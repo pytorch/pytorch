@@ -260,10 +260,7 @@ Module ScriptModuleDeserializer::deserialize(
   for (const auto& kv : extra_files) {
     const std::string& key = "extra/" + kv.first;
     if (reader_->hasRecord(key)) {
-      at::DataPtr meta_ptr;
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      size_t meta_size;
-      std::tie(meta_ptr, meta_size) = reader_->getRecord(key);
+      auto [meta_ptr, meta_size] = reader_->getRecord(key);
       extra_files[kv.first] =
           std::string(static_cast<char*>(meta_ptr.get()), meta_size);
     }
@@ -383,9 +380,7 @@ Module import_ir_module(
     ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
     return deserializer.deserialize(device, extra_files, restore_shapes);
   }
-  std::shared_ptr<char> data;
-  size_t size = 0;
-  std::tie(data, size) = get_stream_content(in);
+  auto [data, size] = get_stream_content(in);
   return _load_jit_module_from_bytes(
       data, size, cu, device, extra_files, restore_shapes);
 }
@@ -432,9 +427,7 @@ Module import_ir_module(
     ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
     return deserializer.deserialize(device, extra_files, restore_shapes);
   }
-  std::shared_ptr<char> data;
-  size_t size = 0;
-  std::tie(data, size) = get_file_content(filename.c_str());
+  auto [data, size] = get_file_content(filename.c_str());
   return _load_jit_module_from_bytes(
       data, size, cu, device, extra_files, restore_shapes);
 }

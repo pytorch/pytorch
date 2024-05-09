@@ -1,13 +1,21 @@
 import abc
 import io
+import operator
 from dataclasses import dataclass
 from enum import auto, Enum
+from functools import reduce
 from typing import Any, List, Optional, Tuple, Union
 
 import torch
-from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
 
-from .metadata import ChunkStorageMetadata, Metadata, MetadataIndex, STATE_DICT_TYPE
+from torch.distributed.checkpoint.metadata import (
+    ChunkStorageMetadata,
+    Metadata,
+    MetadataIndex,
+    STATE_DICT_TYPE,
+    StorageMeta,
+    TensorProperties,
+)
 
 
 __all__ = [
@@ -43,11 +51,27 @@ class TensorWriteData:
 
 @dataclass(frozen=True)
 class WriteItem:
+    """Dataclass which holds information about what needs to be written to storage."""
+
     index: MetadataIndex
     type: WriteItemType
 
     # Value present if it's a tensor write
     tensor_data: Optional[TensorWriteData] = None
+
+    def tensor_storage_size(self) -> Optional[int]:
+        """
+        Calculates the storage size of the underlying tensor, or None if this is not a tensor write.
+
+        Returns:
+            Optional[int] storage size, in bytes of underlying tensor if any.
+        """
+        if self.tensor_data is None:
+            return None
+
+        numels = reduce(operator.mul, self.tensor_data.size, 1)
+        dtype_size = torch._utils._element_size(self.tensor_data.properties.dtype)
+        return numels * dtype_size
 
 
 @dataclass(frozen=True)
@@ -119,9 +143,14 @@ class SavePlanner(abc.ABC):
 
     >>> # xdoctest: +SKIP("undefined vars")
     >>> class RenamePlanner(DefaultSavePlanner):
-    >>>     def set_up_planner(self, state_dict, is_coordinator):
+    >>>     def set_up_planner(
+    >>>         self,
+    >>>         state_dict: STATE_DICT_TYPE,
+    >>>         storage_meta: Optional[StorageMeta],
+    >>>         is_coordinator: bool,
+    >>>     ) -> None:
     >>>         # prefix all keys with `foo_``
-    >>>         super().set_up_planner({"foo_" + k: v for k, v in state_dict.items()}, is_coordinator)
+    >>>         super().set_up_planner({"foo_" + k: v for k, v in state_dict.items()}, storage_meta, is_coordinator)
 
     Modifying local plan and lookup in tandem. This is useful when fine control of how data is persisted
 
@@ -174,7 +203,12 @@ class SavePlanner(abc.ABC):
     """
 
     @abc.abstractmethod
-    def set_up_planner(self, state_dict: STATE_DICT_TYPE, is_coordinator: bool) -> None:
+    def set_up_planner(
+        self,
+        state_dict: STATE_DICT_TYPE,
+        storage_meta: Optional[StorageMeta] = None,
+        is_coordinator: bool = False,
+    ) -> None:
         """
         Initialize this planner to save ``state_dict``.
 
@@ -276,7 +310,12 @@ class LoadPlanner:
 
     >>> # xdoctest: +SKIP("undefined vars")
     >>> class RenamePlanner(DefaultLoadPlanner):
-    >>>     def set_up_planner(self, state_dict, metadata, is_coordinator):
+    >>>     def set_up_planner(
+    >>>         self,
+    >>>         state_dict: STATE_DICT_TYPE,
+    >>>         metadata: Metadata,
+    >>>         is_coordinator: bool,
+    >>>     ) -> None:
     >>>         self.original_state_dict = state_dict
     >>>         state_dict = {"foo_" + k: v for k, v in state_dict.items()}
     >>>
@@ -311,8 +350,8 @@ class LoadPlanner:
     def set_up_planner(
         self,
         state_dict: STATE_DICT_TYPE,
-        metadata: Metadata,
-        is_coordinator: bool,
+        metadata: Optional[Metadata] = None,
+        is_coordinator: bool = False,
     ) -> None:
         """
         Initialize this instance to load data into ``state_dict``.
@@ -355,6 +394,14 @@ class LoadPlanner:
         the checkpoint being loaded.
         """
         pass
+
+    def resolve_bytes(self, read_item: ReadItem) -> io.BytesIO:
+        """
+        Return the BytesIO to be used by the StorageReader to load `read_item`.
+
+        The BytesIO should alias with one on the underlying state_dict as StorageReader will replace its contents.
+        """
+        raise NotImplementedError("LoadPlanner.resolve_bytes is not implemented")
 
     @abc.abstractmethod
     def resolve_tensor(self, read_item: ReadItem) -> torch.Tensor:

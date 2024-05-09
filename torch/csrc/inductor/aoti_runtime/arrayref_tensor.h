@@ -1,7 +1,6 @@
 #pragma once
 
-#include <torch/csrc/inductor/aoti_runtime/model.h>
-#include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/csrc/inductor/aoti_runtime/utils.h>
 
 #include <assert.h>
 #include <cstdint>
@@ -155,6 +154,10 @@ class MiniArrayRef final {
 
 using MiniIntArrayRef = MiniArrayRef<int64_t>;
 
+static_assert(
+    sizeof(MiniIntArrayRef) == sizeof(void*) + sizeof(size_t),
+    "changing the size of MiniArrayRef breaks ABI compatibility!");
+
 inline bool is_contiguous_strides_for_shape(
     int64_t ndim,
     const int64_t* strides_ptr,
@@ -190,8 +193,7 @@ class ArrayRefTensor {
         sizes_(sizes),
         strides_(strides),
         device_type_(device_type),
-        device_idx_(device_idx),
-        numel_(arr.size()) {
+        device_idx_(device_idx) {
     assert(sizes.size() == strides.size());
     assert(is_contiguous_strides_for_shape(
         sizes.size(), strides.data(), sizes.data()));
@@ -243,7 +245,7 @@ class ArrayRefTensor {
   }
 
   auto numel() const {
-    return numel_;
+    return arrayRef_.size();
   }
 
   void set_arrayref(MiniArrayRef<T> new_arrayref) {
@@ -258,8 +260,16 @@ class ArrayRefTensor {
   MiniArrayRef<const int64_t> strides_;
   int32_t device_type_ = 0;
   int32_t device_idx_ = 0;
-  int32_t numel_ = 0;
+  // We continue to zero-initialize this field in case we repurpose
+  // the space later; having predictable contents can only help.
+  int32_t unusedDoNotRemoveForABICompatibility_ = 0;
 };
+
+static_assert(
+    sizeof(ArrayRefTensor<int>) ==
+        3 * sizeof(MiniIntArrayRef) + 3 * sizeof(int32_t) +
+            (alignof(ArrayRefTensor<int>) > 4 ? sizeof(int32_t) : 0),
+    "changing the size of ArrayRefTensor breaks ABI compatibility!");
 
 inline AtenTensorHandle reinterpret_tensor_wrapper(
     AtenTensorHandle self,
@@ -351,6 +361,17 @@ inline RAIIAtenTensorHandle expensive_copy_to_tensor_if_needed(
 inline AtenTensorHandle expensive_copy_to_tensor_if_needed(
     AtenTensorHandle handle) {
   return handle;
+}
+
+template <typename T>
+const T& convert_arrayref_tensor_to_tensor(const T& t) {
+  return t;
+}
+
+template <typename T>
+RAIIAtenTensorHandle convert_arrayref_tensor_to_tensor(
+    const ArrayRefTensor<T>& art) {
+  return art.expensiveCopyToTensor();
 }
 
 } // namespace aot_inductor

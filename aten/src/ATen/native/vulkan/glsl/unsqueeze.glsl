@@ -38,17 +38,13 @@ void main() {
   const int dim = uBlock.info.x;
   const int channels = uBlock.info.y;
   vec4 out_texel = vec4(0, 0, 0, 0);
-  if (dim == 0) {
-    imageStore(uOutput, pos, texelFetch(uImage, pos, 0));
-  } else if (dim == 1) {
+  if (dim == 1) {
     int src_x = pos.x;
     int src_y = pos.y;
-    for (int i = 0; i < 4; i++) {
-      int src_z = pos.z / (channels * 4);
-      int p = (pos.z / channels) % 4;
-      const vec4 v = texelFetch(uImage, ivec3(src_x, src_y, src_z), 0);
-      out_texel[i] = v[p];
-    }
+    int src_z = pos.z / 4;
+    int p = pos.z % 4;
+    const vec4 v = texelFetch(uImage, ivec3(src_x, src_y, src_z), 0);
+    out_texel[0] = v[p];
     imageStore(uOutput, pos, out_texel);
   } else if (dim == 2) {
     int src_x = pos.x;

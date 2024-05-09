@@ -462,6 +462,15 @@ class TestAutoWrap(TestCase):
         )
         self._test_transformer_wrapping(auto_wrap_policy)
 
+    @unittest.skipIf(not TEST_MULTIGPU, "Requires at least 2 GPUs")
+    def test_module_wrap_policy_callable(self):
+        """Tests the ``ModuleWrapPolicy`` as a ``Callable``."""
+        auto_wrap_policy = ModuleWrapPolicy(
+            {TransformerEncoderLayer, TransformerDecoderLayer}
+        )
+        callable_policy = functools.partial(_or_policy, policies=[auto_wrap_policy])
+        self._test_transformer_wrapping(callable_policy)
+
     def _test_transformer_wrapping(self, auto_wrap_policy: Union[Callable, _Policy]):
         fsdp_kwargs = {"auto_wrap_policy": auto_wrap_policy}
         fsdp_model = TransformerWithSharedParams.init(
@@ -936,8 +945,7 @@ class TestWrapUtils(TestCase):
         ignored_params = set()
         for module_name, module in model.named_modules():
             if "lora_A" in module_name:
-                for param in module.parameters():
-                    ignored_params.add(param)
+                ignored_params.update(module.parameters())
         _validate_frozen_params(model, modules_to_wrap, ignored_params, use_orig_params)
 
 

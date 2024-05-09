@@ -4,6 +4,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/Parallel.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
@@ -173,7 +174,7 @@ static void check_result_is_bytebool(const char* name, const Tensor& self, const
 
 // Note [all, any : uint8 compatibility]:
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// For NumPy comptability, `all` and `any` return
+// For NumPy compatibility, `all` and `any` return
 // Tensor of dtype `bool`. However for compatibility reason,
 // for `uint8`, they return Tensor of same dtype `uint8`.
 // Reference: https://github.com/pytorch/pytorch/pull/47878#issuecomment-747108561
@@ -510,7 +511,7 @@ static Tensor reversed_cumsum(const Tensor& w, int64_t dim) {
 Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, const Tensor& output) {
   /*
     We show here how to derive an O(n) gradient formula for
-    abitrary inputs. It follows via a basic application of the
+    arbitrary inputs. It follows via a basic application of the
     chain rule together with a number of observations for different
     cases. We assume that x is an n-dimensional vector and y = cumprod(x).
     In the actual implementation we will need to play a bit with masks
@@ -527,7 +528,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     The term dF / dy_j is just grad_output[j] (assuming again
     everything is one-dimensional).
 
-    The term (dy_j / dx_k) is easilly seen to be
+    The term (dy_j / dx_k) is easily seen to be
 
     if j >= k
       dy_j / dx_k = prod_{1 <= i <= j, i != k} x_i
@@ -589,7 +590,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
 
     dy_j / dx_z1 = prod(x[:z1]) * (grad_output[z1] + sum(grad_output[z1+1:z2] * cumprod(x[z1+1:z2])))
 
-    When the imputs are complex, this is map is holomorphic. As such, to compute
+    When the inputs are complex, this is map is holomorphic. As such, to compute
     its backwards is just the conjugate of the usual backwards. This simplifies to
     conjugating the input. We may also reuse the output as, since the map is holomorphic,
     cumprod(input.conj()) = cumprod(input).conj()
@@ -1170,6 +1171,25 @@ std::vector<Tensor> gradient(const Tensor& self, IntArrayRef dim, int64_t edge_o
 
 // ALL REDUCE #################################################################
 
+inline bool should_use_acc_buffer(at::TensorIterator& iter) {
+  const auto ndim = iter.ndim();
+  if (!iter.device().is_cpu() || iter.noutputs() != 1) {
+    return false;
+  }
+  if (!at::isReducedFloatingType(iter.common_dtype())) {
+    return false;
+  }
+  if (ndim < 2) {
+    return false;
+  }
+  auto out_strides = iter.strides(0);
+  for (const auto dim : c10::irange(0, 2)) {
+      if (out_strides[dim] != 0) {
+        return false;
+      }
+  }
+  return true;
+}
 
 TORCH_IMPL_FUNC(sum_out)
 (const Tensor& self,
@@ -1181,7 +1201,19 @@ TORCH_IMPL_FUNC(sum_out)
   if (iter.numel() == 0) {
     result.zero_();
   } else {
-    sum_stub(iter.device_type(), iter);
+    // Here is a limitation of TensorIterator reductions for permuted input with lower precision on CPU.
+    // Consider the case: TensorIterator coalesces such input and output to >= 2 dims tensors,
+    // and the output stride is [0, 0, x, x, ...] with x >= 0 (two reduced dimensions and non-reduced dims).
+    // Since the reduction loop only operates on two dimensions at a time,
+    // the intermediate sums is forced to do accumulation in the second reduced dim with lower precision.
+    // See https://github.com/pytorch/pytorch/issues/83149
+    if (should_use_acc_buffer(iter)) {
+      auto tmp_output = at::empty(result.sizes(), result.options().dtype(kFloat));
+      at::sum_outf(self.to(ScalarType::Float), opt_dim, keepdim, /*dtype=*/c10::nullopt, tmp_output);
+      result.copy_(tmp_output);
+    } else{
+      sum_stub(iter.device_type(), iter);
+    }
   }
 }
 
@@ -1250,7 +1282,7 @@ Tensor trace_cpu(const Tensor& self) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX(self.scalar_type(), "trace", [&] {
     using accscalar_t = at::acc_type<scalar_t, false>;
     accscalar_t sum = 0;
-    const auto* t_data = self.data_ptr<scalar_t>();
+    const auto* t_data = self.const_data_ptr<scalar_t>();
 
     int64_t t_stride_0, t_stride_1, t_diag_size;
 
@@ -1726,7 +1758,7 @@ static double std_var_all_cpu(const Tensor& self, double correction, bool take_s
 
   auto mean = self.mean().item<double>();
   auto iter = TensorIteratorConfig()
-      .add_input(self)
+      .add_const_input(self)
       .build();
 
   auto reduction = [&](int64_t begin, int64_t end, double thread_sum) {
@@ -2197,7 +2229,7 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
       return true;
     }
     std::atomic<bool> result{true};
-    auto iter = TensorIteratorConfig().add_input(self).build();
+    auto iter = TensorIteratorConfig().add_const_input(self).build();
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(), "equal_notnan_cpu", [&] {
       iter.for_each([&](char** data, const int64_t *strides, int64_t dim_size) {
         if (!result) {
@@ -2218,13 +2250,13 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
 
   std::atomic<bool> result{true};
   auto iter = TensorIteratorConfig()
-    .add_input(self)
-    .add_input(other)
+    .add_const_input(self)
+    .add_const_input(other)
     .allow_cpu_scalars(true)
     .promote_inputs_to_common_dtype(true)
     .build();
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, iter.input_dtype(), "equal_cpu", [&] {
+  AT_DISPATCH_V2(iter.input_dtype(), "equal_cpu", AT_WRAP([&] {
     iter.for_each([&](char** data, const int64_t *strides, int64_t dim_size) {
       if (!result) {
           return;
@@ -2240,7 +2272,7 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
         other_data += strides[1];
       }
     });
-  });
+  }), kBool, kBFloat16, kHalf, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
   return result.load();
 }
 

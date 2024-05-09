@@ -3,29 +3,36 @@
 import operator
 import unittest
 from textwrap import dedent
+from typing import Any, List
 
 import torch
 from torch import nn, Tensor
 from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import sample_inputs_cat_concat
 from torch.testing._internal.common_utils import make_tensor
-from torch.testing._internal.jit_utils import JitTestCase, execWrapper
-from typing import List, Any
+from torch.testing._internal.jit_utils import execWrapper, JitTestCase
 
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_jit.py TESTNAME\n\n"
-                       "instead.")
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test file is not meant to be run directly, use:\n\n"
+        "\tpython test/test_jit.py TESTNAME\n\n"
+        "instead."
+    )
+
 
 # XXX: still in prototype
 class TestSymbolicShapeAnalysis(JitTestCase):
     def setUp(self):
         super(JitTestCase, self).setUp()
-        self.prev_symbolic_shapes_test_enabled = torch._C._jit_symbolic_shapes_test_mode_enabled()
+        self.prev_symbolic_shapes_test_enabled = (
+            torch._C._jit_symbolic_shapes_test_mode_enabled()
+        )
         torch._C._jit_set_symbolic_shapes_test_mode(True)
 
     def tearDown(self):
-        torch._C._jit_set_symbolic_shapes_test_mode(self.prev_symbolic_shapes_test_enabled)
+        torch._C._jit_set_symbolic_shapes_test_mode(
+            self.prev_symbolic_shapes_test_enabled
+        )
 
     def test_shape_analysis(self):
         @torch.jit.script
@@ -115,7 +122,9 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         def neg_to_one(li):
             return [elem if elem >= 0 else -1 for elem in li]
 
-        self.assertEqual(neg_to_one(view.output().type().symbolic_sizes()), [-1, 3, 2, -1])
+        self.assertEqual(
+            neg_to_one(view.output().type().symbolic_sizes()), [-1, 3, 2, -1]
+        )
         if_out = next(foo.graph.findNode("prim::If").outputs())
         self.assertEqual(neg_to_one(if_out.type().symbolic_sizes()), [-1, 3, -1, -1])
 
@@ -135,9 +144,7 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             y = x.mul_(2)
             return y
 
-        unary_ops = [
-            mul_inplace
-        ]
+        unary_ops = [mul_inplace]
         for fn in unary_ops:
             # t = torch.jit.trace(fn, torch.rand([4, 4]))  # For some reason tracing is erroring out.
             t = torch.jit.script(fn)
@@ -202,7 +209,9 @@ class TestSymbolicShapeAnalysis(JitTestCase):
 
             inputs[1].setType(inputs[1].type().with_sizes([5, 8, sym1]))
             torch._C._jit_pass_propagate_shapes_on_graph(graph)
-            self.assertEqual(next(graph.outputs()).type().symbolic_sizes(), [5, 8, sym1])
+            self.assertEqual(
+                next(graph.outputs()).type().symbolic_sizes(), [5, 8, sym1]
+            )
 
     def test_adaptive_avg_pool2d(self):
         inps = [
@@ -227,25 +236,105 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             self.checkShapeAnalysis(out_size, fn.graph, assert_propagation=True)
 
     def test_conv_deconv(self):
-        for inp_shape, weight_shape, bias, stride, padding, output_padding, dilation, groups, mod in [
-                ([32, 6, 10], [16, 3, 3], None, 2, 2, 1, 1, 2, torch.nn.functional.conv1d),
-                ([32, 16, 10], [16, 3, 3], None, 2, 2, 1, 1, 2, torch.nn.functional.conv_transpose1d),
-                ([1, 32, 5, 10], [30, 16, 3, 3], None, [2, 2], [0, 0], 0, 1, 2, torch.nn.functional.conv2d),
-                ([1, 30, 5, 10], [30, 16, 3, 3], None, [2, 2], [0, 0], 0, 1, 2, torch.nn.functional.conv_transpose2d),
-                ([3, 14, 10, 66, 55], [2, 7, 7, 4, 4], None, 1, 1, 2, 1, 2, torch.nn.functional.conv3d),
-                ([3, 2, 10, 66, 55], [2, 7, 7, 4, 4], None, 1, 1, 0, 1, 2, torch.nn.functional.conv_transpose3d)]:
+        for (
+            inp_shape,
+            weight_shape,
+            bias,
+            stride,
+            padding,
+            output_padding,
+            dilation,
+            groups,
+            mod,
+        ) in [
+            ([32, 6, 10], [16, 3, 3], None, 2, 2, 1, 1, 2, torch.nn.functional.conv1d),
+            (
+                [32, 16, 10],
+                [16, 3, 3],
+                None,
+                2,
+                2,
+                1,
+                1,
+                2,
+                torch.nn.functional.conv_transpose1d,
+            ),
+            (
+                [1, 32, 5, 10],
+                [30, 16, 3, 3],
+                None,
+                [2, 2],
+                [0, 0],
+                0,
+                1,
+                2,
+                torch.nn.functional.conv2d,
+            ),
+            (
+                [1, 30, 5, 10],
+                [30, 16, 3, 3],
+                None,
+                [2, 2],
+                [0, 0],
+                0,
+                1,
+                2,
+                torch.nn.functional.conv_transpose2d,
+            ),
+            (
+                [3, 14, 10, 66, 55],
+                [2, 7, 7, 4, 4],
+                None,
+                1,
+                1,
+                2,
+                1,
+                2,
+                torch.nn.functional.conv3d,
+            ),
+            (
+                [3, 2, 10, 66, 55],
+                [2, 7, 7, 4, 4],
+                None,
+                1,
+                1,
+                0,
+                1,
+                2,
+                torch.nn.functional.conv_transpose3d,
+            ),
+        ]:
             inp = torch.rand(inp_shape)
             weight = torch.rand(weight_shape)
-            if mod in [torch.nn.functional.conv1d, torch.nn.functional.conv2d, torch.nn.functional.conv3d]:
+            if mod in [
+                torch.nn.functional.conv1d,
+                torch.nn.functional.conv2d,
+                torch.nn.functional.conv3d,
+            ]:
                 res = mod(inp, weight, bias, stride, padding, dilation, groups).size()
             else:
-                res = mod(inp, weight, bias, stride, padding, output_padding, dilation, groups).size()
+                res = mod(
+                    inp, weight, bias, stride, padding, output_padding, dilation, groups
+                ).size()
 
             def foo(inp, weight):
-                if mod in [torch.nn.functional.conv1d, torch.nn.functional.conv2d, torch.nn.functional.conv3d]:
+                if mod in [
+                    torch.nn.functional.conv1d,
+                    torch.nn.functional.conv2d,
+                    torch.nn.functional.conv3d,
+                ]:
                     return mod(inp, weight, bias, stride, padding, dilation, groups)
                 else:
-                    return mod(inp, weight, bias, stride, padding, output_padding, dilation, groups)
+                    return mod(
+                        inp,
+                        weight,
+                        bias,
+                        stride,
+                        padding,
+                        output_padding,
+                        dilation,
+                        groups,
+                    )
 
             fn = torch.jit.trace(foo, (inp, weight))
             torch._C._jit_erase_non_input_shape_information(fn.graph)
@@ -280,33 +369,58 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         ]
 
         for inp in inps:
-            funcs_template = dedent('''
+            funcs_template = dedent(
+                """
             def func():
                 return torch.arange({args})
-            ''')
+            """
+            )
 
             inp_s = str(inp)[1:-1]  # remove tuple parens
             funcs_str = funcs_template.format(args=inp_s)
             scope = {}
             execWrapper(funcs_str, globals(), scope)
             cu = torch.jit.CompilationUnit(funcs_str)
-            self.checkShapeAnalysis(list(cu.func().size()), cu.func.graph, assert_propagation=True, constant_prop=False)
+            self.checkShapeAnalysis(
+                list(cu.func().size()),
+                cu.func.graph,
+                assert_propagation=True,
+                constant_prop=False,
+            )
 
     def test_shape_embedding_bag(self):
         # TODO: merge into opinfos, having difficulties there
         with torch.no_grad():
+
             def make_arg(shape, low=None, high=None):
-                return make_tensor(shape, device='cpu', dtype=torch.int64,
-                                   low=low, high=high, requires_grad=False)
+                return make_tensor(
+                    shape,
+                    device="cpu",
+                    dtype=torch.int64,
+                    low=low,
+                    high=high,
+                    requires_grad=False,
+                )
 
             nn_inps = (
-                (make_arg((40,), 0, 9), torch.nn.Embedding(20, embedding_dim=64, max_norm=1.0)),
+                (
+                    make_arg((40,), 0, 9),
+                    torch.nn.Embedding(20, embedding_dim=64, max_norm=1.0),
+                ),
                 (make_arg((2, 4), 0, 9), torch.nn.Embedding(10, 20, sparse=True)),
                 (make_arg((0,)), torch.nn.Embedding(0, 0, sparse=True)),
                 (make_arg((2, 4), 0, 9), torch.nn.Embedding(10, 0, sparse=True)),
                 (make_arg((4,), 0, 21), torch.nn.Embedding(22, 5, max_norm=1.0)),
-                (make_arg((2,), 0, 1), torch.nn.Embedding.from_pretrained(torch.arange(6.).view(2, 3), max_norm=2.,
-                                                                          norm_type=.5, scale_grad_by_freq=False, sparse=True)),
+                (
+                    make_arg((2,), 0, 1),
+                    torch.nn.Embedding.from_pretrained(
+                        torch.arange(6.0).view(2, 3),
+                        max_norm=2.0,
+                        norm_type=0.5,
+                        scale_grad_by_freq=False,
+                        sparse=True,
+                    ),
+                ),
             )
 
             for inp, module in nn_inps:
@@ -326,14 +440,16 @@ class TestSymbolicShapeAnalysis(JitTestCase):
 
                 fn = torch.jit.trace(foo, (inp.detach(),), check_trace=False)
 
-                self.checkShapeAnalysis(out_size, fn.graph, assert_propagation=True, constant_prop=False)
+                self.checkShapeAnalysis(
+                    out_size, fn.graph, assert_propagation=True, constant_prop=False
+                )
 
     def test_shape_concat(self):
         # TODO: unify with opinfo tests, traces of lists dont preserve sizes in IR
         sample_inputs = sample_inputs_cat_concat(None, "cpu", torch.float, False)
 
         class CatMod(nn.Module):
-            __constants__ = ['dim']
+            __constants__ = ["dim"]
 
             def __init__(self, dim=0):
                 super().__init__()
@@ -374,16 +490,23 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         # Also, as the return shapes are the input, weight, and bias shape, there is no point
         # in a really complicated test
 
-        input = torch.randn((16, 16, 8, 8), dtype=torch.float32, device="cpu", requires_grad=True)
-        weight = torch.randn((8, 4, 3, 3), dtype=torch.float32, device="cpu", requires_grad=True)
+        input = torch.randn(
+            (16, 16, 8, 8), dtype=torch.float32, device="cpu", requires_grad=True
+        )
+        weight = torch.randn(
+            (8, 4, 3, 3), dtype=torch.float32, device="cpu", requires_grad=True
+        )
         out_grad = torch.randn((16, 8, 8, 8), dtype=torch.float32, device="cpu")
-
 
         @torch.jit.script
         def conv_bwd(input, weight, grad):
-            bias_sizes = [8, ]
+            bias_sizes = [
+                8,
+            ]
             args = ([1, 1], [1, 1], [1, 1], False, [0, 0], 4, [True, True, True])
-            return torch.ops.aten.convolution_backward(grad, input, weight, bias_sizes, *args)
+            return torch.ops.aten.convolution_backward(
+                grad, input, weight, bias_sizes, *args
+            )
 
         self.assert_shape_equal_scripted(conv_bwd, (input, weight, out_grad))
 
@@ -391,15 +514,19 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         def conv_bwd_2(input, weight, grad):
             bias_sizes = None
             args = ([1, 1], [1, 1], [1, 1], False, [0, 0], 4, [True, True, True])
-            return torch.ops.aten.convolution_backward(grad, input, weight, bias_sizes, *args)
-        self.assert_shape_equal_scripted(conv_bwd_2, (input, weight, out_grad))
+            return torch.ops.aten.convolution_backward(
+                grad, input, weight, bias_sizes, *args
+            )
 
+        self.assert_shape_equal_scripted(conv_bwd_2, (input, weight, out_grad))
 
     def test_returning_input_symbolic_shapes(self):
         mm = torch.jit.freeze(torch.jit.script(nn.Conv2d(16, 33, 3, stride=2).eval()))
         inps = list(mm.graph.inputs())
         inps[1].setType(inps[1].type().with_sizes([None, None, None, None]))
-        shape_compute_graph = torch._C._jit_pass_propagate_shapes_on_graph_and_build_compute(mm.graph)
+        shape_compute_graph = (
+            torch._C._jit_pass_propagate_shapes_on_graph_and_build_compute(mm.graph)
+        )
         g = shape_compute_graph.partial_eval_shape_graph()
         # to make into a jit function cant have multiple outputs
         g.makeMultiOutputIntoTuple()
@@ -412,8 +539,12 @@ class TestSymbolicShapeAnalysis(JitTestCase):
 
     def test_partial_eval_graph_conv(self):
         mm = torch.jit.freeze(torch.jit.script(nn.Conv2d(16, 33, 3, stride=2).eval()))
-        shape_compute_graph = torch._C._jit_pass_propagate_shapes_on_graph_and_build_compute(mm.graph)
-        output_sizes = mm.graph.findNode("aten::conv2d").output().type().symbolic_sizes()
+        shape_compute_graph = (
+            torch._C._jit_pass_propagate_shapes_on_graph_and_build_compute(mm.graph)
+        )
+        output_sizes = (
+            mm.graph.findNode("aten::conv2d").output().type().symbolic_sizes()
+        )
         # calculating 0, 2 and 3 index
         for i in [0, 2, 3]:
             self.assertTrue(output_sizes[i] < 0)
@@ -428,7 +559,9 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         for o, oe in zip(output, output_eager[0:1] + output_eager[2:]):
             self.assertEqual(o, oe)
 
-    def checkSymShapeCompute(self, shape_compute_graph, nodes, node_output_sizes, shape_inputs):
+    def checkSymShapeCompute(
+        self, shape_compute_graph, nodes, node_output_sizes, shape_inputs
+    ):
         g = shape_compute_graph.partial_eval_shape_graph()
         self.assertTrue(len(list(g.inputs())) == len(shape_inputs))
         output_sym_map = shape_compute_graph.graph_output_to_symbolic_shape_dim()
@@ -451,27 +584,49 @@ class TestSymbolicShapeAnalysis(JitTestCase):
                     self.assertEqual(sym_outputs[sym_shape_index], output_shape[i])
 
     def test_partial_eval_stitching(self):
-        conv1 = torch.nn.Conv2d(3, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
-        max_pool = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1, dilation=1, ceil_mode=False)
-        conv2 = nn.Conv2d(64, 128, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
+        conv1 = torch.nn.Conv2d(
+            3, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False
+        )
+        max_pool = torch.nn.MaxPool2d(
+            kernel_size=3, stride=2, padding=1, dilation=1, ceil_mode=False
+        )
+        conv2 = nn.Conv2d(
+            64, 128, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False
+        )
 
-        mod = torch.jit.freeze(torch.jit.script(nn.Sequential(conv1, max_pool, conv2).eval()))
+        mod = torch.jit.freeze(
+            torch.jit.script(nn.Sequential(conv1, max_pool, conv2).eval())
+        )
 
         conv1_output = conv1(torch.rand(1, 3, 224, 224))
         max_pool_output = max_pool(conv1_output)
         conv2_output = conv2(max_pool_output)
 
-        shape_compute_graph = torch._C._jit_pass_propagate_shapes_on_graph_and_build_compute(mod.graph)
-        nodes = [mod.graph.findNode("aten::max_pool2d")] + list(mod.graph.findAllNodes("aten::conv2d"))
-        output_shapes = [max_pool_output.size(), conv1_output.size(), conv2_output.size()]
-        self.checkSymShapeCompute(shape_compute_graph, nodes, output_shapes, ([1, 3, 224, 224],))
+        shape_compute_graph = (
+            torch._C._jit_pass_propagate_shapes_on_graph_and_build_compute(mod.graph)
+        )
+        nodes = [mod.graph.findNode("aten::max_pool2d")] + list(
+            mod.graph.findAllNodes("aten::conv2d")
+        )
+        output_shapes = [
+            max_pool_output.size(),
+            conv1_output.size(),
+            conv2_output.size(),
+        ]
+        self.checkSymShapeCompute(
+            shape_compute_graph, nodes, output_shapes, ([1, 3, 224, 224],)
+        )
 
     def test_refinement_through_graph_stitching(self):
         class TwoConvs(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.conv1 = torch.nn.Conv2d(3, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
-                self.conv2 = torch.nn.Conv2d(3, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+                self.conv1 = torch.nn.Conv2d(
+                    3, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False
+                )
+                self.conv2 = torch.nn.Conv2d(
+                    3, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False
+                )
 
             def forward(self, x):
                 a = self.conv1(x)
@@ -495,18 +650,29 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         self.assertEqual(out1, out2)
 
     def test_stitching_multi_output(self):
-        max_pool = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1, dilation=1, ceil_mode=False, return_indices=True)
+        max_pool = torch.nn.MaxPool2d(
+            kernel_size=3,
+            stride=2,
+            padding=1,
+            dilation=1,
+            ceil_mode=False,
+            return_indices=True,
+        )
         tensor = torch.rand(1, 3, 224, 224)
         mod = torch.jit.trace(max_pool, (tensor,))
         mod = torch.jit.freeze(mod.eval())
         inp = list(mod.graph.inputs())[1]
         inp.setType(inp.type().with_sizes([None, None, None, None]))
         output_tensor = list(mod(tensor)[0].size())
-        self.run_pass('lower_all_tuples', mod.graph)
-        shape_compute_graph = torch._C._jit_pass_propagate_shapes_on_graph_and_build_compute(mod.graph)
+        self.run_pass("lower_all_tuples", mod.graph)
+        shape_compute_graph = (
+            torch._C._jit_pass_propagate_shapes_on_graph_and_build_compute(mod.graph)
+        )
         max_pool_node = mod.graph.findNode("aten::max_pool2d_with_indices")
         outs = list(max_pool_node.outputs())
-        self.assertEqual(outs[0].type().symbolic_sizes(), outs[1].type().symbolic_sizes())
+        self.assertEqual(
+            outs[0].type().symbolic_sizes(), outs[1].type().symbolic_sizes()
+        )
         g = shape_compute_graph.partial_eval_shape_graph()
         # to make into a jit function cant have multiple outputs
         g.makeMultiOutputIntoTuple()
@@ -528,7 +694,6 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         self.assertEqual(out, [-2, -3])
 
     def test_stitching_concat(self):
-
         @torch.jit.script
         def foo1(a, b, x, y):
             return (a / b) + torch.cat([x, y])
@@ -542,15 +707,25 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             for inp in foo.graph.inputs():
                 inp.setType(inp.type().with_sizes([None, None]))
 
-            shape_compute_graph = torch._C._jit_pass_propagate_shapes_on_graph_and_build_compute(foo.graph)
-            nodes = [g.findNode("aten::div")] + [g.findNode("aten::add")] + [g.findNode("aten::cat")]
+            shape_compute_graph = (
+                torch._C._jit_pass_propagate_shapes_on_graph_and_build_compute(
+                    foo.graph
+                )
+            )
+            nodes = (
+                [g.findNode("aten::div")]
+                + [g.findNode("aten::add")]
+                + [g.findNode("aten::cat")]
+            )
 
             inps = [1, 10], [20, 10], [15, 1], [5, 1]
             output_shapes = [[20, 10], [20, 10], [20, 1]]
 
             self.checkSymShapeCompute(shape_compute_graph, nodes, output_shapes, inps)
 
-    @unittest.skipIf(not hasattr(torch.jit, "_shapes"), "shape functions not loaded in python")
+    @unittest.skipIf(
+        not hasattr(torch.jit, "_shapes"), "shape functions not loaded in python"
+    )
     def test_shape_function_includes(self):
         inp_shape = [1, 16, 5, 10]
         weight_shape = [33, 16, 3, 3]
@@ -559,7 +734,9 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         padding = [0, 0]
         dilation = [1, 1]
         groups = 1
-        res = torch.jit._shapes.conv2d(inp_shape, weight_shape, bias, stride, padding, dilation, groups)
+        res = torch.jit._shapes.conv2d(
+            inp_shape, weight_shape, bias, stride, padding, dilation, groups
+        )
         self.assertEqual(res, [1, 33, 2, 4])
 
         m1_shape = [10, 20]
@@ -580,8 +757,11 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         def wrong_input_types(x, y):
             x: List[int] = []
             return x
+
         with self.assertRaisesRegex(RuntimeError, "Expected supertype of int"):
-            torch._C._jit_register_shape_compute_graph_for_node(node, wrong_input_types.graph)
+            torch._C._jit_register_shape_compute_graph_for_node(
+                node, wrong_input_types.graph
+            )
 
         @torch.jit.script
         def wrong_output_types(x: List[int], y: List[int]):
@@ -589,7 +769,9 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             return x
 
         with self.assertRaisesRegex(RuntimeError, "but got graph_type"):
-            torch._C._jit_register_shape_compute_graph_for_node(node, wrong_output_types.graph)
+            torch._C._jit_register_shape_compute_graph_for_node(
+                node, wrong_output_types.graph
+            )
 
         @torch.jit.script
         def too_many_inputs(x: List[int], y: List[int], z: Any, z2: Any):
@@ -597,7 +779,9 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             return x
 
         with self.assertRaises(RuntimeError) as error:
-            torch._C._jit_register_shape_compute_graph_for_node(node, too_many_inputs.graph)
+            torch._C._jit_register_shape_compute_graph_for_node(
+                node, too_many_inputs.graph
+            )
 
         self.assertTrue("fewer arguments than schema" in str(error.exception))
 
@@ -608,9 +792,22 @@ class TestSymbolicShapeAnalysis(JitTestCase):
 
         inputs = list(foo.graph.inputs())
         inputs[0].setType(inputs[0].type().with_sizes([8, 2]))
-        inputs[1].setType(inputs[1].type().with_sizes([8,]))
+        inputs[1].setType(
+            inputs[1]
+            .type()
+            .with_sizes(
+                [
+                    8,
+                ]
+            )
+        )
         torch._C._jit_pass_propagate_shapes_on_graph(foo.graph)
-        self.assertEqual(next(foo.graph.outputs()).type().sizes(), [8,])
+        self.assertEqual(
+            next(foo.graph.outputs()).type().sizes(),
+            [
+                8,
+            ],
+        )
 
     def test_squeeze_dims(self):
         @torch.jit.script

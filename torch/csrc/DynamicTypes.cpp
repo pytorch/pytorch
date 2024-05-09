@@ -8,19 +8,14 @@
 #include <torch/csrc/Storage.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/utils/cuda_enabled.h>
-#include <torch/csrc/utils/cuda_lazy_init.h>
+#include <torch/csrc/utils/device_lazy_init.h>
 #include <torch/csrc/utils/object_ptr.h>
 
 #include <ATen/ATen.h>
 #include <ATen/FunctionalStorageImpl.h>
 
 #include <array>
-#include <memory>
-#include <sstream>
 #include <stdexcept>
-#include <string>
-#include <unordered_map>
-#include <vector>
 
 namespace torch {
 namespace {

@@ -4,6 +4,8 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
 
+#include <ATen/detail/AcceleratorHooksInterface.h>
+
 // Forward-declares at::Generator and at::cuda::NVRTC
 namespace at {
 struct Generator;
@@ -57,10 +59,10 @@ constexpr const char* CUDA_HELP =
 // TODO: Consider putting the stub definitions in another class, so that one
 // never forgets to implement each virtual function in the real implementation
 // in CUDAHooks.  This probably doesn't buy us much though.
-struct TORCH_API CUDAHooksInterface {
+struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
   // This should never actually be implemented, but it is used to
   // squelch -Werror=non-virtual-dtor
-  virtual ~CUDAHooksInterface() = default;
+  virtual ~CUDAHooksInterface() override = default;
 
   // Initialize THCState and, transitively, the CUDA state
   virtual void initCUDA() const {
@@ -99,6 +101,10 @@ struct TORCH_API CUDAHooksInterface {
     return false;
   }
 
+  virtual bool hasCuBLASLt() const {
+    return false;
+  }
+
   virtual bool hasROCM() const {
     return false;
   }
@@ -107,7 +113,7 @@ struct TORCH_API CUDAHooksInterface {
     TORCH_CHECK(false, "NVRTC requires CUDA. ", CUDA_HELP);
   }
 
-  virtual bool hasPrimaryContext(DeviceIndex device_index) const {
+  virtual bool hasPrimaryContext(DeviceIndex device_index) const override {
     TORCH_CHECK(false, "Cannot call hasPrimaryContext(", device_index, ") without ATen_cuda library. ", CUDA_HELP);
   }
 

@@ -291,7 +291,7 @@ struct C10_API TensorOptions {
   }
 
   /// Returns the device index of the `TensorOptions`.
-  int32_t device_index() const noexcept {
+  c10::DeviceIndex device_index() const noexcept {
     return device().index();
   }
 
@@ -359,8 +359,16 @@ struct C10_API TensorOptions {
     return layout_ == c10::Layout::Sparse;
   }
 
+  /// Returns if the layout is sparse CSR, deprecated, use
+  /// is_sparse_compressed() instead
   bool is_sparse_csr() const {
     return layout_ == c10::Layout::SparseCsr;
+  }
+
+  bool is_sparse_compressed() const {
+    return layout_ == c10::Layout::SparseCsr ||
+        layout_ == c10::Layout::SparseCsc ||
+        layout_ == c10::Layout::SparseBsr || layout_ == c10::Layout::SparseBsc;
   }
 
   // For compatibility with legacy tensor.type() comparisons
@@ -590,9 +598,8 @@ inline TensorOptions device(Device device) {
 
 /// Convenience function that returns a `TensorOptions` object with the
 /// `device` set to CUDA and the `device_index` set to the given one.
-inline TensorOptions device_index(int16_t device_index) {
-  return TensorOptions().device_index(
-      static_cast<c10::DeviceIndex>(device_index));
+inline TensorOptions device_index(c10::DeviceIndex device_index) {
+  return TensorOptions().device_index(device_index);
 }
 
 /// Convenience function that returns a `TensorOptions` object with the
@@ -646,8 +653,8 @@ inline DispatchKey computeDispatchKey(
 #undef DO_CASE
         case c10::DeviceType::FPGA:
           return DispatchKey::FPGA;
-        case c10::DeviceType::ORT:
-          return DispatchKey::ORT;
+        case c10::DeviceType::MAIA:
+          return DispatchKey::MAIA;
         case c10::DeviceType::Vulkan:
           return DispatchKey::Vulkan;
         case c10::DeviceType::Metal:
@@ -697,12 +704,15 @@ inline DispatchKey computeDispatchKey(
     case Layout::SparseBsr:
     case Layout::SparseBsc:
       switch (device_.type()) {
-        case c10::DeviceType::CPU:
-          return DispatchKey::SparseCsrCPU;
-        case c10::DeviceType::CUDA:
-          return DispatchKey::SparseCsrCUDA;
+#define DO_CASE(device, _)                 \
+  case c10::DeviceType::device: {          \
+    return DispatchKey::SparseCsr##device; \
+  }
+        C10_FORALL_BACKEND_DEVICE_TYPES(DO_CASE, unused)
+#undef DO_CASE
         default:
-          AT_ERROR(
+          TORCH_CHECK_NOT_IMPLEMENTED(
+              false,
               "Unsupported device type for ",
               layout_,
               " layout: ",
@@ -719,13 +729,11 @@ inline Layout dispatchKeyToLayout(DispatchKey dispatch_key) {
     C10_FORALL_BACKEND_COMPONENTS(DO_CASE, unused)
 #undef DO_CASE
     return Layout::Sparse;
-    case DispatchKey::SparseCsrCPU:
-    case DispatchKey::SparseCsrCUDA:
-      TORCH_CHECK(
-          false,
-          "Cannot map DispatchKey ",
-          dispatch_key,
-          " to a unique layout.");
+#define DO_CASE(bc, _) case DispatchKey::SparseCsr##bc:
+    C10_FORALL_BACKEND_COMPONENTS(DO_CASE, unused)
+#undef DO_CASE
+    TORCH_CHECK(
+        false, "Cannot map DispatchKey ", dispatch_key, " to a unique layout.");
     case DispatchKey::MkldnnCPU:
       return Layout::Mkldnn;
     default:
@@ -749,8 +757,8 @@ inline c10::DeviceType dispatchKeyToDeviceType(DispatchKey dispatch_key) {
     case DispatchKey::Vulkan:
       return c10::DeviceType::Vulkan;
 
-    case DispatchKey::ORT:
-      return c10::DeviceType::ORT;
+    case DispatchKey::MAIA:
+      return c10::DeviceType::MAIA;
     default:
       TORCH_CHECK(
           false,

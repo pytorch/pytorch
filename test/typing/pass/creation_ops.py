@@ -1,6 +1,11 @@
+# mypy: disable-error-code="possibly-undefined"
 # flake8: noqa
 import torch
 from torch.testing._internal.common_utils import TEST_NUMPY
+
+from typing_extensions import assert_type
+
+
 if TEST_NUMPY:
     import numpy as np
 
@@ -116,3 +121,7 @@ torch.polar(abs, angle)
 inp = torch.tensor([-1.5, 0, 2.0])
 values = torch.tensor([0.5])
 torch.heaviside(inp, values)
+
+# Parameter
+p = torch.nn.Parameter(torch.empty(1))
+assert_type(p, torch.nn.Parameter)

@@ -40,7 +40,6 @@
 #include <c10/core/SymIntArrayRef.h>
 #include <structmember.h>
 #include <cstdint>
-#include <iostream>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -251,7 +250,7 @@ static PyObject* getPythonTensorClass(c10::Device d) {
   return device_to_py_class_[static_cast<size_t>(d.type())];
 }
 
-void activateCUDATrace() {
+void activateGPUTrace() {
   c10::impl::GPUTrace::set_trace(getPyInterpreter());
 }
 
@@ -525,16 +524,54 @@ static PyObject* THPVariable_fix_weakref(PyObject* self, PyObject* noargs) {
   Py_RETURN_NONE;
 }
 
+// Maps the given python callable over a vector of items, returning a vector
+// of the same type of items.
+template <typename T>
+static std::vector<T> map_py_func(
+    const py::function& func,
+    const std::vector<T>& items) {
+  std::vector<T> new_items;
+  new_items.reserve(items.size());
+  for (auto& item : items) {
+    new_items.emplace_back(py::cast<T>(func(item)));
+  }
+  return new_items;
+}
+
+template <>
+std::vector<at::Tensor> map_py_func(
+    const py::function& func,
+    const std::vector<at::Tensor>& items) {
+  std::vector<at::Tensor> new_items;
+  new_items.reserve(items.size());
+  for (auto& item : items) {
+    auto output = func(item);
+    if (output.is(py::none())) {
+      // treat None value as an undefined tensor
+      new_items.emplace_back();
+    } else {
+      new_items.emplace_back(py::cast<at::Tensor>(output));
+    }
+  }
+  return new_items;
+}
+
 static PyObject* view_func_impl(
-    PyObject* self_,
-    PyObject* arg,
+    PyObject* _self,
+    PyObject* args,
+    PyObject* kwargs,
     bool check_has_same_meta) {
   HANDLE_TH_ERRORS
-  const auto& self = THPVariable_Unpack(self_);
-  TORCH_CHECK(
-      THPVariable_Check(arg),
-      "_view_func expect a single argument that is a Tensor");
-  const auto& new_base = THPVariable_Unpack(arg);
+  const auto& self = THPVariable_Unpack(_self);
+
+  static PythonArgParser parser({
+      "_view_func(Tensor new_base, PyObject* symint_visitor_fn=None, PyObject* tensor_visitor_fn=None)",
+  });
+  ParsedArgs<3> parsed_args{};
+  auto r = parser.parse(_self, args, kwargs, parsed_args);
+  auto new_base = r.tensor(0);
+  PyObject* symint_visitor_fn = r.pyobject(1);
+  PyObject* tensor_visitor_fn = r.pyobject(2);
 
   // Ensure that self is indeed a backward differentiable view
   // If not, we return an undefined Tensor (None) and let the user handle it.
@@ -547,7 +584,29 @@ static PyObject* view_func_impl(
         torch::autograd::utils::has_same_meta(new_base, view_info.base_)) {
       // Do the actual view replay
       if (view_info.has_view_fn()) {
-        out = view_info.view_fn()(new_base);
+        auto& view_func = view_info.view_fn();
+
+        // Determine new SymInt / tensor state as needed.
+        c10::optional<std::vector<c10::SymInt>> new_symints = c10::nullopt;
+        if (symint_visitor_fn != Py_None) {
+          new_symints = map_py_func(
+              py::cast<py::function>(symint_visitor_fn),
+              view_func.get_symints());
+        }
+
+        c10::optional<std::vector<at::Tensor>> new_tensors = c10::nullopt;
+        if (tensor_visitor_fn != Py_None) {
+          new_tensors = map_py_func(
+              py::cast<py::function>(tensor_visitor_fn),
+              view_func.get_tensors());
+        }
+
+        // call view func
+        if (new_symints.has_value() || new_tensors.has_value()) {
+          out = (*view_func.clone_and_set(new_symints, new_tensors))(new_base);
+        } else {
+          out = view_func(new_base);
+        }
       } else {
         out = new_base.as_strided(
             self.sizes(), self.strides(), self.storage_offset());
@@ -558,12 +617,18 @@ static PyObject* view_func_impl(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPVariable_view_func(PyObject* self_, PyObject* arg) {
-  return view_func_impl(self_, arg, /*check_has_same_meta=*/true);
+static PyObject* THPVariable_view_func(
+    PyObject* self_,
+    PyObject* args,
+    PyObject* kwargs) {
+  return view_func_impl(self_, args, kwargs, /*check_has_same_meta=*/true);
 }
 
-static PyObject* THPVariable_view_func_unsafe(PyObject* self_, PyObject* arg) {
-  return view_func_impl(self_, arg, /*check_has_same_meta=*/false);
+static PyObject* THPVariable_view_func_unsafe(
+    PyObject* self_,
+    PyObject* args,
+    PyObject* kwargs) {
+  return view_func_impl(self_, args, kwargs, /*check_has_same_meta=*/false);
 }
 
 static PyObject* rev_view_func_impl(PyObject* self_, PyObject* arg) {
@@ -607,10 +672,11 @@ static PyObject* THPVariable_as_subclass(
   ParsedArgs<1> parsed_args{};
   auto r = parser.parse(_self, args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
-  if (!PyType_Check(cls)) {
-    throw torch::TypeError(
-        "cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
-  }
+  TORCH_CHECK_TYPE(
+      PyType_Check(cls),
+      "cls must be a type (got ",
+      Py_TYPE(cls)->tp_name,
+      ")");
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
       self.alias(),
@@ -629,10 +695,11 @@ static PyObject* THPVariable_make_subclass(
   ParsedArgs<7> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
-  if (!PyType_Check(cls)) {
-    throw torch::TypeError(
-        "cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
-  }
+  TORCH_CHECK_TYPE(
+      PyType_Check(cls),
+      "cls must be a type (got ",
+      Py_TYPE(cls)->tp_name,
+      ")");
   // guard completely turns off torch dispatch modes, doesn't just pop off the
   // stack
   torch_dispatch_mode::StashTorchDispatchStackGuard td_g;
@@ -948,10 +1015,10 @@ int THPVariable_set_data(THPVariable* self, PyObject* data, void* unused) {
   }
   TORCH_CHECK(
       data, "Deleting tensor data is not allowed. Delete tensor instead!");
-  if (!THPVariable_Check(data)) {
-    throw torch::TypeError(
-        "Variable data has to be a tensor, but got %s", Py_TYPE(data)->tp_name);
-  }
+  TORCH_CHECK_TYPE(
+      THPVariable_Check(data),
+      "Variable data has to be a tensor, but got ",
+      Py_TYPE(data)->tp_name);
 
   THPVariable_Unpack(self).set_data(THPVariable_Unpack(data));
   return 0;
@@ -1384,13 +1451,13 @@ PyObject* THPVariable_is_mps(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPVariable_is_ort(THPVariable* self, void* unused) {
+PyObject* THPVariable_is_maia(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
-    return handle_torch_function_getter(self, "is_ort");
+    return handle_torch_function_getter(self, "is_maia");
   }
   auto& self_ = THPVariable_Unpack(self);
-  return torch::autograd::utils::wrap(self_.is_ort());
+  return torch::autograd::utils::wrap(self_.is_maia());
   END_HANDLE_TH_ERRORS
 }
 
@@ -1460,7 +1527,7 @@ static PyObject* THPVariable_dtype(THPVariable* self, void* unused) {
     return handle_torch_function_getter(self, "dtype");
   }
   auto& self_ = THPVariable_Unpack(self);
-  return torch::autograd::utils::wrap(torch::getTHPDtype(self_.scalar_type()));
+  return torch::autograd::utils::wrap(self_.scalar_type());
   END_HANDLE_TH_ERRORS
 }
 
@@ -1470,7 +1537,7 @@ static PyObject* THPVariable_layout(THPVariable* self, void* unused) {
     return handle_torch_function_getter(self, "layout");
   }
   auto& self_ = THPVariable_Unpack(self);
-  return torch::autograd::utils::wrap(torch::getTHPLayout(self_.layout()));
+  return torch::autograd::utils::wrap(self_.layout());
   END_HANDLE_TH_ERRORS
 }
 
@@ -1607,7 +1674,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
      nullptr},
     {"is_mkldnn", (getter)THPVariable_is_mkldnn, nullptr, nullptr, nullptr},
     {"is_mps", (getter)THPVariable_is_mps, nullptr, nullptr, nullptr},
-    {"is_ort", (getter)THPVariable_is_ort, nullptr, nullptr, nullptr},
+    {"is_maia", (getter)THPVariable_is_maia, nullptr, nullptr, nullptr},
     {"is_vulkan", (getter)THPVariable_is_vulkan, nullptr, nullptr, nullptr},
     {"is_complex", (getter)THPVariable_is_complex, nullptr, nullptr, nullptr},
     {"is_quantized",
@@ -1666,8 +1733,14 @@ static PyMethodDef extra_methods[] = {
      METH_STATIC | METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"_fix_weakref", THPVariable_fix_weakref, METH_NOARGS, nullptr},
-    {"_view_func", THPVariable_view_func, METH_O, nullptr},
-    {"_view_func_unsafe", THPVariable_view_func_unsafe, METH_O, nullptr},
+    {"_view_func",
+     castPyCFunctionWithKeywords(THPVariable_view_func),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"_view_func_unsafe",
+     castPyCFunctionWithKeywords(THPVariable_view_func_unsafe),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
     {"_rev_view_func_unsafe",
      THPVariable_rev_view_func_unsafe,
      METH_O,
@@ -2187,11 +2260,59 @@ int THPVariableMetaType_init(PyObject* cls, PyObject* args, PyObject* kwargs) {
   ((PyTypeObject*)cls)->tp_dealloc = (destructor)THPVariable_subclass_dealloc;
   ((PyTypeObject*)cls)->tp_traverse =
       (traverseproc)THPVariable_subclass_traverse;
+
+  // Don't do anything for the base Tensor class
+  if (!THPVariableClass) {
+    return 0;
+  }
+
+  // Forbid subclassing _TensorBase directly
+  py::tuple mro =
+      py::reinterpret_borrow<py::tuple>(((PyTypeObject*)cls)->tp_mro);
+  bool is_subclass_of_thpvariable = false;
+  for (py::handle h : mro) {
+    if (h.ptr() == THPVariableClass) {
+      is_subclass_of_thpvariable = true;
+      break;
+    }
+  }
+  if (!is_subclass_of_thpvariable) {
+    PyErr_SetString(PyExc_RuntimeError, "Cannot subclass _TensorBase directly");
+    return -1;
+  }
+
+  // If the user provided a torch_dispatch implementation, disable
+  // torch_function.
+  py::object torch_dispatch_impl = py::reinterpret_steal<py::object>(
+      PyObject_GetAttrString(cls, "__torch_dispatch__"));
+  py::object torch_dispatch_default = py::reinterpret_steal<py::object>(
+      PyObject_GetAttrString(THPVariableClass, "__torch_dispatch__"));
+  if (torch_dispatch_impl.ptr() != torch_dispatch_default.ptr()) {
+    py::object torch_function_impl = py::reinterpret_steal<py::object>(
+        PyObject_GetAttrString(cls, "__torch_function__"));
+    py::object torch_function_default_bound = py::reinterpret_steal<py::object>(
+        PyObject_GetAttrString(THPVariableClass, "__torch_function__"));
+
+    // Since our __torch_function__ is a classmethod, we need to "unbound" the
+    // method to get the raw function
+    py::object torch_function_default = py::reinterpret_steal<py::object>(
+        PyObject_GetAttrString(torch_function_default_bound.ptr(), "__func__"));
+
+    // User-defined __torch_function__ might not be a classmethod
+    if (PyObject_HasAttrString(torch_function_impl.ptr(), "__func__")) {
+      torch_function_impl = py::reinterpret_steal<py::object>(
+          PyObject_GetAttrString(torch_function_impl.ptr(), "__func__"));
+    }
+    if (torch_function_impl.ptr() == torch_function_default.ptr()) {
+      PyObject_SetAttrString(
+          cls, "__torch_function__", torch::disabled_torch_function_impl());
+    }
+  }
+
   return 0;
 }
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 extern PyMethodDef variable_methods[];
@@ -2213,8 +2334,7 @@ void initTensorImplConversion(PyObject* module) {
     return t->getIntrusivePtr().get();
   });
 }
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd
 
 bool THPVariable_initModule(PyObject* module) {
   THPVariableMetaType.tp_base = &PyType_Type;

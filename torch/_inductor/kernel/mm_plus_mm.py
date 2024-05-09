@@ -207,10 +207,6 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     ):
         # TODO(jansel): support different K values when this is fixed:
         # https://github.com/openai/triton/issues/967
-        if m1 == m2 and n1 == n2:
-            V.graph.sizevars.guard_equals(m1, m2)
-            V.graph.sizevars.guard_equals(n1, n2)
-            return lowerings[aten.addmm](lowerings[aten.mm](mat3, mat4), mat1, mat2)
         return lowerings[aten.add](
             lowerings[aten.mm](mat1, mat2), lowerings[aten.mm](mat3, mat4)
         )

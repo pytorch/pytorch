@@ -236,9 +236,7 @@ ConvParamsSerializationTypeV2 serialize_conv(
     // clone to retain ownership of the data
     .clone();
 
-  at::Tensor weight;
-  c10::optional<at::Tensor> bias;
-  std::tie(weight, bias) = params->unpack();
+  auto [weight, bias] = params->unpack();
 
   non_optional.emplace_back(std::move(params_tensor));
   non_optional.emplace_back(std::move(weight));
@@ -267,9 +265,7 @@ ConvParamsSerializationTypeV3 serialize_conv(
   config_vals.push_back(params->groups());
   config_vals.push_back(params->transpose());
 
-  at::Tensor weight;
-  c10::optional<at::Tensor> bias;
-  std::tie(weight, bias) = params->unpack();
+  auto [weight, bias] = params->unpack();
 
   std::vector<c10::optional<at::Tensor>> tensors;
   tensors.emplace_back();
@@ -287,12 +283,7 @@ ConvParamsSerializationTypeV3 serialize_conv(
 template <uint32_t kSpatialDim>
 c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
     ConvParamsSerializationTypeV3 state) {
-
-  int64_t version;
-  std::vector<int64_t> config_vals;
-  std::vector<c10::optional<at::Tensor>> tensors;
-
-  std::tie(version, config_vals, tensors) = state;
+  auto [version, config_vals, tensors] = state;
   TORCH_INTERNAL_ASSERT(version == 3, "Unexpected serialized qconv version: ", version);
 
   TORCH_CHECK(tensors.size() == 3, "Wrong number of tensors", tensors.size());

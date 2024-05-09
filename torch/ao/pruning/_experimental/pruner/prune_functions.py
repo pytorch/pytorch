@@ -84,7 +84,7 @@ def _prune_module_bias(module: nn.Module, mask: Tensor) -> None:
         delattr(module, "_bias")
 
 
-def _propogate_module_bias(module: nn.Module, mask: Tensor) -> Optional[Tensor]:
+def _propagate_module_bias(module: nn.Module, mask: Tensor) -> Optional[Tensor]:
     r"""
     In the case that we need to propagate biases, this function will return the biases we need
     """
@@ -117,7 +117,7 @@ def _prune_linear_helper(linear: nn.Linear) -> Tensor:
 
     with torch.no_grad():
         parametrize.remove_parametrizations(linear, "weight", leave_parametrized=True)
-        linear.weight = nn.Parameter(linear.weight[mask])
+        linear.weight = nn.Parameter(linear.weight[mask])  # type: ignore[possibly-undefined]
     linear.out_features = linear.weight.shape[0]
     _remove_bias_handles(linear)
 
@@ -143,7 +143,7 @@ def prune_linear_activation_linear(
     if getattr(linear1, "prune_bias", False):
         _prune_module_bias(linear1, mask)
     else:
-        pruned_biases = _propogate_module_bias(linear1, mask)
+        pruned_biases = _propagate_module_bias(linear1, mask)
         if pruned_biases is not None:
             if activation:
                 pruned_biases = activation(pruned_biases)
@@ -175,7 +175,7 @@ def _prune_conv2d_helper(conv2d: nn.Conv2d) -> Tensor:
 
     with torch.no_grad():
         parametrize.remove_parametrizations(conv2d, "weight", leave_parametrized=True)
-        conv2d.weight = nn.Parameter(conv2d.weight[mask])
+        conv2d.weight = nn.Parameter(conv2d.weight[mask])  # type: ignore[possibly-undefined]
     conv2d.out_channels = conv2d.weight.shape[0]
 
     _remove_bias_handles(conv2d)
@@ -197,7 +197,7 @@ def prune_conv2d_padded(conv2d_1: nn.Conv2d) -> None:
             conv2d_1.bias is not None
         ):  # conv2d_1 has original bias and bias propagated from previous layer
             new_bias = torch.zeros(conv2d_1.bias.shape)
-            new_bias[mask] = conv2d_1.bias[mask]
+            new_bias[mask] = conv2d_1.bias[mask]  # type: ignore[possibly-undefined]
             # adjusted bias that to keep in conv2d_1
             new_bias[~mask] = cast(Tensor, conv2d_1._bias)[~mask]
             # pruned biases that are kept instead of propagated
@@ -209,7 +209,7 @@ def prune_conv2d_padded(conv2d_1: nn.Conv2d) -> None:
         if (
             conv2d_1.bias is not None
         ):  # conv2d_1 has bias propagated from previous layer
-            conv2d_1.bias.data[~mask] = 0
+            conv2d_1.bias.data[~mask] = 0  # type: ignore[possibly-undefined]
 
     if hasattr(conv2d_1, "_bias"):
         delattr(conv2d_1, "_bias")
@@ -251,7 +251,7 @@ def prune_conv2d_activation_conv2d(
         if prune_bias:
             _prune_module_bias(conv2d_1, mask)
         else:
-            pruned_biases = _propogate_module_bias(conv2d_1, mask)
+            pruned_biases = _propagate_module_bias(conv2d_1, mask)
             if pruned_biases is not None:
                 if activation:
                     pruned_biases = activation(pruned_biases)
@@ -335,7 +335,7 @@ def prune_conv2d_pool_flatten_linear(
     if getattr(conv2d, "prune_bias", False):
         _prune_module_bias(conv2d, mask)
     else:
-        pruned_biases = cast(Tensor, _propogate_module_bias(conv2d, mask))
+        pruned_biases = cast(Tensor, _propagate_module_bias(conv2d, mask))
         flattened_pruned_biases = torch.tensor(
             [[bias] * flatten_scale for bias in pruned_biases], device=mask.device
         ).flatten()

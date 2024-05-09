@@ -27,8 +27,8 @@ template void run_mha_fwd_splitkv_dispatch<{DTYPE}, {HEAD_DIM}>(Flash_fwd_params
 
 KERNEL_IMPL_TEMPLATE_BWD = """
 template<>
-void run_mha_bwd_<{DTYPE}, {HEAD_DIM}>(Flash_bwd_params &params, cudaStream_t stream, const bool configure) {{
-    run_mha_bwd_hdim{HEAD_DIM}<{DTYPE}>(params, stream, configure);
+void run_mha_bwd_<{DTYPE}, {HEAD_DIM}>(Flash_bwd_params &params, cudaStream_t stream) {{
+    run_mha_bwd_hdim{HEAD_DIM}<{DTYPE}>(params, stream);
 }}
 """
 

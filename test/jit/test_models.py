@@ -3,34 +3,40 @@
 import os
 import sys
 import unittest
-from torch.testing._internal.common_utils import (
-    enable_profiling_mode_for_profiling_tests, GRAPH_EXECUTOR, ProfilingMode,
-    set_default_dtype,
-)
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.testing._internal.common_utils import (
+    enable_profiling_mode_for_profiling_tests,
+    GRAPH_EXECUTOR,
+    ProfilingMode,
+    set_default_dtype,
+)
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA
 from torch.testing._internal.common_utils import slowTest, suppress_warnings
-from torch.testing._internal.common_quantization import skipIfNoFBGEMM
+from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA
 
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_jit.py TESTNAME\n\n"
-                       "instead.")
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test file is not meant to be run directly, use:\n\n"
+        "\tpython test/test_jit.py TESTNAME\n\n"
+        "instead."
+    )
 
 try:
     import torchvision
+
     HAS_TORCHVISION = True
 except ImportError:
     HAS_TORCHVISION = False
 except RuntimeError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
+
 
 class MnistNet(nn.Module):
     def __init__(self):
@@ -49,6 +55,7 @@ class MnistNet(nn.Module):
         x = F.dropout(x, training=self.training)
         x = self.fc2(x)
         return F.log_softmax(x, dim=1)
+
 
 class TestModels(JitTestCase):
     @staticmethod
@@ -103,31 +110,38 @@ class TestModels(JitTestCase):
                     nn.LeakyReLU(0.2, inplace=True),
                     # state size. (ndf*8) x 4 x 4
                     nn.Conv2d(ndf * 8, 1, 4, 1, 0, bias=False),
-                    nn.Sigmoid()
+                    nn.Sigmoid(),
                 )
 
             def forward(self, input):
                 return self.main(input).view(-1, 1).squeeze(1)
 
         bs, nz, ngf, nc, ndf = 5, 6, 9, 3, 10
-        self.checkTrace(DCGANGenerator(nz, ngf, nc).to(device),
-                        (torch.rand(bs, nz, 1, 1, device=device),),
-                        export_import=check_export_import)
-        example_input = DCGANGenerator(nz, ngf, nc).to(device)(torch.rand(bs, nz, 1, 1, device=device))
-        self.checkTrace(DCGANDiscriminator(nc, ndf).to(device), (example_input,),
-                        export_import=check_export_import)
+        self.checkTrace(
+            DCGANGenerator(nz, ngf, nc).to(device),
+            (torch.rand(bs, nz, 1, 1, device=device),),
+            export_import=check_export_import,
+        )
+        example_input = DCGANGenerator(nz, ngf, nc).to(device)(
+            torch.rand(bs, nz, 1, 1, device=device)
+        )
+        self.checkTrace(
+            DCGANDiscriminator(nc, ndf).to(device),
+            (example_input,),
+            export_import=check_export_import,
+        )
 
     def test_dcgan_models(self):
         # Note: Can sometimes fail with low precision if run with float dtype
         with set_default_dtype(torch.double):
-            self._test_dcgan_models(self, device='cpu')
+            self._test_dcgan_models(self, device="cpu")
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_dcgan_models_cuda(self):
         # Note: Can sometimes fail with low precision if run with float dtype
         with set_default_dtype(torch.double):
             # XXX: export_import on CUDA modules doesn't work (#11480)
-            self._test_dcgan_models(self, device='cuda', check_export_import=False)
+            self._test_dcgan_models(self, device="cuda", check_export_import=False)
 
     @staticmethod
     def _test_neural_style(self, device, check_export_import=True):
@@ -148,9 +162,13 @@ class TestModels(JitTestCase):
                 self.res4 = ResidualBlock(128)
                 self.res5 = ResidualBlock(128)
                 # Upsampling Layers
-                self.deconv1 = UpsampleConvLayer(128, 64, kernel_size=3, stride=1, upsample=2)
+                self.deconv1 = UpsampleConvLayer(
+                    128, 64, kernel_size=3, stride=1, upsample=2
+                )
                 self.in4 = torch.nn.InstanceNorm2d(64, affine=True)
-                self.deconv2 = UpsampleConvLayer(64, 32, kernel_size=3, stride=1, upsample=2)
+                self.deconv2 = UpsampleConvLayer(
+                    64, 32, kernel_size=3, stride=1, upsample=2
+                )
                 self.in5 = torch.nn.InstanceNorm2d(32, affine=True)
                 self.deconv3 = ConvLayer(32, 3, kernel_size=9, stride=1)
                 # Non-linearities
@@ -175,7 +193,9 @@ class TestModels(JitTestCase):
                 super().__init__()
                 reflection_padding = kernel_size // 2
                 self.reflection_pad = torch.nn.ReflectionPad2d(reflection_padding)
-                self.conv2d = torch.nn.Conv2d(in_channels, out_channels, kernel_size, stride)
+                self.conv2d = torch.nn.Conv2d(
+                    in_channels, out_channels, kernel_size, stride
+                )
 
             def forward(self, x):
                 out = self.reflection_pad(x)
@@ -210,14 +230,20 @@ class TestModels(JitTestCase):
             ref: http://distill.pub/2016/deconv-checkerboard/
             """
 
-            def __init__(self, in_channels, out_channels, kernel_size, stride, upsample=None):
+            def __init__(
+                self, in_channels, out_channels, kernel_size, stride, upsample=None
+            ):
                 super().__init__()
                 self.upsample = upsample
                 if upsample:
-                    self.upsample_layer = torch.nn.Upsample(mode='nearest', scale_factor=upsample)
+                    self.upsample_layer = torch.nn.Upsample(
+                        mode="nearest", scale_factor=upsample
+                    )
                 reflection_padding = kernel_size // 2
                 self.reflection_pad = torch.nn.ReflectionPad2d(reflection_padding)
-                self.conv2d = torch.nn.Conv2d(in_channels, out_channels, kernel_size, stride)
+                self.conv2d = torch.nn.Conv2d(
+                    in_channels, out_channels, kernel_size, stride
+                )
 
             def forward(self, x):
                 x_in = x
@@ -227,44 +253,54 @@ class TestModels(JitTestCase):
                 out = self.conv2d(out)
                 return out
 
-        self.checkTrace(TransformerNet(), (torch.rand(5, 3, 16, 16),), export_import=check_export_import)
+        self.checkTrace(
+            TransformerNet(),
+            (torch.rand(5, 3, 16, 16),),
+            export_import=check_export_import,
+        )
 
     @slowTest
     def test_neural_style(self):
-        self._test_neural_style(self, device='cpu')
+        self._test_neural_style(self, device="cpu")
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_neural_style_cuda(self):
         # XXX: export_import on CUDA modules doesn't work (#11480)
-        self._test_neural_style(self, device='cuda', check_export_import=False)
+        self._test_neural_style(self, device="cuda", check_export_import=False)
 
-    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.LEGACY, "Bug found in deprecated executor")
+    @unittest.skipIf(
+        GRAPH_EXECUTOR == ProfilingMode.LEGACY, "Bug found in deprecated executor"
+    )
     @staticmethod
     def _test_mnist(self, device, check_export_import=True):
         # eval() is present because dropout makes this nondeterministic
         with enable_profiling_mode_for_profiling_tests():
-            self.checkTrace(MnistNet().to(device).eval(), (torch.rand(5, 1, 28, 28, device=device),),
-                            export_import=check_export_import)
+            self.checkTrace(
+                MnistNet().to(device).eval(),
+                (torch.rand(5, 1, 28, 28, device=device),),
+                export_import=check_export_import,
+            )
 
     def test_mnist(self):
-        self._test_mnist(self, device='cpu')
+        self._test_mnist(self, device="cpu")
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_mnist_cuda(self):
         # XXX: export_import on CUDA modules doesn't work (#11480)
-        self._test_mnist(self, device='cuda', check_export_import=False)
+        self._test_mnist(self, device="cuda", check_export_import=False)
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_mnist_training_leaks_no_memory_cuda(self):
         net = MnistNet().cuda()
         # MnistNet uses dropout, don't check its trace
-        traced_net = torch.jit.trace(net, [torch.randn(5, 1, 28, 28, device='cuda')],
-                                     check_trace=False)
+        traced_net = torch.jit.trace(
+            net, [torch.randn(5, 1, 28, 28, device="cuda")], check_trace=False
+        )
 
         def train(iters):
             for _ in range(iters):
                 # Get some fake data
-                inp = torch.randn(5, 1, 28, 28, device='cuda')
+                inp = torch.randn(5, 1, 28, 28, device="cuda")
                 out = traced_net(inp)
 
                 # Here's some fake loss
@@ -293,21 +329,23 @@ class TestModels(JitTestCase):
                 return F.softmax(action_scores, dim=1)
 
         with enable_profiling_mode_for_profiling_tests():
-            self.checkTrace(Policy().to(device), (torch.rand(1, 4, device=device),),
-                            export_import=test_export_import)
+            self.checkTrace(
+                Policy().to(device),
+                (torch.rand(1, 4, device=device),),
+                export_import=test_export_import,
+            )
 
     def test_reinforcement_learning(self):
-        self._test_reinforcement_learning(self, device='cpu')
+        self._test_reinforcement_learning(self, device="cpu")
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_reinforcement_learning_cuda(self):
         # XXX: export_import on CUDA modules doesn't work (#11480)
-        self._test_reinforcement_learning(self, device='cuda', test_export_import=False)
+        self._test_reinforcement_learning(self, device="cuda", test_export_import=False)
 
     @staticmethod
-    def _test_snli(self, device, check_export_import=True, quantized=False):
+    def _test_snli(self, device, check_export_import=True):
         class Bottle(nn.Module):
-
             def forward(self, input):
                 if len(input.size()) <= 2:
                     return super().forward(input)
@@ -319,25 +357,31 @@ class TestModels(JitTestCase):
             pass
 
         class Encoder(nn.Module):
-
             def __init__(self, config):
                 super().__init__()
                 self.config = config
                 input_size = config.d_proj if config.projection else config.d_embed
                 dropout = 0 if config.n_layers == 1 else config.dp_ratio
-                self.rnn = nn.LSTM(input_size=input_size, hidden_size=config.d_hidden,
-                                   num_layers=config.n_layers, dropout=dropout,
-                                   bidirectional=config.birnn)
+                self.rnn = nn.LSTM(
+                    input_size=input_size,
+                    hidden_size=config.d_hidden,
+                    num_layers=config.n_layers,
+                    dropout=dropout,
+                    bidirectional=config.birnn,
+                )
 
             def forward(self, inputs):
                 batch_size = inputs.size()[1]
                 state_shape = self.config.n_cells, batch_size, self.config.d_hidden
                 h0 = c0 = inputs.new_zeros(state_shape)
                 outputs, (ht, ct) = self.rnn(inputs, (h0, c0))
-                return ht[-1] if not self.config.birnn else ht[-2:].transpose(0, 1).contiguous().view(batch_size, -1)
+                return (
+                    ht[-1]
+                    if not self.config.birnn
+                    else ht[-2:].transpose(0, 1).contiguous().view(batch_size, -1)
+                )
 
         class SNLIClassifier(nn.Module):
-
             def __init__(self, config):
                 super().__init__()
                 self.config = config
@@ -360,7 +404,8 @@ class TestModels(JitTestCase):
                     Linear(*lin_config),
                     self.relu,
                     self.dropout,
-                    Linear(seq_in_size, config.d_out))
+                    Linear(seq_in_size, config.d_out),
+                )
 
             def forward(self, premise, hypothesis):
                 prem_embed = self.embed(premise)
@@ -392,36 +437,25 @@ class TestModels(JitTestCase):
         premise = torch.LongTensor(48, 64).random_(0, 100).to(device)
         hypothesis = torch.LongTensor(24, 64).random_(0, 100).to(device)
 
-        if quantized:
-            snli = SNLIClassifier(Config()).cpu()
-            torch.jit.quantized.quantize_linear_modules(snli)
-            # we don't do export/import checks because we would need to call
-            # _pack/_unpack
-            self.checkTrace(snli, (premise, hypothesis), inputs_require_grads=False,
-                            export_import=False)
-        else:
-            self.checkTrace(SNLIClassifier(Config()).to(device), (premise, hypothesis),
-                            inputs_require_grads=False, export_import=check_export_import)
+        self.checkTrace(
+            SNLIClassifier(Config()).to(device),
+            (premise, hypothesis),
+            inputs_require_grads=False,
+            export_import=check_export_import,
+        )
 
     @slowTest
     def test_snli(self):
-        self._test_snli(self, device='cpu')
-
-    @skipIfNoFBGEMM
-    # Suppression: this exercises a deprecated API
-    @suppress_warnings
-    def test_snli_quantized(self):
-        self._test_snli(self, device='cpu', quantized=True)
+        self._test_snli(self, device="cpu")
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_snli_cuda(self):
         # XXX: export_import on CUDA modules doesn't work (#11480)
-        self._test_snli(self, device='cuda', check_export_import=False)
+        self._test_snli(self, device="cuda", check_export_import=False)
 
     @staticmethod
     def _test_super_resolution(self, device, check_export_import=True):
         class Net(nn.Module):
-
             def __init__(self, upscale_factor):
                 super().__init__()
 
@@ -429,7 +463,7 @@ class TestModels(JitTestCase):
                 self.conv1 = nn.Conv2d(1, 64, (5, 5), (1, 1), (2, 2))
                 self.conv2 = nn.Conv2d(64, 64, (3, 3), (1, 1), (1, 1))
                 self.conv3 = nn.Conv2d(64, 32, (3, 3), (1, 1), (1, 1))
-                self.conv4 = nn.Conv2d(32, upscale_factor ** 2, (3, 3), (1, 1), (1, 1))
+                self.conv4 = nn.Conv2d(32, upscale_factor**2, (3, 3), (1, 1), (1, 1))
                 self.pixel_shuffle = nn.PixelShuffle(upscale_factor)
 
             def forward(self, x):
@@ -440,17 +474,20 @@ class TestModels(JitTestCase):
                 return x
 
         net = Net(upscale_factor=4).to(device)
-        self.checkTrace(net, (torch.rand(5, 1, 32, 32, device=device),),
-                        export_import=check_export_import)
+        self.checkTrace(
+            net,
+            (torch.rand(5, 1, 32, 32, device=device),),
+            export_import=check_export_import,
+        )
 
     @slowTest
     def test_super_resolution(self):
-        self._test_super_resolution(self, device='cpu')
+        self._test_super_resolution(self, device="cpu")
 
-    @unittest.skipIf(not RUN_CUDA, 'no CUDA')
+    @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_super_resolution_cuda(self):
         # XXX: export_import on CUDA modules doesn't work (#11480)
-        self._test_super_resolution(self, device='cuda', check_export_import=False)
+        self._test_super_resolution(self, device="cuda", check_export_import=False)
 
     @suppress_warnings
     def test_time_sequence_prediction(self):
@@ -500,11 +537,10 @@ class TestModels(JitTestCase):
         # disabled due to a jitter issues that will be fixed by using load/store in the compiler
         with torch._jit_internal._disable_emit_hooks():
             # TODO: toggle export_import once above issues are fixed
-            self.checkTrace(Traced(), (torch.rand(3, 4),),
-                            export_import=False)
+            self.checkTrace(Traced(), (torch.rand(3, 4),), export_import=False)
 
     @staticmethod
-    def _test_vae(self, device, check_export_import=True, quantized=False):
+    def _test_vae(self, device, check_export_import=True):
         class VAE(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -536,39 +572,29 @@ class TestModels(JitTestCase):
                 z = self.reparameterize(mu, logvar)
                 return self.decode(z), mu, logvar
 
-        if quantized:
-            vae = VAE().to(device).eval()
-            torch.jit.quantized.quantize_linear_modules(vae)
-            # We don't do export/import checks because we would need to call
-            # _unpack and _pack
-            self.checkTrace(vae, (torch.rand(128, 1, 28, 28, device=device),),
-                            export_import=False, allow_unused=True,
-                            inputs_require_grads=False)
-        else:
-            with enable_profiling_mode_for_profiling_tests():
-                # eval() is present because randn_like makes this nondeterministic
-                self.checkTrace(VAE().to(device).eval(), (torch.rand(128, 1, 28, 28, device=device),),
-                                export_import=check_export_import)
+        with enable_profiling_mode_for_profiling_tests():
+            # eval() is present because randn_like makes this nondeterministic
+            self.checkTrace(
+                VAE().to(device).eval(),
+                (torch.rand(128, 1, 28, 28, device=device),),
+                export_import=check_export_import,
+            )
 
     def test_vae(self):
-        self._test_vae(self, device='cpu')
-
-    @skipIfNoFBGEMM
-    # Suppression: this exercises a deprecated API
-    @suppress_warnings
-    def test_vae_quantized(self):
-        self._test_vae(self, device='cpu', quantized=True)
+        self._test_vae(self, device="cpu")
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_vae_cuda(self):
         # XXX: export_import on CUDA modules doesn't work (#11480)
-        self._test_vae(self, device='cuda', check_export_import=False)
+        self._test_vae(self, device="cuda", check_export_import=False)
 
     @slowTest
     @skipIfNoTorchVision
     def test_script_module_trace_resnet18(self):
         x = torch.ones(1, 3, 224, 224)
-        m_orig = torch.jit.trace(torchvision.models.resnet18(), torch.ones(1, 3, 224, 224))
+        m_orig = torch.jit.trace(
+            torchvision.models.resnet18(), torch.ones(1, 3, 224, 224)
+        )
         m_import = self.getExportImportCopy(m_orig)
 
         input = torch.randn(1, 3, 224, 224, requires_grad=True)
@@ -589,16 +615,24 @@ class TestModels(JitTestCase):
     def test_script_module_script_resnet(self):
         def conv1x1(in_planes, out_planes, stride=1):
             """1x1 convolution"""
-            return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=False)
+            return nn.Conv2d(
+                in_planes, out_planes, kernel_size=1, stride=stride, bias=False
+            )
 
         def conv3x3(in_planes, out_planes, stride=1):
             """3x3 convolution with padding"""
-            return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
-                             padding=1, bias=False)
+            return nn.Conv2d(
+                in_planes,
+                out_planes,
+                kernel_size=3,
+                stride=stride,
+                padding=1,
+                bias=False,
+            )
 
         class BasicBlock(torch.jit.ScriptModule):
             expansion = 1
-            __constants__ = ['downsample']
+            __constants__ = ["downsample"]
 
             def __init__(self, inplanes, planes, stride=1, downsample=None):
                 super().__init__()
@@ -630,13 +664,14 @@ class TestModels(JitTestCase):
                 return out
 
         class ResNet(torch.jit.ScriptModule):
-            __constants__ = ['layer1', 'layer2', 'layer3', 'layer4']
+            __constants__ = ["layer1", "layer2", "layer3", "layer4"]
 
             def __init__(self, block, layers, num_classes=1000):
                 super().__init__()
                 self.inplanes = 64
-                self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3,
-                                       bias=False)
+                self.conv1 = nn.Conv2d(
+                    3, 64, kernel_size=7, stride=2, padding=3, bias=False
+                )
                 self.bn1 = nn.BatchNorm2d(64)
                 self.relu = nn.ReLU(inplace=True)
                 self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
@@ -649,7 +684,9 @@ class TestModels(JitTestCase):
 
                 for m in self.modules():
                     if isinstance(m, nn.Conv2d):
-                        nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                        nn.init.kaiming_normal_(
+                            m.weight, mode="fan_out", nonlinearity="relu"
+                        )
                     elif isinstance(m, nn.BatchNorm2d):
                         nn.init.constant_(m.weight, 1)
                         nn.init.constant_(m.bias, 0)
@@ -709,8 +746,10 @@ class TestModels(JitTestCase):
         x = torch.ones(1, 3, 224, 224)
         model = torchvision.models.AlexNet()
         with torch.random.fork_rng(devices=[]):
-            g, outputs, inputs = torch.jit._get_trace_graph(model, x, return_inputs=True)
-        self.run_pass('cse', g)
+            g, outputs, inputs = torch.jit._get_trace_graph(
+                model, x, return_inputs=True
+            )
+        self.run_pass("cse", g)
         m = self.createFunctionFromGraph(g)
         with torch.random.fork_rng(devices=[]):
             self.assertEqual(outputs, m(*inputs))

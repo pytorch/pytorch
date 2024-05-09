@@ -75,7 +75,7 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   if (bias_.has_value()) {
     // the input bias is a 1-D tensor whose size is the same as the size of the second dimension of quantized_output.
     // we need to add trailing dimensions in order to properly broadcast bias, otherwise broadcast_to will fail.
-    // the number of trailling dimensions is quantized_output.dim() - 2, so the new size of the broadcast_bias
+    // the number of trailing dimensions is quantized_output.dim() - 2, so the new size of the broadcast_bias
     // becomes quantized_output.dim() - 2 + 1. nothing needs to be done for the leading dimensions
     std::vector<int64_t> new_size(quantized_output.dim() - 1, 1);
     new_size[0] = bias_.value().size(0);
@@ -157,7 +157,7 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   c10::optional<cudnn_frontend::Operation> bias_mult_op;
   c10::optional<cudnn_frontend::Operation> sum_conv_bias_op;
   if (bias_.has_value()) {
-    // we can't directly assign bias_mult_op becauase operator= is deleted for cudnn_frontend::Operation;
+    // we can't directly assign bias_mult_op because operator= is deleted for cudnn_frontend::Operation;
     // alternatively, I think we can use std::unique_ptr and dynamically allocate these builder ops
     // but here, we chose to do it statically. c10::optional<T>::emplace() enables this approach
 
@@ -402,7 +402,7 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_relu.new"), QConvInt8<2, true>::run);
 }
 
-} // anonyous namespace
+} // anonymous namespace
 } // namespace at::native
 
 

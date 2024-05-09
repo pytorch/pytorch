@@ -21,23 +21,16 @@ class DataPtr;
  * PYTORCH_DEFAULT and BACKEND_DEFAULT are valid for all backends. The
  * BACKEND_DEFAULT is what a particular backend would select if no
  * flags were given. PYTORCH_DEFAULT is the PyTorch's framework default
- * choice for events on that backend, which may not be the same. For example,
- * when PyTorch creates a CUDA event it sets the flag
- * CUDA_EVENT_DISABLING_TIMING by default to improve performance.
+ * choice for events on that backend, which may not be the same.
  *
  * The mapping of PYTORCH_DEFAULT and BACKEND_DEFAULT is done by each
- * backend implementation. Backend-specific flags, like CUDA_EVENT_DEFAULT,
- * should map one-to-one with actual event flags for those backends.
+ * backend implementation.
  */
 enum class EventFlag {
+  // Disable timing
   PYTORCH_DEFAULT,
+  // Enable timing
   BACKEND_DEFAULT,
-  // CUDA flags
-  CUDA_EVENT_DEFAULT,
-  CUDA_EVENT_DISABLE_TIMING, // PyTorch-default for CUDA
-  // HIP flags
-  HIP_EVENT_DEFAULT,
-  HIP_EVENT_DISABLE_TIMING, // PyTorch-default for HIP
   // FOR TESTING ONLY
   INVALID
 };
@@ -130,6 +123,16 @@ struct C10_API DeviceGuardImplInterface {
   }
 
   /**
+   * Return a new stream for a given device and priority. The stream will be
+   * copied and shared around, device backend should be able to correctly handle
+   * the lifetime of the stream.
+   */
+  virtual Stream getNewStream(Device, int priority = 0) const {
+    (void)priority;
+    TORCH_CHECK(false, "Backend doesn't support create a new Stream.")
+  }
+
+  /**
    * Set a stream to be the thread local current stream for its device.
    * Return the previous stream for that device. You are NOT required
    * to set the current device to match the device of this stream.
@@ -202,11 +205,26 @@ struct C10_API DeviceGuardImplInterface {
   }
 
   /**
+   * Wait (by blocking the calling thread) until all the work previously
+   * recorded on the event has completed running on the device.
+   */
+  virtual void synchronizeEvent(void* /*event*/) const {
+    TORCH_CHECK(false, "Backend doesn't support synchronizing events.");
+  }
+
+  /**
    * Ensure the caching allocator (if any) is aware that the given DataPtr is
    * being used on the given stream, and that it should thus avoid recycling the
    * DataPtr until all work on that stream is done.
    */
   virtual void recordDataPtrOnStream(const c10::DataPtr&, const Stream&) const {
+  }
+
+  /**
+   * Fetch the elapsed time between two recorded events.
+   */
+  virtual double elapsedTime(void* /*event1*/, void* /*event2*/) const {
+    TORCH_CHECK(false, "Backend doesn't support elapsedTime.");
   }
 
   /**
@@ -241,6 +259,13 @@ struct NoOpDeviceGuardImpl final : public DeviceGuardImplInterface {
     // no-op
     return Stream(Stream::DEFAULT, Device(D, -1));
   }
+
+  Stream getNewStream(Device, int priority = 0) const override {
+    // no-op
+    (void)priority;
+    return Stream(Stream::DEFAULT, Device(D, -1));
+  }
+
   // NB: These do NOT set the current device
   Stream exchangeStream(Stream) const noexcept override {
     // no-op

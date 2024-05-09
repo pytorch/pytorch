@@ -2892,15 +2892,12 @@ struct to_ir {
 
     // If it's a tensor, copy the RHS data into it
     if (sliceable->type()->isSubtypeOf(*TensorType::get())) {
-      std::vector<Value*> tensorIndices;
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      Value* sliced;
       // Handle multi-dimensional slicing: first emit int/slice indexing
       // TODO: the Python equivalent code has special-cased copy_to
       // broadcasting to match NumPy semantics (see PR#4853). We can't
       // replicate that without knowing the size of the Tensor; so really that
       // code should be moved into the aten function
-      std::tie(sliced, tensorIndices) = emitIntAndSliceIndexing(
+      auto [sliced, tensorIndices] = emitIntAndSliceIndexing(
           lhs.range(), sliceable, lhs.subscript_exprs());
 
       const auto slicedArg = NamedValue(lhs.range(), sliced);
@@ -5688,7 +5685,7 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
   // successive runs of immutable constant prop does not change the graph
   ConstantPropagationImmutableTypes(to_clean);
 
-  // Constant Pooling pass must be after ConstantPropogation, which can create
+  // Constant Pooling pass must be after ConstantPropagation, which can create
   // new constants that needs to be pooled.
   ConstantPooling(to_clean);
 

@@ -53,7 +53,7 @@ void legacy_pthreadpool_compute_1d_tiled(
   size_t range,
   size_t tile)
 {
-  if (threadpool == NULL) {
+  if (threadpool == nullptr) {
     /* No thread pool provided: execute function sequentially on the calling thread */
     for (size_t i = 0; i < range; i += tile) {
       function(argument, i, min(range - i, tile));
@@ -92,7 +92,7 @@ void legacy_pthreadpool_compute_2d(
   size_t range_i,
   size_t range_j)
 {
-  if (threadpool == NULL) {
+  if (threadpool == nullptr) {
     /* No thread pool provided: execute function sequentially on the calling thread */
     for (size_t i = 0; i < range_i; i++) {
       for (size_t j = 0; j < range_j; j++) {
@@ -144,7 +144,7 @@ void legacy_pthreadpool_compute_2d_tiled(
   size_t tile_i,
   size_t tile_j)
 {
-  if (threadpool == NULL) {
+  if (threadpool == nullptr) {
     /* No thread pool provided: execute function sequentially on the calling thread */
     for (size_t i = 0; i < range_i; i += tile_i) {
       for (size_t j = 0; j < range_j; j += tile_j) {
@@ -215,7 +215,7 @@ void legacy_pthreadpool_compute_3d_tiled(
     size_t tile_i,
     size_t tile_j,
     size_t tile_k) {
-  if (threadpool == NULL) {
+  if (threadpool == nullptr) {
     /* No thread pool provided: execute function sequentially on the calling
      * thread */
     for (size_t i = 0; i < range_i; i += tile_i) {
@@ -322,7 +322,7 @@ void legacy_pthreadpool_compute_4d_tiled(
     size_t tile_j,
     size_t tile_k,
     size_t tile_l) {
-  if (threadpool == NULL) {
+  if (threadpool == nullptr) {
     /* No thread pool provided: execute function sequentially on the calling
      * thread */
     for (size_t i = 0; i < range_i; i += tile_i) {

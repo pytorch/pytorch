@@ -219,12 +219,12 @@ def RunEpoch(
         for _ in range(test_epoch_iters):
             workspace.RunNet(test_model.net.Proto().name)
             for g in test_model._devices:
-                test_accuracy += np.asscalar(workspace.FetchBlob(
+                test_accuracy += workspace.FetchBlob(
                     "{}_{}".format(test_model._device_prefix, g) + '/accuracy'
-                ))
-                test_accuracy_top5 += np.asscalar(workspace.FetchBlob(
+                ).item()
+                test_accuracy_top5 += workspace.FetchBlob(
                     "{}_{}".format(test_model._device_prefix, g) + '/accuracy_top5'
-                ))
+                ).item()
                 ntests += 1
         test_accuracy /= ntests
         test_accuracy_top5 /= ntests

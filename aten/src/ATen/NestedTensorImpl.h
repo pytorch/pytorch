@@ -14,6 +14,8 @@ namespace at::native {
 struct NestedTensorImpl;
 inline bool nested_tensor_impl_is_contiguous(const NestedTensorImpl* nt);
 int64_t get_numel_from_nested_size_tensor(const at::Tensor& tensor);
+at::Tensor construct_nested_strides(const at::Tensor& nested_size);
+at::Tensor construct_offsets(const at::Tensor& nested_size);
 
 struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   explicit NestedTensorImpl(
@@ -25,13 +27,15 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
       at::Tensor storage_offsets);
 
   explicit NestedTensorImpl(
-      at::Tensor buffer,
+      const at::Tensor& buffer,
       at::Tensor nested_sizes,
       at::Tensor nested_strides,
       at::Tensor storage_offsets);
   // assume contiguous, `nested_strides` and `offsets`
   // can be infered from `nested_sizes`
-  explicit NestedTensorImpl(at::Tensor buffer, at::Tensor nested_sizes);
+  explicit NestedTensorImpl(
+      const at::Tensor& buffer,
+      const at::Tensor& nested_sizes);
 
   // This constructor is used creating view tensors from nested tensors
   explicit NestedTensorImpl(
@@ -224,7 +228,8 @@ inline bool nested_tensor_impl_is_contiguous(const NestedTensorImpl* nt) {
   }
   const Tensor &sizemat = nt->get_nested_sizes(),
                &stridemat = nt->get_nested_strides();
-  int64_t* offsets_ptr = nt->get_storage_offsets().data_ptr<int64_t>();
+  const int64_t* offsets_ptr =
+      nt->get_storage_offsets().const_data_ptr<int64_t>();
   int64_t orig_dim = sizemat.size(1);
   // nesting scalars
   if (orig_dim == 0) {
@@ -239,8 +244,8 @@ inline bool nested_tensor_impl_is_contiguous(const NestedTensorImpl* nt) {
   // nesting tensors
   else {
     // if any underlying tensor is non-contiguous
-    const int64_t *sizemat_ptr = sizemat.data_ptr<int64_t>(),
-                  *stridemat_ptr = stridemat.data_ptr<int64_t>();
+    const int64_t *sizemat_ptr = sizemat.const_data_ptr<int64_t>(),
+                  *stridemat_ptr = stridemat.const_data_ptr<int64_t>();
     for (int64_t i = 0; i < ntensors; i++) {
       if (stridemat_ptr[orig_dim - 1] != 1) {
         return false;
@@ -259,8 +264,8 @@ inline bool nested_tensor_impl_is_contiguous(const NestedTensorImpl* nt) {
     if (offsets_ptr[0] != 0) {
       return false;
     }
-    sizemat_ptr = sizemat.data_ptr<int64_t>();
-    stridemat_ptr = stridemat.data_ptr<int64_t>();
+    sizemat_ptr = sizemat.const_data_ptr<int64_t>();
+    stridemat_ptr = stridemat.const_data_ptr<int64_t>();
     for (int64_t i = 1; i < ntensors; i++) {
       if (offsets_ptr[i] !=
           offsets_ptr[i - 1] + *sizemat_ptr * *stridemat_ptr) {

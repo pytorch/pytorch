@@ -133,7 +133,7 @@ void checkDoubleInRange(double a) {
       a > double(std::numeric_limits<int64_t>::max()) ||
       a < double(std::numeric_limits<int64_t>::min())) {
     throw c10::Error(
-        "Cannot convert float " + c10::to_string(a) + " to integer", "");
+        "Cannot convert float " + c10::to_string(a) + " to integer");
     return;
   }
 }
@@ -265,8 +265,7 @@ void listSelect(Stack& stack) {
   int64_t idx = pop(stack).to<int64_t>();
   c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
 
-  auto element = getItem(list, idx);
-  push(stack, std::move(element));
+  push(stack, getItem(list, idx));
 }
 
 void listLen(Stack& stack) {

@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import functools
 
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
 
 import torch
 import torch._dynamo as torchdynamo
@@ -21,8 +21,6 @@ from torch.ao.quantization.observer import (
     PlaceholderObserver,
 )
 
-from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
-
 from torch.ao.quantization.quantizer import QuantizationSpec, Quantizer
 
 from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
@@ -34,7 +32,10 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
     QuantizationConfig,
 )
 
-from torch.fx import Node
+
+if TYPE_CHECKING:
+    from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
+    from torch.fx import Node
 
 
 __all__ = [
@@ -106,6 +107,10 @@ def get_symmetric_quantization_config(
     is_per_channel: bool = False,
     is_qat: bool = False,
     is_dynamic: bool = False,
+    act_qmin: int = -128,
+    act_qmax: int = 127,
+    weight_qmin: int = -127,
+    weight_qmax: int = 127,
 ):
     extra_args: Dict[str, Any] = {"eps": 2**-12}
     if is_qat:
@@ -125,8 +130,8 @@ def get_symmetric_quantization_config(
 
     act_quantization_spec = QuantizationSpec(
         dtype=torch.int8,
-        quant_min=-128,
-        quant_max=127,
+        quant_min=act_qmin,
+        quant_max=act_qmax,
         qscheme=torch.per_tensor_affine,
         is_dynamic=is_dynamic,
         observer_or_fake_quant_ctr=act_observer_or_fake_quant_ctr.with_args(
@@ -153,8 +158,8 @@ def get_symmetric_quantization_config(
             extra_args["observer"] = MovingAveragePerChannelMinMaxObserver  # type: ignore[dict-item]
     weight_quantization_spec = QuantizationSpec(
         dtype=torch.int8,
-        quant_min=-127,
-        quant_max=127,
+        quant_min=weight_qmin,
+        quant_max=weight_qmax,
         qscheme=weight_qscheme,
         ch_axis=0,
         is_dynamic=False,
@@ -207,9 +212,15 @@ def _get_module_name_filter(module_name: str):
         # }
         # get_attr nodes doesn't have nn_module_stack?
         nn_module_stack = n.meta.get("nn_module_stack", {})
-        names = [
-            n[len("L__self___") :].replace("_", ".") for n in nn_module_stack.keys()
-        ]
+
+        def _normalize_path(n):
+            prefix = 0
+            # TODO This is non standard behavior and should be removed when we migrate off capture_pre_autograd_graph.
+            if n.startswith("L['self']."):
+                prefix = len("L['self'].")
+            return n[prefix:]
+
+        names = [_normalize_path(n) for n, _ in nn_module_stack.values()]
         return module_name in names
 
     return module_name_filter
@@ -228,14 +239,22 @@ def _get_module_type_filter(tp: Callable):
     True  # the node is from the submodule `Sub` (same for `Block` and `Linear` as well)
     """
 
+    tp_str = tp.__module__ + "." + tp.__qualname__
+
     def module_type_filter(n: Node) -> bool:
         # example: {
         #     'L__self___sub': ("L['self'].sub", <class '....Sub'>),
         #     'L__self___sub_linear': ("L['self'].sub.linear", <class 'torch.nn.modules.linear.Linear'>)
         # }
         nn_module_stack = n.meta.get("nn_module_stack", {})
-        types = [t for _, t in nn_module_stack.values()]
-        return tp in types
+        types = []
+        for _, t in nn_module_stack.values():
+            # export() returns str, but older APIs (e.g. capture_pre_autograd_graph)
+            # return type. Handle both cases.
+            if isinstance(t, type):
+                t = t.__module__ + "." + t.__qualname__
+            types.append(t)
+        return tp_str in types
 
     return module_type_filter
 
@@ -257,6 +276,8 @@ class XNNPACKQuantizer(Quantizer):
     STATIC_QAT_ONLY_OPS = [
         "conv_bn_relu",
         "conv_bn",
+        "conv_transpose_bn_relu",
+        "conv_transpose_bn",
     ]
 
     # static quantization ops (both PTQ and QAT)
@@ -266,6 +287,7 @@ class XNNPACKQuantizer(Quantizer):
         "linear",
         "conv_relu",
         "conv",
+        "conv_transpose_relu",
         "adaptive_avg_pool2d",
         # TODO: move this to BoltNNQuantizer?
         "gru_io_only",
@@ -292,9 +314,9 @@ class XNNPACKQuantizer(Quantizer):
 
     @classmethod
     def get_supported_quantization_configs(cls) -> List[QuantizationConfig]:
-        op_configs: Set[QuantizationConfig] = set({})
-        for spec, _ in cls.supported_config_and_operators:
-            op_configs.add(spec)
+        op_configs: Set[QuantizationConfig] = {
+            spec for spec, _ in cls.supported_config_and_operators
+        }
         return list(op_configs)
 
     @classmethod

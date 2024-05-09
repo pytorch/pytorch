@@ -184,18 +184,14 @@ template <typename _real, typename = void>
 struct mod_traits {};
 
 template <typename _real>
-struct mod_traits<
-    _real,
-    typename std::enable_if<std::is_floating_point<_real>::value>::type> {
+struct mod_traits<_real, std::enable_if_t<std::is_floating_point_v<_real>>> {
   static _real mod(_real a, _real b) {
     return fmod(a, b);
   }
 };
 
 template <typename _real>
-struct mod_traits<
-    _real,
-    typename std::enable_if<std::is_integral<_real>::value>::type> {
+struct mod_traits<_real, std::enable_if_t<std::is_integral_v<_real>>> {
   static _real mod(_real a, _real b) {
     return a % b;
   }

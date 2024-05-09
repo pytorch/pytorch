@@ -5,6 +5,7 @@
 #include <torch/csrc/Stream.h>
 #include <torch/csrc/python_headers.h>
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct THCPStream : THPStream {
   at::cuda::CUDAStream cuda_stream;
 };

@@ -30,7 +30,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
     {"double", ParameterType::DOUBLE},
     {"complex", ParameterType::COMPLEX},
     {"TensorList", ParameterType::TENSOR_LIST},
-    {"c10::List<c10::optional<Tensor>>", ParameterType::TENSOR_LIST},
+    {"c10::List<::std::optional<Tensor>>", ParameterType::TENSOR_LIST},
     {"IntArrayRef", ParameterType::INT_LIST},
     {"SymIntArrayRef", ParameterType::SYM_INT_LIST},
     {"ArrayRef<double>", ParameterType::FLOAT_LIST},
@@ -742,10 +742,13 @@ bool is_tensor_list_and_append_overloaded(
         tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
     if (!is_tensor_and_append_overloaded(iobj, overloaded_args)) {
       if (throw_error) {
-        throw TypeError(
-            "expected Tensor as element %d in argument %d, but got %s",
-            static_cast<int>(idx),
+        TORCH_CHECK_TYPE(
+            false,
+            "expected Tensor as element ",
+            idx,
+            " in argument ",
             argnum,
+            ", but got ",
             Py_TYPE(iobj)->tp_name);
       }
       return false;
@@ -781,18 +784,25 @@ static bool is_int_or_symint(PyObject* obj) {
     return true;
   }
 
-  if (THPUtils_checkIndex(obj)) {
-    return true;
-  }
-
-  // FakeTensor(..., size=()) is qualified for SymInt param
-  if (is_dynamo_compiling && THPVariable_Check(obj)) {
+  // FakeTensor(..., size=()) is qualified for SymInt param,
+  // but we can't go via __index__ (below) as we would normally
+  // do for regular tensors, because __index__ first forces a
+  // conversion into an int, which in general you cannot do
+  // if you have an unbacked SymInt.  So this fastpath ensures
+  // that we still allow for fake tensors in this case, but
+  // for regular tensors it's redundant with the test below.
+  if (THPVariable_Check(obj)) {
     auto& var = THPVariable_Unpack(obj);
-    if (var.numel() == 1 && var.sizes().empty() &&
+    if (TORCH_GUARD_SIZE_OBLIVIOUS(var.sym_numel().sym_eq(1)) &&
         at::isIntegralType(var.dtype().toScalarType(), /*include_bool*/ true)) {
       return true;
     }
   }
+
+  if (THPUtils_checkIndex(obj)) {
+    return true;
+  }
+
   return false;
 }
 

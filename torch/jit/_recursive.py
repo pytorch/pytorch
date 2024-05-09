@@ -824,16 +824,12 @@ def check_module_initialized(mod):
         for name, param in mod._parameters.items():
             if param is not None and torch.nn.parameter.is_lazy(param):
                 raise RuntimeError(
-                    "'{}' has uninitialized parameters {}. Did you forget to run a forward pass?".format(
-                        torch.typename(type(mod)), name
-                    )
+                    f"'{torch.typename(type(mod))}' has uninitialized parameters {name}. Did you forget to run a forward pass?"
                 )
         for name, buf in mod._buffers.items():
             if buf is not None and torch.nn.parameter.is_lazy(buf):
                 raise RuntimeError(
-                    "'{}' has uninitialized buffers {}. Did you forget to run a forward pass?".format(
-                        torch.typename(type(mod)), name
-                    )
+                    f"'{torch.typename(type(mod))}' has uninitialized buffers {name}. Did you forget to run a forward pass?"
                 )
 
 
@@ -995,6 +991,10 @@ def try_compile_fn(fn, loc):
             "Python functions or methods currently.\n"
             f"Consider manually annotating `{fn}` with @torch.jit.script."
         )
+
+    # The object returned by __prepare_scriptable__ might have a different closure.
+    # Resolve it here to get the right resolution callback.
+    fn = fn.__prepare_scriptable__() if hasattr(fn, "__prepare_scriptable__") else fn  # type: ignore[operator]
 
     # We don't have the actual scope where the function was defined, but we can
     # extract the necessary info from the closed over variables on the function

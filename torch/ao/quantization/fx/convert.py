@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 from typing import Any, Dict, List, Optional, Set, Tuple, Union, Type, Callable
 from torch.ao.quantization.quant_type import QuantType
 import torch
@@ -82,6 +84,18 @@ __all__ = [
     "convert_weighted_module",
 ]
 
+SUPPORTED_QDTYPES = [
+    torch.quint8,
+    torch.qint8,
+    torch.qint32,
+    torch.uint8,
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.float8_e5m2,
+    torch.float8_e4m3fn,
+]
+
 _QSCHEME_TO_CHOOSE_QPARAMS_OP = {
     torch.per_tensor_affine: torch.ops.quantized_decomposed.choose_qparams.tensor,
     torch.per_tensor_symmetric: torch.ops.quantized_decomposed.choose_qparams_symmetric.tensor,
@@ -134,8 +148,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
     if hasattr(activation_post_process, "is_dynamic"):
         is_dynamic = activation_post_process.is_dynamic  # type: ignore[assignment]
 
-    if dtype in [torch.quint8, torch.qint8, torch.qint32, torch.uint8, torch.int8, torch.int16, torch.int32] and \
-            (not is_dynamic):
+    if dtype in SUPPORTED_QDTYPES and (not is_dynamic):
         # TODO: probably should cleanup this condition check, it's hard
         # to reason about this if and the following elif
 
@@ -370,7 +383,7 @@ def _replace_observer_with_quantize_dequantize_node(
     if hasattr(activation_post_process, "is_dynamic"):
         is_dynamic = activation_post_process.is_dynamic  # type: ignore[attr-defined, assignment]
 
-    if dtype in [torch.quint8, torch.qint8, torch.qint32] and \
+    if dtype in [torch.quint8, torch.qint8, torch.qint32, torch.float8_e5m2, torch.float8_e4m3fn] and \
             (not is_dynamic):
         # TODO: probably should cleanup this condition check, it's hard
         # to reason about this if and the following elif
@@ -475,15 +488,7 @@ def _is_conversion_supported(activation_post_process: torch.nn.Module) -> bool:
         is_dynamic = activation_post_process.is_dynamic  # type: ignore[attr-defined, assignment]
 
     return (
-        (dtype in [
-            torch.quint8,
-            torch.qint8,
-            torch.qint32,
-            torch.uint8,
-            torch.int8,
-            torch.int16,
-            torch.int32
-        ] and (not is_dynamic)) or  # type: ignore[return-value]
+        (dtype in SUPPORTED_QDTYPES and (not is_dynamic)) or  # type: ignore[return-value]
         is_dynamic or
         dtype == torch.float16
     )

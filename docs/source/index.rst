@@ -68,6 +68,9 @@ Features described in this documentation are classified by release status:
    cuda
    torch.cuda.memory <torch_cuda_memory>
    mps
+   xpu
+   mtia
+   meta
    torch.backends <backends>
    torch.export <export>
    torch.distributed <distributed>
@@ -75,6 +78,7 @@ Features described in this documentation are classified by release status:
    torch.distributed.elastic <distributed.elastic>
    torch.distributed.fsdp <fsdp>
    torch.distributed.optim <distributed.optim>
+   torch.distributed.pipelining <distributed.pipelining>
    torch.distributed.tensor.parallel <distributed.tensor.parallel>
    torch.distributed.checkpoint <distributed.checkpoint>
    torch.distributions <distributions>
@@ -83,6 +87,7 @@ Features described in this documentation are classified by release status:
    torch.func <func>
    futures
    fx
+   fx.experimental
    torch.hub <hub>
    torch.jit <jit>
    torch.linalg <linalg>
@@ -93,7 +98,7 @@ Features described in this documentation are classified by release status:
    torch.package <package>
    profiler
    nn.init
-   nn.attention.bias
+   nn.attention
    onnx
    optim
    complex_numbers
@@ -104,6 +109,7 @@ Features described in this documentation are classified by release status:
    torch.random <random>
    masked
    torch.nested <nested>
+   size
    sparse
    storage
    torch.testing <testing>
@@ -119,11 +125,14 @@ Features described in this documentation are classified by release status:
    torch.utils.mobile_optimizer <mobile_optimizer>
    torch.utils.model_zoo <model_zoo>
    torch.utils.tensorboard <tensorboard>
+   torch.utils.module_tracker <module_tracker>
    type_info
    named_tensor
    name_inference
    torch.__config__ <config_mod>
+   torch.__future__ <future_mod>
    logging
+   torch_environment_variables
 
 .. toctree::
    :maxdepth: 1

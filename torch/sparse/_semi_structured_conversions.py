@@ -1,20 +1,22 @@
 import torch
 
 
-# This is PyTorch implementation of main part of reorder_meta()
-# function, from tools/util/include/cutlass/util/host_reorder.h file
-# of CUTLASS source tree.  Furthermore, CUTLASS template for sparse
-# GEMM decides upon layout of this matrix, and at the moment for the
-# sparse GEMM executed on tensor cores, this is layout described by
-# ColumnMajorInterleaved<2> data structure, in
-# include/cutlass/layout/matrix.h of CUTLASS source tree.  The
-# reordering of meta matrix into meta_reordered matrix calculated
-# according to these segments of CUTLASS code is re-implemented here.
-# Note that this calculation produces offsets for scattering metadata
-# matrix elements into reordered metadata matrix elements (or,
-# equivalently, for gathering reordered metadata matrix element back
-# into metadata matrix elements).
 def _calculate_meta_reordering_scatter_offsets(m, meta_ncols, meta_dtype, device):
+    """
+    This is PyTorch implementation of main part of reorder_meta()
+    function, from tools/util/include/cutlass/util/host_reorder.h file
+    of CUTLASS source tree.  Furthermore, CUTLASS template for sparse
+    GEMM decides upon layout of this matrix, and at the moment for the
+    sparse GEMM executed on tensor cores, this is layout described by
+    ColumnMajorInterleaved<2> data structure, in
+    include/cutlass/layout/matrix.h of CUTLASS source tree.  The
+    reordering of meta matrix into meta_reordered matrix calculated
+    according to these segments of CUTLASS code is re-implemented here.
+    Note that this calculation produces offsets for scattering metadata
+    matrix elements into reordered metadata matrix elements (or,
+    equivalently, for gathering reordered metadata matrix element back
+    into metadata matrix elements).
+    """
     dst_rows = torch.arange(0, m, device=device)[:, None].repeat(1, meta_ncols)
     dst_cols = torch.arange(0, meta_ncols, device=device).repeat(m, 1)
 
@@ -41,10 +43,12 @@ def _calculate_meta_reordering_scatter_offsets(m, meta_ncols, meta_dtype, device
     return (cols_maj * m * interleave + dst_rows * interleave + cols_min).view(-1)
 
 
-# This function converts dense matrix into sparse semi-structured
-# representation, producing "compressed" matrix, in the layout used by
-# CUTLASS backend, and corresponding metadata matrix.
 def sparse_semi_structured_from_dense_cutlass(dense):
+    """
+    This function converts dense matrix into sparse semi-structured
+    representation, producing "compressed" matrix, in the layout used by
+    CUTLASS backend, and corresponding metadata matrix.
+    """
     if dense.dim() != 2:
         raise RuntimeError(
             f"Expected 2-dimensional dense tensor, got {dense.dim()}-dimensional tensor"
@@ -134,11 +138,11 @@ def sparse_semi_structured_from_dense_cutlass(dense):
     idxs1 = bit2 | (bit3.to(torch.int64) << 1)
 
     if dense.dtype != torch.float:
-        sparse0 = dense_4.gather(-1, idxs0.unsqueeze(-1))
+        sparse0 = dense_4.gather(-1, idxs0.unsqueeze(-1))  # type: ignore[possibly-undefined]
         sparse1 = dense_4.gather(-1, idxs1.unsqueeze(-1))
         sparse = torch.stack((sparse0, sparse1), dim=-1).view(m, k // 2)
     else:
-        sparse = dense_2.gather(-1, idxs0.unsqueeze(-1) // 2).view(m, k // 2)
+        sparse = dense_2.gather(-1, idxs0.unsqueeze(-1) // 2).view(m, k // 2)  # type: ignore[possibly-undefined]
 
     meta_4 = idxs0 | (idxs1 << 2)
     meta_n = meta_4.view((-1, meta_ncols, quadbits_per_meta_elem)).to(meta_dtype)
@@ -163,7 +167,7 @@ def sparse_semi_structured_from_dense_cutlass(dense):
         )
 
     # Reorder meta tensor elements.
-    meta_reordered = meta.new_empty((m * meta_ncols,))
+    meta_reordered = meta.new_empty((m * meta_ncols,))  # type: ignore[possibly-undefined]
     meta_offsets = _calculate_meta_reordering_scatter_offsets(
         m, meta_ncols, meta_dtype, device
     )
@@ -172,11 +176,13 @@ def sparse_semi_structured_from_dense_cutlass(dense):
     return (sparse, meta_reordered.view(m, meta_ncols))
 
 
-# This function performs reverse of the function above - it
-# reconstructs dense matrix from a pair of "compressed" matrix, given
-# in the layout used by CUTLASS backend, and accompanying metadata
-# matrix.
 def sparse_semi_structured_to_dense_cutlass(sparse, meta_reordered):
+    """
+    This function performs reverse of the function above - it
+    reconstructs dense matrix from a pair of "compressed" matrix, given
+    in the layout used by CUTLASS backend, and accompanying metadata
+    matrix.
+    """
     if sparse.dim() != 2:
         raise RuntimeError(
             f"Expected 2-dimensional sparse tensor, got {sparse.dim()}-dimensional tensor"
@@ -273,3 +279,73 @@ def sparse_semi_structured_to_dense_cutlass(sparse, meta_reordered):
         )
 
     return dense.view(m, 2 * k)
+
+
+def _sparse_semi_structured_tile(dense):
+    """
+    This function computes a 2:4 sparse tile by greedily taking the largest values.
+
+    Since we take the largest values greedily, how the sorting algorithm handles duplicates affects
+    the ultimate sparsity pattern.
+
+    Note that this function does not have the same sorting semantics as our CUDA backend,
+    which is exposed via `torch._sparse_semi_structured_tile` and thus returns a different pattern.
+    """
+
+    def greedy_prune_tile(tile):
+        num_kept_row = [0, 0, 0, 0]
+        num_kept_col = [0, 0, 0, 0]
+
+        for x in tile.flatten().sort(descending=True, stable=True).indices:
+            r, c = x // 4, x % 4
+            if num_kept_row[r] < 2 and num_kept_col[c] < 2:
+                num_kept_row[r] += 1
+                num_kept_col[c] += 1
+            else:
+                tile[r, c] = 0
+
+    for batch in dense.unfold(0, 4, 4).unfold(1, 4, 4):
+        for tile in batch:
+            greedy_prune_tile(tile)
+
+    return dense
+
+
+def _compute_compressed_swizzled_bitmask(dense):
+    """
+    Calculates the compressed swizzled bitmask from a dense tensor
+    """
+
+    # first we need to convert the dense tensor to a bitmask
+    int_bitmask = dense.bool().to(torch.uint8)
+
+    # Each thread is responsible for an 8x8 tile, which contains 4 4x4 tiles:
+    # A, B, C and D, as displayed in the following schema:
+    # +---+---+
+    # | A | B |
+    # +---+---+
+    # | C | D |
+    # +---+---+
+
+    # we first need to split into the 8x8 tiles
+    bitmask_8x8_chunks = int_bitmask.unfold(0, 8, 8).unfold(1, 8, 8)
+
+    # then we unfold again to get our indivdual 4x4 tiles
+    bitmask_4x4_chunks = bitmask_8x8_chunks.unfold(2, 4, 4).unfold(3, 4, 4)
+
+    # Each 4x4 bitmask defines two 8-bit integers, which encode the sparsity pattern
+    # of that tile. Note that the least siginificant bit is stored first.
+    # [1 1 0 0]
+    # [1 1 0 0]  ->  0011 0011 ->   51
+    # [0 0 1 1]      1100 1100      204
+    # [0 0 1 1]
+
+    # reshape tensor to expand tiles into 8-bit vectors
+    bitmask_binary_representation = bitmask_4x4_chunks.reshape(*bitmask_4x4_chunks.shape[:2], 4, 2, 8)
+
+    # to convert from binary representaiton, we can do a matmul with powers of two
+    powers_of_two = 2**torch.arange(8, dtype=torch.float, device="cuda")
+    # To run on GPU: cast to float to do matmul and then cast back
+    compressed_swizzled_bitmask = (bitmask_binary_representation.to(torch.float) @ powers_of_two).to(torch.uint8)
+
+    return compressed_swizzled_bitmask

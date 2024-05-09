@@ -1,6 +1,5 @@
 import itertools
-import warnings
-from typing import Protocol
+from typing import Protocol, Optional, Type, Any
 
 import torch
 from ..parameter import is_lazy
@@ -171,15 +170,13 @@ class LazyModuleMixin:
 
     # modules inheriting from this will change their __class__ to the specified
     # one after they are fully initialized
-    cls_to_become = None
+    cls_to_become: Optional[Type[Any]] = None
 
     def __init__(self: _LazyProtocol, *args, **kwargs):
         # Mypy doesnt like this super call in a mixin
         super().__init__(*args, **kwargs)  # type: ignore[misc]
         self._load_hook = self._register_load_state_dict_pre_hook(self._lazy_load_hook)
         self._initialize_hook = self.register_forward_pre_hook(self._infer_parameters, with_kwargs=True)
-        warnings.warn('Lazy modules are a new feature under heavy development '
-                      'so changes to the API or functionality can happen at any moment.')
 
     def _save_to_state_dict(self: _LazyProtocol, destination, prefix, keep_vars):
         # This should be ideally implemented as a hook,

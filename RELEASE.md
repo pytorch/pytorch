@@ -17,6 +17,7 @@
     - [Release Candidate Storage](#release-candidate-storage)
     - [Release Candidate health validation](#release-candidate-health-validation)
     - [Cherry Picking Fixes](#cherry-picking-fixes)
+      - [How to do Cherry Picking](#how-to-do-cherry-picking)
     - [Cherry Picking Reverts](#cherry-picking-reverts)
   - [Preparing and Creating Final Release candidate](#preparing-and-creating-final-release-candidate)
   - [Promoting RCs to Stable](#promoting-rcs-to-stable)
@@ -49,7 +50,8 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 
 | PyTorch version | Python | Stable CUDA | Experimental CUDA |
 | --- | --- | --- | --- |
-| 2.2 | >=3.8, <=3.11 | CUDA 11.8, CUDNN 8.7.0.84 | CUDA 12.1, CUDNN 8.9.2.26 |
+| 2.3 | >=3.8, <=3.11, (3.12 experimental) | CUDA 11.8, CUDNN 8.7.0.84 | CUDA 12.1, CUDNN 8.9.2.26 |
+| 2.2 | >=3.8, <=3.11, (3.12 experimental) | CUDA 11.8, CUDNN 8.7.0.84 | CUDA 12.1, CUDNN 8.9.2.26 |
 | 2.1 | >=3.8, <=3.11 | CUDA 11.8, CUDNN 8.7.0.84 | CUDA 12.1, CUDNN 8.9.2.26 |
 | 2.0 | >=3.8, <=3.11 | CUDA 11.7, CUDNN 8.5.0.96 | CUDA 11.8, CUDNN 8.7.0.84 |
 | 1.13 | >=3.7, <=3.10 | CUDA 11.6, CUDNN 8.3.2.44 | CUDA 11.7, CUDNN 8.5.0.96 |
@@ -217,7 +219,7 @@ Validate the release jobs for pytorch and domain libraries should be green. Vali
   * [TorchVision](https://hud.pytorch.org/hud/pytorch/vision/release%2F1.12)
   * [TorchAudio](https://hud.pytorch.org/hud/pytorch/audio/release%2F1.12)
 
-Validate that the documentation build has completed and generated entry corresponding to the release in  [docs folder](https://github.com/pytorch/pytorch.github.io/tree/site/docs/) of pytorch.github.io repository
+Validate that the documentation build has completed and generated entry corresponding to the release in  [docs repository](https://github.com/pytorch/docs/tree/main/).
 
 ### Cherry Picking Fixes
 
@@ -231,6 +233,32 @@ An example of this would look like:
 Please also make sure to add milestone target to the PR/issue, especially if it needs to be considered for inclusion into the dot release.
 
 **NOTE**: The cherry pick process is not an invitation to add new features, it is mainly there to fix regressions
+
+#### How to do Cherry Picking
+
+You can now use `pytorchbot` to cherry pick a PyTorch PR that has been committed
+to the main branch using `@pytorchbot cherry-pick` command as follows.
+
+```
+usage: @pytorchbot cherry-pick --onto ONTO [--fixes FIXES] -c
+                               {regression,critical,fixnewfeature,docs,release}
+
+Cherry pick a pull request onto a release branch for inclusion in a release
+
+optional arguments:
+  --onto ONTO           Branch you would like to cherry pick onto (Example: release/2.2)
+  --fixes FIXES         Link to the issue that your PR fixes (i.e. https://github.com/pytorch/pytorch/issues/110666)
+  -c {regression,critical,fixnewfeature,docs,release}
+                        A machine-friendly classification of the cherry-pick reason.
+```
+
+For example, [#120567](https://github.com/pytorch/pytorch/pull/120567#issuecomment-1978964376)
+created a cherry pick PR [#121232](https://github.com/pytorch/pytorch/pull/121232) onto `release/2.2`
+branch to fix a regression issue. You can then refer to the original
+and the cherry-picked PRs on the release tracker issue. Please note
+that the cherry-picked PR will still need to be reviewed by PyTorch
+RelEng team before it can go into the release branch. This feature
+requires `pytorchbot`, so it's only available in PyTorch atm.
 
 ### Cherry Picking Reverts
 

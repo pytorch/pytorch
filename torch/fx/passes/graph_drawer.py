@@ -412,7 +412,10 @@ else:
                 graph_module: torch.fx.GraphModule,
                 name: str,
                 ignore_getattr: bool = False,
+                ignore_parameters_and_buffers: bool = False,
+                skip_node_names_in_args: bool = True,
                 parse_stack_trace: bool = False,
+                dot_graph_shape: Optional[str] = None,
             ):
                 raise RuntimeError('FXGraphDrawer requires the pydot package to be installed. Please install '
                                    'pydot through your favorite Python package manager.')

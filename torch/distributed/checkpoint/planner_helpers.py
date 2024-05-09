@@ -1,11 +1,15 @@
-from typing import Any, List
+from typing import Any, cast, List
 
 import torch
+import torch.distributed as dist
+from torch._utils import _get_device_module
+
 from torch.distributed._shard.metadata import ShardMetadata
 from torch.distributed._shard.sharded_tensor import ShardedTensor
-from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
 from torch.distributed._tensor import DTensor
 from torch.distributed._tensor._utils import compute_local_shape_and_global_offset
+
+from torch.utils._pytree import tree_map_only
 
 from .metadata import (
     BytesStorageMetadata,
@@ -13,6 +17,7 @@ from .metadata import (
     MetadataIndex,
     STATE_DICT_TYPE,
     STORAGE_TYPES,
+    TensorProperties,
     TensorStorageMetadata,
 )
 from .planner import (
@@ -47,9 +52,19 @@ def _chunk_for_shard(shard_md: ShardMetadata) -> ChunkStorageMetadata:
 def _sharded_tensor_metadata(
     sharded_tensor: ShardedTensor, shard_md: ShardMetadata
 ) -> TensorWriteData:
+    shard_properties = sharded_tensor.metadata().tensor_properties
+
+    properties = TensorProperties(
+        dtype=shard_properties.dtype,
+        layout=shard_properties.layout,
+        requires_grad=shard_properties.requires_grad,
+        memory_format=shard_properties.memory_format,
+        pin_memory=shard_properties.pin_memory,
+    )
+
     return TensorWriteData(
         chunk=_chunk_for_shard(shard_md),
-        properties=sharded_tensor.metadata().tensor_properties,
+        properties=properties,
         size=sharded_tensor.metadata().size,
     )
 
@@ -68,7 +83,6 @@ def _create_write_items_for_dtensor(fqn: str, tensor: DTensor) -> WriteItem:
                 offsets=offsets,
                 sizes=sizes,
             ),
-            # TODO:update this to not use TensorProperties from ST.
             properties=TensorProperties.create_from_tensor(tensor.to_local()),
             size=tensor.size(),
         ),
@@ -227,21 +241,34 @@ def _create_chunk_from_dtensor(tensor: DTensor) -> ChunkStorageMetadata:
     )
 
 
+def _create_chunk_list(tensor: torch.Tensor) -> List[ChunkStorageMetadata]:
+    if isinstance(tensor, DTensor):
+        local_chunks = [_create_chunk_from_dtensor(tensor)]
+    elif isinstance(tensor, ShardedTensor):
+        local_chunks = [
+            _chunk_for_shard(shard.metadata) for shard in tensor.local_shards()
+        ]
+    elif isinstance(tensor, torch.Tensor):
+        local_chunks = [_create_chunk_from_tensor(tensor)]
+    else:
+        raise ValueError(
+            "Unsupported Type, expecting one of [Tensor, DTensor, ShardedTensor] "
+            f",but got {type(tensor)}"
+        )
+
+    return local_chunks
+
+
 def _create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> List[ReadItem]:
     if not isinstance(md, BytesStorageMetadata):
-        if isinstance(obj, DTensor):
-            local_chunks = [_create_chunk_from_dtensor(obj)]
-        elif isinstance(obj, ShardedTensor):
-            local_chunks = [
-                _chunk_for_shard(shard.metadata) for shard in obj.local_shards()
-            ]
-        elif isinstance(obj, torch.Tensor):
-            local_chunks = [_create_chunk_from_tensor(obj)]
-        else:
+        try:
+            local_chunks = _create_chunk_list(obj)
+        except ValueError as ex:
             raise ValueError(
                 f"Invalid checkpoint metadata for {fqn}, "
-                + f"expected BytesStorageMetadata but found {type(md)}"
-            )
+                + f"expected BytesStorageMetadata but found {type(md)}",
+            ) from ex
+
         return create_read_items_for_chunk_list(fqn, md, local_chunks)
     else:
         return [
@@ -253,3 +280,46 @@ def _create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> List[ReadItem]:
                 length=0,
             )
         ]
+
+
+def _init_state_dict(state_dict: STATE_DICT_TYPE) -> None:
+    state_dict_assigned_storage = tree_map_only(
+        torch.Tensor, lambda v: _init_meta_tensor(v), state_dict
+    )
+    # The inplace version of tree_map_only, tree_map_only_ doesn't seem to work.
+    # So we need to temporariy update the each element in the state dict with meta tensor.
+    for k in state_dict.keys():
+        state_dict[k] = state_dict_assigned_storage[k]
+
+
+def _init_meta_tensor(value: Any) -> Any:
+    """
+    Initializes tensor, moves it to device for torch.Tensor/DTensor on meta device.
+    """
+
+    device = getattr(value, "device", None)
+    # DCP does the initialization if it's meta tensor/DTensor.
+    if device == torch.device("meta"):
+        device_type = dist.distributed_c10d._get_pg_default_device().type
+        device = cast(torch.device, _get_device_module(device_type).current_device())
+        if isinstance(value, DTensor):
+            new_local_tensor = torch.empty_like(value.to_local(), device=device)
+            # We need to pass shape and stride explicitly, since DTensor might be
+            # sharded unevenly.
+            dtensor = DTensor.from_local(
+                new_local_tensor,
+                device_mesh=value.device_mesh,
+                placements=value.placements,
+                shape=value.size(),
+                stride=value.stride(),
+            )
+            return dtensor
+        elif isinstance(value, torch.Tensor):
+            tensor = torch.empty_like(value, device=device)
+            return tensor
+        else:
+            raise RuntimeError(
+                f"Found unsupported type {type(value)} for meta device loading."
+            )
+    else:
+        return value

@@ -645,7 +645,7 @@ class TestNoExtraMethods(TestCase):
 
 
 class TestIter(TestCase):
-    @skipIfTorchDynamo
+    @skipIfTorchDynamo()
     def test_iter_1d(self):
         # numpy generates array scalars, we do 0D arrays
         a = np.arange(5)

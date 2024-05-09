@@ -1,13 +1,10 @@
 #pragma once
 
 #include <cstdint>
-#include <forward_list>
 #include <iostream>
 #include <memory>
 #include <mutex>
-#include <sstream>
 #include <string>
-#include <tuple>
 #include <vector>
 
 #include <torch/csrc/Export.h>
@@ -30,7 +27,6 @@ enum class C10_API_ENUM EventKind : uint16_t {
 
 // To be deprecated, once we switch to Kineto profiling
 struct TORCH_API LegacyEvent {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   LegacyEvent(
       EventKind kind,
       at::StringView name,
@@ -38,46 +34,45 @@ struct TORCH_API LegacyEvent {
       bool record_cuda,
       at::RecordFunctionHandle handle = 0,
       std::vector<std::vector<int64_t>>&& shapes = {},
-      int node_id = -1,
+      int64_t node_id = -1,
       bool is_async = false)
       : name_(std::move(name)),
         kind_(kind),
         thread_id_(thread_id),
         handle_(handle),
-        shapes_(shapes),
+        shapes_(std::move(shapes)),
         node_id_(node_id),
         is_async_(is_async) {
     record(record_cuda);
   }
 
   // Constructor to be used in conjunction with LegacyEvent::fromIValue.
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   LegacyEvent(
       EventKind kind,
       at::StringView name,
       uint16_t thread_id,
       at::RecordFunctionHandle handle,
       std::vector<std::vector<int64_t>>&& shapes,
-      int node_id,
+      int64_t node_id,
       bool is_remote,
       int64_t cpu_memory_usage,
       int64_t cpu_ns,
       bool cuda_recorded,
       int64_t cuda_memory_usage = 0,
-      int device = -1,
+      c10::DeviceIndex device = -1,
       double cuda_us = -1)
       : cpu_ns_(cpu_ns),
         name_(std::move(name)),
         kind_(kind),
         thread_id_(thread_id),
         handle_(handle),
-        shapes_(shapes),
+        shapes_(std::move(shapes)),
         cpu_memory_usage_(cpu_memory_usage),
         cuda_memory_usage_(cuda_memory_usage),
         device_(device),
         node_id_(node_id),
         is_remote_(is_remote),
-        cuda_us_(cuda_us) {
+        cuda_us_(static_cast<int64_t>(cuda_us)) {
     // Sanity check values that were deserialized
     TORCH_INTERNAL_ASSERT(cpu_ns_ > 0);
     if (cuda_recorded) {
@@ -126,12 +121,11 @@ struct TORCH_API LegacyEvent {
   }
 
   double cpuElapsedUs(const LegacyEvent& e) const {
-    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers)
     return static_cast<double>(e.cpu_ns_ - cpu_ns_) / (1000.0);
   }
 
   void setCpuUs(int64_t cpu_us) {
-    cpu_ns_ = static_cast<double>(cpu_us) * 1000.0;
+    cpu_ns_ = cpu_us * 1000;
   }
 
   double cpuUs() const {
@@ -144,7 +138,7 @@ struct TORCH_API LegacyEvent {
     return cuda_event != nullptr || (isRemote() && device_ != -1);
   }
 
-  int device() const {
+  c10::DeviceIndex device() const {
     return device_;
   }
 
@@ -173,12 +167,12 @@ struct TORCH_API LegacyEvent {
   }
 
   // Node ID corresponding to this event.
-  int nodeId() const {
+  int64_t nodeId() const {
     return node_id_;
   }
 
   // Set Node ID on this event.
-  void setNodeId(int node_id) {
+  void setNodeId(int64_t node_id) {
     node_id_ = node_id;
   }
 
@@ -260,22 +254,22 @@ struct TORCH_API LegacyEvent {
   at::StringView name_;
   EventKind kind_;
   uint64_t thread_id_;
-  uint64_t fwd_thread_id_;
+  uint64_t fwd_thread_id_{0};
   at::RecordFunctionHandle handle_{0};
   std::vector<std::vector<int64_t>> shapes_;
   int64_t cpu_memory_usage_ = 0;
   int64_t cuda_memory_usage_ = 0;
-  int device_ = -1;
+  c10::DeviceIndex device_ = -1;
   torch::profiler::impl::ProfilerVoidEventStub cuda_event = nullptr;
-  int node_id_ = 0;
+  int64_t node_id_ = 0;
   bool is_remote_ = false;
   int64_t cuda_us_ = -1;
   int64_t sequence_nr_ = -1;
   bool is_async_ = false;
 
   std::vector<std::string> stack_;
-  uint8_t scope_;
-  uint64_t correlation_id_;
+  uint8_t scope_{0};
+  uint64_t correlation_id_{0};
   // Extra arguments for computing op flops
   std::unordered_map<std::string, c10::IValue> extra_args_;
   uint64_t flops_ = 0;
@@ -285,7 +279,6 @@ struct TORCH_API LegacyEvent {
 // a std::vector resize from taking a large amount of time inside
 // a profiling  event
 struct RangeEventList {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,modernize-use-equals-default)
   RangeEventList() {
     events_.reserve(kReservedCapacity);
   }
@@ -298,7 +291,6 @@ struct RangeEventList {
 
   std::vector<LegacyEvent> consolidate() {
     std::lock_guard<std::mutex> lock(mutex_);
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<LegacyEvent> result;
     result.insert(
         result.begin(),
@@ -389,12 +381,10 @@ struct TORCH_API TLSLegacyProfilerGuard {
       c10::optional<ProfilerDisableOptions> profilerDisableOptions =
           c10::nullopt)
       : cb_(std::move(resultCallback)),
-        // NOLINTNEXTLINE(performance-move-const-arg)
-        profilerDisableOptions_(std::move(profilerDisableOptions)) {
+        profilerDisableOptions_(profilerDisableOptions) {
     enableProfilerLegacy(cfg);
   }
   ~TLSLegacyProfilerGuard() {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     thread_event_lists event_lists =
         disableProfilerLegacy(profilerDisableOptions_);
     if (cb_) {
@@ -408,6 +398,7 @@ struct TORCH_API TLSLegacyProfilerGuard {
 
  private:
   c10::optional<std::function<void(const thread_event_lists&)>> cb_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const c10::optional<ProfilerDisableOptions> profilerDisableOptions_;
 };
 

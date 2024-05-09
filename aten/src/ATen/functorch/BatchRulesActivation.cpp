@@ -10,7 +10,7 @@
 
 // NB: most activation functions fit pointwise unary or binary rules.
 // These are only the ones that have special batch rules to help with organization
-namespace at { namespace functorch {
+namespace at::functorch {
 static std::tuple<Tensor,optional<int64_t>>
 glu_batch_rule(const Tensor& self, optional<int64_t> self_bdim, int64_t dim) {
   // repeated error message from glu because 0D -> 1D when batched
@@ -53,4 +53,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(glu_backward, glu_backward_batch_rule);
   VMAP_SUPPORT(glu, glu_batch_rule);
 }
-}} // namespace at::functorch
+} // namespace at::functorch

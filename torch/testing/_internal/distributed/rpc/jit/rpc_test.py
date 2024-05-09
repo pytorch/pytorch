@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import time
 import io
 from typing import Dict, List, Tuple, Any

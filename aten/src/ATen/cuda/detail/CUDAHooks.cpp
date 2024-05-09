@@ -137,7 +137,7 @@ bool CUDAHooks::isPinnedPtr(const void* data) const {
   cudaPointerAttributes attr;
   // We do not believe that CUDA needs mutable access to the data
   // here.
-  cudaError_t err = cudaPointerGetAttributes(&attr, const_cast<void*>(data));
+  cudaError_t err = cudaPointerGetAttributes(&attr, data);
 #if !defined(USE_ROCM)
   if (err == cudaErrorInvalidValue) {
     (void)cudaGetLastError(); // clear CUDA error
@@ -178,6 +178,16 @@ bool CUDAHooks::hasCuSOLVER() const {
 #if defined(CUDART_VERSION) && defined(CUSOLVER_VERSION)
   return true;
 #elif AT_ROCM_ENABLED() && defined(ROCM_VERSION) && ROCM_VERSION >= 50300
+  return true;
+#else
+  return false;
+#endif
+}
+
+bool CUDAHooks::hasCuBLASLt() const {
+#if defined(CUDART_VERSION)
+  return true;
+#elif AT_ROCM_ENABLED() && defined(ROCM_VERSION) && ROCM_VERSION >= 50700
   return true;
 #else
   return false;
@@ -227,7 +237,7 @@ const at::cuda::NVRTC& CUDAHooks::nvrtc() const {
 }
 
 DeviceIndex current_device() {
-  int device;
+  c10::DeviceIndex device = 0;
   cudaError_t err = c10::cuda::GetDevice(&device);
   if (err == cudaSuccess) {
     return device;

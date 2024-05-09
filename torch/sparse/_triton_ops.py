@@ -569,6 +569,16 @@ def bsr_dense_addmm_meta(M, K, N, Ms, Ks, beta, alpha,
         if meta is None and sparsity != 0.5:
             meta = get_meta('bsr_dense_addmm', key,
                             device_name, version=(0, dtype, 0.5))
+            if meta is None:
+                # find approximate meta such that N % SPLIT_N == 0.
+                matching_meta = get_meta(
+                    'bsr_dense_addmm',
+                    (*key[:2], '*', *key[3:]),
+                    device_name, version=(0, dtype, 0.5))
+                for mkey in sorted(matching_meta or {}):
+                    meta_ = matching_meta[mkey]
+                    if N % meta_['SPLIT_N'] == 0 and mkey[2] <= N:
+                        meta = meta_
         if meta is not None:
             meta.update(**extra)
             return meta
@@ -827,7 +837,7 @@ def bsr_dense_addmm(
         original_batch_dims_broadcasted = broadcast_batch_dims(f_name, bsr, dense)
         out = dense.new_empty(original_batch_dims_broadcasted + (M, N))
 
-    if bsr._nnz() == 0 or alpha == 0:
+    if bsr._nnz() == 0 or alpha == 0 or N == 0 or M == 0 or K == 0:
         if beta == 0:
             out.zero_()
         else:
@@ -1662,7 +1672,7 @@ if has_triton():
         acc_block = tl.zeros((TILE_M, TILE_N), dtype=dot_out_dtype)
 
         if is_compressed:
-            A_ptr += r0 * blocks_stride_P
+            A_ptr += r0 * blocks_stride_P  # type: ignore[possibly-undefined]
             for _ in range(nnz):
                 q = tl.load(q_ptr)
                 B = tl.load(B_ptr + q)
@@ -1889,7 +1899,7 @@ if has_triton():
 
         # alpha is never 0
         if beta_is_nonzero:
-            output_acc_block = tl.load(input_ptrs).to(acc_dtype)
+            output_acc_block = tl.load(input_ptrs).to(acc_dtype)  # type: ignore[possibly-undefined]
             if not (beta_is_one and alpha_is_one):
                 beta_alpha = beta / alpha
                 output_acc_block *= beta_alpha

@@ -9,8 +9,8 @@ import torch
 def set_rng_state(new_state: torch.Tensor) -> None:
     r"""Sets the random number generator state.
 
-    .. note: This function only works for CPU. For CUDA, please use
-             torch.manual_seed(seed), which works for both CPU and CUDA.
+    .. note:: This function only works for CPU. For CUDA, please use
+        :func:`torch.manual_seed`, which works for both CPU and CUDA.
 
     Args:
         new_state (torch.ByteTensor): The desired state
@@ -19,12 +19,17 @@ def set_rng_state(new_state: torch.Tensor) -> None:
 
 
 def get_rng_state() -> torch.Tensor:
-    r"""Returns the random number generator state as a `torch.ByteTensor`."""
+    r"""Returns the random number generator state as a `torch.ByteTensor`.
+
+    .. note:: The returned state is for the default generator on CPU only.
+
+    See also: :func:`torch.random.fork_rng`.
+    """
     return default_generator.get_state()
 
 
 def manual_seed(seed) -> torch._C.Generator:
-    r"""Sets the seed for generating random numbers. Returns a
+    r"""Sets the seed for generating random numbers on all devices. Returns a
     `torch.Generator` object.
 
     Args:
@@ -43,7 +48,8 @@ def manual_seed(seed) -> torch._C.Generator:
     if not torch.mps._is_in_bad_fork():
         torch.mps.manual_seed(seed)
 
-    if hasattr(torch, 'xpu') and not torch.xpu._is_in_bad_fork():
+    import torch.xpu
+    if not torch.xpu._is_in_bad_fork():
         torch.xpu.manual_seed_all(seed)
 
     _seed_custom_device(seed)
@@ -53,7 +59,7 @@ def manual_seed(seed) -> torch._C.Generator:
 
 def seed() -> int:
     r"""Sets the seed for generating random numbers to a non-deterministic
-    random number. Returns a 64 bit number used to seed the RNG.
+    random number on all devices. Returns a 64 bit number used to seed the RNG.
     """
     seed = default_generator.seed()
     import torch.cuda
@@ -65,7 +71,8 @@ def seed() -> int:
     if not torch.mps._is_in_bad_fork():
         torch.mps.manual_seed(seed)
 
-    if hasattr(torch, 'xpu') and not torch.xpu._is_in_bad_fork():
+    import torch.xpu
+    if not torch.xpu._is_in_bad_fork():
         torch.xpu.manual_seed_all(seed)
 
     _seed_custom_device(seed)
@@ -99,6 +106,8 @@ def _seed_custom_device(seed) -> None:
 def initial_seed() -> int:
     r"""Returns the initial seed for generating random numbers as a
     Python `long`.
+
+    .. note:: The returned seed is for the default generator on CPU only.
     """
     return default_generator.initial_seed()
 
@@ -121,7 +130,7 @@ def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="device
         enabled (bool): if ``False``, the RNG is not forked.  This is a convenience
             argument for easily disabling the context manager without having
             to delete it and unindent your Python code under it.
-        deivce_type (str): device type str, default is `cuda`. As for custom device,
+        device_type (str): device type str, default is `cuda`. As for custom device,
             see details in [Note: support the custom device with privateuse1]
     """
 
@@ -163,9 +172,7 @@ def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="device
         devices = list(devices)
 
     cpu_rng_state = torch.get_rng_state()
-    device_rng_states = []
-    for device in devices:
-        device_rng_states.append(device_mod.get_rng_state(device))
+    device_rng_states = [device_mod.get_rng_state(device) for device in devices]
 
     try:
         yield

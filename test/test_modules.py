@@ -15,7 +15,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_modules import module_db, modules, ModuleErrorEnum, TrainEvalMode
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck,
-    gradgradcheck)
+    gradgradcheck, parametrize, wrapSwapTensorsTest)
 from unittest.mock import patch, call
 
 
@@ -212,7 +212,7 @@ class TestModule(TestCase):
             str(m)
 
     @modules(module_db)
-    def test_pickle(self, device, dtype, module_info, training):
+    def test_save_load(self, device, dtype, module_info, training):
         # Test that module can be pickled and unpickled.
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
@@ -229,18 +229,30 @@ class TestModule(TestCase):
                 m = module_cls(*args, **kwargs)
                 m.to(device).to(dtype)
                 m.train(training)
+                sd = m.state_dict()
 
                 # === Do forward pass. ===
                 args, kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
                 output = m(*args, **kwargs)
 
-                # === Check unpickled module gives the same output. ===
+                # === Check saved/loaded module gives the same output. ===
                 with tempfile.TemporaryFile() as f:
                     torch.save(m, f)
                     f.seek(0)
                     m_copy = torch.load(f)
                     output_from_copy = m_copy(*args, **kwargs)
                     self.assertEqual(output, output_from_copy)
+
+                # === Check saved/loaded state_dict are the same (including weights_only load). ===
+                with tempfile.TemporaryFile() as f:
+                    torch.save(sd, f)
+                    f.seek(0)
+                    sd_copy = torch.load(f)
+                    self.assertEqual(sd_copy, sd)
+                    del sd_copy
+                    f.seek(0)
+                    sd_copy_wo = torch.load(f, weights_only=True)
+                    self.assertEqual(sd_copy_wo, sd)
 
     @skipMeta
     @modules([module_info for module_info in module_db
@@ -816,10 +828,8 @@ class TestModule(TestCase):
 
         for module_input, module_input_meta in zip(module_inputs, module_inputs_meta):
             c_args, c_kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
-            fw_args, fw_kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
 
             c_args_meta, c_kwargs_meta = module_input_meta.constructor_input.args, module_input_meta.constructor_input.kwargs
-            fw_args_meta, fw_kwargs_meta = module_input_meta.forward_input.args, module_input_meta.forward_input.kwargs
 
             m_cpu = module_cls(*c_args, **c_kwargs)
 
@@ -852,6 +862,124 @@ class TestModule(TestCase):
                     m(*fw_args, **fw_kwargs)
             else:
                 raise NotImplementedError(f"Unknown error type {error_input.error_on}")
+
+    @modules([module for module in module_db if not module.is_lazy])
+    @parametrize('swap', [True, False])
+    @parametrize('set_grad', [True, False])
+    @wrapSwapTensorsTest()
+    def test_to(self, device, dtype, module_info, training, swap, set_grad):
+        module_cls = module_info.module_cls
+        devices = ['cpu']
+        if torch.cuda.is_available():
+            devices += ['cuda']
+        dtypes = module_info.dtypes
+        module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
+                                                       requires_grad=False, training=training)
+        torch.__future__.set_swap_module_params_on_conversion(swap)
+
+        for module_input in module_inputs:
+            c_args, c_kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
+
+            m = module_cls(*c_args, **c_kwargs)
+
+            # Avoid using `module.to()` when constructing module since that is the method we are testing
+            def _to(m, set_grad=False):
+                for c in m.children():
+                    _to(c, set_grad=set_grad)
+                for n, p in m.named_parameters(recurse=False):
+                    new_p = torch.nn.Parameter(p.detach().clone().to(device, dtype))
+                    setattr(m, n, new_p)
+                    if set_grad:
+                        new_p.grad = torch.randn_like(new_p)
+                for n, b in m.named_buffers(recurse=False):
+                    new_b = b.detach().clone().to(device, dtype)
+                    setattr(m, n, new_b)
+            _to(m, set_grad=set_grad)
+
+            prev_device, prev_dtype = device, dtype
+            for device_, dtype_ in product(devices, dtypes):
+                # if device/dtype do not change, grad.to(device, dtype) is a no-op so
+                # swapping will not change ._cdata
+                # parameters will be wrapped in an nn.Parameter before swapping
+                # which will cause the ._cdata to change
+                g_no_swap = device_ == prev_device and dtype_ == prev_dtype
+                prev_device, prev_dtype = device_, dtype_
+
+                p_ids_before = [id(p) for p in m.parameters()]
+                p_cdatas_before = [p._cdata for p in m.parameters()]
+                if set_grad:
+                    g_ids_before = [id(p.grad) for p in m.parameters()]
+                    g_cdatas_before = [p.grad._cdata for p in m.parameters()]
+
+                m.to(device=device_, dtype=dtype_)
+
+                self.assertTrue(all(isinstance(p, torch.nn.Parameter) for p in m.parameters()))
+                self.assertTrue(all(p.device.type == device_ for p in m.parameters()))
+                self.assertTrue(all(p.dtype == dtype_ for p in m.parameters()))
+                p_ids_after = [id(p) for p in m.parameters()]
+                p_cdatas_after = [p._cdata for p in m.parameters()]
+
+                if set_grad:
+                    self.assertTrue(all(p.grad.device.type == device_ for p in m.parameters()))
+                    self.assertTrue(all(p.grad.dtype == dtype_ for p in m.parameters()))
+                    g_ids_after = [id(p.grad) for p in m.parameters()]
+                    g_cdatas_after = [p.grad._cdata for p in m.parameters()]
+
+                if swap:
+                    # id same, ._cdata differs --> swapped cdata of THPVariable
+                    self.assertTrue(all(a == b for a, b in zip(p_ids_before, p_ids_after)))
+                    self.assertTrue(all(a != b for a, b in zip(p_cdatas_before, p_cdatas_after)))
+                    if set_grad:
+                        self.assertTrue(
+                            all(a == b if g_no_swap else a != b for a, b in zip(g_cdatas_before, g_cdatas_after)))
+                else:
+                    # id and _cdata remain the same --> .data setting
+                    self.assertTrue(all(a == b for a, b in zip(p_cdatas_before, p_cdatas_after)))
+                    self.assertTrue(all(a == b for a, b in zip(p_ids_before, p_ids_after)))
+                    if set_grad:
+                        self.assertTrue(all(a == b for a, b in zip(g_cdatas_before, g_cdatas_after)))
+                        self.assertTrue(all(a == b for a, b in zip(g_ids_before, g_ids_after)))
+
+
+    @modules([module for module in module_db if not module.is_lazy], allowed_dtypes=[torch.float32])
+    @parametrize('swap', [True, False])
+    @wrapSwapTensorsTest()
+    def test_to_empty(self, device, dtype, module_info, swap, training):
+        module_cls = module_info.module_cls
+
+        with torch.device("meta"):
+            module_inputs = module_info.module_inputs_func(module_info, device=None, dtype=dtype,
+                                                           requires_grad=False, training=training)
+
+        torch.__future__.set_swap_module_params_on_conversion(swap)
+        device_ = torch.device(device)
+
+        for module_input in module_inputs:
+            c_args, c_kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
+
+            with torch.device("meta"):
+                m = module_cls(*c_args, **c_kwargs)
+
+            p_ids_before = [id(p) for p in m.parameters()]
+            p_cdatas_before = [p._cdata for p in m.parameters()]
+            m.to_empty(device=device_)
+
+            self.assertTrue(all(isinstance(p, torch.nn.Parameter) for p in m.parameters()))
+            self.assertTrue(all(p.device == device_ for p in m.parameters()))
+            self.assertTrue(all(p.dtype == dtype for p in m.parameters()))
+            p_ids_after = [id(p) for p in m.parameters()]
+            p_cdatas_after = [p._cdata for p in m.parameters()]
+
+            if swap:
+                # id same, ._cdata differs --> swapped cdata of THPVariable
+                self.assertTrue(all(a == b for a, b in zip(p_ids_before, p_ids_after)))
+                self.assertTrue(all(a != b for a, b in zip(p_cdatas_before, p_cdatas_after)))
+            else:
+                # id and ._cdata differ
+                # meta and device have different shallow copy types, so this will create a new
+                # parameter and assign it to the module
+                self.assertTrue(all(a != b for a, b in zip(p_ids_before, p_ids_after)))
+                self.assertTrue(all(a != b for a, b in zip(p_cdatas_before, p_cdatas_after)))
 
 
 instantiate_device_type_tests(TestModule, globals(), allow_mps=True)

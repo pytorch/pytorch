@@ -847,10 +847,10 @@ class Softplus(Module):
     """
 
     __constants__ = ['beta', 'threshold']
-    beta: int
-    threshold: int
+    beta: float
+    threshold: float
 
-    def __init__(self, beta: int = 1, threshold: int = 20) -> None:
+    def __init__(self, beta: float = 1.0, threshold: float = 20.0) -> None:
         super().__init__()
         self.beta = beta
         self.threshold = threshold
@@ -949,7 +949,6 @@ class MultiheadAttention(Module):
     - training is disabled (using ``.eval()``)
     - ``add_bias_kv`` is ``False``
     - ``add_zero_attn`` is ``False``
-    - ``batch_first`` is ``True`` and the input is batched
     - ``kdim`` and ``vdim`` are equal to ``embed_dim``
     - if a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ is passed, neither ``key_padding_mask``
       nor ``attn_mask`` is passed
@@ -1334,7 +1333,7 @@ class PReLU(Module):
     .. math::
         \text{PReLU}(x) =
         \begin{cases}
-        x, & \text{ if } x \geq 0 \\
+        x, & \text{ if } x \ge 0 \\
         ax, & \text{ otherwise }
         \end{cases}
 

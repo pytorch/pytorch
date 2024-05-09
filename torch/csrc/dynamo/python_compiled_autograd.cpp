@@ -7,6 +7,7 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
 #include <iostream>
+#include <sstream>
 #include <vector>
 
 /*
@@ -49,6 +50,14 @@ Notes:
 namespace torch::dynamo::autograd {
 using c10::SymInt;
 
+// snapshot of python verbose logging toggle
+static bool is_verbose_logging_enabled;
+static constexpr std::string_view VLOG_PREFIX =
+    "[python_compiled_autograd.cpp] ";
+std::ostream& vcout() {
+  return std::cout << VLOG_PREFIX;
+}
+
 static PyObject* wrap_int_list(const std::vector<int64_t>& inputs) {
   PyObject* pyinput = PyTuple_New(static_cast<Py_ssize_t>(inputs.size()));
   for (const auto i : c10::irange(inputs.size())) {
@@ -71,6 +80,7 @@ static PyObject* check(PyObject* pyresult) {
     // see https://github.com/pytorch/pytorch/pull/34845
     python_error err;
     err.persist();
+    // NOLINTNEXTLINE(misc-throw-by-value-catch-by-reference)
     throw err;
   }
   return pyresult;
@@ -89,9 +99,11 @@ struct CacheNode {
     return &_root;
   }
 
-  CacheNode* lookup(const CacheKey& key) {
+  CacheNode* lookup(const CacheKey& key, bool create = true) {
     auto it = next.find(key);
     if (it == next.end()) {
+      if (!create)
+        return nullptr;
       // caller's key is in temporary memory, must copy it
       CacheKeyBuffer buffer(key.key, key.key_size);
       CacheKey key_with_storage(key.node_type, buffer.get(), key.key_size);
@@ -144,12 +156,20 @@ struct CacheNode {
     TORCH_INTERNAL_ASSERT(expected_sizes.size() == call.all_size_inputs.size());
     for (const auto i : c10::irange(len)) {
       auto& expected = expected_sizes[i];
-      if (expected.dyn_type == SizeInput::DYNAMIC ||
-          expected.value != data[i].value) {
-        cache_hit = cache_hit && expected.dyn_type == SizeInput::DYNAMIC;
-        if (expected.value != data[i].value) {
-          expected = SizeInput(SizeInput::DYNAMIC, data[i].value);
+      bool was_dynamic = expected.dyn_type == SizeInput::DYNAMIC;
+      bool changed_value = expected.value != data[i].value;
+      if (changed_value) {
+        if (!was_dynamic) {
+          cache_hit = false;
+          if (is_verbose_logging_enabled) {
+            vcout() << "cache miss: marking sizes[" << i << "] as dynamic"
+                    << std::endl;
+          }
         }
+        expected = SizeInput(SizeInput::DYNAMIC, data[i].value);
+      }
+
+      if (changed_value || was_dynamic) {
         if (call.dyn_size_inputs.empty()) {
           call.dyn_size_inputs.reserve(len);
         }
@@ -165,7 +185,7 @@ struct CacheNode {
     return cache_hit;
   }
 
-  PyObject* wrap_dynamic_inputs() {
+  PyObject* wrap_dynamic_inputs() const {
     size_t dynamic_count = 0;
     size_t idx = 0;
     for (const auto& i : expected_sizes) {
@@ -183,7 +203,8 @@ struct CacheNode {
     return pyinput;
   }
 
-  std::vector<c10::optional<SymInt>> unwrap_dynamic_inputs(PyObject* pyresult) {
+  std::vector<c10::optional<SymInt>> unwrap_dynamic_inputs(
+      PyObject* pyresult) const {
     TORCH_INTERNAL_ASSERT(PyList_CheckExact(pyresult));
     size_t idx = 0;
     size_t result_len = PyList_GET_SIZE(pyresult);
@@ -212,10 +233,7 @@ struct CacheNode {
 
 struct InputBuffers : public std::unordered_map<Node*, InputBuffer> {
   InputBuffer& lookup(Node* function) {
-    auto it = find(function);
-    if (it == end()) {
-      it = emplace(function, InputBuffer(function->num_inputs())).first;
-    }
+    auto it = emplace(function, InputBuffer(function->num_inputs())).first;
     return it->second;
   }
 };
@@ -239,10 +257,21 @@ static PyObject* is_cache_empty(PyObject* dummy, PyObject* args) {
   END_HANDLE_TH_ERRORS;
 }
 
+static PyObject* set_verbose_logging(PyObject* dummy, PyObject* args) {
+  HANDLE_TH_ERRORS;
+  if (!PyArg_ParseTuple(args, "p", &is_verbose_logging_enabled)) {
+    Py_RETURN_FALSE;
+  }
+  Py_RETURN_TRUE;
+  END_HANDLE_TH_ERRORS;
+}
+
+// NOLINTNEXTLINE(*array*)
 static PyMethodDef _methods[] = {
     {"set_autograd_compiler", set_autograd_compiler, METH_VARARGS, nullptr},
     {"clear_cache", clear_cache, METH_NOARGS, nullptr},
     {"is_cache_empty", is_cache_empty, METH_NOARGS, nullptr},
+    {"set_verbose_logging", set_verbose_logging, METH_VARARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 static struct PyModuleDef _module = {
@@ -299,27 +328,23 @@ struct ClosingTHPObjectPtr : public THPObjectPtr {
   }
 };
 
-variable_list compiled_autograd(
+// Only call this function while holding GIL
+CacheNode* _compiled_autograd_impl(
     const std::shared_ptr<Node>& graph_root,
     GraphTask& graph_task,
     bool accumulate_grad,
-    const edge_list& output_edges) {
-  TORCH_CHECK(
-      output_edges.empty() || !accumulate_grad,
-      "specifying inputs= with .backward() not yet implemented for compiled autograd")
-  TORCH_CHECK(
-      c10::impl::TorchDispatchModeTLS::stack_len() == 0,
-      "TorchDispatchMode not yet implemented for compiled autograd")
-  static std::mutex lock;
-  std::lock_guard<std::mutex> lock_guard(lock);
-  pybind11::gil_scoped_acquire gil;
-  at::ThreadLocalStateGuard tls_guard(graph_task.thread_locals_);
+    const edge_list& output_edges,
+    THPObjectPtr* graph_arg_inputs,
+    THPObjectPtr* graph_arg_sizes,
+    THPObjectPtr* graph_arg_hooks) {
   std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
   AutogradCompilerCall compiler_call;
 
   for (const auto i : c10::irange(output_edges.size())) {
-    compiler_call.node_calls.lookup(output_edges[i].function)
+    compiler_call.node_calls
+        .lookup(output_edges[i].function)
+        // NOLINTNEXTLINE(*-narrowing-conversions)
         .mark_output(output_edges[i].input_nr, i);
   }
   const bool check_exec_info = !graph_task.exec_info_.empty();
@@ -341,7 +366,13 @@ variable_list compiled_autograd(
         fn->compiled_args(node_args);
         node_args.collect(call.node->next_edges());
       }
-      cache = cache->lookup(node_args.key());
+      CacheKey key = node_args.key();
+      if (is_verbose_logging_enabled &&
+          cache->lookup(key, /*create=*/false) == nullptr) {
+        vcout() << "Creating cache entry for " << fn->name()
+                << ", with key of size " << key.key_size << std::endl;
+      }
+      cache = cache->lookup(key);
     }
 
     for (const auto& edge : fn->next_edges()) {
@@ -371,12 +402,13 @@ variable_list compiled_autograd(
     // cache miss, need to capture FX graph
     ClosingTHPObjectPtr py_compiler(
         check(PyObject_CallNoArgs((the_autograd_compiler))));
+
     TraceState state = call_begin_capture(
         py_compiler, *cache, compiler_call, output_edges.size());
     InputBuffers input_buffers;
 
-    for (NodeCall* call_ptr : calls) {
-      NodeCall& call = *call_ptr;
+    for (size_t i = 0; i < calls.size(); i++) {
+      NodeCall& call = *calls[i];
       // TODO(jansel): consider adding some of this stuff:
       // guard(local_graph_task); NodeGuard ndguard(task.fn_); const auto
       // opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);
@@ -385,7 +417,9 @@ variable_list compiled_autograd(
       // at::getStepCallbacksUnlessEmpty(at::RecordScope::BACKWARD_FUNCTION);
       // if (C10_UNLIKELY(step_callbacks.has_value())) { ... }
 
-      variable_list inputs = input_buffers.lookup(call.node.get()).buffer;
+      variable_list inputs =
+          std::move(input_buffers.lookup(call.node.get()).buffer);
+      input_buffers.erase(call.node.get());
 
       if (!call.tensor_pre_hooks.empty()) {
         THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
@@ -418,6 +452,16 @@ variable_list compiled_autograd(
               py_compiler.get(), "pre_hook", "Oi", pyinputs.get(), hook));
         }
         inputs = THPVariable_UnpackList(pyinputs);
+      }
+
+      if (is_verbose_logging_enabled) {
+        std::string _node_name = call.node->name();
+        THPObjectPtr node_name(PyUnicode_FromString(_node_name.data()));
+        TORCH_INTERNAL_ASSERT(node_name != nullptr);
+        THPObjectPtr set_node_origin(
+            PyObject_GetAttrString(py_compiler.get(), "set_node_origin"));
+        check(PyObject_CallFunction(
+            set_node_origin, "OI", node_name.get(), i, nullptr));
       }
 
       SwapSavedVariables saved(compiler_call, state, py_compiler.get(), call);
@@ -473,9 +517,40 @@ variable_list compiled_autograd(
     }
   }
 
-  THPObjectPtr inputs(THPVariable_WrapList(compiler_call.tensor_args.inputs));
-  THPObjectPtr sizes(wrap_int_list(compiler_call.dyn_size_inputs));
-  THPObjectPtr hooks(convert_hook_list(compiler_call.hooks));
+  *graph_arg_inputs = THPVariable_WrapList(compiler_call.tensor_args.inputs);
+  *graph_arg_sizes = wrap_int_list(compiler_call.dyn_size_inputs);
+  *graph_arg_hooks = convert_hook_list(compiler_call.hooks);
+  return cache;
+}
+
+variable_list compiled_autograd(
+    const std::shared_ptr<Node>& graph_root,
+    GraphTask& graph_task,
+    bool accumulate_grad,
+    const edge_list& output_edges) {
+  TORCH_CHECK(
+      output_edges.empty() || !accumulate_grad,
+      "specifying inputs= with .backward() not yet implemented for compiled autograd")
+  TORCH_CHECK(
+      c10::impl::TorchDispatchModeTLS::stack_len() == 0,
+      "TorchDispatchMode not yet implemented for compiled autograd")
+  static std::mutex lock;
+  std::lock_guard<std::mutex> lock_guard(lock);
+  pybind11::gil_scoped_acquire gil;
+  at::ThreadLocalStateGuard tls_guard(graph_task.thread_locals_);
+
+  THPObjectPtr inputs;
+  THPObjectPtr sizes;
+  THPObjectPtr hooks;
+  CacheNode* cache = _compiled_autograd_impl(
+      graph_root,
+      graph_task,
+      accumulate_grad,
+      output_edges,
+      &inputs,
+      &sizes,
+      &hooks);
+
   THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
       cache->compiled_fn.get(), inputs.get(), sizes.get(), hooks.get(), NULL)));
   variable_list outputs = THPVariable_UnpackList(pyresult);
@@ -485,7 +560,7 @@ variable_list compiled_autograd(
 
 static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args) {
   HANDLE_TH_ERRORS;
-  PyObject* obj;
+  PyObject* obj = nullptr;
   if (!PyArg_ParseTuple(args, "O", &obj)) {
     return nullptr;
   }

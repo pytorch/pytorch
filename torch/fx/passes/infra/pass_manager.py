@@ -75,7 +75,7 @@ def _topological_sort_passes(
 
     # Contruct a graph mapping nodes to a list of their users
     graph: Dict[Callable, List[Callable]] = {p : [] for p in passes}
-    indegree_map: Dict[Callable, int] = {p : 0 for p in passes}
+    indegree_map: Dict[Callable, int] = dict.fromkeys(passes, 0)
     candidates: Queue = Queue()
     for a in passes:
         for b in passes:
@@ -90,7 +90,7 @@ def _topological_sort_passes(
         if indegree_map[a] == 0:
             candidates.put(a)
 
-    visited: Dict[Callable, bool] = {p : False for p in passes}
+    visited: Dict[Callable, bool] = dict.fromkeys(passes, False)
     sorted_passes: List[Callable] = []
 
     while not candidates.empty():
@@ -293,7 +293,7 @@ class PassManager:
                         for p in self.passes[:i]
                     ]
                     msg = f"An error occurred when running the '{fn_name}' pass after the following passes: {prev_pass_names}"
-                    raise Exception(msg) from e
+                    raise Exception(msg) from e  # noqa: TRY002
 
             # If the graph no longer changes, then we can stop running these passes
             overall_modified = overall_modified or modified

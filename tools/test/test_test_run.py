@@ -24,9 +24,7 @@ class TestTestRun(unittest.TestCase):
         run1 = TestRun("foo::bar")
         run2 = TestRun("foo::baz")
 
-        expected = TestRun("foo")
-        expected._included.add("bar")
-        expected._included.add("baz")
+        expected = TestRun("foo", included=["bar", "baz"])
 
         self.assertEqual(run1 | run2, expected)
         self.assertEqual(run2 | run1, expected)

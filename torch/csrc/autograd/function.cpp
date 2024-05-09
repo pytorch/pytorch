@@ -6,10 +6,7 @@
 
 #include <ATen/ATen.h>
 
-#include <algorithm>
-#include <cstdint>
 #include <memory>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>

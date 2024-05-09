@@ -22,9 +22,6 @@ static Tensor& hardswish_impl(Tensor& input, Tensor& output) {
 
   xnn_operator_t hardswish_op{};
   const xnn_status create_status = xnn_create_hardswish_nc_f32(
-    1, // channels
-    1, // input stride
-    1, // output stride
     0, // flags
     &hardswish_op);
 
@@ -37,6 +34,9 @@ static Tensor& hardswish_impl(Tensor& input, Tensor& output) {
   const xnn_status reshape_status = xnn_reshape_hardswish_nc_f32(
     hardswish_op,
     input.numel(),  // Batch
+    1, // channels
+    1, // input stride
+    1, // output stride
     caffe2::pthreadpool_());  // threadpool
 
   TORCH_CHECK(

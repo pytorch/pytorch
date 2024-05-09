@@ -1136,14 +1136,14 @@ class TestCreation(TestCase):
                 return 1
 
             def __getitem__(self, index):
-                raise ValueError()
+                raise ValueError
 
         class Map:
             def __len__(self):
                 return 1
 
             def __getitem__(self, index):
-                raise KeyError()
+                raise KeyError
 
         a = np.array([Map()])
         assert_(a.shape == (1,))
@@ -1160,7 +1160,7 @@ class TestCreation(TestCase):
                 if ind in [0, 1]:
                     return ind
                 else:
-                    raise IndexError()
+                    raise IndexError
 
         d = np.array([Point2(), Point2(), Point2()])
         assert_equal(d.dtype, np.dtype(object))
@@ -1181,7 +1181,7 @@ class TestCreation(TestCase):
         # Special case where a bad __getitem__ makes us fall back on __iter__:
         class C:
             def __getitem__(self, x):
-                raise Exception
+                raise Exception  # noqa: TRY002
 
             def __iter__(self):
                 return iter(())
@@ -3613,8 +3613,9 @@ class TestPutmask(TestCase):
     def test_mask_size(self):
         assert_raises(ValueError, np.putmask, np.array([1, 2, 3]), [True], 5)
 
-    @parametrize("dtype", (">i4", "<i4"))
-    def test_byteorder(self, dtype):
+    @parametrize("greater", (True, False))
+    def test_byteorder(self, greater):
+        dtype = ">i4" if greater else "<i4"
         x = np.array([1, 2, 3], dtype)
         np.putmask(x, [True, False, True], -1)
         assert_array_equal(x, [-1, 2, -1])
@@ -5639,6 +5640,7 @@ class TestMatmulOperator(MatmulCommon, TestCase):
         )
 
     @xpassIfTorchDynamo  # (reason="torch supports inplace matmul, and so do we")
+    @skipif(numpy.__version__ >= "1.26", reason="This is fixed in numpy 1.26")
     def test_matmul_inplace(self):
         # It would be nice to support in-place matmul eventually, but for now
         # we don't have a working implementation, so better just to error out

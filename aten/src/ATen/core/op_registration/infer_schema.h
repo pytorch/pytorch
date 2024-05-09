@@ -6,7 +6,6 @@
  */
 
 #include <ATen/core/function_schema.h>
-#include <c10/util/C++17.h>
 #include <c10/util/Metaprogramming.h>
 
 namespace c10 {
@@ -37,10 +36,10 @@ template <class... Types>
 constexpr int checkStaticTypes() {
  // Give nice error messages for some of the common error cases.
  // Use a LOUD ERROR MESSAGE SO USERS SEE THE STATIC_ASSERT
- static_assert(guts::conjunction<
+ static_assert(std::conjunction<
      bool_t<!std::is_integral<Types>::value || std::is_same<Types, int8_t>::value || std::is_same<Types, int64_t>::value || std::is_same<Types, bool>::value>...
    >::value, "INVALID TYPE: Only int8_t, int64_t and bool are supported as an integral argument type");
- static_assert(guts::conjunction<
+ static_assert(std::conjunction<
      bool_t<!std::is_same<Types, float>::value>...
    >::value, "INVALID TYPE: float is not supported as an argument type, use double instead");
  return 0;

@@ -34,7 +34,7 @@ __device__ inline int max(int a, int b) {
 
 template <typename scalar_t, typename accscalar_t>
 __global__ void avg_pool3d_cuda_update_output(
-  PackedTensorAccessor64<scalar_t, 4> input,
+  PackedTensorAccessor64<const scalar_t, 4> input,
   PackedTensorAccessor64<scalar_t, 4> output,
   int kT, int kH, int kW,
   int dT, int dH, int dW,
@@ -88,7 +88,7 @@ __global__ void avg_pool3d_cuda_update_output(
       {
         for (wi = wstart; wi < wend; ++wi)
         {
-          scalar_t val = input[slice][ti][hi][wi];
+          const scalar_t val = input[slice][ti][hi][wi];
           sum += val;
         }
       }
@@ -103,7 +103,7 @@ __global__ void avg_pool3d_cuda_update_output(
 //
 template<int KERNEL_WIDTH, typename scalar_t, typename accscalar_t>
 __global__ void avg_pool3d_cuda_update_output(
-  PackedTensorAccessor64<scalar_t, 4> input,
+  PackedTensorAccessor64<const scalar_t, 4> input,
   PackedTensorAccessor64<scalar_t, 4> output,
   int kT, int kH,
   int dT, int dH, int dW,
@@ -157,7 +157,7 @@ __global__ void avg_pool3d_cuda_update_output(
       {
         for (wi = wstart; wi < wend; ++wi)
         {
-          scalar_t val = input[slice][ti][hi][wi];
+          const scalar_t val = input[slice][ti][hi][wi];
           sum += val;
         }
       }
@@ -169,7 +169,7 @@ __global__ void avg_pool3d_cuda_update_output(
 
 template <typename scalar_t, typename accscalar_t>
 __global__ void avg_pool3d_single_backward_out_frame_stride1(
-  PackedTensorAccessor64<scalar_t, 4> gradOutput,
+  PackedTensorAccessor64<const scalar_t, 4> gradOutput,
   PackedTensorAccessor64<scalar_t, 4> gradInput,
   int kT, int kH, int kW,
   accscalar_t normFactor,
@@ -184,7 +184,7 @@ __global__ void avg_pool3d_single_backward_out_frame_stride1(
   if (iRow < gradInput.size(2) && iCol < gradInput.size(3))
   {
     accscalar_t sum = 0.0;
-    scalar_t *gOut = &gradOutput[slice][max(0, iFrame - kT + 1)]
+    const scalar_t *gOut = &gradOutput[slice][max(0, iFrame - kT + 1)]
       [max(0, iRow - kH + 1)][max(0, iCol - kW + 1)];
     int frameOffset = 0;
     for (int oFrame  = max(0, iFrame - kT + 1);
@@ -214,7 +214,7 @@ __global__ void avg_pool3d_single_backward_out_frame_stride1(
 
 template <typename scalar_t, typename accscalar_t>
 __global__ void avg_pool3d_cuda_update_grad_input_atomic(
-  PackedTensorAccessor64<scalar_t, 4> gradOutput,
+  PackedTensorAccessor64<const scalar_t, 4> gradOutput,
   PackedTensorAccessor64<scalar_t, 4> gradInput,
   int kT, int kH, int kW,
   int dT, int dH, int dW,
@@ -273,7 +273,7 @@ __global__ void avg_pool3d_cuda_update_grad_input_atomic(
 
 template <typename scalar_t, typename accscalar_t>
 __global__ void avg_pool3d_cuda_update_grad_input(
-  PackedTensorAccessor64<scalar_t, 4> gradOutput,
+  PackedTensorAccessor64<const scalar_t, 4> gradOutput,
   PackedTensorAccessor64<scalar_t, 4> gradInput,
   int kT, int kH, int kW,
   int dT, int dH, int dW,
@@ -333,7 +333,7 @@ __global__ void avg_pool3d_cuda_update_grad_input(
 #define LAUNCH_UPDATE_OUTPUT_KERNEL_WIDTH(KW) case KW:      \
   avg_pool3d_cuda_update_output<KW, scalar_t, accscalar_t>  \
     <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>( \
-       work_input.packed_accessor64<scalar_t, 4>(),         \
+       work_input.packed_accessor64<const scalar_t, 4>(),   \
        work_output.packed_accessor64<scalar_t, 4>(),        \
        kT, kH,                                              \
        dT, dH, dW,                                          \
@@ -422,7 +422,7 @@ TORCH_IMPL_FUNC(avg_pool3d_out_cuda) (
         default:
           avg_pool3d_cuda_update_output<scalar_t, accscalar_t>
             <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-                work_input.packed_accessor64<scalar_t, 4>(),
+                work_input.packed_accessor64<const scalar_t, 4>(),
                 work_output.packed_accessor64<scalar_t, 4>(),
                 kT, kH, kW,
                 dT, dH, dW,
@@ -543,7 +543,7 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_cuda) (
 
           avg_pool3d_single_backward_out_frame_stride1<scalar_t, accscalar_t>
             <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-              work_grad_output.packed_accessor64<scalar_t, 4>(),
+              work_grad_output.packed_accessor64<const scalar_t, 4>(),
               work_grad_input.packed_accessor64<scalar_t, 4>(),
               kT, kH, kW,
               1.0f/divide_factor,
@@ -573,7 +573,7 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_cuda) (
           if (kernelsOverlap) {
             avg_pool3d_cuda_update_grad_input_atomic<scalar_t, accscalar_t>
               <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-                  work_grad_output.packed_accessor64<scalar_t, 4>(),
+                  work_grad_output.packed_accessor64<const scalar_t, 4>(),
                   work_grad_input.packed_accessor64<scalar_t, 4>(),
                   kT, kH, kW,
                   dT, dH, dW,
@@ -585,7 +585,7 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_cuda) (
           else {
             avg_pool3d_cuda_update_grad_input<scalar_t, accscalar_t>
               <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-                  work_grad_output.packed_accessor64<scalar_t, 4>(),
+                  work_grad_output.packed_accessor64<const scalar_t, 4>(),
                   work_grad_input.packed_accessor64<scalar_t, 4>(),
                   kT, kH, kW,
                   dT, dH, dW,

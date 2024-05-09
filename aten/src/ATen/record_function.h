@@ -7,7 +7,6 @@
 #include <c10/util/SmallVector.h>
 
 #include <array>
-#include <atomic>
 #include <functional>
 #include <memory>
 #include <variant>
@@ -244,7 +243,7 @@ constexpr CallbackHandle INVALID_CALLBACK_HANDLE{0};
 // thread-local function callbacks. Moreover, it prevents saving to
 // ThreadLocalState because std::atomic is non-copyable.
 struct RecordFunctionCallbacksEntry {
-  RecordFunctionCallbacksEntry(RecordFunctionCallback&& cb, CallbackHandle h)
+  RecordFunctionCallbacksEntry(RecordFunctionCallback cb, CallbackHandle h)
       : callback_(cb), handle_(h) {}
 
   RecordFunctionCallback callback_;
@@ -311,6 +310,19 @@ struct TORCH_API RecordFunction {
         current_sequence_nr);
   }
 
+  template <typename F>
+  void before(
+      F fn,
+      const std::vector<IValue>* args,
+      const std::unordered_map<std::string, IValue>* kwargs,
+      int64_t current_sequence_nr = -1) {
+    if (!isActive()) {
+      return;
+    }
+    kwinputs_ = *kwargs;
+    before(std::move(fn), args, current_sequence_nr);
+  }
+
   // Destructor calls end callbacks
   virtual ~RecordFunction();
 
@@ -329,6 +341,15 @@ struct TORCH_API RecordFunction {
         inputs_valid_, "Called inputs() outside RecordFunction start callback");
 #endif
     return inputs_;
+  }
+
+  std::unordered_map<std::string, IValue> kwinputs() const {
+#ifndef NDEBUG
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        inputs_valid_,
+        "Called kwinputs() outside RecordFunction start callback");
+#endif
+    return kwinputs_;
   }
 
   const std::vector<c10::IValue>& outputs() const {
@@ -469,6 +490,7 @@ struct TORCH_API RecordFunction {
 
   int64_t sequence_nr_ = -1;
   c10::ArrayRef<const IValue> inputs_;
+  std::unordered_map<std::string, IValue> kwinputs_;
   std::vector<c10::IValue> outputs_;
 
   // For backward functions - thread id of the forward function

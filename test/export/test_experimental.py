@@ -1,4 +1,4 @@
-# Owner(s): ["module: dynamo"]
+# Owner(s): ["oncall: export"]
 # flake8: noqa
 import unittest
 
@@ -43,17 +43,17 @@ class TestExperiment(TestCase):
         self.assertExpectedInline(
             str(ep.graph_module.code.strip()),
             """\
-def forward(self, arg0_1, arg1_1):
-    sin = torch.ops.aten.sin.default(arg1_1)
-    strict_graph_1 = self.strict_graph_1
-    strict_mode_1 = torch.ops.higher_order.strict_mode(strict_graph_1, (sin, arg0_1));  strict_graph_1 = sin = arg0_1 = None
-    getitem_1 = strict_mode_1[0];  strict_mode_1 = None
-    add = torch.ops.aten.add.Tensor(arg1_1, 3);  arg1_1 = None
-    return (getitem_1, add)""",
+def forward(self, b_submodule_buffer1, x):
+    sin = torch.ops.aten.sin.default(x)
+    strict_graph_0 = self.strict_graph_0
+    strict_mode = torch.ops.higher_order.strict_mode(strict_graph_0, (sin, b_submodule_buffer1));  strict_graph_0 = sin = b_submodule_buffer1 = None
+    getitem = strict_mode[0];  strict_mode = None
+    add = torch.ops.aten.add.Tensor(x, 3);  x = None
+    return (getitem, add)""",
         )
 
         self.assertExpectedInline(
-            str(ep.graph_module.strict_graph_1.code.strip()),
+            str(ep.graph_module.strict_graph_0.code.strip()),
             """\
 def forward(self, arg0_1, arg1_1):
     add = torch.ops.aten.add.Tensor(arg0_1, 2)
@@ -70,13 +70,13 @@ def forward(self, arg0_1, arg1_1):
         eager_mod = M()
         ep = torch.export.export(eager_mod, (inp,), strict=True)
 
-        graph_res_1, graph_res_2 = ep(inp)
+        graph_res_1, graph_res_2 = ep.module()(inp)
         eager_res_1, eager_res_2 = eager_mod(inp)
 
         self.assertTrue(torch.allclose(graph_res_2, eager_res_2))
         self.assertTrue(torch.allclose(graph_res_1, eager_res_1))
 
-        graph_res_1, graph_res_2 = ep(inp)
+        graph_res_1, graph_res_2 = ep.module()(inp)
         eager_res_1, eager_res_2 = eager_mod(inp)
 
         self.assertTrue(torch.allclose(graph_res_2, eager_res_2))

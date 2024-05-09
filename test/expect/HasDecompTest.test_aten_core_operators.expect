@@ -6,6 +6,9 @@ aten::_adaptive_avg_pool2d
 aten::_adaptive_avg_pool2d.out
 aten::_addmm_activation
 aten::_addmm_activation.out
+aten::_batch_norm_no_update
+aten::_batch_norm_with_update
+aten::_batch_norm_with_update_functional
 aten::_euclidean_dist.out
 aten::_fused_dropout
 aten::_fused_dropout.out
@@ -19,9 +22,9 @@ aten::_softmax
 aten::_softmax.out
 aten::_to_copy
 aten::_to_copy.out
-aten::_upsample_nearest_exact1d
-aten::_upsample_nearest_exact2d
-aten::_upsample_nearest_exact3d
+aten::_upsample_nearest_exact1d.out
+aten::_upsample_nearest_exact2d.out
+aten::_upsample_nearest_exact3d.out
 aten::abs
 aten::abs.out
 aten::abs_
@@ -76,6 +79,7 @@ aten::atanh
 aten::atanh.out
 aten::atanh_
 aten::baddbmm_
+aten::batch_norm_backward
 aten::bitwise_and.Scalar
 aten::bitwise_and.Scalar_Tensor
 aten::bitwise_and.Scalar_Tensor_out
@@ -238,6 +242,8 @@ aten::fmod.Tensor
 aten::fmod.Tensor_out
 aten::fmod_.Scalar
 aten::fmod_.Tensor
+aten::frexp.Tensor
+aten::frexp.Tensor_out
 aten::full
 aten::full.out
 aten::gcd
@@ -267,6 +273,8 @@ aten::hardtanh.out
 aten::hypot
 aten::hypot.out
 aten::hypot_
+aten::i0
+aten::i0.out
 aten::i0_
 aten::igamma
 aten::igamma.out
@@ -417,8 +425,10 @@ aten::remainder_.Scalar
 aten::remainder_.Tensor
 aten::repeat
 aten::repeat.out
-aten::roll
-aten::roll.out
+aten::round
+aten::round.decimals
+aten::round.decimals_out
+aten::round.out
 aten::round_
 aten::round_.decimals
 aten::rrelu_with_noise_backward
@@ -501,9 +511,10 @@ aten::uniform.out
 aten::uniform_
 aten::unsqueeze
 aten::upsample_bicubic2d
-aten::upsample_nearest1d
-aten::upsample_nearest2d
-aten::upsample_nearest3d
+aten::upsample_bicubic2d.out
+aten::upsample_nearest1d.out
+aten::upsample_nearest2d.out
+aten::upsample_nearest3d.out
 aten::var.correction
 aten::var.correction_out
 aten::var_mean.correction

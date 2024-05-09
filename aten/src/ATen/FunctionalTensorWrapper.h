@@ -56,7 +56,7 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   explicit FunctionalTensorWrapper(
       const Tensor& view_value,
       const FunctionalTensorWrapper* base,
-      functionalization::ViewMeta meta);
+      const functionalization::ViewMeta& meta);
 
   // Get the underlying, actual tensor, that doesn't know anything about
   // functionalization.
@@ -75,25 +75,31 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
     return has_metadata_mutation_;
   };
 
+  void mark_mutation() {
+    functional_storage_impl()->mark_mutation();
+  }
   // Denotes a mutation that's hidden from autograd,
   // e.g. for the purposes of passing a tensor to a triton kernel
   void mark_mutation_hidden_from_autograd() {
-    mutation_hidden_from_autograd_counter_++;
+    functional_storage_impl()->mark_mutation_hidden_from_autograd();
   }
   void mark_mutation_during_no_grad_or_inference_mode() {
-    mutation_during_no_grad_or_inference_mode_++;
+    functional_storage_impl()->mark_mutation_during_no_grad_or_inference_mode();
   }
   // Are all the mutations happening to the tensor hidden from autograd
   bool are_all_mutations_hidden_from_autograd() const {
-    return mutation_hidden_from_autograd_counter_ == mutation_counter_;
+    return functional_storage_impl()->are_all_mutations_hidden_from_autograd();
   }
   // Did all mutations happen under no_grad or inference_mode
   // (We also need to ignore mutations fully hidden from autograd here)
   bool are_all_mutations_under_no_grad_or_inference_mode() const {
-    return mutation_hidden_from_autograd_counter_ +
-        mutation_during_no_grad_or_inference_mode_ ==
-        mutation_counter_;
+    return functional_storage_impl()
+        ->are_all_mutations_under_no_grad_or_inference_mode();
   }
+
+  // Runs the forward_fn of every ViewMeta collected in the current instance
+  // to some other base.
+  Tensor apply_view_metas(const Tensor& base);
 
   // Sync's the underlying tensor with its alias, if it's out of date. This
   // involves two steps: 1) Apply any pending updates/mutations to the alias 2)
@@ -130,7 +136,7 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // from the base tensor. This method is used by inplace-view ops like
   // transpose_. It appends a ViewMeta to the existing stack, and refreshes the
   // tensor by replaying the views off of the alias.
-  void mutate_view_meta(at::functionalization::ViewMeta meta);
+  void mutate_view_meta(const at::functionalization::ViewMeta& meta);
 
   // Custom implementation of self.set_(src)
   void set__impl(const FunctionalTensorWrapper* other);
@@ -156,7 +162,7 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // a.replace_(tmp)
   //
   // replace_() swaps out the wrapped tensor, value_, with tmp.
-  void replace_(const Tensor& other);
+  void replace_(const Tensor& other, bool from_lazy_regenerate = false);
 
   bool is_multi_output_view() {
     return is_multi_output_view_;
@@ -211,18 +217,22 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
       VariableVersion&& version_counter,
       bool allow_tensor_metadata_change) const;
 
+  void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override;
+  void copy_tensor_metadata_and_refresh(
+      const FunctionalTensorWrapper* src_impl,
+      FunctionalTensorWrapper* dest_impl,
+      const c10::VariableVersion& version_counter,
+      bool allow_tensor_metadata_change) const;
+
   // Note that value is not taken by reference: internally, the wrapper will
   // change the value tensor that it points to over time.
   Tensor value_;
-  int64_t level_;
+  int64_t level_{};
   // These two counters are used for identifying
   // whether all the mutations on a given tensor are hidden from autograd or
   // not. If we have an input mutation that is hidden from autograd, then once
   // we convert the input mutation to a copy_() we know it will be safe to hide
   // the copy_() from autograd as well.
-  uint64_t mutation_counter_ = 0;
-  uint64_t mutation_hidden_from_autograd_counter_ = 0;
-  uint64_t mutation_during_no_grad_or_inference_mode_ = 0;
   bool has_metadata_mutation_ = false;
   bool is_multi_output_view_ = false;
   // Did the tensor experience a set_() call.
@@ -230,6 +240,13 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
 
   size_t generation_ = 0;
   std::vector<at::functionalization::ViewMeta> view_metas_;
+
+ protected:
+  static void copy_tensor_metadata(
+      const FunctionalTensorWrapper* src_impl,
+      FunctionalTensorWrapper* dest_impl,
+      const c10::VariableVersion& version_counter,
+      bool allow_tensor_metadata_change);
 };
 
 // Utility functions for the functionalization pass.
@@ -310,9 +327,11 @@ Tensor create_functional_tensor_with_view_meta(
 std::vector<Tensor> create_functional_tensor_with_view_meta(
     ITensorListRef view_to_wrap,
     const Tensor& base,
-    functionalization::ViewMeta meta);
+    const functionalization::ViewMeta& meta);
 
-void mutate_view_meta(const Tensor& self, functionalization::ViewMeta meta);
+void mutate_view_meta(
+    const Tensor& self,
+    const functionalization::ViewMeta& meta);
 
 void set_sizes_strides_offset(const Tensor& out, const Tensor& meta_out);
 void set_sizes_strides_offset(

@@ -5,7 +5,7 @@
 namespace at::native::quantized {
 namespace {
 // MakeConvOutputShape used from both CPU and CUDA libraries
-// and exporting symbol from torch_cpu would probaby take more storage
+// and exporting symbol from torch_cpu would probably take more storage
 // than duplicating implementation which likely be inlined away
 template <int kSpatialDim>
 at::SmallVector<int64_t, kSpatialDim + 2> MakeConvOutputShape(

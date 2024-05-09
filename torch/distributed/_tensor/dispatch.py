@@ -1,7 +1,9 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import contextlib
 import functools
 import operator
-from typing import cast, Dict, List, Optional, Sequence, Tuple
+import warnings
+from typing import cast, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
 
 import torch
 
@@ -24,7 +26,9 @@ from torch.distributed._tensor.tp_conv import (
     convolution_backward_handler,
     convolution_handler,
 )
-from torch.distributed.device_mesh import DeviceMesh
+
+if TYPE_CHECKING:
+    from torch.distributed.device_mesh import DeviceMesh
 
 try:
     from torch.utils import _cxx_pytree as pytree
@@ -164,9 +168,9 @@ class OpDispatcher:
         else:
             if output_sharding.needs_redistribute:
                 # compute locally with redistribute first if needed
-                assert output_sharding.schema_suggestions is not None
+                assert output_sharding.redistribute_schema is not None
                 self.redistribute_local_args(
-                    op_info, output_sharding.schema_suggestions[0]
+                    op_info, output_sharding.redistribute_schema
                 )
 
             local_tensor_args = (
@@ -179,18 +183,23 @@ class OpDispatcher:
 
             # run local op computation with potentially modified args/kwargs
             local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
-            if op_call in self._random_ops and is_rng_supported_mesh(mesh):
-                if not random._rng_tracker:
-                    raise RuntimeError(
-                        "A CudaRNGStateTracker instance must be instantiated "
-                        "before executing a random op over a DTensor. "
-                        "Try calling random.manual_seed() or distribute_tensor() "
-                        "before executing a DTensor random op."
-                    )
+            if op_call in self._random_ops:
+                if not random._rng_tracker and is_rng_supported_mesh(mesh):
+                    # Default to `OffsetBasedRNGTracker` if the parallelism API
+                    # did not already construct one
+                    random._rng_tracker = random.OffsetBasedRNGTracker(mesh.device_type)
+
+                first_arg, first_local_arg = cast(dtensor.DTensor, args[0]), cast(
+                    torch.Tensor, local_tensor_args[0]
+                )
+                rng_context = (
+                    random._rng_tracker._distribute_region(first_arg._spec)
+                    if random._rng_tracker and not first_local_arg.is_meta
+                    else contextlib.nullcontext()
+                )
+
                 # For DTensor random operator, run it within a distribute region
-                with random._rng_tracker._distribute_region(
-                    cast(dtensor.DTensor, args[0])._spec
-                ):
+                with rng_context:
                     local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
             else:
                 local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
@@ -199,7 +208,7 @@ class OpDispatcher:
         if output_sharding.output_spec is None:
             if op_call == aten.equal.default:
                 obj_list = [None for _ in range(dist.get_world_size())]
-                dist.all_gather_object(obj_list, local_results)
+                dist.all_gather_object(obj_list, local_results)  # type: ignore[possibly-undefined]
                 obj_list = list(filter(lambda x: x is not None, obj_list))
                 # perform reduce on the collection with AND op
                 local_results = functools.reduce(operator.and_, obj_list, True)
@@ -229,7 +238,7 @@ class OpDispatcher:
             assert len(out_dts) >= 1, "out variant should have at least one out arg"
             return tuple(out_dts) if len(out_dts) > 1 else out_dts[0]
         else:
-            return self.wrap(local_results, output_sharding.output_spec)
+            return self.wrap(local_results, output_sharding.output_spec)  # type: ignore[possibly-undefined]
 
     @staticmethod
     def redistribute_local_args(
@@ -300,7 +309,20 @@ class OpDispatcher:
                 else:
                     mesh = arg.device_mesh
             elif isinstance(arg, torch.Tensor):
-                if arg.ndim == 0 or self._allow_implicit_replication:
+                if arg.numel() == 1 and arg.ndim == 1:
+                    warnings.warn(
+                        "Found a non-scalar tensor with numel=1 and ndim!=0, "
+                        "we are implicitly creating a replicated DTensor for it. "
+                        "However, please consider changing it to a scalar tensor "
+                        "or explicitly create a DTensor under distributed enviroment."
+                    )
+
+                # if the arg.numel() == 1, arg.ndim could be 0 or 1.
+                if (
+                    arg.ndim <= 1
+                    and arg.numel() == 1
+                    or self._allow_implicit_replication
+                ):
                     mesh = mesh or try_find_mesh_from_args(op_call, args_list)
                     # scalar tensor can be safely treated as replicated
                     args_schema.append(
@@ -362,40 +384,35 @@ class OpDispatcher:
 
     @staticmethod
     def wrap(res: object, spec: OutputSpecType) -> object:
-        def to_dt(res, spec):
-            assert spec is not None and isinstance(
-                spec, DTensorSpec
-            ), f"output spec does not match with output! Expected DTensorSpec, got {spec}."
-            assert spec.tensor_meta is not None
-            return dtensor.DTensor(
-                res,
-                spec.mesh,
-                spec.placements,
-                shape=spec.tensor_meta.shape,
-                dtype=spec.tensor_meta.dtype,
-                requires_grad=res.requires_grad,
-                stride=spec.tensor_meta.stride,
-            )
-
         if isinstance(res, torch.Tensor):
-            return to_dt(res, spec)
+            if spec is not None:
+                assert isinstance(
+                    spec, DTensorSpec
+                ), f"output spec does not match with output! Expected DTensorSpec, got {spec}."
+                assert spec.tensor_meta is not None
+                return dtensor.DTensor(
+                    res,
+                    spec.mesh,
+                    spec.placements,
+                    shape=spec.tensor_meta.shape,
+                    dtype=spec.tensor_meta.dtype,
+                    requires_grad=res.requires_grad,
+                    stride=spec.tensor_meta.stride,
+                )
+            else:
+                # if output does not have a DTensorSpec due to specific ops, it must be a scalar tensor
+                assert res.ndim == 0, "output tensor should be scalar!"
+                return res
         elif isinstance(res, (list, tuple)):
             assert spec is not None and isinstance(
                 spec, (list, tuple)
             ), f"output spec does not match with output! Expected list/tuple, got {spec}."
             res_list = []
             for e, s in zip(res, spec):
-                # NOTE: local results might return Optional Tensor from ATen op, so we need
-                # to handle that case and make sure we don't wrap None with DTensor.
-                # (i.e. native_layer_norm.backward)
-                if isinstance(e, (list, tuple)) and isinstance(s, (list, tuple)):
-                    res_list.append(type(e)([to_dt(ee, ss) for ee, ss in zip(e, s)]))
-                elif e is not None and s is not None:
-                    res_list.append(to_dt(e, s))
-                else:
-                    res_list.append(None)  # type: ignore[arg-type]
+                res_list.append(OpDispatcher.wrap(e, s))
 
             return tuple(res_list) if isinstance(res, tuple) else res_list
         else:
-            # if the res contains only non tensor values, we simply return it without rewrapping
+            # if the res contains only non tensor values (i.e. int/float/none), we simply return it
+            # without rewrapping to DTensor.
             return res

@@ -909,7 +909,6 @@ def _trace_and_get_graph_from_model(model, args):
     # Disable Autocast cache because it replaces kernel's weight and bias
     # by (undesired) constants.
     # No perf impact for when there are reused weights since https://github.com/pytorch/pytorch/pull/85665
-    # TODO: https://github.com/pytorch/pytorch/issues/84092
     prev_autocast_cache_enabled = torch.is_autocast_cache_enabled()
     torch.set_autocast_cache_enabled(False)
     trace_graph, torch_out, inputs_states = torch.jit._get_trace_graph(
@@ -1772,6 +1771,7 @@ def _run_symbolic_method(g, op_name, symbolic_fn, args):
             original_node=None,  # type: ignore[arg-type]
             params_dict=_params_dict,
             env={},
+            new_nodes=[],
         )
         return symbolic_fn(graph_context, *args)
     except TypeError as e:
@@ -1886,6 +1886,7 @@ def _run_symbolic_function(
     node: _C.Node,
     inputs: Any,
     env: Dict[_C.Value, _C.Value],
+    new_nodes: List[_C.Node],
     operator_export_type=_C_onnx.OperatorExportTypes.ONNX,
 ) -> Optional[Union[_C.Value, Sequence[Optional[_C.Value]]]]:
     """Runs a symbolic function.
@@ -1916,6 +1917,7 @@ def _run_symbolic_function(
         original_node=node,
         params_dict=_params_dict,
         env=env,
+        new_nodes=new_nodes,
     )
 
     # Direct ATen export requested

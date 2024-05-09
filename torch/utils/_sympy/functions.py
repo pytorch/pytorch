@@ -1,11 +1,18 @@
 import sympy
 from sympy import S
 from sympy.core.logic import fuzzy_and, fuzzy_not, fuzzy_or
+import math
 
 __all__ = [
     "FloorDiv", "ModularIndexing", "CleanDiv", "CeilDiv", "Pow", "TrueDiv",
     "LShift", "RShift", "IsNonOverlappingAndDenseIndicator", "Round", "RoundDecimal",
 ]
+
+
+def fuzzy_eq(x, y):
+    if None in (x, y):
+        return None
+    return x == y
 
 
 class FloorDiv(sympy.Function):
@@ -95,7 +102,7 @@ class FloorDiv(sympy.Function):
 
 class ModularIndexing(sympy.Function):
     """
-    ModularIndexing(a, b, c) => (a // b) % c
+    ModularIndexing(a, b, c) => (a // b) % c where % is the C modulus
     """
 
     nargs = (3,)
@@ -147,6 +154,15 @@ class ModularIndexing(sympy.Function):
 
         if isinstance(base, FloorDiv):
             return ModularIndexing(base.args[0], base.args[1] * divisor, modulus)
+
+    def _eval_is_nonnegative(self):
+        p, q = self.args[:2]
+        return fuzzy_eq(p.is_nonnegative, q.is_nonnegative)  # type: ignore[attr-defined]
+
+    def _eval_is_positive(self):
+        p, q = self.args[:2]
+        return fuzzy_eq(p.is_positive, q.is_positive)  # type: ignore[attr-defined]
+
 
 class Where(sympy.Function):
     """
@@ -312,6 +328,17 @@ class IsNonOverlappingAndDenseIndicator(sympy.Function):
         return None
 
 
+class Trunc(sympy.Function):
+    is_integer = True
+
+    @classmethod
+    def eval(cls, number):
+        if number.is_integer:
+            return number
+        elif isinstance(number, sympy.Number):
+            return sympy.Integer(math.trunc(float(number)))
+
+
 class Round(sympy.Function):
     is_integer = True
 
@@ -336,3 +363,55 @@ class RoundDecimal(sympy.Function):
         elif isinstance(number, sympy.Number) and isinstance(ndigits, sympy.Integer):
             value_type, output_type = (int, sympy.Integer) if isinstance(number, sympy.Integer) else (float, sympy.Float)
             return output_type(round(value_type(number), int(ndigits)))
+
+
+def make_opaque_unary_fn(name):
+    class OpaqueUnaryFn(sympy.Function):
+        """
+        Unlike the builtin sympy functions on real numbers like sympy.sqrt,
+        these equivalents do not do any nontrivial reasoning besides
+        constant propagation.  This helps avoid performing transformations
+        that are valid for real numbers but are invalid for floating point;
+        in particular, while we are willing to make optimizations that change
+        numerics for Tensor compute, we are NOT willing to make optimziations
+        that change numerics for size compute.
+        """
+
+        _torch_handler_name = name
+
+        @classmethod
+        def eval(cls, a):
+            if isinstance(a, (sympy.Integer, sympy.Float)):
+                # Python converts to float64 before computing, c.f.
+                # >>> math.sin(2**53+1)
+                # -0.848925964814655
+                # >>> math.sin(float(2**53+1))
+                # -0.848925964814655
+                try:
+                    return sympy.Float(getattr(math, name)(float(a)))
+                # Just use sympy semantics for infinity/overflow, you might get some
+                # weird objects but ask silly questions, get silly answers
+                except OverflowError:
+                    return getattr(sympy, name)(a)
+            elif a in [sympy.oo, -sympy.oo, sympy.zoo, -sympy.zoo]:
+                return getattr(sympy, name)(a)
+            return None
+
+    OpaqueUnaryFn.__name__ = "OpaqueUnaryFn_" + name
+
+    return OpaqueUnaryFn
+
+# Keep in sync with math_op_names in torch/fx/experimental/sym_node.py
+OpaqueUnaryFn_sqrt = make_opaque_unary_fn("sqrt")
+OpaqueUnaryFn_cos = make_opaque_unary_fn("cos")
+OpaqueUnaryFn_cosh = make_opaque_unary_fn("cosh")
+OpaqueUnaryFn_sin = make_opaque_unary_fn("sin")
+OpaqueUnaryFn_sinh = make_opaque_unary_fn("sinh")
+OpaqueUnaryFn_tan = make_opaque_unary_fn("tan")
+OpaqueUnaryFn_tanh = make_opaque_unary_fn("tanh")
+OpaqueUnaryFn_asin = make_opaque_unary_fn("asin")
+OpaqueUnaryFn_acos = make_opaque_unary_fn("acos")
+OpaqueUnaryFn_atan = make_opaque_unary_fn("atan")
+OpaqueUnaryFn_exp = make_opaque_unary_fn("exp")
+OpaqueUnaryFn_log = make_opaque_unary_fn("log")
+OpaqueUnaryFn_asinh = make_opaque_unary_fn("asinh")

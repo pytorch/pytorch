@@ -5,6 +5,7 @@
 #include <atomic>
 #include <climits>
 #include <memory>
+#include <type_traits>
 
 namespace pybind11 {
 template <typename, typename...>
@@ -24,6 +25,11 @@ inline void incref(intrusive_ptr_target* self);
 // constructor tag used by intrusive_ptr constructors
 struct DontIncreaseRefcount {};
 } // namespace raw
+
+namespace detail {
+constexpr uint32_t kImpracticallyHugeReferenceCount = 0x0FFFFFFF;
+} // namespace detail
+
 /**
  * intrusive_ptr<T> is an alternative to shared_ptr<T> that has better
  * performance because it does the refcounting intrusively
@@ -74,8 +80,8 @@ class C10_API intrusive_ptr_target {
   //    atomically increment the use count, if it is greater than 0.
   //    If it is not, you must report that the storage is dead.
   //
-  mutable std::atomic<size_t> refcount_;
-  mutable std::atomic<size_t> weakcount_;
+  mutable std::atomic<uint32_t> refcount_;
+  mutable std::atomic<uint32_t> weakcount_;
 
   template <typename T, typename NullType>
   friend class intrusive_ptr;
@@ -119,15 +125,17 @@ class C10_API intrusive_ptr_target {
         // now it's getting destroyed through whatever mechanism the
         // caller of unsafe_adapt_non_heap_allocated wanted to
         // use). We choose our reference count such that the count
-        // will not dip below INT_MAX regardless.
-        refcount_.load() == 0 || refcount_.load() >= INT_MAX,
+        // will not dip below kImpracticallyHugeReferenceCount regardless.
+        refcount_.load() == 0 ||
+            refcount_.load() >= detail::kImpracticallyHugeReferenceCount,
         "Tried to destruct an intrusive_ptr_target that still has intrusive_ptr to it; refcount was ",
         refcount_.load());
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         // See ~intrusive_ptr for optimization that will frequently result in 1
         // at destruction time.
         weakcount_.load() == 1 || weakcount_.load() == 0 ||
-            weakcount_.load() == INT_MAX - 1 || weakcount_.load() == INT_MAX,
+            weakcount_.load() == detail::kImpracticallyHugeReferenceCount - 1 ||
+            weakcount_.load() == detail::kImpracticallyHugeReferenceCount,
         "Tried to destruct an intrusive_ptr_target that still has weak_intrusive_ptr to it");
 #if defined(_MSC_VER) && !defined(__clang__)
 #pragma warning(pop)
@@ -190,23 +198,23 @@ TTarget* assign_ptr_(TTarget* rhs) {
 
 // Increment needs to be acquire-release to make use_count() and
 // unique() reliable.
-inline size_t atomic_refcount_increment(std::atomic<size_t>& refcount) {
+inline uint32_t atomic_refcount_increment(std::atomic<uint32_t>& refcount) {
   return refcount.fetch_add(1, std::memory_order_acq_rel) + 1;
 }
 
 // weak_use_count() is only used for testing, so we don't need it to
 // be reliable. Relaxed should be fine.
-inline size_t atomic_weakcount_increment(std::atomic<size_t>& weakcount) {
+inline uint32_t atomic_weakcount_increment(std::atomic<uint32_t>& weakcount) {
   return weakcount.fetch_add(1, std::memory_order_relaxed) + 1;
 }
 
 // Both decrements need to be acquire-release for correctness. See
 // e.g. std::shared_ptr implementation.
-inline size_t atomic_refcount_decrement(std::atomic<size_t>& refcount) {
+inline uint32_t atomic_refcount_decrement(std::atomic<uint32_t>& refcount) {
   return refcount.fetch_sub(1, std::memory_order_acq_rel) - 1;
 }
 
-inline size_t atomic_weakcount_decrement(std::atomic<size_t>& weakcount) {
+inline uint32_t atomic_weakcount_decrement(std::atomic<uint32_t>& weakcount) {
   return weakcount.fetch_sub(1, std::memory_order_acq_rel) - 1;
 }
 
@@ -261,7 +269,7 @@ class intrusive_ptr final {
 
   void retain_() {
     if (target_ != NullType::singleton()) {
-      size_t new_refcount =
+      uint32_t new_refcount =
           detail::atomic_refcount_increment(target_->refcount_);
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
           new_refcount != 1,
@@ -384,10 +392,10 @@ class intrusive_ptr final {
     return *this;
   }
 
+  // Assignment is implemented using copy and swap. That's safe for self
+  // assignment.
+  // NOLINTNEXTLINE(bugprone-unhandled-self-assignment)
   intrusive_ptr& operator=(const intrusive_ptr& rhs) & noexcept {
-    if (this == &rhs) {
-      return *this;
-    }
     // NOLINTNEXTLINE(*assign-operator, *assignment-signature)
     return operator= <TTarget, NullType>(rhs);
   }
@@ -433,14 +441,14 @@ class intrusive_ptr final {
     return target_ != NullType::singleton();
   }
 
-  size_t use_count() const noexcept {
+  uint32_t use_count() const noexcept {
     if (target_ == NullType::singleton()) {
       return 0;
     }
     return target_->refcount_.load(std::memory_order_acquire);
   }
 
-  size_t weak_use_count() const noexcept {
+  uint32_t weak_use_count() const noexcept {
     if (target_ == NullType::singleton()) {
       return 0;
     }
@@ -532,22 +540,24 @@ class intrusive_ptr final {
    */
   static intrusive_ptr unsafe_adapt_non_heap_allocated(
       TTarget* raw_ptr,
-      size_t expected_decrefs) {
+      uint32_t expected_decrefs) {
     intrusive_ptr result(raw_ptr, raw::DontIncreaseRefcount{});
-    // INT_MAX is impractically huge for a reference count, while
-    // being in no danger of overflowing size_t. We actually only need to
-    // initialize the refcount to 2 -- we are just doing an unbalanced
+    // kImpracticallyHugeReferenceCount is impractically huge for a reference
+    // count, while being in no danger of overflowing uint32_t. We actually only
+    // need to initialize the refcount to 2 -- we are just doing an unbalanced
     // incref to prevent the non-heap-allocated target from being
     // freed, and we are optimizing that incref by directly
     // initializing the refcounts rather than doing an expensive
-    // atomic increment. The reason to use INT_MAX is to accommodate
-    // the debug assertions in ~intrusive_ptr_target.
+    // atomic increment. The reason to use kImpracticallyHugeReferenceCount is
+    // to accommodate the debug assertions in ~intrusive_ptr_target.
 #ifdef NDEBUG
     expected_decrefs = 0;
 #endif
     result.target_->refcount_.store(
-        INT_MAX + expected_decrefs, std::memory_order_relaxed);
-    result.target_->weakcount_.store(INT_MAX, std::memory_order_relaxed);
+        detail::kImpracticallyHugeReferenceCount + expected_decrefs,
+        std::memory_order_relaxed);
+    result.target_->weakcount_.store(
+        detail::kImpracticallyHugeReferenceCount, std::memory_order_relaxed);
     return result;
   }
 
@@ -695,7 +705,7 @@ class weak_intrusive_ptr final {
 
   void retain_() {
     if (target_ != NullType::singleton()) {
-      size_t new_weakcount =
+      uint32_t new_weakcount =
           detail::atomic_weakcount_increment(target_->weakcount_);
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
           new_weakcount != 1,
@@ -834,7 +844,7 @@ class weak_intrusive_ptr final {
     return target_;
   }
 
-  size_t use_count() const noexcept {
+  uint32_t use_count() const noexcept {
     if (target_ == NullType::singleton()) {
       return 0;
     }
@@ -842,7 +852,7 @@ class weak_intrusive_ptr final {
         std::memory_order_acquire); // refcount, not weakcount!
   }
 
-  size_t weak_use_count() const noexcept {
+  uint32_t weak_use_count() const noexcept {
     if (target_ == NullType::singleton()) {
       return 0;
     }
@@ -1002,7 +1012,7 @@ inline T* make_weak(T* self) {
   return wptr.release();
 }
 
-inline size_t use_count(intrusive_ptr_target* self) {
+inline uint32_t use_count(intrusive_ptr_target* self) {
   auto ptr = c10::intrusive_ptr<intrusive_ptr_target>::reclaim(self);
   auto r = ptr.use_count();
   ptr.release();
@@ -1033,7 +1043,7 @@ inline T* lock(T* self) {
 }
 
 // This gives the STRONG refcount of a WEAK pointer
-inline size_t use_count(weak_intrusive_ptr_target* self) {
+inline uint32_t use_count(weak_intrusive_ptr_target* self) {
   auto wptr = c10::weak_intrusive_ptr<intrusive_ptr_target>::reclaim(self);
   auto r = wptr.use_count();
   wptr.release();

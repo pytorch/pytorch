@@ -101,7 +101,7 @@ class Tensor(torch._C.TensorBase):
             if (
                 self.is_sparse
                 or self.device.type
-                in ["lazy", "xla", "mtia", "mps", "ort", "meta", "ipu"]
+                in ["lazy", "xla", "mtia", "mps", "maia", "meta", "ipu"]
                 or (
                     not torch._C._has_storage(self)
                     and self.device.type == torch._C._get_privateuse1_backend_name()
@@ -249,7 +249,7 @@ class Tensor(torch._C.TensorBase):
         # See Note [Don't serialize hooks]
         torch.utils.hooks.warn_if_has_hooks(self)
         backward_hooks: Dict[Any, Any] = OrderedDict()
-        # Note: Numpy array is chosen to be the rebuild component for XLA, MTIA, ORT Tensors.
+        # Note: Numpy array is chosen to be the rebuild component for XLA, MTIA, MAIA Tensors.
         # We considered a few options:
         # 1. CPU tensor can't be used here.
         #    Otherwise in torch.load CPU storage is reconstructed with randomly
@@ -259,7 +259,7 @@ class Tensor(torch._C.TensorBase):
         # 2. Python list is not a good fit due to performance reason.
         #    `tolist()` converts every single element in the tensor into python objects
         #    and serialize them one by one.
-        if self.device.type in ["xla", "mtia", "ort"] or (
+        if self.device.type in ["xla", "mtia", "maia"] or (
             not torch._C._has_storage(self)
             and self.device.type == torch._C._get_privateuse1_backend_name()
         ):
@@ -378,9 +378,18 @@ class Tensor(torch._C.TensorBase):
             )
             return (torch._utils._rebuild_nested_tensor, args_nested)
         elif (
-            self.data_ptr() == 0
-            and type(self) is not torch.Tensor
+            type(self) is not torch.Tensor
             and type(self).__torch_dispatch__ is not torch.Tensor.__torch_dispatch__
+            and (
+                isinstance(
+                    self,
+                    (
+                        torch._subclasses.fake_tensor.FakeTensor,
+                        torch._subclasses.functional_tensor.FunctionalTensor,
+                    ),
+                )
+                or self.data_ptr() == 0
+            )
         ):
             arg_wrapper_subclass = (
                 type(self),
@@ -394,15 +403,7 @@ class Tensor(torch._C.TensorBase):
             )
             return (torch._utils._rebuild_wrapper_subclass, arg_wrapper_subclass)
         else:
-            v3_dtypes = [
-                torch.float8_e5m2,
-                torch.float8_e4m3fn,
-                torch.bits8,
-                torch.bits16,
-                torch.bits1x8,
-                torch.bits2x4,
-                torch.bits4x2,
-            ]
+            v3_dtypes = torch.storage._new_dtypes()
             if self.dtype in v3_dtypes:
                 rebuild_func = torch._utils._rebuild_tensor_v3
                 storage = self.untyped_storage()
@@ -634,7 +635,7 @@ class Tensor(torch._C.TensorBase):
             trim(
                 r"""reinforce() was removed.
             Use torch.distributions instead.
-            See https://pytorch.org/docs/master/distributions.html
+            See https://pytorch.org/docs/main/distributions.html
 
             Instead of:
 
@@ -707,6 +708,36 @@ class Tensor(torch._C.TensorBase):
             return handle_torch_function(Tensor.share_memory_, (self,), self)
         self._typed_storage()._share_memory_()
         return self
+
+    def module_load(self, other, assign=False):
+        r"""Defines how to transform ``other`` when loading it into ``self`` in :meth:`~nn.Module.load_state_dict`.
+
+        Used when :func:`~torch.__future__.get_swap_module_params_on_conversion` is ``True``.
+
+        It is expected that ``self`` is a parameter or buffer in an ``nn.Module`` and ``other`` is the
+        value in the state dictionary with the corresponding key, this method defines
+        how ``other`` is remapped before being swapped with ``self`` via
+        :func:`~torch.utils.swap_tensors`` in ``module.load_state_dict()``.
+
+        .. note::
+            This method should always return a new object that is not ``self`` or ``other``.
+            For example, the default implementation returns ``self.copy_(other).detach()``
+            if ``assign`` is ``False`` or ``other.detach()`` if ``assign`` is ``True``.
+
+        Args:
+            other (Tensor): value in state dict with key corresponding to ``self``
+            assign (bool): the assign argument passed to :meth:`nn.Module.load_state_dict`
+
+        """
+        if has_torch_function_variadic(self, other):
+            return handle_torch_function(
+                Tensor.module_load, (self, other), self, other, assign=assign
+            )
+
+        if assign:
+            return other.detach()
+        else:
+            return self.copy_(other).detach()
 
     def __reversed__(self):
         r"""Reverses the tensor along dimension 0."""

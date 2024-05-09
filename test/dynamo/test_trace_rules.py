@@ -12,22 +12,16 @@ import torch
 import torch._dynamo.config as config
 import torch._dynamo.test_case
 import torch._functorch.deprecated as deprecated_func
-from torch._dynamo.skipfiles import (
-    FUNC_INLINELIST,
-    LEGACY_MOD_INLINELIST,
-    MOD_INLINELIST,
-)
 from torch._dynamo.trace_rules import (
+    LEGACY_MOD_INLINELIST,
     load_object,
+    manual_torch_name_rule_map,
+    MOD_INLINELIST,
     torch_c_binding_in_graph_functions,
-    torch_ctx_manager_classes,
     torch_non_c_binding_in_graph_functions,
 )
 from torch._dynamo.utils import hashable, is_safe_constant, istype
-from torch._dynamo.variables import (
-    TorchCtxManagerClassVariable,
-    TorchInGraphFunctionVariable,
-)
+from torch._dynamo.variables import TorchInGraphFunctionVariable, UserFunctionVariable
 
 try:
     from .utils import create_dummy_module_and_function
@@ -35,52 +29,18 @@ except ImportError:
     from utils import create_dummy_module_and_function
 
 
-ignored_ctx_manager_class_names = {
-    "torch.ExcludeDispatchKeyGuard",
-    "torch._C.DisableTorchFunction",
-    "torch._C._AutoDispatchBelowAutograd",
-    "torch._C._DisableAutocast",
-    "torch._C._DisableFuncTorch",
-    "torch._C._DisablePythonDispatcher",
-    "torch._C._DisableTorchDispatch",
-    "torch._C._EnablePreDispatch",
-    "torch._C._EnablePythonDispatcher",
-    "torch._C._EnableTorchFunction",
-    "torch._C._ExcludeDispatchKeyGuard",
-    "torch._C._ForceDispatchKeyGuard",
-    "torch._C._IncludeDispatchKeyGuard",
-    "torch._C._InferenceMode",
-    "torch._C._RestorePythonTLSSnapshot",
-    "torch._C._SetExcludeDispatchKeyGuard",
-    "torch.ao.nn.sparse.quantized.utils.LinearBlockSparsePattern",
-    "torch.autograd.anomaly_mode.detect_anomaly",
-    "torch.autograd.anomaly_mode.set_detect_anomaly",
-    "torch.autograd.forward_ad._set_fwd_grad_enabled",
-    "torch.autograd.forward_ad.dual_level",
-    "torch.autograd.grad_mode._force_original_view_tracking",
-    "torch.autograd.grad_mode._unsafe_preserve_version_counter",
-    "torch.autograd.grad_mode.set_multithreading_enabled",
-    "torch.autograd.graph._CloneArgBeforeMutateMode",
-    "torch.autograd.graph._swap_with_cloned",
-    "torch.autograd.graph.save_on_cpu",
-    "torch.autograd.graph.saved_tensors_hooks",
-    "torch.backends.mkl.verbose",
-    "torch.backends.mkldnn.verbose",
-    "torch.cpu.StreamContext",
-    "torch.cuda.StreamContext",
-    "torch.cuda._DeviceGuard",
-    "torch.cuda.device",
-    "torch.cuda.device_of",
-    "torch.cuda.graphs.graph",
-    "torch.device",  # as constant folding function
-    "torch.sparse.check_sparse_tensor_invariants",
-}
-
 ignored_c_binding_in_graph_function_names = {
     # Ignored because they have manual rules defined at `trace_rules.manual_torch_name_rule_map`.
     "torch._nested_tensor_from_mask",
     "torch._nested_from_padded",
-    # Ignored and go through rules defined at `skipfiles.check`.
+    "torch.sparse_compressed_tensor",
+    "torch.sparse_bsc_tensor",
+    "torch.sparse_bsr_tensor",
+    "torch.sparse_coo_tensor",
+    "torch.sparse_csc_tensor",
+    "torch.sparse_csr_tensor",
+    "torch.cuda._get_device_properties",
+    # Ignored and go through rules defined at `trace_rules.check`.
     "torch._functionalize_are_all_mutations_under_no_grad_or_inference_mode",
     "torch._cslt_sparse_mm_search",
     "torch._C._abort",
@@ -103,6 +63,19 @@ ignored_c_binding_in_graph_function_names = {
     "torch._C.set_autocast_xla_enabled",
     "torch.resize_as_",
     "torch.resize_as_sparse_",
+    "torch._C._data_address",
+    "torch._C._is_cow_tensor",
+    "torch._lazy_clone",
+    "torch._test_parallel_materialize",
+    "torch._C._storage_address",
+    "torch._C._pickle_save",
+    "torch._validate_sparse_compressed_tensor_args",
+    "torch._validate_sparse_csr_tensor_args",
+    "torch._validate_sparse_bsr_tensor_args",
+    "torch._validate_sparse_csc_tensor_args",
+    "torch._validate_sparse_coo_tensor_args",
+    "torch._validate_sparse_bsc_tensor_args",
+    "torch._validate_compressed_sparse_indices",
 }
 if torch._C._llvm_enabled():
     ignored_c_binding_in_graph_function_names |= {
@@ -129,7 +102,6 @@ class AllowedObjects:
     """
 
     object_ids: Dict[int, str]
-    ctx_mamager_classes: Set[Any]
     c_binding_in_graph_functions: Set[Any]
     non_c_binding_in_graph_functions: Set[Any]
     name_rule_map: Dict[str, Any]
@@ -142,23 +114,9 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
 
     warnings.filterwarnings("ignore", category=UserWarning, module="torch.distributed")
     torch_object_ids = dict()
-    ctx_mamager_classes = set()
     c_binding_in_graph_functions = set()
     non_c_binding_in_graph_functions = set()
     torch_name_rule_map = dict()
-
-    # Add obj to ctx_mamager_classes set if it's a torch context manager class.
-    # This is used to generate the ctx manager class list based on heuristic.
-    def heuristic_record_if_ctx_manager(obj, module, name):
-        if (
-            issubclass(type(obj), type)
-            and hasattr(obj, "__enter__")
-            and hasattr(obj, "__exit__")
-        ):
-            torch_name_rule_map[
-                f"{module.__name__}.{name}"
-            ] = TorchCtxManagerClassVariable
-            ctx_mamager_classes.add(obj)
 
     # In some platforms, these functions were loaded as classes instead of functions.
     # To mitigate these weired cases, we need this special check.
@@ -324,12 +282,10 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
                         _find_torch_objects(obj)
                 elif _is_allowed_module_prefix(obj):
                     if record:
-                        heuristic_record_if_ctx_manager(obj, module, name)
                         heuristic_record_if_in_graph_function(obj, module, name)
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
                 elif inspect.getmodule(obj) is None and not is_safe_constant(obj):
                     if record:
-                        heuristic_record_if_ctx_manager(obj, module, name)
                         heuristic_record_if_in_graph_function(obj, module, name)
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
 
@@ -338,24 +294,10 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
 
     return AllowedObjects(
         torch_object_ids,
-        ctx_mamager_classes,
         c_binding_in_graph_functions,
         non_c_binding_in_graph_functions,
         torch_name_rule_map,
     )
-
-
-def gen_get_func_inlinelist(dummy_func_inlinelist):
-    def get_func_inlinelist():
-        inlinelist = set()
-        for f in dummy_func_inlinelist:
-            module_name, fn_name = f.rsplit(".", 1)
-            m = importlib.import_module(module_name)
-            fn = getattr(m, fn_name)
-            inlinelist.add(fn.__code__)
-        return inlinelist
-
-    return get_func_inlinelist
 
 
 class TraceRuleTests(torch._dynamo.test_case.TestCase):
@@ -382,34 +324,15 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
         for m in LEGACY_MOD_INLINELIST.union(MOD_INLINELIST):
             self.assertTrue(
                 isinstance(importlib.import_module(m), types.ModuleType),
-                f"{m} from skipfiles.MOD_INLINELIST/LEGACY_MOD_INLINELIST is not a python module, please check and correct it.",
-            )
-        for f in FUNC_INLINELIST:
-            module_name, fn_name = f.rsplit(".", 1)
-            m = importlib.import_module(module_name)
-            self.assertTrue(
-                isinstance(getattr(m, fn_name), types.FunctionType),
-                f"{f} from skipfiles.FUNC_INLINELIST is not a python function, please check and correct it.",
+                f"{m} from trace_rules.MOD_INLINELIST/LEGACY_MOD_INLINELIST is not a python module, please check and correct it.",
             )
 
+    @unittest.skip(
+        "This test keeps getting broken and our disable infra is not handling well. see #120627"
+    )
     def test_torch_name_rule_map_updated(self):
         # Generate the allowed objects based on heuristic defined in `allowed_functions.py`,
         objs = gen_allowed_objs_and_ids(record=True, c_binding_only=True)
-        # Test ctx manager classes are updated in torch_name_rule_map.
-        generated = objs.ctx_mamager_classes
-        used = set()
-        for x in (
-            set(torch_ctx_manager_classes.keys()) | ignored_ctx_manager_class_names
-        ):
-            obj = load_object(x)
-            if obj is not None:
-                used.add(obj)
-        self._check_set_equality(
-            generated,
-            used,
-            "torch_ctx_manager_classes",
-            "ignored_ctx_manager_class_names",
-        )
         # Test C binding in graph functions are updated in torch_name_rule_map.
         generated = objs.c_binding_in_graph_functions
         used = set()
@@ -433,7 +356,6 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
                     load_object(f),
                     (
                         types.FunctionType,
-                        types.MethodType,
                         types.BuiltinFunctionType,
                         types.MethodDescriptorType,
                         types.WrapperDescriptorType,
@@ -441,24 +363,35 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
                 )
             )
 
-    def test_func_inlinelist_torch_function(self):
+    def test_force_inline_torch_function(self):
+        # `torch._dynamo.utils.istype` is skipped by default
         def fn(x):
             if istype(x, torch.Tensor):
                 return x + 1
             else:
                 return x - 1
 
-        func_inlinelist = torch._dynamo.skipfiles.FUNC_INLINELIST.copy()
-        func_inlinelist.add("torch._dynamo.utils.istype")
+        _manual_torch_name_rule_map = manual_torch_name_rule_map.copy()
+        # Force inline `torch._dynamo.utils.istype` by setting trace rule.
+        _manual_torch_name_rule_map["torch._dynamo.utils.istype"] = UserFunctionVariable
+
+        _torch_name_rule_map = [
+            _manual_torch_name_rule_map,
+            torch_c_binding_in_graph_functions,
+            torch_non_c_binding_in_graph_functions,
+        ]
 
         self.assertTrue(
-            "torch._dynamo" not in torch._dynamo.skipfiles.LEGACY_MOD_INLINELIST
+            "torch._dynamo" not in torch._dynamo.trace_rules.LEGACY_MOD_INLINELIST
         )
-        self.assertTrue("torch._dynamo" not in torch._dynamo.skipfiles.MOD_INLINELIST)
+        self.assertTrue("torch._dynamo" not in torch._dynamo.trace_rules.MOD_INLINELIST)
 
         with unittest.mock.patch(
-            "torch._dynamo.skipfiles.get_func_inlinelist",
-            gen_get_func_inlinelist(func_inlinelist),
+            "torch._dynamo.trace_rules.torch_name_rule_map",
+            _torch_name_rule_map,
+        ), unittest.mock.patch(
+            "torch._dynamo.trace_rules.get_torch_obj_rule_map",
+            torch._dynamo.trace_rules.get_torch_obj_rule_map.__wrapped__,  # bypass functools.lru_cache
         ):
             x = torch.rand(3)
             opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
@@ -466,29 +399,57 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x)
             self.assertEqual(ref, res)
 
-    def test_func_inlinelist_third_party_function(self):
+    def test_force_inline_custom_function(self):
         mod, func = create_dummy_module_and_function()
 
         def fn(x):
             return func(x)
 
-        func_inlinelist = torch._dynamo.skipfiles.FUNC_INLINELIST.copy()
-        func_inlinelist.add(f"{mod.__name__}.{func.__name__}")
+        _manual_torch_name_rule_map = manual_torch_name_rule_map.copy()
+        # Force inline `mod.func` by setting trace rule.
+        _manual_torch_name_rule_map[
+            f"{mod.__name__}.{func.__name__}"
+        ] = UserFunctionVariable
+
+        _torch_name_rule_map = [
+            _manual_torch_name_rule_map,
+            torch_c_binding_in_graph_functions,
+            torch_non_c_binding_in_graph_functions,
+        ]
 
         with unittest.mock.patch(
-            "torch._dynamo.skipfiles.get_func_inlinelist",
-            gen_get_func_inlinelist(func_inlinelist),
+            "torch._dynamo.trace_rules.torch_name_rule_map",
+            _torch_name_rule_map,
         ), unittest.mock.patch(
-            "torch._dynamo.skipfiles.SKIP_DIRS",
-            torch._dynamo.skipfiles.SKIP_DIRS.copy(),
+            "torch._dynamo.trace_rules.get_torch_obj_rule_map",
+            torch._dynamo.trace_rules.get_torch_obj_rule_map.__wrapped__,
         ):
-            # First adding the module to SKIP_DIRS so that it will be skipped.
-            torch._dynamo.skipfiles.add(mod.__name__)
+            # First adding the module to SKIP_DIRS so that it will be skipped by default.
+            torch._dynamo.trace_rules.add(mod.__name__)
             x = torch.rand(3)
             opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
             ref = fn(x)
             res = opt_fn(x)
             self.assertEqual(ref, res)
+
+
+class TestModuleSurviveSkipFiles(torch._dynamo.test_case.TestCase):
+    @unittest.skipIf(
+        not torch.distributed.is_available(),
+        "need to import MLP module from distributed",
+    )
+    def test_module_survive_skip_files(self):
+        from torch.testing._internal.common_fsdp import MLP
+
+        model = MLP(3)
+        inp = torch.randn((2, 3))
+        frame_count_before = torch._dynamo.convert_frame.FRAME_COUNTER
+        model.compile(backend="eager")
+        model(inp)
+        frame_count_after = torch._dynamo.convert_frame.FRAME_COUNTER
+        self.assertTrue(
+            frame_count_after > frame_count_before, "MLP did not survive skip files"
+        )
 
 
 if __name__ == "__main__":

@@ -3,18 +3,29 @@ Contains various utils for AOTAutograd, including those for handling collections
 """
 
 import dataclasses
+import operator
 import warnings
 from contextlib import nullcontext
 from functools import wraps
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
+from torch._library.fake_class_registry import FakeScriptObject
+from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import py_sym_types
 
-KNOWN_TYPES = tuple(
-    [torch.Tensor, int, str, float, bool, type(None)] + list(py_sym_types)
-)
+KNOWN_TYPES = [
+    torch.Tensor,
+    BackwardState,
+    int,
+    str,
+    float,
+    bool,
+    type(None),
+    *py_sym_types,
+    FakeScriptObject,
+]
 
 original_zip = zip
 
@@ -68,10 +79,10 @@ def normalize_as_list(x):
 
 def _get_autocast_states():
     return [
-        torch.is_autocast_enabled(),
-        torch.is_autocast_cpu_enabled(),
-        torch.get_autocast_gpu_dtype(),
-        torch.get_autocast_cpu_dtype(),
+        torch.is_autocast_enabled("cuda"),
+        torch.is_autocast_enabled("cpu"),
+        torch.get_autocast_dtype("cuda"),
+        torch.get_autocast_dtype("cpu"),
         torch.is_autocast_cache_enabled(),
     ]
 
@@ -94,7 +105,9 @@ def make_boxed_compiler(compiler):
     return f
 
 
-def call_func_at_runtime_with_args(f, args, steal_args=False, disable_amp=False):
+def call_func_at_runtime_with_args(
+    f, args: Union[Tuple[Any], List[Any]], steal_args=False, disable_amp=False
+):
     if not steal_args:
         args = list(args)
     assert isinstance(args, list)
@@ -119,22 +132,23 @@ def call_func_at_runtime_with_args(f, args, steal_args=False, disable_amp=False)
 class PytreeThunk:
     spec: Optional[pytree.TreeSpec] = None
     # These are some kinda dumb microoptimizations that save about 3-4 us of overhead.
-    is_simple = (
-        None  # if the output spec is a tuple/list, we won't bother unflattening it.
-    )
-    is_really_simple = None  # if the output spec is a LeafSpec
+    is_simple: Optional[
+        bool
+    ] = None  # if the output spec is a tuple/list, we won't bother unflattening it.
+    is_really_simple: Optional[bool] = None  # if the output spec is a LeafSpec
 
-    def set(self, spec):
+    def set(self, spec: pytree.TreeSpec) -> None:
         assert self.spec is None or self.spec == spec
-        self.spec = spec
-        if type(self.spec) in [tuple, list] and all(
-            isinstance(i, pytree.LeafSpec) for i in spec.children_specs
+        assert spec is not None
+        self.spec: pytree.TreeSpec = spec
+        if self.spec.type in {tuple, list} and all(
+            child.is_leaf() for child in spec.children_specs
         ):
             self.is_simple = True
-        if isinstance(self.spec, pytree.LeafSpec):
+        if self.spec.is_leaf():
             self.is_really_simple = True
 
-    def unflatten(self, x):
+    def unflatten(self, x: List[Any]) -> Any:
         if self.is_really_simple:
             return x[0]
         if self.is_simple:
@@ -215,3 +229,68 @@ def maybe_to_fresh_input(idx, t, meta):
             # sees the tensor before the metadata mutation
             return t.view(t.shape)
     return t
+
+
+def unlift_tokens(fw_module, fw_metadata):
+    # Remove the tokens from the inputs/outputs of the graph since inductor does
+    # not want these extra inputs/outputs, and replace them with
+    # _make_token() to create a token, and _sink_tokens() to collect the
+    # tokens.  See Note [Side-Effectful Tokens in AOTAutograd]
+    num_tokens = len(fw_metadata.tokens)
+
+    input_token_nodes = []
+    for i, node in enumerate(fw_module.graph.nodes):
+        if i < num_tokens:
+            assert node.op == "placeholder"
+            input_token_nodes.append(node)
+
+        elif node.op == "call_function" and node.target.__name__ == "with_effects":
+            if node.args[0] in input_token_nodes:
+                with fw_module.graph.inserting_before(node):
+                    new_token_node = fw_module.graph.call_function(
+                        torch.ops.prims._make_token.default, ()
+                    )
+                    new_token_node.meta["val"] = torch.tensor([])
+                    new_token_node.meta["tensor_meta"] = torch.tensor([])
+
+                    args = list(node.args)
+                    args[0] = new_token_node
+                    node.args = tuple(args)
+
+        elif node.op == "output":
+            output_token_nodes = node.args[0][:num_tokens]
+            other_output_args = node.args[0][num_tokens:]
+
+            for output_token_node in output_token_nodes:
+                assert (
+                    output_token_node.op == "call_function"
+                    and output_token_node.target == operator.getitem
+                    and output_token_node.args[1] == 0
+                )
+            with fw_module.graph.inserting_before(node):
+                sink_token_node = fw_module.graph.call_function(
+                    torch.ops.prims._sink_tokens.default,
+                    (output_token_nodes,),
+                )
+                node.args = (other_output_args,)
+
+    for input_token_node in input_token_nodes:
+        fw_module.graph.erase_node(input_token_node)
+
+    fw_module.recompile()
+
+    # This is sad, but we need to update the metadata to get rid of
+    # the tokens.
+    fw_metadata.num_forward_returns -= num_tokens
+    fw_metadata.num_forward -= num_tokens
+    fw_metadata.tokens = {}
+
+
+def root_module_when_exporting_non_strict(flat_fn):
+    # When exporting in non-strict mode, we wrap the root module in a specific pattern.
+    # See `_aot_export_non_strict` in torch.export._trace.py.
+    # We look for that wrapping pattern here.
+    if hasattr(flat_fn, "_orig_mod") and hasattr(flat_fn._orig_mod, "_export_root"):
+        return flat_fn._orig_mod._export_root
+    else:
+        return None

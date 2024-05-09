@@ -1054,7 +1054,7 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
   // Case 1: "vectorize along input"
   // This case happens when we are reducing along fastest moving dimesion. In such case, threads
   // with the same threadIdx.y works on the same reduction cooperatively and will produce results
-  // for the same ouput. In such case, values in each loaded vector always correspond to the same ouput.
+  // for the same output. In such case, values in each loaded vector always correspond to the same output.
   //
   // Case 2: "vectorize along output"
   // This case happens when the fastest moving dimesion is not the dimension of reduction. In such case,

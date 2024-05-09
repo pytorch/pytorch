@@ -32,7 +32,13 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
 
 namespace c10 {
 
+#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
 /// Constructors
+inline Half::Half(float16_t value) : x(detail::fp16_to_bits(value)) {}
+inline Half::operator float16_t() const {
+  return detail::fp16_from_bits(x);
+}
+#else
 
 inline C10_HOST_DEVICE Half::Half(float value)
     :
@@ -40,13 +46,11 @@ inline C10_HOST_DEVICE Half::Half(float value)
       x(__half_as_short(__float2half(value)))
 #elif defined(__SYCL_DEVICE_ONLY__)
       x(c10::bit_cast<uint16_t>(sycl::half(value)))
-#else
-#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)) && \
+#elif (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)) && \
     !defined(__APPLE__)
       x(at::vec::float2half_scalar(value))
 #else
       x(detail::fp16_ieee_from_fp32_value(value))
-#endif
 #endif
 {
 }
@@ -58,15 +62,18 @@ inline C10_HOST_DEVICE Half::operator float() const {
   return __half2float(*reinterpret_cast<const __half*>(&x));
 #elif defined(__SYCL_DEVICE_ONLY__)
   return float(c10::bit_cast<sycl::half>(x));
-#else
-#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)) && \
+#elif (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)) && \
     !defined(__APPLE__)
   return at::vec::half2float_scalar(x);
+#elif defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
+  return detail::native_fp16_to_fp32_value(x);
 #else
   return detail::fp16_ieee_to_fp32_value(x);
 #endif
-#endif
 }
+
+#endif /* !defined(__aarch64__) || defined(C10_MOBILE) || defined(__CUDACC__) \
+        */
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
 inline C10_HOST_DEVICE Half::Half(const __half& value) {

@@ -28,7 +28,7 @@ __global__ void upsample_linear1d_out_frame(
     const int n,
     const accscalar_t rwidth,
     const bool align_corners,
-    const PackedTensorAccessor64<scalar_t, 3> idata,
+    const PackedTensorAccessor64<const scalar_t, 3> idata,
     PackedTensorAccessor64<scalar_t, 3> odata) {
   int index = threadIdx.x + blockIdx.x * blockDim.x;
 
@@ -76,7 +76,7 @@ __global__ void upsample_linear1d_out_frame_backward(
     const accscalar_t rwidth,
     const bool align_corners,
     PackedTensorAccessor64<scalar_t, 3> idata,
-    const PackedTensorAccessor64<scalar_t, 3> odata) {
+    const PackedTensorAccessor64<const scalar_t, 3> odata) {
   int index = threadIdx.x + blockIdx.x * blockDim.x;
 
   const int batchsize = idata.size(0);
@@ -143,7 +143,7 @@ static void upsample_linear1d_out_cuda_template(
       input.scalar_type(), "upsample_linear1d_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
-        auto idata = input.packed_accessor64<scalar_t, 3>();
+        auto idata = input.packed_accessor64<const scalar_t, 3>();
         auto odata = output.packed_accessor64<scalar_t, 3>();
 
         const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
@@ -188,7 +188,7 @@ static void upsample_linear1d_backward_out_cuda_template(
         using accscalar_t = at::acc_type<scalar_t, true>;
 
         auto idata = grad_input.packed_accessor64<scalar_t, 3>();
-        auto odata = grad_output.packed_accessor64<scalar_t, 3>();
+        auto odata = grad_output.packed_accessor64<const scalar_t, 3>();
 
         const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
             input_width, output_width, align_corners, scales);

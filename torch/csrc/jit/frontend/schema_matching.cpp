@@ -143,6 +143,14 @@ Value* tryConvertToType(
       } else if (concrete_int) {
         value = graph.insert(aten::Int, {value}, {}, loc);
       }
+    } else if (*value->type() == *BoolType::get()) {
+      if (concrete_float) {
+        value = graph.insert(aten::Float, {value}, {}, loc);
+      } else if (concrete_int) {
+        value = graph.insert(aten::Int, {value}, {}, loc);
+      } else if (concrete_number) {
+        value = graph.insert(aten::Int, {value}, {}, loc);
+      }
     }
 
     // Convert strings to device

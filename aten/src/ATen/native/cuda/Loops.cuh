@@ -68,17 +68,7 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
 
 }}  // namespace at::native
 
-// Note:
-// CUDA and ROCm get diverged in this PR:
-//   https://github.com/pytorch/pytorch/pull/32383
-// Because for some reason trying to enable vectorized
-// memory access introduce regression on ROCm.
-
-#if !defined(USE_ROCM)
-  #include <ATen/native/cuda/CUDALoops.cuh>
-#else
-  #include <ATen/native/cuda/ROCmLoops.cuh>
-#endif
+#include <ATen/native/cuda/CUDALoops.cuh>
 
 namespace at:: native {
 

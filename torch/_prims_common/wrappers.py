@@ -170,9 +170,13 @@ def _resize_output_check(out: TensorLikeType, shape: ShapeType):
 
 
 # TODO: handle tuples of tensors
-def _maybe_resize_out(out: TensorLikeType, shape: ShapeType):
+def _maybe_resize_out(
+    out: TensorLikeType,
+    shape: ShapeType,
+    memory_format: Optional[torch.memory_format] = None,
+):
     if _resize_output_check(out, shape):
-        return out.resize_(shape)
+        return out.resize_(shape, memory_format=memory_format)
     else:
         return out
 
@@ -182,8 +186,9 @@ def _safe_copy_out(
 ):
     # Checks same device
     if copy_from.device != copy_to.device:
-        msg = "Attempting to copy from device {} to device {}, but cross-device copies are not allowed!".format(
-            copy_from.device, copy_to.device
+        msg = (
+            f"Attempting to copy from device {copy_from.device} "
+            f"to device {copy_to.device}, but cross-device copies are not allowed!"
         )
         raise RuntimeError(msg)
 
@@ -204,7 +209,12 @@ def _safe_copy_out(
     return copy_to.copy_(copy_from)
 
 
-def out_wrapper(*out_names: str, exact_dtype: bool = False):
+def out_wrapper(
+    *out_names: str,
+    exact_dtype: bool = False,
+    pass_is_out: bool = False,
+    preserve_memory_format=False,
+):
     # The wrapped function needs to convert the output parameters to ensure
     # compatibility between the Python API (which always uses "out" as the
     # parameter name and may be a tuple) and the Aten API (which may have
@@ -217,6 +227,9 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
         out_names = default_out_names
 
     is_tensor = len(out_names) == 1
+
+    def maybe_compute_memory_format(t):
+        return utils.suggest_memory_format(t) if preserve_memory_format else None
 
     def _out_wrapper(fn: Callable) -> Callable:
         """
@@ -246,8 +259,10 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
                     out_attr = getattr(out, k)
                     if k not in kwargs:
                         kwargs[k] = out_attr
-
-            result = fn(*args, **kwargs)
+            if pass_is_out:
+                result = fn(*args, is_out=(out is not None), **kwargs)
+            else:
+                result = fn(*args, **kwargs)
             assert (
                 isinstance(result, TensorLike)
                 and is_tensor
@@ -274,7 +289,9 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
                 if is_tensor:
                     assert isinstance(out, TensorLike)
                     # These two operations are done in-place
-                    _maybe_resize_out(out, result.shape)
+                    _maybe_resize_out(
+                        out, result.shape, maybe_compute_memory_format(result)
+                    )
                     _safe_copy_out(copy_from=result, copy_to=out, exact_dtype=exact_dtype)  # type: ignore[arg-type]
                 else:
                     assert isinstance(out, Tuple)  # type: ignore[arg-type]
@@ -284,7 +301,7 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
                     )
                     for r, o in zip(result, out):
                         # These two operations are done in-place
-                        _maybe_resize_out(o, r.shape)
+                        _maybe_resize_out(o, r.shape, maybe_compute_memory_format(r))
                         _safe_copy_out(copy_from=r, copy_to=o, exact_dtype=exact_dtype)  # type: ignore[arg-type]
             else:
                 out = result

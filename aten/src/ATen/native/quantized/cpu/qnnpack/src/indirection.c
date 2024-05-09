@@ -208,7 +208,7 @@ void pytorch_qnnp_indirection_init_conv3d(
  *   width
  *
  * step_height: The number of pointers to traverse to move from an output
- *   pixel's first input's index in the indirection bufffer to that of the
+ *   pixel's first input's index in the indirection buffer to that of the
  *   output pixel one ROW (one output y) after it.
  *   i.e. if indirection_buffer[j] points to the first input pixel used to
  *   compute the i'th output pixel, then

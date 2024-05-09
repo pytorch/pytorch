@@ -6,6 +6,27 @@
 
 set -ex
 
+# shellcheck source=./common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+
+# Do not change workspace permissions for ROCm CI jobs
+# as it can leave workspace with bad permissions for cancelled jobs
+if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+  # Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
+  WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
+  cleanup_workspace() {
+    echo "sudo may print the following warning message that can be ignored. The chown command will still run."
+    echo "    sudo: setrlimit(RLIMIT_STACK): Operation not permitted"
+    echo "For more details refer to https://github.com/sudo-project/sudo/issues/42"
+    sudo chown -R "$WORKSPACE_ORIGINAL_OWNER_ID" /var/lib/jenkins/workspace
+  }
+  # Disable shellcheck SC2064 as we want to parse the original owner immediately.
+  # shellcheck disable=SC2064
+  trap_add cleanup_workspace EXIT
+  sudo chown -R jenkins /var/lib/jenkins/workspace
+  git config --global --add safe.directory /var/lib/jenkins/workspace
+fi
+
 echo "Environment variables:"
 env
 
@@ -90,9 +111,6 @@ if [[ -n $TESTS_TO_INCLUDE ]]; then
   INCLUDE_CLAUSE="--include $TESTS_TO_INCLUDE"
 fi
 
-# shellcheck source=./common.sh
-source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
-
 echo "Environment variables"
 env
 
@@ -130,6 +148,8 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
 elif [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="xpu"
+  # setting PYTHON_TEST_EXTRA_OPTION
+  export PYTHON_TEST_EXTRA_OPTION="--xpu"
 fi
 
 if [[ "$TEST_CONFIG" == *crossref* ]]; then
@@ -137,6 +157,8 @@ if [[ "$TEST_CONFIG" == *crossref* ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  # regression in ROCm 6.0 on MI50 CI runners due to hipblaslt; remove in 6.1
+  export VALGRIND=OFF
   # Print GPU info
   rocminfo
   rocminfo | grep -E 'Name:.*\sgfx|Marketing'
@@ -158,6 +180,13 @@ if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
   # but this script should be runnable by any user, including root
   export PATH="$HOME/.local/bin:$PATH"
 fi
+
+if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
+  # TODO: revisit this once the CI is stabilized on aarch64 linux
+  export VALGRIND=OFF
+fi
+
+install_tlparse
 
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
 # if you're not careful.  Check this if you made some changes and the
@@ -205,8 +234,6 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     export LD_PRELOAD=/usr/lib/llvm-15/lib/clang/15.0.7/lib/linux/libclang_rt.asan-x86_64.so
     # Disable valgrind for asan
     export VALGRIND=OFF
-    # Increase stack size, because ASAN red zones use more stack
-    ulimit -s 81920
 
     (cd test && python -c "import torch; print(torch.__version__, torch.version.git_version)")
     echo "The next four invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
@@ -250,14 +277,14 @@ test_python_shard() {
 
   # Bare --include flag is not supported and quoting for lint ends up with flag not being interpreted correctly
   # shellcheck disable=SC2086
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose $PYTHON_TEST_EXTRA_OPTION
 
   assert_git_not_dirty
 }
 
 test_python() {
   # shellcheck disable=SC2086
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --verbose
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --verbose $PYTHON_TEST_EXTRA_OPTION
   assert_git_not_dirty
 }
 
@@ -268,34 +295,13 @@ test_dynamo_shard() {
     exit 1
   fi
   python tools/dynamo/verify_dynamo.py
-  # Temporarily disable test_fx for dynamo pending the investigation on TTS
-  # regression in https://github.com/pytorch/torchdynamo/issues/784
+  # PLEASE DO NOT ADD ADDITIONAL EXCLUDES HERE.
+  # Instead, use @skipIfTorchDynamo on your tests.
   time python test/run_test.py --dynamo \
+    --exclude-inductor-tests \
     --exclude-jit-executor \
     --exclude-distributed-tests \
-    --exclude \
-      test_ao_sparsity \
-      test_autograd \
-      test_jit \
-      test_proxy_tensor \
-      test_quantization \
-      test_public_bindings \
-      test_dataloader \
-      test_reductions \
-      test_namedtensor \
-      test_namedtuple_return_api \
-      profiler/test_profiler \
-      profiler/test_profiler_tree \
-      test_overrides \
-      test_python_dispatch \
-      test_fx \
-      test_package \
-      test_legacy_vmap \
-      test_custom_ops \
-      test_content_store \
-      export/test_db \
-      functorch/test_dims \
-      functorch/test_aotdispatch \
+    --exclude-torch-export-tests \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   assert_git_not_dirty
@@ -304,11 +310,23 @@ test_dynamo_shard() {
 test_inductor_distributed() {
   # Smuggle a few multi-gpu tests here so that we don't have to request another large node
   echo "Testing multi_gpu tests in test_torchinductor"
-  pytest test/inductor/test_torchinductor.py -k test_multi_gpu
-  pytest test/inductor/test_aot_inductor.py -k test_non_default_cuda_device
-  pytest test/inductor/test_aot_inductor.py -k test_replicate_on_devices
-  pytest test/distributed/_tensor/test_dtensor_compile.py
-  pytest test/distributed/tensor/parallel/test_fsdp_2d_parallel.py
+  python test/run_test.py -i inductor/test_torchinductor.py -k test_multi_gpu --verbose
+  python test/run_test.py -i inductor/test_aot_inductor.py -k test_non_default_cuda_device --verbose
+  python test/run_test.py -i inductor/test_aot_inductor.py -k test_replicate_on_devices --verbose
+  python test/run_test.py -i distributed/test_c10d_functional_native.py --verbose
+  python test/run_test.py -i distributed/_tensor/test_dtensor_compile.py --verbose
+  python test/run_test.py -i distributed/tensor/parallel/test_fsdp_2d_parallel.py --verbose
+  python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_comm.py --verbose
+  python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_multi_group --verbose
+  python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_with_activation_checkpointing --verbose
+  python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_2d_mlp --verbose
+  python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_hsdp --verbose
+  python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_2d_transformer_checkpoint_resume --verbose
+  python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_gradient_accumulation --verbose
+  python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_frozen.py --verbose
+  python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_mixed_precision.py -k test_compute_dtype --verbose
+  python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_mixed_precision.py -k test_reduce_dtype --verbose
+  python test/run_test.py -i distributed/fsdp/test_fsdp_tp_integration.py -k test_fsdp_tp_integration --verbose
 
   # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
   # with if required # gpus aren't available
@@ -320,14 +338,22 @@ test_inductor() {
   python tools/dynamo/verify_dynamo.py
   python test/run_test.py --inductor --include test_modules test_ops test_ops_gradients test_torch --verbose
   # Do not add --inductor for the following inductor unit tests, otherwise we will fail because of nested dynamo state
-  python test/run_test.py --include inductor/test_torchinductor inductor/test_torchinductor_opinfo --verbose
+  python test/run_test.py --include inductor/test_torchinductor inductor/test_torchinductor_opinfo inductor/test_aot_inductor --verbose
 
   # docker build uses bdist_wheel which does not work with test_aot_inductor
   # TODO: need a faster way to build
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
       BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
-      CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aot_inductor
+      CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference
   fi
+}
+
+test_inductor_cpp_wrapper_abi_compatible() {
+  export TORCHINDUCTOR_ABI_COMPATIBLE=1
+  echo "Testing Inductor cpp wrapper mode with TORCHINDUCTOR_ABI_COMPATIBLE=1"
+  # cpu stack allocation causes segfault and needs more investigation
+  TORCHINDUCTOR_STACK_ALLOCATION=0 python test/run_test.py --include inductor/test_cpu_cpp_wrapper
+  python test/run_test.py --include inductor/test_cuda_cpp_wrapper
 }
 
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
@@ -422,7 +448,7 @@ test_perf_for_dashboard() {
             --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_freezing_autotune_${suite}_${dtype}_${mode}_cuda_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *aotinductor-true* ]] && [[ "$mode" == "inference" ]]; then
-        python "benchmarks/dynamo/$suite.py" \
+        TORCHINDUCTOR_ABI_COMPATIBLE=1 python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --export-aot-inductor --disable-cudagraphs "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_aot_inductor_${suite}_${dtype}_${mode}_cuda_${target}.csv"
       fi
@@ -430,6 +456,17 @@ test_perf_for_dashboard() {
         TORCHINDUCTOR_MAX_AUTOTUNE=1 python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_cuda_${target}.csv"
+      fi
+      if [[ "$DASHBOARD_TAG" == *cudagraphs_low_precision-true* ]] && [[ "$mode" == "inference" ]]; then
+        # TODO: This has a new dtype called quant and the benchmarks script needs to be updated to support this.
+        # The tentative command is as follows. It doesn't work now, but it's ok because we only need mock data
+        # to fill the dashboard.
+        python "benchmarks/dynamo/$suite.py" \
+          "${target_flag[@]}" --"$mode" --quant --backend "$backend" "$@" \
+          --output "$TEST_REPORTS_DIR/${backend}_cudagraphs_low_precision_${suite}_quant_${mode}_cuda_${target}.csv" || true
+        # Copy cudagraph results as mock data, easiest choice?
+        cp "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_${target}.csv" \
+          "$TEST_REPORTS_DIR/${backend}_cudagraphs_low_precision_${suite}_quant_${mode}_cuda_${target}.csv"
       fi
     done
   done
@@ -466,6 +503,11 @@ test_single_dynamo_benchmark() {
     test_perf_for_dashboard "$suite" \
       "${DYNAMO_BENCHMARK_FLAGS[@]}" "$@" "${partition_flags[@]}"
   else
+    if [[ "${TEST_CONFIG}" == *aot_inductor* ]]; then
+      # Test AOTInductor with the ABI-compatible mode on CI
+      # This can be removed once the ABI-compatible mode becomes default.
+      export TORCHINDUCTOR_ABI_COMPATIBLE=1
+    fi
     python "benchmarks/dynamo/$suite.py" \
       --ci --accuracy --timing --explain \
       "${DYNAMO_BENCHMARK_FLAGS[@]}" \
@@ -478,6 +520,11 @@ test_single_dynamo_benchmark() {
       --actual "$TEST_REPORTS_DIR/${name}_$suite.csv" \
       --expected "benchmarks/dynamo/ci_expected_accuracy/${TEST_CONFIG}_${name}.csv"
   fi
+}
+
+test_inductor_micro_benchmark() {
+  TEST_REPORTS_DIR=$(pwd)/test/test-micro-reports
+  python benchmarks/gpt_fast/benchmark.py
 }
 
 test_dynamo_benchmark() {
@@ -522,7 +569,7 @@ test_inductor_torchbench_smoketest_perf() {
   # The threshold value needs to be actively maintained to make this check useful
   python benchmarks/dynamo/check_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_training_smoketest.csv" -t 1.4
 
-  python benchmarks/dynamo/torchbench.py --device cuda --performance --bfloat16 --inference \
+  TORCHINDUCTOR_ABI_COMPATIBLE=1 python benchmarks/dynamo/torchbench.py --device cuda --performance --bfloat16 --inference \
     --export-aot-inductor --only nanogpt --output "$TEST_REPORTS_DIR/inductor_inference_smoketest.csv"
   # The threshold value needs to be actively maintained to make this check useful
   # The perf number of nanogpt seems not very stable, e.g.
@@ -541,6 +588,56 @@ test_inductor_torchbench_smoketest_perf() {
       "$TEST_REPORTS_DIR/inductor_training_smoketest_$test.csv" \
       --expected benchmarks/dynamo/expected_ci_perf_inductor_torchbench.csv
   done
+}
+
+test_inductor_torchbench_cpu_smoketest_perf(){
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+
+  #set jemalloc
+  JEMALLOC_LIB="/usr/lib/x86_64-linux-gnu/libjemalloc.so.2"
+  IOMP_LIB="$(dirname "$(which python)")/../lib/libiomp5.so"
+  export LD_PRELOAD="$JEMALLOC_LIB":"$IOMP_LIB":"$LD_PRELOAD"
+  export MALLOC_CONF="oversize_threshold:1,background_thread:true,metadata_thp:auto,dirty_decay_ms:-1,muzzy_decay_ms:-1"
+  export KMP_AFFINITY=granularity=fine,compact,1,0
+  export KMP_BLOCKTIME=1
+  CORES=$(lscpu | grep Core | awk '{print $4}')
+  export OMP_NUM_THREADS=$CORES
+  end_core=$(( CORES-1 ))
+
+  MODELS_SPEEDUP_TARGET=benchmarks/dynamo/expected_ci_speedup_inductor_torchbench_cpu.csv
+
+  grep -v '^ *#' < "$MODELS_SPEEDUP_TARGET" | while IFS=',' read -r -a model_cfg
+  do
+    local model_name=${model_cfg[0]}
+    local data_type=${model_cfg[1]}
+    local speedup_target=${model_cfg[4]}
+    if [[ ${model_cfg[3]} == "cpp" ]]; then
+      export TORCHINDUCTOR_CPP_WRAPPER=1
+    else
+      unset TORCHINDUCTOR_CPP_WRAPPER
+    fi
+    local output_name="$TEST_REPORTS_DIR/inductor_inference_${model_cfg[0]}_${model_cfg[1]}_${model_cfg[2]}_${model_cfg[3]}_cpu_smoketest.csv"
+
+    if [[ ${model_cfg[2]} == "dynamic" ]]; then
+      taskset -c 0-"$end_core" python benchmarks/dynamo/torchbench.py \
+        --inference --performance --"$data_type" -dcpu -n50 --only "$model_name" --dynamic-shapes \
+        --dynamic-batch-only --freezing --timeout 9000 --backend=inductor --output "$output_name"
+    else
+      taskset -c 0-"$end_core" python benchmarks/dynamo/torchbench.py \
+        --inference --performance --"$data_type" -dcpu -n50 --only "$model_name" \
+        --freezing --timeout 9000 --backend=inductor --output "$output_name"
+    fi
+    cat "$output_name"
+    # The threshold value needs to be actively maintained to make this check useful.
+    python benchmarks/dynamo/check_perf_csv.py -f "$output_name" -t "$speedup_target"
+  done
+}
+
+test_torchbench_gcp_smoketest(){
+  pushd "${TORCHBENCHPATH}"
+  python test.py -v
+  popd
 }
 
 test_python_gloo_with_tls() {
@@ -693,9 +790,8 @@ test_xpu_bin(){
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
-  for xpu_case in "${BUILD_BIN_DIR}"/*{xpu,sycl}*
-  do
-    if [[ "$xpu_case" != *"*"* ]]; then
+  for xpu_case in "${BUILD_BIN_DIR}"/*{xpu,sycl}*; do
+    if [[ "$xpu_case" != *"*"* && "$xpu_case" != *.so && "$xpu_case" != *.a ]]; then
       case_name=$(basename "$xpu_case")
       echo "Testing ${case_name} ..."
       "$xpu_case" --gtest_output=xml:"$TEST_REPORTS_DIR"/"$case_name".xml
@@ -943,7 +1039,8 @@ test_bazel() {
 
     tools/bazel test --config=cpu-only --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
   else
-    tools/bazel test --test_output=errors \
+    # Increase the test timeout to 480 like CPU tests because modules_test frequently timeout
+    tools/bazel test --test_timeout=480 --test_output=errors \
       //:any_test \
       //:autograd_test \
       //:dataloader_test \
@@ -1038,14 +1135,17 @@ test_docs_test() {
 }
 
 test_executorch() {
+  echo "Install torchvision and torchaudio"
+  install_torchvision
+  install_torchaudio
+
   pushd /executorch
 
-  echo "Install torchvision and torchaudio"
-  # TODO(huydhn): Switch this to the pinned commits on ExecuTorch once they are
-  # there.  These libraries need to be built here, and not part of the Docker
-  # image because they require the target version of torch to be installed first
-  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/audio.git"
-  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/vision.git"
+  # NB: We need to build ExecuTorch runner here and not inside the Docker image
+  # because it depends on PyTorch
+  # shellcheck disable=SC1091
+  source .ci/scripts/utils.sh
+  build_executorch_runner "cmake"
 
   echo "Run ExecuTorch regression tests for some models"
   # NB: This is a sample model, more can be added here
@@ -1063,11 +1163,33 @@ test_executorch() {
   assert_git_not_dirty
 }
 
+test_linux_aarch64(){
+  python test/run_test.py --include test_modules test_mkldnn test_mkldnn_fusion test_openmp test_torch test_dynamic_shapes \
+       test_transformers test_multiprocessing test_numpy_interop --verbose
+
+  # Dynamo tests
+  python test/run_test.py --include dynamo/test_compile dynamo/test_backends dynamo/test_comptime dynamo/test_config \
+       dynamo/test_functions dynamo/test_fx_passes_pre_grad dynamo/test_interop dynamo/test_model_output dynamo/test_modules \
+       dynamo/test_optimizers dynamo/test_recompile_ux dynamo/test_recompiles --verbose
+
+  # Inductor tests
+  python test/run_test.py --include inductor/test_torchinductor inductor/test_benchmark_fusion inductor/test_codecache \
+       inductor/test_config inductor/test_control_flow inductor/test_coordinate_descent_tuner inductor/test_fx_fusion \
+       inductor/test_group_batch_fusion inductor/test_inductor_freezing inductor/test_inductor_utils \
+       inductor/test_inplacing_pass inductor/test_kernel_benchmark inductor/test_layout_optim \
+       inductor/test_max_autotune inductor/test_memory_planning inductor/test_metrics inductor/test_multi_kernel inductor/test_pad_mm \
+       inductor/test_pattern_matcher inductor/test_perf inductor/test_profiler inductor/test_select_algorithm inductor/test_smoke \
+       inductor/test_split_cat_fx_passes inductor/test_standalone_compile inductor/test_torchinductor \
+       inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_torchinductor_dynamic_shapes --verbose
+}
+
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
-if [[ "${TEST_CONFIG}" == *backward* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
+  test_linux_aarch64
+elif [[ "${TEST_CONFIG}" == *backward* ]]; then
   test_forward_backward_compatibility
   # Do NOT add tests after bc check tests, see its comment.
 elif [[ "${TEST_CONFIG}" == *xla* ]]; then
@@ -1092,6 +1214,8 @@ elif [[ "$TEST_CONFIG" == deploy ]]; then
   test_torch_deploy
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   test_inductor_distributed
+elif [[ "${TEST_CONFIG}" == *inductor-micro-benchmark* ]]; then
+  test_inductor_micro_benchmark
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   install_torchvision
   id=$((SHARD_NUMBER-1))
@@ -1114,6 +1238,14 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
     checkout_install_torchbench hf_Bert hf_Albert nanogpt timm_vision_transformer
     PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_smoketest_perf
+  elif [[ "${TEST_CONFIG}" == *inductor_torchbench_cpu_smoketest_perf* ]]; then
+    checkout_install_torchbench timm_vision_transformer phlippe_densenet basic_gnn_gcn \
+      llama_v2_7b_16h resnet50 timm_efficientnet mobilenet_v3_large timm_resnest \
+      shufflenet_v2_x1_0 hf_GPT2
+    PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_cpu_smoketest_perf
+  elif [[ "${TEST_CONFIG}" == *torchbench_gcp_smoketest* ]]; then
+    checkout_install_torchbench
+    TORCHBENCHPATH=$(pwd)/torchbench test_torchbench_gcp_smoketest
   else
     checkout_install_torchbench
     # Do this after checkout_install_torchbench to ensure we clobber any
@@ -1123,6 +1255,9 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     fi
     PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id"
   fi
+elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper_abi_compatible* ]]; then
+  install_torchvision
+  test_inductor_cpp_wrapper_abi_compatible
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
   install_torchvision
   test_inductor

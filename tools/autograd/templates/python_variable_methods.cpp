@@ -21,7 +21,8 @@
 #ifdef USE_CUDA
 #include "torch/csrc/cuda/Event.h"
 #endif
-#include "torch/csrc/utils/cuda_lazy_init.h"
+#include "torch/csrc/utils/device_lazy_init.h"
+#include <torch/csrc/utils/numpy_stub.h>
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/pycfunction_helpers.h"
 #include "torch/csrc/utils/python_arg_parser.h"
@@ -317,9 +318,7 @@ template<typename T>
 static T dispatch_to(const Tensor & self) {
   pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
-  if (self.sym_numel() != 1) {
-    throw ValueError("only one element tensors can be converted to Python scalars");
-  }
+  TORCH_CHECK_VALUE(self.sym_numel() == 1, "only one element tensors can be converted to Python scalars");
   return self.template item<T>();
 }
 
@@ -497,7 +496,7 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
   auto device = r.isNone(0) ? at::Device(at::DeviceType::CUDA) : r.device(0);
   auto opt_memory_format = r.memoryformatOptional(2);
   TORCH_CHECK(device.is_cuda(), "Invalid device, must be cuda device");
-  torch::utils::cuda_lazy_init();
+  torch::utils::device_lazy_init(at::kCUDA);
   return THPVariable_Wrap(dispatch_to(self_, device, r.toBool(1), false, opt_memory_format));
   END_HANDLE_TH_ERRORS
 }
@@ -520,6 +519,7 @@ static PyObject * THPVariable_xpu(PyObject* self, PyObject* args, PyObject* kwar
   auto device = r.isNone(0) ? at::Device(at::DeviceType::XPU) : r.device(0);
   auto opt_memory_format = r.memoryformatOptional(2);
   TORCH_CHECK(device.is_xpu(), "Invalid device, must be xpu device");
+  torch::utils::device_lazy_init(at::kXPU);
   return THPVariable_Wrap(dispatch_to(self_, device, r.toBool(1), false, opt_memory_format));
   END_HANDLE_TH_ERRORS
 }
@@ -975,9 +975,7 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
   auto copy = std::get<3>(parsed);
   auto opt_memory_format = std::get<4>(parsed);
   auto& self_ = THPVariable_Unpack(self);
-  if (device && device->is_cuda()) {
-    torch::utils::cuda_lazy_init();
-  }
+  torch::utils::maybe_initialize_device(device);
   if (device && device->is_privateuseone()) {
     at::globalContext().lazyInitPrivateUse1();
   }
@@ -1059,9 +1057,7 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   if (device_type != device.type()) {
     device = at::Device(device_type);
   }
-  if (device.is_cuda()) {
-    torch::utils::cuda_lazy_init();
-  }
+  torch::utils::maybe_initialize_device(device);
   if (device.is_privateuseone()) {
     at::globalContext().lazyInitPrivateUse1();
   }
@@ -1081,6 +1077,41 @@ static PyObject * THPVariable_bool_scalar(PyObject* self, PyObject* args) {
   }
   jit::tracer::warn("Converting a tensor to a Python boolean", jit::tracer::WARN_PYTHON_DATAFLOW);
   return THPVariable_is_nonzero(self, args);
+}
+
+static PyObject * THPVariable___eq__(PyObject* self_, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+#ifdef USE_NUMPY
+  if (torch::utils::is_numpy_available()) {
+    static PythonArgParser parser({
+      "__eq__(PyObject* other)",
+    }, /*traceable=*/true);
+
+    ParsedArgs<1> parsed_args;
+    auto _r = parser.parse(self_, args, kwargs, parsed_args);
+    if(_r.has_torch_function()) {
+      return handle_torch_function(_r, self_, args, kwargs, THPVariableClass, "torch.Tensor");
+    }
+    switch (_r.idx) {
+      case 0: {
+        auto other = _r.pyobject(0);
+        if (PyArray_Check(other)) {
+          auto other_tensor = torch::utils::tensor_from_numpy(other);
+          auto dispatch_eq = [](const at::Tensor & self, const at::Tensor & other) -> at::Tensor {
+            pybind11::gil_scoped_release no_gil;
+            return self.eq(other);
+          };
+          const Tensor& self = THPVariable_Unpack(self_);
+          return wrap(dispatch_eq(self, other_tensor));
+        }
+      }
+    }
+  }
+#endif
+  return THPVariable_eq(self_, args, kwargs);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 
 // Wrapper converts a raised TypeError into returning NotImplemented
@@ -1214,7 +1245,7 @@ PyMethodDef variable_methods[] = {
   {"__ifloordiv__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_floor_divide_>), METH_VARARGS | METH_KEYWORDS, NULL},
   {"__mod__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_remainder>), METH_VARARGS | METH_KEYWORDS, NULL},
   {"__imod__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_remainder_>), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__eq__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_eq>), METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__eq__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable___eq__>), METH_VARARGS | METH_KEYWORDS, NULL},
   {"__ne__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_ne>), METH_VARARGS | METH_KEYWORDS, NULL},
   {"__lt__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_lt>), METH_VARARGS | METH_KEYWORDS, NULL},
   {"__le__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_le>), METH_VARARGS | METH_KEYWORDS, NULL},

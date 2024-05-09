@@ -4,13 +4,11 @@
 /// conversions to standard C types and basic arithmetic operations. Note that
 /// arithmetic operations are implemented by converting to floating point and
 /// performing the operation in float32.
-///
 /// Binary configuration remains the same as e5m2:
 /// s eeeee mm
 /// 1 sign bit
 /// 5 exponent bits
 /// 2 mantissa bits
-///
 /// The key differences that e5m2fnuz brings are:
 /// bias = 16
 /// no infinities or negative zero
@@ -20,7 +18,6 @@
 /// the existing Float8_e4m3fn implementation.
 
 #include <c10/macros/Macros.h>
-#include <c10/util/C++17.h>
 #include <c10/util/TypeSafeSignMath.h>
 #include <c10/util/floating_point_utils.h>
 
@@ -39,26 +36,10 @@ namespace c10 {
 namespace detail {
 
 /*
- * Convert a 8-bit floating-point number in fp8 E5M2FNUZ format, in bit
- * representation, to a 32-bit floating-point number in IEEE single-precision
- * format, in bit representation.
- *
- * @note The implementation doesn't use any floating-point operations.
- */
-#if defined(__CUDA_ARCH__) || defined(__HIP__)
-C10_HOST_DEVICE C10_API inline float fp8e5m2fnuz_to_fp32_value(uint8_t) {
-  CUDA_KERNEL_ASSERT(false && "e5m2fnuz is not supported by CUDA or HIP");
-  return -1.0;
-}
-#else
-C10_API float fp8e5m2fnuz_to_fp32_value(uint8_t input);
-#endif
-
-/*
  * Convert a 32-bit floating-point number in IEEE single-precision format to a
  * 8-bit floating-point number in fp8 E5M2 format, in bit representation.
  */
-C10_HOST_DEVICE inline uint8_t fp8e5m2fnuz_from_fp32_value(float f) {
+inline C10_HOST_DEVICE uint8_t fp8e5m2fnuz_from_fp32_value(float f) {
   /*
    * Binary representation of 65536.0f, which is the first value not
    * representable (i.e. the first value which would overflow in to the sign
@@ -76,7 +57,6 @@ C10_HOST_DEVICE inline uint8_t fp8e5m2fnuz_from_fp32_value(float f) {
   constexpr uint32_t denorm_mask = UINT32_C(0x85) << 23;
 
   uint32_t f_bits = fp32_to_bits(f);
-
   uint32_t result = 0u;
 
   /*
@@ -132,7 +112,7 @@ struct alignas(1) Float8_e5m2fnuz {
   uint8_t x;
 
   struct from_bits_t {};
-  static constexpr C10_HOST_DEVICE from_bits_t from_bits() {
+  C10_HOST_DEVICE static constexpr from_bits_t from_bits() {
     return from_bits_t();
   }
 
@@ -143,11 +123,15 @@ struct alignas(1) Float8_e5m2fnuz {
   inline C10_HOST_DEVICE Float8_e5m2fnuz(float value);
   inline C10_HOST_DEVICE operator float() const;
   inline C10_HOST_DEVICE bool isnan() const;
+  inline C10_HOST_DEVICE bool isinf() const;
 };
 
-C10_API std::ostream& operator<<(
+C10_API inline std::ostream& operator<<(
     std::ostream& out,
-    const Float8_e5m2fnuz& value);
+    const Float8_e5m2fnuz& value) {
+  out << (float)value;
+  return out;
+}
 
 } // namespace c10
 

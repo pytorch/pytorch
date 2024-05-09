@@ -6,7 +6,8 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/irange.h>
-#if (defined(CPU_CAPABILITY_AVX512)) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX512))
+#define SLEEF_STATIC_LIBS
 #include <sleef.h>
 #endif
 
@@ -15,7 +16,7 @@ namespace vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX512)
 
 template <> class Vectorized<double> {
 private:
@@ -106,6 +107,10 @@ public:
     return _mm512_castsi512_pd(_mm512_mask_set1_epi64(zero_vector, cmp_mask,
                                                       0xFFFFFFFFFFFFFFFF));
   }
+  bool has_inf_nan() const {
+    __m512d self_sub  = _mm512_sub_pd(values, values);
+    return (_mm512_movepi8_mask(_mm512_castpd_si512(self_sub)) & 0x7777777777777777) != 0;
+  }
   Vectorized<double> map(double (*const f)(double)) const {
     __at_align__ double tmp[size()];
     store(tmp);
@@ -144,6 +149,9 @@ public:
   }
   Vectorized<double> acos() const {
     return Vectorized<double>(Sleef_acosd8_u10(values));
+  }
+  Vectorized<double> acosh() const {
+    return Vectorized<double>(Sleef_acoshd8_u10(values));
   }
   Vectorized<double> asin() const {
     return Vectorized<double>(Sleef_asind8_u10(values));

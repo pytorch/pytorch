@@ -138,7 +138,15 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
                     raise NotImplementedError(
                         "Accuracy minification is supported for inductor only"
                     )
-                if backend_aot_accuracy_fails(gm, real_inputs, compiler_fn):
+                failed = not same_two_models(
+                    gm,
+                    inner_compiled_fn,
+                    real_inputs,
+                    only_fwd=True,
+                    ignore_non_fp=config.repro_ignore_non_fp,
+                )
+
+                if failed:
                     log.warning(
                         "Accuracy failed for the AOT Autograd graph %s", graph_name
                     )
@@ -274,10 +282,13 @@ def save_graph_repro(
     fd.write("if __name__ == '__main__':\n")
     fd.write("    from torch._dynamo.repro.after_aot import run_repro\n")
     fd.write(
-        f"    with torch.no_grad():"
+        f"    with torch.no_grad():\n"
         f"        run_repro(mod, load_args, accuracy={accuracy!r}, command={command!r}, "
-        f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}, check_str={check_str!r}"
-        ")\n"
+        f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}, check_str={check_str!r})\n"
+        f"        # To run it separately, do \n"
+        f"        # mod, args = run_repro(mod, load_args, accuracy={accuracy!r}, command='get_args', "
+        f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}, check_str={check_str!r})\n"
+        f"        # mod(*args)"
     )
 
 
@@ -682,6 +693,11 @@ def repro_analyze(options, mod, load_args):
     assert not args
 
 
+def repro_get_args(options, mod, load_args):
+    mod, args = repro_common(options, mod, load_args)
+    return mod, args
+
+
 def repro_run(options, mod, load_args):
     from torch._inductor.compile_fx import compile_fx_inner
 
@@ -694,7 +710,13 @@ def repro_run(options, mod, load_args):
     if options.accuracy != "":
         # We don't really respect --accuracy vs --strict-accuracy here, it
         # seems counterintuitive
-        if not same_two_models(mod, compiled, args, only_fwd=True):
+        if not same_two_models(
+            mod,
+            compiled,
+            args,
+            only_fwd=True,
+            ignore_non_fp=config.repro_ignore_non_fp,
+        ):
             raise AccuracyError("Bad accuracy detected")
     else:
         need_sync = False
@@ -702,9 +724,10 @@ def repro_run(options, mod, load_args):
             if isinstance(arg, torch.Tensor) and arg.is_cuda:
                 need_sync = True
                 break
-        ref = compiled(args)
+        ref = compiled(list(args))
         if need_sync:
             synchronize()  # ensure segfaults are surfaced
+    return lambda: compiled(list(args))
 
 
 # TODO: lazily load the inputs or something, rather than cloning them
@@ -838,6 +861,8 @@ divergences--you just might not end up with a useful repro in the end.""",
         "minify", help="run the minifier on the repro"
     )
     common_flags(parser_minify)
+    parser_get_args = subparsers.add_parser("get_args", help="get the args")
+    common_flags(parser_get_args)
     parser_minify_isolate = parser_minify.add_mutually_exclusive_group()
     parser_minify_isolate.add_argument(
         "--isolate",
@@ -927,5 +952,6 @@ divergences--you just might not end up with a useful repro in the end.""",
         "analyze": repro_analyze,
         "minifier-query": repro_minifier_query,
         "run": repro_run,
+        "get_args": repro_get_args,
     }
-    COMMAND_FNS[options.command](options, mod, load_args)
+    return COMMAND_FNS[options.command](options, mod, load_args)

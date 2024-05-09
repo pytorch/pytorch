@@ -21,7 +21,7 @@ else:
     DimOrDims = Optional[Tuple[int]]
 
 
-__all__ = []
+__all__: List[str] = []
 
 # All masked reduction/normalization operations have the same
 # signatures. Here we introduce docstring templates that are applied
@@ -210,7 +210,7 @@ ord (int, float, optional): the order of vector norm. Default: 2.
 ord (int, float): the order of vector norm. Default: 2.
   See :func:`torch.linalg.vector_norm` for a list of supported norms.""",
         unbiased="""\
-unbiased (bool): when True, use Bessel’s correction, otherwise, compute
+unbiased (bool): when True, use Bessel's correction, otherwise, compute
   the uncorrected sample variance.""",
         eps="""\
 eps (float, optional): small value to avoid division by zero. Default: {default}.""",
@@ -1627,7 +1627,7 @@ def _std_var(
             total = sum(x * x.conj(), dim, keepdim=keepdim, dtype=compute_dtype)
         else:
             total = sum(
-                x * x.conj(), dim, keepdim=keepdim, dtype=compute_dtype, mask=inmask
+                x * x.conj(), dim, keepdim=keepdim, dtype=compute_dtype, mask=inmask  # type: ignore[possibly-undefined]
             )
         if not keepdim:
             count = count.reshape(total.shape)

@@ -118,7 +118,7 @@ public:
   using value_type = composite_value_type;
   using reference = references_holder<composite_value_type, composite_reference>;
   // Note that CompositeRandomAccessor does not hold key and values
-  // in a specific datastrcture, which means that a pointer to a (key, value)
+  // in a specific datastructure, which means that a pointer to a (key, value)
   // is not defined. Hence we just use a pointer type of the KeyAccessor.
   using pointer = typename std::iterator_traits<KeyAccessor>::pointer;
   using difference_type = typename std::iterator_traits<KeyAccessor>::difference_type;

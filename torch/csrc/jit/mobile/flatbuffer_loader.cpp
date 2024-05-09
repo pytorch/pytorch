@@ -827,24 +827,18 @@ mobile::Module load_mobile_module_from_file(
     const std::string& filename,
     c10::optional<c10::Device> device,
     ExtraFilesMap* extra_files) {
-  std::shared_ptr<char> data;
-  size_t size = 0;
-  std::tie(data, size) = get_file_content(filename.c_str());
+  auto [data, size] = get_file_content(filename.c_str());
   return parse_and_initialize_mobile_module(
       std::move(data), size, device, extra_files);
 }
 
 uint64_t get_bytecode_version(std::istream& in) {
-  std::shared_ptr<char> data;
-  size_t size = 0;
-  std::tie(data, size) = get_stream_content(in);
+  auto [data, size] = get_stream_content(in);
   return get_bytecode_version_from_bytes(data.get());
 }
 
 uint64_t get_bytecode_version(const std::string& filename) {
-  std::shared_ptr<char> data;
-  size_t size = 0;
-  std::tie(data, size) = get_file_content(filename.c_str());
+  auto [data, size] = get_file_content(filename.c_str());
   return get_bytecode_version_from_bytes(data.get());
 }
 
@@ -893,9 +887,7 @@ mobile::Module load_mobile_module_from_stream_with_copy(
     std::istream& in,
     c10::optional<at::Device> device,
     ExtraFilesMap* extra_files) {
-  std::shared_ptr<char> data;
-  size_t size = 0;
-  std::tie(data, size) = get_stream_content(in);
+  auto [data, size] = get_stream_content(in);
   return parse_and_initialize_mobile_module(
       std::move(data), size, device, extra_files);
 }

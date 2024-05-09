@@ -14,7 +14,6 @@ static constexpr size_t kCONV_CUDNN_WORKSPACE_LIMIT_BYTES = 64 * 1024 * 1024;
 // This does not have any performance implications, as we will always find the
 // fastest algorithm; setting them to the right number of algorithms will enable
 // us to best report the statistics when doing an exhaustive search, though.
-#if CUDNN_VERSION_MIN(7, 0, 0)
 // Note: Double each of these due to potential
 // tensorcore + non-tensorcore versions
 // which are treated as separate returned algos
@@ -24,11 +23,6 @@ static constexpr size_t kNUM_CUDNN_BWD_FILTER_ALGS =
     2 * CUDNN_CONVOLUTION_BWD_FILTER_ALGO_COUNT;
 static constexpr size_t kNUM_CUDNN_BWD_DATA_ALGS =
     2 * CUDNN_CONVOLUTION_BWD_DATA_ALGO_COUNT;
-#else
-static constexpr size_t kNUM_CUDNN_FWD_ALGS = 7;
-static constexpr size_t kNUM_CUDNN_BWD_FILTER_ALGS = 4;
-static constexpr size_t kNUM_CUDNN_BWD_DATA_ALGS = 5;
-#endif
 
 namespace {
 template <typename ArrayOfcudnnConvolutionAlgoPerf_t>

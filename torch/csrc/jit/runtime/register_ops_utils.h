@@ -32,7 +32,6 @@
 #include <c10/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
-#include <c10/util/math_compat.h>
 #include <c10/util/string_utils.h>
 
 namespace torch::jit {
@@ -123,7 +122,7 @@ double radians(double x);
 
 // Equivalent to list.at(idx)
 template <typename T>
-T getItem(const c10::List<T>& list, int64_t idx) {
+decltype(auto) getItem(const c10::List<T>& list, int64_t idx) {
   const int64_t list_size = list.size();
   const int64_t normalized_idx = normalizeIndex(idx, list_size);
   if (normalized_idx < 0 || normalized_idx >= list_size) {

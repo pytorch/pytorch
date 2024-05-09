@@ -1,6 +1,8 @@
 #include <torch/csrc/inductor/aoti_runtime/arrayref_tensor.h>
 #include <torch/csrc/inductor/aoti_runtime/interface.h>
 #include <torch/csrc/inductor/aoti_runtime/model_container.h>
+#include <torch/csrc/inductor/aoti_runtime/scalar_to_tensor.h>
+#include <torch/csrc/inductor/aoti_runtime/thread_local.h>
 
 #include <iostream>
 #include <sstream>
@@ -51,6 +53,18 @@ AOTIRuntimeError AOTInductorModelContainerCreate(
     size_t num_models,
     bool is_cpu,
     const char* cubin_dir) {
+      return AOTInductorModelContainerCreateWithDevice(
+        container_handle,
+        num_models,
+        is_cpu ? "cpu" : "cuda",
+        cubin_dir);
+}
+
+AOTIRuntimeError AOTInductorModelContainerCreateWithDevice(
+    AOTInductorModelContainerHandle* container_handle,
+    size_t num_models,
+    const char* device_str,
+    const char* cubin_dir) {
   if (num_models == 0) {
     std::cerr << "Error: num_models must be positive, but got 0" << std::endl;
     return AOTI_RUNTIME_FAILURE;
@@ -61,7 +75,7 @@ AOTIRuntimeError AOTInductorModelContainerCreate(
       cubin_dir_opt.emplace(cubin_dir);
     }
     auto* container = new torch::aot_inductor::AOTInductorModelContainer(
-        num_models, is_cpu, cubin_dir_opt);
+        num_models, std::string(device_str), cubin_dir_opt);
     *container_handle =
         reinterpret_cast<AOTInductorModelContainerHandle>(container);
   })
@@ -136,6 +150,15 @@ AOTIRuntimeError AOTInductorModelContainerGetConstantOriginalFQN(
     { *original_fqn = container->constant_original_fqn(idx); })
 }
 
+AOTIRuntimeError AOTInductorModelContainerGetConstantFromFolded(
+    AOTInductorModelContainerHandle container_handle,
+    size_t idx,
+    bool* from_folded) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(container_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE({ *from_folded = container->constant_from_folded(idx); })
+}
+
 AOTIRuntimeError AOTInductorModelContainerGetConstantDtype(
     AOTInductorModelContainerHandle container_handle,
     size_t idx,
@@ -169,6 +192,22 @@ AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(
           constant_map_handle,
           /*use_inactive*/ true,
           /*validate_full_update*/ true);
+}
+
+AOTIRuntimeError AOTInductorModelContainerRunConstantFolding(
+    AOTInductorModelContainerHandle container_handle,
+    bool use_inactive,
+    AOTInductorStreamHandle stream_handle,
+    AOTIProxyExecutorHandle proxy_executor_handle) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  auto stream =
+      reinterpret_cast<torch::aot_inductor::DeviceStreamType>(stream_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    AOTINoGradGuard guard;
+    container->run_const_fold(use_inactive, stream, proxy_executor_handle);
+  })
 }
 
 AOTIRuntimeError AOTInductorModelContainerSwapConstantBuffer(
@@ -247,6 +286,7 @@ AOTIRuntimeError AOTInductorModelCreate(
       auto model = new torch::aot_inductor::AOTInductorModel(
           constant_map,
           constant_array,
+          "cpu", // device_str is hardcoded, as AOTInductorModelCreate is only use for CPU models
           ""
       );
 
@@ -255,7 +295,7 @@ AOTIRuntimeError AOTInductorModelCreate(
           constant_map->emplace(kv.first, kv.second);
         }
       } else {
-        model->load_constants(/*is_cpu*/true);
+        model->load_constants();
       }
 
       *model_handle = reinterpret_cast<AOTInductorModelHandle>(model);
@@ -311,8 +351,4 @@ AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
   })
 }
 
-#define CACHE_TORCH_DTYPE(typename) static auto cached_torch_dtype_##typename = aoti_torch_dtype_##typename()
-
-  static auto cached_torch_device_type_cpu = aoti_torch_device_type_cpu();
-  static auto cached_torch_device_type_cuda = aoti_torch_device_type_cuda();
 } // extern "C"

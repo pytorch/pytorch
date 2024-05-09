@@ -69,7 +69,7 @@ const char* cusparseGetErrorString(cusparseStatus_t status) {
 }
 #endif
 
-namespace at { namespace native { namespace sparse { namespace cuda {
+namespace at::native::sparse::cuda {
 
 void Xcoo2csr(const int *coorowind, int64_t nnz, int64_t m, int *csrrowptr) {
   TORCH_CHECK((m <= INT_MAX) && (nnz <= INT_MAX),
@@ -154,6 +154,13 @@ void _csrmm2(
 
 
   auto handle = at::cuda::getCurrentCUDASparseHandle();
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  // ALG1 is broken on SM89 as of CUDA 11.8+
+#if !defined(USE_ROCM)
+  auto default_alg = prop->major == 8 && prop->minor == 9 ? CUSPARSE_SPMM_CSR_ALG2 : CUSPARSE_SPMM_CSR_ALG1;
+#else
+  auto default_alg = CUSPARSE_SPMM_CSR_ALG1;
+#endif
 
   // cusparseSpMM_bufferSize returns the bufferSize that can be used by cusparseSpMM
   size_t bufferSize;
@@ -164,7 +171,7 @@ void _csrmm2(
     beta,
     descC,
     cusparse_value_type,      /* data type in which the computation is executed */
-    CUSPARSE_SPMM_CSR_ALG1,   /* default computing algorithm for CSR sparse matrix format */
+    default_alg,              /* default computing algorithm for CSR sparse matrix format */
     &bufferSize               /* output */
   ));
 
@@ -178,7 +185,7 @@ void _csrmm2(
     beta,
     descC,
     cusparse_value_type,      /* data type in which the computation is executed */
-    CUSPARSE_SPMM_CSR_ALG1,   /* default computing algorithm for CSR sparse matrix format */
+    default_alg,              /* default computing algorithm for CSR sparse matrix format */
     dataPtr.get()             /* external buffer */
   ));
 
@@ -524,4 +531,4 @@ void XcoosortByRow(int64_t m, int64_t n, int64_t nnz, int *cooRows, int *cooCols
 }
 
 
-}}}} // namespace at::native::sparse::cuda
+} // namespace at::native::sparse::cuda

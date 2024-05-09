@@ -1,5 +1,6 @@
 from .utils import _toposort, groupby
 from .variadic import isvariadic
+import operator
 
 __all__ = ["AmbiguityWarning", "supercedes", "consistent", "ambiguous", "ambiguities", "super_signature",
            "edge", "ordering"]
@@ -68,8 +69,8 @@ def consistent(a, b):
                 p1 += 1
         # We only need to check for variadic ends
         # Variadic types are guaranteed to be the last element
-        return (isvariadic(cur_a) and p2 == len(b) or
-                isvariadic(cur_b) and p1 == len(a))
+        return (isvariadic(cur_a) and p2 == len(b) or  # type: ignore[possibly-undefined]
+                isvariadic(cur_b) and p1 == len(a))  # type: ignore[possibly-undefined]
 
 
 def ambiguous(a, b):
@@ -111,7 +112,7 @@ def ordering(signatures):
     """
     signatures = list(map(tuple, signatures))
     edges = [(a, b) for a in signatures for b in signatures if edge(a, b)]
-    edges = groupby(lambda x: x[0], edges)
+    edges = groupby(operator.itemgetter(0), edges)
     for s in signatures:
         if s not in edges:
             edges[s] = []

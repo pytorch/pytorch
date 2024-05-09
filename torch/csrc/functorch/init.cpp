@@ -6,6 +6,7 @@
 
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/WrapDimUtils.h>
+#include <torch/csrc/utils/python_raii.h>
 #include <torch/python.h>
 
 #include <ATen/functorch/BatchRulesHelper.h>
@@ -306,6 +307,10 @@ static bool is_batchedtensor(const Tensor& tensor) {
   return batched != nullptr;
 }
 
+static bool is_legacy_batchedtensor(const Tensor& tensor) {
+  return tensor.unsafeGetTensorImpl()->key_set().has(DispatchKey::Batched);
+}
+
 static bool is_gradtrackingtensor(const Tensor& tensor) {
   auto* wrapped = maybeGetTensorWrapper(tensor);
   return wrapped != nullptr;
@@ -370,6 +375,15 @@ static int64_t currentLevel() {
   return current_level;
 }
 
+static c10::optional<int64_t> maybe_current_level() {
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  if (maybe_layer.has_value()) {
+    int current_level = maybe_layer->layerId();
+    return current_level;
+  }
+  return nullopt;
+}
+
 static void tls_set_vmap_excluded(bool excluded) {
   c10::impl::tls_set_dispatch_key_excluded(
       c10::DispatchKey::FuncTorchBatched, excluded);
@@ -388,6 +402,41 @@ static void dump_local_tls() {
   std::cout << "[Local Include] " << tls.included_ << std::endl;
   std::cout << "[Local Exclude] " << tls.excluded_ << std::endl;
 }
+
+namespace {
+
+// An RAII to save and restore the DynamicLayer stack.
+struct PreserveDynamicLayerStack {
+  size_t m_oldDepth;
+
+  ~PreserveDynamicLayerStack() {
+    while (at::functorch::getDynamicLayerStack().size() > m_oldDepth) {
+      const auto& top = at::functorch::getDynamicLayerStack().back();
+      switch (top.key()) {
+        case at::functorch::TransformType::Vmap:
+          _vmap_decrement_nesting();
+          break;
+        case at::functorch::TransformType::Grad:
+          _grad_decrement_nesting();
+          break;
+        case at::functorch::TransformType::Jvp:
+          _jvp_decrement_nesting();
+          break;
+        case at::functorch::TransformType::Functionalize:
+          _func_decrement_nesting();
+          break;
+        case at::functorch::TransformType::Torch:
+          popDynamicLayerAndDeleteMetadata();
+          break;
+      }
+    }
+  }
+
+  PreserveDynamicLayerStack()
+      : m_oldDepth(at::functorch::getDynamicLayerStack().size()) {}
+};
+
+} // anonymous namespace
 
 static std::tuple<Tensor, c10::optional<int64_t>> unwrapBatched(
     const Tensor& tensor,
@@ -469,11 +518,13 @@ void initFuncTorchBindings(PyObject* module) {
   // various debugging things. Maybe we should offer these as first-class APIs
   // on Tensors?
   m.def("is_batchedtensor", &is_batchedtensor);
+  m.def("is_legacy_batchedtensor", &is_legacy_batchedtensor);
   m.def("is_gradtrackingtensor", &is_gradtrackingtensor);
   m.def("is_functionaltensor", &is_functionaltensor);
   m.def("get_unwrapped", &get_unwrapped);
   m.def("maybe_get_level", &maybe_get_level);
   m.def("maybe_get_bdim", &maybe_get_bdim);
+  m.def("maybe_current_level", &maybe_current_level);
   m.def("current_level", &currentLevel);
   m.def("tls_set_vmap_excluded", &tls_set_vmap_excluded);
   m.def("_set_dynamic_layer_keys_included", &_set_dynamic_layer_keys_included);
@@ -482,6 +533,18 @@ void initFuncTorchBindings(PyObject* module) {
   m.def("is_functorch_wrapped_tensor", [](const Tensor& tensor) {
     return maybe_get_level(tensor) != -1;
   });
+  m.def(
+      "get_interpreter_stack", []() -> c10::optional<std::vector<Interpreter>> {
+        const auto& stack = getDynamicLayerStack();
+        if (stack.empty()) {
+          return c10::nullopt;
+        }
+        std::vector<Interpreter> result;
+        for (auto i : stack) {
+          result.push_back(i.interpreter());
+        }
+        return result;
+      });
   m.def("peek_interpreter_stack", []() -> c10::optional<Interpreter> {
     const auto& stack = getDynamicLayerStack();
     if (stack.empty()) {
@@ -535,6 +598,9 @@ void initFuncTorchBindings(PyObject* module) {
       .def(
           "functionalizeAddBackViews",
           &FunctionalizeInterpreterPtr::functionalizeAddBackViews);
+
+  torch::impl::py_context_manager<PreserveDynamicLayerStack>(
+      m, "_PreserveDynamicLayerStack");
 }
 
 } // namespace impl

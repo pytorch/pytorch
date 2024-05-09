@@ -138,7 +138,9 @@ _OBS_DTYPE_LIST = [
     torch.uint8,
     torch.int8,
     torch.int16,
-    torch.int32
+    torch.int32,
+    torch.float8_e5m2,
+    torch.float8_e4m3fn,
 ]
 
 _DEFAULT_FP32_OBS_OR_FQ_CTR = PlaceholderObserver.with_args(dtype=torch.float)
@@ -207,7 +209,7 @@ def _create_obs_or_fq_from_qspec(
         kwargs = _get_observer_kwargs(quantization_spec)
         observer_ctr = FixedQParamsObserver.with_args(**kwargs)
         if is_qat:
-            return FixedQParamsFakeQuantize.with_args(observer=observer_ctr)
+            return FixedQParamsFakeQuantize.with_args(observer=observer_ctr)()
         else:
             return observer_ctr()
 
@@ -835,7 +837,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
                 maybe_obs_mod = named_modules[maybe_obs_node.target]  # type: ignore[index]
                 if (
                     type(maybe_obs_mod) == type(arg_as_input_act_obs_or_fq) and
-                    maybe_obs_mod.dtype == arg_as_input_target_dtype
+                    maybe_obs_mod.dtype == arg_as_input_target_dtype  # type: ignore[possibly-undefined]
                 ):
                     arg_as_input_act_obs_or_fq = maybe_obs_mod  # type: ignore[assignment]
                     existing_obs_node = maybe_obs_node
@@ -1099,7 +1101,7 @@ def _maybe_insert_observers_before_graph_output(
         elif maybe_node is None:
             return None
         else:
-            raise Exception("Unhandled type for returned node:", maybe_node)
+            raise Exception("Unhandled type for returned node:", maybe_node)  # noqa: TRY002
 
     new_args = []
     for old_arg in graph_output_node.args:

@@ -77,11 +77,7 @@ class CudnnConvTransposeOpBase : public ConvTransposeUnpoolBase<CUDAContext> {
       const int H,
       const int W,
       cudnnTensorDescriptor_t* desc) const {
-#if CUDNN_VERSION_MIN(7, 0, 0)
     const int CC = C;
-#else
-    const int CC = C / group_;
-#endif
     switch (order_) {
       case StorageOrder::NCHW: {
         CUDNN_ENFORCE(cudnnSetTensor4dDescriptorEx(
@@ -242,11 +238,7 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
     }
     if (filter_changed) {
       cudnn_filter_dims_ = filter.sizes().vec();
-#if CUDNN_VERSION_MIN(7, 0, 0)
       const int MM = M;
-#else
-      const int MM = M / group_;
-#endif
       CUDNN_ENFORCE(cudnnSetFilter4dDescriptor(
           filter_desc_,
           cudnnTypeWrapper<T>::type,
@@ -292,7 +284,6 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
         "The current padding scheme leads to unequal padding on the left "
         "and right, which is not supported by cudnn.");
     // Set the convolution descriptor
-#if CUDNN_VERSION_MIN(6, 0, 0)
     CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
         conv_desc_,
         pad_t(),
@@ -303,19 +294,7 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
         1,
         CUDNN_CROSS_CORRELATION,
         cudnnTypeWrapper<T>::type));
-#else
-    CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
-        conv_desc_,
-        pad_t(),
-        pad_l(),
-        stride_h(),
-        stride_w(),
-        1,
-        1,
-        CUDNN_CROSS_CORRELATION));
-#endif
 
-#if CUDNN_VERSION_MIN(7, 0, 0)
     // enable TensorCore math if desired
     enable_tensor_core_ &= TensorCoreAvailable();
     if (enable_tensor_core_) {
@@ -324,7 +303,6 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
     }
     // set cuDNN groups if appropriate
     CUDNN_ENFORCE(cudnnSetConvolutionGroupCount(conv_desc_, group_));
-#endif
 
     if (force_algo_[ALGO_DGRAD] >= 0) {
       bwd_data_algo_ = (cudnnConvolutionBwdDataAlgo_t)force_algo_[ALGO_DGRAD];
@@ -400,7 +378,6 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
 
   // Now, actually run the computation.
   // Filter
-#if CUDNN_VERSION_MIN(7, 0, 0)
   cudnn_wrapper_.with_cudnn_state(cudnn_state_, [&](CuDNNState* state) {
     CUDNN_ENFORCE(cudnnConvolutionBackwardData(
         state->cudnn_handle(),
@@ -417,33 +394,6 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
         top_desc_,
         Y_data));
   });
-#else
-  const int X_HxW = H * W;
-  const int Y_HxW = H_out * W_out;
-  const int group_offset_X =
-      order_ == StorageOrder::NCHW ? M / group_ * X_HxW : M / group_;
-  const int group_offset_Y =
-      order_ == StorageOrder::NCHW ? C / group_ * Y_HxW : C / group_;
-  const int group_offset_filter = filter.numel() / group_;
-  for (int i = 0; i < group_; ++i) {
-    cudnn_wrapper_.with_cudnn_state(cudnn_state_, [&](CuDNNState* state) {
-      CUDNN_ENFORCE(
-          cudnnConvolutionBackwardData(state->cudnn_handle(),
-                                       cudnnTypeWrapper<T>::kOne(),
-                                       filter_desc_,
-                                       filter_data + i * group_offset_filter,
-                                       bottom_desc_,
-                                       X_data + i * group_offset_X;
-                                       conv_desc_,
-                                       bwd_data_algo_,
-                                       state->workspace().get(cudnn_ws_nbytes_),
-                                       cudnn_ws_nbytes_,
-                                       cudnnTypeWrapper<T_DX>::kZero(),
-                                       top_desc_,
-                                       Y_data + i * group_offset_Y));
-    });
-  }
-#endif
   // Bias
   if (InputSize() == 3) {
     CUDNN_ENFORCE(cudnnAddTensor(
@@ -527,11 +477,7 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
     }
     if (filter_changed) {
       cudnn_filter_dims_ = filter.sizes().vec();
-#if CUDNN_VERSION_MIN(7, 0, 0)
       const int MM = M;
-#else
-      const int MM = M / group_;
-#endif
       CUDNN_ENFORCE(cudnnSetFilter4dDescriptor(
           filter_desc_,
           cudnnTypeWrapper<T>::type,
@@ -576,7 +522,6 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
         pad_r(),
         "The current padding scheme leads to unequal padding on the left "
         "and right, which is not supported by cudnn.");
-#if CUDNN_VERSION_MIN(6, 0, 0)
     CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
         conv_desc_,
         pad_t(),
@@ -587,18 +532,6 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
         1,
         CUDNN_CROSS_CORRELATION,
         cudnnTypeWrapper<T>::type));
-#else
-    CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
-        conv_desc_,
-        pad_t(),
-        pad_l(),
-        stride_h(),
-        stride_w(),
-        1,
-        1,
-        CUDNN_CROSS_CORRELATION));
-#endif
-#if CUDNN_VERSION_MIN(7, 0, 0)
     // enable TensorCore math if desired
     enable_tensor_core_ &= TensorCoreAvailable();
     if (enable_tensor_core_) {
@@ -607,7 +540,6 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
     }
     // set cuDNN groups if appropriate
     CUDNN_CHECK(cudnnSetConvolutionGroupCount(conv_desc_, group_));
-#endif
     if (force_algo_[ALGO_WGRAD] >= 0) {
       bwd_filter_algo_ =
           (cudnnConvolutionBwdFilterAlgo_t)force_algo_[ALGO_WGRAD];
@@ -762,7 +694,6 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
         dbias->template mutable_data<T>()));
   }
 
-#if CUDNN_VERSION_MIN(7, 0, 0)
   cudnn_wrapper_.with_cudnn_state(cudnn_state_, [&](CuDNNState* state) {
     CUDNN_ENFORCE(cudnnConvolutionBackwardFilter(
         state->cudnn_handle(),
@@ -801,55 +732,6 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
           dX->template mutable_data<T>()));
     }
   });
-#else
-  const int X_HxW = H * W;
-  const int Y_HxW = H_out * W_out;
-  const int group_offset_X =
-      order_ == StorageOrder::NCHW ? M / group_ * X_HxW : M / group_;
-  const int group_offset_Y =
-      order_ == StorageOrder::NCHW ? C / group_ * Y_HxW : C / group_;
-  const int group_offset_filter = filter.numel() / group_;
-  for (int i = 0; i < group_; ++i) {
-    cudnn_wrapper_.with_cudnn_state(cudnn_state_, [&](CuDNNState* state) {
-      CUDNN_ENFORCE(cudnnConvolutionBackwardFilter(
-          state->cudnn_handle(),
-          cudnnTypeWrapper<T>::kOne(),
-          top_desc_,
-          dY.template data<T>() + i * group_offset_Y,
-          bottom_desc_,
-          X.template data<T>() + i * group_offset_X,
-          conv_desc_,
-          bwd_filter_algo_,
-          state->workspace().get(cudnn_ws_nbytes_),
-          cudnn_ws_nbytes_,
-          cudnnTypeWrapper<T>::kZero(),
-          filter_desc_,
-          dfilter->template mutable_data<T>() + i * group_offset_filter));
-      if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
-        // Compute the gradient w.r.t. the input.
-        auto* dX = Output(
-            no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD,
-            X.sizes(),
-            at::dtype<T>());
-        cudnn_wrapper_.with_cudnn_state(cudnn_state_, [&](CuDNNState* state) {
-          CUDNN_ENFORCE(cudnnConvolutionForward(
-              state->cudnn_handle(),
-              cudnnTypeWrapper<T>::kOne(),
-              top_desc_,
-              dY.template data<T>() + i * group_offset_Y,
-              filter_desc_,
-              filter.template data<T>() + i * group_offset_filter,
-              conv_desc_,
-              algo_,
-              state->workspace().get(cudnn_ws_nbytes_),
-              cudnn_ws_nbytes_,
-              cudnnTypeWrapper<T>::kZero(),
-              bottom_desc_,
-              dX->template mutable_data<T>() + i * group_offset_X));
-        });
-      }
-  }
-#endif
   return true;
 }
 

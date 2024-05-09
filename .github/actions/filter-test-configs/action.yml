@@ -13,6 +13,13 @@ inputs:
     required: true
     type: string
     description: JSON description of what test configs to run.
+  selected-test-configs:
+    required: false
+    type: string
+    description: |
+      A comma-separated list of test configurations from the test matrix to keep,
+      The empty list means we are going to keep every configurations by defaults
+    default: ""
   job-name:
     type: string
     required: false
@@ -26,11 +33,23 @@ outputs:
     description: True if the filtered test configs matrix is empty. False otherwise.
     value: ${{ steps.filter.outputs.is-test-matrix-empty }}
   keep-going:
-    description: True if keep-going label was on PR.
+    description: True if keep-going label was on PR or [keep-going] in PR body.
     value: ${{ steps.filter.outputs.keep-going }}
   reenabled-issues:
     description: Comma separated list of issue numbers that should correspond to disable test issues that the PR fixes
     value: ${{ steps.filter.outputs.reenabled-issues }}
+  ci-verbose-test-logs:
+    description: True if ci-verbose-test-logs label was on PR or [ci-verbose-test-logs] in PR body.
+    value: ${{ steps.filter.outputs.ci-verbose-test-logs }}
+  ci-no-test-timeout:
+    description: True if ci-no-test-timeout label was on PR or [ci-no-test-timeout] in PR body.
+    value: ${{ steps.filter.outputs.ci-no-test-timeout }}
+  ci-no-td:
+    description: True if ci-no-td label was on PR or [ci-no-td] in PR body.
+    value: ${{ steps.filter.outputs.ci-no-td }}
+  ci-td-distributed:
+    description: True if ci-td-distributed label was on PR or [ci-td-distributed] in PR body.
+    value: ${{ steps.filter.outputs.ci-td-distributed }}
 
 runs:
   using: composite
@@ -114,6 +133,7 @@ runs:
           --workflow "${GITHUB_WORKFLOW}" \
           --job-name "${JOB_NAME}" \
           --test-matrix "${{ inputs.test-matrix }}" \
+          --selected-test-configs "${{ inputs.selected-test-configs }}" \
           --pr-number "${PR_NUMBER}" \
           --tag "${TAG}" \
           --event-name "${EVENT_NAME}" \

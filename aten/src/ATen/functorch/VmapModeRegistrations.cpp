@@ -17,8 +17,7 @@
 // FuncTorchVmapMode -- these registrations are to error out on operations
 // that we don't support on regular Tensors.
 
-namespace at {
-namespace functorch {
+namespace at::functorch {
 
 static void unsupportedRandomOp(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   TORCH_CHECK(false, "vmap: We do not support calling out variants of random operations inside of vmap. ",
@@ -68,6 +67,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   NYI_RANDOM(rrelu);
 }
 
-
-}
-} // namespace at
+} // namespace at::functorch

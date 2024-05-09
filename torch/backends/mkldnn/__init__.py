@@ -1,6 +1,8 @@
 import sys
 from contextlib import contextmanager
 
+from typing import TYPE_CHECKING
+
 import torch
 from torch.backends import __allow_nonbracketed_mutation, ContextProp, PropModule
 
@@ -84,6 +86,10 @@ class MkldnnModule(PropModule):
         super().__init__(m, name)
 
     enabled = ContextProp(torch._C._get_mkldnn_enabled, torch._C._set_mkldnn_enabled)
+
+
+if TYPE_CHECKING:
+    enabled: ContextProp
 
 
 # Cool stuff from torch/backends/cudnn/__init__.py and

@@ -1,9 +1,10 @@
-from typing import List
+from typing import List, Tuple
 
 from tools.testing.target_determination.heuristics.correlated_with_historical_failures import (
     CorrelatedWithHistoricalFailures,
 )
 from tools.testing.target_determination.heuristics.edited_by_pr import EditedByPR
+from tools.testing.target_determination.heuristics.filepath import Filepath
 from tools.testing.target_determination.heuristics.historical_class_failure_correlation import (
     HistoricalClassFailurCorrelation,
 )
@@ -16,6 +17,8 @@ from tools.testing.target_determination.heuristics.interface import (
     HeuristicInterface as HeuristicInterface,
     TestPrioritizations as TestPrioritizations,
 )
+from tools.testing.target_determination.heuristics.llm import LLM
+from tools.testing.target_determination.heuristics.mentioned_in_pr import MentionedInPR
 
 from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
     PreviouslyFailedInPR,
@@ -27,8 +30,11 @@ from tools.testing.target_determination.heuristics.profiling import Profiling
 HEURISTICS: List[HeuristicInterface] = [
     PreviouslyFailedInPR(),
     EditedByPR(),
+    MentionedInPR(),
     HistoricalClassFailurCorrelation(trial_mode=True),
     CorrelatedWithHistoricalFailures(),
-    HistorialEditedFiles(trial_mode=True),
-    Profiling(trial_mode=True),
+    HistorialEditedFiles(),
+    Profiling(),
+    LLM(),
+    Filepath(),
 ]

@@ -140,7 +140,7 @@ def MakeArgument(key, value):
         value = value.flatten().tolist()
     elif isinstance(value, np.generic):
         # convert numpy scalar to native python type
-        value = np.asscalar(value)
+        value = value.item()
 
     if type(value) is float:
         argument.f = value

@@ -38,6 +38,12 @@ class Int16Tensor(torch.Tensor):
         out = tree_map(wrap, out)
         return out
 
+    # This most likely should be removed (and thus use the disabled impl)
+    # but the test below fail under Dynamo in that case.
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        return super().__torch_function__(func, types, args, kwargs)
+
     def __repr__(self) -> str:
         with no_dispatch():
             t16 = self.view(torch.int16)

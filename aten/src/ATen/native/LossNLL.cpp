@@ -147,7 +147,11 @@ inline Tensor optional_contiguous(const Tensor& source) {
 // or nullptr if the tensor is undefined.
 template <typename scalar_t>
 inline scalar_t* optional_data(const Tensor& source) {
-  return source.defined() ? source.data_ptr<scalar_t>() : nullptr;
+  if constexpr (std::is_const<scalar_t>::value) {
+    return source.defined() ? source.const_data_ptr<scalar_t>() : nullptr;
+  } else {
+    return source.defined() ? source.data_ptr<scalar_t>() : nullptr;
+  }
 }
 
 template <typename scalar_t, typename target_t>
@@ -166,14 +170,14 @@ static void nll_loss_out_frame(
   *total_weight_data = 0;
 
   auto weight_contiguous = optional_contiguous(weight);
-  const scalar_t* weight_data = optional_data<scalar_t>(weight_contiguous);
+  const scalar_t* weight_data = optional_data<const scalar_t>(weight_contiguous);
 
   if (reduction == Reduction::None && n_dims == 2) {
     const auto batch_size = input.size(0);
     at::native::resize_output(output, {batch_size});
 
-    auto input_acc = input.accessor<scalar_t, 2>();
-    auto target_acc = target.accessor<target_t, 1>();
+    auto input_acc = input.accessor<const scalar_t, 2>();
+    auto target_acc = target.accessor<const target_t, 1>();
     auto output_acc = output.accessor<scalar_t, 1>();
 
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
@@ -219,8 +223,8 @@ static void nll_loss_out_frame(
   auto input_contiguous = input.contiguous();
   auto target_contiguous = target.contiguous();
 
-  const scalar_t* input_data = input_contiguous.data_ptr<scalar_t>();
-  const target_t* target_data = target_contiguous.data_ptr<target_t>();
+  const scalar_t* input_data = input_contiguous.const_data_ptr<scalar_t>();
+  const target_t* target_data = target_contiguous.const_data_ptr<target_t>();
 
   const int64_t ndim = input.dim();
   const int64_t batch_size = ndim == 1 ? 1 : input.size(0);
@@ -300,8 +304,12 @@ void nll_loss_forward_out_cpu_template(
     const Tensor& weight,
     int64_t reduction,
     int64_t ignore_index) {
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      ScalarType::BFloat16, input.scalar_type(), "nll_loss_out_frame", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::BFloat16,
+      ScalarType::Half,
+      input.scalar_type(),
+      "nll_loss_out_frame",
+      [&] {
         if (target.scalar_type() == kByte) {
           nll_loss_out_frame<scalar_t, uint8_t>(
               output,
@@ -342,15 +350,15 @@ static void nll_loss_backward_out_frame(
   if (target.dim() == 0) {
     target_ = target.unsqueeze(0);
   }
-  auto target_acc = target_.accessor<target_t, 1>();
+  auto target_acc = target_.accessor<const target_t, 1>();
 
   auto weight_contiguous = optional_contiguous(weight);
-  const scalar_t* weight_data = optional_data<scalar_t>(weight_contiguous);
+  const scalar_t* weight_data = optional_data<const scalar_t>(weight_contiguous);
 
   if (reduction == Reduction::None && n_dims == 2) {
     const auto batch_size = input.size(0);
     auto grad_input_acc = grad_input.accessor<scalar_t, 2>();
-    auto grad_output_acc = grad_output.accessor<scalar_t, 1>();
+    auto grad_output_acc = grad_output.accessor<const scalar_t, 1>();
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
       for (const auto i : c10::irange(start, end)) {
         auto cur_target = target_acc[i];
@@ -365,9 +373,9 @@ static void nll_loss_backward_out_frame(
     return;
   }
 
-  const scalar_t total_weight_value = *total_weight.data_ptr<scalar_t>();
+  const scalar_t total_weight_value = *total_weight.const_data_ptr<scalar_t>();
 
-  const scalar_t grad_output_value = *grad_output.data_ptr<scalar_t>();
+  const scalar_t grad_output_value = *grad_output.const_data_ptr<scalar_t>();
 
   if (input.dim() == 1) {
     auto grad_input_acc = grad_input.accessor<scalar_t, 1>();
@@ -411,8 +419,9 @@ void nll_loss_backward_out_cpu_template(
     const Tensor& total_weight) {
   grad_input.zero_();
 
-  AT_DISPATCH_FLOATING_TYPES_AND(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::BFloat16,
+      ScalarType::Half,
       input.scalar_type(),
       "nll_loss_backward_out_frame",
       [&] {
@@ -720,12 +729,12 @@ Tensor nll_loss_nd_symint(
     input_ = input_.contiguous();
     target_ = target_.contiguous();
     // support empty batches, see #15870
-    if (input_.numel() > 0) {
+    if (input_.sym_numel() > 0) {
       input_ = input_.view_symint({n, std::move(c), 1, -1});
     } else {
       input_ = input_.view_symint({n, std::move(c), 0, 0});
     }
-    if (target_.numel() > 0) {
+    if (target_.sym_numel() > 0) {
       target_ = target_.view_symint({std::move(n), 1, -1});
     } else {
       target_ = target_.view_symint({std::move(n), 0, 0});

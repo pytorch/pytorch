@@ -26,7 +26,7 @@ def parse_args() -> Any:
 
     parser = ArgumentParser(description="Incremental build PyTorch with debinfo")
     parser.add_argument("--verbose", action="store_true")
-    parser.add_argument("files", nargs="?", action="append")
+    parser.add_argument("files", nargs="*")
     return parser.parse_args()
 
 

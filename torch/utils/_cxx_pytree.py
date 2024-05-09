@@ -13,6 +13,8 @@ collection support for PyTorch APIs.
 """
 
 import functools
+import sys
+import types
 import warnings
 from typing import (
     Any,
@@ -29,11 +31,13 @@ from typing import (
 
 import torch
 
-if torch._running_with_deploy():
+if torch._running_with_deploy():  # type: ignore[no-untyped-call]
     raise ImportError("C++ pytree utilities do not work with torch::deploy.")
 
 import optree
 from optree import PyTreeSpec  # direct import for type annotations
+
+from torch.utils._pytree import KeyEntry
 
 
 __all__ = [
@@ -46,12 +50,18 @@ __all__ = [
     "FromDumpableContextFn",
     "TreeSpec",
     "LeafSpec",
+    "keystr",
+    "key_get",
     "register_pytree_node",
     "tree_flatten",
+    "tree_flatten_with_path",
     "tree_unflatten",
+    "tree_iter",
     "tree_leaves",
+    "tree_leaves_with_path",
     "tree_structure",
     "tree_map",
+    "tree_map_with_path",
     "tree_map_",
     "tree_map_only",
     "tree_map_only_",
@@ -80,6 +90,8 @@ OpTreeUnflattenFunc = Callable[[Context, Iterable[Any]], PyTree]
 DumpableContext = Any  # Any json dumpable text
 ToDumpableContextFn = Callable[[Context], DumpableContext]
 FromDumpableContextFn = Callable[[DumpableContext], Context]
+KeyPath = Tuple[KeyEntry, ...]
+FlattenWithKeysFunc = Callable[[PyTree], Tuple[List[Tuple[KeyEntry, Any]], Any]]
 
 
 def _reverse_args(func: UnflattenFunc) -> OpTreeUnflattenFunc:
@@ -98,6 +110,7 @@ def register_pytree_node(
     serialized_type_name: Optional[str] = None,
     to_dumpable_context: Optional[ToDumpableContextFn] = None,
     from_dumpable_context: Optional[FromDumpableContextFn] = None,
+    flatten_with_keys_fn: Optional[FlattenWithKeysFunc] = None,
 ) -> None:
     """Register a container-like type as pytree node.
 
@@ -130,6 +143,9 @@ def register_pytree_node(
         ...     lambda children, _: set(children),
         ... )
     """
+    if flatten_with_keys_fn is not None:
+        raise NotImplementedError("KeyPaths are not yet supported in cxx_pytree.")
+
     _private_register_pytree_node(
         cls,
         flatten_fn,
@@ -306,6 +322,41 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
     return optree.tree_unflatten(treespec, leaves)  # type: ignore[arg-type]
 
 
+def tree_iter(
+    tree: PyTree,
+    is_leaf: Optional[Callable[[PyTree], bool]] = None,
+) -> Iterable[Any]:
+    """Get an iterator over the leaves of a pytree.
+
+    See also :func:`tree_flatten`.
+
+    >>> tree = {'b': (2, [3, 4]), 'a': 1, 'c': None, 'd': 5}
+    >>> list(tree_iter(tree))
+    [1, 2, 3, 4, None, 5]
+    >>> list(tree_iter(1))
+    [1]
+    >>> list(tree_iter(None))
+    [None]
+
+    Args:
+        tree (pytree): A pytree to flatten.
+        is_leaf (callable, optional): An extra leaf predicate function that will be called at each
+            flattening step. The function should have a single argument with signature
+            ``is_leaf(node) -> bool``. If it returns :data:`True`, the whole subtree being treated
+            as a leaf. Otherwise, the default pytree registry will be used to determine a node is a
+            leaf or not. If the function is not specified, the default pytree registry will be used.
+
+    Returns:
+        An iterator over the leaf values.
+    """
+    return optree.tree_iter(
+        tree,
+        is_leaf=is_leaf,
+        none_is_leaf=True,
+        namespace="torch",
+    )
+
+
 def tree_leaves(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
@@ -465,7 +516,10 @@ def tree_map_(
 
 Type2 = Tuple[Type[T], Type[S]]
 Type3 = Tuple[Type[T], Type[S], Type[U]]
-TypeAny = Union[Type[Any], Tuple[Type[Any], ...]]
+if sys.version_info >= (3, 10):
+    TypeAny = Union[Type[Any], Tuple[Type[Any], ...], types.UnionType]
+else:
+    TypeAny = Union[Type[Any], Tuple[Type[Any], ...]]
 
 Fn2 = Callable[[Union[T, S]], R]
 Fn3 = Callable[[Union[T, S, U]], R]
@@ -478,27 +532,34 @@ MapOnlyFn = Callable[[T], Callable[[Any], Any]]
 # These specializations help with type inference on the lambda passed to this
 # function
 @overload
-def map_only(__type_or_types: Type2[T, S]) -> MapOnlyFn[Fn2[T, S, Any]]:
+def map_only(__type_or_types_or_pred: Type2[T, S]) -> MapOnlyFn[Fn2[T, S, Any]]:
     ...
 
 
 @overload
-def map_only(__type_or_types: Type3[T, S, U]) -> MapOnlyFn[Fn3[T, S, U, Any]]:
+def map_only(__type_or_types_or_pred: Type3[T, S, U]) -> MapOnlyFn[Fn3[T, S, U, Any]]:
     ...
 
 
 @overload
-def map_only(__type_or_types: Type[T]) -> MapOnlyFn[Fn[T, Any]]:
+def map_only(__type_or_types_or_pred: Type[T]) -> MapOnlyFn[Fn[T, Any]]:
     ...
 
 
 # This specialization is needed for the implementations below that call
 @overload
-def map_only(__type_or_types: TypeAny) -> MapOnlyFn[FnAny[Any]]:
+def map_only(__type_or_types_or_pred: TypeAny) -> MapOnlyFn[FnAny[Any]]:
     ...
 
 
-def map_only(__type_or_types: TypeAny) -> MapOnlyFn[FnAny[Any]]:
+@overload
+def map_only(__type_or_types_or_pred: Callable[[Any], bool]) -> MapOnlyFn[FnAny[Any]]:
+    ...
+
+
+def map_only(
+    __type_or_types_or_pred: Union[TypeAny, Callable[[Any], bool]]
+) -> MapOnlyFn[FnAny[Any]]:
     """
     Suppose you are writing a tree_map over tensors, leaving everything
     else unchanged.  Ordinarily you would have to write:
@@ -517,11 +578,23 @@ def map_only(__type_or_types: TypeAny) -> MapOnlyFn[FnAny[Any]]:
 
     You can also directly use 'tree_map_only'
     """
+    if isinstance(__type_or_types_or_pred, (type, tuple)) or (
+        sys.version_info >= (3, 10)
+        and isinstance(__type_or_types_or_pred, types.UnionType)
+    ):
+
+        def pred(x: Any) -> bool:
+            return isinstance(x, __type_or_types_or_pred)  # type: ignore[arg-type]
+
+    elif callable(__type_or_types_or_pred):
+        pred = __type_or_types_or_pred  # type: ignore[assignment]
+    else:
+        raise TypeError("Argument must be a type, a tuple of types, or a callable.")
 
     def wrapper(func: Callable[[T], Any]) -> Callable[[Any], Any]:
         @functools.wraps(func)
         def wrapped(x: T) -> Any:
-            if isinstance(x, __type_or_types):
+            if pred(x):
                 return func(x)
             return x
 
@@ -532,7 +605,7 @@ def map_only(__type_or_types: TypeAny) -> MapOnlyFn[FnAny[Any]]:
 
 @overload
 def tree_map_only(
-    __type_or_types: Type[T],
+    __type_or_types_or_pred: Type[T],
     func: Fn[T, Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
@@ -542,7 +615,7 @@ def tree_map_only(
 
 @overload
 def tree_map_only(
-    __type_or_types: Type2[T, S],
+    __type_or_types_or_pred: Type2[T, S],
     func: Fn2[T, S, Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
@@ -552,7 +625,7 @@ def tree_map_only(
 
 @overload
 def tree_map_only(
-    __type_or_types: Type3[T, S, U],
+    __type_or_types_or_pred: Type3[T, S, U],
     func: Fn3[T, S, U, Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
@@ -560,18 +633,28 @@ def tree_map_only(
     ...
 
 
+@overload
 def tree_map_only(
-    __type_or_types: TypeAny,
+    __type_or_types_or_pred: Callable[[Any], bool],
     func: FnAny[Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
-    return tree_map(map_only(__type_or_types)(func), tree, is_leaf=is_leaf)
+    ...
+
+
+def tree_map_only(
+    __type_or_types_or_pred: Union[TypeAny, Callable[[Any], bool]],
+    func: FnAny[Any],
+    tree: PyTree,
+    is_leaf: Optional[Callable[[PyTree], bool]] = None,
+) -> PyTree:
+    return tree_map(map_only(__type_or_types_or_pred)(func), tree, is_leaf=is_leaf)
 
 
 @overload
 def tree_map_only_(
-    __type_or_types: Type[T],
+    __type_or_types_or_pred: Type[T],
     func: Fn[T, Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
@@ -581,7 +664,7 @@ def tree_map_only_(
 
 @overload
 def tree_map_only_(
-    __type_or_types: Type2[T, S],
+    __type_or_types_or_pred: Type2[T, S],
     func: Fn2[T, S, Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
@@ -591,7 +674,7 @@ def tree_map_only_(
 
 @overload
 def tree_map_only_(
-    __type_or_types: Type3[T, S, U],
+    __type_or_types_or_pred: Type3[T, S, U],
     func: Fn3[T, S, U, Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
@@ -599,13 +682,23 @@ def tree_map_only_(
     ...
 
 
+@overload
 def tree_map_only_(
-    __type_or_types: TypeAny,
+    __type_or_types_or_pred: Callable[[Any], bool],
     func: FnAny[Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
-    return tree_map_(map_only(__type_or_types)(func), tree, is_leaf=is_leaf)
+    ...
+
+
+def tree_map_only_(
+    __type_or_types_or_pred: Union[TypeAny, Callable[[Any], bool]],
+    func: FnAny[Any],
+    tree: PyTree,
+    is_leaf: Optional[Callable[[PyTree], bool]] = None,
+) -> PyTree:
+    return tree_map_(map_only(__type_or_types_or_pred)(func), tree, is_leaf=is_leaf)
 
 
 def tree_all(
@@ -613,7 +706,7 @@ def tree_all(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> bool:
-    flat_args = tree_leaves(tree, is_leaf=is_leaf)
+    flat_args = tree_iter(tree, is_leaf=is_leaf)
     return all(map(pred, flat_args))
 
 
@@ -622,7 +715,7 @@ def tree_any(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> bool:
-    flat_args = tree_leaves(tree, is_leaf=is_leaf)
+    flat_args = tree_iter(tree, is_leaf=is_leaf)
     return any(map(pred, flat_args))
 
 
@@ -662,7 +755,7 @@ def tree_all_only(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> bool:
-    flat_args = tree_leaves(tree, is_leaf=is_leaf)
+    flat_args = tree_iter(tree, is_leaf=is_leaf)
     return all(pred(x) for x in flat_args if isinstance(x, __type_or_types))
 
 
@@ -702,7 +795,7 @@ def tree_any_only(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> bool:
-    flat_args = tree_leaves(tree, is_leaf=is_leaf)
+    flat_args = tree_iter(tree, is_leaf=is_leaf)
     return any(pred(x) for x in flat_args if isinstance(x, __type_or_types))
 
 
@@ -825,3 +918,89 @@ class LeafSpecMeta(type(TreeSpec)):  # type: ignore[misc]
 class LeafSpec(TreeSpec, metaclass=LeafSpecMeta):
     def __new__(cls) -> "LeafSpec":
         return optree.treespec_leaf(none_is_leaf=True)  # type: ignore[return-value]
+
+
+def tree_flatten_with_path(
+    tree: PyTree,
+    is_leaf: Optional[Callable[[PyTree], bool]] = None,
+) -> Tuple[List[Tuple[KeyPath, Any]], TreeSpec]:
+    """Flattens a pytree like :func:`tree_flatten`, but also returns each leaf's key path.
+
+    Args:
+        tree: a pytree to flatten. If it contains a custom type, that type must be
+            registered with an appropriate `tree_flatten_with_path_fn` when registered
+            with :func:`register_pytree_node`.
+        is_leaf: An extra leaf predicate function that will be called at each
+            flattening step. The function should have a single argument with signature
+            ``is_leaf(node) -> bool``. If it returns :data:`True`, the whole subtree being treated
+            as a leaf. Otherwise, the default pytree registry will be used to determine a node is a
+            leaf or not. If the function is not specified, the default pytree registry will be used.
+    Returns:
+        A tuple where the first element is a list of (key path, leaf) pairs, and the
+        second element is a :class:`TreeSpec` representing the structure of the flattened
+        tree.
+    """
+    raise NotImplementedError("KeyPaths are not yet supported in cxx_pytree.")
+
+
+def tree_leaves_with_path(
+    tree: PyTree,
+    is_leaf: Optional[Callable[[PyTree], bool]] = None,
+) -> List[Tuple[KeyPath, Any]]:
+    """Gets the leaves of a pytree like ``tree_leaves`` and returns each leaf's key path.
+
+    Args:
+        tree: a pytree. If it contains a custom type, that type must be
+            registered with an appropriate `tree_flatten_with_path_fn` when registered
+            with :func:`register_pytree_node`.
+        is_leaf: An extra leaf predicate function that will be called at each
+            flattening step. The function should have a single argument with signature
+            ``is_leaf(node) -> bool``. If it returns :data:`True`, the whole subtree being treated
+            as a leaf. Otherwise, the default pytree registry will be used to determine a node is a
+            leaf or not. If the function is not specified, the default pytree registry will be used.
+    Returns:
+        A list of (key path, leaf) pairs.
+    """
+    raise NotImplementedError("KeyPaths are not yet supported in cxx_pytree.")
+
+
+def tree_map_with_path(
+    func: Callable[..., Any],
+    tree: PyTree,
+    *rests: PyTree,
+    is_leaf: Optional[Callable[[PyTree], bool]] = None,
+) -> PyTree:
+    """Like :func:`tree_map`, but the provided callable takes an additional key path argument.
+
+    Args:
+        func: A function that takes ``2 + len(rests)`` arguments, to be applied at the
+            corresponding leaves of the pytrees. The first positional argument
+            to ``func`` is the key path of the leaf in question. The second
+            positional argument is the value of the leaf.
+        tree: A pytree to be mapped over, with each leaf providing the first positional
+            argument to function ``func``.
+        rests: A tuple of pytrees, each of which has the same structure as
+            ``tree`` or has ``tree`` as a prefix.
+        is_leaf: An extra leaf predicate function that will be called at each
+            flattening step. The function should have a single argument with signature
+            ``is_leaf(node) -> bool``. If it returns :data:`True`, the whole subtree being treated
+            as a leaf. Otherwise, the default pytree registry will be used to determine a node is a
+            leaf or not. If the function is not specified, the default pytree registry will be used.
+
+    Returns
+        A new pytree with the same structure as ``tree`` but with the value at each leaf given by
+        ``func(keypath, x, *xs)`` where ``keypath`` is the key path at the
+        corresponding leaf in ``tree``, ``x`` is the value at that leaf, and
+        ``xs`` is the tuple of values at corresponding nodes in ``rests``.
+    """
+    raise NotImplementedError("KeyPaths are not yet supported in cxx_pytree.")
+
+
+def keystr(kp: KeyPath) -> str:
+    """Given a key path, return a pretty-printed representation."""
+    raise NotImplementedError("KeyPaths are not yet supported in cxx_pytree.")
+
+
+def key_get(obj: Any, kp: KeyPath) -> Any:
+    """Given an object and a key path, return the value at the key path."""
+    raise NotImplementedError("KeyPaths are not yet supported in cxx_pytree.")

@@ -235,8 +235,6 @@ class TestSubclass(TestCase):
             def __init__(self, t) -> None:
                 self.tensor: torch.Tensor = t
 
-            __torch_function__ = torch._C._disabled_torch_function_impl
-
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
 

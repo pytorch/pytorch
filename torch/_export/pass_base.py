@@ -18,6 +18,7 @@ from torch.fx.graph import CodeGen
 from torch.fx.passes.infra.pass_base import PassBase, PassResult
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.utils import _pytree as pytree
+from torch.fx.experimental.symbolic_shapes import PropagateUnbackedSymInts, compute_unbacked_bindings
 
 
 __all__ = ["_ExportPassBaseDeprecatedDoNotUse"]
@@ -200,8 +201,8 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
                 pred, true_fn, false_fn, inputs = args
                 return self.callback.call_cond(pred, true_fn, false_fn, inputs, meta)
             elif target == torch.ops.higher_order.map_impl:
-                f, num_args, *rest = args  # type: ignore[assignment]
-                return self.callback.call_map(f, num_args, list(rest), meta)
+                f, mapped_args, operands = args  # type: ignore[assignment]
+                return self.callback.call_map(f, mapped_args, operands, meta)
             # For other unregistered HigherOrderOps, just interpret them blindly
             elif isinstance(target, torch._ops.HigherOrderOperator):
                 return self.callback._fx(
@@ -238,7 +239,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             return super().run_node(n)
 
     def __init__(self) -> None:
-        self.interpreter = torch.fx.Interpreter(
+        self.interpreter = PropagateUnbackedSymInts(
             torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
         )
         self.tracer = self.ExportTracer(self, CodeGen())
@@ -268,6 +269,9 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
 
         res_proxy = self.tracer.create_proxy(kind, target, args_proxy, kwargs_proxy, name=name)
         res_proxy.node.meta.update(meta.data)
+        if self.fake_tensor_mode and (shape_env := self.fake_tensor_mode.shape_env):
+            if symbol_to_path := compute_unbacked_bindings(shape_env, res_data):
+                res_proxy.node.meta["unbacked_bindings"] = symbol_to_path
         self.tracer.set_metadata(res_proxy.node, res_data)
         return ProxyValue(res_data, res_proxy)
 
@@ -357,18 +361,17 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
     def call_map(
         self,
         f: torch.fx.GraphModule,
-        num_args: int,
-        args: List[ProxyValue],
+        mapped_args: List[ProxyValue],
+        operands: List[ProxyValue],
         meta: NodeMetadata,
     ) -> ProxyValue:
-        xs = _unstack_pytree([arg.data for arg in args[:num_args]])[0]
-        pos_args = args[num_args:]
-        f_branch = self.call_submodule(f, tuple(xs + [arg.data for arg in pos_args]))
+        xs = _unstack_pytree([arg.data for arg in mapped_args])[0]
+        f_branch = self.call_submodule(f, tuple(xs + [arg.data for arg in operands]))
         assert f_branch is not None
         return self._fx(
             "call_function",
             torch.ops.higher_order.map_impl,
-            (f_branch.graph_module, num_args, *args),
+            (f_branch.graph_module, mapped_args, operands),
             {},
             meta,
         )

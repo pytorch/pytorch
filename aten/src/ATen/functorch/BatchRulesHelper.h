@@ -28,7 +28,7 @@ namespace at::functorch {
 TORCH_API Tensor reshape_dim_into(int64_t src, int64_t dst, const Tensor& x);
 TORCH_API Tensor reshape_dim_outof(int64_t src, int64_t size1, const Tensor& x);
 
-TORCH_API Tensor reshape_dim_outof_symint(int64_t src, c10::SymInt size1, const Tensor& x);
+TORCH_API Tensor reshape_dim_outof_symint(int64_t src, const c10::SymInt& size1, const Tensor& x);
 
 Tensor moveBatchDimToFront(const Tensor& tensor, optional<int64_t> maybe_batch_dim);
 int64_t rankWithoutBatchDim(const Tensor& tensor, optional<int64_t> maybe_batch_dim);
@@ -144,11 +144,9 @@ void boxed_tensor_inputs_batch_rule(const c10::OperatorHandle& op, torch::jit::S
   for (const auto idx : c10::irange(0, num_arguments)) {
     const auto& ivalue = arguments[idx];
     if (ivalue.isTensor()) {
-      Tensor tensor_value;
-      optional<int64_t> tensor_bdim;
-      std::tie(tensor_value, tensor_bdim) = unwrapTensorAtLevel(ivalue.toTensor(), cur_level);
+      auto [tensor_value, tensor_bdim] = unwrapTensorAtLevel(ivalue.toTensor(), cur_level);
       tensor_inputs.emplace_back(tensor_value, tensor_bdim);
-      tensor_pos.push_back(idx);
+      tensor_pos.push_back(static_cast<int64_t>(idx));
     }
   }
   Func(tensor_inputs);
@@ -214,7 +212,7 @@ inline void find_and_unpack_tensors(
     int64_t* batch_size) {
 
   int64_t computed_batch_size = -1;
-  int64_t args_begin = stack->size() - num_args;
+  int64_t args_begin = static_cast<int64_t>(stack->size()) - num_args;
 
   for (const auto idx : c10::irange(0, num_args)) {
     const auto& ivalue = (*stack)[args_begin + idx];
@@ -243,7 +241,7 @@ inline void boxed_existing_bdim_all_batch_rule(
     const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   const auto& schema = op.schema();
   const auto num_returns = schema.returns().size();
-  const auto num_arguments = schema.arguments().size();
+  const auto num_arguments = static_cast<int64_t>(schema.arguments().size());
 
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -256,10 +254,10 @@ inline void boxed_existing_bdim_all_batch_rule(
     return;
   }
 
-  int64_t args_begin = stack->size() - num_arguments;
+  int64_t args_begin = static_cast<int64_t>(stack->size()) - num_arguments;
   SmallVector<UnpackedBatchedTensor, 5> tensor_inputs;
   SmallVector<int64_t, 5> tensor_pos;
-  int64_t batch_size;
+  int64_t batch_size = 0;
 
   find_and_unpack_tensors(
       stack, num_arguments, cur_level,
@@ -312,13 +310,13 @@ inline void boxed_all_tensors_have_optional_bdim(
     return;
   }
 
-  int64_t args_begin = stack->size() - num_arguments;
+  int64_t args_begin = static_cast<int64_t>(stack->size() - num_arguments);
   SmallVector<UnpackedBatchedTensor, 5> tensor_inputs;
   SmallVector<int64_t, 5> tensor_pos;
-  int64_t batch_size;
+  int64_t batch_size = 0;
 
   find_and_unpack_tensors(
-      stack, num_arguments, cur_level,
+      stack, static_cast<int64_t>(num_arguments), cur_level,
       &tensor_inputs, &tensor_pos, &batch_size);
 
   optional<bool> is_no_batch_dim_case;

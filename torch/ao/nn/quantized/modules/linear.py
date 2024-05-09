@@ -24,7 +24,7 @@ class LinearPackedParams(torch.nn.Module):
             wq = torch._empty_affine_quantized([1, 1], scale=1.0, zero_point=0, dtype=torch.qint8)
         elif self.dtype == torch.float16:
             wq = torch.zeros([1, 1], dtype=torch.float)
-        self.set_weight_bias(wq, None)
+        self.set_weight_bias(wq, None)  # type: ignore[possibly-undefined]
 
     @torch.jit.export
     def set_weight_bias(self, weight: torch.Tensor, bias: Optional[torch.Tensor]) -> None:
@@ -157,9 +157,8 @@ class Linear(WeightedQuantizedModule):
         return 'QuantizedLinear'
 
     def extra_repr(self):
-        return 'in_features={}, out_features={}, scale={}, zero_point={}, qscheme={}'.format(
-            self.in_features, self.out_features, self.scale, self.zero_point, self.weight().qscheme()
-        )
+        return f'in_features={self.in_features}, out_features={self.out_features}, scale={self.scale}, ' \
+               f'zero_point={self.zero_point}, qscheme={self.weight().qscheme()}'
 
     def __repr__(self):
         return _hide_packed_params_repr(self, LinearPackedParams)

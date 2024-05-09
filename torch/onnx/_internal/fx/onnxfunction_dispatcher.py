@@ -113,7 +113,9 @@ class OnnxFunctionDispatcher:
         self,
         node: torch.fx.Node,
         onnx_args: Sequence[
-            Optional[Union[fx_type_utils.TensorLike, str, int, float, bool, list]]
+            Optional[
+                Union[fx_type_utils.TensorLike, str, int, float, bool, list, complex]
+            ]
         ],
         onnx_kwargs: Dict[str, fx_type_utils.Argument],
         diagnostic_context: diagnostics.DiagnosticContext,
@@ -152,13 +154,10 @@ class OnnxFunctionDispatcher:
         default_and_custom_functions: List[registration.ONNXFunction],
         diagnostic_context: diagnostics.DiagnosticContext,
     ) -> List[registration.ONNXFunction]:
-        if any(
-            torch.is_complex(arg.meta["val"])
-            for arg in node.args
-            if isinstance(arg, torch.fx.Node)
-            and "val" in arg.meta
-            and isinstance(arg.meta["val"], torch.Tensor)
-        ):
+        """Filter the complex functions if the input has complex dtype."""
+
+        args_with_complex_dtype = [_is_arg_with_complex_dtype(arg) for arg in node.args]
+        if any(args_with_complex_dtype):
             default_and_custom_functions = [
                 func for func in default_and_custom_functions if func.is_complex
             ]
@@ -206,7 +205,9 @@ class OnnxFunctionDispatcher:
         node: torch.fx.Node,  # this is used in diagnostic_message_formatter
         default_and_custom_functions: List[registration.ONNXFunction],
         onnx_args: Sequence[
-            Optional[Union[fx_type_utils.TensorLike, str, int, float, bool, list]]
+            Optional[
+                Union[fx_type_utils.TensorLike, str, int, float, bool, list, complex]
+            ]
         ],
         onnx_kwargs: Dict[str, fx_type_utils.Argument],
         diagnostic_context: diagnostics.DiagnosticContext,
@@ -324,8 +325,6 @@ class OnnxFunctionDispatcher:
                     isinstance(node_arg, torch.fx.Node)
                     and not fx_type_utils.is_torch_symbolic_type(node_arg.meta["val"])
                 ):
-                    # TODO: reduce number of explicit initializations.
-                    # TODO: Log location, stack.
                     diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
                         diagnostics.rules.no_symbolic_function_for_call_function,
                         diagnostics.levels.ERROR,
@@ -386,7 +385,6 @@ class OnnxFunctionDispatcher:
         )
 
         # NOTE: Fall back to default overload if the ONNX registry doesn't have the overload.
-        # TODO: Should we have a better fallback mechanism?
         if function_group is None:
             function_group = self.onnx_registry.get_op_functions(
                 namespace=internal_opname.namespace,
@@ -558,7 +556,9 @@ class _OnnxSchemaChecker:
         self,
         diagnostic: diagnostics.Diagnostic,
         args: Sequence[
-            Optional[Union[fx_type_utils.TensorLike, str, int, float, bool, list]]
+            Optional[
+                Union[fx_type_utils.TensorLike, str, int, float, bool, list, complex]
+            ]
         ],
         kwargs: Dict[str, fx_type_utils.Argument],
     ) -> bool:
@@ -716,7 +716,9 @@ class _OnnxSchemaChecker:
     def _record_matching_score(
         self,
         inputs: Sequence[
-            Optional[Union[fx_type_utils.TensorLike, str, int, float, bool, list]]
+            Optional[
+                Union[fx_type_utils.TensorLike, str, int, float, bool, list, complex]
+            ]
         ],
         attributes: Dict[str, fx_type_utils.Argument],
     ):
@@ -770,7 +772,9 @@ class _OnnxSchemaChecker:
         self,
         param_schemas: Sequence["onnxscript.values.ParamSchema"],
         args: Sequence[
-            Optional[Union[fx_type_utils.TensorLike, str, int, float, bool, list]]
+            Optional[
+                Union[fx_type_utils.TensorLike, str, int, float, bool, list, complex]
+            ]
         ],
         kwargs: Dict[str, fx_type_utils.Argument],
         fill_defaults: bool = True,
@@ -801,7 +805,6 @@ class _OnnxSchemaChecker:
         # args, kwargs and param_schemas should be all in order
         # user may not specify all inputs or attributes
 
-        # TODO: avoid circular dependency
         import onnx
 
         onnx_inputs: List[Any] = []
@@ -836,7 +839,6 @@ class _OnnxSchemaChecker:
                     onnx_attributes[param.name] = param.default
             # optional input
             elif param.is_input:
-                # TODO: support optional input default in onnx-script?
                 if fill_defaults:
                     onnx_inputs.append(None)
 
@@ -849,9 +851,25 @@ class _OnnxSchemaChecker:
 
 
 @_beartype.beartype
+def _is_arg_with_complex_dtype(arg: fx_type_utils.Argument) -> bool:
+    """Check if the node has complex dtype recursively."""
+    if (
+        isinstance(arg, torch.fx.Node)
+        and "val" in arg.meta
+        and isinstance(arg.meta["val"], torch.Tensor)
+        and torch.is_complex(arg.meta["val"])
+    ):
+        return True
+    elif isinstance(arg, list):
+        for item in arg:
+            return _is_arg_with_complex_dtype(item)
+    return False
+
+
+@_beartype.beartype
 def _find_onnx_data_type(
     torch_input: Optional[
-        Union[fx_type_utils.TensorLike, str, int, float, bool, list, tuple]
+        Union[fx_type_utils.TensorLike, str, int, float, bool, list, tuple, complex]
     ]
 ) -> Set[str]:
     """Convert inputs data type from torch acceptable dtype to the compatible onnx dtype string."""
@@ -860,10 +878,13 @@ def _find_onnx_data_type(
         and torch_input.dtype is not None
     ):
         return fx_type_utils.from_torch_dtype_to_onnx_dtype_str(torch_input.dtype)
-    if isinstance(torch_input, (int, float, bool, str)):
+    if isinstance(torch_input, (int, float, bool, str, complex)):
         return fx_type_utils.from_torch_dtype_to_onnx_dtype_str(type(torch_input))
     if isinstance(torch_input, (list, tuple)) and torch_input:  # [Tensor, Tensor]
-        set_dtype = _find_onnx_data_type(torch_input[0])
+        the_first_non_none_item = next(
+            (item for item in torch_input if item is not None), None
+        )
+        set_dtype = _find_onnx_data_type(the_first_non_none_item)
         if any(isinstance(input, fx_type_utils.TensorLike) for input in torch_input):
             # NOTE: Any Tensor involved in a list would make it a seq(tensor(onnx_type))
             return {f"seq({dtype})" for dtype in set_dtype}

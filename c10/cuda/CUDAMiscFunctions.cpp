@@ -1,8 +1,7 @@
 #include <c10/cuda/CUDAMiscFunctions.h>
-#include <stdlib.h>
+#include <cstdlib>
 
-namespace c10 {
-namespace cuda {
+namespace c10::cuda {
 
 const char* get_cuda_check_suffix() noexcept {
   static char* device_blocking_flag = getenv("CUDA_LAUNCH_BLOCKING");
@@ -13,7 +12,7 @@ const char* get_cuda_check_suffix() noexcept {
   } else {
     return "\nCUDA kernel errors might be asynchronously reported at some"
            " other API call, so the stacktrace below might be incorrect."
-           "\nFor debugging consider passing CUDA_LAUNCH_BLOCKING=1.";
+           "\nFor debugging consider passing CUDA_LAUNCH_BLOCKING=1";
   }
 }
 std::mutex* getFreeMutex() {
@@ -21,5 +20,4 @@ std::mutex* getFreeMutex() {
   return &cuda_free_mutex;
 }
 
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda

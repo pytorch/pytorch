@@ -128,8 +128,6 @@ CMAKE_ARGS+=("-DUSE_CUDA=OFF")
 CMAKE_ARGS+=("-DUSE_ITT=OFF")
 CMAKE_ARGS+=("-DUSE_GFLAGS=OFF")
 CMAKE_ARGS+=("-DUSE_OPENCV=OFF")
-CMAKE_ARGS+=("-DUSE_LMDB=OFF")
-CMAKE_ARGS+=("-DUSE_LEVELDB=OFF")
 CMAKE_ARGS+=("-DUSE_MPI=OFF")
 CMAKE_ARGS+=("-DUSE_OPENMP=OFF")
 # Only toggle if VERBOSE=1
@@ -164,7 +162,7 @@ CMAKE_ARGS+=($@)
 
 # Patch pocketfft (as Android does not have aligned_alloc even if compiled with c++17
 if [ -f third_party/pocketfft/pocketfft_hdronly.h ]; then
-  sed -i -e "s/#if __cplusplus >= 201703L/#if 0/" third_party/pocketfft/pocketfft_hdronly.h
+  sed -i -e "s/__cplusplus >= 201703L/0/" third_party/pocketfft/pocketfft_hdronly.h
 fi
 
 # Now, actually build the Android target.

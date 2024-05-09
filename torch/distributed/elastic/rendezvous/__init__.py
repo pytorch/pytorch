@@ -139,6 +139,7 @@ __all__ = [
     "RendezvousClosedError",
     "RendezvousConnectionError",
     "RendezvousError",
+    "RendezvousGracefulExitError",
     "RendezvousHandler",
     "RendezvousHandlerCreator",
     "RendezvousHandlerRegistry",

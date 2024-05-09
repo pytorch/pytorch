@@ -13,6 +13,7 @@ from torch import Tensor, device, dtype
 from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict, List
 from typing_extensions import Self
 from ...utils.hooks import RemovableHandle
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 __all__ = ['register_module_forward_pre_hook', 'register_module_forward_hook',
            'register_module_full_backward_pre_hook', 'register_module_backward_hook',
@@ -281,22 +282,12 @@ def register_module_full_backward_pre_hook(
         This adds global state to the `nn.module` module
         and it is only intended for debugging/profiling purposes.
 
-    The hook will be called every time the gradients for the module are computed.
-    The hook should have the following signature::
+    Hooks registered using this function behave in the same way as those
+    registered by :meth:`torch.nn.Module.register_full_backward_pre_hook`.
+    Refer to its documentation for more details.
 
-        hook(module, grad_output) -> Tensor or None
-
-    The :attr:`grad_output` is a tuple. The hook should
-    not modify its arguments, but it can optionally return a new gradient with
-    respect to the output that will be used in place of :attr:`grad_output` in
-    subsequent computations. Entries in :attr:`grad_output` will be ``None`` for
-    all non-Tensor arguments.
-
-    For technical reasons, when this hook is applied to a Module, its forward function will
-    receive a view of each Tensor passed to the Module. Similarly the caller will receive a view
-    of each Tensor returned by the Module's forward function.
-
-    Global hooks are called before hooks registered with `register_backward_pre_hook`
+    Hooks registered using this function will be called before hooks registered
+    using :meth:`torch.nn.Module.register_full_backward_pre_hook`.
 
     Returns:
         :class:`torch.utils.hooks.RemovableHandle`:
@@ -318,26 +309,12 @@ def register_module_full_backward_hook(
         This adds global state to the `nn.module` module
         and it is only intended for debugging/profiling purposes.
 
-    The hook will be called every time the gradients with respect to a module
-    are computed, i.e. the hook will execute if and only if the gradients with
-    respect to module outputs are computed. The hook should have the following
-    signature::
+    Hooks registered using this function behave in the same way as those
+    registered by :meth:`torch.nn.Module.register_full_backward_hook`.
+    Refer to its documentation for more details.
 
-        hook(module, grad_input, grad_output) -> Tensor or None
-
-    The :attr:`grad_input` and :attr:`grad_output` are tuples. The hook should
-    not modify its arguments, but it can optionally return a new gradient with
-    respect to the input that will be used in place of :attr:`grad_input` in
-    subsequent computations. :attr:`grad_input` will only correspond to the inputs given
-    as positional arguments and all kwarg arguments will not appear in the hook. Entries
-    in :attr:`grad_input` and :attr:`grad_output` will be ``None`` for all non-Tensor
-    arguments.
-
-    For technical reasons, when this hook is applied to a Module, its forward function will
-    receive a view of each Tensor passed to the Module. Similarly the caller will receive a view
-    of each Tensor returned by the Module's forward function.
-
-    Global hooks are called before hooks registered with `register_backward_hook`
+    Hooks registered using this function will be called before hooks registered
+    using :meth:`torch.nn.Module.register_full_backward_hook`.
 
     Returns:
         :class:`torch.utils.hooks.RemovableHandle`:
@@ -454,8 +431,8 @@ class Module:
 
         # Backward compatibility: no args used to be allowed when call_super_init=False
         if self.call_super_init is False and bool(kwargs):
-            raise TypeError("{}.__init__() got an unexpected keyword argument '{}'"
-                            "".format(type(self).__name__, next(iter(kwargs))))
+            raise TypeError(f"{type(self).__name__}.__init__() got an unexpected keyword argument '{next(iter(kwargs))}'"
+                            "")
 
         if self.call_super_init is False and bool(args):
             raise TypeError(f"{type(self).__name__}.__init__() takes 1 positional argument but {len(args) + 1} were"
@@ -780,7 +757,7 @@ class Module:
             "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml "
             "to report this bug.")
 
-    def set_extra_state(self, state: Any):
+    def set_extra_state(self, state: Any) -> None:
         """Set extra state contained in the loaded `state_dict`.
 
         This function is called from :func:`load_state_dict` to handle any extra state
@@ -815,6 +792,8 @@ class Module:
             else:
                 return False
 
+        should_use_swap_tensors = torch.__future__.get_swap_module_params_on_conversion()
+
         for key, param in self._parameters.items():
             if param is None:
                 continue
@@ -823,8 +802,26 @@ class Module:
             # `with torch.no_grad():`
             with torch.no_grad():
                 param_applied = fn(param)
-            should_use_set_data = compute_should_use_set_data(param, param_applied)
-            if should_use_set_data:
+            p_should_use_set_data = compute_should_use_set_data(param, param_applied)
+
+            # subclasses may have multiple child tensors so we need to use swap_tensors
+            p_should_use_swap_tensors = should_use_swap_tensors or is_traceable_wrapper_subclass(param_applied)
+
+            param_grad = param.grad
+            if p_should_use_swap_tensors:
+                try:
+                    if param_grad is not None:
+                        # Accessing param.grad makes its at::Tensor's use_count 2, which will prevent swapping.
+                        # Decrement use count of the gradient by setting to None
+                        param.grad = None
+                    param_applied = torch.nn.Parameter(param_applied, requires_grad=param.requires_grad)
+                    torch.utils.swap_tensors(param, param_applied)
+                except Exception as e:
+                    if param_grad is not None:
+                        param.grad = param_grad
+                    raise RuntimeError(f"_apply(): Couldn't swap {self._get_name()}.{key}") from e
+                out_param = param
+            elif p_should_use_set_data:
                 param.data = param_applied
                 out_param = param
             else:
@@ -833,16 +830,23 @@ class Module:
                 out_param = Parameter(param_applied, param.requires_grad)
                 self._parameters[key] = out_param
 
-            if param.grad is not None:
+            if param_grad is not None:
                 with torch.no_grad():
-                    grad_applied = fn(param.grad)
-                should_use_set_data = compute_should_use_set_data(param.grad, grad_applied)
-                if should_use_set_data:
+                    grad_applied = fn(param_grad)
+                g_should_use_set_data = compute_should_use_set_data(param_grad, grad_applied)
+                if p_should_use_swap_tensors:
+                    grad_applied.requires_grad_(param_grad.requires_grad)
+                    try:
+                        torch.utils.swap_tensors(param_grad, grad_applied)
+                    except Exception as e:
+                        raise RuntimeError(f"_apply(): Couldn't swap {self._get_name()}.{key}.grad") from e
+                    out_param.grad = param_grad
+                elif g_should_use_set_data:
                     assert out_param.grad is not None
                     out_param.grad.data = grad_applied
                 else:
-                    assert param.grad.is_leaf
-                    out_param.grad = grad_applied.requires_grad_(param.grad.requires_grad)
+                    assert param_grad.is_leaf
+                    out_param.grad = grad_applied.requires_grad_(param_grad.requires_grad)
 
         for key, buf in self._buffers.items():
             if buf is not None:
@@ -1032,12 +1036,12 @@ class Module:
         return self._apply(lambda t: torch.empty_like(t, device=device), recurse=recurse)
 
     @overload
-    def to(self, device: Optional[DeviceLikeType] = ..., dtype: Optional[Union[dtype, str]] = ...,
+    def to(self, device: Optional[DeviceLikeType] = ..., dtype: Optional[dtype] = ...,
            non_blocking: bool = ...) -> Self:
         ...
 
     @overload
-    def to(self, dtype: Union[dtype, str], non_blocking: bool = ...) -> Self:
+    def to(self, dtype: dtype, non_blocking: bool = ...) -> Self:
         ...
 
     @overload
@@ -1144,10 +1148,27 @@ class Module:
                     "if a complex module does not work as expected.")
 
         def convert(t):
-            if convert_to_format is not None and t.dim() in (4, 5):
-                return t.to(device, dtype if t.is_floating_point() or t.is_complex() else None,
-                            non_blocking, memory_format=convert_to_format)
-            return t.to(device, dtype if t.is_floating_point() or t.is_complex() else None, non_blocking)
+            try:
+                if convert_to_format is not None and t.dim() in (4, 5):
+                    return t.to(
+                        device,
+                        dtype if t.is_floating_point() or t.is_complex() else None,
+                        non_blocking,
+                        memory_format=convert_to_format,
+                    )
+                return t.to(
+                    device,
+                    dtype if t.is_floating_point() or t.is_complex() else None,
+                    non_blocking,
+                )
+            except NotImplementedError as e:
+                if str(e) == "Cannot copy out of meta tensor; no data!":
+                    raise NotImplementedError(
+                        f"{e} Please use torch.nn.Module.to_empty() instead of torch.nn.Module.to() "
+                        f"when moving module from meta to a different device."
+                    ) from None
+                else:
+                    raise
 
         return self._apply(convert)
 
@@ -1604,9 +1625,9 @@ class Module:
             # For now only forward hooks have the always_call option but perhaps
             # this functionality should be added to full backward hooks as well.
             for hook_id, hook in _global_forward_hooks.items():
-                if hook_id in _global_forward_hooks_always_called and hook_id not in called_always_called_hooks:
+                if hook_id in _global_forward_hooks_always_called and hook_id not in called_always_called_hooks:  # type: ignore[possibly-undefined]
                     try:
-                        hook_result = hook(self, args, result)
+                        hook_result = hook(self, args, result)  # type: ignore[possibly-undefined]
                         if hook_result is not None:
                             result = hook_result
                     except Exception as e:
@@ -1615,12 +1636,12 @@ class Module:
                         continue
 
             for hook_id, hook in self._forward_hooks.items():
-                if hook_id in self._forward_hooks_always_called and hook_id not in called_always_called_hooks:
+                if hook_id in self._forward_hooks_always_called and hook_id not in called_always_called_hooks:  # type: ignore[possibly-undefined]
                     try:
                         if hook_id in self._forward_hooks_with_kwargs:
-                            hook_result = hook(self, args, kwargs, result)
+                            hook_result = hook(self, args, kwargs, result)  # type: ignore[possibly-undefined]
                         else:
-                            hook_result = hook(self, args, result)
+                            hook_result = hook(self, args, result)  # type: ignore[possibly-undefined]
                         if hook_result is not None:
                             result = hook_result
                     except Exception as e:
@@ -1629,7 +1650,6 @@ class Module:
                         continue
             # raise exception raised in try block
             raise
-
 
     __call__ : Callable[..., Any] = _wrapped_call_impl
 
@@ -1771,7 +1791,7 @@ class Module:
         return handle
 
     def register_state_dict_pre_hook(self, hook):
-        r"""Register a pre-hook for the :meth:`~torch.nn.Module.load_state_dict` method.
+        r"""Register a pre-hook for the :meth:`~torch.nn.Module.state_dict` method.
 
         These hooks will be called with arguments: ``self``, ``prefix``,
         and ``keep_vars`` before calling ``state_dict`` on ``self``. The registered
@@ -1876,7 +1896,7 @@ class Module:
             # DeprecationWarning is ignored by default
             warnings.warn(
                 "Positional args are being deprecated, use kwargs instead. Refer to "
-                "https://pytorch.org/docs/master/generated/torch.nn.Module.html#torch.nn.Module.state_dict"
+                "https://pytorch.org/docs/main/generated/torch.nn.Module.html#torch.nn.Module.state_dict"
                 " for details.")
 
         if destination is None:
@@ -1949,7 +1969,6 @@ class Module:
         self._load_state_dict_post_hooks[handle.id] = hook
         return handle
 
-
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
         r"""Copy parameters and buffers from :attr:`state_dict` into only this module, but not its descendants.
@@ -1994,6 +2013,7 @@ class Module:
         local_name_params = itertools.chain(self._parameters.items(), persistent_buffers.items())
         local_state = {k: v for k, v in local_name_params if v is not None}
         assign_to_params_buffers = local_metadata.get("assign_to_params_buffers", False)
+        use_swap_tensors = torch.__future__.get_swap_module_params_on_conversion()
 
         for name, param in local_state.items():
             key = prefix + name
@@ -2016,9 +2036,8 @@ class Module:
 
                 if not is_param_lazy and input_param.shape != param.shape:
                     # local shape should match the one in checkpoint
-                    error_msgs.append('size mismatch for {}: copying a param with shape {} from checkpoint, '
-                                      'the shape in current model is {}.'
-                                      .format(key, input_param.shape, param.shape))
+                    error_msgs.append(f'size mismatch for {key}: copying a param with shape {input_param.shape} from checkpoint, '
+                                      f'the shape in current model is {param.shape}.')
                     continue
 
                 if param.is_meta and not input_param.is_meta and not assign_to_params_buffers:
@@ -2029,17 +2048,31 @@ class Module:
 
                 try:
                     with torch.no_grad():
-                        if assign_to_params_buffers:
+                        if use_swap_tensors:
+                            new_input_param = param.module_load(input_param, assign=assign_to_params_buffers)
+                            if id(new_input_param) == id(input_param) or id(new_input_param) == id(param):
+                                raise RuntimeError("module_load returned one of self or other, please .detach() "
+                                                   "the result if returning one of the inputs in module_load")
+                            if (isinstance(param, torch.nn.Parameter)):
+                                if not isinstance(new_input_param, torch.nn.Parameter):
+                                    new_input_param = torch.nn.Parameter(new_input_param, requires_grad=param.requires_grad)
+                                else:
+                                    new_input_param.requires_grad_(param.requires_grad)
+                            torch.utils.swap_tensors(param, new_input_param)
+                            del new_input_param
+                        elif assign_to_params_buffers:
                             # Shape checks are already done above
-                            if (isinstance(param, torch.nn.Parameter) and
-                                    not isinstance(input_param, torch.nn.Parameter)):
-                                setattr(self, name, torch.nn.Parameter(input_param))
-                            else:
-                                setattr(self, name, input_param)
+                            if (isinstance(param, torch.nn.Parameter)):
+                                if not isinstance(input_param, torch.nn.Parameter):
+                                    input_param = torch.nn.Parameter(input_param, requires_grad=param.requires_grad)
+                                else:
+                                    input_param.requires_grad_(param.requires_grad)
+                            setattr(self, name, input_param)
                         else:
                             param.copy_(input_param)
                 except Exception as ex:
-                    error_msgs.append(f'While copying the parameter named "{key}", '
+                    action = "swapping" if use_swap_tensors else "copying"
+                    error_msgs.append(f'While {action} the parameter named "{key}", '
                                       f'whose dimensions in the model are {param.size()} and '
                                       f'whose dimensions in the checkpoint are {input_param.size()}, '
                                       f'an exception occurred : {ex.args}.'
@@ -2059,9 +2092,12 @@ class Module:
         if strict:
             for key in state_dict.keys():
                 if key.startswith(prefix) and key != extra_state_key:
-                    input_name = key[len(prefix):]
-                    input_name = input_name.split('.', 1)[0]  # get the name of param/buffer/child
-                    if input_name not in self._modules and input_name not in local_state:
+                    input_name = key[len(prefix):].split(".", 1)
+                    # Must be Module if it have attributes
+                    if len(input_name) > 1:
+                        if input_name[0] not in self._modules:
+                            unexpected_keys.append(key)
+                    elif input_name[0] not in local_state:
                         unexpected_keys.append(key)
 
     def load_state_dict(self, state_dict: Mapping[str, Any],
@@ -2074,7 +2110,8 @@ class Module:
 
         .. warning::
             If :attr:`assign` is ``True`` the optimizer must be created after
-            the call to :attr:`load_state_dict`.
+            the call to :attr:`load_state_dict` unless
+            :func:`~torch.__future__.get_swap_module_params_on_conversion` is ``True``.
 
         Args:
             state_dict (dict): a dict containing parameters and
@@ -2082,18 +2119,19 @@ class Module:
             strict (bool, optional): whether to strictly enforce that the keys
                 in :attr:`state_dict` match the keys returned by this module's
                 :meth:`~torch.nn.Module.state_dict` function. Default: ``True``
-            assign (bool, optional): whether to assign items in the state
-                dictionary to their corresponding keys in the module instead
-                of copying them inplace into the module's current parameters and buffers.
-                When ``False``, the properties of the tensors in the current
-                module are preserved while when ``True``, the properties of the
-                Tensors in the state dict are preserved.
+            assign (bool, optional): When ``False``, the properties of the tensors
+                in the current module are preserved while when ``True``, the
+                properties of the Tensors in the state dict are preserved. The only
+                exception is the ``requires_grad`` field of :class:`~torch.nn.Parameter`s
+                for which the value from the module is preserved.
                 Default: ``False``
 
         Returns:
             ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields:
-                * **missing_keys** is a list of str containing the missing keys
-                * **unexpected_keys** is a list of str containing the unexpected keys
+                * **missing_keys** is a list of str containing any keys that are expected
+                    by this module but missing from the provided ``state_dict``.
+                * **unexpected_keys** is a list of str containing the keys that are not
+                    expected by this module but present in the provided ``state_dict``.
 
         Note:
             If a parameter or buffer is registered as ``None`` and its corresponding key

@@ -31,6 +31,12 @@
 
 namespace torch {
 namespace autograd {
+enum class can_mutate_inplace_result {
+  success,
+  non_default_backward_view,
+  view_of_leaf,
+  is_leaf,
+};
 
 // The requires_grad argument is used to know if the inplace operation needs
 // gradient to be setup for it.
@@ -38,24 +44,47 @@ namespace autograd {
 // writing a Tensor that requires gradients inplace into a Tensor that does not
 // require gradients: a = torch.rand(2) b = torch.rand(2, requires_grad=True)
 // a.copy_(b)
-inline void check_inplace(const at::Tensor& tensor, bool requires_grad) {
-  if (requires_grad && GradMode::is_enabled()) {
-    auto diff_view_meta = impl::get_view_autograd_meta(tensor);
-    if (diff_view_meta && diff_view_meta->has_bw_view()) {
-      // This can throw or warn
-      handle_view_on_rebase(diff_view_meta);
-      if (tensor.requires_grad() && tensor._base().is_leaf()) {
-        TORCH_CHECK(
-            false,
-            "a view of a leaf Variable that requires grad is being used in an in-place operation.");
-      }
+inline can_mutate_inplace_result can_mutate_inplace(
+    const at::Tensor& tensor,
+    bool requires_grad) {
+  if (!requires_grad || !GradMode::is_enabled()) {
+    return can_mutate_inplace_result::success;
+  }
+  auto diff_view_meta = impl::get_view_autograd_meta(tensor);
+  if (diff_view_meta && diff_view_meta->has_bw_view()) {
+    if (diff_view_meta->get_creation_meta() != CreationMeta::DEFAULT) {
+      return can_mutate_inplace_result::non_default_backward_view;
     }
-    if (tensor.requires_grad() && tensor.is_leaf()) {
+    if (tensor.requires_grad() && tensor._base().is_leaf()) {
+      return can_mutate_inplace_result::view_of_leaf;
+    }
+  }
+  if (tensor.requires_grad() && tensor.is_leaf()) {
+    return can_mutate_inplace_result::is_leaf;
+  }
+  return can_mutate_inplace_result::success;
+}
+
+inline void check_inplace(const at::Tensor& tensor, bool requires_grad) {
+  switch (can_mutate_inplace(tensor, requires_grad)) {
+    case can_mutate_inplace_result::success:
+      return;
+    case can_mutate_inplace_result::non_default_backward_view: {
+      return handle_view_on_rebase(impl::get_view_autograd_meta(tensor));
+    }
+    case can_mutate_inplace_result::view_of_leaf:
+      TORCH_CHECK(
+          false,
+          "a view of a leaf Variable that requires grad is being used in an in-place operation.");
+      break;
+
+    case can_mutate_inplace_result::is_leaf:
       TORCH_CHECK(
           false,
           "a leaf Variable that requires grad is being used in an in-place operation.");
-    }
+      break;
   }
+  TORCH_INTERNAL_ASSERT(false);
 }
 
 inline void check_inplace(at::ITensorListRef tensors, bool requires_grad) {
@@ -104,7 +133,7 @@ inline void throw_error_for_complex_autograd(
 
 // TODO: Blegh, bare references
 
-inline void rebase_history(Variable& var, std::shared_ptr<Node> grad_fn) {
+inline void rebase_history(const Variable& var, std::shared_ptr<Node> grad_fn) {
   if (grad_fn && var.defined()) {
     grad_fn->add_input_metadata(var);
     impl::rebase_history(var, {std::move(grad_fn), 0});
@@ -160,7 +189,7 @@ inline at::Tensor as_view(
     const at::Tensor& tensor,
     bool is_bw_differentiable,
     bool is_fw_differentiable,
-    std::function<at::Tensor(const at::Tensor&)> view_func = nullptr,
+    std::unique_ptr<ViewFunc> view_func = nullptr,
     std::function<at::Tensor(const at::Tensor&)> rev_view_func = nullptr,
     CreationMeta creation_meta = CreationMeta::DEFAULT,
     bool allow_tensor_metadata_change = true) {
@@ -208,11 +237,13 @@ inline at::Tensor as_view(
   c10::optional<ViewInfo> new_fw_info;
 
   if (is_bw_differentiable) {
+    auto bw_view_func = view_func ? view_func->clone_and_set() : nullptr;
     if (diff_view_meta && diff_view_meta->has_bw_view()) {
       const auto& base_bw_info = diff_view_meta->get_backward_view();
-      new_bw_info = base_bw_info.chain(base, tensor, view_func, rev_view_func);
+      new_bw_info = base_bw_info.chain(
+          base, tensor, std::move(bw_view_func), rev_view_func);
     } else {
-      new_bw_info = ViewInfo(base, view_func, rev_view_func);
+      new_bw_info = ViewInfo(base, std::move(bw_view_func), rev_view_func);
     }
   } else {
     TORCH_CHECK(
@@ -395,11 +426,8 @@ Return run_jit_decomposition_with_args_for_jvp(
       name,
       " that does not support it because it has not been implemented yet.\nPlease file an issue "
       "to PyTorch at https://github.com/pytorch/pytorch/issues/new?template=feature-request.yml "
-      "so that we can prioritize its implementation.\n"
-      "Note that forward AD support for some operators require PyTorch to be built with "
-      "TorchScript and for JIT to be enabled. "
-      "If the environment var PYTORCH_JIT=0 is set or if the library is not built with TorchScript, "
-      "some operators may no longer be used with forward AD.");
+      "so that we can prioritize its implementation or submit a PR adding the implementation to "
+      "derivatives.yaml");
 
   return c10::KernelFunction::makeFromBoxedKernel(
              c10::BoxedKernel::makeFromFunctor(

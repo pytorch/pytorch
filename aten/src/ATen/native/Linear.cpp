@@ -30,6 +30,7 @@
 #endif
 
 #include <cctype>
+#include <deque>
 #include <string>
 #include <utility>
 #include <vector>
@@ -70,6 +71,14 @@ static inline Tensor _flatten_nd_linear(const Tensor& input, const Tensor& weigh
 
 
 Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
+  // _matmul_impl checks this again later, but _flatten_nd_linear does not work on scalars inputs,
+  // so let's try to catch this here already
+  const auto input_dim = input.dim();
+  const auto weight_dim = weight.dim();
+  TORCH_CHECK(input_dim != 0 && weight_dim != 0,
+              "both arguments to linear need to be at least 1D, but they are ",
+              input_dim, "D and ", weight_dim, "D");
+
   // See [Note: hacky wrapper removal for optional tensor]
   auto bias = bias_opt.has_value()
     ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
@@ -82,7 +91,6 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
     return xnnpack::linear(input, weight, *bias);
   }
 #endif
-  const auto input_dim = input.dim();
   if (input_dim == 2 && bias->defined()) {
     // Fused op is marginally faster.
     return at::addmm(*bias, input, weight.t());
@@ -703,6 +711,28 @@ Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
+  if (bias.defined()) {
+    TORCH_CHECK(
+        input1.dtype() == input2.dtype() && input1.dtype() == weight.dtype() &&
+            input1.dtype() == bias.dtype(),
+        "All tensors must have the same dtype, got input1: ",
+        input1.dtype(),
+        ", input2: ",
+        input2.dtype(),
+        ", weight: ",
+        weight.dtype(),
+        ", bias: ",
+        bias.dtype());
+  } else {
+    TORCH_CHECK(
+        input1.dtype() == input2.dtype() && input1.dtype() == weight.dtype(),
+        "All tensors must have the same dtype, got input1: ",
+        input1.dtype(),
+        ", input2: ",
+        input2.dtype(),
+        ", weight: ",
+        weight.dtype());
+  }
 
   TORCH_CHECK(input1.dim() == input2.dim(), "bilinear(): input dimensions do not match: got ", input1.dim(), " and ", input2.dim());
   for (const auto i : c10::irange(input1.dim() - 1)) {
@@ -785,7 +815,7 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
       rsizes.emplace_back(t2.sym_size(i));
     }
   }
-  // permut and reshape for matrix multiplication
+  // permute and reshape for matrix multiplication
   t1 = t1.permute(p1).reshape_symint({size1, csize});
   t2 = t2.permute(p2).reshape_symint({csize, size2});
   // multiply and reshape to target size

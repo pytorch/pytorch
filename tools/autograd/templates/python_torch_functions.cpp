@@ -31,7 +31,7 @@
 #include "torch/csrc/jit/frontend/tracer.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/utils/structseq.h"
-#include "torch/csrc/utils/cuda_lazy_init.h"
+#include "torch/csrc/utils/device_lazy_init.h"
 #include "torch/csrc/autograd/generated/python_return_types.h"
 
 #include <ATen/core/Tensor.h>

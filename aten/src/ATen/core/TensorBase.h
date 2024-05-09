@@ -11,6 +11,7 @@
 #include <c10/core/TensorOptions.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/core/WrapDimMinimal.h>
+#include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ExclusivelyOwned.h>
 #include <c10/util/ExclusivelyOwnedTensorTraits.h>
@@ -27,11 +28,11 @@ namespace c10 {
 class Scalar;
 }
 
-namespace torch { namespace autograd {
+namespace torch::autograd {
 
 struct Node;
 
-}} // namespace torch::autograd
+} // namespace torch::autograd
 
 namespace at {
 
@@ -415,7 +416,7 @@ class TORCH_API TensorBase {
   }
 
   /// Returns a `Tensor`'s device index.
-  int64_t get_device() const {
+  DeviceIndex get_device() const {
     // NB: this is not a native function to avoid dispatching overhead.
     return impl_->get_device();
   }
@@ -506,10 +507,10 @@ class TORCH_API TensorBase {
     return impl_->is_mps();
   }
 
-  /// Returns if a `Tensor` is ort tensor.
-  bool is_ort() const {
+  /// Returns if a `Tensor` is maia tensor.
+  bool is_maia() const {
     // NB: this is not a native function to avoid dispatching overhead.
-    return impl_->is_ort();
+    return impl_->is_maia();
   }
 
   /// Returns if a `Tensor` is vulkan tensor.
@@ -593,8 +594,11 @@ class TORCH_API TensorBase {
     return mutable_data_ptr();
   }
 
-  template <typename T>
+  template <typename T, std::enable_if_t<!std::is_const_v<T>, int> = 0>
   const T* const_data_ptr() const;
+
+  template <typename T, std::enable_if_t<std::is_const_v<T>, int> = 0>
+  const std::remove_const_t<T>* const_data_ptr() const;
 
   template <typename T>
   T* mutable_data_ptr() const;
@@ -620,7 +624,13 @@ class TORCH_API TensorBase {
   TensorAccessor<T,N> accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
     TORCH_CHECK(dim() == N, "TensorAccessor expected ", N, " dims but tensor has ", dim());
-    return TensorAccessor<T,N>(data_ptr<T>(),sizes().data(),strides().data());
+    T* ptr = nullptr;
+    if constexpr (std::is_const<T>::value) {
+      ptr = const_data_ptr<T>();
+    } else {
+      ptr = mutable_data_ptr<T>();
+    }
+    return TensorAccessor<T,N>(ptr,sizes().data(),strides().data());
   }
   template<typename T, size_t N>
   TensorAccessor<T,N> accessor() && = delete;
@@ -634,7 +644,13 @@ class TORCH_API TensorBase {
   GenericPackedTensorAccessor<T,N,PtrTraits,index_t> generic_packed_accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
     TORCH_CHECK(dim() == N, "TensorAccessor expected ", N, " dims but tensor has ", dim());
-    return GenericPackedTensorAccessor<T,N,PtrTraits,index_t>(static_cast<typename PtrTraits<T>::PtrType>(data_ptr<T>()),sizes().data(),strides().data());
+    T* ptr = nullptr;
+    if constexpr (std::is_const<T>::value) {
+      ptr = const_data_ptr<T>();
+    } else {
+      ptr = mutable_data_ptr<T>();
+    }
+    return GenericPackedTensorAccessor<T,N,PtrTraits,index_t>(static_cast<typename PtrTraits<T>::PtrType>(ptr),sizes().data(),strides().data());
   }
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
   GenericPackedTensorAccessor<T,N> generic_packed_accessor() && = delete;
@@ -815,9 +831,9 @@ class TORCH_API TensorBase {
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   template <typename T>
-  using hook_return_void_t = std::enable_if_t<std::is_void<typename c10::invoke_result_t<T&, TensorBase>>::value, unsigned>;
+  using hook_return_void_t = std::enable_if_t<std::is_void_v<typename c10::invoke_result_t<T&, TensorBase>>, unsigned>;
   template <typename T>
-  using hook_return_var_t = std::enable_if_t<std::is_same<typename c10::invoke_result_t<T&, TensorBase>, TensorBase>::value, unsigned>;
+  using hook_return_var_t = std::enable_if_t<std::is_same_v<typename c10::invoke_result_t<T&, TensorBase>, TensorBase>, unsigned>;
 
   /// Registers a backward hook.
   ///
@@ -904,15 +920,16 @@ private:
   TensorBase __dispatch_contiguous(c10::MemoryFormat) const;
 };
 
-inline int64_t get_device(const TensorBase& self) {
+inline DeviceIndex get_device(const TensorBase& self) {
   return self.get_device();
 }
 
 template <typename T>
+// NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
 auto TensorBase::register_hook(T&& hook) const -> TensorBase::hook_return_void_t<T> {
   // Return the grad argument in case of a hook with void return type to have an
   // std::function with Tensor return type
-  static_assert(std::is_same<decltype(hook(TensorBase())), void>::value,
+  static_assert(std::is_same_v<decltype(hook(TensorBase())), void>,
                 "Expected hook to return void");
   return _register_hook([fn=std::forward<T>(hook)](const TensorBase& grad) {
     fn(grad);
@@ -1010,9 +1027,9 @@ inline c10::MaybeOwned<TensorBase> TensorBase::expect_contiguous(MemoryFormat me
 namespace symint {
 
 template <typename T>
-using enable_if_symint = std::enable_if_t<std::is_same<T, c10::SymInt>::value>;
+using enable_if_symint = std::enable_if_t<std::is_same_v<T, c10::SymInt>>;
 template <typename T>
-using enable_if_int = std::enable_if_t<std::is_same<T, int64_t>::value>;
+using enable_if_int = std::enable_if_t<std::is_same_v<T, int64_t>>;
 
 template <typename T, typename = enable_if_symint<T>>
 c10::SymIntArrayRef sizes(const TensorBase& t) { return t.sym_sizes(); }

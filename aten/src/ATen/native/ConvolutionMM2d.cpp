@@ -61,7 +61,7 @@ static Tensor compute_columns2d(
         kernel_height * kernel_width * n_input_plane : output_height * output_width;
     columns = at::empty({batch_size, row, col}, input.options());
     AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, input.scalar_type(), "slow_conv2d_cpu", [&]{
-      auto input_a = input.accessor<scalar_t, 4>();
+      auto input_a = input.accessor<const scalar_t, 4>();
       auto columns_a = columns.accessor<scalar_t, 3>();
 
       at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
@@ -220,9 +220,9 @@ static inline Tensor view_weight_2d(const Tensor& weight_,
 
 template <typename scalar_t>
 static void slow_conv2d_update_output_frame(
-    TensorAccessor<scalar_t, 3> input,
+    TensorAccessor<const scalar_t, 3> input,
     TensorAccessor<scalar_t, 3> output,
-    TensorAccessor<scalar_t, 2> weight,
+    TensorAccessor<const scalar_t, 2> weight,
     bool has_bias,
     TensorAccessor<scalar_t, 2> finput,
     int64_t kernel_height,
@@ -285,8 +285,8 @@ static void slow_conv2d_update_output_frame(
 template <typename scalar_t>
 void slow_conv2d_backward_update_grad_input_frame(
     TensorAccessor<scalar_t, 3> grad_input,
-    TensorAccessor<scalar_t, 3> grad_output,
-    TensorAccessor<scalar_t, 2> weight,
+    TensorAccessor<const scalar_t, 3> grad_output,
+    TensorAccessor<const scalar_t, 2> weight,
     scalar_t *fgrad_input,
     int64_t kernel_height,
     int64_t kernel_width,
@@ -405,9 +405,9 @@ void slow_conv2d_backward_out_cpu_template(
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kBFloat16, kHalf, input.scalar_type(), "slow_conv2d_cpu_grad_input", [&] {
-    auto grad_output_a = grad_output.accessor<scalar_t, 4>();
+    auto grad_output_a = grad_output.accessor<const scalar_t, 4>();
     auto grad_input_a = grad_input.accessor<scalar_t, 4>();
-    auto weight_a = weight.accessor<scalar_t, 2>();
+    auto weight_a = weight.accessor<const scalar_t, 2>();
 
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
       auto fgrad_input = std::make_unique<scalar_t[]>(fgrad_input_size);
@@ -434,8 +434,8 @@ void slow_conv2d_backward_out_cpu_template(
 template <typename scalar_t>
 void slow_conv2d_backward_weight_frame(
     TensorAccessor<scalar_t, 2> grad_weight,
-    TensorAccessor<scalar_t, 3> grad_output,
-    TensorAccessor<scalar_t, 2> finput,
+    TensorAccessor<const scalar_t, 3> grad_output,
+    TensorAccessor<const scalar_t, 2> finput,
     bool is_channels_last) {
   // Compute grad_weight += grad_output.reshape({grad_output.shape(0), -1}) * finput.T
   // Note gemm expects fortran order, so all 3 matrices are transposed.
@@ -519,9 +519,9 @@ static void slow_conv2d_backward_weight_out_cpu_template(
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kBFloat16, kHalf, input.scalar_type(), "slow_conv2d_cpu_grad_weight", [&] {
-    auto grad_output_a = grad_output.accessor<scalar_t, 4>();
+    auto grad_output_a = grad_output.accessor<const scalar_t, 4>();
     auto grad_weight_2d_a = grad_weight_2d.accessor<scalar_t, 2>();
-    auto finput_a = finput.accessor<scalar_t, 3>();
+    auto finput_a = finput.accessor<const scalar_t, 3>();
 
     for (const auto t : c10::irange(batch_size)) {
       auto grad_output_t = grad_output_a[t];
@@ -588,10 +588,10 @@ Tensor& slow_conv2d_forward_out_cpu(
   TORCH_CHECK(output.is_contiguous(memory_format), "slow_conv2d output tensor must be contiguous");
 
   AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, input.scalar_type(), "slow_conv2d_cpu", [&]{
-    auto input_a = input.accessor<scalar_t, 4>();
+    auto input_a = input.accessor<const scalar_t, 4>();
     auto output_a = output.accessor<scalar_t, 4>();
     auto finput_a = finput.accessor<scalar_t, 3>();
-    auto weight_2d_a = weight_2d.accessor<scalar_t, 2>();
+    auto weight_2d_a = weight_2d.accessor<const scalar_t, 2>();
 
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
       for (const auto t : c10::irange(start, end)) {

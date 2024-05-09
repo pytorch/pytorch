@@ -8,6 +8,7 @@ This module defines runtime wrappers, which, based on previous analysis attempts
 
 import collections
 import pprint
+from dataclasses import dataclass
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -52,6 +53,79 @@ from .utils import (
 zip = strict_zip
 
 
+class CompilerWrapper:
+    """
+    A wrapper around the inputs and outputs to the compiler_fn. We separate these into two parts:
+
+    1. The prologue, which edits the input to the compiler_fn(flat_fn, flat_args, etc)
+    2. The epilogue, which edits the outputs of the compiler_fn (compiled_fn, real arguments)
+
+    Each wrapper below should be implemented as a CompilerWrapper, so that we can facilitate
+    caching on the compiled output, and re-wrapping the output via epilogues.
+    Extra metadata that is needed to compute pre or post compile can be passed in via attributes.
+    """
+
+    def pre_compile(
+        self,
+        flat_fn,
+        flat_args: List[Tensor],
+        aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+    ):
+        """
+        Process the inputs to the compiler_fn. You can pass in extra metadata via kwargs.
+        Args:
+        flat_fn: The function to compile
+        flat_args: Metadata from example inputs of the function to compile
+        aot_config: AOTConfig passed in at compile time
+        fw_metadata: ViewAndMutationMeta generated from flat_fn and flat_args
+        """
+        return flat_fn, flat_args, aot_config, fw_metadata
+
+    def post_compile(self, compiled_fn, aot_config, *, fw_metadata):
+        """
+        Given an output of the compiler, wrap it with information received from prologue.
+        Args:
+        compiled_fn: Callable after calling compiler_fn
+        aot_config: AOTConfig after calling prologue
+        fw_metadata: ViewAndMutationMeta after calling prologue
+        Example:
+
+        def wrapped_compiled_fn(args):
+            # do something with args, aot_config, fw_metadata
+            return compiled_fn(args)
+
+        return wrapped_compiled_fn
+        """
+        return compiled_fn
+
+    def create(
+        self,
+        flat_fn,
+        flat_args: List[Tensor],
+        aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+        compiler_fn,
+        **kwargs,
+    ):
+        (
+            wrapped_flat_fn,
+            new_flat_args,
+            new_aot_config,
+            new_fw_metadata,
+        ) = self.pre_compile(
+            flat_fn, flat_args, aot_config, fw_metadata=fw_metadata, **kwargs
+        )
+        compiled_fn = compiler_fn(
+            wrapped_flat_fn, new_flat_args, new_aot_config, fw_metadata=new_fw_metadata
+        )
+        return self.post_compile(
+            compiled_fn, new_aot_config, fw_metadata=new_fw_metadata, **kwargs
+        )
+
+
 # The wrapper created by this function handles all of the runtime aliasing and mutation "epilogue" logic
 # that needs to run after the compiled function.
 #
@@ -60,7 +134,30 @@ zip = strict_zip
 # This is because there are some minor differences in how we treat these cases at runtime:
 # - resize_() is currently handled in the inference case, but not fully handled in the autograd case.
 # - the autograd cases inserts TensorAlias wrapper objects for outputs that alias inputs
-def create_runtime_wrapper(
+@dataclass
+class RuntimeWrapper(CompilerWrapper):
+    indices_of_inps_to_detach: List[int]
+    trace_joint: bool
+    disable_amp: bool
+
+    def post_compile(
+        self,
+        compiled_fn,
+        aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+    ):
+        return _create_runtime_wrapper(
+            compiled_fn,
+            runtime_metadata=fw_metadata,
+            indices_of_inps_to_detach=self.indices_of_inps_to_detach,
+            trace_joint=self.trace_joint,
+            keep_input_mutations=aot_config.keep_inference_input_mutations,
+            disable_amp=self.disable_amp,
+        )
+
+
+def _create_runtime_wrapper(
     compiled_fn,
     *,
     runtime_metadata: ViewAndMutationMeta,
@@ -72,7 +169,40 @@ def create_runtime_wrapper(
     if not hasattr(compiled_fn, "_boxed_call"):
         compiled_fn = make_boxed_func(compiled_fn)
 
-    def runtime_wrapper(*args):
+    # Note [Inputs needed in runtime epilogue after list clearing]
+    # In Python functions, you can't free the input arguments of a function within the scope of that function. A workaround is to
+    # wrap the input arguments in a list, and clear the list from within the function.
+    # Here, this is implemented as `call_func_at_runtime_with_args(..., steal_args=True)`.
+    #
+    # This is needed for Compiled Autograd since some of the inputs (activations) should be freed early.
+    # However, we cannot blindly clear the entire list, because AOTAutograd may need access to some of the graph inputs
+    # **after** the compiled function has finished running. There are two main cases:
+    #   (1) Input mutations: If there are an input mutations that we must run outside of the graph, we need access to the input.
+    #   (2) Output aliasing: Outputs that aliases graph inputs generally must be regenerated outside of the `autograd.Function`,
+    #       and doing so requires us accessing the corresponding input after the compiled artifact has run.
+    epilogue_args_idx = []
+    epilogue_args_idx.extend(runtime_metadata.mutated_inp_runtime_indices)
+    num_tokens = len(runtime_metadata.tokens)
+    for info in runtime_metadata.output_info:
+        if (
+            info.output_type == OutputType.alias_of_input
+            or info.output_type == OutputType.is_input
+        ):
+            assert isinstance(info.base_idx, int)
+            epilogue_args_idx.append(info.base_idx + num_tokens)
+
+    def runtime_wrapper(args: List[Any]):
+        if config.unlift_effect_tokens:
+            assert num_tokens == 0
+        elif num_tokens > 0:
+            # Pass in effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
+            old_args = args
+            args = [[None] * num_tokens, *args]
+            old_args.clear()
+
+        # stash a ref to each input tensor we plan to use after the compiled function
+        orig_inputs = {i: args[i] for i in epilogue_args_idx}
+
         if trace_joint:
             args_ = list(args)
             # See Note [Detaching inputs that never need gradients]
@@ -81,21 +211,23 @@ def create_runtime_wrapper(
                     args_[idx] = args_[idx].detach()
             with torch.autograd._force_original_view_tracking(True):
                 all_outs = call_func_at_runtime_with_args(
-                    compiled_fn,
-                    args_,
-                    disable_amp=disable_amp,
+                    compiled_fn, args_, disable_amp=disable_amp, steal_args=True
                 )
         else:
             # When we have an inference graph, we run with torch.no_grad.
             # It's possible to get an inference graph with inputs that require grad,
             # in which case we want to make sure autograd is disabled
             # (since e.g., inductor will generate aten.addmm.out calls which autograd will complain on)
-            with torch.no_grad():
+            if torch.is_grad_enabled():
+                with torch.no_grad():
+                    all_outs = call_func_at_runtime_with_args(
+                        compiled_fn, args, disable_amp=disable_amp, steal_args=True
+                    )
+            else:
                 all_outs = call_func_at_runtime_with_args(
-                    compiled_fn,
-                    args,
-                    disable_amp=disable_amp,
+                    compiled_fn, args, disable_amp=disable_amp, steal_args=True
                 )
+        del args
 
         num_mutated_runtime_inps = runtime_metadata.num_mutated_inp_runtime_indices
         num_intermediate_bases = runtime_metadata.num_intermediate_bases
@@ -113,7 +245,11 @@ def create_runtime_wrapper(
             == num_mutated_runtime_inps
             + runtime_metadata.num_outputs
             + num_intermediate_bases
+            + num_tokens
         )
+
+        # Toss out the effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
+        all_outs = all_outs[num_tokens:]
 
         # Step 3: After running the compiled fw, apply updates to mutated inputs
         num_mutations_to_apply = runtime_metadata.num_mutated_inp_runtime_indices
@@ -125,9 +261,10 @@ def create_runtime_wrapper(
                 meta = runtime_metadata.input_info[inpt_idx]
                 if not meta.mutates_data and not meta.mutates_metadata:
                     continue
-                original_inpt = args[inpt_idx]
+                original_inpt = orig_inputs[inpt_idx]
                 updated_inpt = updated_inputs[i]
                 if meta.mutates_storage_metadata:
+                    # See Note [set_() Input Mutations in AOTAutograd]
                     # mutates_storage_metadata means our input saw a x.set_(y) call.
                     # What if x **also** saw a data and/or a metadata mutation?
                     # (1) If the [meta]data mutation occurred after the set_(),
@@ -218,14 +355,14 @@ def create_runtime_wrapper(
 
                 o_grad = runtime_metadata.output_info[i].requires_grad
                 if info.output_type == OutputType.alias_of_input:
-                    aliased_base_tensor = args[info.base_idx]  # type: ignore[index]
+                    aliased_base_tensor = orig_inputs[info.base_idx + num_tokens]  # type: ignore[index]
                     regenerated_out = gen_alias_from_base(
-                        aliased_base_tensor, o_, o_grad
+                        aliased_base_tensor, o_, o_grad, info.functional_tensor
                     )
                     fw_outs_including_aliases.append(regenerated_out)
                     continue
                 elif info.output_type == OutputType.is_input:
-                    aliased_base_tensor = args[info.base_idx]  # type: ignore[index]
+                    aliased_base_tensor = orig_inputs[info.base_idx + num_tokens]  # type: ignore[index]
                     regenerated_out = aliased_base_tensor
                     fw_outs_including_aliases.append(regenerated_out)
                     continue
@@ -245,7 +382,9 @@ def create_runtime_wrapper(
                 # TODO: handle the custom autograd function case here.
                 # We need a way to check whether a tensor came from a custom autograd fn from python,
                 # AND a way to replay that custom view fn.
-                regenerated_out = gen_alias_from_base(aliased_base_tensor, o_, o_grad)
+                regenerated_out = gen_alias_from_base(
+                    aliased_base_tensor, o_, o_grad, info.functional_tensor
+                )
                 fw_outs_including_aliases.append(regenerated_out)
             ret_outs = fw_outs_including_aliases
         else:
@@ -293,8 +432,9 @@ def aot_dispatch_subclass_wrapper(
     subclass_metas: List[Union[int, SubclassCreationMeta]],
     num_fw_outs_saved_for_bw: Optional[int],
 ) -> Callable:
-    def inner_fn(args):
+    def inner_fn(args: List[Any]):
         unwrapped_args = unwrap_tensor_subclasses(args, is_joint_structure=False)
+        args.clear()
         # expectation: runtime_fn is a boxed fn
         unwrapped_outs = runtime_fn(unwrapped_args)
         wrapped_outs = wrap_tensor_subclasses(
@@ -554,11 +694,8 @@ fw_metadata={str(fw_metadata)}
         wrapped_flat_fn, deduped_flat_args, aot_config, fw_metadata=updated_fw_metadata
     )
 
-    if not hasattr(compiled_fn, "_boxed_call"):
-        compiled_fn = make_boxed_func(compiled_fn)
-
     @wraps(compiled_fn)
-    def wrapped_compiled_fn(args):
+    def wrapped_compiled_fn(args: List[Any]):
         deduped_args = remove_dupe_args(args)
         args.clear()
         return compiled_fn(deduped_args)
@@ -723,9 +860,6 @@ fw_metadata={str(fw_metadata)}
         aot_config,
         fw_metadata=fw_metadata_updated,
     )
-
-    if not hasattr(compiled_fn, "_boxed_call"):
-        compiled_fn = make_boxed_func(compiled_fn)
 
     @wraps(compiled_fn)
     def wrapped_compiled_fn(args):

@@ -11,5 +11,6 @@ from ._internal import (
     getArtifactLogger,
     LazyString,
     set_logs,
+    trace_structured,
     warning_once,
 )

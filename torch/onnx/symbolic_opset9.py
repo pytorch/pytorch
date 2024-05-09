@@ -185,7 +185,6 @@ __all__ = [
     "ones_like",
     "ones",
     "onnx_placeholder",
-    "overload_by_arg_count",
     "pad",
     "pairwise_distance",
     "permute",
@@ -291,15 +290,6 @@ __all__ = [
 
 
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=9)
-
-
-def _apply_params(*args, **kwargs):
-    """Returns a decorator that calls the decorated (higher-order) function with the given parameters."""
-
-    def _apply(fn):
-        return fn(*args, **kwargs)
-
-    return _apply
 
 
 def _export(name: str):
@@ -774,119 +764,26 @@ def _slice(g: jit_utils.GraphContext, input, axes, starts, ends):
     return g.op("Slice", input, axes_i=axes, starts_i=starts, ends_i=ends)
 
 
-@_beartype.beartype
-def _maybe_cast_reduce_op_input(g: jit_utils.GraphContext, self):
-    scalar_type = _type_utils.JitScalarType.from_value(
-        self, _type_utils.JitScalarType.UNDEFINED
-    )
-    if scalar_type != _type_utils.JitScalarType.UNDEFINED:
-        # This check only covers traced modules where dtype is present
-        # pytorch reduce-ops cast all other integral types to int64
-        if (
-            not symbolic_helper._is_fp(self)
-            and scalar_type != _type_utils.JitScalarType.INT64
-        ):
-            self = g.op("Cast", self, to_i=_C_onnx.TensorProtoDataType.INT64)
-    return self
-
-
-@_beartype.beartype
-def _reduce_op_symbolic(onnx_op_name, allow_multi_dim_support=True):
-    @_beartype.beartype
-    def symbolic(g, self, dim=None, keepdim=None):
-        self = _maybe_cast_reduce_op_input(g, self)
-        if dim is None or dim == tuple():
-            # Dim can be 0, which will cause (not dim) == True. So we don't want to do
-            # (not dim)
-            # all-reduce path
-            return symbolic_helper._handle_reduce_dim_none(g, self, onnx_op_name)
-        else:
-            # dim-reduce path
-            desc = "is" if allow_multi_dim_support else "i"
-            dim, keepdim = symbolic_helper._get_const(
-                dim, desc, "dim"
-            ), symbolic_helper._get_const(keepdim, "i", "keepdim")
-            dim_list = dim if allow_multi_dim_support else [dim]
-            return g.op(onnx_op_name, self, axes_i=dim_list, keepdims_i=keepdim)
-
-    return symbolic
-
-
-@_beartype.beartype
-def overload_by_arg_count(fn):
-    @functools.wraps(fn)
-    @_beartype.beartype
-    def wrapper(g, *args):
-        overloads = fn(g, *args)
-        for overload in overloads:
-            arg_descriptors = overload._arg_descriptors
-            if len(arg_descriptors) == len(args):
-                return overload(g, *args)
-        return symbolic_helper._unimplemented(
-            f"aten::{fn.__name__}", f"with {len(args)} arguments"
-        )
-
-    return wrapper
-
-
-@_onnx_symbolic("aten::sum", decorate=[_apply_params("ReduceSum", "sum")])
-@_onnx_symbolic("aten::mean", decorate=[_apply_params("ReduceMean", "mean")])
+@_onnx_symbolic(
+    "aten::sum", decorate=[symbolic_helper._apply_params("ReduceSum", "sum")]
+)
+@_onnx_symbolic(
+    "aten::mean", decorate=[symbolic_helper._apply_params("ReduceMean", "mean")]
+)
 # torch.prod does not support multidimensional "dim"
 @_onnx_symbolic(
     "aten::prod",
-    decorate=[_apply_params("ReduceProd", "prod", allow_multi_dim_support=False)],
+    decorate=[
+        symbolic_helper._apply_params(
+            "ReduceProd", "prod", allow_multi_dim_support=False
+        )
+    ],
 )
 @_beartype.beartype
 def _reduce_with_dtype(onnx_op: str, name: str, allow_multi_dim_support: bool = True):
-    symbolic = _reduce_op_symbolic(
-        onnx_op, allow_multi_dim_support=allow_multi_dim_support
+    return symbolic_helper._reduce_with_dtype_helper(
+        onnx_op, name, allow_multi_dim_support
     )
-
-    @overload_by_arg_count
-    def reduce(g, *args, **kwargs):
-        @symbolic_helper.quantized_args(True)
-        @symbolic_helper.parse_args("v", "none")
-        def reduce_nodim(g, self, dtype):
-            dtype_onnx = None
-            if dtype.node().kind() == "onnx::Constant":
-                dtype = symbolic_helper._get_const(dtype, "i", "dtype")
-                dtype_onnx = _type_utils.JitScalarType(dtype).onnx_type()
-                self = g.op("Cast", self, to_i=dtype_onnx)
-            elif dtype.node().kind() != "prim::Constant":
-                return symbolic_helper._unimplemented(name, "dtype", dtype)
-            result = symbolic(g, self)
-            if dtype_onnx is not None:
-                result_dtype_onnx = _type_utils.JitScalarType.from_value(
-                    result
-                ).onnx_type()
-                if result_dtype_onnx != dtype_onnx:
-                    result = g.op("Cast", result, to_i=dtype_onnx)
-            return result
-
-        dim_desc = "is" if allow_multi_dim_support else "i"
-
-        @symbolic_helper.quantized_args(True)
-        @symbolic_helper.parse_args("v", dim_desc, "i", "none")  # type: ignore[arg-type]
-        def reduce_dim(g, self, dim, keepdim, dtype):
-            dtype_onnx = None
-            if dtype.node().kind() == "onnx::Constant":
-                dtype = symbolic_helper._get_const(dtype, "i", "dtype")
-                dtype_onnx = _type_utils.JitScalarType(dtype).onnx_type()
-                self = g.op("Cast", self, to_i=dtype_onnx)
-            elif dtype.node().kind() != "prim::Constant":
-                return symbolic_helper._unimplemented(name, "dtype", dtype)
-            result = symbolic(g, self, dim, keepdim)
-            if dtype_onnx is not None:
-                result_dtype_onnx = _type_utils.JitScalarType.from_value(
-                    result
-                ).onnx_type()
-                if result_dtype_onnx != dtype_onnx:
-                    result = g.op("Cast", result, to_i=dtype_onnx)
-            return result
-
-        return reduce_nodim, reduce_dim
-
-    return reduce
 
 
 @_onnx_symbolic("aten::cumsum")
@@ -1356,65 +1253,13 @@ def mish(g: jit_utils.GraphContext, input):
     return g.op("Mul", input, g.op("Tanh", g.op("Softplus", input)))
 
 
-@_beartype.beartype
-def _op_with_optional_float_cast(g: jit_utils.GraphContext, op_name, *args, **kwargs):
-    """Some PyTorch operators (e.g., Clip/Min/ReLU/Pad) are super set of ONNX in terms of data types.
-    This function maximizes the exportability of PyTorch-ONNX by allowing ONNX-unsupported PyTorch
-    operator data type. For example, `Cast<int>(Clip<float>(Cast<float>(INPUT)))` can be used to mimic
-    `Clip<int>(INPUT)` (opset version < 12).
-
-    Args:
-        g (torch._C.Graph): graph to write the ONNX representation into.
-        op_name (str): operator name in ONNX.
-        *args (tuple): operands to the operator.
-        **kwargs (dict): attributes to the operator along with "opset_before" (optional, None by default)
-            indicating the smallest opset version to trigger such casting behavior and "target_float_t"
-            (optional, torch.onnx.JitScalarType.FLOAT by default) indicating the data type of internal operator.
-
-    Returns:
-        Optional[torch._C.Value, Tuple[torch._C.Value, ...]]: output(s) of the operator.
-    """
-    opset_before = kwargs.pop("opset_before", None)
-    target_float_t = kwargs.pop("target_float_t", _type_utils.JitScalarType.FLOAT)
-
-    inputs = list(args)
-    dtype_0 = _type_utils.JitScalarType.from_value(inputs[0])
-
-    require_cast = not symbolic_helper._is_fp(inputs[0]) and (
-        opset_before is None or GLOBALS.export_onnx_opset_version < opset_before
-    )
-
-    if require_cast:
-        for input in inputs:
-            if input.isCompleteTensor():
-                input_scalar_type = _type_utils.JitScalarType.from_value(input)
-                if input_scalar_type != dtype_0:
-                    raise errors.SymbolicValueError(
-                        f"Inputs of {op_name} must have same dtype."
-                        f"Got {dtype_0.scalar_name()} and {input_scalar_type.scalar_name()}",
-                        input,
-                    )
-        for i, input in enumerate(inputs):
-            if input.isCompleteTensor() and not symbolic_helper._is_fp(input):
-                inputs[i] = g.op(
-                    "Cast",
-                    input,
-                    to_i=target_float_t.onnx_type(),
-                )
-
-    self = g.op(op_name, *inputs, **kwargs)
-
-    if require_cast:
-        self = g.op("Cast", self, to_i=dtype_0.onnx_type())
-
-    return self
-
-
 @_onnx_symbolic("aten::relu")
 @symbolic_helper.quantized_args(True)
 @_beartype.beartype
 def relu(g: jit_utils.GraphContext, input):
-    return _op_with_optional_float_cast(g, "Relu", input, opset_before=14)
+    return symbolic_helper._op_with_optional_float_cast(
+        g, "Relu", input, opset_before=14
+    )
 
 
 @_onnx_symbolic("aten::relu6")
@@ -1529,7 +1374,7 @@ def softmax(g: jit_utils.GraphContext, input, dim, dtype=None):
             )
 
         if is_transpose_required:
-            softmax = g.op("Transpose", softmax, perm_i=axes)
+            softmax = g.op("Transpose", softmax, perm_i=axes)  # type: ignore[possibly-undefined]
         return softmax
 
     # Apply max normalization.
@@ -1603,7 +1448,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
 @_onnx_symbolic(
     "aten::max_pool1d",
     decorate=[
-        _apply_params(
+        symbolic_helper._apply_params(
             "max_pool1d", torch.nn.modules.utils._single, 1, return_indices=False
         ),
         _export("max_pool1d"),
@@ -1612,7 +1457,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
 @_onnx_symbolic(
     "aten::max_pool2d",
     decorate=[
-        _apply_params(
+        symbolic_helper._apply_params(
             "max_pool2d", torch.nn.modules.utils._pair, 2, return_indices=False
         ),
         _export("max_pool2d"),
@@ -1621,7 +1466,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
 @_onnx_symbolic(
     "aten::max_pool3d",
     decorate=[
-        _apply_params(
+        symbolic_helper._apply_params(
             "max_pool3d", torch.nn.modules.utils._triple, 3, return_indices=False
         ),
         _export("max_pool3d"),
@@ -1716,21 +1561,21 @@ max_pool3d_with_indices = _onnx_symbolic("aten::max_pool3d_with_indices")(
 @_onnx_symbolic(
     "aten::avg_pool1d",
     decorate=[
-        _apply_params("avg_pool1d", torch.nn.modules.utils._single),
+        symbolic_helper._apply_params("avg_pool1d", torch.nn.modules.utils._single),
         _export("avg_pool1d"),
     ],
 )
 @_onnx_symbolic(
     "aten::avg_pool2d",
     decorate=[
-        _apply_params("avg_pool2d", torch.nn.modules.utils._pair),
+        symbolic_helper._apply_params("avg_pool2d", torch.nn.modules.utils._pair),
         _export("avg_pool2d"),
     ],
 )
 @_onnx_symbolic(
     "aten::avg_pool3d",
     decorate=[
-        _apply_params("avg_pool3d", torch.nn.modules.utils._triple),
+        symbolic_helper._apply_params("avg_pool3d", torch.nn.modules.utils._triple),
         _export("avg_pool3d"),
     ],
 )
@@ -1762,7 +1607,7 @@ def _avg_pool(name, tuple_fn):
         # this accommodation.
         # More detail on https://github.com/pytorch/pytorch/issues/57178
         if count_include_pad:
-            input = _op_with_optional_float_cast(
+            input = symbolic_helper._op_with_optional_float_cast(
                 g,
                 "Pad",
                 input,
@@ -1794,7 +1639,7 @@ def _avg_pool(name, tuple_fn):
 @_onnx_symbolic(
     "aten::adaptive_avg_pool1d",
     decorate=[
-        _apply_params(
+        symbolic_helper._apply_params(
             "adaptive_avg_pool1d", "AveragePool", torch.nn.modules.utils._single
         ),
         _export("adaptive_avg_pool1d"),
@@ -1803,7 +1648,7 @@ def _avg_pool(name, tuple_fn):
 @_onnx_symbolic(
     "aten::adaptive_avg_pool2d",
     decorate=[
-        _apply_params(
+        symbolic_helper._apply_params(
             "adaptive_avg_pool2d", "AveragePool", torch.nn.modules.utils._pair
         ),
         _export("adaptive_avg_pool2d"),
@@ -1812,7 +1657,7 @@ def _avg_pool(name, tuple_fn):
 @_onnx_symbolic(
     "aten::adaptive_avg_pool3d",
     decorate=[
-        _apply_params(
+        symbolic_helper._apply_params(
             "adaptive_avg_pool3d", "AveragePool", torch.nn.modules.utils._triple
         ),
         _export("adaptive_avg_pool3d"),
@@ -1821,7 +1666,7 @@ def _avg_pool(name, tuple_fn):
 @_onnx_symbolic(
     "aten::adaptive_max_pool1d",
     decorate=[
-        _apply_params(
+        symbolic_helper._apply_params(
             "adaptive_max_pool1d",
             "MaxPool",
             torch.nn.modules.utils._single,
@@ -1833,7 +1678,7 @@ def _avg_pool(name, tuple_fn):
 @_onnx_symbolic(
     "aten::adaptive_max_pool2d",
     decorate=[
-        _apply_params(
+        symbolic_helper._apply_params(
             "adaptive_max_pool2d",
             "MaxPool",
             torch.nn.modules.utils._pair,
@@ -1845,7 +1690,7 @@ def _avg_pool(name, tuple_fn):
 @_onnx_symbolic(
     "aten::adaptive_max_pool3d",
     decorate=[
-        _apply_params(
+        symbolic_helper._apply_params(
             "adaptive_max_pool3d",
             "MaxPool",
             torch.nn.modules.utils._triple,
@@ -1961,7 +1806,7 @@ def constant_pad_nd(g: jit_utils.GraphContext, input, padding, value):
 
     padding = _convert_padding_node(padding)
     paddings = _prepare_onnx_paddings(symbolic_helper._get_tensor_rank(input), padding)
-    return _op_with_optional_float_cast(
+    return symbolic_helper._op_with_optional_float_cast(
         g, "Pad", input, pads_i=paddings, mode_s=mode, value_f=value, opset_before=11
     )
 
@@ -2016,7 +1861,7 @@ def reflection_pad(g: jit_utils.GraphContext, input, padding):
     mode = "reflect"
     padding = _convert_padding_node(padding)
     paddings = _prepare_onnx_paddings(symbolic_helper._get_tensor_rank(input), padding)
-    return _op_with_optional_float_cast(
+    return symbolic_helper._op_with_optional_float_cast(
         g, "Pad", input, pads_i=paddings, mode_s=mode, opset_before=11
     )
 
@@ -2029,7 +1874,7 @@ def replication_pad(g: jit_utils.GraphContext, input, padding):
     mode = "edge"
     padding = _convert_padding_node(padding)
     paddings = _prepare_onnx_paddings(symbolic_helper._get_tensor_rank(input), padding)
-    return _op_with_optional_float_cast(
+    return symbolic_helper._op_with_optional_float_cast(
         g, "Pad", input, pads_i=paddings, mode_s=mode, opset_before=11
     )
 
@@ -2059,42 +1904,42 @@ def pad(
 @_onnx_symbolic(
     "aten::upsample_nearest1d",
     decorate=[
-        _apply_params("upsample_nearest1d", 3, "nearest"),
+        symbolic_helper._apply_params("upsample_nearest1d", 3, "nearest"),
         _export("upsample_nearest1d"),
     ],
 )
 @_onnx_symbolic(
     "aten::upsample_nearest2d",
     decorate=[
-        _apply_params("upsample_nearest2d", 4, "nearest"),
+        symbolic_helper._apply_params("upsample_nearest2d", 4, "nearest"),
         _export("upsample_nearest2d"),
     ],
 )
 @_onnx_symbolic(
     "aten::upsample_nearest3d",
     decorate=[
-        _apply_params("upsample_nearest3d", 5, "nearest"),
+        symbolic_helper._apply_params("upsample_nearest3d", 5, "nearest"),
         _export("upsample_nearest3d"),
     ],
 )
 @_onnx_symbolic(
     "aten::upsample_linear1d",
     decorate=[
-        _apply_params("upsample_linear1d", 3, "linear"),
+        symbolic_helper._apply_params("upsample_linear1d", 3, "linear"),
         _export("upsample_linear1d"),
     ],
 )
 @_onnx_symbolic(
     "aten::upsample_bilinear2d",
     decorate=[
-        _apply_params("upsample_bilinear2d", 4, "linear"),
+        symbolic_helper._apply_params("upsample_bilinear2d", 4, "linear"),
         _export("upsample_bilinear2d"),
     ],
 )
 @_onnx_symbolic(
     "aten::upsample_trilinear3d",
     decorate=[
-        _apply_params("upsample_trilinear3d", 5, "linear"),
+        symbolic_helper._apply_params("upsample_trilinear3d", 5, "linear"),
         _export("upsample_trilinear3d"),
     ],
 )
@@ -2467,7 +2312,7 @@ def log_softmax(g: jit_utils.GraphContext, input, dim, dtype=None):
             "Cast", return_op, to_i=_type_utils.JitScalarType(parsed_dtype).onnx_type()
         )
     if is_transpose_required:
-        return_op = g.op("Transpose", return_op, perm_i=axes)
+        return_op = g.op("Transpose", return_op, perm_i=axes)  # type: ignore[possibly-undefined]
     return return_op
 
 
@@ -2942,7 +2787,15 @@ def native_layer_norm(
     two_cst = symbolic_helper._generate_wrapped_number(g, 2.0)
     eps_cst = symbolic_helper._generate_wrapped_number(g, eps)
 
-    mean = g.op("ReduceMean", input, axes_i=axes)
+    if g.opset < 18:
+        mean = g.op("ReduceMean", input, axes_i=axes)
+    else:
+        mean = g.op(
+            "ReduceMean",
+            input,
+            g.op("Constant", value_t=torch.tensor(axes, dtype=torch.long)),
+        )
+
     numerator = sub(g, input, mean)
 
     # Cast it to eps dtype to avoid precision loss
@@ -2957,7 +2810,15 @@ def native_layer_norm(
         )
 
     # variance = e((x - e(x))^2), and (x - e(x)) is the numerator in the layer_norm formula
-    variance = g.op("ReduceMean", pow(g, numerator, two_cst), axes_i=axes)
+    if g.opset < 18:
+        variance = g.op("ReduceMean", pow(g, numerator, two_cst), axes_i=axes)
+    else:
+        variance = g.op(
+            "ReduceMean",
+            pow(g, numerator, two_cst),
+            g.op("Constant", value_t=torch.tensor(axes, dtype=torch.long)),
+        )
+
     denominator = sqrt(g, g.op("Add", variance, eps_cst))
     normalized = g.op("Div", numerator, denominator)
 
@@ -2978,7 +2839,7 @@ def native_layer_norm(
     # mean and normalized, so we need to Cast it back
     if is_type_half:
         denominator = g.op(
-            "Cast", denominator, to_i=_type_utils.JitScalarType(input_dtype).onnx_type()
+            "Cast", denominator, to_i=_type_utils.JitScalarType(input_dtype).onnx_type()  # type: ignore[possibly-undefined]
         )
         rdenominator = g.op("Reciprocal", denominator)
     else:
@@ -3405,7 +3266,7 @@ def clamp(g: jit_utils.GraphContext, self, min, max):
         return clamp_min(g, self, min)
     else:
         if symbolic_helper._is_constant(min) and symbolic_helper._is_constant(max):
-            return _op_with_optional_float_cast(
+            return symbolic_helper._op_with_optional_float_cast(
                 g,
                 "Clip",
                 self,
@@ -3422,13 +3283,15 @@ def clamp(g: jit_utils.GraphContext, self, min, max):
 @_beartype.beartype
 def clamp_min(g: jit_utils.GraphContext, self, min):
     if symbolic_helper._is_constant(min):
-        return _op_with_optional_float_cast(
+        return symbolic_helper._op_with_optional_float_cast(
             g, "Clip", self, min_f=symbolic_helper._parse_arg(min, "f"), opset_before=12
         )
     else:
         dtype = _type_utils.JitScalarType.from_value(self)
         min = g.op("Cast", min, to_i=dtype.onnx_type())
-        return _op_with_optional_float_cast(g, "Max", self, min, opset_before=12)
+        return symbolic_helper._op_with_optional_float_cast(
+            g, "Max", self, min, opset_before=12
+        )
 
 
 @_onnx_symbolic("aten::clamp_max")
@@ -3436,13 +3299,15 @@ def clamp_min(g: jit_utils.GraphContext, self, min):
 @_beartype.beartype
 def clamp_max(g: jit_utils.GraphContext, self, max):
     if symbolic_helper._is_constant(max):
-        return _op_with_optional_float_cast(
+        return symbolic_helper._op_with_optional_float_cast(
             g, "Clip", self, max_f=symbolic_helper._parse_arg(max, "f"), opset_before=12
         )
     else:
         dtype = _type_utils.JitScalarType.from_value(self)
         max = g.op("Cast", max, to_i=dtype.onnx_type())
-        return _op_with_optional_float_cast(g, "Min", self, max, opset_before=12)
+        return symbolic_helper._op_with_optional_float_cast(
+            g, "Min", self, max, opset_before=12
+        )
 
 
 @_onnx_symbolic("aten::max")
@@ -3451,19 +3316,7 @@ def clamp_max(g: jit_utils.GraphContext, self, max):
 # TODO(justinchuby): Support multiple quantized args in output
 @_beartype.beartype
 def max(g: jit_utils.GraphContext, self, dim_or_y=None, keepdim=None):
-    # torch.max(input)
-    if dim_or_y is None and keepdim is None:
-        return g.op("ReduceMax", self, keepdims_i=0)
-    # torch.max(input, other)
-    if keepdim is None:
-        return _op_with_optional_float_cast(g, "Max", self, dim_or_y, opset_before=12)
-    # torch.max(input, dim, keepdim)
-    else:
-        dim = symbolic_helper._get_const(dim_or_y, "i", "dim")
-        keepdim = symbolic_helper._get_const(keepdim, "i", "keepdim")
-        max = g.op("ReduceMax", self, axes_i=[dim], keepdims_i=keepdim)
-        indices = g.op("ArgMax", self, axis_i=dim, keepdims_i=keepdim)
-        return max, indices
+    return symbolic_helper._max_helper(g, self, dim_or_y, keepdim)
 
 
 @_onnx_symbolic("aten::maximum")
@@ -3477,19 +3330,7 @@ def maximum(g: jit_utils.GraphContext, input, other):
 # TODO(justinchuby): Support multiple quantized args in output
 @_beartype.beartype
 def min(g: jit_utils.GraphContext, self, dim_or_y=None, keepdim=None):
-    # torch.min(input)
-    if dim_or_y is None and keepdim is None:
-        return g.op("ReduceMin", self, keepdims_i=0)
-    # torch.min(input, other)
-    if keepdim is None:
-        return _op_with_optional_float_cast(g, "Min", self, dim_or_y, opset_before=12)
-    # torch.min(input, dim, keepdim)
-    else:
-        dim = symbolic_helper._get_const(dim_or_y, "i", "dim")
-        keepdim = symbolic_helper._get_const(keepdim, "i", "keepdim")
-        min = g.op("ReduceMin", self, axes_i=[dim], keepdims_i=keepdim)
-        indices = g.op("ArgMin", self, axis_i=dim, keepdims_i=keepdim)
-        return min, indices
+    return symbolic_helper._min_helper(g, self, dim_or_y, keepdim)
 
 
 @_onnx_symbolic("aten::minimum")
@@ -3550,22 +3391,28 @@ def dropout(g: jit_utils.GraphContext, input, p, train):
 
 
 @_onnx_symbolic(
-    "aten::alpha_dropout_", decorate=[_apply_params("aten::alpha_dropout_")]
+    "aten::alpha_dropout_",
+    decorate=[symbolic_helper._apply_params("aten::alpha_dropout_")],
 )  # See Note [Export inplace]
 @_onnx_symbolic(
     "aten::feature_alpha_dropout_",
-    decorate=[_apply_params("aten::feature_alpha_dropout_")],
+    decorate=[symbolic_helper._apply_params("aten::feature_alpha_dropout_")],
 )
 @_onnx_symbolic(
-    "aten::feature_dropout_", decorate=[_apply_params("aten::feature_dropout_")]
+    "aten::feature_dropout_",
+    decorate=[symbolic_helper._apply_params("aten::feature_dropout_")],
 )
 @_onnx_symbolic(
     "aten::feature_alpha_dropout",
-    decorate=[_apply_params("aten::feature_alpha_dropout")],
+    decorate=[symbolic_helper._apply_params("aten::feature_alpha_dropout")],
 )
-@_onnx_symbolic("aten::alpha_dropout", decorate=[_apply_params("aten::alpha_dropout")])
 @_onnx_symbolic(
-    "aten::feature_dropout", decorate=[_apply_params("aten::feature_dropout")]
+    "aten::alpha_dropout",
+    decorate=[symbolic_helper._apply_params("aten::alpha_dropout")],
+)
+@_onnx_symbolic(
+    "aten::feature_dropout",
+    decorate=[symbolic_helper._apply_params("aten::feature_dropout")],
 )
 @_beartype.beartype
 def _unsupported_dropout(name: str):
@@ -3585,9 +3432,9 @@ def _unsupported_dropout(name: str):
 @_beartype.beartype
 def norm(g: jit_utils.GraphContext, self, p, dim, keepdim, dtype=None):
     if p == 1:
-        f = _reduce_op_symbolic("ReduceL1")
+        f = symbolic_helper._reduce_op_symbolic_helper("ReduceL1")
     elif p == 2:
-        f = _reduce_op_symbolic("ReduceL2")
+        f = symbolic_helper._reduce_op_symbolic_helper("ReduceL2")
     else:
         raise errors.SymbolicValueError(
             "ONNX export only p-norms with p of 1 or 2", self
@@ -4135,7 +3982,7 @@ def slice(g: jit_utils.GraphContext, self, *args):
 @symbolic_helper.parse_args("v", "f", "f")
 @_beartype.beartype
 def hardtanh(g: jit_utils.GraphContext, self: _C.Value, min_val: float, max_val: float):
-    return _op_with_optional_float_cast(
+    return symbolic_helper._op_with_optional_float_cast(
         g, "Clip", self, min_f=min_val, max_f=max_val, opset_before=12
     )
 
@@ -4283,8 +4130,7 @@ def sort(g: jit_utils.GraphContext, self, dim, decending, out=None):
 @_onnx_symbolic("aten::numel")
 @_beartype.beartype
 def numel(g: jit_utils.GraphContext, self):
-    shape = g.op("Shape", self)
-    return g.op("ReduceProd", shape, keepdims_i=0)
+    return symbolic_helper._numel_helper(g, self)
 
 
 @_onnx_symbolic("aten::topk")
@@ -4754,7 +4600,7 @@ def _generic_rnn(
                 reform_weights(g, w, hidden_size, reform_permutation) for w in weights
             )
         return tuple(
-            symbolic_helper._unsqueeze_helper(g, x, [0]) for x in (weight_ih, weight_hh)
+            symbolic_helper._unsqueeze_helper(g, x, [0]) for x in (weight_ih, weight_hh)  # type: ignore[possibly-undefined]
         )
 
     @_beartype.beartype
@@ -4766,10 +4612,10 @@ def _generic_rnn(
             weight_ih, weight_hh, bias_ih, bias_hh = (
                 reform_weights(g, w, hidden_size, reform_permutation) for w in weights
             )
-        bias_concat = g.op("Concat", bias_ih, bias_hh, axis_i=0)
+        bias_concat = g.op("Concat", bias_ih, bias_hh, axis_i=0)  # type: ignore[possibly-undefined]
         return tuple(
             symbolic_helper._unsqueeze_helper(g, x, [0])
-            for x in (weight_ih, weight_hh, bias_concat)
+            for x in (weight_ih, weight_hh, bias_concat)  # type: ignore[possibly-undefined]
         )
 
     @_beartype.beartype
@@ -4808,16 +4654,16 @@ def _generic_rnn(
 
         inputs = [prev_output, weight_ih, weight_hh, bias_concat, sequence_lens]
 
-        inputs.append(retrieve_state(h0, *state_indices))
+        inputs.append(retrieve_state(h0, *state_indices))  # type: ignore[possibly-undefined]
         if variant == "LSTM":
-            inputs.append(retrieve_state(c0, *state_indices))
+            inputs.append(retrieve_state(c0, *state_indices))  # type: ignore[possibly-undefined]
 
         extra_kwargs = {} if unidirectional else {"direction_s": "bidirectional"}
         if variant == "RNN":
             if bidirectional:
-                activation = [nonlinearity, nonlinearity]
+                activation = [nonlinearity, nonlinearity]  # type: ignore[possibly-undefined]
             else:
-                activation = [nonlinearity]
+                activation = [nonlinearity]  # type: ignore[possibly-undefined]
 
             prev_output, h_out = g.op(
                 "RNN",
@@ -4859,17 +4705,17 @@ def _generic_rnn(
         else:
             prev_output = symbolic_helper._squeeze_helper(g, prev_output, [1])
 
-        h_outs.append(h_out)
+        h_outs.append(h_out)  # type: ignore[possibly-undefined]
         if variant == "LSTM":
-            c_outs.append(c_out)
+            c_outs.append(c_out)  # type: ignore[possibly-undefined]
     if batch_first:
         # seq, batch, num_directions * hidden_size -> batch, seq, num_directions * hidden_size
         prev_output = g.op("Transpose", prev_output, perm_i=[1, 0, 2])
-    h_outs = h_out if num_layers == 1 else g.op("Concat", *h_outs, axis_i=0)
+    h_outs = h_out if num_layers == 1 else g.op("Concat", *h_outs, axis_i=0)  # type: ignore[possibly-undefined]
     if variant == "RNN" or variant == "GRU":
         return prev_output, h_outs
     elif variant == "LSTM":
-        c_outs = c_out if num_layers == 1 else g.op("Concat", *c_outs, axis_i=0)
+        c_outs = c_out if num_layers == 1 else g.op("Concat", *c_outs, axis_i=0)  # type: ignore[possibly-undefined]
         return prev_output, h_outs, c_outs
 
 
@@ -4974,12 +4820,16 @@ def lstm_cell(g: jit_utils.GraphContext, self, hidden, w_ih, w_hh, b_ih, b_hh):
     ), symbolic_helper._squeeze_helper(g, c_outs, [0])
 
 
-@_onnx_symbolic("aten::gru", decorate=[_apply_params("GRU"), _export("gru")])
 @_onnx_symbolic(
-    "aten::rnn_tanh", decorate=[_apply_params("RNN_TANH"), _export("rnn_tanh")]
+    "aten::gru", decorate=[symbolic_helper._apply_params("GRU"), _export("gru")]
 )
 @_onnx_symbolic(
-    "aten::rnn_relu", decorate=[_apply_params("RNN_RELU"), _export("rnn_relu")]
+    "aten::rnn_tanh",
+    decorate=[symbolic_helper._apply_params("RNN_TANH"), _export("rnn_tanh")],
+)
+@_onnx_symbolic(
+    "aten::rnn_relu",
+    decorate=[symbolic_helper._apply_params("RNN_RELU"), _export("rnn_relu")],
 )
 def _one_hidden_rnn(kind: str):
     @symbolic_helper.parse_args("v", "v", "v", "i", "i", "f", "i", "i", "i")
@@ -5583,37 +5433,7 @@ def gather(g: jit_utils.GraphContext, self, dim, index, sparse_grad=False):
 @symbolic_helper.parse_args("v", "is", "i", "i")
 @_beartype.beartype
 def _var_mean(g: jit_utils.GraphContext, input, dim, correction, keepdim):
-    if dim is None:
-        mean = g.op("ReduceMean", input, keepdims_i=0)
-        t_mean = mean
-        num_elements = numel(g, input)
-    else:
-        mean = g.op("ReduceMean", input, axes_i=dim, keepdims_i=keepdim)
-        t_mean = g.op("ReduceMean", input, axes_i=dim, keepdims_i=1)
-        redudced_dims = g.op("Shape", input)
-        # dim could contain one or multiple dimensions
-        redudced_dims = g.op(
-            "Gather",
-            redudced_dims,
-            g.op("Constant", value_t=torch.tensor(dim)),
-            axis_i=0,
-        )
-        num_elements = g.op("ReduceProd", redudced_dims, keepdims_i=0)
-    sub_v = g.op("Sub", input, t_mean)
-    sqr_sub = g.op("Mul", sub_v, sub_v)
-    keepdim_mean = 0 if dim is None else keepdim
-    var = g.op("ReduceMean", sqr_sub, axes_i=dim, keepdims_i=keepdim_mean)
-    # Correct bias in calculating variance, by dividing it over (N - correction) instead on N
-    if correction is None:
-        correction = 1
-    if correction != 0:
-        num_elements = g.op(
-            "Cast", num_elements, to_i=_C_onnx.TensorProtoDataType.FLOAT
-        )
-        one = g.op("Constant", value_t=torch.tensor(correction, dtype=torch.float))
-        mul = g.op("Mul", var, num_elements)
-        var = g.op("Div", mul, g.op("Sub", num_elements, one))
-    return var, mean
+    return symbolic_helper._var_mean_helper(g, input, dim, correction, keepdim)
 
 
 @_onnx_symbolic("aten::std")
@@ -5633,11 +5453,6 @@ def var(g: jit_utils.GraphContext, input, *args):
 @_onnx_symbolic("aten::var_mean")
 @_beartype.beartype
 def var_mean(g: jit_utils.GraphContext, input, *args):
-    # var_mean (and all variance-related functions) has multiple signatures, so need to manually figure
-    # out the correct arguments:
-    # aten::var_mean(Tensor self, bool unbiased)
-    # aten::var_mean(Tensor self, int[1] dim, bool unbiased, bool keepdim=False)
-    # aten::var_mean(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False)
     if len(args) == 1:
         return _var_mean(g, input, None, args[0], None)
     else:
@@ -5994,42 +5809,7 @@ def linalg_vector_norm(
     keepdim: bool,
     dtype: torch._C.Value,
 ):
-    # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.vector_norm.html
-    if symbolic_helper._is_none(dim):
-        self = symbolic_helper._reshape_helper(g, self, [-1])
-        keepdim = False
-
-    if ord == math.inf:
-        result = g.op("ReduceMax", g.op("Abs", self), axes_i=dim, keepdims_i=keepdim)
-    elif ord == -math.inf:
-        result = g.op("ReduceMin", g.op("Abs", self), axes_i=dim, keepdims_i=keepdim)
-    elif ord == 0:
-        return symbolic_helper._onnx_opset_unsupported_detailed(
-            "linalg_vector_norm", 9, 11, "ord=0 not supported", self
-        )
-    elif ord == 1:
-        result = _reduce_op_symbolic("ReduceL1")(g, self, dim=dim, keepdim=keepdim)
-    elif ord == 2:
-        result = _reduce_op_symbolic("ReduceL2")(g, self, dim=dim, keepdim=keepdim)
-    else:
-        ord_op = g.op("Constant", value_t=torch.tensor(ord, dtype=torch.float32))
-        result = symbolic_helper._reducesum_helper(
-            g, g.op("Pow", g.op("Abs", self), ord_op), axes_i=dim, keepdims_i=keepdim
-        )
-        result = g.op(
-            "Pow",
-            result,
-            g.op(
-                "Div",
-                g.op("Constant", value_t=torch.tensor(1, dtype=torch.float32)),
-                ord_op,
-            ),
-        )
-
-    if not symbolic_helper._is_none(dtype):
-        dtype = symbolic_helper._get_const(dtype, "i", "dtype")
-        result = g.op("Cast", result, to_i=_type_utils.JitScalarType(dtype).onnx_type())  # type: ignore[arg-type]
-    return result
+    return symbolic_helper._linalg_vector_norm_helper(g, self, ord, dim, keepdim, dtype)
 
 
 @_onnx_symbolic("aten::linalg_matrix_norm")
@@ -6842,7 +6622,9 @@ def prim_shape(g: jit_utils.GraphContext, self):
 @_onnx_symbolic("prim::max")
 @_beartype.beartype
 def prim_max(g: jit_utils.GraphContext, self, other):
-    return _op_with_optional_float_cast(g, "Max", self, other, opset_before=12)
+    return symbolic_helper._op_with_optional_float_cast(
+        g, "Max", self, other, opset_before=12
+    )
 
 
 @_onnx_symbolic("prim::min")

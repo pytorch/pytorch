@@ -361,10 +361,10 @@ struct TORCH_API TupleElements {
     switch (inlineSize_) {
       case 3:
         new (&elementsInline_[2]) IValue(elements[2]);
-        C10_FALLTHROUGH;
+        [[fallthrough]];
       case 2:
         new (&elementsInline_[1]) IValue(elements[1]);
-        C10_FALLTHROUGH;
+        [[fallthrough]];
       case 1:
         new (&elementsInline_[0]) IValue(elements[0]);
         break;
@@ -1034,11 +1034,9 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    */
   template <typename T>
   void addCallback(T callback, bool uses_future = true) {
-#if __cpp_lib_is_invocable >= 201703
     static_assert(
         std::is_invocable_r<void, T, Future&>::value,
         "The callback must have signature void(Future&)");
-#endif
 
     std::unique_lock<std::mutex> lock(mutex_);
     if (completed()) {
@@ -1057,14 +1055,13 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   template <typename T>
   c10::intrusive_ptr<Future> then(T callback, TypePtr type) {
     using IValueWithStorages = std::tuple<IValue, std::vector<WeakStorage>>;
-#if __cpp_lib_is_invocable >= 201703
     static_assert(
         std::disjunction<
             std::is_invocable_r<IValue, T, Future&>,
             std::is_invocable_r<IValueWithStorages, T, Future&>>::value,
         "The callback must have signature IValue(Future&) or "
         "std::tuple<IValue, std::vector<Storage>>(Future&)");
-#endif
+
     auto childFut = createInstance(::std::move(type));
     addCallback([childFut,
                  cb = std::move(callback)](Future& parentFut) mutable {
@@ -1084,11 +1081,10 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   template <typename T>
   c10::intrusive_ptr<Future> thenAsync(T callback, TypePtr type) {
-#if __cpp_lib_is_invocable >= 201703
     static_assert(
         std::is_invocable_r<c10::intrusive_ptr<Future>, T, Future&>::value,
         "The callback must have signature c10::intrusive_ptr<Future>(Future&)");
-#endif
+
     auto childFut = createInstance(std::move(type));
     addCallback(
         [childFut, cb = std::move(callback)](Future& parentFut) mutable {
@@ -1165,11 +1161,9 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // synchronize them with the value, and so on (if needed).
   template<typename T>
   void invokeCallback(T callback, bool uses_future) {
-#if __cpp_lib_is_invocable >= 201703
     static_assert(
         std::is_invocable_r<void, T, Future&>::value,
         "The callback must have signature void(Future&)");
-#endif
 
     // The synchronization performed below shouldn't be needed when the future
     // is not used by the callback.
@@ -1675,8 +1669,8 @@ struct _guarded_unsigned_long_unique_dummy final {
   _guarded_unsigned_long_unique_dummy(int64_t){};
 };
 using _guarded_unsigned_long = std::conditional_t<
-    std::is_same<unsigned long, uint32_t>::value ||
-        std::is_same<unsigned long, uint64_t>::value,
+    std::is_same_v<unsigned long, uint32_t> ||
+        std::is_same_v<unsigned long, uint64_t>,
     _guarded_unsigned_long_unique_dummy,
     unsigned long>;
 
@@ -1936,9 +1930,9 @@ template <
     typename... Args,
     typename Indices = std::make_index_sequence<sizeof...(Args)>,
     std::enable_if_t<
-        !std::disjunction<
+        !std::disjunction_v<
             std::is_lvalue_reference<Args>...,
-            std::negation<std::is_constructible<IValue, Args>>...>::value,
+            std::negation<std::is_constructible<IValue, Args>>...>,
         std::nullptr_t> = nullptr>
 std::tuple<Args...> generic_to(const IValue& ivalue, _fake_type<std::tuple<Args...>>) {
   const auto& vals = ivalue.toTupleRef().elements();
@@ -2116,9 +2110,9 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::Tuple> v)
 template <
     typename... Args,
     std::enable_if_t<
-        !std::disjunction<
+        !std::disjunction_v<
             std::is_lvalue_reference<Args>...,
-            std::negation<std::is_constructible<IValue, Args>>...>::value,
+            std::negation<std::is_constructible<IValue, Args>>...>,
         std::nullptr_t>>
 inline IValue::IValue(const std::tuple<Args...>& t)
     : IValue(c10::guts::apply(c10::ivalue::Tuple::create<const Args&...>, t)) {
@@ -2127,9 +2121,9 @@ inline IValue::IValue(const std::tuple<Args...>& t)
 template <
     typename... Args,
     std::enable_if_t<
-        !std::disjunction<
+        !std::disjunction_v<
             std::is_lvalue_reference<Args>...,
-            std::negation<std::is_constructible<IValue, Args>>...>::value,
+            std::negation<std::is_constructible<IValue, Args>>...>,
         std::nullptr_t>>
 inline IValue::IValue(std::tuple<Args...>&& t)
     : IValue(c10::guts::apply(c10::ivalue::Tuple::create<Args&&...>, std::move(t))) {
@@ -2185,6 +2179,23 @@ template <class T, IValue::enable_if_symint<T>>
 inline IValue::IValue(const std::vector<T>& v) : IValue() {
   *this = IValue(at::ArrayRef<T>(v));
 }
+template <class T, IValue::enable_if_symint<T>>
+inline IValue::IValue(std::vector<T>&& v) : IValue() {
+  auto vi = c10::asIntArrayRefSlowOpt(v);
+  if (vi.has_value()) {
+    // This list is entirely integers; ensure it is typed as
+    // an IntList so toIntList works
+    *this = IValue(*vi);
+  } else {
+    // This list has SymInts; type it as a SymInt
+    *this = IValue(impl::toList<c10::SymInt>(c10::List<c10::SymInt>()));
+    auto list = to<c10::List<c10::SymInt>>();
+    list.reserve(v.size());
+    for (auto&& e : std::move(v)) {
+      list.push_back(std::move(e));
+    }
+  }
+}
 template <class T, IValue::enable_if_list_is_ivalue_constructible<T>>
 inline IValue::IValue(const std::vector<T>& v) : IValue(c10::List<T>()) {
   auto list = to<c10::List<T>>();
@@ -2193,6 +2204,22 @@ inline IValue::IValue(const std::vector<T>& v) : IValue(c10::List<T>()) {
     list.push_back(e);
   }
 }
+
+template <class T, IValue::enable_if_list_is_ivalue_constructible<T>>
+inline IValue::IValue(std::vector<T>&& v) : IValue(c10::List<T>()) {
+  auto list = to<c10::List<T>>();
+  list.reserve(v.size());
+  if constexpr (std::is_same_v<T, bool>) {
+    for (auto e : v) {
+      list.push_back(e);
+    }
+  } else {
+    for (auto&& e : std::move(v)) {
+      list.push_back(std::move(e));
+    }
+  }
+}
+
 template <class T, IValue::enable_if_list_is_ivalue_constructible<T>>
 inline IValue::IValue(c10::OptionalArrayRef<T> v) : IValue() {
   if (v.has_value()) {
@@ -2280,7 +2307,7 @@ inline IValue IValue::make_capsule(
 
 template <
     typename T,
-    std::enable_if_t<std::is_base_of<torch::CustomClassHolder, T>::value, int>>
+    std::enable_if_t<std::is_base_of_v<torch::CustomClassHolder, T>, int>>
 IValue::IValue(c10::intrusive_ptr<T> custom_class) : tag(Tag::Object) {
   auto classType = []() {
     try {
@@ -2288,8 +2315,7 @@ IValue::IValue(c10::intrusive_ptr<T> custom_class) : tag(Tag::Object) {
     } catch (const c10::Error&) {
       throw c10::Error(
           "Trying to instantiate a class that isn't a registered custom class: " +
-          std::string(c10::util::get_fully_qualified_type_name<T>()),
-          "");
+          std::string(c10::util::get_fully_qualified_type_name<T>()));
     }
   }();
   auto ivalue_obj = c10::ivalue::Object::create(std::move(classType), /* numSlots */1);

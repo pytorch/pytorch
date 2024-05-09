@@ -4,6 +4,7 @@ Initializer script that installs stuff to pip.
 import argparse
 import logging
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -50,7 +51,12 @@ if __name__ == "__main__":
         stream=sys.stderr,
     )
 
-    pip_args = ["pip3", "install"]
+    uv_available = shutil.which("uv") is not None
+
+    if uv_available:
+        pip_args = ["uv", "pip", "install"]
+    else:
+        pip_args = ["pip", "install"]
 
     # If we are in a global install, use `--user` to install so that you do not
     # need root access in order to initialize linters.

@@ -216,7 +216,7 @@ inline std::vector<c10::Scalar> convert_tensor_to_scalar_list(
       scalarList_.scalar_type(),
       "convert_tensor_to_scalar_list",
       [&]() {
-        const scalar_t* scalar_data = scalarList_.data_ptr<scalar_t>();
+        const scalar_t* scalar_data = scalarList_.const_data_ptr<scalar_t>();
         TORCH_CHECK(
             (expect_length == scalarList_.size(0)),
             "Expected length of scalars to match input of length ",
@@ -248,7 +248,7 @@ inline bool can_use_fast_route(
 }
 
 using DeviceDtypeKey = std::pair<at::Device, at::ScalarType>;
-using IndicesT = std::vector<int>;
+using IndicesT = std::vector<size_t>;
 using nested_optional_tensorvec_t =
     std::vector<std::vector<c10::optional<at::Tensor>>>;
 using TensorsAndIndicesT = std::pair<nested_optional_tensorvec_t, IndicesT>;

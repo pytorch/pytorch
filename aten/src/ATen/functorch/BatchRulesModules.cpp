@@ -10,7 +10,7 @@
 
 #include <utility>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 static Tensor getStepTensor(const Tensor& indices, const c10::SymInt& bdim_size, const c10::SymInt& num_embeddings) {
   // [batch_size, 1, 1, 1, ..., 1]
@@ -218,16 +218,16 @@ cudnn_grid_sample_backward_batch_rule(
 // TODO: replace with targetable functionalization
 static Tensor one_hot_decomposition_hack(const Tensor &self, int64_t num_classes) {
     TORCH_CHECK(self.dtype() == kLong, "one_hot is only applicable to index tensor.");
-    auto shape = self.sizes().vec();
+    auto shape = self.sym_sizes().vec();
 
     // empty tensor could be converted to one hot representation,
     // but shape inference is not possible.
-    if (self.numel() == 0) {
+    if (self.sym_numel() == 0) {
         if (num_classes <= 0) {
             AT_ERROR("Can not infer total number of classes from empty tensor.");
         } else {
             shape.push_back(num_classes);
-            return at::empty(shape, self.options());
+            return at::empty_symint(shape, self.options());
         }
     }
 
@@ -247,7 +247,7 @@ static Tensor one_hot_decomposition_hack(const Tensor &self, int64_t num_classes
     // }
 
     shape.push_back(num_classes);
-    Tensor ret = at::zeros(shape, self.options());
+    Tensor ret = at::zeros_symint(shape, self.options());
     return ret.scatter(-1, self.unsqueeze(-1), 1);
 }
 
@@ -402,4 +402,5 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 
   m.impl("one_hot", one_hot_decomposition_hack);
 }
-}}
+
+} // namespace at::functorch

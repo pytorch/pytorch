@@ -15,13 +15,13 @@ namespace {
 // NOTE: are_expandable did a similar check, please keep them sync if change is needed
 template <typename Container, typename ArrayType>
 Container infer_size_impl(ArrayType a, ArrayType b) {
-  size_t dimsA = a.size();
-  size_t dimsB = b.size();
-  size_t ndim = dimsA > dimsB ? dimsA : dimsB;
+  // Use ptrdiff_t to ensure signed comparison.
+  auto dimsA = static_cast<ptrdiff_t>(a.size());
+  auto dimsB = static_cast<ptrdiff_t>(b.size());
+  auto ndim = dimsA > dimsB ? dimsA : dimsB;
   Container expandedSizes(ndim);
 
-  // Use ptrdiff_t to ensure signed comparison.
-  for (ptrdiff_t i = (ptrdiff_t)ndim - 1; i >= 0; --i) {
+  for (ptrdiff_t i = ndim - 1; i >= 0; --i) {
     ptrdiff_t offset = ndim - 1 - i;
     ptrdiff_t dimA = dimsA - 1 - offset;
     ptrdiff_t dimB = dimsB - 1 - offset;
@@ -63,8 +63,8 @@ C10_ALWAYS_INLINE InferExpandGeometryResult<Container> inferExpandGeometryImpl(
     IntArrayRef tensor_sizes,
     IntArrayRef tensor_strides,
     IntArrayRef sizes) {
-  int64_t ndim = sizes.size();
-  int64_t tensor_dim = tensor_sizes.size();
+  int64_t ndim = static_cast<int64_t>(sizes.size());
+  int64_t tensor_dim = static_cast<int64_t>(tensor_sizes.size());
 
   if (tensor_dim == 0) {
     return InferExpandGeometryResult<Container>(sizes, ndim);

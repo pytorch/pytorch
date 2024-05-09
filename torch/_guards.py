@@ -10,7 +10,7 @@ import threading
 import traceback
 import unittest.mock
 import weakref
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from contextlib import contextmanager
 from typing import (
     Any,
@@ -26,7 +26,6 @@ from typing import (
     TypeVar,
 )
 
-import torch
 from torch.utils import _pytree as pytree
 from torch.utils._traceback import CapturedTraceback
 from torch.utils.weak import WeakTensorKeyDictionary
@@ -35,11 +34,13 @@ log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
+    import sympy
+
     # Import the following modules during type checking to enable code intelligence features,
     # such as auto-completion in tools like pylance, even when these modules are not explicitly
     # imported in user code.
 
-    import sympy
+    import torch
 
 
 """
@@ -86,6 +87,9 @@ class GuardSource(enum.Enum):
     SHAPE_ENV = 6
     LOCAL_FSDP_MODULE = 7
     GLOBAL_FSDP_MODULE = 8
+    BACKWARD_STATE = 9
+    EPHEMERAL = 10
+    SYNTHETIC_LOCAL = 11
 
     def is_fsdp_module(self) -> bool:
         return self in (GuardSource.GLOBAL_FSDP_MODULE, GuardSource.LOCAL_FSDP_MODULE)
@@ -159,9 +163,9 @@ class Guard:
     obj_weakref: Optional[object] = None
     guarded_class_weakref: Optional[type] = None
 
-    stack = None
-    user_stack = None
-    _hash = None
+    stack: Optional[CapturedTraceback] = None
+    user_stack: Optional[traceback.StackSummary] = None
+    _hash: Optional[int] = None
 
     def __hash__(self):
         if self._hash is None:
@@ -169,7 +173,16 @@ class Guard:
         return self._hash
 
     def sort_key(self):
+        # Put the duplicate input guards at the end. The duplicate guards have
+        # two sources while guard.name only considers one source.
+        from ._dynamo.guards import GuardBuilder
+
+        is_duplicate_input = (
+            isinstance(self.create_fn, functools.partial)
+            and self.create_fn.func is GuardBuilder.DUPLICATE_INPUT
+        )
         return (
+            is_duplicate_input,
             self.source.value if self.source else -1,
             len(self.name),
             self.name,
@@ -245,7 +258,7 @@ class Guard:
         try:
             return self.create_fn(builder, self)
         except Exception:
-            log.error("Error while creating guard:\n%s", str(self).rstrip())
+            log.exception("Error while creating guard:\n%s", str(self).rstrip())
             if self.stack:
                 log.error("Created at:\n%s", "".join(self.stack.format()[-4:]).rstrip())
             raise
@@ -276,10 +289,19 @@ class Guard:
         else:
             self.code_list.extend(code_list)
 
-        assert self.obj_weakref in (
-            obj_weakref,
-            None,
-        ), "Guarded object must be identical, or None"
+        # Some objects are ephemeral, e.g., list[slice(1, 2)]. If we have
+        # multiple guards on the same object, the weakref can die between the
+        # invocation of set_export_info calls. So a dead weakref is also
+        # acceptable.
+        assert (
+            self.obj_weakref
+            in (
+                obj_weakref,
+                None,
+            )
+            or callable(self.obj_weakref)
+            and self.obj_weakref() is None
+        ), "Guarded object must be identical, None or ephemeral (dead weakref)"
         self.obj_weakref = obj_weakref
 
 
@@ -326,7 +348,7 @@ In the future, it will have a closer coupling to a generic Checkpoint management
 """
 
 
-class Checkpointable(ABC, Generic[T]):
+class Checkpointable(Generic[T]):
     @abstractmethod
     def copy_graphstate(self) -> T:
         ...
@@ -336,25 +358,23 @@ class Checkpointable(ABC, Generic[T]):
         ...
 
 
-"""
-The GuardCheckpointState - it is the T of Checkpointable[T] for GuardsContext
-"""
-
-
 class GuardsCheckpointState:
+    """
+    The GuardCheckpointState - it is the T of Checkpointable[T] for GuardsContext
+    """
+
     dynamo_guards: Set[Guard] = set()
 
     def __init__(self, dynamo_guards):
         self.dynamo_guards = dynamo_guards
 
-    """
-    Produces a delta against another GuardsCheckpointState.
-
-    Returns None if no delta is found, otherwise, return a set() of mismatched
-    Guard type objects.
-    """
-
     def diff(self, other):
+        """
+        Produces a delta against another GuardsCheckpointState.
+
+        Returns None if no delta is found, otherwise, return a set() of mismatched
+        Guard type objects.
+        """
         r = self.dynamo_guards.difference(other.dynamo_guards)
         if len(r) == 0:
             return None
@@ -370,14 +390,13 @@ class ModuleContextCheckpointState:
     def __init__(self, nn_modules):
         self.nn_modules = nn_modules
 
-    """
-    Produces a delta against another ModuleContextCheckpointState.
-
-    Returns None if no delta is found, otherwise, return a set() of mismatched
-    module key names.
-    """
-
     def diff(self, other):
+        """
+        Produces a delta against another ModuleContextCheckpointState.
+
+        Returns None if no delta is found, otherwise, return a set() of mismatched
+        module key names.
+        """
         r = set(self.nn_modules.keys()).difference(set(other.nn_modules.keys()))
         if len(r) == 0:
             return None
@@ -405,14 +424,13 @@ class GlobalContextCheckpointState:
     def __init__(self, global_states):
         self.global_state = global_states
 
-    """
-    Produces a delta against another GlobalContextCheckpointState.
-
-    Returns None if no delta is found, otherwise, return a set() of mismatched
-    global key names.
-    """
-
     def diff(self, other):
+        """
+        Produces a delta against another GlobalContextCheckpointState.
+
+        Returns None if no delta is found, otherwise, return a set() of mismatched
+        global key names.
+        """
         r = set(self.global_state.keys()).difference(set(other.global_state.keys()))
         if len(r) == 0:
             return None
@@ -485,19 +503,24 @@ class GuardsSet:
     def __bool__(self):
         return bool(self.inner)
 
-    def add(self, guard: Guard, *, skip=0):
+    def add(self, guard: Guard, *, collect_debug_stack=True, skip=0):
         if guard in self.inner:
             return
-        if guard.stack is None:
-            guard.stack = CapturedTraceback.extract(skip=1 + skip)
-        if guard.user_stack is None:
-            guard.user_stack = TracingContext.extract_stack()
+        if collect_debug_stack:
+            if guard.stack is None:
+                guard.stack = CapturedTraceback.extract(skip=1 + skip)
+            if guard.user_stack is None:
+                guard.user_stack = TracingContext.extract_stack()
         self.inner.add(guard)
 
     def update(self, *others: Set[Guard]):
         for o in others:
             for g in o:
                 self.add(g, skip=1)
+
+    def remove_guards_with_source(self, source):
+        """Delete all guards with a given source"""
+        self.inner = {g for g in self.inner if g.originating_source != source}
 
 
 class GuardsContext(Checkpointable[GuardsCheckpointState]):
@@ -602,6 +625,8 @@ class TracingContext:
         self.loc_in_frame = None
         # this is only set after aot_autograd
         self.fw_metadata = None
+        # this is only set after aot_autograd
+        self.aot_graph_name = None
         self.params_flat = None
         # this is for extended return calling convention from backend
         # compiler to aot_autograd
@@ -621,6 +646,16 @@ class TracingContext:
         self.force_unspec_int_unbacked_size_like = False
         # See note [Tensor Fakification and Symbol Caching]
         self.tensor_to_context = WeakTensorKeyDictionary()
+
+        # If this true, Aot Autograd will return output Fake Tensors with appropiate
+        # meta on the first invocation
+        # see note: [Returning Fake Tensors on First AOT Autograd Call]
+        self.fakify_first_call = False
+
+    def clear(self):
+        # Look at the note in output_graph.py in function `save_global_state`
+        # for the context on clearing global context.
+        self.global_context.global_state = {}
 
     @staticmethod
     @contextmanager
@@ -644,9 +679,9 @@ class TracingContext:
         self = TracingContext.try_get()
         if self is None:
             return traceback.StackSummary()
-        stack = list(self.frame_summary_stack)
+        stack = self.frame_summary_stack
         if self.loc_in_frame is not None:
-            stack.append(self.loc_in_frame)
+            stack = stack + [self.loc_in_frame]
         return traceback.StackSummary.from_list(stack)
 
     # Call this when you want to call into some code that isn't necessarily
@@ -720,12 +755,12 @@ class TracingContext:
     @staticmethod
     def set_current_loc(filename, lineno, frame_name):
         TracingContext.get().loc_in_frame = traceback.FrameSummary(
-            filename, lineno, frame_name
+            filename, lineno, frame_name, lookup_line=False
         )
 
 
 @contextmanager
-def compile_context(context: CompileContext):
+def compile_context(context: Optional[CompileContext]):
     old_context = getattr(_TLS, "compile_context", None)
     _TLS.compile_context = context
     try:
@@ -765,28 +800,45 @@ def tracing(context: Optional[TracingContext]):
 # TODO(voz): Consider a toplevel torch/_source.py
 @dataclasses.dataclass(frozen=True)
 class Source:
+    def is_dict_key(self):
+        return False
+
+    def is_ephemeral(self):
+        return False
+
     def reconstruct(self, codegen):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def guard_source(self) -> GuardSource:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def name(self) -> str:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def make_guard(self, fn) -> Guard:
         if self.guard_source() is GuardSource.CONSTANT:
-            raise NotImplementedError()
+            raise NotImplementedError
         return Guard(self, fn)
 
     def is_nn_module(self) -> bool:
         return self.guard_source().is_nn_module()
+
+    def subguards_allowed(self):
+        """True if you can guard on attributes of this"""
+        return self.guard_source() != GuardSource.SYNTHETIC_LOCAL
 
 
 # Subclasses can be found in torch/_dynamo/source.py
 @dataclasses.dataclass(frozen=True)
 class ChainedSource(Source):
     base: Source
+
+    def is_dict_key(self):
+        # Recurse until you either hit a ConstDictKey or a Source
+        return self.base.is_dict_key()
+
+    def is_ephemeral(self):
+        return self.base.is_ephemeral()
 
 
 def detect_fake_mode(inputs: Any = None):
@@ -831,3 +883,18 @@ def detect_fake_mode(inputs: Any = None):
         return fake_mode
     else:
         return None
+
+
+def active_fake_mode():
+    """
+    Inspects the dispatch mode stack for an active fake mode and returns it.
+    Returns None if no fake mode is active.
+    """
+    from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
+
+    for _, m in enumerate(reversed(_get_current_dispatch_mode_stack())):
+        if isinstance(m, FakeTensorMode):
+            return m
+
+    return None

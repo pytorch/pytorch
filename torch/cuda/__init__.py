@@ -19,14 +19,14 @@ import threading
 import traceback
 import warnings
 from functools import lru_cache
-from typing import Any, cast, List, Optional, Tuple, Union
+from typing import Any, Callable, cast, List, Optional, Tuple, Union
 
 import torch
 import torch._C
 from torch.types import Device
 from .. import device as _device
-from .._utils import classproperty
-from ._utils import _dummy_type, _get_device_index
+from .._utils import _dummy_type, _LazySeedTracker, classproperty
+from ._utils import _get_device_index
 from .graphs import (
     CUDAGraph,
     graph,
@@ -44,7 +44,9 @@ except ImportError:
 _initialized = False
 _tls = threading.local()
 _initialization_lock = threading.Lock()
-_queued_calls = []  # don't invoke these until initialization occurs
+_queued_calls: List[
+    Tuple[Callable[[], None], List[str]]
+] = []  # don't invoke these until initialization occurs
 _is_in_bad_fork = getattr(torch._C, "_cuda_isInBadFork", lambda: False)
 _device_t = Union[_device, str, int, None]
 
@@ -56,31 +58,6 @@ try:
     _HAS_PYNVML = True
 except ImportError as err:
     _PYNVML_ERR = err  # sometimes a lib is installed but the import fails for some other reason, so we log the error for later
-
-
-class _LazySeedTracker:
-    # Since seeding is memory-less, only track the latest seed.
-    # Note: `manual_seed_all` followed by `manual_seed` overwrites
-    # the seed on current device. We track the order of **latest**
-    # calls between these two API.
-    def __init__(self):
-        self.manual_seed_all_cb = None
-        self.manual_seed_cb = None
-        self.call_order = []
-
-    def queue_seed_all(self, cb, traceback):
-        self.manual_seed_all_cb = (cb, traceback)
-        # update seed_all to be latest
-        self.call_order = [self.manual_seed_cb, self.manual_seed_all_cb]
-
-    def queue_seed(self, cb, traceback):
-        self.manual_seed_cb = (cb, traceback)
-        # update seed to be latest
-        self.call_order = [self.manual_seed_all_cb, self.manual_seed_cb]
-
-    def get_calls(self) -> List:
-        return self.call_order
-
 
 _lazy_seed_tracker = _LazySeedTracker()
 
@@ -266,7 +243,7 @@ class DeferredCudaCallError(Exception):
     pass
 
 
-OutOfMemoryError = torch._C._OutOfMemoryError
+OutOfMemoryError = torch._C.OutOfMemoryError
 
 
 def init():
@@ -754,22 +731,33 @@ def _get_nvml_device_index(device: Optional[Union[int, Device]]) -> int:
         visible_devices = _transform_uuid_to_ordinals(
             cast(List[str], visible_devices), uuids
         )
-    idx_map = dict(enumerate(cast(List[int], visible_devices)))
-    if idx not in idx_map:
+    visible_devices = cast(List[int], visible_devices)
+    if idx < 0 or idx >= len(visible_devices):
         raise RuntimeError(
             f"device {idx} is not visible (CUDA_VISIBLE_DEVICES={visible_devices})"
         )
-    return idx_map[idx]
+    return visible_devices[idx]
 
 
-@lru_cache(maxsize=1)
+_cached_device_count: Optional[int] = None
+
+
 def device_count() -> int:
     r"""Return the number of GPUs available."""
+    global _cached_device_count
     if not _is_compiled():
         return 0
+    if _cached_device_count is not None:
+        return _cached_device_count
     # bypass _device_count_nvml() if rocm (not supported)
     nvml_count = -1 if torch.version.hip else _device_count_nvml()
-    return torch._C._cuda_getDeviceCount() if nvml_count < 0 else nvml_count
+    r = torch._C._cuda_getDeviceCount() if nvml_count < 0 else nvml_count
+    # NB: Do not cache the device count prior to CUDA initialization, because
+    # the number of devices can change due to changes to CUDA_VISIBLE_DEVICES
+    # setting prior to CUDA initialization.
+    if _initialized:
+        _cached_device_count = r
+    return r
 
 
 def get_arch_list() -> List[str]:

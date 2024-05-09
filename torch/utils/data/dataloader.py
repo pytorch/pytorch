@@ -521,11 +521,9 @@ class DataLoader(Generic[T_co]):
                 "DataLoader is not able to compute a suggested max number of worker in current system.")
 
             warn_msg = (
-                "This DataLoader will create {} worker processes in total. {} "
+                f"This DataLoader will create {num_worker_created} worker processes in total. {suggested_max_worker_msg} "
                 "Please be aware that excessive worker creation might get DataLoader running slow or even freeze, "
-                "lower the worker number to avoid potential slowness/freeze if necessary.").format(
-                    num_worker_created,
-                    suggested_max_worker_msg)
+                "lower the worker number to avoid potential slowness/freeze if necessary.")
             return warn_msg
 
         if not self.num_workers or self.num_workers == 0:
@@ -633,9 +631,8 @@ class _BaseDataLoaderIter:
             if self._dataset_kind == _DatasetKind.Iterable and \
                     self._IterableDataset_len_called is not None and \
                     self._num_yielded > self._IterableDataset_len_called:
-                warn_msg = ("Length of IterableDataset {} was reported to be {} (when accessing len(dataloader)), but {} "
-                            "samples have been fetched. ").format(self._dataset, self._IterableDataset_len_called,
-                                                                  self._num_yielded)
+                warn_msg = (f"Length of IterableDataset {self._dataset} was reported to be {self._IterableDataset_len_called}"
+                            f"(when accessing len(dataloader)), but {self._num_yielded} samples have been fetched. ")
                 if self._num_workers > 0:
                     warn_msg += ("For multiprocessing data-loading, this could be caused by not properly configuring the "
                                  "IterableDataset replica at each worker. Please see "
@@ -1360,7 +1357,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             # not found (i.e., didn't break)
             return
 
-        self._index_queues[worker_queue_idx].put((self._send_idx, index))
+        self._index_queues[worker_queue_idx].put((self._send_idx, index))  # type: ignore[possibly-undefined]
         self._task_info[self._send_idx] = (worker_queue_idx,)
         self._tasks_outstanding += 1
         self._send_idx += 1

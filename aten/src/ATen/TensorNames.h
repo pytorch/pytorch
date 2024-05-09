@@ -63,11 +63,11 @@ struct TORCH_API TensorNames {
       const char* op_name = "unify");
   void checkUnique(const char* op_name) const;
 
-  void append(TensorName&& name);
+  void append(TensorName name);
   std::vector<Dimname> toDimnameVec() const;
 
  private:
-  explicit TensorNames(TensorNameVec&& names) : names_(names){};
+  explicit TensorNames(TensorNameVec&& names) : names_(std::move(names)){};
 
   TensorNameVec names_;
 };

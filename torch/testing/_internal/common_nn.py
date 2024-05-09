@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 from abc import abstractmethod
 import tempfile
 import unittest
@@ -14,7 +16,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import _reduction as _Reduction
 from torch.testing._internal.common_utils import TestCase, to_gpu, freeze_rng_state, is_iterable, \
-    gradcheck, gradgradcheck, set_default_dtype
+    gradcheck, gradgradcheck, set_default_dtype, skipIfTorchDynamo
 from torch.testing._internal.common_cuda import TEST_CUDA, SM90OrLater
 from torch.autograd.gradcheck import _get_numerical_jacobian, _iter_tensors
 from torch.autograd import Variable
@@ -1707,6 +1709,7 @@ new_module_tests = [
         input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
         check_gradgrad=False,
         default_dtype=torch.double,
+        decorator=skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/117971")
     ),
     dict(
         module_name='Embedding',
@@ -1716,6 +1719,7 @@ new_module_tests = [
         check_gradgrad=False,
         desc='discontiguous',
         default_dtype=torch.double,
+        decorator=skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/117971")
     ),
     dict(
         module_name='EmbeddingBag',
@@ -3329,8 +3333,7 @@ class TestBase:
                 if name in {'constructor_args', 'extra_args'}:
                     kwargs[name] = tuple()
                 else:
-                    raise ValueError("{}: Specify {} by a value, a function to generate it, or it's size!"
-                                     .format(self.get_name(), name))
+                    raise ValueError(f"{self.get_name()}: Specify {name} by a value, a function to generate it, or it's size!")
         self._extra_kwargs = kwargs
         self._arg_cache = {}
 

@@ -3,6 +3,7 @@ import functools
 import json
 import os
 import pathlib
+
 from collections import defaultdict, namedtuple, OrderedDict
 from dataclasses import dataclass, field
 from typing import (
@@ -27,6 +28,7 @@ import torchgen.api.native as native
 import torchgen.api.structured as structured
 import torchgen.dest as dest
 
+from torchgen.aoti.fallback_ops import inductor_fallback_ops
 from torchgen.api import cpp
 from torchgen.api.translate import translate
 from torchgen.api.types import (
@@ -43,6 +45,12 @@ from torchgen.context import (
     native_function_manager,
     with_native_function,
     with_native_function_and_indices,
+)
+from torchgen.gen_aoti_c_shim import (
+    gen_aoti_c_shim,
+    gen_static_dispatch_backend_call_signature,
+    get_backend_index_for_aoti,
+    get_fallback_op_name,
 )
 from torchgen.gen_functionalization_type import (
     gen_functionalization_definition,
@@ -138,11 +146,12 @@ class LineLoader(YamlLoader):
         return mapping
 
 
-_GLOBAL_PARSE_NATIVE_YAML_CACHE = {}
-_GLOBAL_PARSE_TAGS_YAML_CACHE = {}
-
 # Parse native_functions.yaml into a sequence of NativeFunctions and Backend Indices.
 ParsedYaml = namedtuple("ParsedYaml", ["native_functions", "backend_indices"])
+
+
+_GLOBAL_PARSE_NATIVE_YAML_CACHE: Dict[str, ParsedYaml] = {}
+_GLOBAL_PARSE_TAGS_YAML_CACHE: Dict[str, Set[str]] = {}
 
 
 def parse_native_yaml_struct(
@@ -274,9 +283,9 @@ def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
             "inplace_view" in f.tags
             and str(f.func.name) != "resize_"
             and str(f.func.name) != "resize_as_"
+            and str(f.func.name.name) != "set_"
         ):
             base_name = f.func.name.name
-            overload_name = f.func.name.overload_name
             assert base_name.inplace, (
                 f"{f.func.name} is marked with tag: inplace_view, but it doesn't follow the naming "
                 "convention for inplace ops - the codegen expects the base name to have a trailing underscore. "
@@ -414,14 +423,7 @@ def generate_static_dispatch_backend_call(
     f: NativeFunction,
     backend_index: BackendIndex,
 ) -> str:
-    cpp_sigs = CppSignatureGroup.from_native_function(
-        f, method=False, fallback_binding=False
-    )
-    if sig.symint and f.func.has_symint():
-        cpp_sig = cpp_sigs.symint_signature
-    else:
-        cpp_sig = cpp_sigs.signature
-    assert cpp_sig is not None
+    cpp_sig = gen_static_dispatch_backend_call_signature(sig, f)
     name = cpp_sig.name()
     exprs = translate_args(sig, cpp_sig)
     backend_metadata = backend_index.get_kernel(f)
@@ -858,7 +860,7 @@ def compute_meta_function_declaration(g: NativeFunctionsGroup) -> Optional[str]:
                 # element that is set by this method is false on the
                 # class corresponding to the object that `this` points to.
                 # This ensures that each element can be set only once.
-                assert_msg = f'"{precomputed_elements[i].name} already set"'
+                assert_msg = f'"{elem.name} already set"'
                 assert_stmt = f"static_assert({precomputed_template_parameters[i]} == false, {assert_msg});"
 
                 # Generate the new object construction block. All state
@@ -1152,7 +1154,7 @@ def compute_cpp_argument_yaml(
             arg["default"] = cpp_a.default
         return arg
     elif isinstance(cpp_a.argument, SelfArgument):
-        raise AssertionError()
+        raise AssertionError
     elif isinstance(cpp_a.argument, Argument):
         return compute_argument_yaml(
             cpp_a.argument,
@@ -1400,7 +1402,9 @@ def get_grouped_by_view_native_functions(
             assert kind not in grouped_by_views[schema]
             grouped_by_views[schema][kind] = f
         else:
-            assert view_kind not in grouped_by_views[schema]
+            assert (
+                view_kind not in grouped_by_views[schema]
+            ), f"{view_kind} already in {grouped_by_views[schema].keys()}"
             grouped_by_views[schema][view_kind] = f
 
     return list(concatMap(maybe_create_view_group, grouped_by_views.values()))
@@ -2126,7 +2130,7 @@ def gen_headers(
     )
 
     def gen_aten_interned_strings() -> Dict[str, str]:
-        attrs = set()  # All function argument names
+        attrs: Set[str] = set()  # All function argument names
         names = set()  # All ATen function names
         for func in native_functions:
             names.add(str(func.func.name.name))
@@ -2134,8 +2138,7 @@ def gen_headers(
             # symbol without the underscore
             names.add(func.func.name.name.base)
 
-            for arg in func.func.schema_order_arguments():
-                attrs.add(arg.name)
+            attrs.update(arg.name for arg in func.func.schema_order_arguments())
 
         # These are keywords in C++, so aren't valid symbol names
         # https://en.cppreference.com/w/cpp/language/operator_alternative
@@ -2179,6 +2182,7 @@ def gen_source_files(
     selector: SelectiveBuilder,
     static_dispatch_idx: List[BackendIndex],
     backend_indices: Dict[DispatchKey, BackendIndex],
+    aoti_fm: FileManager,
     core_fm: FileManager,
     cpu_fm: FileManager,
     cpu_vec_fm: FileManager,
@@ -2189,6 +2193,7 @@ def gen_source_files(
     force_schema_registration: bool,
     per_operator_headers: bool,
     skip_dispatcher_op_registration: bool,
+    update_aoti_c_shim: bool,
 ) -> None:
     extra_cuda_headers = """\
 #include <c10/cuda/CUDAGuard.h>
@@ -2348,6 +2353,106 @@ def gen_source_files(
             else:
                 raise AssertionError(f"unrecognized {dispatch_key} for ufunc")
 
+        structured_func_group_dict = {
+            f"{func_group.functional.namespace}.{func_group.functional.func.name}": func_group
+            for func_group in structured_native_functions
+        }
+        if dispatch_key in (DispatchKey.CPU, DispatchKey.CUDA):
+            fallbacks = dict()
+            for func in native_functions:
+                op_name = get_fallback_op_name(func)
+                if op_name in inductor_fallback_ops:
+                    fallbacks[op_name] = (
+                        func,
+                        structured_func_group_dict.get(
+                            f"{func.namespace}.{func.func.name.name}", None
+                        ),
+                    )
+            fallback_native_functions = tuple(
+                value for _, value in sorted(fallbacks.items())
+            )
+
+            def get_header(
+                func: NativeFunction,
+                func_group: Optional[NativeFunctionsGroup],
+            ) -> Optional[str]:
+                backend_index = get_backend_index_for_aoti(
+                    func, func_group, dispatch_key, backend_indices
+                )
+                return (
+                    None
+                    if backend_index is None
+                    else f"#include <ATen/ops/{func.root_name}_{backend_index.dispatch_key.lower()}_dispatch.h>"
+                )
+
+            def headers_for_aoti() -> str:
+                headers = []
+                for func, func_group in fallback_native_functions:
+                    header = get_header(func, func_group)
+                    if header is not None:
+                        headers.append(header)
+                return "\n".join(sorted(set(headers)))
+
+            extra_headers = (
+                extra_cuda_headers if is_cuda_dispatch_key(dispatch_key) else ""
+            )
+
+            # header files were checked in for ABI-compatiblilty checking
+            header_file_name = f"c_shim_{dispatch_key.lower()}.h"
+            new_header = gen_aoti_c_shim(
+                fallback_native_functions,
+                dispatch_key,
+                backend_indices,
+                header=True,
+                includes="",
+            )
+            if update_aoti_c_shim:
+                aoti_fm.write(
+                    header_file_name,
+                    lambda: new_header,
+                )
+            else:
+                try:
+                    with open(
+                        os.path.join(aoti_fm.install_dir, header_file_name)
+                    ) as old_file:
+                        old_header = old_file.read()
+                        assert (
+                            old_header == new_header
+                        ), """
+
+WARNING: The generated AOTInductor C shim header files have unexpectedly changed. This
+indicates an AOTInductor fallback operator ABI backward compatibility breakage!!!
+Only in a limited number of situations, this is allowed:
+
+1. You added a fallback op to the inductor_fallback_ops list in torchgen/aoti/fallback_ops.py.
+If that's the case, run `python torchgen/gen.py --update-aoti-c-shim` to update the existing
+C shim header files.
+
+2. You added a new default argument to an existing fallback op. This is clearly a BC breaking
+change in the AOTInductor land. In this case, you need to keep a manual copy of that existing
+fallback op in a file, e.g. torch/csrc/inductor/aoti_torch/c/shim.h, bump up the version
+number of that fallback op in the newly generated C shim files, and update the cpp wrapper
+codegen to generate the correct cpp call for this op. Contact AOTInductor team for assistance.
+
+                        """
+                except FileNotFoundError:
+                    print(
+                        f"{os.path.join(aoti_fm.install_dir, header_file_name)} not found"
+                    )
+
+            # cpp files are always generated on-the-fly
+            aoti_fm.write(
+                f"c_shim_{dispatch_key.lower()}.cpp",
+                lambda: gen_aoti_c_shim(
+                    fallback_native_functions,
+                    dispatch_key,
+                    backend_indices,
+                    header=False,
+                    includes=headers_for_aoti() + "\n" + extra_headers,
+                ),
+            )
+
         del fm
 
     # BackendSelect is generated specially
@@ -2426,9 +2531,9 @@ def gen_source_files(
         },
     )
 
-    cpu_fm.write("Functions.cpp", lambda: {})
+    cpu_fm.write("Functions.cpp", dict)
 
-    core_fm.write("TensorMethods.cpp", lambda: {})
+    core_fm.write("TensorMethods.cpp", dict)
 
     core_fm.write(
         "ATenOpList.cpp",
@@ -2656,6 +2761,12 @@ def main() -> None:
         default="build/aten/src/ATen",
     )
     parser.add_argument(
+        "--aoti-install-dir",
+        "--aoti_install_dir",
+        help="output directory for AOTInductor shim",
+        default="torch/csrc/inductor/aoti_torch/generated",
+    )
+    parser.add_argument(
         "--rocm",
         action="store_true",
         help="reinterpret CUDA as ROCm/HIP and adjust filepaths accordingly",
@@ -2719,6 +2830,12 @@ def main() -> None:
         default=["headers", "sources", "declarations_yaml"],
         help="Generate only a subset of files",
     )
+    parser.add_argument(
+        "--update-aoti-c-shim",
+        action="store_true",
+        help="Update AOTInductor C shim after changing torchgen/aoti/fallback_ops.py. "
+        "WARNING: Do not use this unless you are sure what you are doing!!!",
+    )
 
     options = parser.parse_args()
 
@@ -2775,12 +2892,15 @@ def main() -> None:
     pathlib.Path(core_install_dir).mkdir(parents=True, exist_ok=True)
     ops_install_dir = f"{options.install_dir}/ops"
     pathlib.Path(ops_install_dir).mkdir(parents=True, exist_ok=True)
+    aoti_install_dir = f"{options.aoti_install_dir}"
+    pathlib.Path(aoti_install_dir).mkdir(parents=True, exist_ok=True)
 
     core_fm = make_file_manager(options=options, install_dir=core_install_dir)
     cpu_fm = make_file_manager(options=options)
     cpu_vec_fm = make_file_manager(options=options)
     cuda_fm = make_file_manager(options=options)
     ops_fm = make_file_manager(options=options, install_dir=ops_install_dir)
+    aoti_fm = make_file_manager(options=options, install_dir=aoti_install_dir)
 
     # Only a limited set of dispatch keys get CPUFunctions.h headers generated
     # for them; this is the set
@@ -2823,6 +2943,7 @@ def main() -> None:
             selector=selector,
             static_dispatch_idx=static_dispatch_idx,
             backend_indices=backend_indices,
+            aoti_fm=aoti_fm,
             core_fm=core_fm,
             cpu_fm=cpu_fm,
             cpu_vec_fm=cpu_vec_fm,
@@ -2833,6 +2954,7 @@ def main() -> None:
             force_schema_registration=options.force_schema_registration,
             per_operator_headers=options.per_operator_headers,
             skip_dispatcher_op_registration=options.skip_dispatcher_op_registration,
+            update_aoti_c_shim=options.update_aoti_c_shim,
         )
 
     if "headers" in options.generate:

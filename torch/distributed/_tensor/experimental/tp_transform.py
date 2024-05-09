@@ -47,17 +47,24 @@ def tensor_parallel_transformation(
     .. warning::
         This API is experimental and subject to change.
     """
-    # TODO Migrate this to plain function call.
-    return exported_program._transform_do_not_use(
-        TensorParallelTransformPass(
+
+    gm = exported_program.graph_module
+    sig = copy.deepcopy(exported_program.graph_signature)
+    state_dict = copy.copy(exported_program.state_dict)
+
+    with gm._set_replace_hook(sig.get_replace_hook()):
+        res = TensorParallelTransformPass(
             rank,
             world_size,
             device_type,
-            exported_program.state_dict,
+            state_dict,
             exported_program.graph_signature,
             parallel_strategies,
-        )
-    )
+        )(gm)
+        assert res is not None
+        gm = res.graph_module
+
+    return exported_program._update(gm, sig, state_dict)
 
 
 class TensorParallelTransformPass(PassBase):
@@ -203,7 +210,7 @@ def _mark_sharding(
                 placement_strategies[node] = _create_placement_strategy(
                     node,
                     mesh,
-                    placements=arg_strategy.out_spec.placements,
+                    placements=arg_strategy.output_spec.placements,
                     input_specs=_get_input_node_specs(node, placement_strategies),
                 )
                 node.meta["sharding"] = placement_strategies[node]
@@ -228,9 +235,9 @@ def _mark_sharding(
                         op_schema,
                     )
                 placement_strategies[node] = PlacementStrategy(
-                    output_spec=_get_output_spec_from_output_sharding(output_sharding),
-                    input_specs=output_sharding.schema_suggestions[0].args_spec
-                    if output_sharding.schema_suggestions is not None
+                    output_specs=_get_output_spec_from_output_sharding(output_sharding),
+                    input_specs=output_sharding.redistribute_schema.args_spec
+                    if output_sharding.redistribute_schema is not None
                     else _get_input_node_specs(node, placement_strategies),
                 )
                 node.meta["sharding"] = placement_strategies[node]
@@ -268,12 +275,12 @@ def _create_placement_strategy(
     """
     placement = PlacementStrategy(
         input_specs=input_specs,
-        output_spec=DTensorSpec(
+        output_specs=DTensorSpec(
             mesh=mesh,
             placements=placements,
         ),
     )
-    _populate_tensor_meta(node, placement.output_spec)
+    _populate_tensor_meta(node, placement.output_specs)
     return placement
 
 
@@ -338,7 +345,7 @@ def _generate_default_output_sharding(
         output_spec=pytree.tree_map_only(
             FakeTensor, create_output_spec, node.meta["val"]
         ),
-        schema_suggestions=[new_op_schema],
+        redistribute_schema=new_op_schema,
         failed_reason=f"{node.op} does not have sharding strategy registered",
         needs_redistribute=True,
     )
@@ -451,6 +458,14 @@ def _insert_reshard_gm(
     reshard_gm_nodes = list(reshard_gm.graph.nodes)
     input_node = reshard_gm_nodes[0]
     with gm.graph.inserting_before(node):
+        # copy nn_module_stack metadata for output, all-reduce nodes
+        for reshard_node in reshard_gm.graph.nodes:
+            if reshard_node.op not in ["placeholder", "output"]:
+                reshard_node.meta["nn_module_stack"] = (
+                    copy.copy(input_arg.meta["nn_module_stack"])
+                    if not input_arg.op == "placeholder"
+                    else copy.copy(node.meta["nn_module_stack"])
+                )
         output_node = gm.graph.graph_copy(
             reshard_gm.graph,
             val_map={
@@ -481,7 +496,7 @@ def _get_input_node_specs(
     input_specs_list: List[DTensorSpec] = []
     for input_arg in node.all_input_nodes:
         if input_arg in placement_strategies:
-            output_spec = placement_strategies[input_arg].output_spec
+            output_spec = placement_strategies[input_arg].output_specs
             assert isinstance(output_spec, DTensorSpec)
             input_specs_list.append(output_spec)
         else:
@@ -496,7 +511,7 @@ def _get_op_schema(
     Util function to construct the operator schema of a node.
     """
     args_schema_list = pytree.tree_map_only(
-        Node, lambda arg: placement_strategies[arg].output_spec, node.args
+        Node, lambda arg: placement_strategies[arg].output_specs, node.args
     )
     op_schema = OpSchema(
         op=cast(torch._ops.OpOverload, node.target),
@@ -527,7 +542,6 @@ def _shard_state_dict(
         assert fqn in state_dict, f"{fqn} not found in state dict: {state_dict.keys()}"
 
         original_param = state_dict[fqn]
-        assert isinstance(placement_strategy.output_spec, DTensorSpec)
         dtensor_param = distribute_tensor(
             original_param,
             mesh,

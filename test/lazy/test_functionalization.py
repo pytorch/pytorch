@@ -1,11 +1,15 @@
 # Owner(s): ["oncall: jit"]
 
+import re
+
 import torch
 import torch._lazy.metrics as metrics
 import torch._lazy.ts_backend
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 torch._lazy.ts_backend.init()
+
+NODE_TYPE_PATTERN = re.compile(r", NodeType=[^\n]+")
 
 
 class LazyFuncionalizationTest(TestCase):
@@ -55,6 +59,39 @@ class LazyFuncionalizationTest(TestCase):
 
         self.assertEqual(cpu_out, lazy_out_1.to("cpu"))
         self.assertEqual(cpu_out, lazy_out_2.to("cpu"))
+
+    def test_data_assign(self):
+        def text(lazyt):
+            raw = torch._C._lazy._get_tensors_text([lazyt])
+            return NODE_TYPE_PATTERN.sub("", raw)
+
+        origin = torch.rand(3, dtype=torch.float32)
+        tensor = origin.to("lazy")
+
+        self.assertExpectedInline(
+            text(tensor),
+            """\
+IR {
+  %0 = [Float[3]] lazy_tensors::device_data(), device=CPU0, ROOT=0
+}
+""",
+        )
+
+        # Modify the data-type of tensor, and assign it to 'data'.
+        # This should update the inner tensor of FunctionalTensorWrapper,
+        # changing the corresponding IR node.
+        modified_tensor = tensor.to(torch.bfloat16)
+        tensor.data = modified_tensor
+
+        self.assertExpectedInline(
+            text(tensor),
+            """\
+IR {
+  %0 = [Float[3]] lazy_tensors::device_data(), device=CPU0
+  %1 = [BFloat16[3]] aten::_to_copy(%0), dtype=BFloat16, layout=null, device=null, pin_memory=null, non_blocking=0, memory_format=null, ROOT=0
+}
+""",  # noqa: B950
+        )
 
 
 if __name__ == "__main__":
