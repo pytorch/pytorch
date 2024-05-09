@@ -61,7 +61,7 @@ template <typename InputIteratorT,
           typename NumSelectedIteratorT,
           typename OffsetT,
           typename SelectOp>
-CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE static cudaError_t dispatch_select_if_wrapper(
+static cudaError_t dispatch_select_if_wrapper(
   void* d_temp_storage,
   std::size_t& temp_storage_bytes,
   InputIteratorT d_in,
