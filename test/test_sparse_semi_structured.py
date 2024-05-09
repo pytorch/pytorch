@@ -65,7 +65,7 @@ if torch.cuda.is_available():
     except Exception:
         pass
 
-inference_dtypes = dtypes(torch.float16, torch.bfloat16, torch.float32, torch.int8)
+inference_dtypes = dtypes(torch.float16, torch.bfloat16, torch.int8) if torch.version.hip is not None else dtypes(torch.float16, torch.bfloat16, torch.float32, torch.int8)
 training_dtypes = dtypes(torch.float16, torch.bfloat16)
 parametrize_backends = parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
 
