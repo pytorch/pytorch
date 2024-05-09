@@ -9,7 +9,6 @@ from typing import Any, Dict, List
 
 from tools.stats.test_dashboard import upload_additional_info
 from tools.stats.upload_stats_lib import (
-    download_gha_artifacts,
     download_s3_artifacts,
     get_job_id,
     unzip,
@@ -121,12 +120,6 @@ def get_tests(workflow_run_id: int, workflow_run_attempt: int) -> List[Dict[str,
             "test-report", workflow_run_id, workflow_run_attempt
         )
         for path in s3_paths:
-            unzip(path)
-
-        artifact_paths = download_gha_artifacts(
-            "test-report", workflow_run_id, workflow_run_attempt
-        )
-        for path in artifact_paths:
             unzip(path)
 
         # Parse the reports and transform them to JSON
