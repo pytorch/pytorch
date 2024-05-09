@@ -508,8 +508,10 @@ def _fused_adagrad(
             "adagrad with fused=True does not support differentiable=True"
         )
 
-    grad_scale_dict = {grad_scale.device: grad_scale} if grad_scale is not None else {}
-    found_inf_dict = {found_inf.device: found_inf} if found_inf is not None else {}
+    grad_scale_dict = (
+        {grad_scale.device: grad_scale} if grad_scale is not None else None
+    )
+    found_inf_dict = {found_inf.device: found_inf} if found_inf is not None else None
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, state_sums, state_steps]
@@ -524,14 +526,14 @@ def _fused_adagrad(
         _,
     ) in grouped_tensors.items():
         device_grad_scale, device_found_inf = None, None
-        if grad_scale is not None:
+        if grad_scale is not None and grad_scale_dict is not None:
             if device not in grad_scale_dict:
-                grad_scale_dict[device] = grad_scale.to(device, non_blocking=True)
-            device_grad_scale = grad_scale_dict[device]
-        if found_inf is not None:
+                grad_scale_dict[device] = grad_scale.to(device, non_blocking=True)  # type: ignore[index]
+            device_grad_scale = grad_scale_dict[device]  # type: ignore[index]
+        if found_inf is not None and found_inf_dict is not None:
             if found_inf not in found_inf_dict:
-                found_inf_dict[device] = found_inf.to(device, non_blocking=True)
-            device_found_inf = found_inf_dict[device]
+                found_inf_dict[device] = found_inf.to(device, non_blocking=True)  # type: ignore[index]
+            device_found_inf = found_inf_dict[device]  # type: ignore[index]
         torch._foreach_add_(device_state_steps, 1)
         torch._fused_adagrad_(
             device_params,
