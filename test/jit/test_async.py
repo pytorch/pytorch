@@ -3,18 +3,20 @@
 import os
 import sys
 
+from typing import Any, Tuple
+
 import torch
 import torch.nn as nn
-
-from typing import Any, Tuple
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.jit_utils import JitTestCase, _inline_everything
 from typing import List
+
 from torch import Tensor
 from torch.jit import Future
+from torch.testing._internal.jit_utils import _inline_everything, JitTestCase
+
 
 class TestAsync(JitTestCase):
     def test_async_python(self):
@@ -51,8 +53,7 @@ class TestAsync(JitTestCase):
             futures = torch.jit.annotate(List[Future[List[Tensor]]], [])
             for _ in range(3):
                 future = torch.jit.annotate(
-                    Future[List[Tensor]],
-                    torch.jit.fork(foo, x)
+                    Future[List[Tensor]], torch.jit.fork(foo, x)
                 )
                 futures.append(future)
 
@@ -85,7 +86,7 @@ class TestAsync(JitTestCase):
 
     def test_async_script_capture(self):
         class Mod(torch.jit.ScriptModule):
-            __constants__ = ['const']
+            __constants__ = ["const"]
 
             def __init__(self):
                 super().__init__()
@@ -139,7 +140,10 @@ class TestAsync(JitTestCase):
     def test_async_script_no_script_mod(self):
         x = torch.rand(3, 4)
 
-        with self.assertRaisesRegexWithHighlight(RuntimeError, 'cannot call a value', 'torch.jit._fork(x'):
+        with self.assertRaisesRegexWithHighlight(
+            RuntimeError, "cannot call a value", "torch.jit._fork(x"
+        ):
+
             @torch.jit.script
             def wait_script(x):
                 fut = torch.jit._fork(x)
@@ -213,7 +217,7 @@ class TestAsync(JitTestCase):
             lambda x1, x2: torch.jit._wait(torch.jit._fork(foo, x1, x2)),
             lambda x1, x2: torch.jit._wait(torch.jit._fork(foo, x1, x2=x2)),
             lambda x1, x2: torch.jit._wait(torch.jit._fork(foo, x1=x1, x2=x2)),
-            lambda x1, x2: torch.jit._wait(torch.jit._fork(foo, x2=x2, x1=x1))
+            lambda x1, x2: torch.jit._wait(torch.jit._fork(foo, x2=x2, x1=x1)),
         ]:
             for wrapper in [
                 func,
@@ -234,8 +238,8 @@ class TestAsync(JitTestCase):
             return torch.jit._wait(torch.jit._fork(foo, x1=x1, x2=x2))
 
         for wrapper in [
-                foo_script_args,
-                foo_script_kwargs,
+            foo_script_args,
+            foo_script_kwargs,
         ]:
             self.assertEqual(wrapper(x1, x2), y_hat)
             self.assertEqual(wrapper(x1, x2=x2), y_hat)
@@ -255,7 +259,9 @@ class TestAsync(JitTestCase):
                 self.traced = torch.jit.trace(Traced(), (x), _force_outplace=True)
 
             @torch.jit.script_method
-            def forward(self, x: Tensor) -> Tuple[List[Tensor], Tuple[Tensor, Tensor], Tensor]:
+            def forward(
+                self, x: Tensor
+            ) -> Tuple[List[Tensor], Tuple[Tensor, Tensor], Tensor]:
                 future1 = torch.jit._fork(self.traced, x)
                 future2 = torch.jit._fork(torch.neg, x)
 
@@ -284,10 +290,16 @@ class TestAsync(JitTestCase):
         module = torch.jit.trace(TupleCl(), (x), _force_outplace=True)
 
         # Make sure we have forks
-        self.assertGraphContainsExactly(module.graph, kind='prim::fork', num_kind_nodes=2)
+        self.assertGraphContainsExactly(
+            module.graph, kind="prim::fork", num_kind_nodes=2
+        )
         # Make sure 1 ::neg is in the root graph and 2 ::negs are in the subgraphs
-        self.assertGraphContainsExactly(module.graph, kind='aten::neg', num_kind_nodes=1)
-        self.assertGraphContainsExactly(module.graph, kind='aten::neg', num_kind_nodes=3, consider_subgraphs=True)
+        self.assertGraphContainsExactly(
+            module.graph, kind="aten::neg", num_kind_nodes=1
+        )
+        self.assertGraphContainsExactly(
+            module.graph, kind="aten::neg", num_kind_nodes=3, consider_subgraphs=True
+        )
 
         y = torch.neg(x)
         self.assertEqual(module(x), (y, y, y, y, x, x))
@@ -311,19 +323,23 @@ class TestAsync(JitTestCase):
             return torch.jit._wait(fut)
 
         # no future
-        error_msg = 'The size.*must match the size of tensor'
-        with self.assertRaisesRegexWithHighlight(Exception, error_msg, 'x.t() + x'):
+        error_msg = "The size.*must match the size of tensor"
+        with self.assertRaisesRegexWithHighlight(Exception, error_msg, "x.t() + x"):
             foo(x)
 
         # one future
-        with self.assertRaisesRegexWithHighlight(Exception, error_msg, 'torch.jit._fork(foo, x'):
+        with self.assertRaisesRegexWithHighlight(
+            Exception, error_msg, "torch.jit._fork(foo, x"
+        ):
             wait_script(x)
 
         # two futures with a different error
         x = torch.rand(3, 4, 5)
-        with self.assertRaisesRegexWithHighlight(Exception,
-                                                 'expects a tensor with <= 2 dimensions',
-                                                 'torch.jit._fork(wait_script, x'):
+        with self.assertRaisesRegexWithHighlight(
+            Exception,
+            "expects a tensor with <= 2 dimensions",
+            "torch.jit._fork(wait_script, x",
+        ):
             wait_script_nest(x)
 
     def test_async_grad_guard_with_grad(self):
@@ -381,9 +397,15 @@ class TestAsync(JitTestCase):
         x = torch.rand(3, 4)
         self.assertEqual(fn(x), traced(x))
 
-        self.assertGraphContainsExactly(traced.graph, kind='prim::fork', num_kind_nodes=1)
-        self.assertGraphContainsExactly(traced.graph, kind='aten::wait', num_kind_nodes=1)
-        self.assertGraphContainsExactly(traced.graph, kind='aten::neg', num_kind_nodes=2, consider_subgraphs=True)
+        self.assertGraphContainsExactly(
+            traced.graph, kind="prim::fork", num_kind_nodes=1
+        )
+        self.assertGraphContainsExactly(
+            traced.graph, kind="aten::wait", num_kind_nodes=1
+        )
+        self.assertGraphContainsExactly(
+            traced.graph, kind="aten::neg", num_kind_nodes=2, consider_subgraphs=True
+        )
 
     def test_trace_fork_wait_leaking(self):
         my_list = []
@@ -397,9 +419,13 @@ class TestAsync(JitTestCase):
             val = torch.jit._wait(fut)
             return my_list[0]
 
-        with self.assertRaisesRegexWithHighlight(RuntimeError, 'did not have observable data dependence with trace inputs; '
-                                                 'this probably indicates your program cannot be understood '
-                                                 'by the tracer.', ''):
+        with self.assertRaisesRegexWithHighlight(
+            RuntimeError,
+            "did not have observable data dependence with trace inputs; "
+            "this probably indicates your program cannot be understood "
+            "by the tracer.",
+            "",
+        ):
             traced = torch.jit.trace(fn, (torch.rand(3, 4),), check_trace=False)
 
     def test_trace_fork_wait_inline(self):
@@ -413,9 +439,15 @@ class TestAsync(JitTestCase):
 
         traced = torch.jit.trace(fn, (torch.rand(3, 4),))
         torch._C._jit_pass_inline_fork_wait(traced.graph)
-        self.assertGraphContainsExactly(traced.graph, kind='prim::fork', num_kind_nodes=0)
-        self.assertGraphContainsExactly(traced.graph, kind='aten::wait', num_kind_nodes=0)
-        self.assertGraphContainsExactly(traced.graph, kind='aten::add', num_kind_nodes=2)
+        self.assertGraphContainsExactly(
+            traced.graph, kind="prim::fork", num_kind_nodes=0
+        )
+        self.assertGraphContainsExactly(
+            traced.graph, kind="aten::wait", num_kind_nodes=0
+        )
+        self.assertGraphContainsExactly(
+            traced.graph, kind="aten::add", num_kind_nodes=2
+        )
 
     def test_trace_fork_wait_list_modulecalls(self):
         def add_one(input):
@@ -472,7 +504,10 @@ class TestAsync(JitTestCase):
         self.checkTrace(TestModule(), (torch.randn(5, 5),))
 
     def test_no_future_subtype_message(self):
-        with self.assertRaisesRegexWithHighlight(RuntimeError, 'Future without a contained type', ''):
+        with self.assertRaisesRegexWithHighlight(
+            RuntimeError, "Future without a contained type", ""
+        ):
+
             @torch.jit.script
             def forward(self, x):
                 futs = torch.jit.annotate(List[torch.jit.Future], [])
@@ -481,6 +516,7 @@ class TestAsync(JitTestCase):
         """
         Test that futures subtype each other properly.
         """
+
         # Successful subtyping.
         def returns_int(x: int) -> int:
             return x + x + 1
@@ -495,10 +531,11 @@ class TestAsync(JitTestCase):
 
         # Unsuccessful subtyping.
         with self.assertRaisesRegexWithHighlight(
-                RuntimeError,
-                r"was annotated as having type Future\[float\] but is actually of type Future\[int\]",
-                "fut = returns_future_float(x"
+            RuntimeError,
+            r"was annotated as having type Future\[float\] but is actually of type Future\[int\]",
+            "fut = returns_future_float(x",
         ):
+
             def returns_future_float(x: int) -> torch.jit.Future[float]:
                 return torch.jit._fork(returns_int, (x))
 
@@ -508,8 +545,9 @@ class TestAsync(JitTestCase):
                 return fut.wait()
 
 
-
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_jit.py TESTNAME\n\n"
-                       "instead.")
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test file is not meant to be run directly, use:\n\n"
+        "\tpython test/test_jit.py TESTNAME\n\n"
+        "instead."
+    )

@@ -19,7 +19,7 @@ static Tensor permuteBatchDimsToFront(const BatchedTensorImpl* batched) {
   if (batched->bdim() == 0) {
     return physical_tensor;
   }
-  const auto sizes = physical_tensor.sizes();
+  const auto sizes = physical_tensor.sym_sizes();
   VmapDimVector permutation(sizes.size(), 0);
   permutation.reserve(sizes.size());
   const auto is_bdim = createBatchDimBitset(batched->bdim());
@@ -96,14 +96,14 @@ static std::tuple<int64_t, int64_t> computeFrontBatchDimsFromLevels(std::bitset<
   return std::make_tuple(dim, level);
 }
 
-static Tensor moveDimToFrontAndExpand(Tensor tensor, optional<int64_t> dim, int64_t size) {
+static Tensor moveDimToFrontAndExpand(Tensor tensor, optional<int64_t> dim, c10::SymInt size) {
   if (dim) {
     tensor = tensor.movedim(*dim, 0);
   } else {
     tensor = tensor.unsqueeze(0);
-    auto expanded_sizes = tensor.sizes().vec();
+    auto expanded_sizes = tensor.sym_sizes().vec();
     expanded_sizes[0] = size;
-    tensor = tensor.expand(expanded_sizes);
+    tensor = tensor.expand_symint(expanded_sizes);
   }
   return tensor;
 }
@@ -119,7 +119,7 @@ static Tensor moveDimToFrontAndExpand(Tensor tensor, optional<int64_t> dim, int6
 VmapPhysicalViewVec
 MultiBatchVmapTransform::logicalToPhysical(ITensorListRef logical_tensors) {
   auto cur_level = maybeCurrentDynamicLayer().value().layerId();
-  auto bdim_size = -1;
+  c10::SymInt bdim_size = -1;
 
   // Figure out the batch size first
   for (const auto& logical_tensor : logical_tensors) {
@@ -130,7 +130,7 @@ MultiBatchVmapTransform::logicalToPhysical(ITensorListRef logical_tensors) {
     if (batched->level() != cur_level) {
       continue;
     }
-    bdim_size = batched->value().size(batched->bdim());
+    bdim_size = batched->value().sym_size(batched->bdim());
   }
   TORCH_INTERNAL_ASSERT(bdim_size != -1);
 

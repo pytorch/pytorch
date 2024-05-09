@@ -8,6 +8,7 @@ import torch.distributed._functional_collectives as funcol
 
 from torch.distributed._state_dict_utils import (
     _check_state_dict_similarity,
+    _copy_state_dict,
     _create_cpu_state_dict,
     _gather_state_dict,
     _offload_state_dict_to_cpu,
@@ -119,7 +120,6 @@ class TestStateDictUtils(DTensorTestBase):
         }
         self.assertEqual(state_dict, _gather_state_dict(dist_state_dict))
 
-    @with_comms
     @skip_if_lt_x_gpu(2)
     def test_create_cpu_state_dict(self):
         device = torch.device("cuda")
@@ -144,11 +144,9 @@ class TestStateDictUtils(DTensorTestBase):
             self.assertFalse(_check_state_dict_similarity(state_dict, cpu_state_dict))
             cpu_state_dict["tensor1"] = tensor1
 
-            cpu_state_dict = _offload_state_dict_to_cpu(
-                state_dict, cpu_offload_state_dict=cpu_state_dict, type_check=True
-            )
+            _copy_state_dict(state_dict, cpu_state_dict)
 
-            # Verify if _offload_state_dict_to_cpu works
+            # Verify if _copy_state_dict works
             for v in cpu_state_dict.values():
                 if isinstance(v, torch.Tensor):
                     self.assertFalse(v.is_cuda)
@@ -168,6 +166,10 @@ class TestStateDictUtils(DTensorTestBase):
         cpu_state_dict = _create_cpu_state_dict(state_dict, pin_memory=True)
         _verify(cpu_state_dict)
         cpu_state_dict = _create_cpu_state_dict(state_dict, share_memory=True)
+        _verify(cpu_state_dict)
+        cpu_state_dict = _create_cpu_state_dict(
+            state_dict, share_memory=True, pin_memory=True
+        )
         _verify(cpu_state_dict)
 
 

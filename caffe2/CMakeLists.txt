@@ -59,27 +59,14 @@ if(INTERN_BUILD_ATEN_OPS)
 
   # Generate the headers wrapped by our operator
   file(GLOB_RECURSE torchgen_python "${PROJECT_SOURCE_DIR}/torchgen/*.py")
-  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/contrib/aten/aten_op.h
-  COMMAND
-  "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
-    --aten_root=${CMAKE_CURRENT_SOURCE_DIR}/../aten
-    --template_dir=${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten
-    --yaml_dir=${CMAKE_BINARY_DIR}/aten/src/ATen
-    --install_dir=${CMAKE_CURRENT_BINARY_DIR}/contrib/aten
-  DEPENDS
-  ${torchgen_python}
-  ${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml
-  ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
-  ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/aten_op_template.h)
 
-  add_custom_target(__aten_op_header_gen
-    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/contrib/aten/aten_op.h)
-  add_library(aten_op_header_gen INTERFACE)
-  add_dependencies(aten_op_header_gen __aten_op_header_gen)
 
   # Add source, includes, and libs to lists
   list(APPEND Caffe2_CPU_SRCS ${ATen_CPU_SRCS})
   list(APPEND Caffe2_GPU_SRCS ${ATen_CUDA_CPP_SRCS})
+  list(APPEND Caffe2_XPU_SRCS ${ATen_XPU_SRCS})
+  list(APPEND Caffe2_XPU_INCLUDE ${ATen_XPU_INCLUDE})
+  list(APPEND Caffe2_XPU_DEPENDENCY_LIBS ${ATen_XPU_DEPENDENCY_LIBS})
   list(APPEND Caffe2_GPU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_SRCS_W_SORT_BY_KEY})
   list(APPEND Caffe2_GPU_CU_SRCS ${ATen_CUDA_CU_SRCS})
   list(APPEND Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_CU_SRCS_W_SORT_BY_KEY})
@@ -129,41 +116,14 @@ endif()
 
 # Skip modules that are not used by libtorch mobile yet.
 if(BUILD_CAFFE2 AND NOT INTERN_BUILD_MOBILE)
-  add_subdirectory(contrib)
-  add_subdirectory(predictor)
-  add_subdirectory(predictor/emulator)
   add_subdirectory(core/nomnigraph)
   if(USE_NVRTC)
     add_subdirectory(cuda_rtc)
   endif()
-  add_subdirectory(db)
-  add_subdirectory(distributed)
-  # add_subdirectory(experiments) # note, we may remove this folder at some point
-  add_subdirectory(ideep)
-  add_subdirectory(image)
-  add_subdirectory(video)
-  add_subdirectory(mobile)
-  add_subdirectory(mpi)
-  add_subdirectory(observers)
-  add_subdirectory(onnx)
   if(BUILD_CAFFE2_OPS)
-    add_subdirectory(operators)
-    add_subdirectory(operators/rnn)
-    if(USE_FBGEMM)
-      add_subdirectory(quantization/server)
-    endif()
-    if(USE_QNNPACK)
-      add_subdirectory(operators/quantized)
-    endif()
   endif()
-  add_subdirectory(opt)
   add_subdirectory(proto)
   add_subdirectory(python)
-  add_subdirectory(queue)
-  add_subdirectory(sgd)
-  add_subdirectory(share)
-  # add_subdirectory(test) # todo: use caffe2_gtest_main instead of gtest_main because we will need to call GlobalInit
-  add_subdirectory(transforms)
 endif()
 if(NOT BUILD_CAFFE2 AND NOT INTERN_BUILD_MOBILE)
   add_subdirectory(proto)
@@ -174,6 +134,7 @@ endif()
 if(CAFFE2_ALLOWLISTED_FILES)
   caffe2_do_allowlist(Caffe2_CPU_SRCS CAFFE2_ALLOWLISTED_FILES)
   caffe2_do_allowlist(Caffe2_GPU_SRCS CAFFE2_ALLOWLISTED_FILES)
+  caffe2_do_allowlist(Caffe2_XPU_SRCS CAFFE2_ALLOWLISTED_FILES)
   caffe2_do_allowlist(Caffe2_GPU_SRCS_W_SORT_BY_KEY CAFFE2_ALLOWLISTED_FILES)
   caffe2_do_allowlist(Caffe2_GPU_CU_SRCS CAFFE2_ALLOWLISTED_FILES)
   caffe2_do_allowlist(Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY CAFFE2_ALLOWLISTED_FILES)
@@ -1257,11 +1218,6 @@ if(USE_TBB)
   target_link_libraries(torch_cpu PUBLIC TBB::tbb)
 endif()
 
-if(BUILD_CAFFE2 AND BUILD_CAFFE2_OPS AND USE_FBGEMM)
-  # FIXME: quantization/server/conv_dnnlowp_op.cc depends on fbgemm/src/RefImplementations.h
-  target_include_directories(torch_cpu PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../third_party)
-endif()
-
 target_include_directories(torch_cpu PRIVATE ${ATen_CPU_INCLUDE})
 
 target_include_directories(torch_cpu PRIVATE
@@ -1332,8 +1288,11 @@ if(BUILD_TEST)
   endif()
   if(BUILD_AOT_INDUCTOR_TEST)
     add_subdirectory(
-      ${TORCH_ROOT}/test/cpp/aot_inductor
-      ${CMAKE_BINARY_DIR}/test_aot_inductor)
+      ${TORCH_ROOT}/test/cpp/aoti_abi_check
+      ${CMAKE_BINARY_DIR}/test_aoti_abi_check)
+    add_subdirectory(
+      ${TORCH_ROOT}/test/cpp/aoti_inference
+      ${CMAKE_BINARY_DIR}/test_aoti_inference)
   endif()
 endif()
 
@@ -1607,9 +1566,7 @@ if(USE_CUDA)
   caffe2_interface_library(torch_cuda torch_cuda_library)
 elseif(USE_ROCM)
   caffe2_interface_library(torch_hip torch_hip_library)
-endif()
-
-if(USE_XPU)
+elseif(USE_XPU)
   caffe2_interface_library(torch_xpu torch_xpu_library)
 endif()
 
@@ -1621,9 +1578,7 @@ if(USE_CUDA)
   install(TARGETS torch_cuda torch_cuda_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 elseif(USE_ROCM)
   install(TARGETS torch_hip torch_hip_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-endif()
-
-if(USE_XPU)
+elseif(USE_XPU)
   install(TARGETS torch_xpu torch_xpu_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 endif()
 
@@ -1689,6 +1644,8 @@ if(USE_XPU)
       torch_xpu INTERFACE $<INSTALL_INTERFACE:include>)
   target_include_directories(
       torch_xpu PRIVATE ${Caffe2_XPU_INCLUDE})
+  target_link_libraries(
+      torch_xpu PRIVATE ${Caffe2_XPU_DEPENDENCY_LIBS})
 
   target_link_libraries(torch_xpu PUBLIC torch_cpu_library)
 endif()

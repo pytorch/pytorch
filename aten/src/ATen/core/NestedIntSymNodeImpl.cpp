@@ -73,4 +73,8 @@ c10::SymNode NestedIntSymNodeImpl::mul(const c10::SymNode& other) {
   return SymNode(c10::make_intrusive<NestedIntSymNodeImpl>(val_, coeff_ * *c));
 }
 
+c10::SymNode NestedIntSymNodeImpl::clone() {
+  return SymNode(c10::make_intrusive<NestedIntSymNodeImpl>(val_, coeff_));
+}
+
 } // namespace c10
