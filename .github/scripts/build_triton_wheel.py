@@ -88,7 +88,8 @@ def build_triton(
     if not release:
         # Nightly binaries include the triton commit hash, i.e. 2.1.0+e6216047b8
         # while release build should only include the version, i.e. 2.1.0
-        version_suffix = f"+{commit_hash[:10]}"
+        rocm_version = get_rocm_version()
+        version_suffix = f"+rocm{rocm_version}_{commit_hash[:10]}"
         version += version_suffix
 
     with TemporaryDirectory() as tmpdir:
