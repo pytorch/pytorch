@@ -9,9 +9,7 @@
 
 // cublasLT was introduced in CUDA 10.1 but we enable only for 11.1 that also
 // added bf16 support
-#ifndef _MSC_VER
 #include <cublasLt.h>
-#endif
 
 #ifdef CUDART_VERSION
 #include <cusolverDn.h>
