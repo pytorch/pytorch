@@ -81,7 +81,7 @@ static void unary_op_noresize(const Tensor& self, const Tensor& output_, std::st
 
   auto output = output_;
   bool needsCopyToOutput = false;
-  if (output.storage_offset() || !output.is_contiguous()) {
+  if (needsGather(output)) {
     output = at::empty(output.sizes(), output.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
     needsCopyToOutput = true;
   }

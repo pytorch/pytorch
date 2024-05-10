@@ -91,6 +91,7 @@ from .variables.builder import (
     VariableBuilder,
     wrap_fx_proxy,
 )
+from .variables.lists import BaseListVariable
 from .variables.misc import NullVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
@@ -599,28 +600,20 @@ class OutputGraph:
         )
         global_state["grad_enabled"] = (torch.set_grad_enabled, torch.is_grad_enabled())
 
-        def autocast_specific_backend(
-            device_type: str, func: Callable[[str, Any], None]
-        ):
-            def decorator(value):
-                return func(device_type, value)
-
-            return decorator
-
         global_state["autocast_enabled"] = (
-            autocast_specific_backend("cuda", torch.set_autocast_enabled),
+            functools.partial(torch.set_autocast_enabled, "cuda"),
             torch.is_autocast_enabled("cuda"),
         )
         global_state["autocast_cpu_enabled"] = (
-            autocast_specific_backend("cpu", torch.set_autocast_enabled),
+            functools.partial(torch.set_autocast_enabled, "cpu"),
             torch.is_autocast_enabled("cpu"),
         )
         global_state["autocast_gpu_dtype"] = (
-            autocast_specific_backend("cuda", torch.set_autocast_dtype),
+            functools.partial(torch.set_autocast_dtype, "cuda"),
             torch.get_autocast_dtype("cuda"),
         )
         global_state["autocast_cpu_dtype"] = (
-            autocast_specific_backend("cpu", torch.set_autocast_dtype),
+            functools.partial(torch.set_autocast_dtype, "cpu"),
             torch.get_autocast_dtype("cpu"),
         )
         global_state["autocast_cache_enabled"] = (
@@ -876,18 +869,29 @@ class OutputGraph:
 
     def handle_aliases_for_stolen_lists(self, tx):
         # If list inputs are stolen, but still needed after the function call, create aliases to keep them alive
-        alias_insts = []
+        maybe_gm = self.local_scope.get("self")
+        stolen_list_names = get_locals_to_steal(maybe_gm)
+        if not stolen_list_names:
+            return []
 
+        alias_insts = []
         needs_alias: Dict[
             str, List[Union[VariableTracker, AttributeMutationExisting]]
         ] = {}
-        maybe_gm = self.local_scope.get("self")
-        stolen_list_names = get_locals_to_steal(maybe_gm)
-        for x in [
+
+        queue = [
             *tx.stack,
             *tx.symbolic_locals.values(),
             *self.side_effects.store_attr_mutations.keys(),
-        ]:
+        ]
+
+        while queue:
+            x = queue.pop()
+            if isinstance(x, BaseListVariable):
+                assert isinstance(x.items, List)
+                queue += x.items
+                continue
+
             if not (
                 isinstance(x, (VariableTracker, AttributeMutationExisting))
                 and isinstance(x.source, GetItemSource)
@@ -901,7 +905,7 @@ class OutputGraph:
                 needs_alias[stolen_name] = []
             needs_alias[stolen_name].append(x)
 
-        visited = set()
+        visited = {}
         for arg in self.graphargs:
             if not (
                 isinstance(arg._example, list)
@@ -915,12 +919,12 @@ class OutputGraph:
             assert list_name in self.code_options["co_varnames"]
             for x in needs_alias[list_name]:
                 list_idx = x.source.index
-                alias_name = self.new_var(
-                    f"{list_name}_ref"
-                )  # self.new_var already adds unique id suffix
-
                 if list_idx not in visited:
-                    visited.add(list_idx)
+                    alias_name = self.new_var(
+                        f"{list_name}_ref"
+                    )  # self.new_var already adds unique id suffix
+
+                    visited[list_idx] = alias_name
                     # bytecode of `alias_name = list_name[list_idx]`
                     alias_insts.extend(
                         [
@@ -932,7 +936,7 @@ class OutputGraph:
                     )
 
                 # operate on alias, handled by suffix codegen
-                x.source = LocalSource(alias_name)
+                x.source = LocalSource(visited[list_idx])
 
         return alias_insts
 

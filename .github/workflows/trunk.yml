@@ -140,6 +140,8 @@ jobs:
       test-matrix: |
         { include: [
           { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-stable" },
+          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-14" },
+
         ]}
 
   macos-12-py3-arm64-test:
