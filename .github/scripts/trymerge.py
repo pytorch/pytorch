@@ -1635,6 +1635,28 @@ def is_broken_trunk(
     )
 
 
+def is_unstable(
+    check: JobCheckState,
+    drci_classifications: Any,
+) -> bool:
+    if not check or not drci_classifications:
+        return False
+
+    name = check.name
+    job_id = check.job_id
+
+    # The job name has the unstable keyword. This is the original way to mark a job
+    # as unstable on HUD, Dr.CI, and trymerge
+    if "unstable" in name:
+        return True
+
+    # Consult the list of unstable failures from Dr.CI
+    return any(
+        (name == unstable["name"] or (job_id and job_id == unstable["id"]))
+        for unstable in drci_classifications.get("UNSTABLE", [])
+    )
+
+
 def is_flaky(
     check: JobCheckState,
     drci_classifications: Any,
@@ -1722,7 +1744,7 @@ def get_classifications(
         if check.status == "SUCCESS" or check.status == "NEUTRAL":
             continue
 
-        if "unstable" in name:
+        if is_unstable(check, drci_classifications):
             checks_with_classifications[name] = JobCheckState(
                 check.name,
                 check.url,

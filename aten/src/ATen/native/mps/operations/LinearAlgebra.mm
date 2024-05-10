@@ -25,7 +25,7 @@
 namespace at::native {
 namespace mps {
 namespace {
-static const char* METAL_LINALG = R"MATMUL_METAL(
+static MetalShaderLibrary lib(R"MATMUL_METAL(
 #include <metal_array>
 
 using namespace metal;
@@ -74,48 +74,12 @@ INSTANTIATE_NAIVE_MM(half);
 #if __METAL_VERSION__ >= 310
 INSTANTIATE_NAIVE_MM(bfloat);
 #endif
-)MATMUL_METAL";
-
-id<MTLLibrary> compileLinalgOpLibrary(id<MTLDevice> device) {
-  static id<MTLLibrary> linalgLibrary = nil;
-  if (linalgLibrary) {
-    return linalgLibrary;
-  }
-
-  NSError* error = nil;
-  MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
-  [options setLanguageVersion:is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) ? MTLLanguageVersion3_1
-                                                                                      : MTLLanguageVersion2_3];
-  linalgLibrary = [device newLibraryWithSource:[NSString stringWithCString:METAL_LINALG encoding:NSASCIIStringEncoding]
-                                       options:options
-                                         error:&error];
-  TORCH_CHECK(linalgLibrary, "Failed to create metal linalg library, error: ", [[error description] UTF8String]);
-  return linalgLibrary;
-}
-
-id<MTLComputePipelineState> matmulPipelineState(id<MTLDevice> device, ScalarType scalar_type) {
-  std::string kernel = "naive_matmul_" + mps::scalarToMetalTypeString(scalar_type);
-  static std::unordered_map<std::string, id<MTLComputePipelineState>> psoCache;
-  id<MTLComputePipelineState> pso = psoCache[kernel];
-  if (pso) {
-    return pso;
-  }
-
-  NSError* error = nil;
-  id<MTLLibrary> linalgLib = compileLinalgOpLibrary(device);
-  id<MTLFunction> matmulFunc = [linalgLib newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]];
-  TORCH_CHECK(matmulFunc, "Failed to create function state object for: ", kernel);
-  pso = [device newComputePipelineStateWithFunction:matmulFunc error:&error];
-  TORCH_CHECK(pso, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
-
-  psoCache[kernel] = pso;
-  return pso;
-}
+)MATMUL_METAL");
 
 Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
-  auto matmulPSO = matmulPipelineState(device, output.scalar_type());
+  auto matmulPSO = lib.getPipelineStateForFunc("naive_matmul_" + mps::scalarToMetalTypeString(output));
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       getMPSProfiler().beginProfileKernel(matmulPSO, "naive_matmul", {self, other});
