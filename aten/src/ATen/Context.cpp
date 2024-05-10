@@ -20,7 +20,7 @@
 
 namespace at {
 
-void fp32_precision_valid_check(const std::string& backend, const std::string& op, const std::string& precision=std::string()) {
+static void fp32_precision_valid_check(const std::string& backend, const std::string& op, const std::string& precision=std::string()) {
   static std::vector<std::string> backends = {"generic", "mkldnn", "cuda"};
   static std::vector<std::string> operators = {"conv", "matmul", "rnn", "all"};
 
