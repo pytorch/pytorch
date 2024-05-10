@@ -3320,7 +3320,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return y
 
         x = {"a": torch.tensor([1]), "b": torch.tensor([1])}
-        # FIXME It should be KeyError here
         self.assertRaises(KeyError, lambda: fn(x))
 
     def test_attached_attribute_in_dir(self):
