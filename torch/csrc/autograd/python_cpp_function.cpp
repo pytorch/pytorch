@@ -20,8 +20,7 @@
 
 using namespace torch::autograd;
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 namespace {
 
@@ -227,7 +226,7 @@ PyTypeObject* _initFunctionPyTypeObject(
     const char* name,
     PyGetSetDef* function_properties,
     PyMethodDef* function_methods) {
-  type.ob_base = { PyObject_HEAD_INIT(nullptr) 0 };
+  type.ob_base = {PyObject_HEAD_INIT(nullptr) 0};
   // NOLINTNEXTLINE(misc-redundant-expression)
   type.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
   type.tp_name = name;
@@ -257,13 +256,12 @@ struct DefaultFunctionType {
   PyTypeObject type;
 };
 
-PyTypeObject* get_default_type(){
+PyTypeObject* get_default_type() {
   static DefaultFunctionType default_type;
   return &(default_type.type);
 }
 
 PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata) {
-
   if (!cdata) {
     Py_RETURN_NONE;
   }
@@ -381,5 +379,4 @@ PyObject* registerFunctionPreHook(Node& fn, PyObject* hook) {
   return handle;
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd
