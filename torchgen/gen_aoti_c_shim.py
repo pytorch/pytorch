@@ -209,7 +209,7 @@ def gen_returns(schema: FunctionSchema) -> Tuple[List[str], List[str]]:
 
     ret_pointer_can_be_null = False
     unambiguous_name = schema.name.unambiguous_name()
-    for name in ["_scaled_dot_product_flash_attention"]:
+    for name in ["_scaled_dot_product_flash_attention", "convolution_backward"]:
         if name in unambiguous_name:
             ret_pointer_can_be_null = True
             break
