@@ -24,6 +24,7 @@ class TryMergeExplainer:
     org: str
     project: str
     ignore_current: bool
+    commend_id: str
 
     has_trunk_label: bool
     has_ciflow_label: bool
@@ -36,6 +37,7 @@ class TryMergeExplainer:
         org: str,
         project: str,
         ignore_current: bool,
+        comment_id: str,
     ):
         self.force = force
         self.labels = labels
@@ -43,6 +45,7 @@ class TryMergeExplainer:
         self.org = org
         self.project = project
         self.ignore_current = ignore_current
+        self.comment_id = comment_id
 
     def _get_flag_msg(
         self,
@@ -73,12 +76,18 @@ class TryMergeExplainer:
     ) -> str:
         title = "### Merge started"
         main_message = self._get_flag_msg(ignore_current_checks)
+        gh_run_url = os.getenv("GH_RUN_URL")
+        gh_comment_url = f"https://github.com/{self.org}/{self.project}/pull/{self.pr_num}#issuecomment-{self.comment_id}"
 
         advanced_debugging = "\n".join(
             (
                 "<details><summary>Advanced Debugging</summary>",
-                "Check the merge workflow status ",
-                f"<a href=\"{os.getenv('GH_RUN_URL')}\">here</a>",
+                "<br>",
+                f"<kbd> <br> [Merge workflow status][{gh_run_url}] <br> </kbd>",
+                "<br>",
+                "<br>",
+                f"<kbd> <br> [Merge trigger][{gh_comment_url}] <br> </kbd>",
+                "<br>",
                 "</details>",
             )
         )

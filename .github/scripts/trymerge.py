@@ -2114,6 +2114,7 @@ def merge(
         pr.org,
         pr.project,
         ignore_current,
+        comment_id,
     )
 
     # probably a bad name, but this is a list of current checks that should be
