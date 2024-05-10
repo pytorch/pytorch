@@ -1616,6 +1616,40 @@ class OnnxModelFromDynamoAotInline(OnnxModelFromDynamo):
         return onnx_program
 
 
+class OnnxModelFromDynamoAotOptimize(OnnxModelFromDynamo):
+    """Dynamo and Fx based export, with AOT optimize post export. `torch.onnx.dynamo_export`."""
+
+    _COMPILER_NAME = "dynamo_aot_optimize"
+
+    def _export(
+        self, model, example_inputs, output_path: str
+    ) -> torch.onnx.ONNXProgram:
+        if self.copy_before_export:
+            # Deepcopy model before export to avoid modification to baseline model.
+            model, example_inputs = self.deepcopy_model_and_inputs_to_device(
+                model, example_inputs, self._determine_deepcopy_target_device()
+            )
+
+        example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
+        options = torch.onnx.ExportOptions(dynamic_shapes=self._dynamic_shapes)
+        export_output = torch.onnx.dynamo_export(
+            model, *example_args, **example_kwargs, export_options=options
+        )
+
+        import onnx
+        from onnxscript.rewriter.onnxruntime import rewrite
+
+        model_proto = rewrite(export_output.model_proto)
+        onnx.save_model(
+            model_proto,
+            output_path,
+            save_as_external_data=True,
+            all_tensors_to_one_file=True,
+        )
+
+        return export_output
+
+
 class _OnnxPatch:
     @classmethod
     def patch_non_tensor_outputs(cls, correct_result, new_result, fp64_outputs):
@@ -1971,33 +2005,6 @@ def get_dynamo_stats():
     )
 
 
-def maybe_fresh_cache(fn, is_cold_start):
-    def inner(*args, **kwargs):
-        cache_minder = contextlib.nullcontext()
-        if is_cold_start:
-            cache_entries = {}
-            cache_minder = fresh_inductor_cache(cache_entries)
-
-        try:
-            with cache_minder:
-                return fn(*args, **kwargs)
-        finally:
-            dump_cache = False
-            if dump_cache and is_cold_start:
-                output_csv(
-                    output_filename[:-4] + "_triton_cache.csv",
-                    ["dev", "name", "batch_size", "triton_cache"],
-                    [
-                        current_device,
-                        current_name,
-                        current_batch_size,
-                        cache_entries,
-                    ],
-                )
-
-    return inner
-
-
 @contextmanager
 def maybe_init_distributed(should_init_distributed, rank, world_size, port="6789"):
     try:
@@ -2052,31 +2059,30 @@ class BenchmarkRunner:
 
         devices = [current_device] if current_device else self.args.devices
         if self.args.amp:
-            if devices == ["cuda"]:
-                # AMP training can lead to small loss values which can undeflow
-                # gradient values returning in zero gradients. To solve this
-                # problem, PyTorch introduces GradScaler. GradScaler is a stateful
-                # structure, that scales the loss values to prevent underflow. Loss
-                # values are big at the beginning of training (therefore not
-                # requiring scaling), while loss value tends to be small as network
-                # starts getting better (requiring scaling). GradScaler manages all
-                # of this fine tuning, checking the gradients are turning to inf,
-                # discarding such batches.
+            # AMP training can lead to small loss values which can undeflow
+            # gradient values returning in zero gradients. To solve this
+            # problem, PyTorch introduces GradScaler. GradScaler is a stateful
+            # structure, that scales the loss values to prevent underflow. Loss
+            # values are big at the beginning of training (therefore not
+            # requiring scaling), while loss value tends to be small as network
+            # starts getting better (requiring scaling). GradScaler manages all
+            # of this fine tuning, checking the gradients are turning to inf,
+            # discarding such batches.
 
-                # Since we are not running a long iteration, default value of
-                # init_scale 65536 is going to turn all gradients to inf. Therefore,
-                # we just use a init_scale of 2.0 for benchmarking purpose.
+            # Since we are not running a long iteration, default value of
+            # init_scale 65536 is going to turn all gradients to inf. Therefore,
+            # we just use a init_scale of 2.0 for benchmarking purpose.
 
-                # Disabling Gradscaler because
-                #  1) Benchmark setup runs 2 iterations of fwd-bwd. So, not useful.
-                #  2) Current setup shares grad_scaler for eager and dynamo model,
-                #  which is bad as Gradscaler has state and can adjust the scaling
-                #  factor between eager and dynamo run, making accuracy check
-                #  harder.
-                # self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
-                self.autocast = torch.cuda.amp.autocast
-            if devices == ["cpu"]:
-                self.autocast = torch.cpu.amp.autocast
+            # Disabling Gradscaler because
+            #  1) Benchmark setup runs 2 iterations of fwd-bwd. So, not useful.
+            #  2) Current setup shares grad_scaler for eager and dynamo model,
+            #  which is bad as Gradscaler has state and can adjust the scaling
+            #  factor between eager and dynamo run, making accuracy check
+            #  harder.
+            # self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
+            self.autocast = functools.partial(
+                torch.amp.autocast, device_type=devices[0]
+            )
             if self.args.amp_dtype:
                 amp_dtype = (
                     torch.float16
@@ -2176,6 +2182,10 @@ class BenchmarkRunner:
 
     @property
     def skip_models_due_to_control_flow(self):
+        return set()
+
+    @property
+    def guard_on_nn_module_models(self):
         return set()
 
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
@@ -3261,12 +3271,6 @@ def parse_args(args=None):
         help="print dataframe result used for calculating accuracy",
     )
     parser.add_argument(
-        "--cold-start-latency",
-        "--cold_start_latency",
-        action="store_true",
-        help="Use a fresh triton cachedir when running each model, to force cold-start compile.",
-    )
-    parser.add_argument(
         "--disable-cudagraphs",
         action="store_true",
         help="Disables cudagraphs for Inductor",
@@ -3378,6 +3382,19 @@ def parse_args(args=None):
         help="Enables Memory Snapshot tool for memory deep dives: https://pytorch.org/blog/understanding-gpu-memory-1/",
     )
 
+    group_latency = parser.add_mutually_exclusive_group()
+    group_latency.add_argument(
+        "--cold-start-latency",
+        "--cold_start_latency",
+        action="store_true",
+        help="Use a fresh triton cachedir when running each model, to force cold-start compile.",
+    )
+    group_latency.add_argument(
+        "--warm-start-latency",
+        action="store_true",
+        help="Run model(s) twice and preseve caches in between to enable a 'warm start' on the 2nd run",
+    )
+
     group_fuser = parser.add_mutually_exclusive_group()
     # --nvfuser is now the default, keep the option to not break scripts
     group_fuser.add_argument("--nvfuser", action="store_true", help=argparse.SUPPRESS)
@@ -3472,6 +3489,12 @@ def parse_args(args=None):
         help="Measure speedup with Dynamo ONNX AOT Inline, i.e. `torch.onnx.dynamo_export`",
     )
     group.add_argument(
+        "--dynamo-onnx-aot-optimize",
+        "--dynamo_onnx_aot_optimize",
+        action="store_true",
+        help="Measure speedup with Dynamo ONNX w/ ort fusions, i.e. `torch.onnx.dynamo_export`",
+    )
+    group.add_argument(
         "--backend",
         choices=torch._dynamo.list_backends(exclude_tags=None),
         help="measure speedup with a given backend",
@@ -3528,9 +3551,17 @@ def process_entry(rank, runner, original_dir, args):
         world_size=args.world_size,
         port=args.distributed_master_port,
     ):
-        return maybe_fresh_cache(
-            run, (args.cold_start_latency and args.only) or args.ci
-        )(runner, args, original_dir)
+        return run(runner, args, original_dir)
+
+
+def maybe_fresh_cache(args):
+    cache_dir_assigned = "TORCHINDUCTOR_CACHE_DIR" in os.environ
+    if not cache_dir_assigned and (
+        args.cold_start_latency or args.warm_start_latency or args.ci
+    ):
+        return fresh_inductor_cache()
+    else:
+        return contextlib.nullcontext()
 
 
 def main(runner, original_dir=None, args=None):
@@ -3555,23 +3586,39 @@ def main(runner, original_dir=None, args=None):
                 f"--diff-branch: current branch is same as {args.diff_branch} branch, what are you diffing?"
             )
 
-    args.init_distributed = args.only and args.multiprocess
-    if args.init_distributed:
-        # NB: Do NOT query device count before CUDA initialization; we're
-        # going to overwrite CUDA_VISIBLE_DEVICES and this will result in
-        # https://github.com/pytorch/pytorch/issues/107300
-        device_count = torch.cuda.device_count()
-        if device_count <= 1:
-            log.warning(
-                "The use multiprocess flag is set but there are <= 1 devices available."
+    with maybe_fresh_cache(args):
+        args.init_distributed = args.only and args.multiprocess
+        if args.init_distributed:
+            # NB: Do NOT query device count before CUDA initialization; we're
+            # going to overwrite CUDA_VISIBLE_DEVICES and this will result in
+            # https://github.com/pytorch/pytorch/issues/107300
+            device_count = torch.cuda.device_count()
+            if device_count <= 1:
+                log.warning(
+                    "The use multiprocess flag is set but there are <= 1 devices available."
+                )
+            # multiprocess path
+            args.world_size = device_count
+            mp.spawn(
+                process_entry, args=(runner, original_dir, args), nprocs=device_count
             )
-        # multiprocess path
-        args.world_size = device_count
-        mp.spawn(process_entry, args=(runner, original_dir, args), nprocs=device_count)
-    else:
-        # single process path just uses the main process
-        args.world_size = 1
-        process_entry(0, runner, original_dir, args)
+        elif args.only and args.warm_start_latency:
+            # Warm start mode. Enable FX graph caching and perform back-to-back runs in
+            # separate processes (but ensure the inductor cache is preserved across runs).
+            env = os.environ.copy()
+            env["TORCHINDUCTOR_FX_GRAPH_CACHE"] = "1"
+            cmd = [sys.executable] + sys.argv
+            cmd.remove("--warm-start-latency")
+
+            print(f"Executing cold-start run for {args.only}")
+            subprocess.check_call(cmd, timeout=args.timeout, env=env)
+
+            print(f"Executing warm-start run for {args.only}")
+            subprocess.check_call(cmd, timeout=args.timeout, env=env)
+        else:
+            # single process path just uses the main process
+            args.world_size = 1
+            process_entry(0, runner, original_dir, args)
 
 
 def write_csv_when_exception(args, name: str, status: str, device=None):
@@ -3835,6 +3882,17 @@ def run(runner, args, original_dir=None):
         experiment = speedup_experiment_onnx
         output_filename = "dynamo_onnx_aot_inline.csv"
         current_onnx_compiler = "dynamo"
+    elif args.dynamo_onnx_aot_optimize:
+        optimize_ctx = functools.partial(
+            optimize_onnx_ctx,
+            args.output_directory or ".",
+            OnnxModelFromDynamoAotOptimize,
+            dynamic_shapes=args.dynamic_shapes,
+            copy_before_export=args.performance,
+        )
+        experiment = speedup_experiment_onnx
+        output_filename = "dynamo_onnx_aot_optimize.csv"
+        current_onnx_compiler = "dynamo"
     elif args.speedup_dynamo_ts:
         optimize_ctx = torch._dynamo.optimize("ts", nopython=args.nopython)
         experiment = speedup_experiment
@@ -4088,15 +4146,20 @@ def run(runner, args, original_dir=None):
             else:
                 model, example_inputs = runner.cast_based_on_args(model, example_inputs)
             runner.setup_amp(current_device)
-            runner.run_one_model(
-                name,
-                model,
-                example_inputs,
-                optimize_ctx,
-                experiment,
-                explain=args.explain,
-                tag=args.tag,
-            )
+            guard_ctx = contextlib.nullcontext()
+            if name in runner.guard_on_nn_module_models:
+                guard_ctx = torch._dynamo.config.patch(guard_nn_modules=True)
+
+            with guard_ctx:
+                runner.run_one_model(
+                    name,
+                    model,
+                    example_inputs,
+                    optimize_ctx,
+                    experiment,
+                    explain=args.explain,
+                    tag=args.tag,
+                )
         if args.generate_aot_autograd_stats:
             stats_file = output_filename.split(".csv")[0] + "_stats.csv"
             output_csv(
