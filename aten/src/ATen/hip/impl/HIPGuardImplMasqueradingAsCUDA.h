@@ -232,7 +232,7 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     TORCH_CHECK(
         event1 && event2,
         "Both events must be recorded before calculating elapsed time.");
-    int orig_device;    
+    int orig_device;
     C10_HIP_CHECK(hipGetDevice(&orig_device));
     C10_HIP_CHECK(hipSetDevice(device_index));
     hipEvent_t hip_event1 = static_cast<hipEvent_t>(event1);
