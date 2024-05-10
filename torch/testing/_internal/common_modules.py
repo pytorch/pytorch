@@ -25,7 +25,7 @@ from torch.testing._internal.common_nn import (
     nllloss_reference, nlllossNd_reference, smoothl1loss_reference, softmarginloss_reference, get_reduction)
 from torch.testing._internal.common_utils import (
     freeze_rng_state, set_single_threaded_if_parallel_tbb, skipIfMps, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS,
-    skipIfTorchDynamo)
+    skipIfTorchDynamo, skipIfTorchInductor)
 from types import ModuleType
 from typing import List, Tuple, Type, Set, Dict
 import operator
@@ -3469,6 +3469,10 @@ module_db: List[ModuleInfo] = [
                        unittest.expectedFailure, 'TestEagerFusionModuleInfo',
                        'test_aot_autograd_module_exhaustive',
                        active_if=operator.itemgetter('training')
+                   ),
+                   # test flalky if run alone https://github.com/pytorch/pytorch/issues/125967 in inductor
+                   DecorateInfo(
+                       skipIfTorchInductor, 'TestModule', 'test_memory_format', device_type='cuda'
                    ),)
                ),
     ModuleInfo(torch.nn.BatchNorm3d,
