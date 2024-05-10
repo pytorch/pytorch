@@ -287,7 +287,7 @@ View operators with multiple aliasing inputs aren't supported yet. Found an oper
 
 # One-liner expression for checking if an expression expr of type type has any
 # symbolic values.
-def emit_expr_has_symbolic_values(expr: str, type: CType):
+def emit_expr_has_symbolic_values(expr: str, type: CType) -> str:
     if type == BaseCType(SymIntT):
         return f"{expr}.is_symbolic()"
 
@@ -296,7 +296,7 @@ def emit_expr_has_symbolic_values(expr: str, type: CType):
         return f"{expr}.has_value() ? {emit_expr_has_symbolic_values(innerexpr, type.elem)} : false"
 
     if type == BaseCType(optionalSymIntArrayRefT):
-        return emit_expr_has_symbolic_values(expr, OptionalCType(symIntArrayRefT))
+        return emit_expr_has_symbolic_values(expr, OptionalCType(BaseCType(symIntArrayRefT)))
 
     if type in (BaseCType(symIntArrayRefT), VectorCType(BaseCType(SymIntT))):
         argname = "arg"
@@ -316,12 +316,12 @@ def emit_expr_has_symbolic_values(expr: str, type: CType):
 
 # Detects whether any of the SymInt arguments are, in fact, symbolic values.
 # This is used in the constructor of ViewMeta.
-def emit_has_symbolic_inputs(sig: DispatcherSignature):
+def emit_has_symbolic_inputs(sig: DispatcherSignature) -> str:
     name = "has_symbolic_inputs"
     statements = [
-        f"{name} = {name} | {emit_expr_has_symbolic_values(binding.name, binding.nctype.type)};"
+        f"{name} = {name} | ({emit_expr_has_symbolic_values(binding.name, binding.nctype.type)});"
         for binding in sig.arguments()
-        if binding.argument.type.is_symint_like()
+        if isinstance(binding.argument, Argument) and binding.argument.type.is_symint_like()
     ]
     body = "\n      ".join(statements)
     return (
