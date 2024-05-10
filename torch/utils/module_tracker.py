@@ -1,6 +1,6 @@
 import weakref
 
-from typing import Set
+from typing import Set, List, Tuple
 
 import torch
 from torch.autograd.graph import register_multi_grad_hook
@@ -78,9 +78,20 @@ class ModuleTracker:
         if mod not in self._known_modules:
             self._known_modules[mod] = type(mod).__name__
         mod_name = self._known_modules[mod]
-        if mod not in self._seen_modules:
-            for name, submod in mod.named_children():
-                self._known_modules[submod] = f"{mod_name}.{name}"
+        # if we reach nn.ModuleDict or nn.ModuleList, we need to recursively
+        # process their submodules
+        to_process: List[Tuple(nn.Module, str)] = [(mod, mod_name)]
+        while to_process:
+            _mod, _mod_name = to_process.pop()
+            if _mod not in self._seen_modules:
+                self._seen_modules.add(_mod)
+                for name, submod in _mod.named_children():
+                    self._known_modules[submod] = f"{_mod_name}.{name}"
+                    if (
+                        isinstance(submod, torch.nn.ModuleDict) or
+                        isinstance(submod, torch.nn.ModuleList)
+                    ):
+                        to_process.append((submod, self._known_modules[submod]))
         return mod_name
 
     def _get_append_fn(self, name, is_bw):
