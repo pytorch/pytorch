@@ -1,7 +1,7 @@
 import contextlib
 import inspect
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -19,7 +19,7 @@ from torch._guards import Source
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import Constraint
-from torch.export.dynamic_shapes import _Dim
+from torch.export.dynamic_shapes import _tree_map
 from torch.export.graph_signature import CustomObjArgument
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -34,9 +34,11 @@ from torch.utils._pytree import (
     KeyPath,
     MappingKey,
     SequenceKey,
-    tree_flatten,
     tree_map_with_path,
 )
+
+if TYPE_CHECKING:
+    from sympy import Symbol
 
 
 def key_path_to_source(kp: KeyPath) -> Source:
@@ -160,8 +162,6 @@ def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes):
             (args, kwargs),
         )
 
-        from sympy import Symbol
-
         source_pairs: List[Tuple[Source, Source]] = []
         derived_equalities: List[Tuple[Source, Union[Source, Symbol], Callable]] = []
         phantom_symbols: Dict[str, Symbol] = {}
@@ -185,25 +185,17 @@ def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes):
 
 
 def _flatten_dynamic_shapes(
-    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any]]
-):
-    def _is_dynamic_shape_leaf(x):
-        if isinstance(x, dict):
-            x = list(x.values())
-        return x is None or all(isinstance(y, (_Dim, int)) or y is None for y in x)
+    combined_args: Dict[str, Any],
+    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any]],
+) -> List[Any]:
+    flat_shapes = []
 
-    if isinstance(dynamic_shapes, (list, tuple)):
-        flat_dynamic_shapes = []
-        for item in dynamic_shapes:
-            flat_shapes, _ = tree_flatten(
-                dynamic_shapes, is_leaf=_is_dynamic_shape_leaf
-            )
-            flat_dynamic_shapes += flat_shapes
-    else:
-        flat_dynamic_shapes, _ = tree_flatten(
-            dynamic_shapes, is_leaf=_is_dynamic_shape_leaf
-        )
-    return flat_dynamic_shapes
+    def _tree_map_helper(t, shape):
+        nonlocal flat_shapes
+        flat_shapes.append(shape)
+
+    _tree_map(_tree_map_helper, combined_args, dynamic_shapes)
+    return flat_shapes
 
 
 def produce_guards_and_solve_constraints(
@@ -211,6 +203,7 @@ def produce_guards_and_solve_constraints(
     gm: torch.fx.GraphModule,
     equalities_inputs: EqualityConstraint,
     original_signature: inspect.Signature,
+    _disable_forced_specializations: Optional[bool] = False,
 ):
     """
     Given a fake mode, sources pairs corresponding to equal dynamic shape dimensions,
@@ -221,6 +214,7 @@ def produce_guards_and_solve_constraints(
     Additional inputs:
         equalities_inputs: the equality constraints to use for guards
         original_signature: the signature of the forward method
+        _disable_forced_specializations: if True, avoids forced specializations
     """
     shape_env = fake_mode.shape_env
     assert shape_env.tracked_fakes is not None
@@ -236,6 +230,7 @@ def produce_guards_and_solve_constraints(
             input_contexts=input_contexts,
             equalities_inputs=equalities_inputs,
             ignore_static=False,
+            _disable_forced_specializations=_disable_forced_specializations,
         )
     except ConstraintViolationError as e:
         constraint_violation_error = e
@@ -248,7 +243,9 @@ def produce_guards_and_solve_constraints(
         # TODO(avik): Maybe record the constraint violation error instead and replay later?
         assert constraint_violation_error
         raise constraint_violation_error
-    dim_constraints.solve()
+    dim_constraints.solve(
+        _disable_forced_specializations=_disable_forced_specializations
+    )
     dim_constraints.remove_redundant_dynamic_results()
     forced_specializations = dim_constraints.forced_specializations()
     msg = dim_constraints.prettify_results(
@@ -265,6 +262,7 @@ def produce_guards_and_solve_constraints(
 def make_constraints(
     fake_mode: FakeTensorMode,
     gm: torch.fx.GraphModule,
+    combined_args: Dict[str, Any],
     dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any], None],
     num_lifted_inputs: int,
 ):
@@ -285,7 +283,16 @@ def make_constraints(
     if not dynamic_shapes:
         return range_constraints
 
-    flat_dynamic_shapes = _flatten_dynamic_shapes(dynamic_shapes)
+    # get individual dynamic shapes spec for each input
+    if not isinstance(dynamic_shapes, dict):
+        assert isinstance(dynamic_shapes, (tuple, list))
+        combined_args = type(dynamic_shapes)(combined_args.values())  # type: ignore[assignment, misc]
+    flat_dynamic_shapes = _flatten_dynamic_shapes(combined_args, dynamic_shapes)
+
+    # check number of shapes vs. number of inputs
+    num_placeholders = [node.op == "placeholder" for node in gm.graph.nodes].count(True)
+    assert len(flat_dynamic_shapes) == num_placeholders - num_lifted_inputs
+
     input_dims = defaultdict(list)
     free_symbols = set()
     for input_index, node in enumerate(gm.graph.nodes):
@@ -396,7 +403,9 @@ def _fakify_script_objects(
     fake_constant_attrs = ConstantAttrMap()
     fake_to_real = {}
 
-    def _fakify_obj(obj):
+    def _maybe_fakify_obj(obj):
+        if not torch._library.fake_class_registry.has_fake_class(obj._type().qualified_name()):  # type: ignore[attr-defined]
+            return obj
         fake_obj = torch._library.fake_class_registry.to_fake_obj(fake_mode, obj)
         fake_to_real[fake_obj] = obj
         return fake_obj
@@ -415,7 +424,7 @@ def _fakify_script_objects(
             if isinstance(obj, torch.ScriptObject):
                 cur_mod, attr = _leaf_mod_and_attr(mod, fqn)
                 assert obj is getattr(cur_mod, attr)
-                fake_script_obj = _fakify_obj(obj)
+                fake_script_obj = _maybe_fakify_obj(obj)
                 setattr(cur_mod, attr, fake_script_obj)
                 fake_constant_attrs[fake_script_obj] = fqn
                 patched_attr[fqn] = obj
@@ -423,14 +432,8 @@ def _fakify_script_objects(
                 fake_constant_attrs[obj] = fqn
 
         fake_args, fake_kwargs = pytree.tree_map_only(
-            torch.ScriptObject, _fakify_obj, (args, kwargs)
+            torch.ScriptObject, _maybe_fakify_obj, (args, kwargs)
         )
-        assert not any(
-            isinstance(obj, torch.ScriptObject) for obj in fake_constant_attrs.values()
-        ), "Patched mod shouldn't contain any torch.ScriptObject."
-        assert not pytree.tree_any(
-            lambda obj: isinstance(obj, torch.ScriptObject), (fake_args, fake_kwargs)
-        ), "Fakfied args and kwargs shouldn't contain any torch.ScriptObject."
         yield (mod, fake_args, fake_kwargs, fake_constant_attrs, fake_to_real)
     finally:
         for fqn, orig_obj in patched_attr.items():
