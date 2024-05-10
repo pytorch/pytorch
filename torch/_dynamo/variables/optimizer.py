@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 
 import weakref
-from typing import Dict, List
+from typing import Dict, List, TYPE_CHECKING
 
 import torch
 from torch.utils._pytree import tree_map_only
@@ -16,12 +16,14 @@ from ..source import (
 )
 from ..utils import GLOBAL_KEY_PREFIX
 
-from .base import VariableTracker
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
 from .lists import ListVariable
 from .misc import GetAttrVariable
 from .user_defined import UserDefinedObjectVariable
+
+if TYPE_CHECKING:
+    from .base import VariableTracker
 
 
 class ArgMappingException(Exception):
@@ -112,9 +114,8 @@ class OptimizerVariable(UserDefinedObjectVariable):
         for g in self.value.param_groups:
             for p in g["params"]:
                 side_effects = tx.output.side_effects
-                if side_effects.has_pending_mutation(
-                    side_effects.id_to_variable.get(id(p), None)
-                ):
+                variable = side_effects.id_to_variable.get(id(p), None)
+                if variable and side_effects.has_pending_mutation(variable):
                     from ..exc import Unsupported
 
                     raise Unsupported("Pending mutation on parameter")

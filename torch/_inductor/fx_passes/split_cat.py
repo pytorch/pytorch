@@ -7,7 +7,6 @@ from typing_extensions import TypeAlias
 
 import torch
 from torch._dynamo.utils import counters
-from .. import config
 
 from ..pattern_matcher import (
     Arg,
@@ -44,8 +43,7 @@ _Range: TypeAlias = Tuple[int, int]
 PRE_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = dict()
 POST_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = dict()
 
-# TODO: read the pass_names from the config after the frontend change
-pass_names = [
+pre_grad_pass_names = [
     "normalization_pass",
     "remove_split_with_size_one_pass",
     "merge_getitem_cat_pass",
@@ -54,25 +52,31 @@ pass_names = [
     "mutate_cat_pass",
     "split_cat_pass",
     "unbind_stack_pass",
-    # must be the last pass
+]
+
+post_grad_pass_names = [
     "decompose_mm_pass",
 ]
 
-for pass_name in pass_names:
+for pass_name in pre_grad_pass_names:
     # exclude all passes from the group batch fusion
     # they do not use pattern matcher
-    if pass_name in PRE_GRAD_FUSIONS or pass_name in POST_GRAD_FUSIONS:
+    if pass_name in PRE_GRAD_FUSIONS:
         continue
-    if pass_name != "decompose_mm_pass":
-        PRE_GRAD_PATTERNS[pass_name] = PatternMatcherPass(
-            prevent_match_across_mutations=True,
-            pass_name=pass_name,
-        )
-    else:
-        POST_GRAD_PATTERNS[pass_name] = PatternMatcherPass(
-            prevent_match_across_mutations=True,
-            pass_name=pass_name,
-        )
+    PRE_GRAD_PATTERNS[pass_name] = PatternMatcherPass(
+        prevent_match_across_mutations=True,
+        pass_name=pass_name,
+    )
+
+for pass_name in post_grad_pass_names:
+    # exclude all passes from the group batch fusion
+    # they do not use pattern matcher
+    if pass_name in POST_GRAD_FUSIONS:
+        continue
+    POST_GRAD_PATTERNS[pass_name] = PatternMatcherPass(
+        prevent_match_across_mutations=True,
+        pass_name=pass_name,
+    )
 
 
 def construct_pattern_matcher_pass(pass_name: str) -> PatternMatcherPass:
@@ -81,30 +85,8 @@ def construct_pattern_matcher_pass(pass_name: str) -> PatternMatcherPass:
     """
     if pass_name in PRE_GRAD_PATTERNS:
         return PRE_GRAD_PATTERNS[pass_name]
-    elif pass_name in POST_GRAD_PATTERNS:
-        return POST_GRAD_PATTERNS[pass_name]
     else:
-        # pattern that does not in the config, will
-        # not be conduted in the optimization
-        return PatternMatcherPass(
-            prevent_match_across_mutations=True,
-            pass_name=pass_name,
-        )
-
-
-def get_config_flag(pass_name: str, flag="split_cat_fx_passes"):
-    def flag_check(match):
-        # TODO: remove the flag config check after we have the front end change
-        # currently, pre_grad_fusion_options and post_grad_fusion_options are only have batch fusion
-        # options controlled by the batch_fusion flag, after we extend it to indluce other fusions,
-        # we can only check if the pass_name is in the config
-        return (
-            getattr(config, flag)
-            or pass_name in config.pre_grad_fusion_options
-            or pass_name in config.post_grad_fusion_options
-        )
-
-    return flag_check
+        return POST_GRAD_PATTERNS[pass_name]
 
 
 def _get_split_args_default(split_node):
@@ -121,7 +103,7 @@ def _get_split_args_default(split_node):
     )
 
 
-def _get_dim(node: Any) -> int:
+def _get_dim(node: Any):
     assert isinstance(node, torch.fx.Node)
     if "dim" in node.kwargs:
         assert isinstance(node.kwargs["dim"], int)
@@ -215,12 +197,10 @@ def normalize_split_base(
 @register_graph_pattern(
     CallFunctionVarArgs(torch.split, users=MULTIPLE),
     pass_dict=construct_pattern_matcher_pass("normalization_pass"),
-    extra_check=get_config_flag("normalization_pass"),
 )
 @register_graph_pattern(
     CallMethodVarArgs("split", users=MULTIPLE),
     pass_dict=construct_pattern_matcher_pass("normalization_pass"),
-    extra_check=get_config_flag("normalization_pass"),
 )
 def normalize_split_default(match: Match, *args, **kwargs):
     return normalize_split_base(match, _get_split_args_default)
@@ -229,12 +209,10 @@ def normalize_split_default(match: Match, *args, **kwargs):
 @register_graph_pattern(
     CallFunctionVarArgs(torch.split, users=MULTIPLE),
     pass_dict=construct_pattern_matcher_pass("remove_split_with_size_one_pass"),
-    extra_check=get_config_flag("remove_split_with_size_one_pass"),
 )
 @register_graph_pattern(
     CallMethodVarArgs("split", users=MULTIPLE),
     pass_dict=construct_pattern_matcher_pass("remove_split_with_size_one_pass"),
-    extra_check=get_config_flag("remove_split_with_size_one_pass"),
 )
 def remove_split_with_size_one(match: Match, *args, **kwargs):
     graph = match.graph
@@ -269,12 +247,10 @@ def remove_split_with_size_one(match: Match, *args, **kwargs):
 @register_graph_pattern(
     CallFunctionVarArgs(torch.unbind, users=MULTIPLE),
     pass_dict=construct_pattern_matcher_pass("normalization_pass"),
-    extra_check=get_config_flag("normalization_pass"),
 )
 @register_graph_pattern(
     CallMethodVarArgs("unbind", users=MULTIPLE),
     pass_dict=construct_pattern_matcher_pass("normalization_pass"),
-    extra_check=get_config_flag("normalization_pass"),
 )
 def normalize_unbind_default(match: Match, *args, **kwargs):
     node = match.nodes[0]
@@ -311,7 +287,6 @@ def normalize_unbind_default(match: Match, *args, **kwargs):
 @register_graph_pattern(
     CallFunctionVarArgs(torch.cat, users=MULTIPLE),
     pass_dict=construct_pattern_matcher_pass("normalization_pass"),
-    extra_check=get_config_flag("normalization_pass"),
 )
 def normalize_cat_default(match: Match, *args, **kwargs):
     from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
@@ -373,7 +348,6 @@ def normalize_cat_default(match: Match, *args, **kwargs):
 @register_graph_pattern(
     CallFunctionVarArgs(torch.stack, users=MULTIPLE),
     pass_dict=construct_pattern_matcher_pass("normalization_pass"),
-    extra_check=get_config_flag("normalization_pass"),
 )
 def normalize_stack_default(match: Match, *args, **kwargs):
     node = match.nodes[0]
@@ -419,7 +393,6 @@ def find_next_users(split_node: torch.fx.Node) -> List[torch.fx.Node]:
 @register_graph_pattern(
     CallMethodVarArgs("squeeze", users=MULTIPLE),
     pass_dict=construct_pattern_matcher_pass("normalization_pass"),
-    extra_check=get_config_flag("normalization_pass"),
 )
 def normalize_squeeze_default(match: Match, *args, **kwargs):
     squeeze_node = match.nodes[0]
@@ -502,7 +475,6 @@ class TorchSplit(CallFunction):
         KeywordArg("next_split_sections"),
     ),
     pass_dict=construct_pattern_matcher_pass("merge_splits_pass"),
-    extra_check=get_config_flag("merge_splits_pass"),
 )
 def merge_splits(
     match: Match,
@@ -1020,7 +992,7 @@ class UnbindCatRemover(SplitCatSimplifier):
 
     def get_transform_params(
         self,
-        unbind_node: torch.fx.Node,
+        split_node: torch.fx.Node,
         next_users: List[torch.fx.Node],
         user_inputs_list: List[List[Union[torch.fx.Node, _Range]]],
     ) -> Optional[List[List[_TransformParam]]]:
@@ -1045,7 +1017,7 @@ class UnbindCatRemover(SplitCatSimplifier):
 
 
         """
-        split_dim = _get_dim(unbind_node)
+        split_dim = _get_dim(split_node)
         transform_params_list: List[List[_TransformParam]] = []
         for user_node, user_inputs in zip(next_users, user_inputs_list):
             cat_dim = get_arg_value(user_node, 1, "dim") or 0
@@ -1108,7 +1080,6 @@ class GetItem(CallFunction):
         ),
     ),
     pass_dict=construct_pattern_matcher_pass("split_cat_pass"),
-    extra_check=get_config_flag("split_cat_pass"),
 )
 @register_graph_pattern(
     RepeatedExpr(
@@ -1126,7 +1097,6 @@ class GetItem(CallFunction):
         )
     ),
     pass_dict=construct_pattern_matcher_pass("split_cat_pass"),
-    extra_check=get_config_flag("split_cat_pass"),
 )
 def merge_split_squeeze(
     match: Match, split_input: torch.fx.Node, split_sizes: List[int], dim: int
@@ -1180,21 +1150,18 @@ getitem_unbind = ListOf(
 @register_graph_pattern(
     CallFunction([torch.stack, torch.cat], getitem_unbind, Ignored(), _users=MULTIPLE),
     pass_dict=construct_pattern_matcher_pass("unbind_stack_pass"),
-    extra_check=get_config_flag("unbind_stack_pass"),
 )
 @register_graph_pattern(
     CallFunction(
         [torch.stack, torch.cat], getitem_unbind, dim=Ignored(), _users=MULTIPLE
     ),
     pass_dict=construct_pattern_matcher_pass("unbind_stack_pass"),
-    extra_check=get_config_flag("unbind_stack_pass"),
 )
 @register_graph_pattern(
     CallFunction(
         [torch.stack, torch.cat], tensors=getitem_unbind, dim=Ignored(), _users=MULTIPLE
     ),
     pass_dict=construct_pattern_matcher_pass("unbind_stack_pass"),
-    extra_check=get_config_flag("unbind_stack_pass"),
 )
 def merge_unbind_stack(match: Match, unbind_input: torch.fx.Node, dim: int):
     unbind_node = next(node for node in match.nodes if node.target == torch.unbind)
@@ -1223,7 +1190,6 @@ getitem_split = ListOf(
         _users=MULTIPLE,
     ),
     pass_dict=construct_pattern_matcher_pass("split_cat_pass"),
-    extra_check=get_config_flag("split_cat_pass"),
 )
 @register_graph_pattern(
     CallFunction(
@@ -1233,7 +1199,6 @@ getitem_split = ListOf(
         _users=MULTIPLE,
     ),
     pass_dict=construct_pattern_matcher_pass("split_cat_pass"),
-    extra_check=get_config_flag("split_cat_pass"),
 )
 @register_graph_pattern(
     CallFunction(
@@ -1243,7 +1208,6 @@ getitem_split = ListOf(
         _users=MULTIPLE,
     ),
     pass_dict=construct_pattern_matcher_pass("split_cat_pass"),
-    extra_check=get_config_flag("split_cat_pass"),
 )
 def simplify_split_cat(match: Match, split_sections: List[int], dim: int):
     if not isinstance(split_sections, (list, tuple)):  # Unnormalized split
@@ -1328,7 +1292,6 @@ def calculate_fused_tensor_size(split_node: torch.fx.Node, indices: List[int]) -
         _users=MULTIPLE,
     ),
     pass_dict=construct_pattern_matcher_pass("merge_getitem_cat_pass"),
-    extra_check=get_config_flag("merge_getitem_cat_pass"),
 )
 def merge_getitem_cat(match: Match, split_sections: List[int], dim: int):
     if not isinstance(split_sections, (list, tuple)):  # Unnormalized split
@@ -1436,7 +1399,6 @@ def merge_getitem_cat(match: Match, split_sections: List[int], dim: int):
         _users=MULTIPLE,
     ),
     pass_dict=construct_pattern_matcher_pass("mutate_cat_pass"),
-    extra_check=get_config_flag("mutate_cat_pass"),
 )
 def mutate_cat_node(match: Match, split_sections: List[int], dim: int):
     if not isinstance(split_sections, (list, tuple)):  # Unnormalized split
@@ -1532,7 +1494,6 @@ def mutate_cat_node(match: Match, split_sections: List[int], dim: int):
         ),
     ),
     pass_dict=construct_pattern_matcher_pass("merge_stack_tahn_unbind_pass"),
-    extra_check=get_config_flag("merge_stack_tahn_unbind_pass"),
 )
 @register_graph_pattern(
     CallFunction(
@@ -1544,7 +1505,6 @@ def mutate_cat_node(match: Match, split_sections: List[int], dim: int):
         ),
     ),
     pass_dict=construct_pattern_matcher_pass("merge_stack_tahn_unbind_pass"),
-    extra_check=get_config_flag("merge_stack_tahn_unbind_pass"),
 )
 @register_graph_pattern(
     CallFunction(
@@ -1556,7 +1516,6 @@ def mutate_cat_node(match: Match, split_sections: List[int], dim: int):
         ),
     ),
     pass_dict=construct_pattern_matcher_pass("merge_stack_tahn_unbind_pass"),
-    extra_check=get_config_flag("merge_stack_tahn_unbind_pass"),
 )
 def merge_stack_tahn_unbind(match: Match, split_sections: List[int], dim: int):
     if not isinstance(split_sections, (list, tuple)):  # Unnormalized split

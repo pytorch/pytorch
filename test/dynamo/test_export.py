@@ -2471,7 +2471,7 @@ def forward(self, x):
         mod = Mod()
         torch._dynamo.export(mod)(y)
 
-        with self.assertRaisesRegex(ConstraintViolationError, "dimx = None  # 3"):
+        with self.assertRaisesRegex(ConstraintViolationError, "dimx = 3"):
             torch._dynamo.export(mod, dynamic_shapes=({0: torch.export.Dim("dimx")},))(
                 y
             )
@@ -2604,7 +2604,7 @@ def forward(self, x):
     def test_export_preserve_constraints_as_metadata_scalar(self):
         def f(x, y):
             b = x.item()
-            torch._constrain_as_size(b)
+            torch._check_is_size(b)
             return torch.empty((b, y.shape[0]))
 
         x = torch.tensor([3])
@@ -2634,7 +2634,8 @@ def forward(self, x):
     def test_export_preserve_constraints_as_metadata_tensor(self):
         def f(x):
             b = x.nonzero()
-            torch._constrain_as_value(b.shape[0], min=2, max=5)
+            torch._check(b.shape[0] >= 2)
+            torch._check(b.shape[0] <= 5)
             return b
 
         y = torch.tensor([8, 8, 6])
@@ -2652,7 +2653,7 @@ def forward(self, x):
     def test_exported_graph_serialization(self):
         def f(x, y):
             b = x.item()
-            torch._constrain_as_size(b)
+            torch._check_is_size(b)
             return torch.empty((b, y.shape[0]))
 
         x = torch.tensor([3])
@@ -3071,6 +3072,20 @@ def forward(self, x):
             gm, _ = torch._dynamo.export(f, aten_graph=True)(*example_inputs)
             self.assertEqual(gm(*example_inputs), f(*example_inputs))
 
+    @unittest.expectedFailure  # TODO: Not sure why dynamo creates a new inputs for self.a
+    def test_sum_param(self):
+        # Setting a new attribute inside forward()
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.randn(3, 2)
+
+            def forward(self, x):
+                self.b = 2
+                return x.sum() + self.a.sum() + self.b
+
+        torch._dynamo.export(Foo())(torch.randn(3, 2))
+
     def test_mixed_real_and_fake_inputs(self):
         class _TestPattern(torch.nn.Module):
             def __init__(self):
@@ -3386,6 +3401,7 @@ def forward(self, x):
                     pred = fake_x.size(0) == size
                     gm, guards = torch._dynamo.export(f)(pred, x)
                     actual = normalize_gm(gm.print_readable(print_output=False))
+                    # TODO: This is naughty, EXPECTTEST_ACCEPT=1 doesn't work
                     self.assertExpectedInline(actual, exp_graph[i])
                     dynamo_shape_env_guards = [
                         guard
@@ -3413,7 +3429,7 @@ class GraphModule(torch.nn.Module):
         arg0, arg1, = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
         l_x_ = arg1
 
-        sin = l_x_.sin();  l_x_ = None
+        sin: "f32[s1, s2]" = l_x_.sin();  l_x_ = None
         return pytree.tree_unflatten([sin], self._out_spec)
 """
         false_graph = """\
@@ -3424,7 +3440,7 @@ class GraphModule(torch.nn.Module):
         arg0, arg1, = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
         l_x_ = arg1
 
-        cos = l_x_.cos();  l_x_ = None
+        cos: "f32[s1, s2]" = l_x_.cos();  l_x_ = None
         return pytree.tree_unflatten([cos], self._out_spec)
 """
         true_guard_code = [
@@ -4308,12 +4324,16 @@ def forward(self, x):
         gm_edit.recompile()
 
         expected = [
-            "x = torch.sin(l_x_)",
-            "cos = torch.cos(l_stack0_)",
+            """x = torch.sin(l_x_)""",
+            """cos = torch.cos(l_stack0_)""",
         ]
 
         def test_backend(gm: torch.fx.GraphModule, example_inputs):
             self.assertTrue(expected)
+            # Normalize output for dynamic and not
+            for nd in gm.graph.nodes:
+                if "example_value" in nd.meta:
+                    del nd.meta["example_value"]
             self.assertIn(expected[0], gm.print_readable(print_output=False))
             expected.pop(0)
             return gm.forward

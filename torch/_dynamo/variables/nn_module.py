@@ -223,6 +223,11 @@ class NNModuleVariable(VariableTracker):
             return VariableBuilder(tx, NNModuleSource(source))(subobj)
         else:
             if istype(subobj, property):
+                if self.source:
+                    # Read the class attribute to reach the property
+                    source = AttrSource(AttrSource(self.source, "__class__"), name)
+                    # Get the getter function
+                    source = AttrSource(source, "fget")
                 return variables.UserFunctionVariable(
                     subobj.fget,
                     source=source,
@@ -303,20 +308,18 @@ class NNModuleVariable(VariableTracker):
             # If we are tracing the higher order op, we want Dynamo to step
             # inside the module call so that Dynamo can see the underlying
             # parameters and buffers and raise them as inputs to the graph.
-            if tx.output.is_root_tracer() and mod.__module__.startswith(
-                ("torch.nn.", "torch.ao.")
+            #
+            # NB: torch.nn.utils.parametrize changes the class type of a
+            # parametrized module such that its __module__ points to
+            # "torch.nn.utils.parametrize".
+            if (
+                tx.output.is_root_tracer()
+                and mod.__module__.startswith(("torch.nn.", "torch.ao."))
+                and mod.__module__ != "torch.nn.utils.parametrize"
             ):
                 if nnmodule_has_hooks(
                     mod, check_forward_hooks=True, check_backward_hooks=True
                 ):
-                    # End of fn, this bubbles up and restarts tracing.
-                    self.convert_to_unspecialized(tx)
-
-                # NB: torch.nn.utils.parametrize changes the class type of the
-                # parametrized module such that its __module__ points to the
-                # "torch.nn.utils.parametrize". These modules should be treated
-                # as unspecialized since parametrizations can do arbitrary computation.
-                if mod.__module__ == "torch.nn.utils.parametrize":
                     # End of fn, this bubbles up and restarts tracing.
                     self.convert_to_unspecialized(tx)
 
@@ -484,12 +487,16 @@ class NNModuleVariable(VariableTracker):
             return source
 
         if name == "named_children":
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules").name())
             assert not (args or kwargs)
             result = []
             for name, submod in module.named_children():
                 result.append(named_embed(name, submod))
             return ListIteratorVariable(result, mutable_local=MutableLocal())
         elif name == "named_parameters":
+            tx.output.guard_on_key_order.add(
+                AttrSource(self.source, "_parameters").name()
+            )
             result = []
             for name, param in module.named_parameters(
                 **get_kwargs("prefix", "recurse")
@@ -497,6 +504,7 @@ class NNModuleVariable(VariableTracker):
                 result.append(named_embed(name, param))
             return ListIteratorVariable(result, mutable_local=MutableLocal())
         elif name == "named_buffers":
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_buffers").name())
             result = []
             for name, buffer in module.named_buffers(
                 **get_kwargs("prefix", "recurse", "remove_duplicate")
@@ -504,6 +512,7 @@ class NNModuleVariable(VariableTracker):
                 result.append(named_embed(name, buffer))
             return ListIteratorVariable(result, mutable_local=MutableLocal())
         elif name == "named_modules":
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules").name())
             result = []
             for name, submod in module.named_modules(
                 **get_kwargs("memo", "prefix", "remove_duplicate")
@@ -511,13 +520,19 @@ class NNModuleVariable(VariableTracker):
                 result.append(named_embed(name, submod))
             return ListIteratorVariable(result, mutable_local=MutableLocal())
         elif name == "children":
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules").name())
             assert not (args or kwargs)
             return wrap_values(module.named_children())
         elif name == "modules":
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules").name())
             return wrap_values(module.named_modules())
         elif name == "parameters":
+            tx.output.guard_on_key_order.add(
+                AttrSource(self.source, "_parameters").name()
+            )
             return wrap_values(module.named_parameters(**get_kwargs("recurse")))
         elif name == "buffers":
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_buffers").name())
             return wrap_values(module.named_buffers(**get_kwargs("recurse")))
         elif name == "keys":
             assert not (args or kwargs)

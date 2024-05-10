@@ -225,6 +225,21 @@ MetricTable.register_table(
     ],
 )
 
+# Log the fusion failures due to indexing mismatch
+MetricTable.register_table(
+    "fusion_failure_due_to_indexing_mismatch",
+    [
+        "pre_grad_graph_id",
+        "post_grad_graph_id",
+        "node1_name",
+        "node2_name",
+        "node1_debug_str",
+        "node2_debug_str",
+        "common_buffer_names",
+        "failure_reason",
+    ],
+)
+
 # Log metadata for pointwise/reduction kernels. E.g., model name, kernel path, numel, rnumel, reduction hint
 MetricTable.register_table(
     "kernel_metadata",

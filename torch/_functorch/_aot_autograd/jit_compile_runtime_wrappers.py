@@ -40,8 +40,8 @@ from .logging_utils import describe_input, format_guard_bug_msg, track_graph_com
 
 from .runtime_wrappers import (
     aot_dispatch_subclass_wrapper,
-    create_runtime_wrapper,
     functionalized_rng_runtime_epilogue,
+    RuntimeWrapper,
 )
 from .schemas import (
     AOTConfig,
@@ -73,6 +73,19 @@ aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
 aten = torch.ops.aten
+
+
+def _force_contiguous(x):
+    if not isinstance(x, torch.Tensor):
+        return x
+    x = x.contiguous()
+    if not is_traceable_wrapper_subclass(x):
+        return x
+    for attr in x.__tensor_flatten__()[0]:  # type: ignore[attr-defined]
+        elem = getattr(x, attr)
+        if not elem.is_contiguous():
+            setattr(x, attr, elem.contiguous())
+    return x
 
 
 def _compute_output_meta_with_inductor_strides(fw_module, fwd_output_strides):
@@ -161,7 +174,7 @@ def aot_dispatch_base(
                 fw_module, fwd_output_strides
             )
 
-    # However, create_runtime_wrapper does not expect the rng offsets in the
+    # However, RuntimeWrapper does not expect the rng offsets in the
     # output. So, we have to create another wrapper and take out the offset. As
     # a result, we have to account for not boxed_call compilers as well.
     if not hasattr(compiled_fw, "_boxed_call"):
@@ -199,13 +212,14 @@ def aot_dispatch_base(
     if not hasattr(compiled_fw_func, "_boxed_call"):
         compiled_fw_func = make_boxed_func(compiled_fw_func)
 
-    compiled_fn = create_runtime_wrapper(
-        compiled_fw_func,
-        runtime_metadata=fw_metadata,
+    compiled_fn = RuntimeWrapper(
         indices_of_inps_to_detach=[],
         trace_joint=False,
-        keep_input_mutations=aot_config.keep_inference_input_mutations,
         disable_amp=disable_amp,
+    ).post_compile(
+        compiled_fw_func,
+        aot_config,
+        fw_metadata=fw_metadata,
     )
 
     return compiled_fn
@@ -895,11 +909,8 @@ Got grad_output types: {str(grad_output_types)}"""
             # Make the tangents contiguous. Note that we must do this after subclass desugaring
             # because inputs to inductor have to be contiguous
             all_args = [
-                t.contiguous()
-                if (
-                    (tangents_start_idx <= i < tangents_end_idx)
-                    and (not t.is_contiguous())
-                )
+                _force_contiguous(t)
+                if (tangents_start_idx <= i < tangents_end_idx)
                 else t
                 for i, t in enumerate(all_args)
             ]
@@ -1031,13 +1042,14 @@ Got grad_output types: {str(grad_output_types)}"""
                 return (*[None] * num_tokens, *outs_wrapped)
             return (*[None] * num_tokens, *out)
 
-    compiled_function = create_runtime_wrapper(
-        CompiledFunction.apply,
-        runtime_metadata=fw_metadata,
+    compiled_function = RuntimeWrapper(
         indices_of_inps_to_detach=_indices_of_inps_to_detach,
         trace_joint=True,
-        keep_input_mutations=aot_config.keep_inference_input_mutations,
         disable_amp=disable_amp,
+    ).post_compile(
+        CompiledFunction.apply,
+        aot_config,
+        fw_metadata=fw_metadata,
     )
 
     if not config.debug_assert:
