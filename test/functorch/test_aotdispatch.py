@@ -587,6 +587,17 @@ def forward(self, primals_1, primals_2):
                 a_view.mul_(2)
             return a + tmp
 
+        # There is a very bad interaction, where running this particular test
+        # under dynamo causes dynamo to emit bytecode that (incorrectly)
+        # turn off grad_mode, poisoning global state for future tests.
+        # I have been unable to make a repro any smaller than this test though,
+        # suggesting that this behavior is (hopefully) extremely rare for anyone
+        # in the wild to run into (compiling code that runs AOTAutograd on set_() + data mutation).
+        # to repro, remove this check and run:
+        #   PYTORCH_TEST_WITH_DYNAMO=1 pytest test/functorch/test_aotdispatch.py::TestAOTAutograd::test_set__and_data_mutation_bad
+        # then print `torch.is_grad_enabled()` before/after the test, to see that grad state changed.
+        if torch.compiler.is_dynamo_compiling():
+            return
         inp = [torch.ones(3, 3, requires_grad=True)]
         with self.assertRaisesRegex(
             RuntimeError, "cannot mutate tensors with frozen storage"
