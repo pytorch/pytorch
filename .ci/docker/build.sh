@@ -85,7 +85,7 @@ fi
 CMAKE_VERSION=3.18.5
 
 _UCX_COMMIT=7bb2722ff2187a0cad557ae4a6afa090569f83fb
-_UCC_COMMIT=7cb07a76ccedad7e56ceb136b865eb9319c258ea
+_UCC_COMMIT=20fc1869025b8a310ef12be59bd90b92612801c8
 
 # It's annoying to rename jobs every time you want to rewrite a
 # configuration, so we hardcode everything here rather than do it
