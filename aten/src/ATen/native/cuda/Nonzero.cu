@@ -91,6 +91,7 @@ static cudaError_t dispatch_select_if_wrapper(
                          equality_op_t{},
                          num_items,
                          stream);
+}
 } // anonymous namespace
 
 template<typename scalar_t>
