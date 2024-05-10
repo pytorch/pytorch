@@ -663,6 +663,31 @@ class NopKernelSchedulerNode(BaseSchedulerNode):
     pass
 
 
+def debug_triton_code(node: Union["SchedulerNode", "FusedSchedulerNode"]) -> List[str]:
+    lines = []
+    is_multi_template = node.is_template() and isinstance(
+        node.get_template_node(), ir.MultiTemplateBuffer
+    )
+    if is_multi_template and node.get_template_node().make_kernel_render is None:
+        lines.append(f"{node.get_name()} Unfinalized multi template buffer")
+    else:
+        snodes = (node,) if isinstance(node, SchedulerNode) else node.snodes
+        device = snodes[0].get_device()
+        backend = node.scheduler.get_backend(device)
+        V.graph.scheduler.current_device = device
+
+        # Don't increment kernel count when generating debug string.
+        # This will confuse some unit tests that check the number of
+        # generated kernels.
+        old_generated_kernel_count = metrics.generated_kernel_count
+        triton_code = backend.generate_kernel_code_from_nodes(snodes).strip()
+        metrics.generated_kernel_count = old_generated_kernel_count
+
+        lines.append(f"{node.get_name()} Triton code:")
+        lines.append(textwrap.indent(triton_code, "    "))
+    return lines
+
+
 class SchedulerNode(BaseSchedulerNode):
     def __init__(
         self,
@@ -718,18 +743,8 @@ class SchedulerNode(BaseSchedulerNode):
             lines.append(textwrap.indent(self._body.debug_str(), "    "))
 
         if ir.is_triton(self.node.get_device()):
-            backend = self.scheduler.get_backend(self.node.get_device())
-            V.graph.scheduler.current_device = self.node.get_device()
+            lines.extend(debug_triton_code(self))
 
-            # Don't increment kernel count when generating debug string.
-            # This will confuse some unit tests that check the number of
-            # generated kernels.
-            old_generated_kernel_count = metrics.generated_kernel_count
-            triton_code = backend.generate_kernel_code_from_nodes((self,)).strip()
-            metrics.generated_kernel_count = old_generated_kernel_count
-
-            lines.append(f"{self.get_name()} Triton code:")
-            lines.append(textwrap.indent(triton_code, "    "))
         return "\n".join(lines)
 
     def get_ranges(self):
@@ -889,13 +904,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
         ]
         device = self.snodes[0].node.get_device()
         if ir.is_triton(device):
-            backend = self.scheduler.get_backend(device)
-            V.graph.scheduler.current_device = device
-            old_generated_kernel_count = metrics.generated_kernel_count
-            triton_code = backend.generate_kernel_code_from_nodes(self.snodes).strip()
-            metrics.generated_kernel_count = old_generated_kernel_count
-            lines.append(f"{self.get_name()} Triton code:")
-            lines.append(textwrap.indent(triton_code, "    "))
+            lines.extend(debug_triton_code(self))
 
         return textwrap.indent("\n".join(lines).rstrip(), "    ")
 

@@ -3595,8 +3595,8 @@ class TritonTemplateBuffer(TemplateBuffer):
         self.mutated_inputs = mutated_inputs
         if mutated_inputs is not None:
             # Ensure that the mutated inputs are only allowed for certain nodes
-            allowed_set = {"flex_attention"}
-            current_node = str(V.graph.current_node)
+            allowed_set = {torch.ops.higher_order.flex_attention}
+            current_node = V.graph.current_node.target
             assert (
                 current_node in allowed_set
             ), f"Mutated inputs are only allowed for {allowed_set} but got {current_node}"
@@ -3627,7 +3627,7 @@ class ChoiceCaller:
 
     def benchmark(self, *args, out) -> float:
         algo = self.to_callable()
-        return do_bench(lambda: algo(*args, out=out))
+        return do_bench(algo, args, {"out": out})
 
     def call_name(self) -> str:
         raise NotImplementedError
@@ -6482,7 +6482,12 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
         algorithm,
     ):
         transposed = True
-        (inputs, constant_args, kernel_layout, _,) = _prepare_convolution_fusion_create(
+        (
+            inputs,
+            constant_args,
+            kernel_layout,
+            _,
+        ) = _prepare_convolution_fusion_create(
             cls,
             x,
             weight,
@@ -6655,7 +6660,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
                 torch::List<int64_t> padding,
                 torch::List<int64_t> dilation,
                 int64_t groups,
-                double inv_output_scale,
+                double output_scale,
                 int64_t output_zero_point,
                 c10::optional<c10::ScalarType> output_dtype,
                 c10::string_view attr,
@@ -6831,7 +6836,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
                 torch::List<int64_t> padding,
                 torch::List<int64_t> dilation,
                 int64_t groups,
-                double inv_output_scale,
+                double output_scale,
                 int64_t output_zero_point,
                 c10::optional<c10::ScalarType> output_dtype,
                 c10::string_view binary_attr,
@@ -7047,7 +7052,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
                 at::Tensor weight_scales,
                 at::Tensor weight_zero_points,
                 c10::optional<at::Tensor> bias,
-                double inv_output_scale,
+                double output_scale,
                 int64_t output_zero_point,
                 c10::optional<c10::ScalarType> output_dtype,
                 c10::string_view post_op_name,
