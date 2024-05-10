@@ -958,7 +958,9 @@ class TensorVariable(VariableTracker):
 
 class SymNodeVariable(VariableTracker):
     """
-    Represents a symbolic size, e.g., as returned by tensor.size(0)
+    Represents a symbolic scalar, either int, float or bool.  This is most commonly used to
+    handle symbolic size computation, e.g., tensor.size(0), but it is also used to
+    handle logic like float_tensor.item() or unspecialized float inputs.
     """
 
     _nonvar_fields = {
