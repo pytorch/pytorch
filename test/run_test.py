@@ -495,7 +495,7 @@ def run_test(
         None
         if not options.enable_timeout
         else THRESHOLD * 6
-        if TEST_WITH_SLOW
+        if IS_SLOW
         else THRESHOLD * 3
         if should_retry
         and isinstance(test_module, ShardedTest)
@@ -1194,7 +1194,8 @@ def parse_args():
         )
         and get_pr_number() is not None
         and not strtobool(os.environ.get("NO_TD", "False"))
-        and not IS_SLOW,
+        and not IS_SLOW
+        and not TEST_WITH_ROCM,
     )
     parser.add_argument(
         "additional_unittest_args",
