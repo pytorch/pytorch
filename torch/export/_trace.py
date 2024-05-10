@@ -467,6 +467,7 @@ def _export_non_strict(
     *,
     transform=lambda x: x,  # TODO(zhxchen17) Revisit if this is needed later.
     pre_dispatch=False,
+    should_insert_runtime_assertion=False,
 ):
     # [NOTE] If the user is exporting under training mode, we want to detect if there is any
     # state change in the autograd global state and error. If the user is exporting under inference
@@ -508,41 +509,6 @@ def _export_non_strict(
     if isinstance(mod, torch.fx.GraphModule) and hasattr(mod, "meta"):
         gm.meta.update(mod.meta)
 
-    if pre_dispatch:
-        from torch._export.passes.replace_set_grad_with_hop_pass import (
-            replace_set_grad_with_hop_pass,
-        )
-
-        gm = replace_set_grad_with_hop_pass(gm)
-
-    # Remove nn_module_stack, stack_trace metadata from all placeholders/inputs nodes.
-    for _mod in gm.modules():
-        if not isinstance(_mod, torch.fx.GraphModule):
-            continue
-        for node in _mod.graph.nodes:
-            if node.op in ["placeholder", "output"]:
-                node.meta.pop("nn_module_stack", None)
-                node.meta.pop("stack_trace", None)
-
-    # NOTE: aot_export adds symint metadata for placeholders with int values;
-    # since these become specialized, we replace such metadata with the original values
-    flat_args = pytree.tree_leaves((fake_args, fake_kwargs))
-    index = 0
-    total_non_user_inputs = (
-        len(graph_signature.parameters)
-        + len(graph_signature.buffers)
-        + len(graph_signature.input_tokens)
-    )
-    for node in gm.graph.nodes:
-        if node.op == "placeholder":
-            if index >= total_non_user_inputs:
-                user_arg = flat_args[index - total_non_user_inputs]
-                if not isinstance(user_arg, torch.Tensor):
-                    node.meta["val"] = user_arg
-            index += 1
-
-    is_joint = graph_signature.backward_signature is not None
-
     def make_argument_spec(i, node) -> ArgumentSpec:
         if isinstance(node, (int, bool, float, type(None))):
             # For const outputs we just directly return this
@@ -571,6 +537,25 @@ def _export_non_strict(
                 f"while writing the metadata for exported program"
             )
 
+    is_joint = graph_signature.backward_signature is not None
+
+    # NOTE: aot_export adds symint metadata for placeholders with int values;
+    # since these become specialized, we replace such metadata with the original values
+    flat_args = pytree.tree_leaves((fake_args, fake_kwargs))
+    index = 0
+    total_non_user_inputs = (
+        len(graph_signature.parameters)
+        + len(graph_signature.buffers)
+        + len(graph_signature.input_tokens)
+    )
+    for node in gm.graph.nodes:
+        if node.op == "placeholder":
+            if index >= total_non_user_inputs:
+                user_arg = flat_args[index - total_non_user_inputs]
+                if not isinstance(user_arg, torch.Tensor):
+                    node.meta["val"] = user_arg
+            index += 1
+
     input_specs, output_specs = _sig_to_specs(
         user_inputs=set(graph_signature.user_inputs),
         inputs_to_parameters=graph_signature.inputs_to_parameters,  # type: ignore[arg-type]
@@ -598,6 +583,41 @@ def _export_non_strict(
     export_graph_signature = ExportGraphSignature(
         input_specs=input_specs, output_specs=output_specs
     )
+
+    from torch._guards import detect_fake_mode
+
+    fake_mode = detect_fake_mode(flat_args)
+
+    if should_insert_runtime_assertion:
+        stack_trace = (
+            'File "torch/fx/passes/runtime_assert.py", line 24, '
+            "in insert_deferred_runtime_asserts"
+        )
+        with gm._set_create_node_hook(
+            functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+        ):
+            insert_deferred_runtime_asserts(
+                gm,
+                fake_mode.shape_env,
+                f"non strict exported program: {first_call_function_nn_module_stack(gm.graph)}",
+                export=True,
+            )
+
+    if pre_dispatch:
+        from torch._export.passes.replace_set_grad_with_hop_pass import (
+            replace_set_grad_with_hop_pass,
+        )
+
+        gm = replace_set_grad_with_hop_pass(gm, export_graph_signature)
+
+    # Remove nn_module_stack, stack_trace metadata from all placeholders/inputs nodes.
+    for _mod in gm.modules():
+        if not isinstance(_mod, torch.fx.GraphModule):
+            continue
+        for node in _mod.graph.nodes:
+            if node.op in ["placeholder", "output"]:
+                node.meta.pop("nn_module_stack", None)
+                node.meta.pop("stack_trace", None)
 
     constants = rewrite_script_object_meta(gm)
     constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
@@ -1040,6 +1060,7 @@ def _export(
                     new_fake_constant_attrs,
                     pre_dispatch=pre_dispatch,
                     transform=_tuplify_outputs,
+                    should_insert_runtime_assertion=not strict,
                 )
                 # ep_non_strict.constants contains only fake script objects, we need to map them back
                 ep_non_strict.constants = {
@@ -1048,20 +1069,6 @@ def _export(
                     else obj
                     for fqn, obj in ep_non_strict.constants.items()
                 }
-
-            stack_trace = (
-                'File "torch/fx/passes/runtime_assert.py", line 24, '
-                "in insert_deferred_runtime_asserts"
-            )
-            with ep_non_strict.gm._set_create_node_hook(
-                functools.partial(_node_metadata_hook, stack_trace=stack_trace)
-            ):
-                insert_deferred_runtime_asserts(
-                    ep_non_strict.gm,
-                    fake_mode.shape_env,
-                    f"non strict exported program: {first_call_function_nn_module_stack(ep_non_strict.gm.graph)}",
-                    export=True,
-                )
 
         ep_non_strict.gm.meta["inline_constraints"] = {
             k: v
@@ -1246,6 +1253,7 @@ def _export(
         fake_params_buffers,
         constant_attrs,
         pre_dispatch=pre_dispatch,
+        should_insert_runtime_assertion=not strict,
     )
 
     gm = ep_non_strict.gm
