@@ -48,9 +48,6 @@ class CKTemplate(ROCmTemplate):
                 #include "ck/library/utility/host_tensor.hpp"
                 #include "ck/library/utility/host_tensor_generator.hpp"
                 #include "ck/library/utility/literals.hpp"
-
-                // NB: this type alias needs to be defined before CUDATemplate globals
-                using nv_bfloat16 = hip_bfloat16;
             """
         )
         return res

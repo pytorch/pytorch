@@ -8,6 +8,7 @@ from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateKernel
 from torch._inductor.codegen.rocm.ck_library import gen_ops_library, gen_ops_preselected
 from torch._inductor.codegen.rocm.ck_template import CKTemplate
 from torch._inductor.codegen.rocm.ck_universal_gemm_op import CKGemmOperation
+from torch._inductor.codegen.rocm.rocm_kernel import ROCmTemplateKernel
 from torch._inductor.ir import Buffer, Layout
 
 log = logging.getLogger(__name__)
@@ -109,8 +110,6 @@ class CKGemmTemplate(CKTemplate):
 
                 using Row = ck::tensor_layout::gemm::RowMajor;
                 using Col = ck::tensor_layout::gemm::ColumnMajor;
-
-                using cudaStream_t = hipStream_t;
 
                 using BlockGemmPipelineScheduler = ck::BlockGemmPipelineScheduler;
                 using GemmSpecialization = ck::tensor_operation::device::GemmSpecialization;
@@ -233,7 +232,7 @@ class CKGemmTemplate(CKTemplate):
             template_params=(",\n" + 12 * " ").join(template_params),
         ), self._template_from_string(template_type).render(operation_name=op.name())
 
-    def render(self, kernel: CUDATemplateKernel, op: CKGemmOperation, **kwargs) -> str:
+    def render(self, kernel: ROCmTemplateKernel, op: CKGemmOperation, **kwargs) -> str:
         """
         The primary entry point for the code rendering process used in this template.
         """

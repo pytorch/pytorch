@@ -2724,34 +2724,34 @@ def cuda_compile_command(
     dst_file_ext: str,
     extra_args: Optional[List[str]] = None,
 ) -> str:
-    if not torch.version.cuda:
-        return ""
+    if extra_args is None:
+        extra_args = []
     include_paths = _cutlass_include_paths()
-    lib_options = _cuda_lib_options()
-    host_compiler_options = _nvcc_host_compiler_options()
-    device_compiler_options = _nvcc_compiler_options()
-    compiler = _cuda_compiler()
+    cuda_lib_options = _cuda_lib_options()
+    nvcc_host_compiler_options = _nvcc_host_compiler_options()
+    nvcc_compiler_options = _nvcc_compiler_options()
     options = (
-        device_compiler_options
-        + (extra_args if extra_args else [])
+        nvcc_compiler_options
+        + extra_args
         + [
             f"-Xcompiler {opt}" if "=" in opt else f"-Xcompiler={opt}"
-            for opt in host_compiler_options
+            for opt in nvcc_host_compiler_options
         ]
         + ["-I" + path for path in include_paths]
-        + lib_options
+        + cuda_lib_options
     )
     src_file = " ".join(src_files)
     res = ""
     if dst_file_ext == "o":
-        res = f"{compiler} {' '.join(options)} -c -o {dst_file} {src_file}"
+        res = f"{_cuda_compiler()} {' '.join(options)} -c -o {dst_file} {src_file}"
     elif dst_file_ext == "so":
         options.append("-shared")
-        res = f"{compiler} {' '.join(options)} -o {dst_file} {src_file}"
+        res = f"{_cuda_compiler()} {' '.join(options)} -o {dst_file} {src_file}"
     elif dst_file_ext == "exe":
-        res = f"{compiler} {' '.join(options)} -o {dst_file} {src_file}"
+        res = f"{_cuda_compiler()} {' '.join(options)} -o {dst_file} {src_file}"
     else:
         raise NotImplementedError(f"Unsupported output file suffix {dst_file_ext}!")
+    log.debug("CUDA command: %s", res)
     return res
 
 
@@ -2802,9 +2802,6 @@ class DLLWrapper:
 
         def _wrapped_func(*args):
             err = method(*args)
-            if err == -23:
-                # magic spell to assign +inf to benchmarking time in select_algorithm.py:1052 (2/2)
-                raise RuntimeError(f"Error in function: {method.__name__}: invalid argument for gemm")
             if err:
                 raise RuntimeError(f"Error in function: {method.__name__}")
 
@@ -2867,12 +2864,12 @@ class CUDACodeCache:
                         [input_path], output_path, dst_file_ext, extra_args
                     )
                     start_time = time()
+                    log.debug("CUDA Compilation: %s", cmd)
                     cmd_parts = cmd.split(" ")
                     try:
-                        output = subprocess.check_output(
-                            cmd_parts, stderr=subprocess.STDOUT, text=True, env=os.environ
+                        subprocess.check_output(
+                            cmd_parts, stderr=subprocess.STDOUT, env=os.environ
                         )
-                        log.debug(f"CUDA compilation output: {output}")
                     except subprocess.CalledProcessError as error:
                         raise exc.CUDACompileError(cmd_parts, error.output) from error
                     end_time = time()
@@ -2884,6 +2881,93 @@ class CUDACodeCache:
                         input_path,
                     )
                 cls.cache[key] = CUDACodeCache.CacheEntry(input_path, output_path)
+
+        return (cls.cache[key].output_path, key, input_path)
+
+    @classmethod
+    def load(cls, source_code, dst_file_ext) -> Tuple[DLLWrapper, str, str]:
+        """
+        Compiles source code and loads the generated .so file.
+        Returns a tuple of DLLWrapper, hash_key, source_code_path
+        """
+
+        if dst_file_ext != "so":
+            raise RuntimeError(
+                f"Only support loading a .so file for now. "
+                f"Requested file extension: {dst_file_ext}. Source code: {source_code}"
+            )
+        dst_file_path, hash_key, source_code_path = cls.compile(
+            source_code, dst_file_ext
+        )
+        return (DLLWrapper(dst_file_path), hash_key, source_code_path)
+
+
+@clear_on_fresh_inductor_cache
+class ROCmCodeCache:
+    @dataclasses.dataclass
+    class CacheEntry:
+        input_path: str
+        output_path: str
+
+    cache: Dict[str, CacheEntry] = dict()
+    cache_clear = staticmethod(cache.clear)
+    _SOURCE_CODE_SUFFIX = "cpp"
+
+    log.debug(f"HIP compiler version:\n{rocm_compiler_version()}")
+
+    @classmethod
+    def write(cls, source_code, dst_file_ext) -> Tuple[str, str]:
+        """
+        Writes source code into a file with dst_file_ext as the file extension.
+        Returns the hash key of source code, and the path to the file.
+        """
+
+        cuda_command = repr(
+            rocm_compile_command(["dummy_input"], "dummy_output", dst_file_ext)
+        )
+        key, input_path = write(
+            source_code, cls._SOURCE_CODE_SUFFIX, extra=cuda_command
+        )
+        return key, input_path
+
+    @classmethod
+    def compile(
+        cls, source_code, dst_file_ext, extra_args: Optional[List[str]] = None
+    ) -> Tuple[str, str, str]:
+        """
+        Compiles CUDA source_code into a file with dst_file_ext extension.
+        Returns a tuple of dst_file_path, hash_key, source_code_path
+        """
+        key, input_path = cls.write(source_code, dst_file_ext)
+        if key not in cls.cache:
+            from filelock import FileLock
+
+            lock_dir = get_lock_dir()
+            lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+            with lock:
+                output_path = input_path[: -len(cls._SOURCE_CODE_SUFFIX)] + dst_file_ext
+                if not os.path.exists(output_path):
+                    cmd = rocm_compile_command(
+                        [input_path], output_path, dst_file_ext, extra_args
+                    )
+                    start_time = time()
+                    cmd_parts = cmd.split(" ")
+                    try:
+                        output = subprocess.check_output(
+                            cmd_parts, stderr=subprocess.STDOUT, text=True, env=os.environ
+                        )
+                        log.debug("Compilation output: %s", output)
+                    except subprocess.CalledProcessError as error:
+                        raise exc.CUDACompileError(cmd_parts, error.output) from error
+                    end_time = time()
+                    log_duration_msg = f"Compilation took {end_time-start_time} seconds. Compile command: {cmd}"
+                    log.info(log_duration_msg)
+                else:
+                    log.debug(
+                        "Compilation skipped: %s since output already exists",
+                        input_path,
+                    )
+                cls.cache[key] = ROCmCodeCache.CacheEntry(input_path, output_path)
 
         return (cls.cache[key].output_path, key, input_path)
 
@@ -3112,7 +3196,7 @@ class AsyncCompile:
 
     def rocm(self, source_code, dst_file_ext):
         def task():
-            return CUDACodeCache.load(source_code, dst_file_ext)[0]
+            return ROCmCodeCache.load(source_code, dst_file_ext)[0]
 
         return self.submit(task)
 

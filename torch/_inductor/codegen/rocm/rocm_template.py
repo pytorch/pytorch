@@ -59,7 +59,7 @@ class ROCmTemplate(KernelTemplate):
         Returns:
             A ROCmTemplateCaller object representing the generated ROCm template caller.
         """
-        kernel_name = f"cuda_{self.name}"
+        kernel_name = f"rocm_{self.name}"
         with patch.object(
             V.graph, "get_dtype", self._fake_get_dtype(self.output_node)
         ), ROCmTemplateKernel(

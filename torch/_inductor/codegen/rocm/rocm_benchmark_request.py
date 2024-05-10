@@ -18,7 +18,7 @@ from torch._inductor.autotune_process import GPUDeviceBenchmarkRequest, TensorMe
 from torch._inductor.codecache import (
     DLLWrapper,
 )
-from torch._inductor.codegen.rocm.rocm_codecache import ROCmCodeCache
+from torch._inductor.codecache import ROCmCodeCache
 
 log = logging.getLogger(__name__)
 
