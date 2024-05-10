@@ -110,12 +110,12 @@ class AutogradCompilerInstance:
         backward_idx: int,
     ):
         assert self.hooks_proxy is not None
-        backward_fn = self.hooks_proxy[backward_idx]  # type: ignore[index]
+        backward_c_function = self.hooks_proxy[backward_idx]  # type: ignore[index]
         proxies = self.fx_tracer.create_proxy(
             kind="call_function",
             target=call_backward,
             args=(
-                backward_fn,
+                backward_c_function,
                 self.to_proxy(saved_tensors),
                 *self.to_proxy(inputs),
             ),
@@ -205,7 +205,9 @@ class AutogradCompilerInstance:
 
         if self.compiler_fn is not compiler_fn:
             raise RuntimeError(
-                "Multiple compiled autograd backends detected. This is not supported."
+                "Multiple compile backends detected, the gradients are depending on outputs from 2+ torch.compile "
+                "configurations, this is unsupported. If you are using the same configuration between the "
+                "torch.compile calls, file an issue."
             )
 
     def end_capture(self, outputs):
@@ -231,14 +233,9 @@ class AutogradCompilerInstance:
             "compiled_autograd_graph",
             payload_fn=lambda: graph.print_readable(print_output=False),
         )
-        assert self.compiler_fn
-        return torch.compile(
-            graph,
-            backend=self.compiler_fn,
-            fullgraph=self.compiler_fn.fullgraph,
-            dynamic=self.compiler_fn.dynamic,
-            options=self.compiler_fn.kwargs,
-        )
+
+        assert self.compiler_fn and hasattr(self.compiler_fn, "rewrap")
+        return self.compiler_fn.rewrap(graph)
 
     def reorder_accumulate_grad_nodes(self):
         """

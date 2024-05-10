@@ -17,6 +17,7 @@ import textwrap
 import ctypes
 import inspect
 import threading
+import functools
 
 # multipy/deploy is setting this import before importing torch, this is the most
 # reliable way we have to detect if we're running within deploy.
@@ -1687,11 +1688,12 @@ from ._linalg_utils import _symeig as symeig  # type: ignore[misc]
 class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
-    def __init__(self, mode, options, dynamic):
+    def __init__(self, mode, options, dynamic, rewrap):
         self.config: Dict[str, Any] = dict()
         self.dynamic = dynamic
         self.apply_mode(mode)
         self.apply_options(options)
+        self.rewrap = rewrap
 
         # Stash the compiler_fn to be used for backend match guard.
         from torch._inductor.compile_fx import compile_fx
@@ -1758,7 +1760,7 @@ class _TorchCompileInductorWrapper:
                 reset_cudagraph_trees()
 
 class _TorchCompileWrapper:
-    def __init__(self, backend, mode, options, dynamic):
+    def __init__(self, backend, mode, options, dynamic, rewrap):
         from torch._dynamo.backends.registry import lookup_backend
 
         if isinstance(backend, str):
@@ -1775,6 +1777,7 @@ class _TorchCompileWrapper:
             self.kwargs["mode"] = mode
         if options:
             self.kwargs["options"] = options
+        self.rewrap = rewrap
 
     def __eq__(self, other):
         return (isinstance(other, _TorchCompileWrapper) and
@@ -1898,16 +1901,24 @@ def compile(model: Optional[Callable] = None, *,
                            disable=disable)
         return fn
 
+    def rewrap(model):
+        return functools.partial(
+            compile,
+            fullgraph=fullgraph,
+            dynamic=dynamic,
+            backend=backend,
+            mode=mode,
+            options=options,
+            disable=disable)(model)
+
     if mode is not None and options is not None:
         raise RuntimeError("Either mode or options can be specified, but both can't be specified at the same time.")
     if mode is None and options is None:
         mode = "default"
     if backend == "inductor":
-        backend = _TorchCompileInductorWrapper(mode, options, dynamic)
+        backend = _TorchCompileInductorWrapper(mode, options, dynamic, rewrap)
     else:
-        backend = _TorchCompileWrapper(backend, mode, options, dynamic)
-    backend.fullgraph = fullgraph
-    backend.disable = disable
+        backend = _TorchCompileWrapper(backend, mode, options, dynamic, rewrap)
 
     return torch._dynamo.optimize(backend=backend, nopython=fullgraph, dynamic=dynamic, disable=disable)(model)
 
