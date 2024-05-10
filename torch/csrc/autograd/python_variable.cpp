@@ -747,21 +747,22 @@ static PyObject* THPVariable_make_wrapper_subclass(
   // NB: pin_memory doesn't actually do anything
   // TODO: strides variant?
 
-  /**
-   * cls: Python subclass type
-   * size, strides, storage_offset, memory_format, dtype: self-explanatory
-   * layout: memory layout, e.g. for types of Nested Tensors or other sparse tensors
-   * pin_memory, requires_grad: self-explanatory
-   * dispatch_sizes_strides_policy: string - which sizes/strides we should dispatch
-   *                                to a custom python implementation.
-   * dispatch_device: whether to dispatch to a custom python implementation for device
-   * dispatch_layout: whether to dispatch to a custom python implementation for layout
-   * _extra_dispatch_keys: additional dispatch keys to add to the tensor
-   * storage_size: if provided, skip storage size calculation and just use the value
-   *               provided. One use case is for Nested Tensor, where the storage size
-   *               cannot be calculated from the sizes/strides (because they contain a
-   *               NestedInt).
-   */
+  // cls: Python subclass type
+  // size, strides, storage_offset, memory_format, dtype: self-explanatory
+  // layout: memory layout, e.g. for types of Nested Tensors or other sparse
+  //         tensors
+  // pin_memory, requires_grad: self-explanatory
+  // dispatch_sizes_strides_policy: string - which sizes/strides we should
+  //                                dispatch to a custom python implementation.
+  // dispatch_device: whether to dispatch to a custom python implementation
+  //                  for device
+  // dispatch_layout: whether to dispatch to a custom python implementation
+  //                  for layout
+  // _extra_dispatch_keys: additional dispatch keys to add to the tensor
+  // storage_size: if provided, skip storage size calculation and just use the
+  //               value provided. One use case is for Nested Tensor, where the
+  //               storage size cannot be calculated from the sizes/strides
+  //               (because they contain a NestedInt).
   static PythonArgParser parser({
       "_make_wrapper_subclass(PyObject* cls, SymIntArrayRef size, SymIntArrayRef? strides=None, "
       "SymInt? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
