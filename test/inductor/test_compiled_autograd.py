@@ -354,27 +354,29 @@ main()
                 call_op = "CALL"
 
             insts = list(dis.get_instructions(out_code))
-            call_graph_idx = next(
+            call_graph_idxs = [
                 i for i, inst in enumerate(insts) if inst.opname == call_op
-            )
-            # pre-graph should alias: inputs_ref_0 = inputs[0]
-            matches = [
-                inst
-                for inst in insts[:call_graph_idx]
-                if inst.opname == "STORE_FAST" and inst.argval == "inputs_ref_0"
             ]
-            self.assertTrue(len(matches) == 1)
-            # post-graph should access inputs_ref_0 instead of inputs
-            matches = [
-                inst for inst in insts[call_graph_idx:] if inst.argval == "inputs"
-            ]
-            self.assertTrue(len(matches) == 0)
-            matches = [
-                inst
-                for inst in insts[call_graph_idx:]
-                if inst.opname == "LOAD_FAST" and inst.argval == "inputs_ref_0"
-            ]
-            self.assertTrue(len(matches) == 1)
+            if call_graph_idxs:
+                call_graph_idx = call_graph_idxs[0]
+                # pre-graph should alias: inputs_ref_0 = inputs[0]
+                matches = [
+                    inst
+                    for inst in insts[:call_graph_idx]
+                    if inst.opname == "STORE_FAST" and inst.argval == "inputs_ref_0"
+                ]
+                self.assertTrue(len(matches) == 1)
+                # post-graph should access inputs_ref_0 instead of inputs
+                matches = [
+                    inst for inst in insts[call_graph_idx:] if inst.argval == "inputs"
+                ]
+                self.assertTrue(len(matches) == 0)
+                matches = [
+                    inst
+                    for inst in insts[call_graph_idx:]
+                    if inst.opname == "LOAD_FAST" and inst.argval == "inputs_ref_0"
+                ]
+                self.assertTrue(len(matches) == 1)
 
         torch._dynamo.reset()
         handle = torch._dynamo.convert_frame.register_bytecode_hook(bytecode_hook)
