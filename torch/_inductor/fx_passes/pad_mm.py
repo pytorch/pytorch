@@ -145,11 +145,10 @@ def pad_addmm(
                 input = pad_dim(input, n_padded_length, 1)
             elif input.dim() == 1 and input.shape[0] != 1:
                 input = pad_dim(input, n_padded_length, 0)
-        elif m_padded_length != 0 and input.dim() == 2 and input.shape[0] != 1:
+        if m_padded_length != 0 and input.dim() == 2 and input.shape[0] != 1:
             input = pad_dim(input, m_padded_length, 0)
-        input_padded = input
 
-    res = aten.addmm(input_padded, mat1, mat2, beta=beta, alpha=alpha)
+    res = aten.addmm(input, mat1, mat2, beta=beta, alpha=alpha)
 
     if m_padded_length != 0:
         res = res[:-m_padded_length, :]
