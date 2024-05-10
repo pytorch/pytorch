@@ -8,6 +8,7 @@ in `runtime_wrappers`.
 """
 
 import logging
+import time
 from contextlib import nullcontext
 from functools import wraps
 from typing import Any, List, Optional, Sequence
@@ -16,7 +17,13 @@ import torch
 import torch.utils.dlpack
 from torch import Tensor
 from torch._dynamo.utils import lazy_format_graph_code
-from torch._guards import detect_fake_mode, tracing, TracingContext
+from torch._guards import (
+    compile_context,
+    CompileContext,
+    detect_fake_mode,
+    tracing,
+    TracingContext,
+)
 from torch._logging import getArtifactLogger, trace_structured
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
@@ -33,8 +40,8 @@ from .logging_utils import describe_input, format_guard_bug_msg, track_graph_com
 
 from .runtime_wrappers import (
     aot_dispatch_subclass_wrapper,
-    create_runtime_wrapper,
     functionalized_rng_runtime_epilogue,
+    RuntimeWrapper,
 )
 from .schemas import (
     AOTConfig,
@@ -66,6 +73,19 @@ aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
 aten = torch.ops.aten
+
+
+def _force_contiguous(x):
+    if not isinstance(x, torch.Tensor):
+        return x
+    x = x.contiguous()
+    if not is_traceable_wrapper_subclass(x):
+        return x
+    for attr in x.__tensor_flatten__()[0]:  # type: ignore[attr-defined]
+        elem = getattr(x, attr)
+        if not elem.is_contiguous():
+            setattr(x, attr, elem.contiguous())
+    return x
 
 
 def _compute_output_meta_with_inductor_strides(fw_module, fwd_output_strides):
@@ -154,7 +174,7 @@ def aot_dispatch_base(
                 fw_module, fwd_output_strides
             )
 
-    # However, create_runtime_wrapper does not expect the rng offsets in the
+    # However, RuntimeWrapper does not expect the rng offsets in the
     # output. So, we have to create another wrapper and take out the offset. As
     # a result, we have to account for not boxed_call compilers as well.
     if not hasattr(compiled_fw, "_boxed_call"):
@@ -192,13 +212,14 @@ def aot_dispatch_base(
     if not hasattr(compiled_fw_func, "_boxed_call"):
         compiled_fw_func = make_boxed_func(compiled_fw_func)
 
-    compiled_fn = create_runtime_wrapper(
-        compiled_fw_func,
-        runtime_metadata=fw_metadata,
+    compiled_fn = RuntimeWrapper(
         indices_of_inps_to_detach=[],
         trace_joint=False,
-        keep_input_mutations=aot_config.keep_inference_input_mutations,
         disable_amp=disable_amp,
+    ).post_compile(
+        compiled_fw_func,
+        aot_config,
+        fw_metadata=fw_metadata,
     )
 
     return compiled_fn
@@ -532,6 +553,7 @@ def aot_dispatch_autograd(
                 _LazyGraphModule.force_recompile(bw_module)
 
     saved_context = TracingContext.try_get()
+    saved_compile_context = CompileContext.try_get()
 
     backward_state_indices = [
         idx for idx, x in enumerate(flat_args) if isinstance(x, BackwardState)
@@ -887,11 +909,8 @@ Got grad_output types: {str(grad_output_types)}"""
             # Make the tangents contiguous. Note that we must do this after subclass desugaring
             # because inputs to inductor have to be contiguous
             all_args = [
-                t.contiguous()
-                if (
-                    (tangents_start_idx <= i < tangents_end_idx)
-                    and (not t.is_contiguous())
-                )
+                _force_contiguous(t)
+                if (tangents_start_idx <= i < tangents_end_idx)
                 else t
                 for i, t in enumerate(all_args)
             ]
@@ -918,12 +937,44 @@ Got grad_output types: {str(grad_output_types)}"""
                 ctx.maybe_clear_saved_tensors()
                 if CompiledFunction.compiled_bw is None:
                     context = torch._C._DisableAutocast if disable_amp else nullcontext
-                    with tracing(saved_context), context(), track_graph_compiling(
-                        aot_config, "backward"
-                    ):
-                        CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                            bw_module, placeholder_list
-                        )
+                    with tracing(saved_context), compile_context(
+                        saved_compile_context
+                    ), context(), track_graph_compiling(aot_config, "backward"):
+                        fail_type: Optional[str] = None
+                        fail_reason: Optional[str] = None
+                        start_time = time.time()
+                        try:
+                            CompiledFunction.compiled_bw = aot_config.bw_compiler(
+                                bw_module, placeholder_list
+                            )
+                        except Exception as e:
+                            fail_type = str(type(e))
+                            fail_reason = str(e)
+                            if saved_compile_context is not None:
+                                e.compile_id = saved_compile_context.compile_id  # type: ignore[attr-defined]
+                            raise
+                        finally:
+                            # TODO: Similar to CompilationMetrics, we would
+                            # like to report inductor_compile_time, but we
+                            # cannot conveniently do so because these are
+                            # keyed on utils.frame, and frame key is not
+                            # incremented on backwards compilations.  Maybe
+                            # should just bump the frame key here too?
+                            end_time = time.time()
+                            # TODO: Put this in scuba?  But CompilationMetrics
+                            # is kind of not a great match, because there's no
+                            # interaction with Dynamo, so a lot of Dynamo only
+                            # events don't exist anymore.  So we need a new
+                            # scuba table. Lazy lazy...
+                            trace_structured(
+                                "aot_autograd_backward_compilation_metrics",
+                                lambda: {
+                                    "start_time": start_time,
+                                    "elapsed_time": time.time() - start_time,
+                                    "fail_type": fail_type,
+                                    "fail_reason": fail_reason,
+                                },
+                            )
 
                 out = call_func_at_runtime_with_args(
                     CompiledFunction.compiled_bw,
@@ -991,13 +1042,14 @@ Got grad_output types: {str(grad_output_types)}"""
                 return (*[None] * num_tokens, *outs_wrapped)
             return (*[None] * num_tokens, *out)
 
-    compiled_function = create_runtime_wrapper(
-        CompiledFunction.apply,
-        runtime_metadata=fw_metadata,
+    compiled_function = RuntimeWrapper(
         indices_of_inps_to_detach=_indices_of_inps_to_detach,
         trace_joint=True,
-        keep_input_mutations=aot_config.keep_inference_input_mutations,
         disable_amp=disable_amp,
+    ).post_compile(
+        CompiledFunction.apply,
+        aot_config,
+        fw_metadata=fw_metadata,
     )
 
     if not config.debug_assert:

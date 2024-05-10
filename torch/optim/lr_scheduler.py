@@ -1,13 +1,13 @@
 import math
 import types
 import warnings
-import weakref
 from bisect import bisect_right
 from collections import Counter
-from functools import partial, wraps
+from functools import partial
 from typing import Optional, Sequence
+from weakref import ref
 
-from torch import inf
+from torch import inf, Tensor
 
 from .optimizer import Optimizer
 
@@ -76,39 +76,31 @@ class LRScheduler:
         # Following https://github.com/pytorch/pytorch/issues/20124
         # We would like to ensure that `lr_scheduler.step()` is called after
         # `optimizer.step()`
-        def with_counter(method):
-            if getattr(method, "_with_counter", False):
-                # `optimizer.step()` has already been replaced, return.
-                return method
+        def patch_track_step_called(opt):
+            if hasattr(opt.step, "_wrapped_by_lr_sched"):
+                # we've already patched
+                return opt.step
 
-            # Keep a weak reference to the optimizer instance to prevent
-            # cyclic references.
-            instance_ref = weakref.ref(method.__self__)
-            # Get the unbound method for the same purpose.
-            func = method.__func__
-            cls = instance_ref().__class__
-            del method
+            def wrap_step(step_fn):
+                opt_ref = ref(self.optimizer)
+                func = step_fn.__func__
 
-            @wraps(func)
-            def wrapper(*args, **kwargs):
-                instance = instance_ref()
-                instance._step_count += 1
-                wrapped = func.__get__(instance, cls)
-                return wrapped(*args, **kwargs)
+                def wrapper(*args, **kwargs):
+                    opt = opt_ref()
+                    opt._opt_called = True
+                    return func.__get__(opt, opt.__class__)(*args, **kwargs)
 
-            # Note that the returned function here is no longer a bound method,
-            # so attributes like `__func__` and `__self__` no longer exist.
-            wrapper._with_counter = True
-            return wrapper
+                wrapper._wrapped_by_lr_sched = True
+                return wrapper
 
-        self.optimizer.step = with_counter(self.optimizer.step)
+            opt.step = wrap_step(opt.step)
+
+        patch_track_step_called(self.optimizer)
         self.verbose = _check_verbose_deprecated_warning(verbose)
-
         self._initial_step()
 
     def _initial_step(self):
         """Initialize step counts and performs a step"""
-        self.optimizer._step_count = 0
         self._step_count = 0
         self.step()
 
@@ -154,7 +146,7 @@ class LRScheduler:
         # Raise a warning if old pattern is detected
         # https://github.com/pytorch/pytorch/issues/20124
         if self._step_count == 1:
-            if not hasattr(self.optimizer.step, "_with_counter"):
+            if not hasattr(self.optimizer.step, "_wrapped_by_lr_sched"):
                 warnings.warn(
                     "Seems like `optimizer.step()` has been overridden after learning rate scheduler "
                     "initialization. Please, make sure to call `optimizer.step()` before "
@@ -164,7 +156,7 @@ class LRScheduler:
                 )
 
             # Just check if there were two first lr_scheduler.step() calls before optimizer.step()
-            elif self.optimizer._step_count < 1:
+            elif not getattr(self.optimizer, "_opt_called", False):
                 warnings.warn(
                     "Detected call of `lr_scheduler.step()` before `optimizer.step()`. "
                     "In PyTorch 1.1.0 and later, you should call them in the opposite order: "
@@ -190,9 +182,23 @@ class LRScheduler:
 
         for i, data in enumerate(zip(self.optimizer.param_groups, values)):
             param_group, lr = data
-            param_group["lr"] = lr
+            if isinstance(param_group["lr"], Tensor):
+                lr_val = lr.item() if isinstance(lr, Tensor) else lr
+                param_group["lr"].fill_(lr)
+            else:
+                param_group["lr"] = lr
 
         self._last_lr = [group["lr"] for group in self.optimizer.param_groups]
+
+
+def _warn_get_lr_called_within_step(lr_scheduler: LRScheduler):
+    if not lr_scheduler._get_lr_called_within_step:
+        warnings.warn(
+            "To get the last learning rate computed by the scheduler, "
+            "please use `get_last_lr()`.",
+            UserWarning,
+            stacklevel=2,
+        )
 
 
 # Including _LRScheduler for backwards compatibility
@@ -300,11 +306,7 @@ class LambdaLR(LRScheduler):
                 self.lr_lambdas[idx].__dict__.update(fn)
 
     def get_lr(self):
-        if not self._get_lr_called_within_step:
-            warnings.warn(
-                "To get the last learning rate computed by the scheduler, "
-                "please use `get_last_lr()`."
-            )
+        _warn_get_lr_called_within_step(self)
 
         return [
             base_lr * lmbda(self.last_epoch)
@@ -391,12 +393,7 @@ class MultiplicativeLR(LRScheduler):
                 self.lr_lambdas[idx].__dict__.update(fn)
 
     def get_lr(self):
-        if not self._get_lr_called_within_step:
-            warnings.warn(
-                "To get the last learning rate computed by the scheduler, "
-                "please use `get_last_lr()`.",
-                UserWarning,
-            )
+        _warn_get_lr_called_within_step(self)
 
         if self.last_epoch > 0:
             return [
@@ -448,12 +445,7 @@ class StepLR(LRScheduler):
         super().__init__(optimizer, last_epoch, verbose)
 
     def get_lr(self):
-        if not self._get_lr_called_within_step:
-            warnings.warn(
-                "To get the last learning rate computed by the scheduler, "
-                "please use `get_last_lr()`.",
-                UserWarning,
-            )
+        _warn_get_lr_called_within_step(self)
 
         if (self.last_epoch == 0) or (self.last_epoch % self.step_size != 0):
             return [group["lr"] for group in self.optimizer.param_groups]
@@ -506,12 +498,7 @@ class MultiStepLR(LRScheduler):
         super().__init__(optimizer, last_epoch, verbose)
 
     def get_lr(self):
-        if not self._get_lr_called_within_step:
-            warnings.warn(
-                "To get the last learning rate computed by the scheduler, "
-                "please use `get_last_lr()`.",
-                UserWarning,
-            )
+        _warn_get_lr_called_within_step(self)
 
         if self.last_epoch not in self.milestones:
             return [group["lr"] for group in self.optimizer.param_groups]
@@ -581,12 +568,7 @@ class ConstantLR(LRScheduler):
         super().__init__(optimizer, last_epoch, verbose)
 
     def get_lr(self):
-        if not self._get_lr_called_within_step:
-            warnings.warn(
-                "To get the last learning rate computed by the scheduler, "
-                "please use `get_last_lr()`.",
-                UserWarning,
-            )
+        _warn_get_lr_called_within_step(self)
 
         if self.last_epoch == 0:
             return [group["lr"] * self.factor for group in self.optimizer.param_groups]
@@ -669,12 +651,7 @@ class LinearLR(LRScheduler):
         super().__init__(optimizer, last_epoch, verbose)
 
     def get_lr(self):
-        if not self._get_lr_called_within_step:
-            warnings.warn(
-                "To get the last learning rate computed by the scheduler, "
-                "please use `get_last_lr()`.",
-                UserWarning,
-            )
+        _warn_get_lr_called_within_step(self)
 
         if self.last_epoch == 0:
             return [
@@ -731,12 +708,7 @@ class ExponentialLR(LRScheduler):
         super().__init__(optimizer, last_epoch, verbose)
 
     def get_lr(self):
-        if not self._get_lr_called_within_step:
-            warnings.warn(
-                "To get the last learning rate computed by the scheduler, "
-                "please use `get_last_lr()`.",
-                UserWarning,
-            )
+        _warn_get_lr_called_within_step(self)
 
         if self.last_epoch == 0:
             return [group["lr"] for group in self.optimizer.param_groups]
@@ -915,12 +887,7 @@ class PolynomialLR(LRScheduler):
         super().__init__(optimizer, last_epoch, verbose)
 
     def get_lr(self):
-        if not self._get_lr_called_within_step:
-            warnings.warn(
-                "To get the last learning rate computed by the scheduler, "
-                "please use `get_last_lr()`.",
-                UserWarning,
-            )
+        _warn_get_lr_called_within_step(self)
 
         if self.last_epoch == 0 or self.last_epoch > self.total_iters:
             return [group["lr"] for group in self.optimizer.param_groups]
@@ -994,12 +961,7 @@ class CosineAnnealingLR(LRScheduler):
         super().__init__(optimizer, last_epoch, verbose)
 
     def get_lr(self):
-        if not self._get_lr_called_within_step:
-            warnings.warn(
-                "To get the last learning rate computed by the scheduler, "
-                "please use `get_last_lr()`.",
-                UserWarning,
-            )
+        _warn_get_lr_called_within_step(self)
 
         if self.last_epoch == 0:
             return [group["lr"] for group in self.optimizer.param_groups]
@@ -1455,7 +1417,11 @@ class CyclicLR(LRScheduler):
         base_lrs = self._format_param("base_lr", optimizer, base_lr)
         if last_epoch == -1:
             for lr, group in zip(base_lrs, optimizer.param_groups):
-                group["lr"] = lr
+                if isinstance(group["lr"], Tensor):
+                    lr_val = lr.item() if isinstance(lr, Tensor) else lr
+                    group["lr"].fill_(lr)
+                else:
+                    group["lr"] = lr
 
         self.max_lrs = self._format_param("max_lr", optimizer, max_lr)
 
@@ -1558,12 +1524,7 @@ class CyclicLR(LRScheduler):
         updating the optimizer's momentum.
         """
 
-        if not self._get_lr_called_within_step:
-            warnings.warn(
-                "To get the last learning rate computed by the scheduler, "
-                "please use `get_last_lr()`.",
-                UserWarning,
-            )
+        _warn_get_lr_called_within_step(self)
 
         cycle = math.floor(1 + self.last_epoch / self.total_size)
         x = 1.0 + self.last_epoch / self.total_size - cycle
@@ -1642,10 +1603,10 @@ class CosineAnnealingWarmRestarts(LRScheduler):
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
-        T_0 (int): Number of iterations for the first restart.
-        T_mult (int, optional): A factor increases :math:`T_{i}` after a restart. Default: 1.
+        T_0 (int): Number of iterations until the first restart.
+        T_mult (int, optional): A factor by which :math:`T_{i}` increases after a restart. Default: 1.
         eta_min (float, optional): Minimum learning rate. Default: 0.
-        last_epoch (int, optional): The index of last epoch. Default: -1.
+        last_epoch (int, optional): The index of the last epoch. Default: -1.
         verbose (bool): If ``True``, prints a message to stdout for
             each update. Default: ``False``.
 
@@ -1676,12 +1637,7 @@ class CosineAnnealingWarmRestarts(LRScheduler):
         super().__init__(optimizer, last_epoch, verbose)
 
     def get_lr(self):
-        if not self._get_lr_called_within_step:
-            warnings.warn(
-                "To get the last learning rate computed by the scheduler, "
-                "please use `get_last_lr()`.",
-                UserWarning,
-            )
+        _warn_get_lr_called_within_step(self)
 
         return [
             self.eta_min
@@ -2046,12 +2002,7 @@ class OneCycleLR(LRScheduler):
         return (end - start) * pct + start
 
     def get_lr(self):
-        if not self._get_lr_called_within_step:
-            warnings.warn(
-                "To get the last learning rate computed by the scheduler, "
-                "please use `get_last_lr()`.",
-                UserWarning,
-            )
+        _warn_get_lr_called_within_step(self)
 
         lrs = []
         step_num = self.last_epoch
