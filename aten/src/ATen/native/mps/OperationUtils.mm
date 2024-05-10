@@ -368,9 +368,8 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
   TORCH_CHECK(src.is_mps(), "Placeholder storage has not been allocated on MPS device!");
   // extract the pointer to MTLBuffer from the Tensor's storage
   id<MTLBuffer> srcBuf = getMTLBufferStorage(src);
-  bool sliceViewTensor = canSliceViewTensor(src, mpsShape);
   // a view tensor could be contiguous (e.g., slice ops) or non-contiguous (e.g., transpose())
-  if ((!src.is_contiguous() || (src.storage_offset() && !sliceViewTensor)) && gatherTensorData) {
+  if (needsGather(src) && gatherTensorData) {
     Tensor emptyShell = Tensor();
     // use "_tensor" from Placeholder to retain view's output during its usage in other ops
     _tensor = gatherViewTensor(src, emptyShell);
@@ -390,13 +389,9 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
     const auto scalar_type = _tensor.scalar_type();
     dataType = _tensor.dim() == 0 ? getMPSScalarType(scalar_type) : getMPSDataType(scalar_type);
   }
-  if (src.is_contiguous() && src.storage_offset() && sliceViewTensor) {
-    _value = getMPSGraphTensorDataForView(src, mpsShape, dataType);
-  } else {
-    _value = [[[MPSGraphTensorData alloc] initWithMTLBuffer:srcBuf
-                                                      shape:mpsShape ? mpsShape : getMPSShape(_tensor)
-                                                   dataType:dataType] autorelease];
-  }
+  _value = [[[MPSGraphTensorData alloc] initWithMTLBuffer:srcBuf
+                                                    shape:mpsShape ? mpsShape : getMPSShape(_tensor)
+                                                 dataType:dataType] autorelease];
 
   TORCH_INTERNAL_ASSERT(_value);
   _placeholder = mpsGraphTensor;
