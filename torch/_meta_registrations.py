@@ -6309,6 +6309,27 @@ def meta_channel_shuffle(input, groups):
     )
 
 
+@register_meta(aten._fbgemm_jagged_to_padded_dense_forward.default)
+def meta__fbgemm_jagged_to_padded_dense_forward(values: Tensor, offsets: List[Tensor], max_lengths: List[int], padding_value: float=0.0):
+    # only one jagged dim is supported for now
+    assert len(offsets) == 1
+    assert len(max_lengths) == 1
+
+    B = offsets[0].shape[0] - 1
+    S = max_lengths[0]
+    output_shape = (B, S, *values.shape[1:])
+    return values.new_empty(output_shape)
+
+
+@register_meta(aten._fbgemm_jagged_to_padded_dense_backward.default)
+def meta__fbgemm_jagged_to_padded_dense_backward(grad_output: Tensor, offsets: List[Tensor], total_L: int):
+    # only one jagged dim is supported for now
+    assert len(offsets) == 1
+
+    output_shape = (total_L, *grad_output.shape[1:])
+    return grad_output.new_empty(output_shape)
+
+
 def _create_unary_float_meta_func(func):
     @register_meta(func)
     @out_wrapper()
