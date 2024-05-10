@@ -360,6 +360,7 @@ def should_pad_bench(
                 )
             else:
                 if input is not None:
+                    # realize bias for addmm
                     input = realize_tensor(input)
                 ori_time = do_bench(
                     lambda: op(input, mat1, mat2),
