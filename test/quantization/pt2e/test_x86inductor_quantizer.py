@@ -1866,6 +1866,105 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             )
 
     @skipIfNoX86
+    def test_set_module_name(self):
+        """Test that quantize the specific submodule."""
+
+        class Sub(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+                self.sub = Sub()
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.sub(x)
+                return x
+
+        m = M().eval()
+        example_inputs = (torch.randn(3, 5),)
+        # Set global to no quantization and then default config for a specific submodule.
+        quantizer = X86InductorQuantizer()
+        quantizer.set_module_name(
+            "sub", xiq.get_default_x86_inductor_quantization_config()
+        )
+        node_occurrence = {
+            torch.ops.aten.linear.default: 2,
+            # input and output for the second linear
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+        }
+        node_list = [
+            # first linear is not quantized
+            torch.ops.aten.linear.default,
+            # second linear is quantized
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default,
+            torch.ops.aten.linear.default,
+        ]
+        self._test_quantizer(m, example_inputs, quantizer, node_occurrence, node_list)
+
+    @skipIfNoX86
+    def test_set_module_name_with_underscores(self) -> None:
+        """Test that if a module name has an underscore, we can still quantize it."""
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # This module name has underscores, which can be part of a mangled
+                # name.
+                self.foo_bar = torch.nn.Linear(2, 2)
+                self.baz = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                return self.baz(self.foo_bar(x))
+
+        # Set global to no quantization and then default config for a specific submodule.
+        quantizer = X86InductorQuantizer()
+        quantizer.set_module_name(
+            "foo_bar", xiq.get_default_x86_inductor_quantization_config()
+        )
+        example_inputs = (torch.randn(2, 2),)
+        m = M().eval()
+        m = capture_pre_autograd_graph(m, example_inputs)
+        m = prepare_pt2e(m, quantizer)
+        # Use a linear count instead of names because the names might change, but
+        # the order should be the same.
+        count = 0
+        for n in m.graph.nodes:
+            if n.op == "call_function" and n.target == torch.ops.aten.linear.default:
+                # Get the weight observer to see the per-channel vs per-tensor.
+                weight_observer_node = n.args[1]
+                if count == 0:
+                    # for foo_bar.
+                    self.assertEqual(
+                        weight_observer_node.op,
+                        "call_module",
+                        f"The op of linear({count})'s weight_observer_node is {weight_observer_node.op} instead call_module",
+                    )
+                    observer_instance = getattr(m, weight_observer_node.target)
+                    self.assertEqual(
+                        observer_instance.qscheme, torch.per_channel_symmetric
+                    )
+                else:
+                    # For baz it should have no observer at all.
+                    self.assertNotEqual(
+                        weight_observer_node.op,
+                        "call_module",
+                        f"The op of linear({count})'s weight_observer_node is {weight_observer_node.op} instead call_module",
+                    )
+                count += 1
+
+    @skipIfNoX86
     def test_filter_conv2d_recipe(self):
         """
         Test removing conv2d from default recipe of X86InductorQuantizer.

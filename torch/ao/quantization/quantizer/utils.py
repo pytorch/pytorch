@@ -1,4 +1,4 @@
-from typing import List
+from typing import Callable, List, Optional
 
 from torch.ao.quantization.pt2e.utils import _is_sym_size_node
 
@@ -47,3 +47,65 @@ def _node_only_used_for_sym_size(node: Node, partition_nodes: List[Node]):
         ((user not in partition_nodes) or _is_sym_size_node(user))
         for user in node.users
     )
+
+
+def _get_module_name_filter(module_name: str):
+    """Get the module_name_filter function for a given module name, the filter accepts
+    a node and checks if the node comes from a module that has certain module name
+
+    For example:
+        node: linear_op = call_function[...](...)  # comes from a module with name blocks.sub.linear1
+
+
+    >> module_name_filter = _get_module_name_filter("blocks.sub")
+    >> print(module_name_filter(node))
+    True  # the node is from "blocks.sub" based on the fully qualified name "blocks.sub.linear1"
+    """
+
+    def module_name_filter(n: Node) -> bool:
+        # example: {
+        #    'L__self___sub': ("L['self'].sub", <class '....Sub'>),
+        #    'L__self___sub_linear': ("L['self'].sub.linear", <class 'torch.nn.modules.linear.Linear'>)
+        # }
+        # get_attr nodes doesn't have nn_module_stack?
+        nn_module_stack = n.meta.get("nn_module_stack", {})
+
+        def _normalize_path(n):
+            prefix = 0
+            # TODO This is non standard behavior and should be removed when we migrate off capture_pre_autograd_graph.
+            if n.startswith("L['self']."):
+                prefix = len("L['self'].")
+            return n[prefix:]
+
+        names = [_normalize_path(n) for n, _ in nn_module_stack.values()]
+        return module_name in names
+
+    return module_name_filter
+
+
+def _is_annotated(nodes: List[Node]):
+    """
+    Given a list of nodes (that represents an operator pattern),
+    check if any of the node is annotated, return True if any of the node
+    is annotated, otherwise return False
+    """
+    annotated = False
+    for node in nodes:
+        annotated = annotated or (
+            "quantization_annotation" in node.meta
+            and node.meta["quantization_annotation"]._annotated
+        )
+    return annotated
+
+
+def _skip_annotate(
+    nodes: List[Node], filter_fn: Optional[Callable[[Node], bool]] = None
+):
+    skip_annotate = False
+    # 1) Skip annotate if any node is already annotated
+    if _is_annotated(nodes):
+        skip_annotate = True
+    # 2) TODO: Skip annotate if a) filter_fn is provided and b) any node does not pass the filter
+    if filter_fn and any(not filter_fn(node) for node in nodes):
+        skip_annotate = True
+    return skip_annotate

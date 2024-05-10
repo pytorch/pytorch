@@ -14,6 +14,7 @@ from typing import (
     Set,
     Tuple,
     TYPE_CHECKING,
+    Union,
 )
 
 import torch
@@ -35,6 +36,10 @@ from torch.ao.quantization.quantizer.quantizer import (
     QuantizationSpec,
     Quantizer,
     SharedQuantizationSpec,
+)
+from torch.ao.quantization.quantizer.utils import (
+    _get_module_name_filter,
+    _skip_annotate,
 )
 from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
     _is_annotated,
@@ -142,6 +147,46 @@ def _mark_nodes_as_annotated(nodes: List[Node]):
             if QUANT_ANNOTATION_KEY not in node.meta:
                 node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation()
             node.meta[QUANT_ANNOTATION_KEY]._annotated = True
+
+
+AnnotatorType = Callable[
+    [
+        "X86InductorQuantizer",
+        torch.fx.GraphModule,
+        Optional[QuantizationConfig],
+        Optional[Callable[[Node], bool]],
+    ],
+    Optional[List[List[Node]]],
+]
+
+X86_ANNOTATOR_COLLECTIONS: Dict[str, Dict[str, AnnotatorType]] = {
+    "STATIC": {},
+    "DYNAMIC": {},
+    "QAT": {},
+}
+
+STATIC_ANNOTATORS = X86_ANNOTATOR_COLLECTIONS["STATIC"]
+DYNAMIC_ANNOTATORS = X86_ANNOTATOR_COLLECTIONS["DYNAMIC"]
+QAT_ANNOTATORS = X86_ANNOTATOR_COLLECTIONS["QAT"]
+
+
+AnnotatorCollectionType = Dict[str, AnnotatorType]
+
+
+def register_annotator(
+    annotators_list: Union[AnnotatorCollectionType, List[AnnotatorCollectionType]],
+    annotator_name: Optional[str] = None,
+):
+    def decorator(annotator: AnnotatorType):
+        nonlocal annotators_list, annotator_name
+        if not isinstance(annotators_list, list):
+            annotators_list = [annotators_list]
+        annotator_name = annotator_name or annotator.__name__
+        for annotators in annotators_list:
+            annotators[annotator_name] = annotator
+        return annotator
+
+    return decorator
 
 
 def _is_node_annotated(_node):
@@ -303,6 +348,7 @@ class X86InductorQuantizer(Quantizer):
         self.operator_type_qconfig: Dict[
             torch._ops.OpOverloadPacket, Optional[QuantizationConfig]
         ] = {}
+        self.module_name_config: Dict[str, Optional[QuantizationConfig]] = {}
 
     @classmethod
     def get_supported_quantization_configs(cls) -> List[QuantizationConfig]:
@@ -370,6 +416,19 @@ class X86InductorQuantizer(Quantizer):
             warnings.warn(
                 f"Module: Unable to customize quantization config for {module_type} by X86InductorQuantizer."
             )
+        return self
+
+    def set_module_name(
+        self, module_name: str, quantization_config: Optional[QuantizationConfig]
+    ):
+        """Set quantization_config for a submodule with name: `module_name`, for example:
+        quantizer.set_module_name("blocks.sub"), it will quantize all supported operator/operator
+        patterns in the submodule with this module name with the given `quantization_config`
+        """
+        assert (
+            quantization_config is not None
+        ), " quantization_config == None is not supported yet"
+        self.module_name_config[module_name] = quantization_config
         return self
 
     def _set_aten_operator_qconfig(
@@ -510,6 +569,37 @@ class X86InductorQuantizer(Quantizer):
             model = self._annotate_for_static_quantization_config(model)
         return model
 
+    def _annotate_by_module_name(
+        self,
+        model: torch.fx.GraphModule,
+        quantization_config: Optional[QuantizationConfig],
+        filter_fn: Optional[Callable[[Node], bool]] = None,
+    ) -> torch.fx.GraphModule:
+        # TODO: implement the support for None to be canceling out previous annotations
+        if quantization_config is None:
+            return model
+
+        if quantization_config.is_qat:
+            for annotator_func in QAT_ANNOTATORS.values():
+                annotator_func(self, model, quantization_config, filter_fn)
+        for annotator_func in STATIC_ANNOTATORS.values():
+            annotator_func(self, model, quantization_config, filter_fn)
+        return model
+
+    def _annotate_static_quantization_config_by_module_name(
+        self, model: torch.fx.GraphModule
+    ) -> torch.fx.GraphModule:
+        for module_name, config in self.module_name_config.items():
+            self._annotate_by_module_name(
+                model, config, _get_module_name_filter(module_name)
+            )
+        return model
+
+    def _annotate_static_quantization_config_by_op_type_and_global_config(self, model):
+        self._annotate_conv2d_fusion_pattern(model)
+        self._annotate_linear_fusion_pattern(model)
+        self._annotate_matmul_pattern(model)
+
     def _annotate_for_static_quantization_config(
         self, model: torch.fx.GraphModule
     ) -> torch.fx.GraphModule:
@@ -525,9 +615,12 @@ class X86InductorQuantizer(Quantizer):
         """
 
         # Step1: Recipe of fusion patterns like conv/linear.
-        self._annotate_conv2d_fusion_pattern(model)
-        self._annotate_linear_fusion_pattern(model)
-        self._annotate_matmul(model)
+        if self.module_name_config:
+            self._annotate_static_quantization_config_by_module_name(model)
+        if self.operator_type_qconfig or self.global_config:
+            self._annotate_static_quantization_config_by_op_type_and_global_config(
+                model
+            )
 
         # Step2: Recipe to propagate annotation for patterns beside conv/linear.
         # Go through all the nodes from start to end.
@@ -561,7 +654,9 @@ class X86InductorQuantizer(Quantizer):
         self._annotate_qat_conv2d_bn(model, config)
 
     def _annotate_qat_conv2d_bn_binary_unary(
-        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+        self,
+        gm: torch.fx.GraphModule,
+        quantization_config: QuantizationConfig,
     ) -> None:
         fused_partitions = find_sequential_partitions(
             gm, [torch.nn.Conv2d, torch.nn.BatchNorm2d, operator.add, torch.nn.ReLU]
@@ -782,26 +877,38 @@ class X86InductorQuantizer(Quantizer):
                 self._annotate_linear_unary(model, config)
             self._annotate_linear(model, config)
 
-    def _annotate_matmul(self, model: torch.fx.GraphModule):
+    def _annotate_matmul_pattern(self, model: torch.fx.GraphModule):
         if config := self._get_aten_operator_qconfig(torch.ops.aten.matmul.default):
-            for node in model.graph.nodes:
-                if node.target == torch.ops.aten.matmul.default and not _is_annotated(
-                    [node]
-                ):
-                    input_qspec_map = {}
-                    matmul_node = node
-                    for input_node in matmul_node.args:
-                        input_qspec_map[input_node] = get_input_act_qspec(config)
-                    matmul_node.meta[
-                        QUANT_ANNOTATION_KEY
-                    ] = _X86InductorQuantizationAnnotation(
-                        input_qspec_map=input_qspec_map,
-                        _annotated=True,
-                        _is_output_of_quantized_pattern=True,
-                    )
+            self._annotate_matmul(model, config)
 
+    @register_annotator(STATIC_ANNOTATORS)
+    def _annotate_matmul(
+        self,
+        model: torch.fx.GraphModule,
+        quantization_config: QuantizationConfig,
+        filter_fn: Optional[Callable[[Node], bool]] = None,
+    ):
+        for node in model.graph.nodes:
+            if node.target != torch.ops.aten.matmul.default:
+                continue
+            if _skip_annotate([node], filter_fn):
+                continue
+            input_qspec_map = {}
+            matmul_node = node
+            for input_node in matmul_node.args:
+                input_qspec_map[input_node] = get_input_act_qspec(quantization_config)
+            matmul_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
+                input_qspec_map=input_qspec_map,
+                _annotated=True,
+                _is_output_of_quantized_pattern=True,
+            )
+
+    @register_annotator(STATIC_ANNOTATORS)
     def _annotate_conv2d_binary_unary(
-        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+        self,
+        gm: torch.fx.GraphModule,
+        quantization_config: QuantizationConfig,
+        filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         # Conv2d + add + unary op
         fused_partitions = find_sequential_partitions(
@@ -829,7 +936,7 @@ class X86InductorQuantizer(Quantizer):
             ):
                 # No conv node found to be fused with add
                 continue
-            if _is_annotated([unary_node, binary_node, conv_node]):
+            if _skip_annotate([unary_node, binary_node, conv_node], filter_fn):
                 continue
             self._annotate_conv_node_helper(conv_node, False, quantization_config)
             binary_node_input_qspec_map = {}
@@ -845,8 +952,12 @@ class X86InductorQuantizer(Quantizer):
                 _is_output_of_quantized_pattern=True,
             )
 
+    @register_annotator(STATIC_ANNOTATORS)
     def _annotate_conv2d_binary(
-        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+        self,
+        gm: torch.fx.GraphModule,
+        quantization_config: QuantizationConfig,
+        filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         # Conv2d + add
         fused_partitions = find_sequential_partitions(
@@ -875,7 +986,7 @@ class X86InductorQuantizer(Quantizer):
             ):
                 # No conv node found to be fused with add
                 continue
-            if _is_annotated([binary_node, conv_node]):
+            if _skip_annotate([binary_node, conv_node], filter_fn):
                 continue
             self._annotate_conv_node_helper(conv_node, False, quantization_config)
             binary_node_input_qspec_map = {}
@@ -888,8 +999,12 @@ class X86InductorQuantizer(Quantizer):
                 _is_output_of_quantized_pattern=True,
             )
 
+    @register_annotator(STATIC_ANNOTATORS)
     def _annotate_conv2d_unary(
-        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+        self,
+        gm: torch.fx.GraphModule,
+        quantization_config: QuantizationConfig,
+        filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         fused_partitions = []
         unary_patterns = [
@@ -915,7 +1030,7 @@ class X86InductorQuantizer(Quantizer):
                 or conv_node.target != torch.ops.aten.conv2d.default
             ):
                 continue
-            if _is_annotated([unary_node, conv_node]):
+            if _skip_annotate([unary_node, conv_node], filter_fn):
                 continue
             self._annotate_conv_node_helper(conv_node, False, quantization_config)
             unary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
@@ -923,8 +1038,12 @@ class X86InductorQuantizer(Quantizer):
                 _is_output_of_quantized_pattern=True,
             )
 
+    @register_annotator(STATIC_ANNOTATORS)
     def _annotate_conv2d(
-        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+        self,
+        gm: torch.fx.GraphModule,
+        quantization_config: QuantizationConfig,
+        filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         conv_partitions = get_source_partitions(
             gm.graph, [torch.nn.Conv2d, torch.nn.functional.conv2d]
@@ -940,7 +1059,7 @@ class X86InductorQuantizer(Quantizer):
             ):
                 raise ValueError(f"{conv_node} is not an aten conv2d operator")
             # skip annotation if it is already annotated
-            if _is_annotated([conv_node]):
+            if _skip_annotate([conv_node], filter_fn):
                 continue
             self._annotate_conv_node_helper(conv_node, True, quantization_config)
 
@@ -1099,8 +1218,12 @@ class X86InductorQuantizer(Quantizer):
                 self._annotate_output_share_observer_as_input(input_node, node)
         return
 
+    @register_annotator(STATIC_ANNOTATORS)
     def _annotate_linear(
-        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+        self,
+        gm: torch.fx.GraphModule,
+        quantization_config: QuantizationConfig,
+        filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         linear_partitions = get_source_partitions(
             gm.graph, [torch.nn.Linear, torch.nn.functional.linear]
@@ -1119,12 +1242,16 @@ class X86InductorQuantizer(Quantizer):
             ):
                 raise ValueError(f"{linear_node} is not an aten linear operator")
             # skip annotation if it is already annotated
-            if _is_annotated([linear_node]):
+            if _skip_annotate([linear_node], filter_fn):
                 continue
             self._annotate_linear_node_helper(linear_node, True, quantization_config)
 
+    @register_annotator(STATIC_ANNOTATORS)
     def _annotate_linear_unary(
-        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+        self,
+        gm: torch.fx.GraphModule,
+        quantization_config: QuantizationConfig,
+        filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         postop_list = [
             torch.nn.ReLU,
@@ -1146,7 +1273,7 @@ class X86InductorQuantizer(Quantizer):
                 torch.ops.aten.linear.default,
             ):
                 continue
-            if _is_annotated([unary_node, linear_node]):
+            if _skip_annotate([unary_node, linear_node], filter_fn):
                 continue
             self._annotate_linear_node_helper(linear_node, False, quantization_config)
             unary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
@@ -1154,10 +1281,12 @@ class X86InductorQuantizer(Quantizer):
                 _is_output_of_quantized_pattern=True,
             )
 
+    @register_annotator(STATIC_ANNOTATORS)
     def _annotate_linear_binary_unary(
         self,
         gm: torch.fx.GraphModule,
         quantization_config: QuantizationConfig,
+        filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> None:
         # linear + binary_op + (optional) unary op
         binary_op_list = [operator.add]
