@@ -1665,3 +1665,20 @@ class TestClassType(JitTestCase):
         for fn in (fn_a, fn_b, fn_c, fn_d, fn_e):
             with self.assertRaisesRegex(RuntimeError, error_message_regex):
                 torch.jit.script(fn)
+
+    def test_class_type_closure(self):
+        # In this test, sqrt_class.py has `from math import sqrt`
+        # and MySqrtClass uses sqrt().
+        #
+        # We need to make sure that the closure of MySqrtClass.get_sqrt_inverse
+        # is used as the resolution callback, otherwise we may not be able to
+        # resolve `sqrt`.
+        from jit._imported_class_test.sqrt_class import MySqrtClass
+
+        # Make sure "sqrt" isn't defined here, in case we fall back to using the
+        # current frame's resolution callback.
+        self.assertFalse("sqrt" in globals())
+
+        ScriptedMySqrtClass = torch.jit.script(MySqrtClass)
+
+        self.assertEqual(ScriptedMySqrtClass().get_sqrt_inverse(), 0.5)

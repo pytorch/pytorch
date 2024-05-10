@@ -248,16 +248,20 @@ def get_class_assigns(ctx, cls_ast):
     return assigns
 
 
-def get_jit_class_def(cls, self_name):
-    # Get defs for each method within the current class independently
-    # TODO: proper overriding analysis when implementing class inheritance
-    methods = inspect.getmembers(
+def get_jit_class_methods(cls):
+    return inspect.getmembers(
         cls,
         predicate=lambda m: (inspect.ismethod(m) or inspect.isfunction(m))
         and not is_static_fn(cls, m.__name__)
         and m.__name__ in cls.__dict__
         and not _is_drop_fn(m),
     )
+
+
+def get_jit_class_def(cls, self_name):
+    # Get defs for each method within the current class independently
+    # TODO: proper overriding analysis when implementing class inheritance
+    methods = get_jit_class_methods(cls)
 
     def is_classmethod(fn):
         return inspect.ismethod(fn) and getattr(fn, "__self__", None) == cls

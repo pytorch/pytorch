@@ -1729,7 +1729,8 @@ void initJitScriptBindings(PyObject* module) {
       [](const std::string& qualifiedName,
          const ClassDef& classDef,
          const ClassMethodDefaults& defaults,
-         const ResolutionCallback& rcb) {
+         const ResolutionCallback& rcb,
+         const py::object& per_method_rcb) {
         C10_LOG_API_USAGE_ONCE("torch.script.class");
         if (classDef.superclass().present()) {
           throw ErrorReport(classDef.range())
@@ -1752,6 +1753,15 @@ void initJitScriptBindings(PyObject* module) {
         std::vector<Def> methodDefs;
         std::vector<Property> props;
 
+        std::unordered_map<std::string, ResolutionCallback> rcb_map_cpp;
+        if (py::isinstance<py::dict>(per_method_rcb)) {
+          py::dict per_method_rcb_dict = per_method_rcb.cast<py::dict>();
+          for (const auto& it : per_method_rcb_dict) {
+            rcb_map_cpp[py::cast<std::string>(it.first)] =
+                py::cast<ResolutionCallback>(it.second);
+          }
+        }
+
         for (const auto& def : classDef.body()) {
           if (def.kind() != TK_DEF) {
             throw ErrorReport(def.range())
@@ -1760,8 +1770,12 @@ void initJitScriptBindings(PyObject* module) {
                    "something else!";
           }
           methodDefs.emplace_back(def);
+          const auto& method_name = methodDefs.back().name().name();
+          auto rcb_ptr = rcb_map_cpp.find(method_name);
+          const auto& this_rcb =
+              (rcb_ptr == rcb_map_cpp.end() ? rcb : rcb_ptr->second);
           methodRcbs.push_back(
-              pythonResolver(rcb, classDef.name().name(), classType));
+              pythonResolver(this_rcb, classDef.name().name(), classType));
         }
 
         // Gather definitions for property getters and setters as well as
@@ -1801,7 +1815,12 @@ void initJitScriptBindings(PyObject* module) {
           ++defs_it;
         }
         return classType;
-      });
+      },
+      py::arg("qual_name"),
+      py::arg("definition"),
+      py::arg("defaults"),
+      py::arg("rcb"),
+      py::arg("per_method_rcb") = py::none());
   m.def(
       "_jit_script_interface_compile",
       [](const std::string& qualifiedName,

@@ -53,13 +53,26 @@ ignored_attributes = [
 
 
 def _compile_and_register_class(obj, rcb, qualified_name):
+    """
+    For non-nn.Module classes.
+
+    Check the global cache; if it's been scripted before, use the cached version.
+    Otherwise, compile the class and register it in the global cache.
+    """
     script_class = _get_script_class(obj)
 
     if not script_class:
         ast = get_jit_class_def(obj, obj.__name__)
         defaults = torch.jit.frontend.get_default_args_for_class(obj)
+        methods = torch.jit.frontend.get_jit_class_methods(obj)
+        # If we just use the default RCB for the current frame where we called jit.script,
+        # we may miss some context. For example, cal
+        per_method_rcbs = {
+            name: _jit_internal.createResolutionCallbackFromClosure(method)
+            for (name, method) in methods
+        }
         script_class = torch._C._jit_script_class_compile(
-            qualified_name, ast, defaults, rcb
+            qualified_name, ast, defaults, rcb, per_method_rcbs
         )
         _add_script_class(obj, script_class)
 
@@ -67,6 +80,14 @@ def _compile_and_register_class(obj, rcb, qualified_name):
 
 
 def make_stub(func, name):
+    """
+    For methods on nn.Modules.
+
+    Gets:
+    * resolution callback
+    * ast
+    * original function
+    """
     rcb = _jit_internal.createResolutionCallbackFromClosure(func)
     ast = get_jit_def(func, name, self_name="RecursiveScriptModule")
     return ScriptMethodStub(rcb, ast, func)
@@ -88,6 +109,9 @@ def make_stub_from_method(nn_module, method_name):
 
 
 def make_stubs_from_exported_methods(mod):
+    """
+    For nn.Modules.
+    """
     stubs = []
     for name in dir(mod):
         item = getattr(mod, name, None)
@@ -101,6 +125,9 @@ def make_stubs_from_exported_methods(mod):
 
 
 def jit_ignored_properties(module):
+    """
+    For nn.Modules.
+    """
     user_annotated_ignored_attributes = getattr(
         module, "__jit_ignored_attributes__", list()
     )
@@ -134,6 +161,9 @@ _constant_types = (
 
 
 def _get_valid_constant(attr, v, owner_type):
+    """
+    For nn.Modules.
+    """
     if isinstance(v, _constant_types):
         return v
     elif isinstance(v, (tuple, list)):
