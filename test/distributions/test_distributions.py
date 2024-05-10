@@ -4657,7 +4657,7 @@ class TestRsample(DistributionsTestCase):
                         "alpha = alpha_c + %.2g" % shift,  # noqa: UP031
                         "expected_grad: %.5g" % expected_grad,  # noqa: UP031
                         "actual_grad: %.5g" % actual_grad,  # noqa: UP031
-                        "error = %.2g"
+                        "error = %.2g"  # noqa: UP031
                         % torch.abs(expected_grad - actual_grad).max(),  # noqa: UP031
                     ]
                 ),
