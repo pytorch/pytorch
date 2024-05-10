@@ -41,20 +41,22 @@ def decomp_for_pre_dispatch(enabled=True):
 def should_decompose_torch_op(fn):
     from torch._dynamo import compiled_autograd
 
-    # TODO(JackCaoG): we need a better way to tell if a torch function should we decompose
-    allowed_torch_fn = fn.__name__ not in ["_make_grads"]
-    definanilly_not_composite_kernel = type(
-        fn
-    ) == torch._ops.OpOverload and not torch._C._dispatch_has_kernel_for_dispatch_key(
-        fn.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+    # definanilly_not_composite_kernel = type(
+    #     fn
+    # ) == torch._ops.OpOverload and not torch._C._dispatch_has_kernel_for_dispatch_key(
+    #     fn.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+    # )
+
+    is_nn_functional = (
+        hasattr(fn, "__module__") and fn.__module__ == "torch.nn.functional"
     )
 
     # only decompoization torch ops for forward
     in_compiled_backward = compiled_autograd.compiled_autograd_enabled
+
     return (
         torch._dynamo.config.use_single_step_graph
-        and allowed_torch_fn
-        and not definanilly_not_composite_kernel
+        and is_nn_functional
         and not in_compiled_backward
     )
 
