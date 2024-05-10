@@ -3,6 +3,8 @@ import functools
 import inspect
 import itertools
 import logging
+
+import math
 import operator
 import sys
 import textwrap
@@ -842,7 +844,7 @@ class ExternKernelCaller(ChoiceCaller):
                 out_new, tuple(out.size()), tuple(out.stride())
             )
             out.copy_(out_new)  # for correctness checking
-            return do_bench(lambda: algo(*args))
+            return do_bench(algo, args, {})
 
     def to_callable(self):
         fn = self.choice.to_callable()
@@ -942,7 +944,7 @@ class AlgorithmSelectorCache(PersistentCache):
         choices = [choice for choice in choices if choice is not None]
 
         if len(choices) == 0:
-            raise RuntimeError(
+            raise NoValidChoicesError(
                 "No choices to select, please consider adding ATEN into max_autotune_gemm_backends "
                 "config (defined in torch/_inductor/config.py) to allow at least one choice. "
             )
@@ -974,6 +976,14 @@ class AlgorithmSelectorCache(PersistentCache):
                 len(choices),
             )
             if num_workers <= 0:
+                return no_op
+
+            # https://github.com/python/cpython/issues/106905
+            if (
+                sys.version_info.major == 3
+                and sys.version_info.minor == 11
+                and sys.version_info.micro <= 8
+            ):
                 return no_op
 
             # TODO - debug issue
@@ -1026,7 +1036,6 @@ class AlgorithmSelectorCache(PersistentCache):
                 [c for c in choices if hasattr(c, "precompile")],
                 timeout=precompilation_timeout_seconds,
             )
-            from triton.runtime.autotuner import OutOfResources
 
             @functools.lru_cache(None)
             @restore_stdout_stderr(initial_stdout, initial_stderr)
@@ -1047,9 +1056,17 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
                 except StopIteration:
                     pass
-                except OutOfResources:
-                    # This config is invalid due to requiring too many resources
-                    pass
+                except Exception as e:
+                    try:
+                        from triton.runtime.autotuner import OutOfResources
+
+                        if isinstance(e, OutOfResources):
+                            # This config is invalid due to requiring too many resources
+                            pass
+                        else:
+                            raise e
+                    except ImportError:
+                        raise e
 
                 executor.shutdown(wait=True)
 
@@ -1129,7 +1146,11 @@ class AlgorithmSelectorCache(PersistentCache):
         if timings == {} or choices[0] not in timings:
             return choices[0].output_node()
 
-        selected_choice = builtins.min(timings, key=timings.__getitem__).output_node()
+        selected_key = builtins.min(timings, key=timings.__getitem__)
+        selected_time = timings[selected_key]
+        if (not isinstance(selected_time, float)) or (not math.isfinite(selected_time)):
+            raise NoValidChoicesError
+        selected_choice = selected_key.output_node()
         log.debug("selected choice: %s", str(selected_choice))
         return selected_choice
 
@@ -1209,14 +1230,13 @@ class AlgorithmSelectorCache(PersistentCache):
             else:
                 # triton templates want the base pointer for sliced tensors
                 result = choice.benchmark(*example_inputs, out=out)
-            if VERIFY:
+            if VERIFY and expected is not None:
                 torch.testing.assert_close(out_extern, expected, **VERIFY)
-            torch.cuda.synchronize()  # shake out any CUDA errors
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()  # shake out any CUDA errors
             return result
 
         def benchmark_in_current_process(choices):
-            from triton.runtime.autotuner import OutOfResources
-
             inputs = get_inputs()
             example_inputs, _, out, _, _ = inputs
             timings = {}
@@ -1224,30 +1244,38 @@ class AlgorithmSelectorCache(PersistentCache):
                 try:
                     timing = benchmark_choice_in_current_process(choice, *inputs)
                 except CUDACompileError as e:
-                    log.warning(
-                        "CUDA compilation error: \n%s. \nIgnore this choice.", str(e)
+                    log.error(
+                        "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice.",
+                        str(e),
                     )
                     timing = float("inf")
                 except RuntimeError as e:
                     msg = str(e)
                     if "invalid argument" in msg:
                         msg += "\n\nThis may mean this GPU is too small for max_autotune mode.\n\n"
-                        log.warning(msg)
-                        timing = float("inf")
                     else:
                         if "illegal memory access" in msg:
                             msg += "\n\nEither error in template or triton bug.\n"
-                        raise ErrorFromChoice(
-                            msg, choice, debug_str(example_inputs, out)
-                        ) from e
-                except OutOfResources as e:
-                    log.warning(e)
+                    log.error(
+                        "Runtime error during autotuning: \n%s. \nIgnoring this choice.",
+                        msg,
+                    )
                     timing = float("inf")
-
                 except AssertionError as e:
                     raise AssertionError(  # noqa: TRY200
                         f"Incorrect result from choice {choice}\n\n{e}"
                     )
+                except Exception as e:
+                    try:
+                        from triton.runtime.autotuner import OutOfResources
+
+                        if isinstance(e, OutOfResources):
+                            log.warning(e)
+                            timing = float("inf")
+                        else:
+                            raise e
+                    except ImportError:
+                        raise e
 
                 timings[choice] = timing
 

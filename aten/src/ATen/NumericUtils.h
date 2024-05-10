@@ -38,11 +38,7 @@ inline C10_HOST_DEVICE bool _isnan(T val) {
 
 template <typename T, std::enable_if_t<c10::is_complex<T>::value, int> = 0>
 inline C10_HOST_DEVICE bool _isnan(T val) {
-#if defined(__CUDACC__) || defined(__HIPCC__)
-  return ::isnan(val.real()) || ::isnan(val.imag());
-#else
   return std::isnan(val.real()) || std::isnan(val.imag());
-#endif
 }
 
 template <typename T, std::enable_if_t<std::is_same_v<T, at::Half>, int> = 0>

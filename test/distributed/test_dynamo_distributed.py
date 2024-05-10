@@ -577,6 +577,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     # TODO(whc) Investigate why cudagraphs breaks inductor+fsdp for hf_bert
     @patch.object(torch._inductor.config.triton, "cudagraphs", False)
     @patch.object(torch._inductor.config, "fallback_random", True)
+    @patch.object(torch._dynamo.config, "guard_nn_modules", True)
     def test_hf_bert_fsdp_activation_checkpointing(self):
         from transformers.models.bert.modeling_bert import BertLayer
 
@@ -1177,6 +1178,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         fsdp_out = fsdp_model(inp)
         self.assertEqual(local_out, fsdp_out)
 
+    @patch.object(config, "guard_nn_modules", True)
     def test_fsdp_dup_tensors_diff_source(self):
         """
         Tests that FSDP-managed modules' parameters and buffers with different
