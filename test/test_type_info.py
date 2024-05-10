@@ -6,6 +6,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests, TEST_NUMPY
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
+import sys
 import torch
 import unittest
 
@@ -23,6 +24,8 @@ class TestDTypeInfo(TestCase):
         for dtype in [torch.int64, torch.int32, torch.int16, torch.int8, torch.uint8, torch.bool]:
             with self.assertRaises(TypeError):
                 _ = torch.finfo(dtype)
+            with self.assertRaises(RuntimeError):
+                dtype.to_complex()
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_iinfo(self):
@@ -87,6 +90,26 @@ class TestDTypeInfo(TestCase):
         self.assertEqual(xinfo.tiny, 0.015625)
         self.assertEqual(xinfo.resolution, 1.0)
         self.assertEqual(xinfo.dtype, "float8_e4m3fn")
+
+    def test_to_complex(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/124868
+        # If reference count is leaked this would be a set of 10 elements
+        ref_cnt = {sys.getrefcount(torch.float32.to_complex()) for _ in range(10)}
+        self.assertLess(len(ref_cnt), 3)
+
+        self.assertEqual(torch.float64.to_complex(), torch.complex128)
+        self.assertEqual(torch.float32.to_complex(), torch.complex64)
+        self.assertEqual(torch.float16.to_complex(), torch.complex32)
+
+    def test_to_real(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/124868
+        # If reference count is leaked this would be a set of 10 elements
+        ref_cnt = {sys.getrefcount(torch.cfloat.to_real()) for _ in range(10)}
+        self.assertLess(len(ref_cnt), 3)
+
+        self.assertEqual(torch.complex128.to_real(), torch.double)
+        self.assertEqual(torch.complex64.to_real(), torch.float32)
+        self.assertEqual(torch.complex32.to_real(), torch.float16)
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True

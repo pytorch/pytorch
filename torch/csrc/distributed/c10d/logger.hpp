@@ -1,7 +1,6 @@
 #include <c10/util/Logging.h>
 #include <torch/csrc/distributed/c10d/reducer.hpp>
 
-#include <mutex>
 #include <utility>
 
 namespace c10d {

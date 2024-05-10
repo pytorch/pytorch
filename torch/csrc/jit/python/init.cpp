@@ -1303,6 +1303,11 @@ void initJITBindings(PyObject* module) {
           "nested_int_coeff",
           [](const c10::SymNode& node) {
             return node->nested_int_coeff();
+          })
+      .def(
+          "__deepcopy__",
+          [](const c10::SymNode& node, py::handle memo) {
+            return node->clone();
           });
 
   // clang-format on

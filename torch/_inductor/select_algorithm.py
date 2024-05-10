@@ -3,6 +3,8 @@ import functools
 import inspect
 import itertools
 import logging
+
+import math
 import operator
 import sys
 import textwrap
@@ -35,11 +37,14 @@ from .codegen.triton import (
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
+from .runtime.hints import DeviceProperties
+from .runtime.runtime_utils import do_bench
 from .utils import (
-    do_bench,
     get_dtype_size,
     Placeholder,
+    restore_stdout_stderr,
     sympy_dot,
+    sympy_index_symbol,
     sympy_product,
     unique,
 )
@@ -153,8 +158,7 @@ class TritonTemplateKernel(TritonKernel):
         argdefs, _, signature = self.args.python_argdefs()
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
-            "device": self.output_node.get_device().index,
-            "device_type": self.output_node.get_device().type,
+            "device": DeviceProperties.create(self.output_node.get_device()),
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
@@ -168,7 +172,7 @@ class TritonTemplateKernel(TritonKernel):
 
         inductor_meta = {
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
-            "backend_hash": torch.utils._triton.triton_hash_with_backend(),
+            **TritonKernel.inductor_meta_common(),
         }
         if config.profile_bandwidth or config.benchmark_kernel:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
@@ -275,20 +279,23 @@ class TritonTemplateKernel(TritonKernel):
         potential multiple modifications
         """
 
+        def add_input(name):
+            return self.args.input(name)
+
         class PlaceholderSubstitution(V.WrapperHandler):  # type: ignore[name-defined]
             self.name = "PlaceholderSubstitution"
 
             def load(self, name: str, index: sympy.Expr):
                 if name not in fixed_inputs:
-                    raise AssertionError(
-                        f"All loads should be coming from fixed inputs - {name}"
-                    )
+                    # If it's not a fixed input, it's a load from a captured
+                    # tensor
+                    var = add_input(name)
+                    return f"tl.load({var} + {index})"
+
                 return f"({fixed_inputs[name]})"
 
-            # TODO Doesn't work yet
             def indirect_indexing(self, index_var, size, check):
-                return self._inner.indirect_indexing(index_var, size, False)
-                # return sympy_symbol(str(index_var))
+                return sympy_index_symbol(str(index_var))
 
         # if self.modification_cache is None:
         with V.set_ops_handler(PlaceholderSubstitution(V.ops)):
@@ -595,16 +602,25 @@ class TritonTemplate(KernelTemplate):
                 + "-"
             )
             mod = PyCodeCache.load(code, extra)
-            _, call_args, _ = kernel.args.python_argdefs()
 
-        expected_args = list(unique(x.get_name() for x in input_nodes))
-        expected_args.extend([fake_out.get_name()])
-        assert list(call_args)[: len(expected_args)] == expected_args, (
-            call_args,
-            expected_args,
+        input_call_args = tuple(kernel.args.input_buffers.keys())
+        output_call_args = tuple(kernel.args.output_buffers.keys())
+
+        # We expect the input_buffer order to be [*input_nodes, *captured_buffers]
+        expected_input_args = tuple(unique(x.get_name() for x in input_nodes))
+        expected_output_args = (fake_out.get_name(),)
+        assert input_call_args[: len(expected_input_args)] == expected_input_args, (
+            input_call_args,
+            expected_input_args,
         )
+        assert output_call_args == expected_output_args, (
+            output_call_args,
+            expected_output_args,
+        )
+
+        full_input_nodes = tuple([V.graph.get_buffer(k) for k in input_call_args])
         extra_args = V.graph.sizevars.size_hints(
-            map(sympy.expand, call_args[len(expected_args) :]),
+            map(sympy.expand, tuple(kernel.args.sizevars.keys())),
             fallback=config.unbacked_symint_fallback,
         )
 
@@ -642,13 +658,13 @@ class TritonTemplate(KernelTemplate):
             num_stages=num_stages,
             num_warps=num_warps,
             matrix_instr_nonkdim=kwargs.get("matrix_instr_nonkdim", 0),
-            input_tensor_meta=TensorMeta.from_irnodes(input_nodes),
+            input_tensor_meta=TensorMeta.from_irnodes(full_input_nodes),
             output_tensor_meta=TensorMeta.from_irnodes(layout),
         )
 
         return TritonTemplateCaller(
             kernel_hash_name,
-            input_nodes,
+            full_input_nodes,
             layout,
             make_kernel_render,
             extra.strip("-").replace("-", ", "),
@@ -828,7 +844,7 @@ class ExternKernelCaller(ChoiceCaller):
                 out_new, tuple(out.size()), tuple(out.stride())
             )
             out.copy_(out_new)  # for correctness checking
-            return do_bench(lambda: algo(*args))
+            return do_bench(algo, args, {})
 
     def to_callable(self):
         fn = self.choice.to_callable()
@@ -886,6 +902,10 @@ class ErrorFromChoice(RuntimeError):
         self.choice = choice
 
 
+class NoValidChoicesError(RuntimeError):
+    pass
+
+
 class AlgorithmSelectorCache(PersistentCache):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -924,7 +944,7 @@ class AlgorithmSelectorCache(PersistentCache):
         choices = [choice for choice in choices if choice is not None]
 
         if len(choices) == 0:
-            raise RuntimeError(
+            raise NoValidChoicesError(
                 "No choices to select, please consider adding ATEN into max_autotune_gemm_backends "
                 "config (defined in torch/_inductor/config.py) to allow at least one choice. "
             )
@@ -958,6 +978,14 @@ class AlgorithmSelectorCache(PersistentCache):
             if num_workers <= 0:
                 return no_op
 
+            # https://github.com/python/cpython/issues/106905
+            if (
+                sys.version_info.major == 3
+                and sys.version_info.minor == 11
+                and sys.version_info.micro <= 8
+            ):
+                return no_op
+
             # TODO - debug issue
             if torch.version.hip:
                 return no_op
@@ -973,6 +1001,11 @@ class AlgorithmSelectorCache(PersistentCache):
             if timings:
                 return no_op
 
+            if config.search_autotune_cache and not (
+                config.max_autotune or config.max_autotune_gemm
+            ):
+                return no_op
+
             precompile_key = (
                 f"{name}: {inputs_key} : {torch.get_float32_matmul_precision()}"
             )
@@ -985,14 +1018,27 @@ class AlgorithmSelectorCache(PersistentCache):
                 num_workers,
             )
 
+            # In rare circumstances, because python threads inherit global state,
+            # thread pool executor can race and leave stdout/stderr in a state
+            # different than the original values. we explicitly restore the state
+            # here to avoid this issue.
+
+            initial_stdout = sys.stdout
+            initial_stderr = sys.stderr
+
+            def precompile_with_captured_stdout(choice):
+                with restore_stdout_stderr(initial_stdout, initial_stderr):
+                    return choice.precompile()
+
             executor = ThreadPoolExecutor(max_workers=num_workers)
             futures = executor.map(
-                lambda c: c.precompile(),
+                lambda c: precompile_with_captured_stdout(c),
                 [c for c in choices if hasattr(c, "precompile")],
                 timeout=precompilation_timeout_seconds,
             )
 
             @functools.lru_cache(None)
+            @restore_stdout_stderr(initial_stdout, initial_stderr)
             def wait_on_futures():
                 counters["inductor"]["select_algorithm_precompile"] += 1
                 try:
@@ -1010,6 +1056,17 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
                 except StopIteration:
                     pass
+                except Exception as e:
+                    try:
+                        from triton.runtime.autotuner import OutOfResources
+
+                        if isinstance(e, OutOfResources):
+                            # This config is invalid due to requiring too many resources
+                            pass
+                        else:
+                            raise e
+                    except ImportError:
+                        raise e
 
                 executor.shutdown(wait=True)
 
@@ -1089,7 +1146,11 @@ class AlgorithmSelectorCache(PersistentCache):
         if timings == {} or choices[0] not in timings:
             return choices[0].output_node()
 
-        selected_choice = builtins.min(timings, key=timings.__getitem__).output_node()
+        selected_key = builtins.min(timings, key=timings.__getitem__)
+        selected_time = timings[selected_key]
+        if (not isinstance(selected_time, float)) or (not math.isfinite(selected_time)):
+            raise NoValidChoicesError
+        selected_choice = selected_key.output_node()
         log.debug("selected choice: %s", str(selected_choice))
         return selected_choice
 
@@ -1169,14 +1230,13 @@ class AlgorithmSelectorCache(PersistentCache):
             else:
                 # triton templates want the base pointer for sliced tensors
                 result = choice.benchmark(*example_inputs, out=out)
-            if VERIFY:
+            if VERIFY and expected is not None:
                 torch.testing.assert_close(out_extern, expected, **VERIFY)
-            torch.cuda.synchronize()  # shake out any CUDA errors
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()  # shake out any CUDA errors
             return result
 
         def benchmark_in_current_process(choices):
-            from triton.runtime.autotuner import OutOfResources
-
             inputs = get_inputs()
             example_inputs, _, out, _, _ = inputs
             timings = {}
@@ -1184,30 +1244,38 @@ class AlgorithmSelectorCache(PersistentCache):
                 try:
                     timing = benchmark_choice_in_current_process(choice, *inputs)
                 except CUDACompileError as e:
-                    log.warning(
-                        "CUDA compilation error: \n%s. \nIgnore this choice.", str(e)
+                    log.error(
+                        "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice.",
+                        str(e),
                     )
                     timing = float("inf")
                 except RuntimeError as e:
                     msg = str(e)
                     if "invalid argument" in msg:
                         msg += "\n\nThis may mean this GPU is too small for max_autotune mode.\n\n"
-                        log.warning(msg)
-                        timing = float("inf")
                     else:
                         if "illegal memory access" in msg:
                             msg += "\n\nEither error in template or triton bug.\n"
-                        raise ErrorFromChoice(
-                            msg, choice, debug_str(example_inputs, out)
-                        ) from e
-                except OutOfResources as e:
-                    log.warning(e)
+                    log.error(
+                        "Runtime error during autotuning: \n%s. \nIgnoring this choice.",
+                        msg,
+                    )
                     timing = float("inf")
-
                 except AssertionError as e:
                     raise AssertionError(  # noqa: TRY200
                         f"Incorrect result from choice {choice}\n\n{e}"
                     )
+                except Exception as e:
+                    try:
+                        from triton.runtime.autotuner import OutOfResources
+
+                        if isinstance(e, OutOfResources):
+                            log.warning(e)
+                            timing = float("inf")
+                        else:
+                            raise e
+                    except ImportError:
+                        raise e
 
                 timings[choice] = timing
 
