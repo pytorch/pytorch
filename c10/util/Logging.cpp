@@ -3,7 +3,6 @@
 #include <c10/util/Lazy.h>
 #include <c10/util/Logging.h>
 #ifdef FBCODE_CAFFE2
-#include <common/process/StackTrace.h>
 #include <folly/synchronization/SanitizeThread.h>
 #endif
 
@@ -26,30 +25,15 @@ C10_DEFINE_bool(
 namespace c10 {
 
 namespace {
-std::function<::c10::Error::Backtrace()>& GetFetchStackTrace() {
-  static std::function<::c10::Error::Backtrace()> func = []() {
-#ifdef FBCODE_CAFFE2
-    // Same implementation as get_backtrace() in fbcode, but with lazy
-    // symbolization.
-    class LazyBacktrace : public OptimisticLazyValue<std::string> {
-      facebook::process::StackTrace st_;
-
-      std::string compute() const override {
-        return st_.toString();
-      }
-    };
-
-    return std::make_shared<LazyBacktrace>();
-#else
-    return std::make_shared<PrecomputedLazyValue<std::string>>(
-        get_backtrace(/*frames_to_skip=*/1));
-#endif
+std::function<::c10::Backtrace()>& GetFetchStackTrace() {
+  static std::function<::c10::Backtrace()> func = []() {
+    return get_lazy_backtrace(/*frames_to_skip=*/1);
   };
   return func;
 };
 } // namespace
 
-void SetStackTraceFetcher(std::function<::c10::Error::Backtrace()> fetcher) {
+void SetStackTraceFetcher(std::function<::c10::Backtrace()> fetcher) {
   GetFetchStackTrace() = std::move(fetcher);
 }
 
@@ -116,7 +100,7 @@ class PyTorchStyleBacktrace : public OptimisticLazyValue<std::string> {
         backtrace_->get());
   }
 
-  ::c10::Error::Backtrace backtrace_;
+  ::c10::Backtrace backtrace_;
   SourceLocation source_location_;
 };
 
