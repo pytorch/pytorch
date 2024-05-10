@@ -2,10 +2,10 @@ import logging
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 from .rocm_benchmark_request import ROCmBenchmarkRequest
+from .rocm_template_buffer import ROCmTemplateBuffer
 from ...ir import (
     Buffer,
     ChoiceCaller,
-    ROCmTemplateBuffer,
     IRNode,
     Layout,
     PrimitiveInfoType,

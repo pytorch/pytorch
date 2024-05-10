@@ -6,7 +6,7 @@ from ...._dynamo.utils import counters
 from ... import config
 from ...codecache import code_hash, get_path
 
-from ...ir import ROCmTemplateBuffer
+from .rocm_template_buffer import ROCmTemplateBuffer
 from ...scheduler import BaseSchedulerNode, BaseScheduling, Scheduler, SchedulerNode
 from ...utils import get_fused_kernel_name, get_kernel_metadata, sympy_product
 from ...virtualized import V

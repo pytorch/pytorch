@@ -20,9 +20,6 @@ from torch._inductor.codecache import (
     DLLWrapper,
 )
 
-CUDA_VISIBLE_DEVICES = "CUDA_VISIBLE_DEVICES"
-EXIT_HANDLER_REGISTERED = False
-
 log = logging.getLogger(__name__)
 
 
