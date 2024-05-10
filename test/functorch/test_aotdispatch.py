@@ -67,6 +67,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfRocm,
+    skipIfTorchDynamo,
     TestCase,
 )
 from torch.testing._internal.hop_db import hop_db
@@ -3308,6 +3309,7 @@ def forward(self, tangents_1):
             str(out2.grad_fn.__class__), """<class 'ViewBackward0'>"""
         )
 
+    @skipIfTorchDynamo()
     @patch("torch._dynamo.config.assume_static_by_default", False)
     def test_dynamic_output_aliases_input_view_meta_replay(self):
         # - torch.compile: using it so we can have a SymInt in the FX graph.
