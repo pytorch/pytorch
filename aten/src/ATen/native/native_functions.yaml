@@ -14661,6 +14661,11 @@
   dispatch:
     CUDA: _fbgemm_jagged_to_padded_dense_backward
 
+- func: _fbgemm_dense_to_jagged_forward(Tensor dense, Tensor[] offsets, SymInt? total_L) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: _fbgemm_dense_to_jagged_forward_symint
+
 - func: _nested_from_padded_tensor(Tensor padded, Tensor offsets, Tensor dummy, int dim=1) -> Tensor
   variants: function
   device_check: NoCheck
