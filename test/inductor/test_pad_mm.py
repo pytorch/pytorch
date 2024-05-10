@@ -328,6 +328,34 @@ class PadMMTest(TestCase):
         self.assertEqual(out, inps[0] @ inps[1])
 
     @inductor_config.patch(force_shape_pad=True)
+    @fresh_inductor_cache()
+    def test_pad_addmm_2d_bias(self):
+        @torch.compile()
+        def foo(input, x, y):
+            return torch.ops.aten.addmm(input, x, y)
+
+        for a in [1, 4]:
+            for b in [1, 6]:
+                inps = (
+                    torch.rand([a, b], device="cuda"),
+                    torch.rand([4, 5], device="cuda"),
+                    torch.rand([5, 6], device="cuda"),
+                )
+                out = foo(*inps)
+                out_eager = torch.ops.aten.addmm(*inps)
+                self.assertEqual(out, out_eager)
+
+        for a in [1, 6]:
+            inps = (
+                torch.rand([a], device="cuda"),
+                torch.rand([4, 5], device="cuda"),
+                torch.rand([5, 6], device="cuda"),
+            )
+            out = foo(*inps)
+            out_eager = torch.ops.aten.addmm(*inps)
+            self.assertEqual(out, out_eager)
+
+    @inductor_config.patch(force_shape_pad=True)
     def test_pad_batch(self):
         m = 6
         n = 9
@@ -366,7 +394,9 @@ class PadMMTest(TestCase):
         mm(torch.rand([25, 25], device="cuda"), torch.rand([25, 25], device="cuda"))
         local_cache = get_pad_cache().get_local_cache()
         self.assertTrue(len(local_cache) == 2)
-        FileCheck().check_count("exclude_pad:False", 2, exactly=True)
+        FileCheck().check_count("exclude_pad:False", 2, exactly=True).run(
+            repr(local_cache)
+        )
 
         @torch.compile()
         def mm(a, b):
@@ -377,8 +407,12 @@ class PadMMTest(TestCase):
         # reuse original base timing
         self.assertTrue(len(local_cache) == 3)
 
-        FileCheck().check_count("exclude_pad:False", 3, exactly=True)
-        FileCheck().check_count("exclude_pad:True", 1, exactly=True)
+        FileCheck().check_count("exclude_pad:False", 3, exactly=True).run(
+            repr(local_cache)
+        )
+        FileCheck().check_count("exclude_pad:True", 1, exactly=True).run(
+            repr(local_cache)
+        )
 
 
 if __name__ == "__main__":

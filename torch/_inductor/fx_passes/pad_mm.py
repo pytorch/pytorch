@@ -145,11 +145,10 @@ def pad_addmm(
                 input = pad_dim(input, n_padded_length, 1)
             elif input.dim() == 1 and input.shape[0] != 1:
                 input = pad_dim(input, n_padded_length, 0)
-        elif m_padded_length != 0 and input.dim() == 2 and input.shape[0] != 1:
+        if m_padded_length != 0 and input.dim() == 2 and input.shape[0] != 1:
             input = pad_dim(input, m_padded_length, 0)
-        input_padded = input
 
-    res = aten.addmm(input_padded, mat1, mat2, beta=beta, alpha=alpha)
+    res = aten.addmm(input, mat1, mat2, beta=beta, alpha=alpha)
 
     if m_padded_length != 0:
         res = res[:-m_padded_length, :]
@@ -214,11 +213,19 @@ def get_pad_cache():
     return torch._inductor.codecache.LocalCache()
 
 
-def get_cached_should_pad(key):
+def get_cached_should_pad(key: str) -> bool:
     return get_pad_cache().lookup(key)
 
 
-def set_cached_should_pad(key, value):
+def set_cached_should_pad(key: str, value: bool):
+    return get_pad_cache().set_value(key, value=value)
+
+
+def get_cached_base_mm_benchmark_time(key: str) -> float:
+    return get_pad_cache().lookup(key)
+
+
+def set_cached_base_mm_benchmark_time(key: str, value: float):
     return get_pad_cache().set_value(key, value=value)
 
 
@@ -228,7 +235,7 @@ def should_pad_bench_key(
     mat2: Tensor,
     op,
     input: Optional[Tensor] = None,
-    ignore_should_pad=False,
+    is_base_time_key=False,
 ) -> str:
     def tensor_key(t):
         return (t.shape, t.stride(), t.dtype)
@@ -238,7 +245,7 @@ def should_pad_bench_key(
     )
 
     def fmt_pad(name):
-        if ignore_should_pad:
+        if is_base_time_key:
             return None
         return f"exclude_pad:{should_exclude_padding_time(match, name)}"
 
@@ -252,7 +259,10 @@ def should_pad_bench_key(
         tf32_key,
     )
 
-    return str(key)
+    key = str(key)
+    if is_base_time_key:
+        key = f"base mm time: {key}"
+    return key
 
 
 def get_non_view_def(node):
@@ -339,10 +349,10 @@ def should_pad_bench(
 
         # since we key on whether or not the inputs can be memory planned, set cache for the
         # original time which is unaffected by whether or not the input can be planned
-        ori_time_key = "ori_time " + should_pad_bench_key(
-            match, mat1, mat2, op, input, ignore_should_pad=True
+        ori_time_key = should_pad_bench_key(
+            match, mat1, mat2, op, input, is_base_time_key=True
         )
-        ori_time = get_cached_should_pad(ori_time_key)
+        ori_time = get_cached_base_mm_benchmark_time(ori_time_key)
         if ori_time is None:
             if op is torch.ops.aten.bmm or op is torch.ops.aten.mm:
                 ori_time = do_bench(
@@ -354,7 +364,7 @@ def should_pad_bench(
                 ori_time = do_bench(
                     lambda: op(input, mat1, mat2),
                 )
-            set_cached_should_pad(ori_time_key, ori_time)
+            set_cached_base_mm_benchmark_time(ori_time_key, ori_time)
 
         mat1_pad = mat1
         mat2_pad = mat2
