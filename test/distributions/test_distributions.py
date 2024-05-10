@@ -4654,10 +4654,11 @@ class TestRsample(DistributionsTestCase):
                 rtol=0,
                 msg="\n".join(
                     [
-                        f"alpha = alpha_c + {shift:.2g}",
-                        f"expected_grad: {expected_grad:.5g}",
-                        f"actual_grad: {actual_grad:.5g}",
-                        f"error = {torch.abs(expected_grad - actual_grad).max():.2g}",
+                        "alpha = alpha_c + %.2g" % shift,  # noqa: UP031
+                        "expected_grad: %.5g" % expected_grad,  # noqa: UP031
+                        "actual_grad: %.5g" % actual_grad,  # noqa: UP031
+                        "error = %.2g"
+                        % torch.abs(expected_grad - actual_grad).max(),  # noqa: UP031
                     ]
                 ),
             )
