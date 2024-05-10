@@ -2594,6 +2594,85 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     )
 
 
+# TODO: Will remove the temp code after switch to new cpp_builder
+def _temp_validate_new_and_old_command(new_cmd: List[str], old_cmd: List[str]):
+    new_diff: List[str] = [x for x in new_cmd if x not in old_cmd]
+    old_diff: List[str] = [y for y in old_cmd if y not in new_cmd]
+
+    if new_diff or old_diff:
+        print("!!! new_cmd: ", new_cmd)
+        print("!!! old_cmd: ", old_cmd)
+        print("!!! new_diff: ", new_diff)
+        print("!!! old_diff: ", old_diff)
+        raise RuntimeError("Error in new and old command different.")
+
+
+def _do_validate_cpp_commands(
+    include_pytorch: bool, cuda: bool, compile_only: bool, mmap_weights: bool
+):
+    # PreCI will failed if test machine can't run cuda.
+    test_cuda = torch.cuda.is_available() and cuda
+    input_path = "/temp/dummy_input.cpp"
+    output_path = "/temp/dummy_output.so"
+    if compile_only:
+        output_path = "/temp/dummy_output.o"
+    picked_isa = pick_vec_isa()
+
+    old_cmd = cpp_compile_command(
+        input=input_path,
+        output=output_path,
+        include_pytorch=include_pytorch,
+        vec_isa=picked_isa,
+        cuda=test_cuda,
+        aot_mode=False,
+        compile_only=compile_only,
+        use_absolute_path=False,
+        use_mmap_weights=mmap_weights,
+    ).split(" ")
+
+    from torch._inductor.cpp_builder import CppBuilder, CppTorchCudaOptions
+
+    dummy_build_option = CppTorchCudaOptions(
+        vec_isa=picked_isa,
+        include_pytorch=include_pytorch,
+        cuda=test_cuda,
+        compile_only=compile_only,
+        use_mmap_weights=mmap_weights,
+    )
+
+    dummy_builder = CppBuilder(
+        name="dummy_output",
+        sources=input_path,
+        BuildOption=dummy_build_option,
+        output_dir="/temp/",
+        compile_only=compile_only,
+        use_absolute_path=False,
+    )
+    new_cmd = dummy_builder.get_command_line().split(" ")
+
+    _temp_validate_new_and_old_command(new_cmd, old_cmd)
+
+
+# TODO: Will remove the temp code after switch to new cpp_builder
+# It could help on sync new cpp_builder generate same command line as the old one.
+def validate_new_cpp_commands():
+    cuda = [True, False]
+    use_mmap_weights = [True, False]
+    compile_only = [True, False]
+    include_pytorch = [True, False]
+
+    for x in cuda:
+        for y in use_mmap_weights:
+            for z in compile_only:
+                for m in include_pytorch:
+                    print(
+                        f"!!! cuda:{x}, use_mmap_weights:{y}, compile_only:{z}, include_pytorch:{m}"
+                    )
+                    _do_validate_cpp_commands(
+                        include_pytorch=m, cuda=x, mmap_weights=y, compile_only=z
+                    )
+
+
 @clear_on_fresh_inductor_cache
 class PyCodeCache:
     cache: Dict[str, ModuleType] = dict()
