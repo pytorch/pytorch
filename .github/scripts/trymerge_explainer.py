@@ -24,7 +24,7 @@ class TryMergeExplainer:
     org: str
     project: str
     ignore_current: bool
-    commend_id: str
+    comment_id: str
 
     has_trunk_label: bool
     has_ciflow_label: bool
