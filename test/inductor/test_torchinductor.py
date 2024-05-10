@@ -80,7 +80,6 @@ from torch.testing._internal.common_utils import (
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_unflatten
-from torch.utils._triton import has_triton
 from torch.utils.weak import WeakTensorKeyDictionary
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
