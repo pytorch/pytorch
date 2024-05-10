@@ -196,6 +196,7 @@ function checkout_install_torchdeploy() {
   pushd multipy
   git checkout "${commit}"
   python multipy/runtime/example/generate_examples.py
+  sudo apt-get update && sudo apt-get install -y liblzma-dev
   BUILD_CUDA_TESTS=1 pip install -e .
   popd
   popd
