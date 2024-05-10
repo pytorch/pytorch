@@ -489,30 +489,34 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
     def test_unspec_float_input(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
-        @torch.compile(backend=cnts, fullgraph=True)
         def f(x, y):
             if y == 5.0:
                 return x + 2
             else:
                 return x + y
 
-        f(torch.randn(3), 3.0)
-        f(torch.randn(3), 4.0)
+        cf = torch.compile(backend=cnts, fullgraph=True)(f)
+
+        x = torch.randn(3)
+        self.assertEqual(f(x, 3.0), cf(x, 3.0))
+        self.assertEqual(f(x, 4.0), cf(x, 4.0))
         self.assertExpectedInline(cnts.frame_count, """1""")  # no recompile
-        f(torch.randn(3), 5.0)
+        self.assertEqual(f(x, 5.0), cf(x, 5.0))
         self.assertExpectedInline(cnts.frame_count, """2""")  # guard worked
 
     @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=True)
     def test_unspec_float_output(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
-        @torch.compile(backend=cnts, fullgraph=True)
         def f(x, y):
             return x + 1, y * 2
 
-        f(torch.randn(3), 3.0)
-        f(torch.randn(3), 4.0)
-        f(torch.randn(3), 5.0)
+        cf = torch.compile(backend=cnts, fullgraph=True)(f)
+        x = torch.randn(3)
+
+        self.assertEqual(f(x, 3.0), cf(x, 3.0))
+        self.assertEqual(f(x, 4.0), cf(x, 4.0))
+        self.assertEqual(f(x, 5.0), cf(x, 5.0))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_data_dependent_evaluate_expr_graph_break(self):
