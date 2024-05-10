@@ -21,7 +21,6 @@ distinfo = glob.glob(os.path.join(site_packages, "torch-*dist-info"))
 
 
 class TestLicense(TestCase):
-
     @unittest.skipIf(not create_bundled, "can only be run in a source tree")
     def test_license_for_wheel(self):
         current = io.StringIO()
