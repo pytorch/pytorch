@@ -382,7 +382,10 @@ class TestGroupBatchFusion(TestCase):
         counters.clear()
         module = TestPoitwiseOps("cuda")
         input = [torch.randn(50, 1000, requires_grad=True, device="cuda")]
-        traced = torch.compile(module)
+
+        def wrapper(*args, **kwargs):
+            return module(*args, **kwargs)
+        traced = torch.compile(wrapper)
         ref = module(*input)
         res = traced(*input)
         self.compare_pred(module, traced, input)
