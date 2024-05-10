@@ -2,9 +2,8 @@ import logging
 import random
 import sympy
 from typing import List, Optional
-
+import torch
 from torch._inductor import config
-from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateKernel
 from torch._inductor.codegen.rocm.ck_library import gen_ops_library, gen_ops_preselected
 from torch._inductor.codegen.rocm.ck_template import CKTemplate
 from torch._inductor.codegen.rocm.ck_universal_gemm_op import CKGemmOperation
@@ -29,7 +28,7 @@ def torch_layout_to_ck_layout(torch_layout):
 
 class CKGemmTemplate(CKTemplate):
     # the JINJA template for rendering CK Universal GEMMs
-    gemm_template = r"""
+    gemm_template = r"""{{version_comment}}
     {{headers}}
     {{globals}}
     {{instance_definition}}
@@ -71,6 +70,7 @@ class CKGemmTemplate(CKTemplate):
             *workspace_size = gemm.GetWorkSpaceSize(&argument);
             return 0;
         }
+        {{null_checks}}
         // run the kernel
         float elapsed_time = invoker.Run(argument, StreamConfig{stream, /* time kernel */ false, /* log level */ kDEBUG_LOG});
         return 0;
@@ -250,6 +250,12 @@ class CKGemmTemplate(CKTemplate):
         Y = self.output_node
         Bias = None  # TBD support gemm_bias
 
+        version_comment = rf"""/** Generated code for CK inductor backend
+{torch.__version__=}
+{torch.version.git_version=}
+*/
+"""
+
         return self._template_from_string(self.gemm_template).render(
             headers=self.header().getvalue(),
             globals=self.globals().getvalue(),
@@ -273,6 +279,8 @@ class CKGemmTemplate(CKTemplate):
             a_layout=op.a_layout,
             b_layout=op.b_layout,
             c_layout=op.c_layout,
+            null_checks="".join(kernel.check_not_null(node) for node in (X, W, Y)),
+            version_comment=version_comment
         )
 
     def _is_rcr_f16(self):
