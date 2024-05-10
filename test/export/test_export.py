@@ -2430,12 +2430,7 @@ def forward(self, x):
 
         ep = export(M(), (torch.tensor(1), torch.ones(4, 5)))
 
-        # This is because we insert sym_constrain_range in the graph now
-        if is_non_strict_test(self._testMethodName):
-            error_msg = "Invalid value range"
-        else:
-            error_msg = "is outside of inline constraint"
-        with self.assertRaisesRegex(RuntimeError, error_msg):
+        with self.assertRaisesRegex(RuntimeError, "Invalid value range"):
             _ = ep.module()(torch.tensor(-1), torch.randn(4, 5))
 
         self.assertTrue(
