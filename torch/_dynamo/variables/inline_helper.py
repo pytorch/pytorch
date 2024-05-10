@@ -160,10 +160,12 @@ def decompose_and_inline_function_with_makefx(tx, fn, args, kwargs):
 
     wrapped_fn = wrapper_fn(fn)
 
-    with tx.fake_mode and enable_python_dispatcher() and decomp_for_pre_dispatch():
-        fx_g = make_fx(wrapped_fn, pre_dispatch=True)(
-            fake_value_args, fake_value_kwargs
-        )
+    with decomp_for_pre_dispatch():
+        with enable_python_dispatcher():
+            with tx.fake_mode:
+                fx_g = make_fx(wrapped_fn, pre_dispatch=True)(
+                    fake_value_args, fake_value_kwargs
+                )
 
     # this is a hack, we want to access `.code` here to trigger the `real_recompile`
     # in case this is `_lazy_graph_module`. This will avoid us trying to inline the
