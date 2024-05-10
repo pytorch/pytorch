@@ -23,9 +23,6 @@ from torch._export.non_strict_utils import (
     produce_guards_and_solve_constraints,
 )
 from torch._export.passes._node_metadata_hook import _node_metadata_hook
-from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
-    _AddRuntimeAssertionsForInlineConstraintsPass,
-)
 from torch._export.passes.collect_tracepoints_pass import CollectTracepointsPass
 from torch._export.passes.lift_constants_pass import (
     ConstantAttrMap,
@@ -1337,21 +1334,6 @@ def _export(
 
     if len(preserve_module_call_signature) > 0:
         res = CollectTracepointsPass(module_call_signatures, export_graph_signature)(gm)
-        assert res is not None
-        gm = res.graph_module
-
-    # We can't get rid of this yet, since for some reason
-    # insert_deferred_runtime_assertions doesn't add assertions to cond
-    # subgraphs
-    if len(range_constraints) > 0:
-        stack_trace = (
-            'File "torch/_export/passes/add_runtime_assertions_for_constraints_pass.py", line 46, '
-            "in _AddRuntimeAssertionsForInlineConstraintsPass"
-        )
-        with dynamo_fake_mode, gm._set_create_node_hook(
-            functools.partial(_node_metadata_hook, stack_trace=stack_trace)
-        ):
-            res = _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints)(gm)
         assert res is not None
         gm = res.graph_module
 

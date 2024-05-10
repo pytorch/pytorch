@@ -133,6 +133,9 @@ class TracerBase:
         modification of values used in node creation. For example, one might
         want to disallow in-place operations from being recorded.
         """
+
+        if kind == "call_function" and "mul_2" in str(args):
+            breakpoint()
         if kind == 'call_function' and self.check_mutable_operations:
             check_for_mutable_operation(target, args, kwargs)
 
