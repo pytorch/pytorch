@@ -1,5 +1,6 @@
 #include <c10/util/Backtrace.h>
 #include <c10/util/Flags.h>
+#include <c10/util/Lazy.h>
 #include <c10/util/Logging.h>
 #ifdef FBCODE_CAFFE2
 #include <folly/synchronization/SanitizeThread.h>
@@ -24,16 +25,22 @@ C10_DEFINE_bool(
 namespace c10 {
 
 namespace {
-std::function<string()>* GetFetchStackTrace() {
-  static std::function<string()> func = []() {
-    return get_backtrace(/*frames_to_skip=*/1);
+std::function<::c10::Backtrace()>& GetFetchStackTrace() {
+  static std::function<::c10::Backtrace()> func = []() {
+    return get_lazy_backtrace(/*frames_to_skip=*/1);
   };
-  return &func;
+  return func;
 };
 } // namespace
 
-void SetStackTraceFetcher(std::function<string(void)> fetcher) {
-  *GetFetchStackTrace() = std::move(fetcher);
+void SetStackTraceFetcher(std::function<::c10::Backtrace()> fetcher) {
+  GetFetchStackTrace() = std::move(fetcher);
+}
+
+void SetStackTraceFetcher(std::function<string()> fetcher) {
+  SetStackTraceFetcher([fetcher = std::move(fetcher)] {
+    return std::make_shared<PrecomputedLazyValue<std::string>>(fetcher());
+  });
 }
 
 void ThrowEnforceNotMet(
@@ -42,7 +49,7 @@ void ThrowEnforceNotMet(
     const char* condition,
     const std::string& msg,
     const void* caller) {
-  c10::Error e(file, line, condition, msg, (*GetFetchStackTrace())(), caller);
+  c10::Error e(file, line, condition, msg, GetFetchStackTrace()(), caller);
   if (FLAGS_caffe2_use_fatal_for_enforce) {
     LOG(FATAL) << e.msg();
   }
@@ -65,7 +72,7 @@ void ThrowEnforceFiniteNotMet(
     const std::string& msg,
     const void* caller) {
   throw c10::EnforceFiniteError(
-      file, line, condition, msg, (*GetFetchStackTrace())(), caller);
+      file, line, condition, msg, GetFetchStackTrace()(), caller);
 }
 
 void ThrowEnforceFiniteNotMet(
@@ -76,15 +83,35 @@ void ThrowEnforceFiniteNotMet(
     const void* caller) {
   ThrowEnforceFiniteNotMet(file, line, condition, std::string(msg), caller);
 }
+
+namespace {
+
+class PyTorchStyleBacktrace : public OptimisticLazyValue<std::string> {
+ public:
+  PyTorchStyleBacktrace(SourceLocation source_location)
+      : backtrace_(GetFetchStackTrace()()), source_location_(source_location) {}
+
+ private:
+  std::string compute() const override {
+    return str(
+        "Exception raised from ",
+        source_location_,
+        " (most recent call first):\n",
+        backtrace_->get());
+  }
+
+  ::c10::Backtrace backtrace_;
+  SourceLocation source_location_;
+};
+
+} // namespace
+
 // PyTorch-style error message
 // (This must be defined here for access to GetFetchStackTrace)
 Error::Error(SourceLocation source_location, std::string msg)
     : Error(
           std::move(msg),
-          str("Exception raised from ",
-              source_location,
-              " (most recent call first):\n",
-              (*GetFetchStackTrace())())) {}
+          std::make_shared<PyTorchStyleBacktrace>(source_location)) {}
 
 using APIUsageLoggerType = std::function<void(const std::string&)>;
 using APIUsageMetadataLoggerType = std::function<void(

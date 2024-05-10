@@ -20,6 +20,7 @@ from torch._decomp.decompositions import (
 )
 from torch._decomp.decompositions_for_rng import extra_random_decomps
 from torch._higher_order_ops.out_dtype import out_dtype
+from torch._inductor.utils import pad_listlike
 from torch._prims_common import (
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
@@ -477,70 +478,6 @@ def linear_dynamic_fp16_unpacked_weight(
     )
 
 
-# The difference between quantize_per_tensor.default and quantize_per_tensor.tensor is
-# scale and zero_point is scalar or scalar tensor
-@register_decomposition(quantized_decomposed.quantize_per_tensor.default)
-def quantize_per_tensor_default_decomp_impl(
-    input: torch.Tensor,
-    scale: float,
-    zero_point: int,
-    quant_min: int,
-    quant_max: int,
-    dtype: torch.dtype,
-) -> torch.Tensor:
-    if input.dtype == torch.bfloat16:
-        input = input.to(torch.float32)
-    inv_scale = 1.0 / scale
-    return torch.clamp(
-        torch.round(input * inv_scale) + zero_point, quant_min, quant_max
-    ).to(dtype)
-
-
-# The difference between dequantize_per_tensor.default and dequantize_per_tensor.tensor is
-# scale and zero_point is scalar or scalar tensor
-@register_decomposition(quantized_decomposed.dequantize_per_tensor.default)
-def dequantize_per_tensor_default_decomp_impl(
-    input: torch.Tensor,
-    scale: float,
-    zero_point: int,
-    quant_min: int,
-    quant_max: int,
-    dtype: torch.dtype,
-) -> torch.Tensor:
-    return (input.to(torch.float32) - zero_point) * scale
-
-
-@register_decomposition(quantized_decomposed.quantize_per_tensor.tensor)
-def quantize_per_tensor_tensor_decomp_impl(
-    input: torch.Tensor,
-    scale: torch.Tensor,
-    zero_point: torch.Tensor,
-    quant_min: int,
-    quant_max: int,
-    dtype: torch.dtype,
-) -> torch.Tensor:
-    if input.dtype == torch.bfloat16:
-        input = input.to(torch.float32)
-    inv_scale = 1.0 / scale
-    return torch.clamp(
-        torch.round(input * inv_scale) + zero_point, quant_min, quant_max
-    ).to(dtype)
-
-
-@register_decomposition(quantized_decomposed.dequantize_per_tensor.tensor)
-def dequantize_per_tensor_tensor_decomp_impl(
-    input: torch.Tensor,
-    scale: torch.Tensor,
-    zero_point: torch.Tensor,
-    quant_min: int,
-    quant_max: int,
-    dtype: torch.dtype,
-) -> torch.Tensor:
-    return (input.to(torch.float32) - zero_point.to(torch.int32)) * scale.to(
-        torch.float32
-    )
-
-
 @register_decomposition(torch.ops.quantized.embedding_bag_byte_unpack)
 def q_embedding_bag_byte_unpack_decomp(packed):
     def bitcast_u8_to_f32(u8):
@@ -754,3 +691,49 @@ def index_reduce(
         reduction_type,
         include_self=include_self,
     )
+
+
+@register_decomposition(aten.max_pool2d_with_indices)
+def max_pool2d_with_indices(
+    x, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False
+):
+    if dilation == 1:
+        dilation = [1, 1]
+
+    if padding == 0:
+        padding = [0, 0]
+
+    if stride is None:
+        stride = kernel_size
+
+    kernel_size = pad_listlike(kernel_size, 2)
+    dilation = pad_listlike(dilation, 2)
+    padding = pad_listlike(padding, 2)
+    stride = pad_listlike(stride, 2)
+
+    window_size = kernel_size[0] * kernel_size[1]
+    # We fallback when using non-default dilation or when the window size is too large
+    if (
+        torch._inductor.lowering.should_fallback_max_pool2d_with_indices(
+            kernel_size, dilation
+        )
+        or window_size > torch.iinfo(torch.int8).max
+    ):
+        return NotImplemented
+
+    vals, offsets = prims._low_memory_max_pool2d_with_offsets(
+        x,
+        kernel_size,
+        stride,
+        padding,
+        dilation,
+        ceil_mode,
+    )
+    indices = prims._low_memory_max_pool2d_offsets_to_indices(
+        offsets,
+        kernel_size[1],
+        x.size(-1),
+        stride,
+        padding,
+    )
+    return vals, indices
