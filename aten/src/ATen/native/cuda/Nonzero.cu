@@ -20,6 +20,8 @@ namespace at::native {
 
 namespace {
 // Wrapper for DeviceSelect::If to handle tensors larger than INT_MAX
+// Imported from https://github.com/NVIDIA/cccl/pull/1379
+// #todo Remove the wrapper when https://github.com/NVIDIA/cccl/issues/1422 is released
 template <typename InputIteratorT,
           typename OutputIteratorT,
           typename NumSelectedIteratorT,
