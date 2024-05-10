@@ -108,6 +108,7 @@ current_device = ""
 current_onnx_compiler = ""
 current_batch_size = None
 output_filename = None
+disable_output = False
 
 MAX_DOWNLOAD_ATTEMPTS = 5
 
@@ -306,6 +307,9 @@ def load_model_from_path(path_and_class_str):
 
 
 def output_csv(filename, headers, row):
+    global disable_output
+    if disable_output:
+        return
     if os.path.exists(filename):
         with open(filename) as fd:
             lines = list(csv.reader(fd)) or [[]]
@@ -3213,6 +3217,11 @@ def parse_args(args=None):
         help="Overrides the directory to place output files.",
     )
     parser.add_argument(
+        "--disable-output",
+        action="store_true",
+        help="Disable writing of output files, e.g., for warm-up runs",
+    )
+    parser.add_argument(
         "--baseline",
         help="Compare with a prior --output",
     )
@@ -3612,7 +3621,8 @@ def main(runner, original_dir=None, args=None):
             cmd.remove("--warm-start-latency")
 
             print(f"Performing cold-start run for {args.only}")
-            subprocess.check_call(cmd + ["--repeat=1"], timeout=args.timeout, env=env)
+            warmup_cmd = cmd + ["--repeat=1", "--disable-output"]
+            subprocess.check_call(warmup_cmd, timeout=args.timeout, env=env)
 
             print(f"Performing warm-start run for {args.only}")
             subprocess.check_call(cmd, timeout=args.timeout, env=env)
@@ -3821,8 +3831,11 @@ def run(runner, args, original_dir=None):
         runner.skip_models.clear()
 
     experiment = null_experiment
-    global current_name, current_device, current_batch_size, output_filename, optimize_ctx, current_onnx_compiler
+    global current_name, current_device, current_batch_size, output_filename, disable_output, optimize_ctx, current_onnx_compiler
     optimize_ctx = contextlib.nullcontext()
+
+    if args.disable_output:
+        disable_output = True
 
     if args.overhead:
         optimize_ctx = torch._dynamo.optimize(dummy_fx_compile, nopython=args.nopython)
