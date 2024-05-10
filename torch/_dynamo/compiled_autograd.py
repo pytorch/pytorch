@@ -271,6 +271,7 @@ class AutogradCompilerInstance:
 
 compiled_autograd_enabled = False
 
+
 @contextlib.contextmanager
 def enable(compiler_fn):
     global compiled_autograd_enabled
