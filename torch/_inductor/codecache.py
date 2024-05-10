@@ -11,7 +11,6 @@ import json
 import logging
 import multiprocessing
 import os
-import pathlib
 import pickle
 import pkgutil
 import platform
@@ -34,13 +33,14 @@ from ctypes import c_void_p, cdll, CDLL
 from functools import partial
 from pathlib import Path
 from threading import Thread
-from time import sleep, time
+from time import sleep, time, time_ns
 from types import ModuleType
 from typing import (
     Any,
     Callable,
     cast,
     Dict,
+    Generator,
     List,
     Optional,
     Set,
@@ -160,9 +160,11 @@ class CacheBase:
     @functools.lru_cache(None)
     def get_system() -> Dict[str, Any]:
         try:
-            import triton
+            from triton.compiler.compiler import triton_key
 
-            triton_version = triton.__version__  # type: ignore[attr-defined]
+            # Use triton_key instead of triton.__version__ as the version
+            # is not updated with each code change
+            triton_version = triton_key()
         except ModuleNotFoundError:
             triton_version = None
 
@@ -204,9 +206,6 @@ class CacheBase:
         )
 
     def __init__(self) -> None:
-        if not torch.cuda.is_available():
-            return
-
         self.system = CacheBase.get_system()
 
     def get_local_cache(self) -> Dict[str, Any]:
@@ -400,6 +399,13 @@ def write(
     return basename, path
 
 
+def write_text(text: str) -> str:
+    """
+    Write the `text` to a file and return the path computed based on the hash.
+    """
+    return write(text, "txt")[1]
+
+
 def write_atomic(
     path: str, content: Union[str, bytes], make_dirs: bool = False
 ) -> None:
@@ -408,7 +414,7 @@ def write_atomic(
     assert isinstance(
         content, (str, bytes)
     ), "Only strings and byte arrays can be saved in the cache"
-    path = pathlib.Path(path)
+    path = Path(path)
     if make_dirs:
         path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.parent / f".{os.getpid()}.{threading.get_ident()}.tmp"
@@ -482,6 +488,14 @@ def _reduce_symint(s):
     return (_ident, (str(s),))
 
 
+def _reduce_unsupported(s):
+    """
+    See FxGraphCachePickler. Custom reducer to handle any objects that we don't
+    support and therefore raise to bypass caching.
+    """
+    raise BypassFxGraphCache
+
+
 class FxGraphCachePickler(pickle.Pickler):
     """
     Custom pickler to customize the pickling of some objects (Tensors), only for the
@@ -494,6 +508,9 @@ class FxGraphCachePickler(pickle.Pickler):
     dispatch_table[FakeTensor] = _reduce_fake_tensor
     dispatch_table[torch.Tensor] = _reduce_tensor
     dispatch_table[torch.SymInt] = _reduce_symint
+    dispatch_table[
+        torch.fx.experimental._backward_state.BackwardState
+    ] = _reduce_unsupported
 
     @classmethod
     def dumps(cls, obj) -> bytes:
@@ -735,15 +752,13 @@ class FxGraphCache:
     def _lookup_graph(
         key: str,
         example_inputs: List[torch.Tensor],
+        local,
+        remote_cache,
     ) -> Optional[CompiledFxGraph]:
         """
         Lookup a compiled graph in the cache by key. On a hit, return the
         deserialized CompiledFxGraph object. On a miss, return None.
         """
-        subdir = FxGraphCache._get_tmp_dir_for_key(key)
-        if not os.path.exists(subdir):
-            return None
-
         shape_env = FxGraphCache._get_shape_env()
         assert shape_env is not None
 
@@ -751,14 +766,22 @@ class FxGraphCache:
         assert all(has_hint(s) for s in symints)
         hints = [hint_int(s) for s in symints]
 
+        def iterate_over_candidates() -> Generator[CompiledFxGraph, None, None]:
+            if local:
+                subdir = FxGraphCache._get_tmp_dir_for_key(key)
+                if os.path.exists(subdir):
+                    for path in sorted(os.listdir(subdir)):
+                        with open(os.path.join(subdir, path), "rb") as f:
+                            yield pickle.load(f)
+            if remote_cache:
+                if (data := remote_cache.get(key)) is not None:
+                    yield pickle.loads(data)
+
         # Iterate over any entries in the subdir for this key and evaluate
         # their guards to determine whether there's a hit.
         graph = None
 
-        for path in sorted(os.listdir(subdir)):
-            with open(os.path.join(subdir, path), "rb") as f:
-                candidate: CompiledFxGraph = pickle.load(f)
-
+        for candidate in iterate_over_candidates():
             if not candidate.guards_expr:
                 # No guards to evaluate, so this is a hit.
                 graph = candidate
@@ -790,7 +813,20 @@ class FxGraphCache:
         artifact_path = get_path(graph.cache_key, "py")[2]
         if not os.path.exists(artifact_path):
             counters["inductor"]["fxgraph_lookup_write_file"] += 1
-            write_atomic(artifact_path, graph.source_code, make_dirs=True)
+            Path(os.path.dirname(artifact_path)).mkdir(parents=True, exist_ok=True)
+            code = graph.source_code
+            cpp_pp = cpp_prefix_path()
+            if os.path.basename(cpp_pp) in code:
+                if cpp_pp in code:
+                    # Great the name is correct
+                    pass
+                else:
+                    # Old dir name is included, replace it
+                    pattern = rf'#include\s*"[^"]+{os.path.basename(cpp_pp)}"'
+                    code = re.sub(pattern, f'#include "{cpp_pp}"', code)
+
+            write_atomic(artifact_path, code, make_dirs=True)
+
         try:
             graph.current_callable = PyCodeCache.load_by_key_path(
                 graph.cache_key,
@@ -823,7 +859,12 @@ class FxGraphCache:
 
     @staticmethod
     def _save_graph(
-        key: str, compiled_graph: CompiledFxGraph, example_inputs: List[torch.Tensor]
+        key: str,
+        compiled_graph: CompiledFxGraph,
+        example_inputs: List[torch.Tensor],
+        time_taken_ns,
+        local,
+        remote_cache,
     ):
         """
         Store a serialized CompiledFxGraph on disk.
@@ -852,13 +893,27 @@ class FxGraphCache:
             counters["inductor"]["fxgraph_cache_pickle_error"] += 1
             return
 
-        subdir = FxGraphCache._get_tmp_dir_for_key(key)
+        if local:
+            subdir = FxGraphCache._get_tmp_dir_for_key(key)
+            if not os.path.exists(subdir):
+                os.makedirs(subdir, exist_ok=True)
 
-        # Use a hash of the serialized CompiledFxGraph to get a unique file
-        # name. The specific name doesn't matter since a lookup involves
-        # iterating over all entries in the parent subdir.
-        path = os.path.join(subdir, sha256_hash(content))
-        write_atomic(path, content, make_dirs=True)
+            # Use a hash of the serialized CompiledFxGraph to get a unique file
+            # name. The specific name doesn't matter since a lookup involves
+            # iterating over all entries in the parent subdir.
+            path = os.path.join(subdir, sha256_hash(content))
+            write_atomic(path, content, make_dirs=True)
+
+        if remote_cache:
+            cache_data = (
+                {
+                    "data": content,
+                    "time_taken_ms": time_taken_ns // 1000000,  # Convert from NS to MS
+                }
+                if config.is_fbcode()
+                else content
+            )
+            remote_cache.put(key, cache_data)
 
     @staticmethod
     def _check_can_cache(gm: torch.fx.GraphModule):
@@ -888,23 +943,54 @@ class FxGraphCache:
         gm: torch.fx.GraphModule,
         example_inputs: List[torch.Tensor],
         fx_kwargs: Dict[str, Any],
+        local: bool,
+        remote: bool,
     ):
         """
         Load a compiled graph from the cache. If a cached entry does not exist,
         compile the graph and save it to the cache.
         """
-
+        assert local or remote, "at least one of them needs to be enabled"
         compiled_graph = None
         try:
             FxGraphCache._check_can_cache(gm)
             key = compiled_fx_graph_hash(gm, example_inputs, fx_kwargs)
 
-            compiled_graph = FxGraphCache._lookup_graph(key, example_inputs)
+            remote_cache = None
+            if remote:
+                cache_id = "fx-graph-v1"
+                try:
+                    import triton
+
+                    if config.is_fbcode():
+                        remote_cache = triton.runtime.fb_memcache.FbMemcacheRemoteFxGraphCacheBackend(
+                            cache_id
+                        )
+                    else:
+                        remote_cache = triton.runtime.cache.RedisRemoteCacheBackend(
+                            cache_id
+                        )
+                except Exception:
+                    remote_cache = None
+                    log.warning("Unable to create a remote cache", exc_info=True)
+
+            compiled_graph = FxGraphCache._lookup_graph(
+                key, example_inputs, local, remote_cache
+            )
             if compiled_graph is None:
                 log.debug("fx graph cache miss for key %s", key)
                 counters["inductor"]["fxgraph_cache_miss"] += 1
+                start_time = time_ns()
                 compiled_graph = compile_fx_fn(gm, example_inputs, **fx_kwargs)
-                FxGraphCache._save_graph(key, compiled_graph, example_inputs)
+                time_taken_ns = time_ns() - start_time
+                FxGraphCache._save_graph(
+                    key,
+                    compiled_graph,
+                    example_inputs,
+                    time_taken_ns,
+                    local,
+                    remote_cache,
+                )
             else:
                 log.debug("fx graph cache hit for key %s", key)
                 counters["inductor"]["fxgraph_cache_hit"] += 1
@@ -1285,7 +1371,18 @@ def valid_vec_isa_list() -> List[VecISA]:
         return []
 
     if platform.machine() == "s390x":
-        return [VecZVECTOR()]
+        with open("/proc/cpuinfo") as _cpu_info:
+            while True:
+                line = _cpu_info.readline()
+                if not line:
+                    break
+                # process line
+                featuresmatch = re.match(r"^features\s*:\s*(.*)$", line)
+                if featuresmatch:
+                    for group in featuresmatch.groups():
+                        if re.search(r"[\^ ]+vxe[\$ ]+", group):
+                            return [VecZVECTOR()]
+        return []
 
     isa_list = []
     with open("/proc/cpuinfo") as _cpu_info:
@@ -1447,6 +1544,19 @@ def _set_gpu_runtime_env() -> None:
         os.environ["CUDA_HOME"] = os.path.dirname(build_paths.cuda())
 
 
+def _get_python_include_dirs():
+    include_dir = Path(sysconfig.get_path("include"))
+    # On Darwin Python executable from a framework can return
+    # non-existing /Library/Python/... include path, in which case
+    # one should use Headers folder from the framework
+    if not include_dir.exists() and platform.system() == "Darwin":
+        std_lib = Path(sysconfig.get_path("stdlib"))
+        include_dir = (std_lib.parent.parent / "Headers").absolute()
+    if not (include_dir / "Python.h").exists():
+        warnings.warn(f"Can't find Python.h in {str(include_dir)}")
+    return [str(include_dir)]
+
+
 def get_include_and_linking_paths(
     include_pytorch: bool = False,
     vec_isa: VecISA = invalid_vec_isa,
@@ -1467,7 +1577,7 @@ def get_include_and_linking_paths(
         # Note - We include pytorch only on linux right now. There is more work
         # to do to enable OMP build on darwin where PyTorch is built with IOMP
         # and we need a way to link to what PyTorch links.
-        ipaths = cpp_extension.include_paths(cuda) + [sysconfig.get_path("include")]
+        ipaths = cpp_extension.include_paths(cuda) + _get_python_include_dirs()
         lpaths = cpp_extension.library_paths(cuda) + [
             sysconfig.get_config_var("LIBDIR")
         ]
@@ -1532,7 +1642,7 @@ def get_include_and_linking_paths(
         # symbol not found, if those header files require a library.
         # For those cases, include the lpath and libs command as we do for pytorch above.
         # This approach allows us to only pay for what we use.
-        ipaths = cpp_extension.include_paths(cuda) + [sysconfig.get_path("include")]
+        ipaths = cpp_extension.include_paths(cuda) + _get_python_include_dirs()
         if aot_mode:
             ipaths += [os.path.dirname(cpp_prefix_path())]
         lpaths = []
@@ -2518,7 +2628,12 @@ def _cuda_compiler() -> Optional[str]:
 
 
 def _cutlass_include_paths() -> List[str]:
-    cutlass_path = config.cuda.cutlass_dir
+    if config.is_fbcode():
+        from libfb.py import parutil
+
+        cutlass_path = parutil.get_dir_path("cutlass-3-headers")
+    else:
+        cutlass_path = config.cuda.cutlass_dir
     return [
         # Use realpath to get canonical absolute paths, in order not to mess up cache keys
         os.path.realpath(os.path.join(cutlass_path, "include")),
