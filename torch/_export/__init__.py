@@ -13,6 +13,7 @@ import weakref
 import zipfile
 from collections import OrderedDict
 from contextlib import contextmanager
+from functools import lru_cache
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from unittest.mock import patch
@@ -86,6 +87,19 @@ class ExportDynamoConfig:
     allow_rnn: bool = True
 
 
+# We only want to print this once to avoid flooding logs in workflows where capture_pre_autograd_graph
+# is called multiple times.
+@lru_cache
+def capture_pre_autograd_graph_warning():
+    log.warning("+============================+")
+    log.warning("|     !!!   WARNING   !!!    |")
+    log.warning("+============================+")
+    log.warning("capture_pre_autograd_graph() is deprecated and doesn't provide any function guarantee moving forward.")
+    log.warning("Please switch to use torch.export instead.")
+    if config.is_fbcode():
+        log.warning("Unless the unittest is in the blocklist, capture_pre_autograd_graph() will fallback to torch.export.")
+
+
 @compatibility(is_backward_compatible=False)
 def capture_pre_autograd_graph(
     f: torch.nn.Module,
@@ -127,13 +141,7 @@ def capture_pre_autograd_graph(
     from torch.export._trace import _convert_input_to_fake, DEFAULT_EXPORT_DYNAMO_CONFIG
     from torch._utils_internal import export_api_rollout_check
 
-    log.warning("+============================+")
-    log.warning("|     !!!   WARNING   !!!    |")
-    log.warning("+============================+")
-    log.warning("capture_pre_autograd_graph() is deprecated and doesn't provide any function guarantee moving forward.")
-    log.warning("Please switch to use torch.export instead.")
-    if config.is_fbcode():
-        log.warning("Unless the unittest is in the blocklist, capture_pre_autograd_graph() will fallback to torch.export.")
+    capture_pre_autograd_graph_warning()
 
     assert isinstance(f, torch.nn.Module), "Expected an nn.Module instance."
 

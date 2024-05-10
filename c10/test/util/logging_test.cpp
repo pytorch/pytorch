@@ -169,6 +169,7 @@ C10_NOINLINE void f3() {
   f2();
 }
 
+#ifdef FBCODE_CAFFE2
 TEST(LoggingTest, ExceptionWhat) {
   std::optional<::c10::Error> error;
   try {
@@ -179,11 +180,6 @@ TEST(LoggingTest, ExceptionWhat) {
 
   ASSERT_TRUE(error);
   std::string what = error->what();
-
-  if (what.find("(no backtrace available)") != std::string::npos) {
-    // Skip test on platforms that have no backtrace implementation.
-    return;
-  }
 
   EXPECT_TRUE(what.find("c10_test::f1()") != std::string::npos) << what;
   EXPECT_TRUE(what.find("c10_test::f2()") != std::string::npos) << what;
@@ -197,6 +193,7 @@ TEST(LoggingTest, ExceptionWhat) {
   EXPECT_TRUE(what.find("c10_test::f3()") != std::string::npos) << what;
   EXPECT_TRUE(what.find("NewContext") != std::string::npos) << what;
 }
+#endif
 
 TEST(LoggingTest, LazyBacktrace) {
   struct CountingLazyString : ::c10::OptimisticLazyValue<std::string> {
