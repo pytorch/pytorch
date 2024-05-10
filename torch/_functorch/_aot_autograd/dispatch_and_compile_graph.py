@@ -78,6 +78,9 @@ def aot_dispatch_base_graph(
         trace_joint=False,
     )
 
+    # TODO: replace with AOTDispatchSubclassWrapper once we refactor
+    # fn_input_mutations_to_outputs and create_functionalized_fn
+    # into CompilerWrappers.
     (
         fn_to_trace,
         updated_flat_args_subclasses_desugared,
@@ -229,6 +232,9 @@ def aot_dispatch_autograd_graph(
         trace_joint=True,
     )
 
+    # TODO: replace with AOTDispatchSubclassWrapper once we refactor
+    # fn_input_mutations_to_outputs and create_functionalized_fn
+    # into CompilerWrappers.
     subclass_tracing_info = aot_dispatch_subclass(
         joint_fn_to_trace,
         updated_joint_inputs,

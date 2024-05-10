@@ -8,14 +8,14 @@ This module defines runtime wrappers, which, based on previous analysis attempts
 
 import collections
 import pprint
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.utils.dlpack
 from torch import Tensor
-from torch._guards import DuplicateInputs, TracingContext
+from torch._guards import detect_fake_mode, DuplicateInputs, TracingContext
 from torch._prims_common import CUDARngStateHelper
 from torch.multiprocessing.reductions import StorageWeakRef
 from .. import config
@@ -32,7 +32,7 @@ from .schemas import (
     AOTConfig,
     InputAliasInfo,
     OutputType,
-    SubclassCreationMeta,
+    SubclassMeta,
     TensorAlias,
     ViewAndMutationMeta,
 )
@@ -42,13 +42,14 @@ from .subclass_utils import (
     wrap_tensor_subclasses,
 )
 
+from .traced_function_transforms import aot_dispatch_subclass
+
 from .utils import (
     call_func_at_runtime_with_args,
     make_boxed_func,
     partial_flatten_asdict,
     strict_zip,
 )
-
 
 zip = strict_zip
 
@@ -108,21 +109,18 @@ class CompilerWrapper:
         *,
         fw_metadata: ViewAndMutationMeta,
         compiler_fn,
-        **kwargs,
     ):
         (
             wrapped_flat_fn,
             new_flat_args,
             new_aot_config,
             new_fw_metadata,
-        ) = self.pre_compile(
-            flat_fn, flat_args, aot_config, fw_metadata=fw_metadata, **kwargs
-        )
+        ) = self.pre_compile(flat_fn, flat_args, aot_config, fw_metadata=fw_metadata)
         compiled_fn = compiler_fn(
             wrapped_flat_fn, new_flat_args, new_aot_config, fw_metadata=new_fw_metadata
         )
         return self.post_compile(
-            compiled_fn, new_aot_config, fw_metadata=new_fw_metadata, **kwargs
+            compiled_fn, new_aot_config, fw_metadata=new_fw_metadata
         )
 
 
@@ -405,49 +403,211 @@ def _create_runtime_wrapper(
     return runtime_wrapper
 
 
-# Calling convention: If we are running functionalized RNG, then outs consists
-# of (user_outs, rng_offset)
-def functionalized_rng_runtime_epilogue(
-    metadata: ViewAndMutationMeta, outs, return_new_outs=True
-):
-    if metadata.is_rng_op_functionalized:
-        assert metadata.num_outputs_rng_offset == 1
-        new_rng_offset = outs[-1]
-        CUDARngStateHelper.set_new_offset(new_rng_offset)
-        if return_new_outs:
-            user_outs = outs[:-1]
-            return user_outs
+@dataclass
+class FunctionalizedRngRuntimeWrapper(CompilerWrapper):
+    # TODO: I would love to get rid of this argument, but it's
+    # Wrapped pretty tightly around our aot_dispatch_autograd logic.
+    # Specifically, tensors_saved_for_backwards_slice's value is both used for calculating indices
+    # for setting placeholder strides(which is done before runtime, before this wrapper runs)
+    # and for saving tensors for backward (which is done during runtime, after this wrapper runs)
+    # So in aot_dispatch_autograd, this wrapper can't edit the set of outs without making one
+    # of those two indices incorrect.
+    return_new_outs: bool = True
+
+    def pre_compile(
+        self,
+        flat_fn,
+        flat_args,
+        aot_config,
+        *,
+        fw_metadata,
+    ):
+        if config.functionalize_rng_ops:
+            # Update example inputs for the fw_compiler
+            fake_mode = detect_fake_mode()
+            seed, offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
+            flat_args.extend([seed, offset])
+            # We are not clearing flat_args here because
+            # 1) There is a check in the debug compiler at the end
+            # 2) It does not matter as these are fake tensors
+        return flat_fn, flat_args, aot_config, fw_metadata
+
+    def post_compile(
+        self,
+        compiled_fn,
+        aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+    ):
+        @wraps(compiled_fn)
+        def wrapper(runtime_args: List[Any]):
+            if fw_metadata.is_rng_op_functionalized:
+                # Add the seed and offset to args
+                seed, offset = CUDARngStateHelper.get_torch_state_as_tuple()
+                runtime_args.extend([seed, offset])
+                out = compiled_fn(runtime_args)
+                out = self._functionalized_rng_runtime_epilogue(
+                    fw_metadata,
+                    out,
+                    # TODO: this won't be right for the backward when we convert the call_compiled_backward to use the wrapper
+                    fw_metadata.num_forward_returns,
+                )
+                return out
+            return compiled_fn(runtime_args)
+
+        return wrapper
+
+    # Calling convention: If we are running functionalized RNG, then outs consists
+    # of (user_outs, rng_offset)
+    def _functionalized_rng_runtime_epilogue(
+        self,
+        metadata: ViewAndMutationMeta,
+        outs,
+        offset_index,
+    ):
+        if metadata.is_rng_op_functionalized:
+            assert metadata.num_outputs_rng_offset == 1
+            new_rng_offset = outs[offset_index]
+            CUDARngStateHelper.set_new_offset(new_rng_offset)
+            if self.return_new_outs:
+                user_outs = outs[:offset_index] + outs[offset_index + 1 :]
+                return user_outs
+            else:
+                return outs
+
+        return outs
+
+
+@dataclass
+class FakifiedOutWrapper(CompilerWrapper):
+    out_metas: List[torch.Tensor] = field(default_factory=list)
+    # TracingContext.fwd_output_strides
+    # Generated from actually doing compile
+    fwd_output_strides: Optional[List[List[int]]] = None
+    needs_post_compile: bool = True
+
+    def pre_compile(
+        self,
+        fw_module,  # Must be fw_module from aot_dispatch_*_graph
+        flat_args,
+        aot_config,
+        *,
+        fw_metadata,
+    ):
+        tracing_context = torch._guards.TracingContext.try_get()
+        if tracing_context and tracing_context.fakify_first_call:
+            self.out_metas = [
+                n.meta["val"] for n in (list(fw_module.graph.nodes)[-1].args[0])
+            ]
         else:
-            return None
-    return outs
+            self.needs_post_compile = False
+        return fw_module, flat_args, aot_config, fw_metadata
+
+    def _compute_output_meta_with_inductor_strides(self):
+        out = self.out_metas
+        fwd_output_strides = self.fwd_output_strides
+        if not fwd_output_strides:
+            return out
+        with TracingContext.get().fake_mode.shape_env.suppress_guards():
+            for i in range(len(out)):
+                if not isinstance(out[i], Tensor):
+                    continue
+                if all(
+                    s1 == s2 for s1, s2 in zip(out[i].stride(), fwd_output_strides[i])
+                ):
+                    continue
+                out[i] = out[i].as_strided(out[i].shape, fwd_output_strides[i])
+        return out
+
+    # To be called post compile
+    def set_fwd_output_strides(self, fwd_output_strides):
+        self.fwd_output_strides = fwd_output_strides
+
+    def post_compile(
+        self,
+        compiled_fn,
+        aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+    ):
+        if self.needs_post_compile:
+            assert self.fwd_output_strides is not None
+            fakified_out = self._compute_output_meta_with_inductor_strides()
+
+            @wraps(compiled_fn)
+            def wrapper(runtime_args):
+                nonlocal fakified_out
+                if fakified_out is not None:
+                    out = fakified_out
+                    fakified_out = None
+                    return out
+                return compiled_fn(runtime_args)
+
+            return wrapper
+        # If we don't need to fakify, we can just return the original compiled function
+        return compiled_fn
 
 
 # This wrapper handles the AOTDispatch runtime logic for tensor subclasses.
 # At runtime, we have a compiled function that knows how to operate on the domain of DenseTensor -> DenseTensor,
 # But the user might have passed us some tensor subclass inputs (or expect some subclass tensor outputs).
 # This function handles the wrapping and unwrapping of tensor subclasses at runtime.
-def aot_dispatch_subclass_wrapper(
-    runtime_fn: Callable,
-    *,
-    subclass_metas: List[Union[int, SubclassCreationMeta]],
-    num_fw_outs_saved_for_bw: Optional[int],
-) -> Callable:
-    def inner_fn(args: List[Any]):
-        unwrapped_args = unwrap_tensor_subclasses(args, is_joint_structure=False)
-        args.clear()
-        # expectation: runtime_fn is a boxed fn
-        unwrapped_outs = runtime_fn(unwrapped_args)
-        wrapped_outs = wrap_tensor_subclasses(
-            unwrapped_outs,
-            subclass_metas=subclass_metas,
-            num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw,
-            is_runtime=True,
-        )
-        return wrapped_outs
+@dataclass
+class AOTDispatchSubclassWrapper(CompilerWrapper):
+    trace_joint: bool
+    fw_only: Optional[Callable]  # Not cached, only used in pre_compile
+    maybe_subclass_meta: Optional[SubclassMeta]
+    num_fw_outs_saved_for_bw: Optional[int]
 
-    # box it
-    inner_fn._boxed_call = True  # type: ignore[attr-defined]
-    return inner_fn
+    def pre_compile(
+        self,
+        flat_fn,
+        flat_args: List[Tensor],
+        aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+    ):
+        (new_flat_fn, new_flat_args, subclass_meta) = aot_dispatch_subclass(
+            flat_fn,
+            flat_args,
+            is_joint_structure=self.trace_joint,
+            meta=fw_metadata,
+            fw_only=self.fw_only,  # type: ignore[arg-type]
+        )
+        self.maybe_subclass_meta = subclass_meta
+        return new_flat_fn, new_flat_args, aot_config, fw_metadata
+
+    def post_compile(
+        self,
+        compiled_fn,
+        _aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+    ):
+        if self.maybe_subclass_meta is None:
+            return compiled_fn
+
+        subclass_metas = fw_metadata.subclass_fw_graph_out_meta
+
+        @wraps(compiled_fn)
+        def inner_fn(args: List[Any]):
+            unwrapped_args = unwrap_tensor_subclasses(
+                args, is_joint_structure=self.trace_joint
+            )
+            args.clear()
+            # expectation: runtime_fn is a boxed fn
+            unwrapped_outs = compiled_fn(unwrapped_args)
+            wrapped_outs = wrap_tensor_subclasses(
+                unwrapped_outs,
+                subclass_metas=subclass_metas,
+                num_fw_outs_saved_for_bw=self.num_fw_outs_saved_for_bw,
+                is_runtime=True,
+            )
+            return wrapped_outs
+
+        # box it
+        inner_fn._boxed_call = True  # type: ignore[attr-defined]
+        return inner_fn
 
 
 # MOTIVATION:

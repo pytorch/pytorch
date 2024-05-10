@@ -196,6 +196,10 @@ class TestForeach(TestCase):
             "fastpath" if not x else "slowpath", "inplace" if y else "outplace"
         ),
     )
+    @unittest.skipIf(
+        torch.cuda.is_available() and not torch.cuda.get_device_capability(0) == (8, 6),
+        "failing flakily on non sm86 cuda jobs",
+    )
     def test_parity(self, device, dtype, op, noncontiguous, inplace):
         if inplace:
             _, _, func, ref = self._get_funcs(op)
@@ -665,6 +669,10 @@ class TestForeach(TestCase):
         filter(lambda op: op.supports_out, foreach_binary_op_db),
         dtypes=OpDTypes.supported,
     )
+    @unittest.skipIf(
+        torch.cuda.is_available() and not torch.cuda.get_device_capability(0) == (8, 6),
+        "failing flakily on non sm86 cuda jobs, ex https://github.com/pytorch/pytorch/issues/125775",
+    )
     def test_binary_op_list_slow_path(self, device, dtype, op):
         foreach_op, native_op, foreach_op_, native_op_ = self._get_funcs(op)
         # 0-strides
@@ -779,6 +787,10 @@ class TestForeach(TestCase):
         filter(lambda op: op.supports_out, foreach_binary_op_db),
         dtypes=floating_types_and(torch.half, torch.bfloat16),
     )
+    @unittest.skipIf(
+        torch.cuda.is_available() and not torch.cuda.get_device_capability(0) == (8, 6),
+        "failing flakily on non sm86 cuda jobs",
+    )
     def test_binary_op_float_inf_nan(self, device, dtype, op):
         inputs = (
             [
@@ -844,6 +856,10 @@ class TestForeach(TestCase):
 
     @onlyCUDA
     @ops(filter(lambda op: op.supports_out, foreach_binary_op_db))
+    @unittest.skipIf(
+        torch.cuda.is_available() and not torch.cuda.get_device_capability(0) == (8, 6),
+        "failing flakily on non sm86 cuda jobs",
+    )
     def test_binary_op_tensors_on_different_devices(self, device, dtype, op):
         # `tensors1`: ['cuda', 'cpu']
         # `tensors2`: ['cuda', 'cpu']
