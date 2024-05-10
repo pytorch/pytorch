@@ -720,7 +720,7 @@ Tensor & _index_put_impl_(Tensor & self, const torch::List<c10::optional<Tensor>
   }
   if (!accumulate) {
     auto masked_fill_dispatch = canDispatchToMaskedFill(self, indices, value);
-    if (std::get<0>(masked_fill_dispatch)) {
+    if (std::get<0>(masked_fill_dispatch) && value.device().is_cpu()) {
       return self.masked_fill_(std::get<1>(masked_fill_dispatch), value.item());
     }
   }
