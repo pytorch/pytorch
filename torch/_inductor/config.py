@@ -238,6 +238,11 @@ max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON"
 ).upper()
 
+# Whether we fall back to ATen or hard error when no matches are found during autotuning
+autotune_fallback_to_aten = (
+    os.environ.get("TORCHINDUCTOR_AUTOTUNE_FALLBACK_TO_ATEN", "1") == "1"
+)
+
 # the value used as a fallback for the unbacked SymInts
 # that can appear in the input shapes (e.g., in autotuning)
 unbacked_symint_fallback = 8192
