@@ -1,3 +1,4 @@
+from .assertion_removal import RemoveAssertions
 from .decomp import Decompose
 from .functionalization import Functionalize, RemoveInputMutation
 from .modularization import Modularize
@@ -11,6 +12,7 @@ __all__ = [
     "Functionalize",
     "Modularize",
     "MovePlaceholderToFront",
+    "RemoveAssertions",
     "RemoveInputMutation",
     "RestoreParameterAndBufferNames",
     "ReplaceGetAttrWithPlaceholder",
