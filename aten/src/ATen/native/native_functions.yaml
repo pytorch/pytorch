@@ -14649,6 +14649,11 @@
   dispatch:
     CUDA: _fbgemm_jagged_to_padded_dense_backward
 
+- func: _nested_from_padded_tensor(Tensor padded, Tensor offsets, Tensor dummy, int dim=1) -> Tensor
+  variants: function
+  device_check: NoCheck
+  dispatch: {}
+
 - func: _nested_tensor_softmax_with_shape(Tensor self, Tensor query) -> Tensor
   dispatch:
     NestedTensorCPU: NestedTensor_softmax_dropout

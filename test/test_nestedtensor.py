@@ -4496,6 +4496,81 @@ class TestNestedTensorSubclass(TestCase):
         # should be equivalent to the original values
         self.assertEqual(values, output_jagged)
 
+    # TODO: test CPU as well when a backup non-FBGEMM impl exists
+    @onlyCUDA
+    @dtypes(torch.float32, torch.double, torch.half)
+    @parametrize("nt_dim", [2, 3, 4])
+    def test_to_padded_tensor(self, device, dtype, nt_dim):
+        if nt_dim == 2:
+            post_seq_len_shape = ()
+        elif nt_dim == 3:
+            post_seq_len_shape = (10,)
+        elif nt_dim == 4:
+            post_seq_len_shape = (9, 10)
+
+        nt = torch.nested.nested_tensor([
+            torch.randn(2, *post_seq_len_shape, device=device, dtype=dtype),
+            torch.randn(3, *post_seq_len_shape, device=device, dtype=dtype),
+            torch.randn(4, *post_seq_len_shape, device=device, dtype=dtype),
+            torch.randn(5, *post_seq_len_shape, device=device, dtype=dtype),
+            torch.randn(6, *post_seq_len_shape, device=device, dtype=dtype),
+            torch.randn(7, *post_seq_len_shape, device=device, dtype=dtype),
+            torch.randn(8, *post_seq_len_shape, device=device, dtype=dtype),
+        ], layout=torch.jagged)
+
+        PADDING_VAL = 4.2
+        expected_padded = nt._values.new_full((7, 8, *post_seq_len_shape), PADDING_VAL)
+        for i, component in enumerate(nt.unbind()):
+            expected_padded[i, :component.shape[0]].copy_(component)
+
+        padded = nt.to_padded_tensor(PADDING_VAL)
+        self.assertEqual(expected_padded, padded)
+
+        # convert padded dense -> NJT
+        nt2 = torch.nested.nested_tensor_from_padded(padded, nt.offsets())
+        self.assertEqual(nt, nt2)
+
+    @skipIfTorchDynamo("SDPA test compiles internally")
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @skipCUDAIfRocm
+    @onlyCUDA
+    @dtypes(torch.float32, torch.double, torch.half)
+    @parametrize("nt_dim", [2, 3, 4])
+    def test_to_padded_tensor_compile(self, device, dtype, nt_dim):
+        if nt_dim == 2:
+            post_seq_len_shape = ()
+        elif nt_dim == 3:
+            post_seq_len_shape = (10,)
+        elif nt_dim == 4:
+            post_seq_len_shape = (9, 10)
+
+        nt = torch.nested.nested_tensor([
+            torch.randn(2, *post_seq_len_shape, device=device, dtype=dtype),
+            torch.randn(3, *post_seq_len_shape, device=device, dtype=dtype),
+            torch.randn(4, *post_seq_len_shape, device=device, dtype=dtype),
+            torch.randn(5, *post_seq_len_shape, device=device, dtype=dtype),
+            torch.randn(6, *post_seq_len_shape, device=device, dtype=dtype),
+            torch.randn(7, *post_seq_len_shape, device=device, dtype=dtype),
+            torch.randn(8, *post_seq_len_shape, device=device, dtype=dtype),
+        ], layout=torch.jagged)
+
+        def f(x):
+            return x.sin() + 1
+
+        PADDING_VAL = 4.2
+
+        @torch.compile
+        def g(nt):
+            padded = nt.to_padded_tensor(PADDING_VAL)
+            padded = f(padded)
+            return torch.nested.nested_tensor_from_padded(padded, nt.offsets())
+
+        output = g(nt)
+        self.assertEqual(f(nt), output)
+
+        # TODO: Verify that computation fusion happens
+
 
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
