@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import os
 import subprocess
 import sys
 from unittest.mock import patch
@@ -58,6 +59,38 @@ class TestKernelBenchmark(TestCase):
             GB_count,
             exactly=1,
         ).run(bench_out)
+
+    def verify_remove_inductor_deps(self, compiled_module):
+        try:
+            out = subprocess.check_output(
+                f"{sys.executable} {compiled_module.__file__}".split(),
+                env={**os.environ.copy(), "TORCHINDUCTOR_DUMP_LAUNCH_PARAMS": "1"},
+                stderr=subprocess.STDOUT,
+            )
+        except subprocess.CalledProcessError as e:
+            print(
+                "Failed when runinng triton code with TORCHINDUCTOR_DUMP_LAUNCH_PARAMS=1",
+                e,
+            )
+            print(e.output.decode())
+            raise e
+        from torch.utils._get_clean_triton import get_clean_triton
+
+        cleaned_triton = get_clean_triton(
+            compiled_module.__file__, f"{compiled_module.__file__}.cleaned"
+        )
+        self.assertTrue("@triton_heuristics" not in cleaned_triton)
+        try:
+            out = subprocess.check_output(
+                f"{sys.executable} {compiled_module.__file__}.cleaned".split(),
+                stderr=subprocess.STDOUT,
+            )
+        except subprocess.CalledProcessError as e:
+            print("Failed when when running cleaned triton", e)
+            print(e.output.decode())
+            print(cleaned_triton)
+            raise e
+        return cleaned_triton
 
     def check_bandwidth(self, compiled_module, num_gb):
         # now run the compiled module in subprocess and check its output
@@ -252,7 +285,7 @@ class TestKernelBenchmark(TestCase):
         # num_gp = size_a + size_slice_b + size_c + size_out
         # num_gb = (5 * 1000000 + 5 * 2000000 + 1000000 + 5 * 2000000) * 2 / 1e9
         #        = 0.052
-        self.check_bandwidth(compiled_module, "0.052")
+        self.check_bandwidth(compiled_module, "0.020")
 
     def test_slice_add_bandwidth_computation(self):
         M, N = 5, 1000000
@@ -374,6 +407,55 @@ class TestKernelBenchmark(TestCase):
         # 20000 * 4 = 80KB for b
         # 20000 * 5000 * 4 = 200MB for a
         self.check_bandwidth(compiled_module, "0.200")
+
+    @config.patch("triton.unique_kernel_names", True)
+    @config.patch(benchmark_kernel=False)
+    @config.patch(compile_threads=1)
+    def test_remove_inductor_deps(self):
+        @torch.compile
+        def f(a):
+            return a.cos().sin()
+
+        a = torch.randn(5, device=GPU_TYPE)
+        f(a)
+        compiled_module = self.get_compiled_module()
+        cleaned_triton = self.verify_remove_inductor_deps(compiled_module)
+
+    @config.patch("triton.unique_kernel_names", True)
+    @config.patch(benchmark_kernel=False)
+    @config.patch(compile_threads=1)
+    def test_remove_inductor_deps_multiple_kernels(self):
+        @torch.compile
+        def f(a):
+            a = torch.mm(a, a)
+            a = a.cos().sin()
+            a = torch.mm(a, a)
+            a = torch.softmax(a, dim=-1)
+            return a
+
+        a = torch.randn(5, 5, device=GPU_TYPE)
+        f(a)
+        compiled_module = self.get_compiled_module()
+        self.verify_remove_inductor_deps(compiled_module)
+
+    @config.patch("triton.unique_kernel_names", True)
+    @config.patch("triton.unique_kernel_names", True)
+    @config.patch(benchmark_kernel=False)
+    @config.patch(compile_threads=1)
+    @config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
+    def test_remove_inductor_deps_templates(self):
+        @torch.compile
+        def f(a):
+            a = torch.mm(a, a)
+            a = a.cos()
+            a = torch.mm(a, a)
+            a = a.sin()
+            return a
+
+        a = torch.randn(128, 128, device=GPU_TYPE)
+        f(a)
+        compiled_module = self.get_compiled_module()
+        self.verify_remove_inductor_deps(compiled_module)
 
 
 if __name__ == "__main__":

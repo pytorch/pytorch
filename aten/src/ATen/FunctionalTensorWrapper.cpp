@@ -276,6 +276,32 @@ void FunctionalTensorWrapper::set__impl(const FunctionalTensorWrapper* other) {
   set_sizes_and_strides(sizes_, strides_, storage_offset_);
 }
 
+void FunctionalTensorWrapper::storage_resize_(c10::SymInt new_size) {
+  auto curr_storage_size = value_.unsafeGetTensorImpl()->unsafe_storage().unsafeGetStorageImpl()->sym_nbytes();
+  // storage resizing is severely limited: we only support resizing either to zero, or from zero bytes.
+  TORCH_CHECK(new_size == 0 || curr_storage_size == 0, "new_size: ", new_size, ". curr_storage_size: ", curr_storage_size);
+  // The "functionalization rule" for storage resizing is a giant no-op, mainly because we don't want
+  // resize_() calls to actualy emit any ops in the functional graph.
+  // How does it work?
+  // Resizing up (old size == 0):
+  //   We do nothing in this case.
+  //   The expection is that for the user code to be valid, the next op that should run against the current tensor "x"
+  //   will be a x.copy_(y) (or similar), that will fully overwrite the data of x.
+  //   If there are any outstanding aliases of x, we expect them not to be used until after the copy_() call
+  //   (otherwise the eager code would be invalid),
+  //   and therefore functionalization will regenerate the aliases off of the result of `x.copy(y)`.
+  // Resizing down (new size == 0):
+  //   We also do nothing in this case. The assumption is that after resizing a tensor down,
+  //   it is fully unused in the program (unless it is later resized back up first, has data copied in)
+  //   Although it might be saved for backward, which happens in FSDP.
+  //   The expected pattern is that the param will then be resized back up from zero in the backward.
+
+  // Mark the tensor as having its storage resized.
+  // This is so we can detect it for inputs in AOTAutograd and error / emit
+  // an input mutation resize_() appropriately
+  functional_storage_impl()->mark_inductor_storage_resize(new_size);
+}
+
 void FunctionalTensorWrapper::maybe_replace_storage(const Tensor& other) {
   // Note [resize_() in functionalization pass]
   // resize_() is a special operator in functionalization because it can reallocate its underlying storage.
