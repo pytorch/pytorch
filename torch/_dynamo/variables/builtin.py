@@ -1400,10 +1400,15 @@ class BuiltinVariable(VariableTracker):
 
     def call_issubclass(self, tx, left_ty, right_ty):
         """Checks if first arg is subclass of right arg"""
-        left_ty = left_ty.as_python_constant()
-        right_ty = right_ty.as_python_constant()
+        try:
+            left_ty_py = left_ty.as_python_constant()
+            right_ty_py = right_ty.as_python_constant()
+        except NotImplementedError:
+            unimplemented(
+                f"call_issubclass args not constant left_ty: {left_ty}, right_ty: {right_ty}"
+            )
 
-        return variables.ConstantVariable(issubclass(left_ty, right_ty))
+        return variables.ConstantVariable(issubclass(left_ty_py, right_ty_py))
 
     def call_super(self, tx, a, b):
         return variables.SuperVariable(a, b)
