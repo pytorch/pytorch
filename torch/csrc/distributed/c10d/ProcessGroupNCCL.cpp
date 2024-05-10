@@ -2321,11 +2321,7 @@ ProcessGroupNCCL::Options::Options(bool is_high_priority_stream)
 
 static constexpr int CoalActive = 0x01, CoalColl = 0x02, CoalP2P = 0x04;
 
-void ProcessGroupNCCL::startCoalescing() {
-  coalescedDevice_.set_index(-1);
-  coalescedComm_ = nullptr;
-  coalescing_state_ |= CoalActive;
-  groupStart();
+void ProcessGroupNCCL::startCoalescing(OpType optype) {
   // Other collective ops bump seq_ before creating a work. Thus, if coalesced
   // ops bump seq_ only after initing a work they will collide with (reuse) the
   // seq_ of the last non-coalesced collective.  Previously, seq_ was bumped
@@ -2334,10 +2330,25 @@ void ProcessGroupNCCL::startCoalescing() {
   // same seq_ for those ops and its 'endCoalescing' op. Hence we bump during
   // start, which has one minor downside- we burn a seq_ if someone ever does a
   // 'start' and 'end' coalescing region without doing an operation inbetween.
-  seqCollective_++;
 
   // Don't bump op_id_ here, because startCoalescing isn't a logical operation.
   // Bump it for each logical op inside the coalescing group.
+  if (isP2POp(optype)) {
+    seqP2P_++;
+  } else {
+    seqCollective_++;
+  }
+  return startCoalescing();
+}
+
+// Do not call this directly, use startCoalescing(OpType) instead.
+// This ensures that appropriate sequence numbers are properly incremented which
+// are important for debugging.
+void ProcessGroupNCCL::startCoalescing() {
+  coalescedDevice_.set_index(-1);
+  coalescedComm_ = nullptr;
+  coalescing_state_ |= CoalActive;
+  groupStart();
 }
 
 // `optype` is for specifying a composite optype, such as ALLGATHER and
@@ -2432,7 +2443,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   errorIfCapturingNonCapturableNCCL(capture_status);
 
   // Bump collective counter
-  seqCollective_++;
+  if (isP2POp(opType)) {
+    seqP2P_++;
+  } else {
+    seqCollective_++;
+  }
   op_id_++;
 
   auto device = getDevice(input);
@@ -2587,9 +2602,13 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   errorIfCapturingNonCapturableNCCL(capture_status);
 
   // Bump collective counter
-  seqCollective_++;
+  if (isP2POp(opType)) {
+    seqP2P_++;
+  } else {
+    seqCollective_++;
+  }
   // For coalescingManager collectives, there is no individual c++ call per
-  // collective so there is no flight record and we increment seq_ and op_id_
+  // collective so there is no flight record and we increment seq*_ and op_id_
   // together. Compare this to startCoalesing/endCoalescing flow where we
   // increment seq_ once per group and increment op_id_ once per indvidual
   // operation within the group
@@ -2815,7 +2834,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
 
     if (!coalescing_state_) {
       // Bump sequence number. Don't do so if it's a batch P2P, it will be
-      // bumped in `endCoalescing`.
+      // bumped in `startCoalescing`.
       seqP2P_++;
     }
   }
@@ -3492,7 +3511,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
         "nccl:all_gather");
   } else {
     const auto num_reduces = outputTensors_.size();
-    startCoalescing();
+    startCoalescing(OpType::ALLGATHER);
     for (const int i : c10::irange(num_reduces)) {
       auto& output = outputTensors_[i];
       auto& input = (i == rank_) ? inputTensor : output;
@@ -3625,7 +3644,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
         "nccl:reduce_scatter");
   } else {
     const auto num_reduces = inputTensors_.size();
-    startCoalescing();
+    startCoalescing(OpType::REDUCE_SCATTER);
     for (const int i : c10::irange(num_reduces)) {
       auto& input = inputTensors_[i];
       auto& output = (i == rank_) ? outputTensor : input;

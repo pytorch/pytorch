@@ -482,6 +482,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void startCoalescing() override;
 
+  // For tracking collectives v/s P2P communications sequence numbers
+  // separately, we have an additional method to help distinguish between the
+  // two.
+  void startCoalescing(OpType optype);
+
   c10::intrusive_ptr<Work> endCoalescing() override;
 
   // For specifying a composite optype, such as ALLGATHER and REDUCE_SCATTER
