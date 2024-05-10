@@ -1,5 +1,7 @@
 import contextlib
-from typing import List, Optional, TYPE_CHECKING
+
+import functools
+from typing import Any, Callable, List, Optional, TYPE_CHECKING
 
 import torch
 from torch._dynamo.external_utils import call_backward, call_hook
@@ -44,7 +46,6 @@ def maybe_clone(x):
 
 class AutogradCompilerInstance:
     def __init__(self) -> None:
-        self.compiler_fn = None
         self.stack = contextlib.ExitStack()
         self.close = self.stack.close
         self.shape_env = ShapeEnv()
@@ -234,6 +235,10 @@ class AutogradCompilerInstance:
             payload_fn=lambda: graph.print_readable(print_output=False),
         )
 
+        global override_compiler_fn
+        if override_compiler_fn:
+            return override_compiler_fn(graph)
+
         assert self.compiler_fn and hasattr(self.compiler_fn, "rewrap")
         return self.compiler_fn.rewrap(graph)
 
@@ -282,7 +287,9 @@ class AutogradCompilerInstance:
         set_stack_trace(new_stack_trace)
 
 
+override_compiler_fn: Optional[Callable[[Any], Any]] = None
 active_context_manager = False
+
 
 def initialize():
     # called by torch.compile
@@ -299,6 +306,7 @@ def initialize():
     )
     # TODO: can only be re-enabled when compiled autograd is turned off and all nodes are freed
     torch.autograd.set_multithreading_enabled(False)
+
 
 @contextlib.contextmanager
 def enable(compiler_fn):
@@ -319,15 +327,15 @@ def enable(compiler_fn):
             yield
     finally:
         active_context_manager = False
-        torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
+        torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
+
 
 @contextlib.contextmanager
-def disable():
+def disable_compiler():
     # Note: this does not disable compiler_fn installation on torch.compile created autograd nodes during forward compilation
     # controlled by `torch._dynamo.config.compiled_autograd_enabled`
     prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
     try:
         yield
     finally:
-        if prior:
-            torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
+        torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)

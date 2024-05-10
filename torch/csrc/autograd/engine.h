@@ -137,7 +137,9 @@ struct TORCH_API Engine {
       GraphTask& graph_task,
       bool accumulate_grad,
       const edge_list& outputs);
-  static void set_compiled_autograd(compiled_autograd_fn fn);
+  static void set_compiled_autograd(
+      compiled_autograd_fn fn,
+      bool ctx_manager_override);
 
   Engine(const Engine&) = delete;
   Engine(Engine&&) = delete;

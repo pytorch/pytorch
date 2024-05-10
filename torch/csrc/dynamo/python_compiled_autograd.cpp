@@ -564,18 +564,20 @@ variable_list compiled_autograd(
 static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args) {
   HANDLE_TH_ERRORS;
   PyObject* obj = nullptr;
-  if (!PyArg_ParseTuple(args, "O", &obj)) {
+  PyObject* py_ctx_manager_override = nullptr;
+  if (!PyArg_ParseTuple(args, "OO", &obj, &py_ctx_manager_override)) {
     return nullptr;
   }
+  bool ctx_manager_override = PyObject_IsTrue(py_ctx_manager_override);
 
   PyObject* prior = the_autograd_compiler;
   if (obj == Py_None) { // disable
     the_autograd_compiler = nullptr; // decref not needed due to `prior`
-    Engine::set_compiled_autograd(nullptr);
+    Engine::set_compiled_autograd(nullptr, ctx_manager_override);
   } else { // enable
     Py_INCREF(obj);
     the_autograd_compiler = obj;
-    Engine::set_compiled_autograd(&compiled_autograd);
+    Engine::set_compiled_autograd(&compiled_autograd, ctx_manager_override);
   }
 
   if (prior == nullptr) {
@@ -592,7 +594,7 @@ static PyObject* clear_autograd_compiler(PyObject* dummy, PyObject* args) {
     Py_DECREF(the_autograd_compiler);
   }
   the_autograd_compiler = nullptr;
-  Engine::set_compiled_autograd(nullptr);
+  Engine::set_compiled_autograd(nullptr, false);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS;
 }
