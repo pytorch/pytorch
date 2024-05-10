@@ -137,35 +137,19 @@ def pad_addmm(
         mat2 = pad_mat2(
             mat2, k_padded_length=k_padded_length, n_padded_length=n_padded_length
         )
-    if input is not None:
-        if len(input.shape) < 2:
-            # make sure we have at least two dimensions
-            # the first one to be broadcasted over is sometimes implicit
-            input = input.unsqueeze(0)
-        if n_padded_length != 0 or m_padded_length != 0:
-            bias_n_padded_length = n_padded_length
-            bias_m_padded_length = m_padded_length
-            # What if we're broadcasting?
-            if input.shape[0] == 1 and mat1.shape[0] > 1:
-                bias_m_padded_length = 0
-            if input.shape[1] == 1 and mat2.shape[1] > 1:
-                bias_n_padded_length = 0
-            if bias_m_padded_length > 0 or bias_n_padded_length > 0:
-                input_padded = aten.constant_pad_nd(
-                    input, [0, bias_n_padded_length, 0, bias_m_padded_length]
-                )
-            else:
-                input_padded = input
-        else:
-            input_padded = input
-    else:
-        input_padded = None
 
-    try:
-        res = aten.addmm(input_padded, mat1, mat2, beta=beta, alpha=alpha)
-    except RuntimeError as e:
-        note = f"\naten.addmm was called with shapes: input_padded.shape={input.shape if input else None}, mat1_padded.shape={mat1.shape}, mat2_padded.shape={mat2.shape}, beta={beta}, alpha={alpha},  m_padded_length={m_padded_length}, k_padded_length={k_padded_length}, n_padded_length={n_padded_length}"  # noqa: B950
-        raise RuntimeError(str(e) + note) from e
+    # the add broadcasts, so we only pad if the dimension != 1
+    if input is not None and k_padded_length == 0:
+        if n_padded_length != 0:
+            if input.dim() == 2 and input.shape[1] != 1:
+                input = pad_dim(input, n_padded_length, 1)
+            elif input.dim() == 1 and input.shape[0] != 1:
+                input = pad_dim(input, n_padded_length, 0)
+        elif m_padded_length != 0 and input.dim() == 2 and input.shape[0] != 1:
+            input = pad_dim(input, m_padded_length, 0)
+        input_padded = input
+
+    res = aten.addmm(input_padded, mat1, mat2, beta=beta, alpha=alpha)
 
     if m_padded_length != 0:
         res = res[:-m_padded_length, :]
