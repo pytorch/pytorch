@@ -206,7 +206,7 @@ class LRScheduler:
         for i, data in enumerate(zip(self.optimizer.param_groups, values)):
             param_group, lr = data
             if isinstance(param_group["lr"], Tensor):
-                lr_val = lr.item() if isinstance(lr, Tensor) else lr
+                lr_val = lr.item() if isinstance(lr, Tensor) else lr  # type: ignore[attr-defined]
                 param_group["lr"].fill_(lr_val)
             else:
                 param_group["lr"] = lr
@@ -214,16 +214,6 @@ class LRScheduler:
         self._last_lr: List[float] = [
             group["lr"] for group in self.optimizer.param_groups
         ]
-
-
-def _warn_get_lr_called_within_step(lr_scheduler: LRScheduler):
-    if not lr_scheduler._get_lr_called_within_step:
-        warnings.warn(
-            "To get the last learning rate computed by the scheduler, "
-            "please use `get_last_lr()`.",
-            UserWarning,
-            stacklevel=2,
-        )
 
 
 def _warn_get_lr_called_within_step(lr_scheduler: LRScheduler):
