@@ -38,10 +38,9 @@ from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .runtime.hints import DeviceProperties
-from .runtime.runtime_utils import do_bench, do_bench_cpu
+from .runtime.runtime_utils import do_bench
 from .utils import (
     get_dtype_size,
-    is_cpu_device,
     Placeholder,
     restore_stdout_stderr,
     sympy_dot,
@@ -845,10 +844,7 @@ class ExternKernelCaller(ChoiceCaller):
                 out_new, tuple(out.size()), tuple(out.stride())
             )
             out.copy_(out_new)  # for correctness checking
-            if is_cpu_device(args):
-                return do_bench_cpu(lambda: algo(*args))
-            else:
-                return do_bench(lambda: algo(*args))
+            return do_bench(algo, args, {})
 
     def to_callable(self):
         fn = self.choice.to_callable()
