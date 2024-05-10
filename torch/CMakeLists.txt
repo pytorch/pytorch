@@ -361,9 +361,9 @@ if(USE_UCC)
   target_compile_definitions(torch_python PRIVATE USE_UCC)
 endif()
 
-if(BUILD_ONEDNN_GRAPH)
+if(BUILD_ONEDNN_GRAPH AND NOT BUILD_LIBTORCHLESS)
   target_compile_definitions(torch_python PRIVATE "-DBUILD_ONEDNN_GRAPH")
-  target_compile_definitions(torch_cpu PRIVATE "-DBUILD_ONEDNN_GRAPH")
+  target_compile_definitions(${TORCH_CPU_LIB} PRIVATE "-DBUILD_ONEDNN_GRAPH")
 endif()
 
 if(NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")

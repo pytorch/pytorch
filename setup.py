@@ -234,8 +234,8 @@
 #      Builds pytorch as a wheel using libtorch.so from a seperate wheel [not supported yet]
 
 import os
-import sys
 import pkgutil
+import sys
 
 if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
     print(
@@ -244,6 +244,7 @@ if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
     sys.exit(-1)
 
 import platform
+
 
 def _get_package_path(package_name):
     loader = pkgutil.find_loader(package_name)
@@ -256,10 +257,9 @@ def _get_package_path(package_name):
             pass
     return None
 
+
 BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
-BUILD_PYTORCH_USING_LIBTORCH_WHL = (
-    os.getenv("BUILD_PYTHON_ONLY", "0") == "1"
-)
+BUILD_PYTORCH_USING_LIBTORCH_WHL = os.getenv("BUILD_PYTHON_ONLY", "0") == "1"
 
 # set up appropriate env variables
 if BUILD_LIBTORCH_WHL:
@@ -379,9 +379,6 @@ cmake_python_include_dir = sysconfig.get_path("include")
 ################################################################################
 # Version, create_version_file, and package_name
 ################################################################################
-
-
-
 
 
 DEFAULT_PACKAGE_NAME = "libtorch" if BUILD_LIBTORCH_WHL else "torch"
