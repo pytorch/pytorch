@@ -308,9 +308,8 @@ def main(experiments=None, output_file=DEFAULT_OUTPUT_FILE):
         "memory_bandwidth[actual]",
         "memory_bandwidth[pct]",
     ]
-    rows = [x for x in results]
 
-    for row in rows:
+    for row in results:
         output_csv(output_file, headers, row)
 
 

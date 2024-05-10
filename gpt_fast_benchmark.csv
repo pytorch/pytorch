@@ -1,0 +1,4 @@
+name,mode,token_per_sec[target],token_per_sec[actual],token_per_sec[pct],memory_bandwidth[target],memory_bandwidth[actual],memory_bandwidth[pct]
+Llama-2-7b-chat-hf,bfloat16,94,106.469704,113.27%,1430,1406.963867,98.39%
+Llama-2-7b-chat-hf,int8,144,156.140930,108.43%,1066,1032.153076,96.82%
+Mixtral-8x7B-v0.1,int8,175,198.314529,113.32%,4647,4632.793457,99.69%
