@@ -34,11 +34,6 @@ int saxpy(int n, float a, float *x, float *y) {
 }
 """
 
-if torch.version.hip:
-    _SOURCE_CODE = rf"""
-#include "hip/hip_runtime.h"
-{_SOURCE_CODE}    
-"""
 
 @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUDA_HOME setup")
 class TestCUDACodeCache(InductorTestCase):
@@ -93,5 +88,5 @@ class TestCUDACodeCache(InductorTestCase):
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if nvcc_exist("nvcc") or nvcc_exist("hipcc"):
+    if nvcc_exist():
         run_tests("cuda")
