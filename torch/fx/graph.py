@@ -544,7 +544,7 @@ class CodeGen:
                 from torch.fx.experimental.proxy_tensor import py_sym_types
                 from torch.fx.passes.shape_prop import TensorMetadata
 
-                meta_val = node.meta.get('val', node.meta.get('tensor_meta', None))
+                meta_val = node.meta.get('val', node.meta.get('tensor_meta', node.meta.get('example_value', None)))
                 # use string as annotation, to make it valid python code
                 if isinstance(meta_val, FakeTensor):
                     stride_annotation = f"{stringify_shape(meta_val.stride())}" if include_stride else ""
@@ -983,6 +983,9 @@ class Graph:
         candidate = name if name is not None else self._target_to_str(target)
         name = self._graph_namespace.create_name(candidate, None)
         n = Node(self, name, op, target, args, kwargs, type_expr)
+
+        if self.owning_module is not None and getattr(self.owning_module, "_create_node_hook", None) is not None:
+            self.owning_module._create_node_hook(n)
 
         self._graph_namespace.associate_name_with_obj(name, n)
 

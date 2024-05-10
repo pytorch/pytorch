@@ -57,8 +57,8 @@ from torch.testing._internal.common_cuda import (
     _create_scaling_case, _create_scaling_models_optimizers)
 from torch.testing._internal.common_mkldnn import bf32_on_and_off
 from torch.testing._internal.common_dtype import (
-    floating_types_and, get_all_math_dtypes, all_types_and_complex_and, all_types_and, floating_types,
-    floating_and_complex_types, integral_types_and,
+    floating_types_and, get_all_math_dtypes, all_types_and_complex_and, complex_types,
+    all_types_and, floating_types, floating_and_complex_types, integral_types_and,
     get_all_qint_dtypes,
 )
 from torch.testing._internal.two_tensor import TwoTensor
@@ -3837,7 +3837,7 @@ else:
             self.assertEqual(input, result, msg=f"result: {result} input: {input} method: {str(operation)}")
 
     @onlyCUDA
-    @dtypes(torch.cdouble)
+    @dtypes(*complex_types())
     def test_scatter_reduce_multiply_unsupported_dtypes(self, device, dtype):
         height = 2
         width = 2
@@ -9779,8 +9779,13 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         # Direct construction not OK
         self.assertRaises(RuntimeError, lambda: torch._C.TensorBase())
 
-        # But construction of subclass is OK
-        class T(torch._C.TensorBase):
+        # Subclassing it directly no OK
+        with self.assertRaisesRegex(RuntimeError, "Cannot subclass"):
+            class Tfail(torch._C.TensorBase):
+                pass
+
+        # Doing so with Tensor is ok though
+        class T(torch.Tensor):
             pass
 
         T()
@@ -9799,7 +9804,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         # OK to call super().__new__, see
         # https://github.com/pytorch/pytorch/issues/57421
-        class TestTensor(torch._C.TensorBase):
+        class TestTensor(torch.Tensor):
             @staticmethod
             def __new__(cls, x, *args, **kwargs):
                 return super().__new__(cls, x, *args, **kwargs)
@@ -9999,7 +10004,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     def test_tensor_slot_dealloc(self):
 
-        class SlotTensor1(torch._C.TensorBase):
+        class SlotTensor1(torch.Tensor):
             __slots__ = ['slot1']
 
         class SlotTensor2(SlotTensor1):
@@ -10062,7 +10067,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_tensor_finalizer_dealloc(self):
         m = [False]
 
-        class FinalizerTensor(torch._C.TensorBase):
+        class FinalizerTensor(torch.Tensor):
             def __del__(self):
                 m[0] = True
 
@@ -10200,7 +10205,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         m1 = [False]
         m2 = [False]
 
-        class SlotTensor1(torch._C.TensorBase):
+        class SlotTensor1(torch.Tensor):
             __slots__ = ['slot1']
 
             def __del__(self):
