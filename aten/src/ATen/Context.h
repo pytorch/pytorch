@@ -317,7 +317,6 @@ class TORCH_API Context {
   std::string float32Precision(
       const std::string& backend,
       const std::string& op) const;
-  void setFloat32MatmulPrecision(Float32MatmulPrecision p);
   bool allowFP16ReductionCuBLAS() const;
   void setAllowFP16ReductionCuBLAS(bool);
   bool allowBF16ReductionCuBLAS() const;

@@ -245,7 +245,7 @@ void Context::setBenchmarkLimitCuDNN(int b) {
 
 bool Context::allowTF32CuBLAS() const {
   bool legacy_allow_tf32 = float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
-  bool allow_tf32 = float32Precision("cuda", "matmul") == "tf32";
+  bool allow_tf32 = float32Precision("cuda", "matmul") == "tf32" ? true : false;
   TORCH_CHECK(legacy_allow_tf32 == allow_tf32);
   return allow_tf32;
 }
@@ -270,21 +270,23 @@ std::string Context::float32Precision(const std::string& backend, const std::str
   return precision;
 }
 
-void Context::setFloat32MatmulPrecision(Float32MatmulPrecision p) {
-  float32_matmul_precision = p;
-}
-
 void Context::setFloat32MatmulPrecision(const std::string &s) {
   auto match = [this](const std::string & s_) {
     // TODO: consider if CuDNN field needs to also be set for potential future CuDNN ops like multi-headed attention
     if (s_ == "highest") {
       float32_matmul_precision = at::Float32MatmulPrecision::HIGHEST;
+      setFloat32Precision("ieee", "cuda", "matmul");
+      setFloat32Precision("ieee", "mkldnn", "matmul");
       return true;
     } else if (s_ == "high") {
       float32_matmul_precision = at::Float32MatmulPrecision::HIGH;
+      setFloat32Precision("tf32", "cuda", "matmul");
+      setFloat32Precision("ieee", "mkldnn", "matmul");
       return true;
     } else if (s_ == "medium") {
       float32_matmul_precision = at::Float32MatmulPrecision::MEDIUM;
+      setFloat32Precision("tf32", "cuda", "matmul");
+      setFloat32Precision("bf16", "mkldnn", "matmul");
       return true;
     }
     return false;
