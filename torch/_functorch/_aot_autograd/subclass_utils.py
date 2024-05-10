@@ -85,6 +85,9 @@ def unwrap_tensor_subclasses(wrapped_args, *, is_joint_structure: bool):
                 xs_inner += [getattr(x, attr) for attr in attrs]
             else:
                 xs_inner += [x]
+        for x in xs:
+            if isinstance(x, Tensor) and is_traceable_wrapper_subclass(x):
+                xs_inner += list(x.size())
         return xs_inner
 
     if is_joint_structure:
@@ -112,6 +115,7 @@ def wrap_tensor_subclasses(
     is_runtime: bool = False,
 ) -> Tuple[Any, ...]:
     wrapped_args = []
+    num_arg_sizes_to_ignore = 0
     num_args_tallied = 0
     for subclass_meta in subclass_metas:
         if isinstance(subclass_meta, int):
@@ -122,6 +126,7 @@ def wrap_tensor_subclasses(
             wrapped_args.append(
                 subclass_meta.creation_fn(unwrapped_args, is_runtime=is_runtime)
             )
+            num_arg_sizes_to_ignore += len(wrapped_args[-1].size())
             num_args_tallied += subclass_meta.arg_count
 
     # Note: [Partitioner handling for Subclasses, Part 2]
@@ -158,7 +163,7 @@ def wrap_tensor_subclasses(
             return wrapped_args + activations
         return tuple(list(wrapped_args) + list(activations))
     else:
-        assert len(unwrapped_args) == num_args_tallied
+        assert len(unwrapped_args) == num_args_tallied + num_arg_sizes_to_ignore
         return tuple(wrapped_args)
 
 

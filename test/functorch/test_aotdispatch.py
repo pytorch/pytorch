@@ -3311,6 +3311,126 @@ def forward(self, tangents_1):
             str(out2.grad_fn.__class__), """<class 'ViewBackward0'>"""
         )
 
+    def test_tensor_subclass_simple(self):
+        def f(tt):
+            return tt * tt.size()[0]
+
+        a = torch.ones(3, 4)
+        b = a.clone()
+        tt = TwoTensor(a, b)
+
+        fw_graph = self.verify_aot_autograd(f, [tt], dynamic=True)
+        self.assertExpectedInline(
+            fw_graph.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
+    mul = torch.ops.aten.mul.Tensor(arg0_1, arg2_1);  arg0_1 = None
+    mul_1 = torch.ops.aten.mul.Tensor(arg1_1, arg2_1);  arg1_1 = None
+    return [mul, mul_1, arg2_1, arg3_1]""",
+        )
+
+    def test_tensor_subclass_clone_view(self):
+        def f(tt):
+            y = tt.clone()
+            return y.view(y.shape[1], y.shape[0])
+
+        a = torch.ones(3, 4)
+        b = a.clone()
+        tt = TwoTensor(a, b)
+
+        fw_graph = self.verify_aot_autograd(f, [tt], dynamic=True)
+        self.assertExpectedInline(
+            fw_graph.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+    clone_1 = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
+    view = torch.ops.aten.view.default(clone, [arg3_1, arg2_1]);  clone = None
+    view_1 = torch.ops.aten.view.default(clone_1, [arg3_1, arg2_1]);  clone_1 = None
+    return [view, view_1, arg3_1, arg2_1]""",
+        )
+
+    def test_tensor_subclass_mul(self):
+        def f(tt, a, b):
+            s0, s1 = a.size()
+            s2, s3 = b.size()
+            return tt * s0 * s1 * s2 * s3
+
+        a = torch.ones(3, 4)
+        b = a.clone()
+        tt = TwoTensor(a, b)
+
+        fw_graph = self.verify_aot_autograd(f, [tt, a, b], dynamic=True)
+        self.assertExpectedInline(
+            fw_graph.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
+    mul = torch.ops.aten.mul.Tensor(arg0_1, arg4_1);  arg0_1 = None
+    mul_1 = torch.ops.aten.mul.Tensor(arg1_1, arg4_1);  arg1_1 = None
+    mul_2 = torch.ops.aten.mul.Tensor(mul, arg5_1);  mul = None
+    mul_3 = torch.ops.aten.mul.Tensor(mul_1, arg5_1);  mul_1 = None
+    mul_4 = torch.ops.aten.mul.Tensor(mul_2, arg4_1);  mul_2 = None
+    mul_5 = torch.ops.aten.mul.Tensor(mul_3, arg4_1);  mul_3 = None
+    mul_6 = torch.ops.aten.mul.Tensor(mul_4, arg5_1);  mul_4 = None
+    mul_7 = torch.ops.aten.mul.Tensor(mul_5, arg5_1);  mul_5 = None
+    return [mul_6, mul_7, arg4_1, arg5_1]""",
+        )
+
+    def test_tensor_subclass_view(self):
+        def f(tt):
+            y = tt.clone()
+            return y.view(y.shape[0], y.shape[1])
+
+        a = torch.ones(3, 4)
+        b = a.clone()
+        tt = TwoTensor(a, b)
+
+        fw_graph = self.verify_aot_autograd(f, [tt], dynamic=True)
+        self.assertExpectedInline(
+            fw_graph.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+    clone_1 = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
+    view = torch.ops.aten.view.default(clone, [arg2_1, arg3_1]);  clone = None
+    view_1 = torch.ops.aten.view.default(clone_1, [arg2_1, arg3_1]);  clone_1 = None
+    return [view, view_1, arg2_1, arg3_1]""",
+        )
+
+    def test_tensor_subclass_view_mul(self):
+        def f(tt):
+            y = tt.clone()
+            return y.view(y.shape[0] * y.shape[1])
+
+        a = torch.ones(3, 4)
+        b = a.clone()
+        tt = TwoTensor(a, b)
+
+        fw_graph = self.verify_aot_autograd(f, [tt], dynamic=True)
+        self.assertExpectedInline(
+            fw_graph.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+    clone_1 = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
+    mul = arg2_1 * arg3_1;  arg2_1 = arg3_1 = None
+    view = torch.ops.aten.view.default(clone, [mul]);  clone = None
+    view_1 = torch.ops.aten.view.default(clone_1, [mul]);  clone_1 = None
+    return [view, view_1, mul]""",
+        )
+
+    def test_tensor_subclass_return_shape(self):
+        @torch.compile(backend="aot_eager", dynamic=True)
+        def fn(x):
+            return x.clone().view(x.shape[0] * x.shape[1])
+
+        a = torch.ones(2, 3)
+        b = a.clone()
+        tt = TwoTensor(a, b)
+        out = fn(tt)
+        self.assertEqual(tt.view(2 * 3), out)
+        self.assertEqual(out.shape, (6,))
+
 
 def extract_graph(fx_g, _, graph_cell):
     graph_cell[0] = fx_g
