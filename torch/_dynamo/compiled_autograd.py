@@ -1,6 +1,5 @@
 import contextlib
-import functools
-from typing import List, Optional, TYPE_CHECKING
+from typing import Any, Callable, List, Optional, TYPE_CHECKING
 
 import torch
 from torch._dynamo.external_utils import call_backward, call_hook
@@ -44,8 +43,7 @@ def maybe_clone(x):
 
 
 class AutogradCompilerInstance:
-    def __init__(self, compiler_fn) -> None:
-        self.compiler_fn = compiler_fn
+    def __init__(self) -> None:
         self.stack = contextlib.ExitStack()
         self.close = self.stack.close
         self.shape_env = ShapeEnv()
@@ -222,7 +220,9 @@ class AutogradCompilerInstance:
             "compiled_autograd_graph",
             payload_fn=lambda: graph.print_readable(print_output=False),
         )
-        return self.compiler_fn(graph)
+        global override_compiler_fn
+        assert override_compiler_fn
+        return override_compiler_fn(graph)
 
     def reorder_accumulate_grad_nodes(self):
         """
@@ -270,16 +270,19 @@ class AutogradCompilerInstance:
 
 
 compiled_autograd_enabled = False
+override_compiler_fn: Optional[Callable[[Any], Any]] = None
 
 
 @contextlib.contextmanager
 def enable(compiler_fn):
-    global compiled_autograd_enabled
+    global compiled_autograd_enabled, override_compiler_fn
     assert not compiled_autograd_enabled
     compiled_autograd_enabled = True
+    override_compiler_fn = compiler_fn
     prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
-        functools.partial(AutogradCompilerInstance, compiler_fn)
+        AutogradCompilerInstance
     )
+    assert not prior
     torch._C._dynamo.compiled_autograd.set_verbose_logging(
         snapshot_verbose_logging_enabled()
     )
@@ -287,9 +290,8 @@ def enable(compiler_fn):
         with torch.autograd.set_multithreading_enabled(False):
             yield
     finally:
-        if not prior:
-            compiled_autograd_enabled = False
-        torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
+        compiled_autograd_enabled = False
+        torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
 
 
 @contextlib.contextmanager
