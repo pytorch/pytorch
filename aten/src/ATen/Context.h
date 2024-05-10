@@ -409,14 +409,20 @@ class TORCH_API Context {
   std::map<std::string, std::map<std::string, std::string>> fp32_precision = {
       {"generic", {{"all", "ieee"}}},
       {"mkldnn",
-       {{"matmul", "ieee"},
-        {"conv", "ieee"},
-        {"rnn", "ieee"},
-        {"all", "ieee"}}},
+       {{"matmul",
+         float32_matmul_precision == at::Float32MatmulPrecision::MEDIUM
+             ? "bf16"
+             : "ieee"},
+        {"conv", "default"},
+        {"rnn", "default"},
+        {"all", "default"}}},
       {"cuda",
-       {{"matmul", "ieee"},
-        {"conv", "tf32"},
-        {"rnn", "tf32"},
+       {{"matmul",
+         float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST
+             ? "ieee"
+             : "tf32"},
+        {"conv", allow_tf32_cudnn ? "tf32" : "ieee"},
+        {"rnn", allow_tf32_cudnn ? "tf32" : "ieee"},
         {"all", "ieee"}}},
   };
 
