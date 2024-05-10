@@ -1,13 +1,13 @@
 import math
 import types
 import warnings
-import weakref
 from bisect import bisect_right
 from collections import Counter
-from functools import partial, wraps
+from functools import partial
 from typing import Optional, Sequence
+from weakref import ref
 
-from torch import inf
+from torch import inf, Tensor
 
 from .optimizer import Optimizer
 
@@ -76,39 +76,31 @@ class LRScheduler:
         # Following https://github.com/pytorch/pytorch/issues/20124
         # We would like to ensure that `lr_scheduler.step()` is called after
         # `optimizer.step()`
-        def with_counter(method):
-            if getattr(method, "_with_counter", False):
-                # `optimizer.step()` has already been replaced, return.
-                return method
+        def patch_track_step_called(opt):
+            if hasattr(opt.step, "_wrapped_by_lr_sched"):
+                # we've already patched
+                return opt.step
 
-            # Keep a weak reference to the optimizer instance to prevent
-            # cyclic references.
-            instance_ref = weakref.ref(method.__self__)
-            # Get the unbound method for the same purpose.
-            func = method.__func__
-            cls = instance_ref().__class__
-            del method
+            def wrap_step(step_fn):
+                opt_ref = ref(self.optimizer)
+                func = step_fn.__func__
 
-            @wraps(func)
-            def wrapper(*args, **kwargs):
-                instance = instance_ref()
-                instance._step_count += 1
-                wrapped = func.__get__(instance, cls)
-                return wrapped(*args, **kwargs)
+                def wrapper(*args, **kwargs):
+                    opt = opt_ref()
+                    opt._opt_called = True
+                    return func.__get__(opt, opt.__class__)(*args, **kwargs)
 
-            # Note that the returned function here is no longer a bound method,
-            # so attributes like `__func__` and `__self__` no longer exist.
-            wrapper._with_counter = True
-            return wrapper
+                wrapper._wrapped_by_lr_sched = True
+                return wrapper
 
-        self.optimizer.step = with_counter(self.optimizer.step)
+            opt.step = wrap_step(opt.step)
+
+        patch_track_step_called(self.optimizer)
         self.verbose = _check_verbose_deprecated_warning(verbose)
-
         self._initial_step()
 
     def _initial_step(self):
         """Initialize step counts and performs a step"""
-        self.optimizer._step_count = 0
         self._step_count = 0
         self.step()
 
@@ -154,7 +146,7 @@ class LRScheduler:
         # Raise a warning if old pattern is detected
         # https://github.com/pytorch/pytorch/issues/20124
         if self._step_count == 1:
-            if not hasattr(self.optimizer.step, "_with_counter"):
+            if not hasattr(self.optimizer.step, "_wrapped_by_lr_sched"):
                 warnings.warn(
                     "Seems like `optimizer.step()` has been overridden after learning rate scheduler "
                     "initialization. Please, make sure to call `optimizer.step()` before "
@@ -164,7 +156,7 @@ class LRScheduler:
                 )
 
             # Just check if there were two first lr_scheduler.step() calls before optimizer.step()
-            elif self.optimizer._step_count < 1:
+            elif not getattr(self.optimizer, "_opt_called", False):
                 warnings.warn(
                     "Detected call of `lr_scheduler.step()` before `optimizer.step()`. "
                     "In PyTorch 1.1.0 and later, you should call them in the opposite order: "
@@ -190,7 +182,11 @@ class LRScheduler:
 
         for i, data in enumerate(zip(self.optimizer.param_groups, values)):
             param_group, lr = data
-            param_group["lr"] = lr
+            if isinstance(param_group["lr"], Tensor):
+                lr_val = lr.item() if isinstance(lr, Tensor) else lr
+                param_group["lr"].fill_(lr)
+            else:
+                param_group["lr"] = lr
 
         self._last_lr = [group["lr"] for group in self.optimizer.param_groups]
 
@@ -1421,7 +1417,11 @@ class CyclicLR(LRScheduler):
         base_lrs = self._format_param("base_lr", optimizer, base_lr)
         if last_epoch == -1:
             for lr, group in zip(base_lrs, optimizer.param_groups):
-                group["lr"] = lr
+                if isinstance(group["lr"], Tensor):
+                    lr_val = lr.item() if isinstance(lr, Tensor) else lr
+                    group["lr"].fill_(lr)
+                else:
+                    group["lr"] = lr
 
         self.max_lrs = self._format_param("max_lr", optimizer, max_lr)
 
