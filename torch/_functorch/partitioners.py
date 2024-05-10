@@ -88,9 +88,6 @@ def _extract_graph_with_inputs_outputs(joint_graph, inputs, outputs):
     new_graph = fx.Graph()
     env = {}
 
-    # Ensure we can ask about our input nodes quickly.
-    inputs = inputs if isinstance(inputs, set) else set(inputs)
-
     # Add new placeholder nodes in the order specified by the inputs
     for node in inputs:
         new_node = new_graph.placeholder(node.name)
@@ -99,7 +96,7 @@ def _extract_graph_with_inputs_outputs(joint_graph, inputs, outputs):
         env[node] = new_node
 
     for node in joint_graph.nodes:
-        if node in inputs:
+        if node in env:
             continue
         elif node.op == "placeholder":
             env[node] = InvalidNode
