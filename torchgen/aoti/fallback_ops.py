@@ -5,8 +5,8 @@
 # The inductor_fallback_ops list is based on the fallback ops from torch/_inductor/lowering.py.
 # Generally speaking, it is ok to add a new op to the list, but you need to run
 # `python torchgen/gen.py --update-aoti-c-shim` in order to regenerate C shim header files.
-# But it is NOT ok to remove an existing fallback op from the list, since that might break
-# an existing AOTInductor-compiled model.
+# But it is NOT ok to remove an existing fallback op from the list, since that will break
+# some existing AOTInductor-compiled models.
 inductor_fallback_ops = {
     "aten._adaptive_avg_pool2d_backward.default",
     "aten._adaptive_avg_pool2d.default",
