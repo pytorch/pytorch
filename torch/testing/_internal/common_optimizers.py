@@ -361,6 +361,11 @@ def optim_inputs_func_adagrad(device, dtype=None):
             kwargs={"lr": 0.1, "lr_decay": 0.5, "weight_decay": 0.1},
             desc="lr_decay",
         ),  # TODO: Move out to testing in param_group?
+        OptimizerInput(
+            params=None,
+            kwargs={"lr": torch.tensor(0.001)},
+            desc="Tensor lr",
+        ),
     ]
 
 
@@ -503,6 +508,16 @@ def optim_inputs_func_adamax(device, dtype=None):
             kwargs={"weight_decay": 0.9, "maximize": False, "capturable": True},
             desc="capturable, weight_decay",
         ),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "lr": torch.tensor(0.001),
+                "weight_decay": 0.9,
+                "maximize": False,
+                "capturable": True,
+            },
+            desc="capturable, weight_decay, tensor LR",
+        ),
     ]
 
     return [
@@ -561,6 +576,16 @@ def optim_inputs_func_asgd(device, dtype=None):
             params=None,
             kwargs={"weight_decay": 0.1, "maximize": True, "capturable": True},
             desc="maximize, weight_decay, capturable",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "lr": torch.tensor(0.001),
+                "weight_decay": 0.1,
+                "maximize": True,
+                "capturable": True,
+            },
+            desc="maximize, weight_decay, capturable, tensor LR",
         ),
     ]
     return [
@@ -628,6 +653,17 @@ def optim_inputs_func_nadam(device, dtype=None):
         OptimizerInput(
             params=None,
             kwargs={
+                "weight_decay": 0.9,
+                "momentum_decay": 6e-3,
+                "decoupled_weight_decay": True,
+                "capturable": True,
+            },
+            desc="decoupled_weight_decay, capturable",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "lr": torch.tensor(0.001),
                 "weight_decay": 0.9,
                 "momentum_decay": 6e-3,
                 "decoupled_weight_decay": True,
@@ -707,6 +743,16 @@ def optim_inputs_func_radam(device=None, dtype=None):
                 "decoupled_weight_decay": True,
             },
             desc="capturable, weight_decay, decoupled_weight_decay",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "lr": torch.tensor(0.001),
+                "capturable": True,
+                "weight_decay": 0.1,
+                "decoupled_weight_decay": True,
+            },
+            desc="capturable, weight_decay, decoupled_weight_decay, tensor LR",
         ),
     ]
     return [
@@ -857,6 +903,9 @@ def optim_inputs_func_sgd(device, dtype=None):
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(params=None, kwargs={"lr": 1e-2}, desc="non-default lr"),
+        OptimizerInput(
+            params=None, kwargs={"lr": torch.tensor(0.001)}, desc="tensor lr"
+        ),
         OptimizerInput(params=None, kwargs={"momentum": 0.9}, desc="momentum"),
         OptimizerInput(
             params=None,
@@ -1055,13 +1104,6 @@ optim_db: List[OptimizerInfo] = [
                 active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
-                ),
-                "TestOptimRenewed",
-                "test_peak_memory_foreach",
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo("See #116028"),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
@@ -1125,13 +1167,6 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_tensor_lr",
                 active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
-                ),
-                "TestOptimRenewed",
-                "test_peak_memory_foreach",
             ),
             DecorateInfo(
                 skipIfTorchDynamo("See #116028"),
@@ -1230,13 +1265,6 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/116046"
-                ),
-                "TestOptimRenewed",
-                "test_peak_memory_foreach",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
                 ),
                 "TestOptimRenewed",
@@ -1278,13 +1306,6 @@ optim_db: List[OptimizerInfo] = [
                 skipIfTorchDynamo("See #116028"),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/116046"
-                ),
-                "TestOptimRenewed",
-                "test_peak_memory_foreach",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1360,13 +1381,6 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/116046"
-                ),
-                "TestOptimRenewed",
-                "test_peak_memory_foreach",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
                 ),
                 "TestOptimRenewed",
@@ -1392,13 +1406,6 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_tensor_lr",
                 active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
-                ),
-                "TestOptimRenewed",
-                "test_peak_memory_foreach",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1500,25 +1507,10 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/116046"
-                ),
-                "TestOptimRenewed",
-                "test_peak_memory_foreach",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
                 ),
                 "TestOptimRenewed",
                 "test_complex_2d",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/116499"
-                ),
-                "TestOptimRenewed",
-                "test_can_load_older_state_dict",
-                device_type="cuda",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1554,13 +1546,6 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_tensor_lr",
                 active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
-                ),
-                "TestOptimRenewed",
-                "test_peak_memory_foreach",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1614,13 +1599,6 @@ optim_db: List[OptimizerInfo] = [
                 active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
-                ),
-                "TestOptimRenewed",
-                "test_peak_memory_foreach",
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo("See #116028"),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
@@ -1668,13 +1646,6 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_tensor_lr",
                 active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
-                ),
-                "TestOptimRenewed",
-                "test_peak_memory_foreach",
             ),
             DecorateInfo(
                 skipIfTorchDynamo("See #116028"),
@@ -1738,7 +1709,10 @@ optim_db: List[OptimizerInfo] = [
             },
             [lambda opt: StepLR(opt, gamma=0.99999, step_size=300)],
         ),
-        supports_fused_on=("cuda",),
+        supports_fused_on=(
+            "cpu",
+            "cuda",
+        ),
         skips=(
             DecorateInfo(
                 skipIfTorchDynamo("initial_value is incorrect in dynamo, see #123202"),
@@ -1750,13 +1724,6 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_tensor_lr",
                 active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
-                ),
-                "TestOptimRenewed",
-                "test_peak_memory_foreach",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(

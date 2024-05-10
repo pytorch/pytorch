@@ -1,13 +1,11 @@
-#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
-#include <fstream>
-#include <mutex>
-#include <sstream>
 
 #ifdef USE_C10D_NCCL
 
 #include <exception>
+#include <fstream>
 #include <map>
+#include <mutex>
+#include <sstream>
 #include <stdexcept>
 #include <tuple>
 #include <unordered_set>
@@ -25,8 +23,10 @@
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/cuda/nccl.h>
+#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/logger.hpp>
@@ -323,7 +323,7 @@ void cacheAllocatorDeregisterHook(
   }
 }
 
-#if defined(IS_NCCL_EXP) && defined(NCCL_COMM_DUMP)
+#if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
 std::string dump_nccl_trace() {
   std::unordered_map<
       std::string /* ncclUniqueID */,
@@ -352,8 +352,11 @@ std::string dump_nccl_trace() {
 }
 #endif
 
-c10::optional<std::function<std::string()>>& get_cpp_trace_dumper() {
-  static c10::optional<std::function<std::string()>> dumper(c10::nullopt);
+c10::optional<std::function<void(std::function<void(const std::string&)>)>>&
+get_cpp_trace_dumper() {
+  static c10::optional<
+      std::function<void(std::function<void(const std::string&)>)>>
+      dumper(c10::nullopt);
   return dumper;
 }
 
@@ -472,12 +475,16 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
 ProcessGroupNCCL::WorkNCCL::~WorkNCCL() = default;
 
 bool ProcessGroupNCCL::WorkNCCL::isCompleted() {
-  checkAndSetException();
+  if (!ncclComm_->isAborted()) {
+    checkAndSetException();
+  }
   return exception() || finishedGPUExecutionInternal();
 }
 
 bool ProcessGroupNCCL::WorkNCCL::isStarted() {
-  checkAndSetException();
+  if (!ncclComm_->isAborted()) {
+    checkAndSetException();
+  }
   return exception() || startedGPUExecutionInternal();
 }
 
@@ -1247,6 +1254,11 @@ void ProcessGroupNCCL::heartbeatMonitor() {
         lastTimePollStore = currentTime;
         if (globalStore_->check({std::string(EXCEPTION_DUMP)})) {
           int timeOutRank = -1;
+          if (!shouldDump_.load()) {
+            LOG(ERROR)
+                << logPrefix()
+                << "First PG on this rank detecting the dump signal through tcpstore.";
+          }
           shouldDump_.store(true);
           try {
             auto vec = globalStore_->get(std::string(EXCEPTION_DUMP));
@@ -1292,6 +1304,11 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       if (heartbeat != heartBeatCounter) {
         heartBeatCounter = heartbeat;
       } else {
+        if (!shouldDump_.load()) {
+          LOG(ERROR)
+              << logPrefix()
+              << "First PG on this rank that detected no heartbeat of its watchdog.";
+        }
         shouldDump_.store(true);
         // No heartbeat increase detected and timeout.
         errorMsg = c10::str(
@@ -1330,19 +1347,22 @@ void ProcessGroupNCCL::heartbeatMonitor() {
 
   auto& cpp_dumper = get_cpp_trace_dumper();
   if (cpp_dumper.has_value()) {
-    LOG(INFO) << "Dumping c++ stacktraces: " << cpp_dumper.value()();
+    LOG(INFO) << "Dumping c++ stacktraces:";
+    cpp_dumper.value()([](const std::string& line) { LOG(INFO) << line; });
   }
 
-  // Store debug info to storage if no other thread does it. (By default to
-  // local disk)
-  std::future<bool> asyncDebugDump = std::async(
-      std::launch::async, [this]() { return this->dumpDebuggingInfo(); });
+  if (checkDumpSignal && shouldDump_.load()) {
+    // Store debug info to storage if no other thread does it. (By default to
+    // local disk)
+    std::future<bool> asyncDebugDump = std::async(
+        std::launch::async, [this]() { return this->dumpDebuggingInfo(); });
 
-  // wait for the dump until timeout
-  waitForFutureOrTimeout(
-      asyncDebugDump,
-      std::chrono::milliseconds(waitTimeoutDumpInMilSec_),
-      "Flight recorder dump in heartbeatMonitor");
+    // wait for the dump until timeout
+    waitForFutureOrTimeout(
+        asyncDebugDump,
+        std::chrono::milliseconds(waitTimeoutDumpInMilSec_),
+        "Flight recorder dump in heartbeatMonitor");
+  }
 
   if (get_gil_checker() != nullptr) {
     auto fut = launchAsyncGilCheck();
@@ -1563,6 +1583,16 @@ void ProcessGroupNCCL::watchdogHandler() {
 
       // If work hits an exception (either an error or timeout)
       if (work.exception()) {
+        // log as soon as exception is detected
+        LOG(ERROR) << c10::str(
+            logPrefix(),
+            "Exception (either an error or timeout) detected by watchdog at work: ",
+            work.seq_,
+            ", last enqueued NCCL work: ",
+            lastEnqueuedSeq_,
+            ", last completed NCCL work: ",
+            lastCompletedSeq_,
+            ".");
         // try to dump flight records if exception happens.
         // Flight recorder behavior should be independent of desync Debug
         if (dumpOnException_) {
@@ -1572,6 +1602,10 @@ void ProcessGroupNCCL::watchdogHandler() {
                 reinterpret_cast<uint8_t*>(&rank),
                 reinterpret_cast<uint8_t*>(&rank) + sizeof(rank));
             globalStore_->set(std::string(EXCEPTION_DUMP), vec);
+            if (!shouldDump_.load()) {
+              LOG(ERROR) << logPrefix()
+                         << "First watchdog to set the dump signal.";
+            }
             // signal the monitor thread to start dumping
             shouldDump_.store(true);
             // This sleep is used to give time for dumping before throwing
@@ -2995,7 +3029,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_sparse(
     const AllreduceOptions& opts) {
   TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   auto tensor = tensors.back();
-#ifdef IS_NCCL_EXP
+#ifdef IS_NCCLX
   tensor = tensor.coalesce();
   at::Tensor outputTensor =
       torch::zeros(tensor.sizes(), tensor.options().layout(torch::kStrided));

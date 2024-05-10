@@ -1451,13 +1451,13 @@ PyObject* THPVariable_is_mps(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPVariable_is_ort(THPVariable* self, void* unused) {
+PyObject* THPVariable_is_maia(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
-    return handle_torch_function_getter(self, "is_ort");
+    return handle_torch_function_getter(self, "is_maia");
   }
   auto& self_ = THPVariable_Unpack(self);
-  return torch::autograd::utils::wrap(self_.is_ort());
+  return torch::autograd::utils::wrap(self_.is_maia());
   END_HANDLE_TH_ERRORS
 }
 
@@ -1527,7 +1527,7 @@ static PyObject* THPVariable_dtype(THPVariable* self, void* unused) {
     return handle_torch_function_getter(self, "dtype");
   }
   auto& self_ = THPVariable_Unpack(self);
-  return torch::autograd::utils::wrap(torch::getTHPDtype(self_.scalar_type()));
+  return torch::autograd::utils::wrap(self_.scalar_type());
   END_HANDLE_TH_ERRORS
 }
 
@@ -1537,7 +1537,7 @@ static PyObject* THPVariable_layout(THPVariable* self, void* unused) {
     return handle_torch_function_getter(self, "layout");
   }
   auto& self_ = THPVariable_Unpack(self);
-  return torch::autograd::utils::wrap(torch::getTHPLayout(self_.layout()));
+  return torch::autograd::utils::wrap(self_.layout());
   END_HANDLE_TH_ERRORS
 }
 
@@ -1674,7 +1674,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
      nullptr},
     {"is_mkldnn", (getter)THPVariable_is_mkldnn, nullptr, nullptr, nullptr},
     {"is_mps", (getter)THPVariable_is_mps, nullptr, nullptr, nullptr},
-    {"is_ort", (getter)THPVariable_is_ort, nullptr, nullptr, nullptr},
+    {"is_maia", (getter)THPVariable_is_maia, nullptr, nullptr, nullptr},
     {"is_vulkan", (getter)THPVariable_is_vulkan, nullptr, nullptr, nullptr},
     {"is_complex", (getter)THPVariable_is_complex, nullptr, nullptr, nullptr},
     {"is_quantized",
@@ -2266,6 +2266,21 @@ int THPVariableMetaType_init(PyObject* cls, PyObject* args, PyObject* kwargs) {
     return 0;
   }
 
+  // Forbid subclassing _TensorBase directly
+  py::tuple mro =
+      py::reinterpret_borrow<py::tuple>(((PyTypeObject*)cls)->tp_mro);
+  bool is_subclass_of_thpvariable = false;
+  for (py::handle h : mro) {
+    if (h.ptr() == THPVariableClass) {
+      is_subclass_of_thpvariable = true;
+      break;
+    }
+  }
+  if (!is_subclass_of_thpvariable) {
+    PyErr_SetString(PyExc_RuntimeError, "Cannot subclass _TensorBase directly");
+    return -1;
+  }
+
   // If the user provided a torch_dispatch implementation, disable
   // torch_function.
   py::object torch_dispatch_impl = py::reinterpret_steal<py::object>(
@@ -2275,13 +2290,6 @@ int THPVariableMetaType_init(PyObject* cls, PyObject* args, PyObject* kwargs) {
   if (torch_dispatch_impl.ptr() != torch_dispatch_default.ptr()) {
     py::object torch_function_impl = py::reinterpret_steal<py::object>(
         PyObject_GetAttrString(cls, "__torch_function__"));
-    // This will only fail if the user subclasses _TensorBase directly.
-    // Ignore the error here to let the class __init__ code fail with a nice
-    // error message.
-    if (!torch_function_impl) {
-      PyErr_Clear();
-      return 0;
-    }
     py::object torch_function_default_bound = py::reinterpret_steal<py::object>(
         PyObject_GetAttrString(THPVariableClass, "__torch_function__"));
 
