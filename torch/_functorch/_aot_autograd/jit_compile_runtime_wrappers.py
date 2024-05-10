@@ -559,7 +559,7 @@ def aot_dispatch_autograd(
         from torch.fx._lazy_graph_module import _LazyGraphModule
 
         _LazyGraphModule.force_recompile(bw_module)
-        torch._dynamo.compiled_autograd.initialize()
+        torch._dynamo.compiled_autograd._initialize()
 
     class CompiledFunction(torch.autograd.Function):
         compiled_fw = compiled_fw_func

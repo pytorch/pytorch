@@ -78,7 +78,8 @@ inline bool should_run_in_cpu_ready_queue(c10::DeviceType device) {
 }
 
 std::atomic<Engine::compiled_autograd_fn> the_compiled_autograd = nullptr;
-std::atomic<bool> the_compiled_autograd_ctx_manager_override = false;
+std::atomic<Engine::compiled_autograd_active_ctx>
+    the_compiled_autograd_active_ctx = nullptr;
 #define COMPILED_AUTOGRAD_POISON \
   reinterpret_cast<Engine::compiled_autograd_fn>(1)
 std::atomic<int32_t> num_threads_in_backwards;
@@ -1221,8 +1222,7 @@ auto Engine::execute(
   CompiledAutogradThreadingDebugCheck _thread_check;
   auto compiled_autograd = the_compiled_autograd.load();
   TORCH_INTERNAL_ASSERT(compiled_autograd != COMPILED_AUTOGRAD_POISON);
-  bool compiled_autograd_ctx_manager_override =
-      the_compiled_autograd_ctx_manager_override.load();
+  auto compiled_autograd_active_ctx = the_compiled_autograd_active_ctx.load();
 
   // accumulate_grad is true if and only if the frontend call was to
   // backward(), not grad(). grad() returns the sum of the gradients
@@ -1268,13 +1268,12 @@ auto Engine::execute(
   }
 
   std::cout << "c++ autograd engine, compiled_autograd.fn=" << compiled_autograd
-            << "compiled_autograd.ctx_manager_override"
-            << compiled_autograd_ctx_manager_override
+            << ", compiled_autograd.ctx_manager_override="
+            << compiled_autograd_active_ctx
             << ", marked_for_compiled_autograd=" << marked_for_compiled_autograd
             << std::endl;
-  if (compiled_autograd != nullptr &&
-      (marked_for_compiled_autograd ||
-       compiled_autograd_ctx_manager_override)) {
+  if (compiled_autograd != nullptr && compiled_autograd_active_ctx != nullptr &&
+      (marked_for_compiled_autograd || (*compiled_autograd_active_ctx)())) {
     // see [Note: Compiled Autograd]
     TORCH_CHECK(
         !create_graph, "compiled_autograd does not support create_graph");
@@ -1419,9 +1418,9 @@ Engine& Engine::get_default_engine() {
 
 void Engine::set_compiled_autograd(
     Engine::compiled_autograd_fn fn,
-    bool ctx_manager_override) {
+    Engine::compiled_autograd_active_ctx active_ctx) {
   if (the_compiled_autograd.load() == fn) {
-    the_compiled_autograd_ctx_manager_override.store(ctx_manager_override);
+    TORCH_CHECK(the_compiled_autograd_active_ctx.load() == active_ctx);
     return;
   }
   auto prior = the_compiled_autograd.exchange(COMPILED_AUTOGRAD_POISON);
@@ -1429,7 +1428,7 @@ void Engine::set_compiled_autograd(
       num_threads_in_backwards.load() == 0 && prior != COMPILED_AUTOGRAD_POISON,
       "Enabling compiled autograd requires no threads in backwards()");
   the_compiled_autograd.store(fn);
-  the_compiled_autograd_ctx_manager_override.store(ctx_manager_override);
+  the_compiled_autograd_active_ctx.store(active_ctx);
 }
 
 void Engine::queue_callback(std::function<void()> callback) {
