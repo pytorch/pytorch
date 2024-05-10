@@ -272,7 +272,8 @@ main()
 
     def test_inputs_aliasing_bytecode_attr_mutations(self):
         # Freeze compiled autograd graph
-        compiler = torch._dynamo.compiled_autograd.AutogradCompilerInstance(compiler_fn)
+        compiler = torch._dynamo.compiled_autograd.AutogradCompilerInstance()
+        torch._dynamo.override_compiler_fn = compiler_fn
         param = torch.ones(100)
         activ = torch.ones(100) * 2
         inputs = [param, activ]
