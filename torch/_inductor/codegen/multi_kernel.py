@@ -6,7 +6,7 @@ from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 
 from .. import config
 from ..codecache import PyCodeCache, TritonFuture
-from ..runtime.runtime_utils import do_bench
+from ..runtime.runtime_utils import do_bench_gpu
 from ..utils import cache_on_self
 from ..virtualized import V
 from .common import TensorArg
@@ -339,7 +339,7 @@ class MultiKernelCall:
         be picked.
         """
         return [
-            do_bench(lambda: kernel_call(True), rep=40, fast_flush=True)
+            do_bench_gpu(lambda: kernel_call(True), rep=40, fast_flush=True)
             for kernel_call in kernel_calls
         ]
 
