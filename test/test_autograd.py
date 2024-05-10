@@ -79,8 +79,8 @@ from torch.testing._internal.common_utils import (
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
-from torch.utils.hooks import RemovableHandle
 from torch.utils.cpp_extension import load_inline
+from torch.utils.hooks import RemovableHandle
 
 
 def graph_desc(fn):
@@ -9522,6 +9522,7 @@ for shape in [(1,), ()]:
             @staticmethod
             def backward(ctx, gO):
                 return gO
+
         t2 = Foo.apply(t2)
 
         # C++ Node
