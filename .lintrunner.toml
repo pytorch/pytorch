@@ -1114,8 +1114,6 @@ exclude_patterns = [
     'test/test_optim.py',
     'test/test_out_dtype_op.py',
     'test/test_overrides.py',
-    'test/test_package.py',
-    'test/test_per_overload_api.py',
     'test/test_prims.py',
     'test/test_proxy_tensor.py',
     'test/test_pruning_op.py',
