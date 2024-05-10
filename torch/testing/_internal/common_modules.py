@@ -3470,7 +3470,7 @@ module_db: List[ModuleInfo] = [
                        'test_aot_autograd_module_exhaustive',
                        active_if=operator.itemgetter('training')
                    ),
-                   # test flalky if run alone https://github.com/pytorch/pytorch/issues/125967 in inductor
+                   # test fails if run alone in inductor https://github.com/pytorch/pytorch/issues/125967
                    DecorateInfo(
                        skipIfTorchInductor, 'TestModule', 'test_memory_format', device_type='cuda'
                    ),)
