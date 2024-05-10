@@ -250,9 +250,8 @@ BUILD_PYTORCH_USING_LIBTORCH_WHL = (
 )
 
 # set up appropriate env variables
-if not BUILD_LIBTORCH_WHL:
+if BUILD_LIBTORCH_WHL:
     # Set up environment variables for ONLY building libtorch.so and not libtorch_python.so
-
     # functorch is not supported without python
     os.environ["BUILD_FUNCTORCH"] = "OFF"
     os.environ["BUILD_PYTHONLESS"] = "ON"
