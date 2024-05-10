@@ -166,7 +166,7 @@ Tensor& range_mps_out(const Scalar& start, const Scalar& end, const Scalar& step
     if (numel != size) {
       result.resize_({size});
     }
-    bool is_contiguous = result.is_contiguous();
+    bool is_contiguous = !mps::needsGather(result);
     Tensor r = !is_contiguous ? at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : result;
     using namespace mps;
     auto cache_ = MPSGraphCache::getInstance();
