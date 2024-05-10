@@ -3115,6 +3115,12 @@ class AsyncCompile:
 
         return self.submit(task)
 
+    def rocm(self, source_code, dst_file_ext):
+        def task():
+            return CUDACodeCache.load(source_code, dst_file_ext)[0]
+
+        return self.submit(task)
+
     def wait(self, scope: Dict[str, Any]) -> None:
         num_kernels = len(
             [
