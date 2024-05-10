@@ -567,7 +567,7 @@ for_each_linearity_ops = [
 ]
 
 
-def foreach_list_pointwise_strategy(
+def list_pointwise_strategy(
     mesh: DeviceMesh, op_schema: OpSchema, linearity: bool = False
 ) -> StrategyType:
     """
@@ -576,6 +576,14 @@ def foreach_list_pointwise_strategy(
     strategy on each pair (l1[i], l2[i]). If the first argument is a list but
     the second (or later) one is a tensor, then we broadcast the tensor by
     replicating it into a list with the length of the first argument.
+
+    Args:
+        mesh (DeviceMesh): device mesh for pointwise ops
+        op_schema (OpSchema): schema of the operator to generate strategy for
+        linearity (bool): specify whether op(a) + op(b) = op(a + b)
+
+    Returns:
+        OpStrategy: generated strategy
     """
 
     def args_tuple_strategies(args_schema: Tuple[object, ...]) -> List[TupleStrategy]:
@@ -595,13 +603,13 @@ def foreach_list_pointwise_strategy(
                     )
                 else:
                     raise RuntimeError(
-                        f"foreach list op only supports tuple strategy! {op_schema}"
+                        f"list op only supports tuple strategy! {op_schema}"
                     )
         return tuple_strategies
 
     args_strategies = args_tuple_strategies(op_schema.args_schema)
     follow_strategy: TupleStrategy = args_strategies[0]
-    foreach_strategy_list: List[OpStrategy] = []
+    list_strategy: List[OpStrategy] = []
     for child_idx, child_strtgy in enumerate(follow_strategy.childs):
         assert isinstance(child_strtgy, OpStrategy)
         args_schema: List[StrategyType] = [
@@ -610,25 +618,37 @@ def foreach_list_pointwise_strategy(
         pointwise_strategy: OpStrategy = common_pointwise_strategy(
             mesh, args_schema, child_strtgy, linearity
         )
-        foreach_strategy_list.append(pointwise_strategy)
-    return TupleStrategy(foreach_strategy_list)
+        list_strategy.append(pointwise_strategy)
+    return TupleStrategy(list_strategy)
 
 
-def foreach_list_linear_pointwise_strategy(
+def list_linear_pointwise_strategy(
     mesh: DeviceMesh, op_schema: OpSchema
 ) -> StrategyType:
     """
     for each list op stratgy that supports linearity
     """
-    return foreach_list_pointwise_strategy(mesh, op_schema, linearity=True)
+    return list_pointwise_strategy(mesh, op_schema, linearity=True)
 
 
 for op in for_each_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(needs_pytree=True))(
-        foreach_list_pointwise_strategy
+        list_pointwise_strategy
     )
 
 for op in for_each_linearity_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(needs_pytree=True))(
-        foreach_list_linear_pointwise_strategy
+        list_linear_pointwise_strategy
+    )
+
+fused_ops = [
+    aten._fused_adam_.default,
+    aten._fused_adam.default,
+    aten._fused_adamw_.default,
+    aten._fused_adamw.default,
+]
+
+for op in fused_ops:
+    register_op_strategy(op, schema_info=RuntimeSchemaInfo(needs_pytree=True))(
+        list_pointwise_strategy
     )

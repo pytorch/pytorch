@@ -234,7 +234,6 @@ namespace at::cuda::blas {
     CUDABLAS_NONNEGINT_CHECK(bgemm<Dtype>, num_batches);  \
   } while (0)
 
-#ifndef _MSC_VER
 
 namespace {
 // Following the pattern of CuSparseDescriptor
@@ -319,11 +318,9 @@ class CuBlasLtMatmulPreference : public CuBlasLtDescriptor<
 };
 } // namespace
 
-#endif
 
 template <typename Dtype>
 inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
-#ifndef _MSC_VER
   cudaDataType_t abcType = CUDA_R_32F;
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
   cudaDataType_t scaleType = CUDA_R_32F;
@@ -454,9 +451,6 @@ inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
       computeType,
       " scaleType ",
       scaleType);
-#else
-  AT_ERROR("at::cuda::blas::bgemm_internal_cublaslt: not implemented for ", typeid(Dtype).name());
-#endif
 }
 
 
@@ -1183,7 +1177,6 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
   }
 }
 
-#ifndef _MSC_VER
 
 template <typename Dtype>
 void gemm_and_bias(
@@ -1685,7 +1678,6 @@ void int8_gemm(
       " scaleType ",
       scaleType);
 }
-#endif // !defined(_MSC_VER))
 
 template <>
 void trsm<float>(CUDABLAS_TRSM_ARGTYPES(float)) {
