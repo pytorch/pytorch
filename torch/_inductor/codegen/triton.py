@@ -49,7 +49,7 @@ from ..ir import IRNode, TritonTemplateBuffer
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..runtime.hints import ReductionHint, TRITON_MAX_BLOCK
 from ..runtime.runtime_utils import (
-    do_bench,
+    do_bench_gpu,
     get_max_y_grid,
     green_text,
     next_power_of_2,
@@ -2653,7 +2653,7 @@ class TritonKernel(Kernel):
 
             result.writeline("args = get_args()")
             result.writeline(
-                "ms = do_bench(lambda: call(args), rep=40, fast_flush=True)"
+                "ms = do_bench_gpu(lambda: call(args), rep=40, fast_flush=True)"
             )
             result.writeline(f"num_gb = {num_gb}")
             result.writeline("gb_per_s = num_gb / (ms / 1e3)")
@@ -4036,13 +4036,13 @@ class TritonScheduling(BaseScheduling):
         else:
             # We have to clone the inplace updated arguments to avoid earlier calls
             # generating out of range indices for later calls.
-            ms = do_bench(lambda: call(wrapped_jit_function.clone_args(*args)[0]))
+            ms = do_bench_gpu(lambda: call(wrapped_jit_function.clone_args(*args)[0]))
 
             # overhead of cloning args gives bias for fusing the kernel
             # in the case of mutating/in-placeable second fusion
             # TODO - would be better as a hook in triton do_bench that reset
             # the input values between benchmarking
-            ms = ms - do_bench(lambda: wrapped_jit_function.clone_args(*args))
+            ms = ms - do_bench_gpu(lambda: wrapped_jit_function.clone_args(*args))
 
         log.debug(
             "The fused kernel for %s took %.3f ms to run",
