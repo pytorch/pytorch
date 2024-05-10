@@ -11,6 +11,7 @@ else:
 import torch
 import torch.utils._pytree as pytree
 from torch import fx
+from torch.fx._compatibility import compatibility
 from torch.fx._utils import lazy_format_graph_code
 from torch.fx.experimental.sym_node import SymNode
 from torch.fx.graph_module import GraphModule
@@ -19,7 +20,7 @@ log = logging.getLogger(__name__)
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 
 
-def get_example_value(node: fx.Node) -> Optional[str]:
+def _get_example_value(node: fx.Node) -> Optional[str]:
     """
     Get the example value key for a node, since dynamo uses "example_value"
     while non-strict export uses "val.
@@ -32,6 +33,7 @@ def get_example_value(node: fx.Node) -> Optional[str]:
         return None
 
 
+@compatibility(is_backward_compatible=True)
 def insert_deferred_runtime_asserts(
     gm: GraphModule,
     shape_env: ShapeEnv,
@@ -131,7 +133,7 @@ def insert_deferred_runtime_asserts(
             # arguments
             if (
                 node in placeholders
-                and (example_value := get_example_value(node)) is not None
+                and (example_value := _get_example_value(node)) is not None
             ):
 
                 def match_symbol(symint, cb):

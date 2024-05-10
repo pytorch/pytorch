@@ -4745,6 +4745,64 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(v.data.shape, (10, 20))
         self.assertEqual(type(v), Matrix)
 
+    def test_nn_parametrize(self):
+        class Module(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(10, 10))
+
+            def forward(self, x):
+                return self.param @ x
+
+        class Parametrization(torch.nn.Module):
+            def forward(self, x):
+                return torch.sin(x)
+
+        m = Module()
+        torch.nn.utils.parametrize.register_parametrization(
+            m, "param", Parametrization()
+        )
+
+        sin_found = False
+
+        def backend(gm, _):
+            nonlocal sin_found
+            for node in gm.graph.nodes:
+                if node.target is torch.sin:
+                    sin_found = True
+            return gm
+
+        opt_m = torch.compile(m, backend=backend, fullgraph=True)
+        inp = torch.randn(10, 10)
+        self.assertEqual(m(inp), opt_m(inp))
+        self.assertTrue(sin_found)
+
+        torch.nn.utils.parametrize.remove_parametrizations(m, "param")
+        sin_found = False
+        self.assertEqual(m(inp), opt_m(inp))
+        self.assertFalse(sin_found)
+
+    def test_nn_module_property_closure(self):
+        x = torch.randn(10, 10)
+
+        class Mod(torch.nn.Module):
+            @property
+            def y(self):
+                return torch.ones(10, 10) + x
+
+            def forward(self, x):
+                return x @ self.y
+
+        mod = Mod()
+
+        def fn(x):
+            return mod(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        inp = torch.randn(10, 10)
+        self.assertEqual(fn(inp), opt_fn(inp))
+
     def test_global_fn_mutation(self):
         def foo(x, y):
             return global_fn(x) + y
