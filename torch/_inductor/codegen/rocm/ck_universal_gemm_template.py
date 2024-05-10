@@ -67,6 +67,10 @@ class CKGemmTemplate(CKTemplate):
             argument.Print();
             return -23;
         }
+        if (workspace_size) {
+            *workspace_size = gemm.GetWorkSpaceSize(&argument);
+            return 0;
+        }
         // run the kernel
         float elapsed_time = invoker.Run(argument, StreamConfig{stream, /* time kernel */ false, /* log level */ kDEBUG_LOG});
         return 0;

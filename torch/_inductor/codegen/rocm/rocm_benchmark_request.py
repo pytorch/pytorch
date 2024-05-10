@@ -92,9 +92,6 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkRequest):
         )
 
     def update_workspace_size(self) -> None:
-        if torch.version.hip:
-            # TODO: fix memory access errors on ROCm
-            return
         if self._workspace_size_updated:
             return
         self.ensure_dll_loaded()
