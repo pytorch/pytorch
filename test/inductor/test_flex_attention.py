@@ -310,7 +310,7 @@ class TestTemplatedSDPA(InductorTestCase):
             query, key, value, score_mod_func
         )
         self.assertExpectedInline(
-            gm.sdpa_score.code.strip(),
+            gm.sdpa_score0.code.strip(),
             """\
 def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     add = torch.ops.aten.add.Tensor(arg4_1, 1);  arg4_1 = None
@@ -324,7 +324,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             query, key, value, score_mod_func
         )
         self.assertExpectedInline(
-            gm.sdpa_score.code.strip(),
+            gm.sdpa_score0.code.strip(),
             """\
 def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     add = torch.ops.aten.add.Tensor(arg4_1, 1);  arg4_1 = None
