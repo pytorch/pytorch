@@ -116,7 +116,6 @@ install_centos() {
     libstdc++-devel \
     libsndfile-devel \
     make \
-    opencv-devel \
     sudo \
     wget \
     vim \
