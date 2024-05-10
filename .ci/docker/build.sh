@@ -206,6 +206,20 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
+  pytorch-linux-focal-cuda12.4-cudnn8-py3-gcc9)
+    CUDA_VERSION=12.4.0
+    CUDNN_VERSION=8
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    CONDA_CMAKE=yes
+    TRITON=yes
+    ;;
   pytorch-linux-focal-py3-clang10-onnx)
     ANACONDA_PYTHON_VERSION=3.8
     CLANG_VERSION=10
