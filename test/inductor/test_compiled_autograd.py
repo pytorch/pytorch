@@ -332,12 +332,8 @@ main()
             return (out,)
 
         gm = torch.fx.symbolic_trace(forward)
-
-        def wrapper(*args, **kwargs):
-            return gm(*args, **kwargs)
-
         torch._dynamo.utils.set_locals_to_steal(gm, ["inputs"])
-        compiled_fn = torch.compile(wrapper)
+        compiled_fn = torch.compile(gm)
 
         inputs = [
             torch.ones(1000000, dtype=torch.float32),
