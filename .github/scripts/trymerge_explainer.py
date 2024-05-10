@@ -24,7 +24,7 @@ class TryMergeExplainer:
     org: str
     project: str
     ignore_current: bool
-    comment_id: str
+    commend_id: str
 
     has_trunk_label: bool
     has_ciflow_label: bool
@@ -83,10 +83,8 @@ class TryMergeExplainer:
             (
                 "<details><summary>Advanced Debugging</summary>",
                 "<br>",
-                f"<kbd> <br> [Merge workflow status][{gh_run_url}] <br> </kbd>",
-                "<br>",
-                "<br>",
-                f"<kbd> <br> [Merge trigger][{gh_comment_url}] <br> </kbd>",
+                f"  * [Merge workflow status][{gh_run_url}]",
+                f"  * [Merge trigger][{gh_comment_url}]",
                 "<br>",
                 "</details>",
             )
