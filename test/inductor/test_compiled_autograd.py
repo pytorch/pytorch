@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import contextlib
 import functools
 import re
 import sys
@@ -50,10 +51,24 @@ def hook3(gI, gO):
     return (torch.sin(gI[0]) + gO[0],)
 
 
+@contextlib.contextmanager
+def set_flag():
+    torch._dynamo.config.compiled_autograd_enabled = True
+    try:
+        yield
+    finally:
+        torch._dynamo.config.compiled_autograd_enabled = False
+
+
 class TestCompiledAutograd(TestCase):
     def check_output_and_recompiles(
-        self, fn, count=1, compiler_fn=compiler_fn, compile_fn=False
+        self, fn, count=1, compiler_fn=compiler_fn, compile_fn=False, use_ctx=True
     ):
+        if use_ctx:
+            ctx = (compiled_autograd.enable, (compiler_fn,))
+        else:
+            ctx = (set_flag, ())
+
         if isinstance(count, list):
             captures, compiles = count
         else:
@@ -64,7 +79,7 @@ class TestCompiledAutograd(TestCase):
             torch.manual_seed(123)
             expected = list(fn())
             torch.manual_seed(123)
-            with compiled_autograd.enable(compiler_fn):
+            with ctx[0](*ctx[1]):
                 opt_fn = torch.compile(fn) if compile_fn else fn
                 actual = list(opt_fn())
             self.assertEqual(expected, actual)
@@ -221,6 +236,70 @@ main()
 
         self.check_output_and_recompiles(fn)
 
+    def test_torch_compile_api_inductor(self):
+        def fn():
+            model = torch.nn.Sequential(
+                torch.nn.Linear(4, 4),
+                torch.nn.Sigmoid(),
+            )
+            opt_model = torch.compile(model, fullgraph=True)
+
+            for _ in range(3):
+                x = torch.randn([1, 4])
+
+                result = opt_model(x).sum()
+                result.backward()
+                yield model[0].weight.grad
+                yield model[0].bias.grad
+                model.zero_grad()
+
+        self.check_output_and_recompiles(fn, count=[1, 0], use_ctx=False)
+        self.assertEqual(
+            counters["stats"]["unique_graphs"], 3
+        )  # 1 for joint eager, 1 for joint CA, 1 for CA
+
+    def test_torch_compile_api_aot_eager(self):
+        def fn():
+            model = torch.nn.Sequential(
+                torch.nn.Linear(4, 4),
+                torch.nn.Sigmoid(),
+            )
+            opt_model = torch.compile(model, backend="aot_eager", fullgraph=True)
+
+            for _ in range(3):
+                x = torch.randn([1, 4])
+
+                result = opt_model(x).sum()
+                result.backward()
+                yield model[0].weight.grad
+                yield model[0].bias.grad
+                model.zero_grad()
+
+        self.check_output_and_recompiles(fn, count=[1, 0], use_ctx=False)
+        self.assertEqual(
+            counters["stats"]["unique_graphs"], 3
+        )  # 1 for joint eager, 1 for joint CA, 1 for CA
+
+    def test_torch_compile_api_eager(self):
+        def fn():
+            model = torch.nn.Sequential(
+                torch.nn.Linear(4, 4),
+                torch.nn.Sigmoid(),
+            )
+            opt_model = torch.compile(model, backend="eager", fullgraph=True)
+
+            for _ in range(3):
+                x = torch.randn([1, 4])
+
+                result = opt_model(x).sum()
+                result.backward()
+                yield model[0].weight.grad
+                yield model[0].bias.grad
+                model.zero_grad()
+
+        # no AOTAutograd to mark nodes, should not run compiled autograd
+        self.check_output_and_recompiles(fn, count=0, use_ctx=False)
+
     def test_dynamo_boxed(self):
         def get_placeholders(gm_):
             placeholders = []
@@ -272,8 +351,8 @@ main()
 
     def test_inputs_aliasing_bytecode_attr_mutations(self):
         # Freeze compiled autograd graph
-        compiler = torch._dynamo.compiled_autograd.AutogradCompilerInstance()
-        torch._dynamo.override_compiler_fn = compiler_fn
+        compiler = compiled_autograd.AutogradCompilerInstance()
+        compiled_autograd.override_compiler_fn = compiler_fn
         param = torch.ones(100)
         activ = torch.ones(100) * 2
         inputs = [param, activ]

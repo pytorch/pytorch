@@ -297,14 +297,14 @@ def _initialize():
         not override_compiler_fn
     ), "Cannot torch.compile with compiled autograd within a compiled autograd context manager"
 
-    prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
+    torch._C._dynamo.compiled_autograd.set_autograd_compiler(
         AutogradCompilerInstance,
         snapshot_verbose_logging_enabled(),
         False,
     )
-    assert prior[0] is None
     # TODO: multithreading can only be re-enabled when compiled autograd is turned off and all nodes are freed
     torch.autograd.set_multithreading_enabled(False)
+    compiled_autograd_log.info("Compiled autograd initialized.")
 
 
 # Forces .backward() call within to dispatch to compiled autograd

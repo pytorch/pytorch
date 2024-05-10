@@ -583,7 +583,8 @@ static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args) {
   }
   PyObject* py_prior_verbose = PyBool_FromLong(prior_verbose);
   PyObject* py_prior_active_ctx = PyBool_FromLong(prior_active_ctx);
-  PyObject* priors = PyTuple_Pack(3, prior_obj, py_prior_verbose, py_prior_active_ctx, nullptr);
+  PyObject* priors = PyTuple_Pack(
+      3, prior_obj, py_prior_verbose, py_prior_active_ctx, nullptr);
   return priors;
   END_HANDLE_TH_ERRORS;
 }

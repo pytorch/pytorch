@@ -1267,11 +1267,6 @@ auto Engine::execute(
         *graph_root, outputs, accumulate_grad, min_topo_nr);
   }
 
-  std::cout << "c++ autograd engine, compiled_autograd.fn=" << compiled_autograd
-            << ", compiled_autograd.ctx_manager_override="
-            << compiled_autograd_active_ctx
-            << ", marked_for_compiled_autograd=" << marked_for_compiled_autograd
-            << std::endl;
   if (compiled_autograd != nullptr && compiled_autograd_active_ctx != nullptr &&
       (marked_for_compiled_autograd || (*compiled_autograd_active_ctx)())) {
     // see [Note: Compiled Autograd]

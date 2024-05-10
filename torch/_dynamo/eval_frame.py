@@ -670,6 +670,8 @@ def optimize(
     torch._C._log_api_usage_once("torch._dynamo.optimize")
     if disable or os.environ.get("TORCHDYNAMO_DISABLE", "") == "1":
         return _NullDecorator()
+    elif config.compiled_autograd_enabled:
+        torch._dynamo.compiled_autograd._initialize()
 
     backend = get_compiler_fn(backend)
 
