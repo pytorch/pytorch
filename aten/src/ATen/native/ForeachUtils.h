@@ -181,7 +181,8 @@ inline bool _check_tensors_do_type_promotion_with_scalars(
 // [note: what's ``does_op_promote_integer_inputs_to_float=true``?]
 //     ``does_op_promote_integer_inputs_to_float=true`` means that the result of
 //     the op will be float even if inputs are integer or boolean, which
-//     currently fast path does not support. In short, a gatekeeper.
+//     currently fast path does not support. In short, this flag, when
+//     turned on, gatekeeps the op from going down the fastpath.
 
 // Please, make sure to call check_foreach_api_restrictions before calling this
 // method. There is a set of preconditions that have to be satisfied.
