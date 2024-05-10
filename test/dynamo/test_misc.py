@@ -146,9 +146,13 @@ class UserDefineSetAttr:
         assert torch.compiler.is_dynamo_compiling() or UserDefineSetAttr.setup
         super().__setattr__(f"pfx_{key}", value)
 
-    def __getattr__(self, key):
+    def __getattr__(self, key, c=1):
         assert torch.compiler.is_dynamo_compiling() or UserDefineSetAttr.setup
-        return self.__dict__[f"pfx_{key}"]
+        # c is added to force a guard on __defaults__ and checks the source for __getattr__
+        if c:
+            return self.__dict__[f"pfx_{key}"]
+        else:
+            return None
 
 
 class MiscTests(torch._inductor.test_case.TestCase):
