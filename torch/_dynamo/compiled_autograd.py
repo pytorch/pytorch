@@ -282,8 +282,13 @@ class AutogradCompilerInstance:
         set_stack_trace(new_stack_trace)
 
 
+active_context_manager = False
+
 def initialize():
+    # called by torch.compile
     assert torch._dynamo.config.compiled_autograd_enabled
+    global active_context_manager
+    assert not active_context_manager
     torch._C._dynamo.compiled_autograd.clear_autograd_compiler()
     prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
         AutogradCompilerInstance
@@ -292,7 +297,29 @@ def initialize():
     torch._C._dynamo.compiled_autograd.set_verbose_logging(
         snapshot_verbose_logging_enabled()
     )
+    # TODO: can only be re-enabled when compiled autograd is turned off and all nodes are freed
+    torch.autograd.set_multithreading_enabled(False)
 
+@contextlib.contextmanager
+def enable(compiler_fn):
+    # need to convince cpp engine to route to compiled autograd
+    global override_compiler_fn
+    prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
+        functools.partial(AutogradCompilerInstance, compiler_fn)
+    )
+    # swap this too
+    torch._C._dynamo.compiled_autograd.set_verbose_logging(
+        snapshot_verbose_logging_enabled()
+    )
+    global active_context_manager
+    assert not active_context_manager
+    active_context_manager = True
+    try:
+        with torch.autograd.set_multithreading_enabled(False):
+            yield
+    finally:
+        active_context_manager = False
+        torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
 
 @contextlib.contextmanager
 def disable():
