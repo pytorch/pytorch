@@ -223,7 +223,10 @@ struct C10_API DeviceGuardImplInterface {
   /**
    * Fetch the elapsed time between two recorded events.
    */
-  virtual double elapsedTime(void* /*event1*/, void* /*event2*/) const {
+  virtual double elapsedTime(
+      void* /*event1*/,
+      void* /*event2*/,
+      const DeviceIndex /*device_index*/) const {
     TORCH_CHECK(false, "Backend doesn't support elapsedTime.");
   }
 

@@ -184,6 +184,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     if (!event)
       return true;
     cudaEvent_t cuda_event = static_cast<cudaEvent_t>(event);
+    // Note: cudaEventQuery can be safely called from any device
     const cudaError_t err = C10_CUDA_ERROR_HANDLED(cudaEventQuery(cuda_event));
     if (err != cudaErrorNotReady) {
       C10_CUDA_CHECK(err);
@@ -214,6 +215,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       (*interp)->trace_gpu_event_synchronization(
           c10::kCUDA, reinterpret_cast<uintptr_t>(cuda_event));
     }
+    // Note: cudaEventSynchronize can be safely called from any device
     C10_CUDA_CHECK(cudaEventSynchronize(cuda_event));
   }
 
@@ -223,15 +225,22 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     CUDACachingAllocator::recordStream(data_ptr, cuda_stream);
   }
 
-  double elapsedTime(void* event1, void* event2) const override {
+  double elapsedTime(void* event1, void* event2, const DeviceIndex device_index)
+      const override {
     TORCH_CHECK(
         event1 && event2,
         "Both events must be recorded before calculating elapsed time.");
+    // Even though cudaEventElapsedTime can be safely called from any device, if
+    // the current device is not initialized, it will create a new cuda context,
+    // which will consume a lot of memory.
+    const auto orig_device = getDevice();
+    setDevice(device_index);
     cudaEvent_t cuda_event1 = static_cast<cudaEvent_t>(event1);
     cudaEvent_t cuda_event2 = static_cast<cudaEvent_t>(event2);
     float time_ms = 0;
     // raise cudaErrorNotReady if either event is recorded but not yet completed
     C10_CUDA_CHECK(cudaEventElapsedTime(&time_ms, cuda_event1, cuda_event2));
+    setDevice(orig_device);
     return static_cast<double>(time_ms);
   }
 };

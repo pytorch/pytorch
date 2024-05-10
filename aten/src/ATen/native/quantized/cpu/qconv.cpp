@@ -1397,7 +1397,7 @@ static at::Tensor _quantized_convolution_onednn(
     torch::List<int64_t> dilation,
     bool transposed,
     int64_t groups,
-    double inv_output_scale,  // inv_output_scale is the reciprocal of scale in fake quant
+    double output_scale,
     int64_t output_zero_point,
     c10::optional<at::Tensor> accum, // accum to fused with conv add
     double accum_scale,
@@ -1420,10 +1420,10 @@ static at::Tensor _quantized_convolution_onednn(
   bool bfloat16_output = output_dtype.has_value() && (output_dtype.value() == c10::kBFloat16);
   if (fp32_output || bfloat16_output) {
     // When fp32 or bf16 output, oneDNN expects op_attr doesn't set_scales and set_zero_points.
-    // So, we will use default inv_output_scale as 1.0 and output_zero_point as 0, since
-    // when inv_output_scale is 1.0, we will skip invoking of op_attr.set_scales in ideep;
+    // So, we will use default output_scale as 1.0 and output_zero_point as 0, since
+    // when output_scale is 1.0, we will skip invoking of op_attr.set_scales in ideep;
     // when output_zero_point is 0, we will skip invoking of op_attr.set_zero_points in ideep.
-    TORCH_CHECK(inv_output_scale == 1.0,  " (ONEDNN): fp32 or bf16 output, inv_output_scale must be 1.0.");
+    TORCH_CHECK(output_scale == 1.0,  " (ONEDNN): fp32 or bf16 output, output_scale must be 1.0.");
     TORCH_CHECK(output_zero_point == 0,  " (ONEDNN): fp32 or bf16 output, output_zero_point must be 0");
   }
 
@@ -1634,7 +1634,7 @@ static at::Tensor _quantized_convolution_onednn(
   int oc_per_group = packed_weight.get_dim(0) / groups;
   int wei_scale_mask = ideep::utils::conv_weight_scale_mask(weight_scales.numel(), oc_per_group, groups, false);
   op_attr.set_scales_mask(DNNL_ARG_WEIGHTS, wei_scale_mask);
-  if (inv_output_scale != 1.0f) {
+  if (output_scale != 1.0f) {
     op_attr.set_scales_mask(DNNL_ARG_DST, 0);
   }
   if (output_zero_point != 0) {
@@ -1671,13 +1671,13 @@ static at::Tensor _quantized_convolution_onednn(
   }
   tensor src_scales_t = tensor(ideep::scale_t(1, act_scale));
   tensor wei_scales_t = tensor(weights_scales);
-  tensor dst_scales_t = tensor(ideep::scale_t(1, 1.0/inv_output_scale));
+  tensor dst_scales_t = tensor(ideep::scale_t(1, output_scale));
   tensor src_zp_t = tensor(ideep::zero_point_t(1, act_zero_point));
   tensor dst_zp_t = tensor(ideep::zero_point_t(1, output_zero_point));
   if (act_scale != 1.0f) {
     args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, src_scales_t});
   }
-  if (inv_output_scale != 1.0f) {
+  if (output_scale != 1.0f) {
     args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST, dst_scales_t});
   }
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, wei_scales_t});
@@ -1697,7 +1697,7 @@ static at::Tensor _quantized_convolution_onednn(
     const ideep::scale_t accum_ideep_scale = ideep::scale_t(1, 1.0/accum_scale);
     const ideep::zero_point_t accum_ideep_zero_points = ideep::zero_point_t(1, accum_zero_point);
     // Set the dst scale and zero point with the value of accum.
-    // The true scale and zero point is stored in ideep::scale_t(scale_size, inv_output_scale) and dst_zero_points.
+    // The true scale and zero point is stored in ideep::scale_t(scale_size, output_scale) and dst_zero_points.
     dst.set_scale(accum_ideep_scale);
     dst.set_zero_point(accum_ideep_zero_points);
   }
@@ -1707,7 +1707,7 @@ static at::Tensor _quantized_convolution_onednn(
   ideep::convolution_forward::prepare(
       params, src, packed_weight, expected_bias, dst_dims, dst,
       stride.vec(), dilation.vec(), padding.vec(), padding.vec(), groups,
-      src_scales, weights_scales, ideep::scale_t(1, inv_output_scale),
+      src_scales, weights_scales, ideep::scale_t(1, 1.0f / output_scale),
       src_zero_points, dst_zero_points,
       op_attr, dnnl::algorithm::convolution_direct,
       dnnl::prop_kind::forward_inference,
@@ -1872,7 +1872,7 @@ class QConvoneDNN final {
       torch::List<int64_t> padding,
       torch::List<int64_t> dilation,
       int64_t groups,
-      double inv_output_scale,  // inv_output_scale is the reciprocal of scale in fake quant
+      double output_scale,
       int64_t output_zero_point,
       c10::optional<c10::ScalarType> output_dtype,
       c10::string_view attr,
@@ -1900,7 +1900,7 @@ class QConvoneDNN final {
         act, act_scale, act_zero_point,
         weight, weight_scales, weight_zero_points,
         bias, stride, padding, dilation, /*transposed*/false,
-        groups, inv_output_scale, output_zero_point,
+        groups, output_scale, output_zero_point,
         /*accum*/c10::nullopt, /*accum_scale*/0.0, /*accum_zero_point*/0,
         /*output_dtype*/output_dtype, /*binary_attr*/c10::nullopt, /*binary_alpha*/c10::nullopt,
         /*unary_attr*/attr, /*unary_scalars*/scalars, /*unary_algorithm*/algorithm
@@ -1924,7 +1924,7 @@ class QConvoneDNN final {
       torch::List<int64_t> padding,
       torch::List<int64_t> dilation,
       int64_t groups,
-      double inv_output_scale,  // inv_output_scale is the reciprocal of scale in fake quant
+      double output_scale,
       int64_t output_zero_point,
       c10::optional<c10::ScalarType> output_dtype,
       c10::string_view binary_attr,
@@ -1952,7 +1952,7 @@ class QConvoneDNN final {
         act, act_scale, act_zero_point,
         weight, weight_scales, weight_zero_points,
         bias, stride, padding, dilation, /*transposed*/false,
-        groups, inv_output_scale, output_zero_point,
+        groups, output_scale, output_zero_point,
         accum, accum_scale, accum_zero_point,
         /*output_dtype*/output_dtype, binary_attr, alpha,
         unary_attr, unary_scalars, unary_algorithm

@@ -4446,6 +4446,10 @@ class TestSparseMeta(TestCase):
             self.assertIsInstance(f, FakeTensor)
             self.assertEqualMeta(f, t, 0)
 
+            d = f.detach()
+            self.assertIsInstance(d, FakeTensor)
+            self.assertEqualMeta(d, t, 0)
+
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("dtype", [torch.float64])
     def test_zeros_like_fake(self, dtype, layout):
