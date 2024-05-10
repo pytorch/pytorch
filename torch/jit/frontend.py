@@ -1206,8 +1206,8 @@ class ExprBuilder(Builder):
                     raise NotSupportedError(r, "Don't support formatting in JoinedStr")
                 s += "{}"
                 args.append(build_expr(ctx, value.value))
-            elif isinstance(value, ast.Str):
-                s += value.s
+            elif isinstance(value, ast.Constant):
+                s += value.value
             else:
                 raise NotSupportedError(r, "Unsupported value in JoinedStr")
 
