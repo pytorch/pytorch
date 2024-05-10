@@ -31,13 +31,13 @@ from torch.utils._foreach_utils import (
     _get_fused_kernels_supported_devices,
     _group_tensors_by_device_and_dtype,
     Indices,
-    TensorListList,
 )
 from torch.utils.hooks import RemovableHandle
 
 Args: TypeAlias = Tuple[Any, ...]
 Kwargs: TypeAlias = Dict[str, Any]
 StateDict: TypeAlias = Dict[str, Any]
+TensorListList: TypeAlias = List[List[torch.Tensor]]
 
 GlobalOptimizerPreHook: TypeAlias = Callable[
     ["Optimizer", Args, Kwargs], Optional[Tuple[Args, Kwargs]]
@@ -99,7 +99,7 @@ def _get_value(x):
     if not torch.jit.is_scripting() and is_compiling():
         return x
     else:
-        return x.item()
+        return x.item() if isinstance(x, torch.Tensor) else x
 
 
 def _stack_if_compiling(x):
@@ -116,6 +116,27 @@ def _dispatch_sqrt(
         return x.sqrt()
     else:
         return math.sqrt(x)
+
+
+def _disable_dynamo_if_unsupported(single_tensor_fn=None):
+    # workaround for torchscript BC
+    # it requires all called functions to be in the
+    # global environment at the site at which the
+    # maybe_fallback closure is created
+    if single_tensor_fn:
+        globals()[single_tensor_fn.__name__] = single_tensor_fn
+
+    def wrapper(func):
+        @functools.wraps(func)
+        def maybe_fallback(self, *args, **kwargs):
+            if is_compiling() and not kwargs.get("capturable", False):
+                return torch._disable_dynamo(func(self, *args, **kwargs))
+            else:
+                return func(self, *args, **kwargs)
+
+        return maybe_fallback
+
+    return wrapper
 
 
 # For any optimizer with a faster implementation, we attempt to default to the
@@ -463,7 +484,7 @@ class Optimizer:
         if is_compiling():
             return {(None, None): (tensorlistlist, list(range(len(tensorlistlist[0]))))}
         else:
-            return _group_tensors_by_device_and_dtype(tensorlistlist, with_indices)
+            return _group_tensors_by_device_and_dtype(tensorlistlist, with_indices)  # type: ignore[return-value, arg-type]
 
     def _patch_step_function(self) -> None:
         self._zero_grad_profile_name = (

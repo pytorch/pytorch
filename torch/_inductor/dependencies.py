@@ -1,3 +1,4 @@
+import abc
 import collections
 import dataclasses
 import itertools
@@ -25,17 +26,90 @@ from .virtualized import OpsHandler, ReductionType, V
 
 log = logging.getLogger(__name__)
 is_indirect = re.compile(r"indirect|tmp").search
-Dep = Union["MemoryDep", "StarDep", "WeakDep"]
 
 
-class MemoryDep(typing.NamedTuple):
+class Dep(abc.ABC):
     name: str
-    index: sympy.Expr  # type: ignore[assignment]
+    index: sympy.Expr
+
+    @abc.abstractmethod
+    def rename(self, renames: Dict[str, str]) -> "Dep":
+        pass
+
+    @abc.abstractmethod
+    def get_numel(self) -> sympy.Expr:
+        pass
+
+    @abc.abstractmethod
+    def numbytes_hint(self):
+        pass
+
+    @abc.abstractmethod
+    def has_unbacked_symbols(self) -> bool:
+        pass
+
+    @abc.abstractmethod
+    def is_contiguous(self) -> bool:
+        pass
+
+
+@dataclasses.dataclass(frozen=True)
+class MemoryDep(Dep):
+    name: str
+    index: sympy.Expr
     var_names: Tuple[sympy.Symbol, ...]
     size: Tuple[sympy.Expr, ...]
 
     def __repr__(self):
         return f"MemoryDep({self.name!r}, {self.index}, {self.ranges})"
+
+    def get_offset(self):
+        """
+        Return the offset by setting every variable to be 0.
+        """
+        return sympy_subs(self.index, {v: 0 for v in self.var_names})
+
+    def normalize_with_stride_order(self, prefix="t"):
+        r"""
+        Used to decide if two MemoryDep does not equal due to different loop orders.
+        More specifically, when dep1 and dep2 are not equal, we can normalize
+        both and check if they are equal after that. If yes, then the mismatch is
+        caused by different loop orders.
+        """
+        # import here to avoid circular import
+        from torch._inductor import ir
+
+        strides = V.graph.sizevars.stride_hints(self.index, self.var_names)
+
+        # pick a loop order with stride ordered decreasingly
+        order = sorted(range(len(strides)), key=strides.__getitem__, reverse=True)
+        stride_reorder = ir.same_reorder(order)
+        sizes = self.size
+        var_names = self.var_names
+
+        new_reordered_sizes = stride_reorder(sizes)
+        new_reordered_var_names = stride_reorder(var_names)
+
+        new_simplified_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
+            new_reordered_var_names,
+            new_reordered_sizes,
+            index_prevent_reordering(
+                [self.index], new_reordered_var_names, new_reordered_sizes
+            ),
+        )
+
+        # now let's create new symbols with the passed in prefix
+        var_ranges, add_var = var_builder(prefix)
+        replacement = dict(
+            zip(
+                new_reordered_var_names,
+                reindex([add_var(x) for x in new_simplified_sizes]),
+            )
+        )
+        new_index = sympy_subs(sympy.expand(self.index), replacement)
+
+        out = MemoryDep(self.name, new_index, tuple(var_ranges.keys()), tuple(var_ranges.values()))  # type: ignore[arg-type]
+        return out
 
     @property
     def ranges(self) -> Dict[sympy.Symbol, sympy.Expr]:
@@ -109,10 +183,11 @@ class MemoryDep(typing.NamedTuple):
         return any(is_indirect(v.name) for v in self.index.free_symbols)  # type: ignore[attr-defined]
 
 
-class StarDep(typing.NamedTuple):
-    # depends on the entire buffer
+@dataclasses.dataclass(frozen=True)
+class StarDep(Dep):
     name: str
 
+    # depends on the entire buffer
     @property
     def index(self):
         raise NotImplementedError("StarDep does not have an index")
@@ -149,7 +224,8 @@ class StarDep(typing.NamedTuple):
 #
 # It is weak because if it turns out A's read is never used, we can still
 # eliminate it
-class WeakDep(typing.NamedTuple):
+@dataclasses.dataclass(frozen=True)
+class WeakDep(Dep):
     name: str
 
     @property
@@ -174,7 +250,8 @@ class WeakDep(typing.NamedTuple):
         return False
 
 
-class IndexExprDep(typing.NamedTuple):
+@dataclasses.dataclass(frozen=True)
+class IndexExprDep:
     index: sympy.Expr  # type: ignore[assignment]
     var_names: Tuple[sympy.Symbol, ...]
     size: Tuple[sympy.Expr, ...]
@@ -244,6 +321,20 @@ class ReadWrites:
 
     def reads_and_writes(self):
         return itertools.chain(self.reads, self.writes)
+
+    def buffer_names(self, ignore_integer_index=True):
+        """
+        Integer index is used for load_seed.
+        """
+        names = set()
+        for dep in self.reads_and_writes():
+            if not isinstance(dep, MemoryDep):
+                continue
+            if not ignore_integer_index or not isinstance(
+                dep.index, (int, sympy.Integer)
+            ):
+                names.add(dep.name)
+        return names
 
 
 class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
@@ -353,6 +444,7 @@ class RecordLoadStore(V.KernelFormatterHandler):  # type: ignore[name-defined]
         super().__init__(parent_handler=parent_handler)
 
 
+# TODO: check call sites
 def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Symbol]]:
     cnt = itertools.count()
     var_ranges: VarRanges = dict()

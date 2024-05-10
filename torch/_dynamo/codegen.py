@@ -380,7 +380,7 @@ class PyCodegen:
 
         graphargs = self.tx.output.graphargs
         for arg in graphargs:
-            if arg.is_unspecialized:
+            if arg.pass_arg_as_tensor:
                 self.extend_output(
                     [
                         self.create_load_python_module(torch, True),
