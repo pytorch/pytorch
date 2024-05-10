@@ -296,7 +296,9 @@ def emit_expr_has_symbolic_values(expr: str, type: CType) -> str:
         return f"{expr}.has_value() ? {emit_expr_has_symbolic_values(innerexpr, type.elem)} : false"
 
     if type == BaseCType(optionalSymIntArrayRefT):
-        return emit_expr_has_symbolic_values(expr, OptionalCType(BaseCType(symIntArrayRefT)))
+        return emit_expr_has_symbolic_values(
+            expr, OptionalCType(BaseCType(symIntArrayRefT))
+        )
 
     if type in (BaseCType(symIntArrayRefT), VectorCType(BaseCType(SymIntT))):
         argname = "arg"
@@ -316,12 +318,15 @@ def emit_expr_has_symbolic_values(expr: str, type: CType) -> str:
 
 # Detects whether any of the SymInt arguments are, in fact, symbolic values.
 # This is used in the constructor of ViewMeta.
-def emit_has_symbolic_inputs(sig: DispatcherSignature) -> str:
+def emit_has_symbolic_inputs(sig: DispatcherSignature) -> Tuple[str, str]:
     name = "has_symbolic_inputs"
     statements = [
         f"{name} = {name} | ({emit_expr_has_symbolic_values(binding.name, binding.nctype.type)});"
         for binding in sig.arguments()
-        if isinstance(binding.argument, Argument) and binding.argument.type.is_symint_like()
+        if (
+            isinstance(binding.argument, Argument)
+            and binding.argument.type.is_symint_like()
+        )
     ]
     body = "\n      ".join(statements)
     return (
