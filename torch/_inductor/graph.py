@@ -1532,6 +1532,9 @@ class GraphLowering(torch.fx.Interpreter):
         if "cuda" in self.device_types:
             # first pass
             self.cpp_wrapper = False
+            # Although triton.store_cubin was set in compile_fx, the backward pass didn't pick
+            # that up. In theory it should work by only setting triton.store_cubin to True here,
+            # but that will cause a problem when use_runtime_constant_folding is set.
             with config.patch({"triton.store_cubin": True}):
                 compiled = self.compile_to_module().call
 
@@ -1547,14 +1550,6 @@ class GraphLowering(torch.fx.Interpreter):
                     ), "Unknown type when creating real inputs" + str(type(x))
                     return x
 
-            # In the backward pass, V.real_inputs is not set.
-            # Generating random inputs based on self.example_inputs sometimes can be problematic,
-            # e.g. illegal memory access. A comprehensive fix is to autotune in a separate process.
-            real_inputs = (
-                self.example_inputs
-                if isinstance(V.real_inputs, NullHandler)
-                else V.real_inputs
-            )
             tracing_context = torch._guards.TracingContext.try_get()
             if tracing_context is not None and not isinstance(
                 V.real_inputs, NullHandler
@@ -1568,10 +1563,20 @@ class GraphLowering(torch.fx.Interpreter):
                     if param is not None
                 ]
                 real_inputs = [
-                    materialize(x) for x in itertools.chain(params_flat, real_inputs)
+                    materialize(x) for x in itertools.chain(params_flat, V.real_inputs)
                 ]
             else:
-                real_inputs = [materialize(x) for x in real_inputs]
+                # In the backward pass, V.real_inputs is not set.
+                # Generating random inputs based on self.example_inputs sometimes can be problematic,
+                # e.g. illegal memory access. A comprehensive fix is to autotune in a separate process.
+                real_inputs = [
+                    materialize(x)
+                    for x in (
+                        self.example_inputs
+                        if isinstance(V.real_inputs, NullHandler)
+                        else V.real_inputs
+                    )
+                ]
 
             if self.mutated_inputs:
                 from .compile_fx import clone_preserve_strides
