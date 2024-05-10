@@ -84,13 +84,13 @@ class CompilerWrapper:
         """
         return flat_fn, flat_args, fw_metadata
 
-    def post_compile(self, compiled_fn, aot_config, *, fw_metadata) -> Callable:
+    def post_compile(self, compiled_fn, aot_config, *, runtime_metadata) -> Callable:
         """
         Given an output of the compiler, wrap it with information received from prologue.
         Args:
         compiled_fn: Callable after calling compiler_fn
         aot_config: AOTConfig after calling prologue
-        fw_metadata: ViewAndMutationMeta after calling prologue
+        runtime_metadata: ViewAndMutationMeta after calling all wrappers's pre_compile steps.
         Example:
 
         def wrapped_compiled_fn(args):
@@ -100,25 +100,6 @@ class CompilerWrapper:
         return wrapped_compiled_fn
         """
         return compiled_fn
-
-    def create(
-        self,
-        flat_fn,
-        flat_args: List[Tensor],
-        aot_config: AOTConfig,
-        *,
-        fw_metadata: ViewAndMutationMeta,
-        compiler_fn,
-    ):
-        (
-            wrapped_flat_fn,
-            new_flat_args,
-            new_fw_metadata,
-        ) = self.pre_compile(flat_fn, flat_args, aot_config, fw_metadata=fw_metadata)
-        compiled_fn = compiler_fn(
-            wrapped_flat_fn, new_flat_args, aot_config, fw_metadata=new_fw_metadata
-        )
-        return self.post_compile(compiled_fn, aot_config, fw_metadata=new_fw_metadata)
 
 
 # The wrapper created by this function handles all of the runtime aliasing and mutation "epilogue" logic
@@ -140,11 +121,11 @@ class RuntimeWrapper(CompilerWrapper):
         compiled_fn,
         aot_config: AOTConfig,
         *,
-        fw_metadata: ViewAndMutationMeta,
+        runtime_metadata: ViewAndMutationMeta,
     ):
         return _create_runtime_wrapper(
             compiled_fn,
-            runtime_metadata=fw_metadata,
+            runtime_metadata=runtime_metadata,
             indices_of_inps_to_detach=self.indices_of_inps_to_detach,
             trace_joint=self.trace_joint,
             keep_input_mutations=aot_config.keep_inference_input_mutations,
@@ -434,20 +415,20 @@ class FunctionalizedRngRuntimeWrapper(CompilerWrapper):
         compiled_fn,
         aot_config: AOTConfig,
         *,
-        fw_metadata: ViewAndMutationMeta,
+        runtime_metadata: ViewAndMutationMeta,
     ):
         @wraps(compiled_fn)
         def wrapper(runtime_args: List[Any]):
-            if fw_metadata.is_rng_op_functionalized:
+            if runtime_metadata.is_rng_op_functionalized:
                 # Add the seed and offset to args
                 seed, offset = CUDARngStateHelper.get_torch_state_as_tuple()
                 runtime_args.extend([seed, offset])
                 out = compiled_fn(runtime_args)
                 out = self._functionalized_rng_runtime_epilogue(
-                    fw_metadata,
+                    runtime_metadata,
                     out,
                     # TODO: this won't be right for the backward when we convert the call_compiled_backward to use the wrapper
-                    fw_metadata.num_forward_returns,
+                    runtime_metadata.num_forward_returns,
                 )
                 return out
             return compiled_fn(runtime_args)
@@ -525,7 +506,7 @@ class FakifiedOutWrapper(CompilerWrapper):
         compiled_fn,
         aot_config: AOTConfig,
         *,
-        fw_metadata: ViewAndMutationMeta,
+        runtime_metadata: ViewAndMutationMeta,
     ):
         if self.needs_post_compile:
             assert self.fwd_output_strides is not None
@@ -579,12 +560,12 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
         compiled_fn,
         _aot_config: AOTConfig,
         *,
-        fw_metadata: ViewAndMutationMeta,
+        runtime_metadata: ViewAndMutationMeta,
     ):
         if self.maybe_subclass_meta is None:
             return compiled_fn
 
-        subclass_metas = fw_metadata.subclass_fw_graph_out_meta
+        subclass_metas = runtime_metadata.subclass_fw_graph_out_meta
 
         @wraps(compiled_fn)
         def inner_fn(args: List[Any]):
@@ -869,7 +850,7 @@ class AOTDedupeWrapper(CompilerWrapper):
         compiled_fn,
         aot_config: AOTConfig,
         *,
-        fw_metadata: ViewAndMutationMeta,
+        runtime_metadata: ViewAndMutationMeta,
     ):
         if not self.needs_post_compile:
             return compiled_fn
@@ -1055,7 +1036,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         compiled_fn,
         aot_config: AOTConfig,
         *,
-        fw_metadata: ViewAndMutationMeta,
+        runtime_metadata: ViewAndMutationMeta,
     ):
         if not self.needs_post_compile:
             return compiled_fn
