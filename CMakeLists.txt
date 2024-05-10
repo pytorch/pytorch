@@ -56,7 +56,7 @@ endif()
 
 # This define is needed to preserve behavior given anticpated changes to cccl/thrust
 # https://nvidia.github.io/libcudacxx/standard_api/numerics_library/complex.html
-string(APPEND CMAKE_CUDA_FLAGS " -DLIBCUDACXX_ENABLE_SIMPLIFIED_COMPLEX_OPERATIONS")
+string(APPEND CMAKE_CUDA_FLAGS "-DLIBCUDACXX_ENABLE_SIMPLIFIED_COMPLEX_OPERATIONS")
 
 if(LINUX)
   include(cmake/CheckAbi.cmake)
@@ -228,9 +228,12 @@ option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
 option(USE_CUPTI_SO "Use CUPTI as a shared library" ON)
 option(USE_FAKELOWP "Use FakeLowp operators" OFF)
+option(USE_FFMPEG "Use ffmpeg" OFF)
 option(USE_GFLAGS "Use GFLAGS" OFF)
 option(USE_GLOG "Use GLOG" OFF)
+option(USE_LEVELDB "Use LEVELDB" OFF)
 option(USE_LITE_PROTO "Use lite protobuf instead of full." OFF)
+option(USE_LMDB "Use LMDB" OFF)
 option(USE_MAGMA "Use MAGMA" ON)
 option(USE_METAL "Use Metal for Caffe2 iOS build" ON)
 option(USE_PYTORCH_METAL "Use Metal for PyTorch iOS build" OFF)
@@ -261,12 +264,15 @@ cmake_dependent_option(
 option(USE_NUMPY "Use NumPy" ON)
 option(USE_OBSERVERS "Use observers module." OFF)
 option(USE_OPENCL "Use OpenCL" OFF)
+option(USE_OPENCV "Use OpenCV" OFF)
 option(USE_OPENMP "Use OpenMP for parallel code" ON)
 option(USE_PRECOMPILED_HEADERS "Use pre-compiled headers to accelerate build." OFF)
 
 option(USE_PROF "Use profiling" OFF)
 option(USE_QNNPACK "Use QNNPACK (quantized 8-bit operators)" ON)
 option(USE_PYTORCH_QNNPACK "Use ATen/QNNPACK (quantized 8-bit operators)" ON)
+option(USE_REDIS "Use Redis" OFF)
+option(USE_ROCKSDB "Use RocksDB" OFF)
 option(USE_SNPE "Use Qualcomm's SNPE library" OFF)
 option(USE_SYSTEM_EIGEN_INSTALL
     "Use system Eigen instead of the one under third_party" OFF)
@@ -288,6 +294,7 @@ option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference" OFF)
 option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
 # option USE_XNNPACK: try to enable xnnpack by default.
 option(USE_XNNPACK "Use XNNPACK" ON)
+option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
 option(USE_ROCM_KERNEL_ASSERT "Use Kernel Assert for ROCm" OFF)
 # Ensure that an ITT build is the default for x86 CPUs
@@ -1253,7 +1260,11 @@ if(DEFINED USE_CUSTOM_DEBINFO)
     foreach(SOURCE_FILE ${SOURCE_FILES_LIST})
         # We have to specify the scope here. We do this by specifying the
         # targets we care about and caffe2/ for all test targets defined there
-        set(ALL_PT_TARGETS "torch_python;c10;torch_cpu;torch")
+        if(BUILD_LIBTORCHLESS)
+          set(ALL_PT_TARGETS "torch_python;${C10_LIB};torch_cpu;torch")
+        else()
+          set(ALL_PT_TARGETS "torch_python;c10;torch_cpu;torch")
+        endif()
         set_source_files_properties(${SOURCE_FILE} DIRECTORY "caffe2/" TARGET_DIRECTORY ${ALL_PT_TARGETS} PROPERTIES COMPILE_FLAGS "-g")
     endforeach()
 
