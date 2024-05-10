@@ -369,12 +369,7 @@ def _gather_constant_attrs(m: torch.nn.Module) -> ConstantAttrMap:
                     continue
 
                 fqn = ".".join(prefix_atoms + [k])
-                if v in constants:
-                    raise ValueError(
-                        f"Duplicate reference to constant attribute found: '{constants[v]}' and '{fqn}'."
-                    )
-
-                constants[v] = fqn
+                constants.add(v, fqn)
         for k, v in m.named_children():
             inner(v, prefix_atoms + [k], constants)
 
@@ -431,16 +426,18 @@ def _fakify_script_objects(
         return cur_mod, last_attr
 
     try:
-        for obj, fqn in constant_attrs.items():
+        for obj, fqns in constant_attrs.items():
             if isinstance(obj, torch.ScriptObject):
-                cur_mod, attr = _leaf_mod_and_attr(mod, fqn)
-                assert obj is getattr(cur_mod, attr)
                 fake_script_obj = _maybe_fakify_obj(obj)
-                setattr(cur_mod, attr, fake_script_obj)
-                fake_constant_attrs[fake_script_obj] = fqn
-                patched_attr[fqn] = obj
+                for fqn in fqns:
+                    cur_mod, attr = _leaf_mod_and_attr(mod, fqn)
+                    assert obj is getattr(cur_mod, attr)
+                    setattr(cur_mod, attr, fake_script_obj)
+                    fake_constant_attrs.add(fake_script_obj, fqn)
+                    patched_attr[fqn] = obj
             else:
-                fake_constant_attrs[obj] = fqn
+                for fqn in fqns:
+                    fake_constant_attrs.add(obj, fqn)
 
         fake_args, fake_kwargs = pytree.tree_map_only(
             torch.ScriptObject, _maybe_fakify_obj, (args, kwargs)
