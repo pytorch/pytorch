@@ -24,7 +24,7 @@ from typing_extensions import Self
 import torch
 from torch import device, dtype, Tensor
 from torch._prims_common import DeviceLikeType
-from torch.nn.parameter import Parameter
+from torch.nn.parameter import Parameter, Buffer
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.hooks import BackwardHook, RemovableHandle
 
@@ -1974,18 +1974,18 @@ class Module:
                         value = output
                 modules[name] = value
             else:
-                buffers = self.__dict__.get("_buffers")
-                if buffers is not None and name in buffers:
+                buffers = self.__dict__.get('_buffers')
+                if isinstance(value, Buffer) or buffers is not None and name in buffers:
                     if value is not None and not isinstance(value, torch.Tensor):
                         raise TypeError(
                             f"cannot assign '{torch.typename(value)}' as buffer '{name}' "
-                            "(torch.Tensor or None expected)"
+                            "(torch.nn.Buffer, torch.Tensor or None expected)"
                         )
-                    for hook in _global_buffer_registration_hooks.values():
-                        output = hook(self, name, value)
-                        if output is not None:
-                            value = output
-                    buffers[name] = value
+                    if isinstance(value, Buffer):
+                        persistent = value.persistent
+                    else:
+                        persistent = name not in self._non_persistent_buffers_set
+                    self.register_buffer(name, value, persistent)
                 else:
                     super().__setattr__(name, value)
 

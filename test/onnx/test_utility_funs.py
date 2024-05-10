@@ -544,7 +544,7 @@ class TestUtilityFuns(_BaseTestCase):
                 self,
             ):
                 super().__init__()
-                self.register_buffer("weight", torch.ones(5))
+                self.weight = torch.nn.Buffer(torch.ones(5))
 
             def forward(self, x):
                 b = self.weight.reshape(1, -1, 1, 1)
@@ -567,7 +567,7 @@ class TestUtilityFuns(_BaseTestCase):
                 self,
             ):
                 super().__init__()
-                self.register_buffer("weight", torch.ones(5))
+                self.weight = torch.nn.Buffer(torch.ones(5))
 
             def forward(self, x):
                 div = self.weight.div(torch.tensor([1, 2, 3, 4, 5]))
@@ -590,7 +590,7 @@ class TestUtilityFuns(_BaseTestCase):
                 self,
             ):
                 super().__init__()
-                self.register_buffer("weight", torch.ones(5))
+                self.weight = torch.nn.Buffer(torch.ones(5))
 
             def forward(self, x):
                 mul = self.weight.mul(torch.tensor([1, 2, 3, 4, 5]))
@@ -613,7 +613,7 @@ class TestUtilityFuns(_BaseTestCase):
                 self,
             ):
                 super().__init__()
-                self.register_buffer("weight", torch.ones(5))
+                self.weight = torch.nn.Buffer(torch.ones(5))
 
             def forward(self, x):
                 add = self.weight + torch.tensor([1, 2, 3, 4, 5])
@@ -644,7 +644,7 @@ class TestUtilityFuns(_BaseTestCase):
                 self,
             ):
                 super().__init__()
-                self.register_buffer("weight", torch.ones(5))
+                self.weight = torch.nn.Buffer(torch.ones(5))
 
             def forward(self, x):
                 sub = self.weight - torch.tensor([1, 2, 3, 4, 5])
@@ -675,7 +675,7 @@ class TestUtilityFuns(_BaseTestCase):
                 self,
             ):
                 super().__init__()
-                self.register_buffer("weight", torch.ones(5))
+                self.weight = torch.nn.Buffer(torch.ones(5))
 
             def forward(self, x):
                 sqrt = torch.sqrt(self.weight)
@@ -695,7 +695,7 @@ class TestUtilityFuns(_BaseTestCase):
         class ShapeModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("weight", torch.ones(5))
+                self.weight = torch.nn.Buffer(torch.ones(5))
 
             def forward(self, x):
                 shape = self.weight.shape[0]
