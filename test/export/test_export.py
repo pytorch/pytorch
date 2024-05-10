@@ -180,7 +180,7 @@ class TestDynamismExpression(TestCase):
         res = gm(*inp)
         self.assertTrue(torchdynamo.utils.same(ref, res))
 
-    def test_export_constraints_error(self):
+    def test_export_constraints_error_not_in_range(self):
         class InvalidInputConflictWithInputConstraints(torch.nn.Module):
             def forward(self, x):
                 return x + 1
@@ -194,6 +194,7 @@ class TestDynamismExpression(TestCase):
                 dynamic_shapes={"x": {0: dim_x}},
             )
 
+    def test_export_constraints_error(self):
         class ConflictingConstraints(torch.nn.Module):
             def forward(self, x):
                 b = x.item()
@@ -2432,7 +2433,7 @@ def forward(self, x):
 
         # This is because we insert sym_constrain_range in the graph now
         if is_non_strict_test(self._testMethodName):
-            error_msg = "Invalid value range"
+            error_msg = r"Invalid value range for -1 between"
         else:
             error_msg = "is outside of inline constraint"
         with self.assertRaisesRegex(RuntimeError, error_msg):
@@ -4208,6 +4209,22 @@ def forward(self, x, b_t, y):
         self.assertEqual(len(ep.constants), 1)
         self.assertEqual(mod(inp), m(inp))
 
+    def test_export_as_backend(self):
+        def f(x, y):
+            return x + y
+
+        def my_custom_backend(gm, example_inputs):
+            gm = (
+                torch.export.export(gm, tuple(example_inputs), strict=False)
+                .run_decompositions()
+                .module()
+            )
+            return gm
+
+        inp = (torch.randn(3, 3), torch.randn(3, 3))
+        new_res = torch.compile(f, backend=my_custom_backend)(*inp)
+        self.assertTrue(torch.allclose(f(*inp), new_res))
+
     def test_nonstrict_retrace_preserves_metadata(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -4821,6 +4838,40 @@ def forward(self, x, y):
                 strict=False,
                 _disable_forced_specializations=True,
             )
+
+    def test_constant_aliasing(self):
+        class M1(torch.nn.Module):
+            def __init__(self, m2, foo):
+                super().__init__()
+                self.m2 = m2
+                self.foo = foo
+
+            def forward(self, x):
+                return x + self.foo + self.m2(x)
+
+        class M2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = torch.ones(3, 3)
+
+            def forward(self, x):
+                return x + self.foo
+
+        m2 = M2()
+        m1 = M1(m2, m2.foo)
+        inps = (torch.ones(3, 3),)
+        ep = torch.export.export(m1, inps, strict=False)
+        # check both constants appear in list
+        self.assertEqual(sorted(list(ep.constants)), ["foo", "m2.foo"])
+        # check only one input spec exists
+        num_constant_inputs = [
+            spec.kind == InputKind.CONSTANT_TENSOR
+            for spec in ep.graph_signature.input_specs
+        ].count(True)
+        self.assertEqual(num_constant_inputs, 1)
+        # unflatten
+        unflattened = unflatten(ep)
+        self.assertTrue(torch.allclose(m1(*inps), unflattened(*inps)))
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
