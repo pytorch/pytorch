@@ -58,19 +58,6 @@ def device_sync(device):
         print(f"device={device} is not yet suppported")
 
 
-def get_model_size(model):
-    model_size = 0
-    for name, child in model.named_children():
-        if not isinstance(child, torch.nn.Embedding):
-            model_size += sum(
-                [
-                    p.numel() * p.dtype.itemsize
-                    for p in itertools.chain(child.parameters(), child.buffers())
-                ]
-            )
-    return model_size
-
-
 def multinomial_sample_one_no_sync(
     probs_sort,
 ):  # Does multinomial sampling without a cuda synchronization
@@ -186,6 +173,19 @@ def _load_model(x: Experiment, device="cuda", precision=torch.bfloat16):
     return model.eval()
 
 
+def _get_model_size(model):
+    model_size = 0
+    for name, child in model.named_children():
+        if not isinstance(child, torch.nn.Embedding):
+            model_size += sum(
+                [
+                    p.numel() * p.dtype.itemsize
+                    for p in itertools.chain(child.parameters(), child.buffers())
+                ]
+            )
+    return model_size
+
+
 def run_experiment(
     x: Experiment,
     num_samples: int = 5,
@@ -206,7 +206,7 @@ def run_experiment(
     prompt_length = prompt.size(0)
 
     torch.manual_seed(1234)
-    model_size = get_model_size(model)
+    model_size = _get_model_size(model)
 
     aggregate_metrics = {"tokens_per_sec": []}
     start = -1
