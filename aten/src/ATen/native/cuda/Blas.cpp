@@ -1011,10 +1011,10 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
         bias ? bias->data_ptr(): nullptr,
         bias ? bias->scalar_type() : isFloat8Type(out_dtype_) ? at::ScalarType::Half : out_dtype_,
         args.result->data_ptr(),
-#if !defined(USE_ROCM)
-        scale_result ? scale_result->data_ptr() : nullptr,
-#elif defined(USE_ROCM) && ROCM_VERSION >= 60200
+#if defined(USE_ROCM) && ROCM_VERSION >= 60200
         scale_result ? scale_result->data_ptr() : dummy_scale.data_ptr(),
+#else
+        scale_result ? scale_result->data_ptr() : nullptr,
 #endif
         args.result_ld,
         out_dtype_,
