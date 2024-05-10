@@ -51,6 +51,7 @@ from torch.testing._internal.common_distributed import (
     with_dist_debug_levels,
     with_nccl_blocking_wait,
 )
+from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1245,16 +1246,36 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_nan_assert(self):
+    @parametrize("type", [torch.float16, torch.float32, torch.float64])
+    @parametrize("size", [(10, 10), (1000, 1000)])
+    def test_nan_assert(self, type, size):
         os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
-
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_nccl(store, self.opts())
         device = self.rank_to_GPU[self.rank][0]
-        nan_tensor = torch.full((2, 3), float("nan"), device=device)
+        nan_tensor = torch.full(size, self.rank, dtype=type, device=device)
+        # randomly pick an nan element
+        i = random.randint(0, nan_tensor.size(0) - 1)
+        j = random.randint(0, nan_tensor.size(1) - 1)
+        nan_tensor[i, j] = float("nan")
         with self.assertRaises(RuntimeError):
             pg.allreduce(nan_tensor)
-        del pg
+        dist.destroy_process_group()
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_nan_assert_no_failure(self):
+        os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_nccl(store, self.opts())
+        device = self.rank_to_GPU[self.rank][0]
+        unsuppored_types = [torch.int16, torch.bfloat16]
+        for dtype in get_all_dtypes():
+            if dtype in unsuppored_types:
+                continue
+            tensor = torch.tensor([self.rank], dtype=dtype).cuda(device)
+            pg.allreduce(tensor).wait()
+        dist.destroy_process_group()
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
