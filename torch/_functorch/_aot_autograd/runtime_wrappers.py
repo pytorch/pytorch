@@ -910,6 +910,8 @@ class AOTDedupeWrapper(CompilerWrapper):
 # would cause us to hit that path more frequently).
 @dataclass
 class AOTSyntheticBaseWrapper(CompilerWrapper):
+    # Currently, the only reason we need to plumb this bool is because
+    # the synthetic base code prohibits more cases in the autograd case than the inference case.
     trace_joint: bool  # TODO: refactor trace_joint
     needs_post_compile: bool = True
     aliased_arg_idx_with_metadata_mutations: List[int] = field(default_factory=list)
