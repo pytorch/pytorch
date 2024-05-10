@@ -110,7 +110,7 @@ def forward(self, arg0_1, arg1_1):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buf", torch.ones(3))
+                self.buf = torch.nn.Buffer(torch.ones(3))
 
             def forward(self, x):
                 torch.ops.aten._print("moo")

@@ -496,7 +496,7 @@ def fetch_object_proxy(tracer: _ProxyTracer, t: PySymType) -> Union[_PySymProxyT
 def fetch_object_proxy(tracer: _ProxyTracer, t: Union[Tensor, _AnyScriptObjectType, PySymType]) -> object:
     return get_proxy_slot(t, tracer, t)
 
-HANDLED_TYPES = (Tensor, torch.nn.Parameter, FakeTensor)
+HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter, torch.nn.Buffer, FakeTensor)
 
 def proxy_call(
         proxy_mode: ProxyTorchDispatchMode,

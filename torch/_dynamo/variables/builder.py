@@ -386,6 +386,7 @@ class VariableBuilder:
             (
                 (
                     torch.Tensor,
+                    torch.nn.Buffer,
                     torch.nn.Parameter,
                     torch._subclasses.FakeTensor,
                     torch._subclasses.functional_tensor.FunctionalTensor,
@@ -973,7 +974,11 @@ class VariableBuilder:
             # unlikely to change, so its ok to skip the guard here.
             return MethodWrapperVariable(value)
         elif issubclass(type(value), type):
-            if value in (torch.utils.hooks.BackwardHook, torch.nn.Parameter):
+            if value in (
+                torch.utils.hooks.BackwardHook,
+                torch.nn.Parameter,
+                torch.nn.Buffer,
+            ):
                 # TODO(jansel): combine this case with the one above
                 return trace_rules.lookup(value).create_with_source(
                     value, source=self.source
@@ -1380,6 +1385,7 @@ class VariableBuilder:
         else:
             assert type(value) in (
                 torch.Tensor,
+                torch.nn.Buffer,
                 torch.nn.Parameter,
                 torch._subclasses.fake_tensor.FakeTensor,
                 torch._subclasses.functional_tensor.FunctionalTensor,
@@ -1987,6 +1993,7 @@ def wrap_fx_proxy_cls(
 
     if isinstance(example_value, torch.Tensor):
         is_parameter = isinstance(example_value, torch.nn.Parameter)
+        is_buffer = isinstance(example_value, torch.nn.Buffer)
 
         # NB: In most (all?) cases, this does not actually do a clone.
         # (WARNING: this means that if we mutate metadata on the fake
@@ -2001,7 +2008,11 @@ def wrap_fx_proxy_cls(
         ):
             tensor_type = subclass_type if subclass_type else torch.Tensor
             specialized_props["class_type"] = (
-                torch.nn.Parameter if is_parameter else tensor_type
+                torch.nn.Parameter
+                if is_parameter
+                else torch.nn.Buffer
+                if is_buffer
+                else tensor_type
             )
 
         options.update(specialized_props)
@@ -2484,7 +2495,7 @@ def wrap_to_fake_tensor_and_record(
     e, tx, *, source: Optional[Source], is_tensor: bool, parent_context=None
 ):
     if (
-        type(e) in (torch.Tensor, torch.nn.Parameter, FakeTensor)
+        type(e) in (torch.Tensor, torch.nn.Buffer, torch.nn.Parameter, FakeTensor)
         or isinstance(e, torch.Tensor)
         or is_traceable_wrapper_subclass(e)
     ):

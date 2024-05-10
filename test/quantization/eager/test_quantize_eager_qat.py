@@ -95,9 +95,9 @@ class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
         self.beta = nn.Parameter(torch.empty(out_channels))
         self.affine = True
         self.track_running_stats = True
-        self.register_buffer('running_mean', torch.zeros(out_channels))
-        self.register_buffer('running_var', torch.ones(out_channels))
-        self.register_buffer('num_batches_tracked', torch.tensor(0, dtype=torch.long))
+        self.running_mean = nn.Buffer(torch.zeros(out_channels))
+        self.running_var = nn.Buffer(torch.ones(out_channels))
+        self.num_batches_tracked = nn.Buffer(torch.tensor(0, dtype=torch.long))
         self.activation_post_process = self.qconfig.activation()
         self.weight_fake_quant = self.qconfig.weight()
         if bias:

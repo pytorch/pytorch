@@ -621,7 +621,7 @@ class TraceTrainStepTest(DTensorTestBase):
             def __init__(self):
                 super().__init__()
                 self.fc = nn.Linear(10, 10)
-                self.register_buffer("dummy_buffer", torch.ones(10, 10))
+                self.dummy_buffer = torch.nn.Buffer(torch.ones(10, 10))
 
             def forward(self, x):
                 # N.B.: setting requires_grad in forward, as deepcopy does not

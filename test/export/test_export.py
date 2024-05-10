@@ -461,8 +461,8 @@ graph():
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("u", torch.ones(1))
-                self.register_buffer("v", torch.ones(1))
+                self.u = torch.nn.Buffer(torch.ones(1))
+                self.v = torch.nn.Buffer(torch.ones(1))
 
             def forward(self, x, ys, zs, c):
                 y = ys[0] + ys[1] + zs["a"] + zs["b"]
@@ -576,7 +576,7 @@ graph():
         class M(torch.nn.Module):  # simple with register buffer
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buf", torch.ones(2, 3), persistent=False)
+                self.buf = torch.nn.Buffer(torch.ones(2, 3), persistent=False)
 
             def forward(self, x):
                 # x = 2
@@ -1298,8 +1298,8 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
         class MyLinear(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("weight", torch.randn(20, 98))
-                self.register_buffer("bias", torch.randn(20))
+                self.weight = torch.nn.Buffer(torch.randn(20, 98))
+                self.bias = torch.nn.Buffer(torch.randn(20))
 
             def forward(self, x):
                 return torch.nn.functional.linear(x, self.weight, self.bias)
@@ -1469,7 +1469,7 @@ def forward(self, x):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer", torch.ones(4, 4))
+                self.buffer = torch.nn.Buffer(torch.ones(4, 4))
 
             def forward(self, x):
                 x.add_(5)
@@ -1513,7 +1513,7 @@ def forward(self, x):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer", torch.ones(4, 4))
+                self.buffer = torch.nn.Buffer(torch.ones(4, 4))
 
             def forward(self, x):
                 x.add_(5)
@@ -1550,7 +1550,7 @@ def forward(self, x):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer", torch.ones(4, 4))
+                self.buffer = torch.nn.Buffer(torch.ones(4, 4))
 
             def forward(self, container):
                 x = container[0][0]
@@ -1578,7 +1578,7 @@ def forward(self, x):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer", torch.ones(2, 2))
+                self.buffer = torch.nn.Buffer(torch.ones(2, 2))
                 self.linear = torch.nn.Linear(2, 2)
 
             def forward(self, x):
@@ -3418,7 +3418,7 @@ def forward(self, x):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buf", torch.zeros(1))
+                self.buf = torch.nn.Buffer(torch.zeros(1))
 
             def forward(self, x):
                 self.buf.add_(1)
@@ -3447,7 +3447,7 @@ def forward(self, x):
         class Bar(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buf", torch.ones(1))
+                self.buf = torch.nn.Buffer(torch.ones(1))
 
             def forward(self, x):
                 self.buf.add_(1)
@@ -3456,7 +3456,7 @@ def forward(self, x):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buf", torch.zeros(1))
+                self.buf = torch.nn.Buffer(torch.zeros(1))
                 self.bar = Bar()
 
             def forward(self, x):
@@ -3546,7 +3546,7 @@ def forward(self, x):
         class Bar(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buf", torch.ones(1))
+                self.buf = torch.nn.Buffer(torch.ones(1))
 
             def forward(self, x):
                 self.buf.add_(1)
@@ -3555,7 +3555,7 @@ def forward(self, x):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buf", torch.zeros(1))
+                self.buf = torch.nn.Buffer(torch.zeros(1))
                 self.bar = Bar()
 
             def forward(self, x):
@@ -3599,7 +3599,7 @@ def forward(self, x):
         class Bar(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buf", torch.ones(1))
+                self.buf = torch.nn.Buffer(torch.ones(1))
 
             def forward(self, x):
                 self.buf.add_(1)
@@ -3608,7 +3608,7 @@ def forward(self, x):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buf", torch.zeros(1))
+                self.buf = torch.nn.Buffer(torch.zeros(1))
                 self.bar = Bar()
 
             def forward(self, x):
@@ -3655,7 +3655,7 @@ def forward(self, x):
         class A(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer", torch.ones(6, 4))
+                self.buffer = torch.nn.Buffer(torch.ones(6, 4))
 
             def forward(self):
                 return self.buffer.cos()
@@ -3711,7 +3711,7 @@ def forward(self, b_a_buffer, x):
                 self.register_parameter(
                     "param", torch.nn.Parameter(torch.ones(2, 3), requires_grad=False)
                 )
-                self.register_buffer("buffer", torch.ones(2, 3) + 1)
+                self.buffer = torch.nn.Buffer(torch.ones(2, 3) + 1)
 
             def true_fn(self, x):
                 return x + self.param
@@ -3744,7 +3744,7 @@ def forward(self, b_a_buffer, x):
                 self.register_parameter(
                     "param", torch.nn.Parameter(torch.tensor(5), requires_grad=False)
                 )
-                self.register_buffer("buffer", torch.tensor(6) + 1)
+                self.buffer = torch.nn.Buffer(torch.tensor(6) + 1)
 
         m1 = M1()
 
@@ -4336,7 +4336,7 @@ graph():
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer", torch.ones(4, 4))
+                self.buffer = torch.nn.Buffer(torch.ones(4, 4))
 
             def forward(self, x):
                 self.buffer.add_(4)
@@ -4803,7 +4803,7 @@ graph():
         class Child2(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("child2buffer", torch.ones(2, 3))
+                self.child2buffer = torch.nn.Buffer(torch.ones(2, 3))
 
             def forward(self, x):
                 return x - self.child2buffer
@@ -4863,7 +4863,7 @@ graph():
             def __init__(self):
                 super().__init__()
                 self.leaf = Leaf()
-                self.register_buffer("buffer", torch.randn(4, 4))
+                self.buffer = torch.nn.Buffer(torch.randn(4, 4))
 
             def forward(self, x):
                 return self.buffer.sum() + self.leaf(x).sum()
@@ -4920,7 +4920,7 @@ graph():
             def __init__(self):
                 super().__init__()
                 self.leaf = Leaf()
-                self.register_buffer("buffer", torch.randn(4, 4))
+                self.buffer = torch.nn.Buffer(torch.randn(4, 4))
 
             def forward(self, x):
                 return self.buffer.sum() + self.leaf(x).sum()
@@ -5118,8 +5118,8 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("pred", torch.tensor(False))
-                self.register_buffer("t", torch.tensor(10))
+                self.pred = torch.nn.Buffer(torch.tensor(False))
+                self.t = torch.nn.Buffer(torch.tensor(10))
 
             def forward(self, x, y):
                 def true_fn(x, y):
@@ -5254,7 +5254,7 @@ def forward(self, x, b_t, y):
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("foo", torch.rand(2, 3), persistent=False)
+                self.foo = torch.nn.Buffer(torch.rand(2, 3), persistent=False)
 
             def forward(self, x):
                 return self.foo + x
@@ -5320,8 +5320,8 @@ def forward(self, x, b_t, y):
             def __init__(self):
                 super().__init__()
                 self.foo = torch.nn.Parameter(torch.randn(4, 4))
-                self.register_buffer("bar", torch.randn(4, 4), persistent=False)
-                self.register_buffer("baz", torch.randn(4, 4), persistent=True)
+                self.bar = torch.nn.Buffer(torch.randn(4, 4), persistent=False)
+                self.baz = torch.nn.Buffer(torch.randn(4, 4), persistent=True)
 
             def forward(self, x):
                 return self.foo + x + self.bar + self.baz
@@ -5408,7 +5408,7 @@ def forward(self, x, b_t, y):
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("foo", torch.randn(4, 4))
+                self.foo = torch.nn.Buffer(torch.randn(4, 4))
 
             def forward(self, x):
                 self.foo.add_(1)
@@ -5546,8 +5546,8 @@ def forward(self, x):
             def __init__(self):
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.randn(4))
-                self.register_buffer("alpha", torch.randn(4), persistent=True)
-                self.register_buffer("beta", torch.randn(4), persistent=False)
+                self.alpha = torch.nn.Buffer(torch.randn(4), persistent=True)
+                self.beta = torch.nn.Buffer(torch.randn(4), persistent=False)
                 self.gamma = torch.randn(4)
 
             def forward(self, p, b_alpha, b, c_gamma):

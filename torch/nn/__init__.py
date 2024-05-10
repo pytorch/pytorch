@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 from torch.nn.parameter import (
+    Buffer as Buffer,
     Parameter as Parameter,
     UninitializedBuffer as UninitializedBuffer,
     UninitializedParameter as UninitializedParameter,
