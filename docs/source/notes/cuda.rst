@@ -121,6 +121,7 @@ such as the ratio of memory bandwidth to compute as well as the ratio of TF32 to
 may vary from generation to generation or model to model.
 If full FP32 precision is needed, users can disable TF32 by:
 
+## TODO: Haozhe fix here
 .. code:: python
 
   torch.backends.cuda.matmul.allow_tf32 = False

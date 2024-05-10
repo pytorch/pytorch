@@ -5,7 +5,12 @@ from contextlib import contextmanager
 from typing import Optional
 
 import torch
-from torch.backends import __allow_nonbracketed_mutation, ContextProp, PropModule
+from torch.backends import (
+    __allow_nonbracketed_mutation,
+    ContextProp,
+    FP32Precision,
+    PropModule,
+)
 
 try:
     from torch._C import _cudnn
@@ -192,6 +197,8 @@ class CudnnModule(PropModule):
     allow_tf32 = ContextProp(
         torch._C._get_cudnn_allow_tf32, torch._C._set_cudnn_allow_tf32
     )
+    conv = FP32Precision("cuda", "conv")
+    rnn = FP32Precision("cuda", "rnn")
 
 
 # This is the sys.modules replacement trick, see

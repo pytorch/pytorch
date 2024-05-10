@@ -4,7 +4,12 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 import torch
-from torch.backends import __allow_nonbracketed_mutation, ContextProp, PropModule
+from torch.backends import (
+    __allow_nonbracketed_mutation,
+    ContextProp,
+    FP32Precision,
+    PropModule,
+)
 
 
 def is_available():
@@ -86,6 +91,9 @@ class MkldnnModule(PropModule):
         super().__init__(m, name)
 
     enabled = ContextProp(torch._C._get_mkldnn_enabled, torch._C._set_mkldnn_enabled)
+    matmul = FP32Precision("mkldnn", "matmul")
+    conv = FP32Precision("mkldnn", "conv")
+    rnn = FP32Precision("mkldnn", "rnn")
 
 
 if TYPE_CHECKING:

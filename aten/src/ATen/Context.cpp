@@ -20,6 +20,32 @@
 
 namespace at {
 
+void fp32_precision_valid_check(const std::string& backend, const std::string& op, const std::string& precision=std::string()) {
+  static std::vector<std::string> backends = {"generic", "mkldnn", "cuda"};
+  static std::vector<std::string> operators = {"conv", "matmul", "rnn", "all"};
+
+  TORCH_CHECK(std::find(backends.begin(), backends.end(), backend) != backends.end(),
+    "Invalid backend: ", backend);
+  TORCH_CHECK(std::find(operators.begin(), operators.end(), op) != operators.end(), "Invalid operator: ", op);
+
+  if (precision.size() != 0) {
+
+    static std::vector<std::string> generic_precisions = {"default", "tf32", "bf16", "ieee"};
+    static std::vector<std::string> cuda_precisions = {"default", "tf32", "ieee"};
+    static std::vector<std::string> mkldnn_precisions = {"default", "bf16", "ieee"};
+
+    if (backend == "generic") {
+      TORCH_CHECK(op == "all", "Invalid operation for generic backend: ", op);
+    } else if (backend == "cuda") {
+      TORCH_CHECK(std::find(cuda_precisions.begin(), cuda_precisions.end(), precision) != cuda_precisions.end(),
+        "Invalid precision for CUDA backend: ", precision);
+    } else if (backend == "mkldnn") {
+      TORCH_CHECK(std::find(mkldnn_precisions.begin(), mkldnn_precisions.end(), precision) != mkldnn_precisions.end(),
+        "Invalid precision for MKLDNN backend: ", precision);
+    }
+  }
+}
+
 Context::Context() = default;
 
 // TODO: This could be bad juju if someone calls globalContext() in the
@@ -105,11 +131,24 @@ void Context::setUserEnabledNNPACK(bool e) {
   enabled_nnpack = e;
 }
 
-bool Context::allowTF32CuDNN() const {
-  return allow_tf32_cudnn;
+bool Context::allowTF32CuDNN(const std::string& op) const {
+  bool allow_tf32 = false;
+  if (op.size() == 0){
+    allow_tf32 = float32Precision("cuda", "rnn") == "tf32" && float32Precision("cuda", "conv") == "tf32";
+  } else {
+    allow_tf32 = float32Precision("cuda", op) == "tf32";
+  }
+  TORCH_CHECK(allow_tf32_cudnn == allow_tf32);
+  return allow_tf32;
 }
 
-void Context::setAllowTF32CuDNN(bool b) {
+void Context::setAllowTF32CuDNN(bool b, const std::string& op) {
+  if (op.size() == 0){
+    setFloat32Precision(b ? "tf32" : "ieee", "cuda", "rnn");
+    setFloat32Precision(b ? "tf32" : "ieee", "cuda", "conv");
+  } else {
+    setFloat32Precision(b ? "tf32" : "ieee", "cuda", op);
+  }
   allow_tf32_cudnn = b;
 }
 
@@ -205,15 +244,30 @@ void Context::setBenchmarkLimitCuDNN(int b) {
 }
 
 bool Context::allowTF32CuBLAS() const {
-  return float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
+  bool legacy_allow_tf32 = float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
+  bool allow_tf32 = float32Precision("cuda", "matmul") == "tf32";
+  TORCH_CHECK(legacy_allow_tf32 == allow_tf32);
+  return allow_tf32;
 }
 
 void Context::setAllowTF32CuBLAS(bool b) {
   float32_matmul_precision = b ? at::Float32MatmulPrecision::HIGH : at::Float32MatmulPrecision::HIGHEST;
+  setFloat32Precision(b ? "tf32" : "ieee", "cuda", "matmul");
 }
 
 Float32MatmulPrecision Context::float32MatmulPrecision() const {
   return float32_matmul_precision;
+}
+
+std::string Context::float32Precision(const std::string& backend, const std::string& op) const {
+  fp32_precision_valid_check(backend, op);
+  auto precision = fp32_precision.find(backend)->second.find(op)->second;
+  if (precision == "default")
+    precision = fp32_precision.find(backend)->second.find("all")->second;
+  if (precision == "default")
+    precision = fp32_precision.find("generic")->second.find("all")->second;
+  TORCH_CHECK(precision != "default");
+  return precision;
 }
 
 void Context::setFloat32MatmulPrecision(Float32MatmulPrecision p) {
@@ -242,6 +296,11 @@ void Context::setFloat32MatmulPrecision(const std::string &s) {
   if (match(sl)) { return; }
   TORCH_WARN(s, " is not one of 'highest', 'high', or 'medium'; the current"
     "setFloat32MatmulPrecision call has no effect.");
+}
+
+void Context::setFloat32Precision(const std::string& p, const std::string& backend, const std::string& op) {
+  fp32_precision_valid_check(backend, op, p);
+  fp32_precision[backend][op] = p;
 }
 
 at::LinalgBackend Context::linalgPreferredBackend() const {

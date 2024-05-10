@@ -1,6 +1,8 @@
 import types
 from contextlib import contextmanager
 
+import torch
+
 # The idea for this parameter is that we forbid bare assignment
 # to torch.backends.<cudnn|mkldnn>.enabled and friends when running our
 # test suite, where it's very easy to forget to undo the change
@@ -55,6 +57,28 @@ class PropModule(types.ModuleType):
     def __getattr__(self, attr):
         return self.m.__getattribute__(attr)
 
+
+class FP32Precision:
+    def __init__(self, backend, op):
+        self.backend = backend
+        self.op = op
+
+    def __setattr__(self, name, value):
+        if name == "fp32_precision":
+            torch._C._set_fp32_precision(value, self.backend, self.op)
+        elif name in ("backend", "op"):
+            super().__setattr__(name, value)
+        else:
+            raise AttributeError("Unknown attribute " + name)
+
+    def __getattr__(self, name):
+        if name == "fp32_precision":
+            return torch._C._get_fp32_precision(self.backend, self.op)
+        else:
+            raise AttributeError("Unknown attribute " + name)
+
+
+fp32_precision = FP32Precision("generic", "all")
 
 from torch.backends import (
     cpu as cpu,

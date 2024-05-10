@@ -25,6 +25,7 @@
 #include <c10/util/irange.h>
 
 #include <cstdint>
+#include <map>
 #include <mutex>
 
 namespace at {
@@ -304,11 +305,18 @@ class TORCH_API Context {
   void alertCuBLASConfigNotDeterministic() const;
 
   void setFloat32MatmulPrecision(const std::string& s);
-  bool allowTF32CuDNN() const;
-  void setAllowTF32CuDNN(bool);
+  void setFloat32Precision(
+      const std::string& s,
+      const std::string& backend,
+      const std::string& op);
+  bool allowTF32CuDNN(const std::string& op = std::string()) const;
+  void setAllowTF32CuDNN(bool, const std::string& op = std::string());
   bool allowTF32CuBLAS() const;
   void setAllowTF32CuBLAS(bool);
   Float32MatmulPrecision float32MatmulPrecision() const;
+  std::string float32Precision(
+      const std::string& backend,
+      const std::string& op) const;
   void setFloat32MatmulPrecision(Float32MatmulPrecision p);
   bool allowFP16ReductionCuBLAS() const;
   void setAllowFP16ReductionCuBLAS(bool);
@@ -398,6 +406,20 @@ class TORCH_API Context {
   c10::optional<at::QEngine> quantized_engine = c10::nullopt;
   bool enable_sparse_tensor_invariant_checks = false;
   bool allow_fp16_reduction_cpu = false;
+
+  std::map<std::string, std::map<std::string, std::string>> fp32_precision = {
+      {"generic", {{"all", "ieee"}}},
+      {"mkldnn",
+       {{"matmul", "ieee"},
+        {"conv", "ieee"},
+        {"rnn", "ieee"},
+        {"all", "ieee"}}},
+      {"cuda",
+       {{"matmul", "ieee"},
+        {"conv", "tf32"},
+        {"rnn", "tf32"},
+        {"all", "ieee"}}},
+  };
 
   Allocator* prev_allocator_ptr_{nullptr};
 };
