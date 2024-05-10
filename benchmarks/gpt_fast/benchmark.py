@@ -37,12 +37,12 @@ all_experiments = {
     "llama-7b-int8": Experiment(
         "Llama-2-7b-chat-hf", LLaMA, "int8", LLaMAWeightOnlyInt8QuantHandler, 155
     ),
-    "mixtral-int8": Experiment(
+    "mixtral-int8": Experiment(  # We reduced the original number of layers from 32 to 16 to adapt CI memory limitation.
         "Mixtral-8x7B-v0.1",
         MixtralMoE,
         "int8",
         MixtralMoEWeightOnlyInt8QuantHandler,
-        97,
+        197,
     ),
 }
 
@@ -173,6 +173,19 @@ def _load_model(x: Experiment, device="cuda", precision=torch.bfloat16):
     return model.eval()
 
 
+def _get_model_size(model):
+    model_size = 0
+    for name, child in model.named_children():
+        if not isinstance(child, torch.nn.Embedding):
+            model_size += sum(
+                [
+                    p.numel() * p.dtype.itemsize
+                    for p in itertools.chain(child.parameters(), child.buffers())
+                ]
+            )
+    return model_size
+
+
 def run_experiment(
     x: Experiment,
     num_samples: int = 5,
@@ -193,10 +206,7 @@ def run_experiment(
     prompt_length = prompt.size(0)
 
     torch.manual_seed(1234)
-    model_size = sum(
-        p.numel() * p.dtype.itemsize
-        for p in itertools.chain(model.parameters(), model.buffers())
-    )
+    model_size = _get_model_size(model)
 
     aggregate_metrics = {"tokens_per_sec": []}
     start = -1

@@ -146,9 +146,13 @@ class UserDefineSetAttr:
         assert torch.compiler.is_dynamo_compiling() or UserDefineSetAttr.setup
         super().__setattr__(f"pfx_{key}", value)
 
-    def __getattr__(self, key):
+    def __getattr__(self, key, c=1):
         assert torch.compiler.is_dynamo_compiling() or UserDefineSetAttr.setup
-        return self.__dict__[f"pfx_{key}"]
+        # c is added to force a guard on __defaults__ and checks the source for __getattr__
+        if c:
+            return self.__dict__[f"pfx_{key}"]
+        else:
+            return None
 
 
 class MiscTests(torch._inductor.test_case.TestCase):
@@ -3877,6 +3881,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         self.assertTrue(same(ref, res))
 
+    @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_source_non_input_grad_access(self):
         # This test creates a model, and accesses the grads
         # from its parameter. This means that within dynamo,
@@ -4642,6 +4647,19 @@ def fn():
         res2 = opt_fn(x)
         self.assertEqual(res, res2)
 
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    def test_tensor_ctor_list_of_tensor(self):
+        def fn(x):
+            return torch.tensor([x], dtype=torch.int64)
+
+        x = torch.tensor(20)
+        res = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        res2 = opt_fn(x)
+        self.assertEqual(res, res2)
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_tensor_types(self):
         def fn(dtype, tensor_type):
             x = torch.empty(4, dtype=dtype)
@@ -4872,6 +4890,7 @@ def fn():
             self.assertEqual(k_a, k)
             self.assertTrue(torch.allclose(v_a, v))
 
+    @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_module_complex_iter(self):
         n_embd = 768
         block_size = 128
@@ -5734,6 +5753,7 @@ def fn():
         res = opt_fn(x, m)
         self.assertTrue(torch.allclose(ref, res))
 
+    @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_repro_graph_breaks_in__get_item_by_idx(self):
         class Mod(torch.nn.Module):
             def __init__(self):
