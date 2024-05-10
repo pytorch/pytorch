@@ -16,9 +16,9 @@ import torch
 
 from torch._inductor.autotune_process import GPUDeviceBenchmarkRequest, TensorMeta
 from torch._inductor.codecache import (
-    CUDACodeCache,
     DLLWrapper,
 )
+from torch._inductor.codegen.rocm.rocm_codecache import ROCmCodeCache
 
 log = logging.getLogger(__name__)
 
@@ -43,13 +43,13 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkRequest):
         self._workspace_size_updated = False
         self.hash_key: str = ""
         self.source_file: str = ""
-        self.hash_key, self.source_file = CUDACodeCache.write(self.source_code, "so")
+        self.hash_key, self.source_file = ROCmCodeCache.write(self.source_code, "so")
 
     def precompile(self):
-        # Prepopulate CUDACodeCache
+        # Prepopulate code cache
         # may happen in separate Threadpool
         log.debug("Precompiling %s", self)
-        CUDACodeCache.compile(self.source_code, "so")
+        ROCmCodeCache.compile(self.source_code, "so")
         log.debug("Done precompiling %s", self)
 
     def make_run_fn(
@@ -130,7 +130,7 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkRequest):
 
     def ensure_dll_loaded(self):
         if self.DLL is None:
-            self.DLL, self.hash_key, self.source_file = CUDACodeCache.load(
+            self.DLL, self.hash_key, self.source_file = ROCmCodeCache.load(
                 self.source_code, "so"
             )
 

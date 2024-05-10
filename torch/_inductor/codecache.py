@@ -2724,8 +2724,6 @@ def cuda_compile_command(
     dst_file_ext: str,
     extra_args: Optional[List[str]] = None,
 ) -> str:
-    if torch.version.hip:
-        return rocm_compile_command(src_files, dst_file, dst_file_ext, extra_args)
     if not torch.version.cuda:
         return ""
     include_paths = _cutlass_include_paths()
@@ -2832,9 +2830,6 @@ class CUDACodeCache:
     cache: Dict[str, CacheEntry] = dict()
     cache_clear = staticmethod(cache.clear)
     _SOURCE_CODE_SUFFIX = "cu"
-
-    if torch.version.hip:
-        log.debug(f"HIP compiler version:\n{rocm_compiler_version()}")
 
     @classmethod
     def write(cls, source_code, dst_file_ext) -> Tuple[str, str]:
