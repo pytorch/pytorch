@@ -4844,6 +4844,40 @@ def forward(self, x, y):
                 _disable_forced_specializations=True,
             )
 
+    def test_constant_aliasing(self):
+        class M1(torch.nn.Module):
+            def __init__(self, m2, foo):
+                super().__init__()
+                self.m2 = m2
+                self.foo = foo
+
+            def forward(self, x):
+                return x + self.foo + self.m2(x)
+
+        class M2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = torch.ones(3, 3)
+
+            def forward(self, x):
+                return x + self.foo
+
+        m2 = M2()
+        m1 = M1(m2, m2.foo)
+        inps = (torch.ones(3, 3),)
+        ep = torch.export.export(m1, inps, strict=False)
+        # check both constants appear in list
+        self.assertEqual(sorted(list(ep.constants)), ["foo", "m2.foo"])
+        # check only one input spec exists
+        num_constant_inputs = [
+            spec.kind == InputKind.CONSTANT_TENSOR
+            for spec in ep.graph_signature.input_specs
+        ].count(True)
+        self.assertEqual(num_constant_inputs, 1)
+        # unflatten
+        unflattened = unflatten(ep)
+        self.assertTrue(torch.allclose(m1(*inps), unflattened(*inps)))
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
