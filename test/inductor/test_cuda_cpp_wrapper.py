@@ -191,6 +191,7 @@ if RUN_CUDA:
         BaseTest("test_bitwise"),  # int32
         BaseTest("test_bmm1"),
         BaseTest("test_bmm2"),
+        BaseTest("test_buffer_use_after_remove"),
         BaseTest("test_cat"),  # alias
         BaseTest("test_convolution1"),
         BaseTest("test_conv_backward"),
