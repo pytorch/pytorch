@@ -588,6 +588,15 @@ test_inductor_torchbench_smoketest_perf() {
       "$TEST_REPORTS_DIR/inductor_training_smoketest_$test.csv" \
       --expected benchmarks/dynamo/expected_ci_perf_inductor_torchbench.csv
   done
+
+  # Perform some "warm-start" runs for a few huggingface models.
+  for test in AlbertForQuestionAnswering AllenaiLongformerBase DistilBertForMaskedLM DistillGPT2 GoogleFnet YituTechConvBert; do
+    python benchmarks/dynamo/huggingface.py --accuracy --training --amp --inductor --device cuda --warm-start-latency \
+      --only $test --output "$TEST_REPORTS_DIR/inductor_warm_start_smoketest_$test.csv"
+    python benchmarks/dynamo/check_accuracy.py \
+      --actual "$TEST_REPORTS_DIR/inductor_warm_start_smoketest_$test.csv" \
+      --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_huggingface_training.csv"
+  done
 }
 
 test_inductor_torchbench_cpu_smoketest_perf(){
