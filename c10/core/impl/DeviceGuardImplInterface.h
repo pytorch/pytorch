@@ -16,7 +16,7 @@ namespace c10 {
 class DataPtr;
 
 /**
- * Flags defining the behavior of events.
+ * Note [Flags defining the behavior of events]
  *
  * PYTORCH_DEFAULT and BACKEND_DEFAULT are valid for all backends. The
  * BACKEND_DEFAULT is what a particular backend would select if no
