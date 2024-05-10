@@ -879,7 +879,11 @@ def _check_overload_body(func):
         return isinstance(x, ast.Pass)
 
     def is_ellipsis(x):
-        return isinstance(x, ast.Expr) and isinstance(x.value, ast.Ellipsis)
+        return (
+            isinstance(x, ast.Expr)
+            and isinstance(x.value, ast.Constant)
+            and x.value.value is Ellipsis
+        )
 
     if len(body) != 1 or not (is_pass(body[0]) or is_ellipsis(body[0])):
         msg = (

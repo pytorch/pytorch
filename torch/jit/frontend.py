@@ -1072,7 +1072,7 @@ class ExprBuilder(Builder):
                     sub_exprs.append(build_Index(ctx, base, expr))
                 elif sub_type is ast.Slice:
                     sub_exprs.append(build_SliceExpr(ctx, base, expr))
-                elif sub_type is ast.Ellipsis:
+                elif sub_type is ast.Constant and expr.value is Ellipsis:
                     sub_exprs.append(Dots(base.range()))
                 else:
                     raise NotSupportedError(
