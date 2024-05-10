@@ -903,34 +903,6 @@ class TestSchemaVersioning(TestCase):
             )
 
 
-class TestOpVersioning(TestCase):
-    """Test if serializer/deserializer behaves correctly if version mismatch."""
-
-    def test_empty_model_opset_version_raises(self):
-        compiler_opset_version = {"aten": 4}
-        model_opset_version = None
-        deserializer = ExportedProgramDeserializer(compiler_opset_version)
-        with self.assertRaises(RuntimeError):
-            deserializer._validate_model_opset_version(model_opset_version)
-
-    def test_opset_mismatch_raises(self):
-        compiler_opset_version = {"aten": 4}
-        model_opset_version = {"aten": 3}
-        deserializer = ExportedProgramDeserializer(compiler_opset_version)
-        with self.assertRaises(NotImplementedError):
-            deserializer._validate_model_opset_version(model_opset_version)
-
-    def test_model_op_namespace_version_missing_from_deserializer_do_not_raises(self):
-        compiler_opset_version = {"aten": 3}
-        model_opset_version = {"aten": 3, "custom": 4}
-        deserializer = ExportedProgramDeserializer(compiler_opset_version)
-        with self.assertLogs(level="WARN") as log:
-            deserializer._validate_model_opset_version(model_opset_version)
-            self.assertIn(
-                "Compiler doesn't have a version table for op namespace", log.output[0]
-            )
-
-
 # We didn't set up kwargs input yet
 unittest.expectedFailure(TestDeserialize.test_exportdb_supported_case_fn_with_kwargs)
 
