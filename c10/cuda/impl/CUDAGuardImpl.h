@@ -233,14 +233,15 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     // Even though cudaEventElapsedTime can be safely called from any device, if
     // the current device is not initialized, it will create a new cuda context,
     // which will consume a lot of memory.
-    const auto orig_device = getDevice();
-    setDevice(device_index);
+    DeviceIndex orig_device{-1};
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&orig_device));
+    C10_CUDA_CHECK(c10::cuda::SetDevice(device_index));
     cudaEvent_t cuda_event1 = static_cast<cudaEvent_t>(event1);
     cudaEvent_t cuda_event2 = static_cast<cudaEvent_t>(event2);
     float time_ms = 0;
     // raise cudaErrorNotReady if either event is recorded but not yet completed
     C10_CUDA_CHECK(cudaEventElapsedTime(&time_ms, cuda_event1, cuda_event2));
-    setDevice(orig_device);
+    C10_CUDA_CHECK(c10::cuda::SetDevice(orig_device));
     return static_cast<double>(time_ms);
   }
 };
