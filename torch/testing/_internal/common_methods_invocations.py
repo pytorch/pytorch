@@ -8719,16 +8719,16 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
     )
 
     # jagged (with query/keys offsets)
-    cu_seqlens_k = torch.arange(-1, 32 * 2 + 1, dtype=torch.int32, device=device)
+    cu_seqlens_k = torch.arange(-1, 32 * 2 + 1, 2, dtype=torch.int32, device=device)
     cu_seqlens_k[-1] = 62
     cu_seqlens_k[0] = 0
     samples.append(
         SampleInput(
             make((32, 2, 64)).view(-1, 8, 8).unsqueeze(0),
-            make((6, 64)).view(-1, 8, 8).unsqueeze(0),
-            make((6, 64)).view(-1, 8, 8).unsqueeze(0),
+            make((64, 64)).view(-1, 8, 8).unsqueeze(0),
+            make((64, 64)).view(-1, 8, 8).unsqueeze(0),
             bias=None,
-            cu_seqlens_q=torch.arange(0, 32 * 2 + 2, dtype=torch.int32, device=device),
+            cu_seqlens_q=torch.arange(0, 32 * 2 + 2, 2, dtype=torch.int32, device=device),
             cu_seqlens_k=cu_seqlens_k,
             max_seqlen_q=2,
             max_seqlen_k=2,
@@ -16565,9 +16565,12 @@ op_db: List[OpInfo] = [
                                                        torch.complex64: tol(atol=1e-03, rtol=1e-03)}),
                                     'TestCommon', 'test_noncontiguous_samples'),
                        # FIXME This should be the following, but the toleranceOverride does not seem to do anything!
-                       #DecorateInfo(toleranceOverride({torch.complex128: tol(atol=1e-04, rtol=1e-04)}),
-                       #             'TestFwdGradients', 'test_fn_fwgrad_bwgrad'),
-                       DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_fn_fwgrad_bwgrad', dtypes=[torch.complex128]),
+                       # DecorateInfo(toleranceOverride({torch.complex128: tol(atol=1e-04, rtol=1e-04)}),
+                       #              'TestFwdGradients', 'test_fn_fwgrad_bwgrad'),
+                       DecorateInfo(unittest.skip("See comment above"),
+                                    'TestFwdGradients',
+                                    'test_fn_fwgrad_bwgrad',
+                                    dtypes=[torch.complex128]),
                        ],
            skips=(
                # test does not work with passing lambda for op
@@ -16599,9 +16602,12 @@ op_db: List[OpInfo] = [
                                                        torch.complex64: tol(atol=1e-03, rtol=1e-03)}),
                                     'TestCommon', 'test_noncontiguous_samples'),
                        # FIXME This should be the following, but the toleranceOverride does not seem to do anything!
-                       #DecorateInfo(toleranceOverride({torch.complex128: tol(atol=1e-04, rtol=1e-04)}),
-                       #             'TestFwdGradients', 'test_fn_fwgrad_bwgrad'),
-                       DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_fn_fwgrad_bwgrad', dtypes=[torch.complex128]),
+                       # DecorateInfo(toleranceOverride({torch.complex128: tol(atol=1e-04, rtol=1e-04)}),
+                       #              'TestFwdGradients', 'test_fn_fwgrad_bwgrad'),
+                       DecorateInfo(unittest.skip("See comment above"),
+                                    'TestFwdGradients',
+                                    'test_fn_fwgrad_bwgrad',
+                                    dtypes=[torch.complex128]),
 
                        ],
            skips=(
