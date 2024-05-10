@@ -21,6 +21,7 @@
 #include <c10/util/flat_hash_map.h>
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
+#include <torch/csrc/inductor/aoti_eager/kernel_holder.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_raii.h>
 
@@ -372,6 +373,32 @@ void initDispatchBindings(PyObject* module) {
           py::arg("name"),
           py::arg("dispatch") = "",
           py::arg("debug") = "impl_t_t")
+      .def(
+          "impl_with_aoti_compile",
+          [](const py::object& self,
+             const char* ns,
+             const char* op_name_with_overload,
+             c10::DispatchKey dispatch) {
+            HANDLE_TH_ERRORS
+            std::string reg_op_name =
+                std::string(ns).append("::").append(op_name_with_overload);
+
+            auto& lib = self.cast<torch::Library&>();
+            lib.impl(
+                reg_op_name.c_str(),
+                torch::dispatch(
+                    dispatch,
+                    CppFunction::makeFromBoxedFunctor(
+                        std::make_unique<
+                            torch::inductor::AOTIPythonKernelHolder>(
+                            dispatch, ns, op_name_with_overload))),
+                register_or_verify());
+            END_HANDLE_TH_ERRORS_PYBIND
+          },
+          "",
+          py::arg("ns"),
+          py::arg("op_name_with_overload"),
+          py::arg("dispatch"))
       .def(
           "impl",
           [](const py::object& self,
