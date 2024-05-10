@@ -1469,12 +1469,16 @@ def compile_fx(
         # will be the same as the generated FP16 patterns.
         disable_amp = torch._C._is_any_autocast_enabled()
         context = torch._C._DisableAutocast if disable_amp else contextlib.nullcontext
-        with V.set_fake_mode(fake_mode), compiled_autograd.disable(), context():
+        with V.set_fake_mode(
+            fake_mode
+        ), compiled_autograd.disable_compiler(), context():
             return inference_compiler(unlifted_gm, example_inputs_)
 
     with V.set_fake_mode(fake_mode), torch._guards.tracing(
         tracing_context
-    ), compiled_autograd.disable(), functorch_config.patch(unlift_effect_tokens=True):
+    ), compiled_autograd.disable_compiler(), functorch_config.patch(
+        unlift_effect_tokens=True
+    ):
         return aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,

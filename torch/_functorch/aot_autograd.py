@@ -952,7 +952,7 @@ def aot_module_simplified(
         no_tangents=False,
     )
 
-    with compiled_autograd.disable():
+    with compiled_autograd.disable_compiler():
         compiled_fn = create_aot_dispatcher_function(
             functional_call,
             full_args,
