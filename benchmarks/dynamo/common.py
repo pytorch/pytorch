@@ -103,6 +103,9 @@ torch.backends.cuda.matmul.allow_tf32 = True
 # Suppress torch.profiler spam
 os.environ["KINETO_LOG_LEVEL"] = "5"
 
+# Enable FX graph caching
+os.environ["TORCHINDUCTOR_FX_GRAPH_CACHE"] = "1"
+
 current_name = ""
 current_device = ""
 current_onnx_compiler = ""
