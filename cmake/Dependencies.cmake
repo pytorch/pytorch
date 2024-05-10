@@ -1446,13 +1446,6 @@ if(USE_SNPE AND ANDROID)
   endif()
 endif()
 
-if(USE_METAL)
-  if(NOT IOS)
-    message(WARNING "Metal is only used in ios builds.")
-    caffe2_update_option(USE_METAL OFF)
-  endif()
-endif()
-
 if(USE_NNAPI AND NOT ANDROID)
   message(WARNING "NNApi is only used in android builds.")
   caffe2_update_option(USE_NNAPI OFF)
@@ -1841,8 +1834,6 @@ if(USE_KINETO)
       set(CUPTI_LIB_NAME "cupti.lib")
     endif()
 
-    set(NVPERF_HOST_LIB_NAME "libnvperf_host.so")
-
     find_library(CUPTI_LIBRARY_PATH ${CUPTI_LIB_NAME} PATHS
         ${CUDA_SOURCE_DIR}
         ${CUDA_SOURCE_DIR}/extras/CUPTI/lib64
@@ -1857,26 +1848,12 @@ if(USE_KINETO)
         ${CUDA_SOURCE_DIR}/include
         NO_DEFAULT_PATH)
 
-    find_library(NVPERF_HOST_LIBRARY_PATH ${NVPERF_HOST_LIB_NAME} PATHS
-        ${CUDA_SOURCE_DIR}
-        ${CUDA_SOURCE_DIR}/lib
-        ${CUDA_SOURCE_DIR}/lib64
-        ${CUDA_SOURCE_DIR}/extras/CUPTI/lib64
-        NO_DEFAULT_PATH)
-
     if(CUPTI_LIBRARY_PATH AND CUPTI_INCLUDE_DIR)
       message(STATUS "  CUPTI_INCLUDE_DIR = ${CUPTI_INCLUDE_DIR}")
       set(CUDA_cupti_LIBRARY ${CUPTI_LIBRARY_PATH})
       message(STATUS "  CUDA_cupti_LIBRARY = ${CUDA_cupti_LIBRARY}")
-      # CUPTI Range Profiler requires the NVPerf library
-      # for configuring metrics
-      if(NVPERF_HOST_LIBRARY_PATH)
-        set(CUDA_nvperf_host_LIBRARY ${NVPERF_HOST_LIBRARY_PATH})
-        message(STATUS "  CUDA_nvperf_host_LIBRARY = ${NVPERF_HOST_LIBRARY_PATH}")
-      endif()
       message(STATUS "Found CUPTI")
       set(LIBKINETO_NOCUPTI OFF CACHE STRING "" FORCE)
-
 
       # I've only tested this sanity check on Linux; if someone
       # runs into this bug on another platform feel free to
