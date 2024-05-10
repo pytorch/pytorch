@@ -34,18 +34,6 @@ jobs:
       id-token: write
       contents: read
 
-  # Build PyTorch with BUILD_CAFFE2=ON
-  caffe2-linux-jammy-py3_8-gcc11-build:
-    name: caffe2-linux-jammy-py3.8-gcc11
-    uses: ./.github/workflows/_linux-build.yml
-    with:
-      build-environment: caffe2-linux-jammy-py3.8-gcc11
-      docker-image-name: pytorch-linux-jammy-py3.8-gcc11
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1 },
-        ]}
-
   linux-focal-cuda12_1-py3_10-gcc9-build:
     name: linux-focal-cuda12.1-py3.10-gcc9
     uses: ./.github/workflows/_linux-build.yml
@@ -106,20 +94,16 @@ jobs:
           { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
-  macos-12-py3-arm64-build:
-    name: macos-12-py3-arm64
+  macos-13-py3-arm64-build:
+    name: macos-13-py3-arm64
     uses: ./.github/workflows/_mac-build.yml
     with:
-      sync-tag: macos-12-py3-arm64-build
-      build-environment: macos-12-py3-arm64
+      sync-tag: macos-py3-arm64-build
+      build-environment: macos-13-py3-arm64
       runner-type: macos-m1-stable
       build-generates-artifacts: true
       # To match the one pre-installed in the m1 runners
       python-version: 3.9.12
-      # We need to set the environment file here instead of trying to detect it automatically because
-      # MacOS arm64 is cross-compiled from x86-64. Specifically, it means that arm64 conda environment
-      # is needed when building PyTorch MacOS arm64 from x86-64
-      environment-file: .github/requirements/conda-env-macOS-ARM64
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 3, runner: "macos-m1-stable" },
@@ -127,33 +111,34 @@ jobs:
           { config: "default", shard: 3, num_shards: 3, runner: "macos-m1-stable" },
         ]}
 
-  macos-12-py3-arm64-mps-test:
-    name: macos-12-py3-arm64-mps
+  macos-py3-arm64-mps-test:
+    name: macos-py3-arm64-mps
     uses: ./.github/workflows/_mac-test-mps.yml
-    needs: macos-12-py3-arm64-build
-    if: needs.macos-12-py3-arm64-build.outputs.build-outcome == 'success'
+    needs: macos-13-py3-arm64-build
+    if: needs.macos-13-py3-arm64-build.outputs.build-outcome == 'success'
     with:
-      sync-tag: macos-12-py3-arm64-mps-test
-      build-environment: macos-12-py3-arm64
+      sync-tag: macos-py3-arm64-mps-test
+      build-environment: macos-13-py3-arm64
       # Same as the build job
       python-version: 3.9.12
       test-matrix: |
         { include: [
           { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-stable" },
+          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-14" },
+
         ]}
 
-  macos-12-py3-arm64-test:
-    name: macos-12-py3-arm64
+  macos-13-py3-arm64-test:
+    name: macos-13-py3-arm64
     uses: ./.github/workflows/_mac-test.yml
     needs:
-      - macos-12-py3-arm64-build
+      - macos-13-py3-arm64-build
       - target-determination
     with:
-      build-environment: macos-12-py3-arm64
+      build-environment: macos-13-py3-arm64
       # Same as the build job
       python-version: 3.9.12
-      test-matrix: ${{ needs.macos-12-py3-arm64-build.outputs.test-matrix }}
-      arch: arm64
+      test-matrix: ${{ needs.macos-13-py3-arm64-build.outputs.test-matrix }}
 
   win-vs2019-cpu-py3-build:
     name: win-vs2019-cpu-py3
