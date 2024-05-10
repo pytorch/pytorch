@@ -3391,6 +3391,7 @@ def parse_args(args=None):
     )
     group_latency.add_argument(
         "--warm-start-latency",
+        "--warm_start_latency",
         action="store_true",
         help="Run model(s) twice and preseve caches in between to enable a 'warm start' on the 2nd run",
     )
@@ -3610,10 +3611,10 @@ def main(runner, original_dir=None, args=None):
             cmd = [sys.executable] + sys.argv
             cmd.remove("--warm-start-latency")
 
-            print(f"Executing cold-start run for {args.only}")
-            subprocess.check_call(cmd, timeout=args.timeout, env=env)
+            print(f"Performing cold-start run for {args.only}")
+            subprocess.check_call(cmd + ["--repeat=1"], timeout=args.timeout, env=env)
 
-            print(f"Executing warm-start run for {args.only}")
+            print(f"Performing warm-start run for {args.only}")
             subprocess.check_call(cmd, timeout=args.timeout, env=env)
         else:
             # single process path just uses the main process
@@ -3666,7 +3667,7 @@ def run(runner, args, original_dir=None):
     if args.ci:
         if args.accuracy:
             # Run fewer iterations when checking accuracy
-            args.repeat = 2
+            args.repeat = min(args.repeat, 2)
 
             # Set translation validation on by default on CI accuracy runs.
             torch.fx.experimental._config.translation_validation = True
