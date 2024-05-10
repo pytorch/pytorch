@@ -12,7 +12,7 @@ from torch._inductor.fx_passes.pad_mm import (
 )
 
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -325,6 +325,34 @@ class PadMMTest(TestCase):
         inps = [torch.rand([5, 5], device="cuda") for _ in range(2)]
         out = foo(*inps)
         self.assertEqual(out, inps[0] @ inps[1])
+
+    @inductor_config.patch(force_shape_pad=True)
+    @fresh_inductor_cache()
+    def test_pad_addmm_2d_bias(self):
+        @torch.compile()
+        def foo(input, x, y):
+            return torch.ops.aten.addmm(input, x, y)
+
+        for a in [1, 4]:
+            for b in [1, 6]:
+                inps = (
+                    torch.rand([a, b], device="cuda"),
+                    torch.rand([4, 5], device="cuda"),
+                    torch.rand([5, 6], device="cuda"),
+                )
+                out = foo(*inps)
+                out_eager = torch.ops.aten.addmm(*inps)
+                self.assertEqual(out, out_eager)
+
+        for a in [1, 6]:
+            inps = (
+                torch.rand([a], device="cuda"),
+                torch.rand([4, 5], device="cuda"),
+                torch.rand([5, 6], device="cuda"),
+            )
+            out = foo(*inps)
+            out_eager = torch.ops.aten.addmm(*inps)
+            self.assertEqual(out, out_eager)
 
     @inductor_config.patch(force_shape_pad=True)
     def test_pad_batch(self):
