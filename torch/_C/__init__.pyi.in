@@ -652,12 +652,14 @@ def _jit_onnx_convert_pattern_from_subblock(
     block: Block,
     n: Node,
     env: Dict[Value, Value],
+    values_in_env: Set[Value],
 ) -> List[Value]: ...
 def _jit_pass_onnx_block(
     old_block: Block,
     new_block: Block,
     operator_export_type: _onnx.OperatorExportTypes,
     env: Dict[Value, Value],
+    values_in_env: Set[Value],
     is_sub_block: _bool,
 ) -> Dict[Value, Value]: ...
 def _jit_pass_onnx_assign_scoped_names_for_node_and_value(graph: Graph) -> None: ...
