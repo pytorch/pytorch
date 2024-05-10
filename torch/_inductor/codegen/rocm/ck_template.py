@@ -1,10 +1,10 @@
 
 import torch
+from torch._inductor.codegen.rocm.rocm_template import ROCmTemplate
 from torch._inductor.ir import IRNode
 from torch._inductor.utils import IndentedBuffer
-from ..cuda.cuda_template import CUDATemplate
 
-class CKTemplate(CUDATemplate):
+class CKTemplate(ROCmTemplate):
     """
     Base class for generating CK templates, has common, i.e. non-gemm-specific, code generation logic
     """
