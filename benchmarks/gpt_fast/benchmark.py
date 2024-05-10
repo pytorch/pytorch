@@ -39,7 +39,7 @@ all_experiments = {
         "bfloat16",
         LLaMAWeightOnlyInt8QuantHandler,
         94,
-        1430,
+        1253,
     ),
     "llama-7b-int8": Experiment(
         "Llama-2-7b-chat-hf",
@@ -47,7 +47,7 @@ all_experiments = {
         "int8",
         LLaMAWeightOnlyInt8QuantHandler,
         144,
-        1066,
+        957,
     ),
     "mixtral-int8": Experiment(  # We reduced the original number of layers from 32 to 16 to adapt CI memory limitation.
         "Mixtral-8x7B-v0.1",
@@ -55,7 +55,7 @@ all_experiments = {
         "int8",
         MixtralMoEWeightOnlyInt8QuantHandler,
         175,
-        4647,
+        4129,
     ),
 }
 
@@ -290,10 +290,10 @@ def main(experiments=None, output_file=DEFAULT_OUTPUT_FILE):
                 x.name,
                 x.mode,
                 x.token_per_sec,
-                actual_token_per_sec,
+                f"{actual_token_per_sec:.2f}",
                 token_per_sec_pct,
                 x.memory_bandwidth,
-                actual_memory_bandwidth,
+                f"{actual_memory_bandwidth:.2f}",
                 bandwidth_pct,
             )
         )
