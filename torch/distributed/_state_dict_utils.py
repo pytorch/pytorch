@@ -1,7 +1,20 @@
 import copy
 import io
 import math
-from typing import Any, Callable, Dict, Optional, Tuple, TYPE_CHECKING
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    List,
+    Mapping,
+    MutableMapping,
+    NamedTuple,
+    Optional,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 
 import torch
 import torch.distributed as dist
@@ -11,7 +24,7 @@ from torch.distributed._functional_collectives import AsyncCollectiveTensor
 if dist.is_available() or TYPE_CHECKING:
     from torch.distributed import distributed_c10d
     from torch.distributed._shard.sharded_tensor import ShardedTensor
-    from torch.distributed._tensor import DTensor, Replicate
+    from torch.distributed._tensor import distribute_tensor, DTensor, Replicate
 
 
 def _identity_func(
@@ -457,3 +470,197 @@ def _check_state_dict_similarity(
         return False
 
     return True
+
+
+class _TensorInfo(NamedTuple):
+    size: torch.Size
+    dtype: torch.dtype
+
+
+def _broadcast_tensors(
+    full_state_dict: Dict[str, Any],
+    local_state_dict: Dict[str, Any],
+    keys: List[str],
+    device: torch.device,
+    pg: Optional[dist.ProcessGroup] = None,
+) -> None:
+    tensors = []
+    for key in keys:
+        if dist.get_rank() == 0:
+            full_state = full_state_dict[key]
+            assert isinstance(full_state, torch.Tensor)
+            full_tensor = full_state.detach().to(device)
+        else:
+            tensor_info = full_state_dict[key]
+            full_tensor = torch.empty(
+                size=tensor_info.size,
+                device=device,
+                dtype=tensor_info.dtype,
+            )
+
+        tensors.append(full_tensor)
+        local_state = local_state_dict.get(key, None)
+        if local_state is None:
+            continue
+        elif isinstance(local_state, DTensor):
+            local_state_dict[key] = (local_state, full_tensor)
+        else:
+            local_state_dict[key] = full_tensor
+
+    if pg is None:
+        pg = dist.distributed_c10d._get_default_group()
+    dist._broadcast_coalesced(pg, tensors, 500, 0)
+
+    for key in keys:
+        _local_state = local_state_dict.get(key, None)
+        if _local_state is None or torch.is_tensor(_local_state):
+            continue
+
+        local_state = _local_state[0]
+        full_tensor = _local_state[1]
+        local_state_dict[key] = distribute_tensor(
+            full_tensor, local_state.device_mesh, local_state.placements
+        )
+
+
+def _broadcast_state_dict(
+    full_state_dict: Dict[str, Any],
+    local_state_dict: Dict[str, Any],
+    device: torch.device,
+    pg: Optional[dist.ProcessGroup] = None,
+) -> None:
+    # Gather the full state dict keys, non tensor values, scalar tensor values,
+    # and tensor information.
+    ret = {}
+    if dist.get_rank() == 0:
+        for key, value in full_state_dict.items():
+            if not torch.is_tensor(value):
+                ret[key] = value
+            elif value.dim() == 0:
+                ret[key] = value.cpu()
+            else:
+                ret[key] = _TensorInfo(value.size(), value.dtype)
+
+    broadcast_list = [ret]
+    dist.broadcast_object_list(broadcast_list, src=0, group=pg)
+    ret = broadcast_list[0]
+
+    # Gather values
+    keys = []
+    for key, value in ret.items():
+        if not isinstance(value, _TensorInfo):
+            if key in local_state_dict:
+                local_state_dict[key] = value
+            continue
+
+        if dist.get_rank() == 0:
+            ret[key] = full_state_dict[key]
+
+        keys.append(key)
+        # Broadcast every 10 tensors, just hardcode the number for now
+        if len(keys) >= 10:
+            _broadcast_tensors(ret, local_state_dict, keys, device, pg)
+            keys.clear()
+
+    if keys:
+        _broadcast_tensors(ret, local_state_dict, keys, device, pg)
+
+
+# These APIs are from torch.distributed.checkpoint.
+# TODO: We should consolidate the code here as some not all modules can depend on
+# DCP.
+PATH_ITEM = Union[str, int]
+OBJ_PATH = Tuple[PATH_ITEM, ...]
+FLATTEN_MAPPING = Dict[str, OBJ_PATH]
+STATE_DICT_TYPE = Dict[str, Any]
+CONTAINER_TYPE = MutableMapping[PATH_ITEM, Any]
+
+
+def _traverse_state_dict(
+    state_dict: STATE_DICT_TYPE,
+    visitor: Callable[[OBJ_PATH, Any], None],
+) -> None:
+    """
+    Invoke ``visitor`` for each value recursively in ``state_dict``.
+    Mapping, list, and tuple will be flattened and other value types are treated
+    as the terminal values and will invoke ``visitor``.
+    """
+
+    def _traverse_obj(path: OBJ_PATH, value: Any) -> None:
+        if isinstance(value, Mapping):
+            for k, v in value.items():
+                _traverse_obj(path + (str(k),), v)
+        elif isinstance(value, (list, tuple)):
+            for i, v in enumerate(value):
+                _traverse_obj(path + (i,), v)
+        else:
+            visitor(path, value)
+
+    for key, value in state_dict.items():
+        _traverse_obj((str(key),), value)
+
+
+def _flatten_state_dict(
+    state_dict: STATE_DICT_TYPE,
+) -> Tuple[STATE_DICT_TYPE, FLATTEN_MAPPING]:
+    """
+    Flatten ``state_dict`` made of nested dicts and lists into a top level dictionary.
+
+    Use ``unflatten_state_dict`` to revert this process.
+    Returns:
+        A tuple with the flatten state_dict and a mapping from original to new state_dict.
+    N.B. The new keys are derived from the object paths, joined by dot.
+        For example: ``{ 'a': {'b':...}}`` results in the key `a.b`.
+    """
+    flattened: STATE_DICT_TYPE = {}
+    mappings: FLATTEN_MAPPING = {}
+
+    def flat_copy(path: OBJ_PATH, value: Any) -> None:
+        new_fqn = ".".join(map(str, path))
+        if new_fqn in flattened:
+            raise ValueError(f"duplicated flatten key {new_fqn}")
+        flattened[new_fqn] = value
+        mappings[new_fqn] = path
+
+    _traverse_state_dict(state_dict, flat_copy)
+    return flattened, mappings
+
+
+def _set_element(root_dict: STATE_DICT_TYPE, path: OBJ_PATH, value: Any) -> None:
+    """Set ``value`` in ``root_dict`` along the ``path`` object path."""
+    cur_container = cast(CONTAINER_TYPE, root_dict)
+
+    def extend_list(lst: List[Any], idx: int) -> None:
+        while len(lst) <= idx:
+            lst.append(None)
+
+    for i in range(1, len(path)):
+        prev_key = path[i - 1]
+        key = path[i]
+        def_val: Union[CONTAINER_TYPE, List[Any]] = {} if type(key) == str else []
+
+        if isinstance(cur_container, Mapping):
+            cur_container = cast(
+                CONTAINER_TYPE, cur_container.setdefault(prev_key, def_val)
+            )
+        else:
+            extend_list(cur_container, prev_key)
+            if cur_container[prev_key] is None:
+                cur_container[prev_key] = def_val
+            cur_container = cur_container[prev_key]
+
+    key = path[-1]
+    if type(key) == int:
+        extend_list(cast(List[Any], cur_container), key)
+
+    cur_container[key] = value
+
+
+def _unflatten_state_dict(
+    state_dict: STATE_DICT_TYPE, mapping: FLATTEN_MAPPING
+) -> STATE_DICT_TYPE:
+    """Restore the original nested state_dict according to ``mapping`` and the flattened ``state_dict``."""
+    nested: STATE_DICT_TYPE = {}
+    for key, value in state_dict.items():
+        _set_element(nested, mapping[key], value)
+    return nested

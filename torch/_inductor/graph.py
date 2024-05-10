@@ -1313,7 +1313,10 @@ class GraphLowering(torch.fx.Interpreter):
                                 ir.get_stride_order(n.meta["val"].stride()),
                                 allow_padding=True,
                             )
-                        if user.target in need_fixed_channels_last_layout:
+                        if (
+                            user.target in need_fixed_channels_last_layout
+                            and n is user.args[0]
+                        ):
                             result = ir.ExternKernel.require_stride_order(
                                 result,
                                 ir.get_stride_order(
