@@ -1253,6 +1253,7 @@ def export(
             automatic_dynamic_shapes=False,
             capture_dynamic_output_shape_ops=True,
             capture_scalar_outputs=True,
+            use_single_step_graph=False,
         ):
             opt_f = optimize_assert(
                 dynamo_normalization_capturing_compiler,
