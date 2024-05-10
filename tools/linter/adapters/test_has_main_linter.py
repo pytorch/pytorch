@@ -29,6 +29,11 @@ class HasMainVisiter(cst.CSTVisitor):
         run_test_call = m.Call(
             func=m.Name("run_tests") | m.Attribute(attr=m.Name("run_tests"))
         )
+        # Distributed tests (i.e. MultiProcContinuousTest) calls `run_rank`
+        # instead of `run_tests` in main
+        run_rank_call = m.Call(
+            func=m.Name("run_rank") | m.Attribute(attr=m.Name("run_rank"))
+        )
         raise_block = m.Raise()
 
         # name == main or main == name
@@ -42,7 +47,7 @@ class HasMainVisiter(cst.CSTVisitor):
         )
         for child in node.children:
             if m.matches(child, m.If(test=if_main1 | if_main2)):
-                if m.findall(child, raise_block | run_test_call):
+                if m.findall(child, raise_block | run_test_call | run_rank_call):
                     self.found = True
                     break
 
