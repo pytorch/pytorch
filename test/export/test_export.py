@@ -92,6 +92,11 @@ torch.library.define(
     "(Tensor x) -> (Tensor)",
     tags=torch.Tag.pt2_compliant_tag,
 )
+torch.library.define(
+    "testlib::foo_unbacked",
+    "(Scalar x) -> (Tensor)",
+    tags=torch.Tag.pt2_compliant_tag,
+)
 
 
 @torch.library.impl("testlib::returns_tensor_symint", "cpu")
@@ -123,6 +128,15 @@ def foo_mutated(x):
 def foo_functional(x):
     a, b, c = torch.ops.testlib.foo(x.cos(), x.cos())
     return a.cos()
+
+
+@torch.library.impl("testlib::foo_unbacked", "CompositeImplicitAutograd")
+def foo_unbacked(x):
+    if x > 2:
+        return torch.ones(4, 4)
+    if x < 6:
+        return torch.ones(4, 4)
+    return torch.ones(4, 4)
 
 
 @dataclass
@@ -166,7 +180,7 @@ class TestDynamismExpression(TestCase):
         res = gm(*inp)
         self.assertTrue(torchdynamo.utils.same(ref, res))
 
-    def test_export_constraints_error(self):
+    def test_export_constraints_error_not_in_range(self):
         class InvalidInputConflictWithInputConstraints(torch.nn.Module):
             def forward(self, x):
                 return x + 1
@@ -180,6 +194,7 @@ class TestDynamismExpression(TestCase):
                 dynamic_shapes={"x": {0: dim_x}},
             )
 
+    def test_export_constraints_error(self):
         class ConflictingConstraints(torch.nn.Module):
             def forward(self, x):
                 b = x.item()
@@ -2415,8 +2430,9 @@ def forward(self, x):
 
         ep = export(M(), (torch.tensor(1), torch.ones(4, 5)))
 
+        # This is because we insert sym_constrain_range in the graph now
         if is_non_strict_test(self._testMethodName):
-            error_msg = "Invalid value range"
+            error_msg = r"Invalid value range for -1 between"
         else:
             error_msg = "is outside of inline constraint"
         with self.assertRaisesRegex(RuntimeError, error_msg):
@@ -4078,16 +4094,16 @@ def forward(self, b_pred, b_t, x, y):
             """\
 def forward(self, b_t, x, y):
     submod_3 = self.submod_1
-    add_1 = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_3, b_t, x, y);  submod_3 = b_t = x = y = None
+    add_1 = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_3, x, b_t, y);  submod_3 = x = b_t = y = None
     return (add_1,)""",
         )
 
         self.assertExpectedInline(
             str(exported_program.graph_module.true_graph_0.submod_1.code.strip()),
             """\
-def forward(self, b_t, x, y):
-    sub = torch.ops.aten.sub.Tensor(b_t, 1);  b_t = None
-    add = torch.ops.aten.add.Tensor(sub, x);  sub = x = None
+def forward(self, x, b_t, y):
+    sub = torch.ops.aten.sub.Tensor(x, 1);  x = None
+    add = torch.ops.aten.add.Tensor(sub, b_t);  sub = b_t = None
     add_1 = torch.ops.aten.add.Tensor(add, y);  add = y = None
     return add_1""",
         )
@@ -4198,6 +4214,22 @@ def forward(self, b_t, x, y):
         self.assertIn("foo", ep.constants)
         self.assertEqual(len(ep.constants), 1)
         self.assertEqual(mod(inp), m(inp))
+
+    def test_export_as_backend(self):
+        def f(x, y):
+            return x + y
+
+        def my_custom_backend(gm, example_inputs):
+            gm = (
+                torch.export.export(gm, tuple(example_inputs), strict=False)
+                .run_decompositions()
+                .module()
+            )
+            return gm
+
+        inp = (torch.randn(3, 3), torch.randn(3, 3))
+        new_res = torch.compile(f, backend=my_custom_backend)(*inp)
+        self.assertTrue(torch.allclose(f(*inp), new_res))
 
     def test_nonstrict_retrace_preserves_metadata(self):
         class MyModule(torch.nn.Module):
@@ -4587,6 +4619,65 @@ def forward(self, x):
         self.assertEqual(div_spec.arg.name, "div")
         self.assertEqual(div_spec.arg.value, "floor")
 
+    def test_unbacked_deferred_runtime_retrace(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                y_sum = y.sin().sum()
+                with torch.no_grad():
+                    a = x.item()
+                    torch._check_is_size(a)
+                    torch._check(a > 2)
+                    torch._check(a < 6)
+                    unbacked_shape = torch.ops.testlib.foo_unbacked(a)
+                return y + y_sum + unbacked_shape.sum()
+
+        inps = (torch.tensor(4), torch.randn(5, 5))
+        from torch.export import _trace
+
+        ep_pre = _trace._export(Foo(), inps, pre_dispatch=True, strict=False)
+        self.assertExpectedInline(
+            str(ep_pre.graph_module.submod_1.code).strip(),
+            """\
+def forward(self, x):
+    item = torch.ops.aten.item.default(x);  x = None
+    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(item)
+    sym_constrain_range_default = torch.ops.aten.sym_constrain_range.default(item, min = 3, max = 5)
+    mul = -1 * item
+    le = mul <= 0;  mul = None
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression -u1 <= 0 on node 'le'");  le = None
+    mul_1 = -1 * item
+    lt = mul_1 < -2;  mul_1 = None
+    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression -u1 < -2 on node 'lt'");  lt = None
+    lt_1 = item < 6
+    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(lt_1, "Runtime assertion failed for expression u1 < 6 on node 'lt_1'");  lt_1 = None
+    foo_unbacked = torch.ops.testlib.foo_unbacked.default(item);  item = None
+    return foo_unbacked""",
+        )
+        ep_aot = ep_pre.run_decompositions()
+        self.assertExpectedInline(
+            str(ep_aot.graph_module.code).strip(),
+            """\
+def forward(self, x, y):
+    sin = torch.ops.aten.sin.default(y)
+    sum_1 = torch.ops.aten.sum.dim_IntList(sin, []);  sin = None
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x);  x = None
+    sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense)
+    sym_constrain_range = torch.ops.aten.sym_constrain_range.default(_local_scalar_dense, min = 3, max = 5)
+    mul = -1 * _local_scalar_dense
+    le = mul <= 0;  mul = None
+    _assert_scalar = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression -u1 <= 0 on node 'le'");  le = None
+    mul_1 = -1 * _local_scalar_dense
+    lt = mul_1 < -2;  mul_1 = None
+    _assert_scalar_1 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression -u1 < -2 on node 'lt'");  lt = None
+    lt_1 = _local_scalar_dense < 6;  _local_scalar_dense = None
+    _assert_scalar_2 = torch.ops.aten._assert_scalar.default(lt_1, "Runtime assertion failed for expression u1 < 6 on node 'lt_1'");  lt_1 = None
+    full = torch.ops.aten.full.default([4, 4], 1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
+    add = torch.ops.aten.add.Tensor(y, sum_1);  y = sum_1 = None
+    sum_2 = torch.ops.aten.sum.dim_IntList(full, []);  full = None
+    add_1 = torch.ops.aten.add.Tensor(add, sum_2);  add = sum_2 = None
+    return (add_1,)""",
+        )
+
     def test_nested_dynamic_shapes_spec(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -4753,6 +4844,40 @@ def forward(self, x):
                 strict=False,
                 _disable_forced_specializations=True,
             )
+
+    def test_constant_aliasing(self):
+        class M1(torch.nn.Module):
+            def __init__(self, m2, foo):
+                super().__init__()
+                self.m2 = m2
+                self.foo = foo
+
+            def forward(self, x):
+                return x + self.foo + self.m2(x)
+
+        class M2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = torch.ones(3, 3)
+
+            def forward(self, x):
+                return x + self.foo
+
+        m2 = M2()
+        m1 = M1(m2, m2.foo)
+        inps = (torch.ones(3, 3),)
+        ep = torch.export.export(m1, inps, strict=False)
+        # check both constants appear in list
+        self.assertEqual(sorted(list(ep.constants)), ["foo", "m2.foo"])
+        # check only one input spec exists
+        num_constant_inputs = [
+            spec.kind == InputKind.CONSTANT_TENSOR
+            for spec in ep.graph_signature.input_specs
+        ].count(True)
+        self.assertEqual(num_constant_inputs, 1)
+        # unflatten
+        unflattened = unflatten(ep)
+        self.assertTrue(torch.allclose(m1(*inps), unflattened(*inps)))
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")

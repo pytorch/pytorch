@@ -4756,23 +4756,31 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         class Parametrization(torch.nn.Module):
             def forward(self, x):
-                return x + 1
-
-        def parametrize(model: nn.Module):
-            mods = list(model.modules())
-            for mod in mods:
-                params = list(mod._parameters.items())
-                for name, p in params:
-                    if p is not None:
-                        torch.nn.utils.parametrize.register_parametrization(
-                            mod, name, Parametrization(), unsafe=True
-                        )
+                return torch.sin(x)
 
         m = Module()
-        parametrize(m)
-        opt_m = torch.compile(m, backend="eager")
+        torch.nn.utils.parametrize.register_parametrization(
+            m, "param", Parametrization()
+        )
+
+        sin_found = False
+
+        def backend(gm, _):
+            nonlocal sin_found
+            for node in gm.graph.nodes:
+                if node.target is torch.sin:
+                    sin_found = True
+            return gm
+
+        opt_m = torch.compile(m, backend=backend, fullgraph=True)
         inp = torch.randn(10, 10)
         self.assertEqual(m(inp), opt_m(inp))
+        self.assertTrue(sin_found)
+
+        torch.nn.utils.parametrize.remove_parametrizations(m, "param")
+        sin_found = False
+        self.assertEqual(m(inp), opt_m(inp))
+        self.assertFalse(sin_found)
 
     def test_nn_module_property_closure(self):
         x = torch.randn(10, 10)
