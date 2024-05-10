@@ -126,7 +126,7 @@ inline __host__ __device__ uint32_t getAlignmentRoundUp(const void* p) {
 }
 
 #if defined(USE_ROCM)
-constexpr int32_t kWarpSize = __AMDGCN_WAVEFRONT_SIZE;
+constexpr int32_t kWarpSize = warpSize;
 #else
 constexpr int32_t kWarpSize = 32;
 #endif

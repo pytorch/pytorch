@@ -11,7 +11,7 @@ static constexpr size_t kBytesPerThread = 16;
 static constexpr size_t kMaxAllReduceBlocks = 24;
 static constexpr size_t kThreadsPerBlock = 1024;
 #if defined(USE_ROCM)
-static constexpr size_t kWarpSize = __AMDGCN_WAVEFRONT_SIZE;
+static constexpr size_t kWarpSize = warpSize;
 #else
 static constexpr size_t kWarpSize = 32;
 #endif

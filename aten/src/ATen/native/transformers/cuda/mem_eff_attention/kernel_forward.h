@@ -124,7 +124,7 @@ struct AttentionKernel {
       kQueriesPerBlock * kKeysPerBlock / (32 * 32);
 
 #if defined(USE_ROCM)
-  static constexpr int kWarpSize = __AMDGCN_WAVEFRONT_SIZE;
+  static constexpr int kWarpSize = warpSize;
 #else
   static constexpr int kWarpSize = 32;
 #endif
