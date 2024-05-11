@@ -34,6 +34,7 @@ from ..scheduler import (
 )
 from ..utils import (
     cache_on_self,
+    get_bounds_index_expr,
     get_fused_kernel_name,
     is_welford_reduction,
     parallel_num_threads,
@@ -216,6 +217,14 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
         f"{struct_name} {tmpvar_per_thd};",
     ]
     return prefix, parallel_prefix, local_init
+
+
+def get_call_ranges(node: BaseSchedulerNode):
+    assert isinstance(node, (SchedulerNode, FusedSchedulerNode))
+    nodes: List[SchedulerNode] = node.get_nodes()  # type: ignore[assignment]
+    _, (group, reduction_group) = max(nodes, key=lambda x: int(x.is_reduction())).group
+    call_ranges = tuple(group) + tuple(reduction_group)
+    return call_ranges
 
 
 def try_reset_var_index_to_thread_local_buf(name, var, index):
@@ -865,7 +874,7 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def constant(val, dtype):
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        assert opt_ctx and opt_ctx.dtype is not None
+        assert opt_ctx and opt_ctx.dtype is not None, opt_ctx
         dtype = opt_ctx.dtype
         if dtype in DTYPE_LOWP_FP:
             # Since load promotes all half-precision inputs to float, constants
@@ -878,7 +887,12 @@ class CppOverrides(OpOverrides):
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         assert opt_ctx and opt_ctx.dtype is not None
         dtype = opt_ctx.dtype
-        return ops.to_dtype(cexpr(V.kernel.rename_indexing(expr)), dtype)
+
+        idx_str = cexpr(V.kernel.rename_indexing(expr))
+        var = V.kernel.cse.generate(
+            V.kernel.compute, idx_str, bounds=get_bounds_index_expr(expr)
+        )
+        return ops.to_dtype(var, dtype)
 
     @staticmethod
     def masked(mask, body, other):
@@ -1475,7 +1489,10 @@ class CppVecOverrides(CppOverrides):
         if stride == 0:
             return CppOverrides.index_expr(expr, dtype)
         elif stride is not None:
-            value = ops.to_dtype(cexpr(index), dtype)
+            idx = V.kernel.cse.generate(
+                V.kernel.compute, cexpr(index), bounds=get_bounds_index_expr(expr)
+            )
+            value = ops.to_dtype(idx, dtype)
             if isinstance(value, OpsValue):
                 value = value.value
             csevar = V.kernel.arange(value, stride)
@@ -3674,44 +3691,36 @@ class CppScheduling(BaseScheduling):
                 def _can_use_thread_local_buffer(node):
                     outer_loop_fusion_depth = node.outer_loop_fusion_depth
                     for _node in node.get_outer_nodes():
-                        _nodes: List[SchedulerNode] = _node.get_nodes()
-                        _, (group, reduction_group) = max(
-                            _nodes, key=lambda x: int(x.is_reduction())
-                        ).group
-
-                        call_ranges = tuple(group) + tuple(reduction_group)
-
+                        call_ranges = get_call_ranges(_node)
                         if len(call_ranges) != outer_loop_fusion_depth + 1:
-                            # Assume there is only 1 left loop level
-                            # which potentially can do the thread_local id sustitute
+                            # Ref to the typical case of local buffer
+                            # in https://github.com/pytorch/pytorch/blob/
+                            # 1115a25c36340554442f28f9570abd42f0aface2/aten/src/ATen/native/cpu/SoftMaxKernel.cpp#L159
+                            # where the buffer is with size of last dim and contiguous
+                            # Only support this typical case at first.
                             return False
                     return True
 
                 if _can_use_thread_local_buffer(node):
-                    flatten_node = node.get_nodes()
-                    # Annotate the node to change index
-                    for _node in node.get_outer_nodes():
-                        _nodes: List[SchedulerNode] = _node.get_nodes()
-                        _, (group, reduction_group) = max(
-                            _nodes, key=lambda x: int(x.is_reduction())
-                        ).group
-                        call_ranges = tuple(group) + tuple(reduction_group)
+                    assert isinstance(node, OuterLoopFusedSchedulerNode)
+                    flatten_node = node.get_nodes()  # Get all of the schedulerNode
+                    for fused_scheduler_node in node.get_outer_nodes():
+                        call_ranges = get_call_ranges(fused_scheduler_node)
                         keep_idx_id = len(call_ranges) - 1
-                        for _snode in _nodes:
-                            if not _snode.is_reduction():
-                                users = _snode.users
-                                if any(user.node not in flatten_node for user in users):
-                                    # Skip if any node' user is outside of current OuterLoopFusedSchedulerNode
-                                    continue
-                                # Only Support torch.float32 for now
-                                _snode._use_thread_local_buf = True  # type: ignore[attr-defined]
-                                # Record current node's index which will be used in codegen
-                                _snode._index_with_tl_tid = {  # type: ignore[attr-defined]
+                        scheduler_nodes = fused_scheduler_node.get_nodes()
+                        for scheduler_node in scheduler_nodes:
+                            if not scheduler_node.is_reduction() and all(
+                                user.node in flatten_node
+                                for user in scheduler_node.users
+                            ):  # all users inside same OuterLoopFusedSchedulerNode
+                                scheduler_node._use_thread_local_buf = True  # type: ignore[attr-defined]
+                                # Record index which will be used in local buf indexing
+                                scheduler_node._index_with_tl_tid = {  # type: ignore[attr-defined]
                                     "keep_idx_id": keep_idx_id,
                                 }
-                                _snode._thread_local_buf_size = call_ranges[keep_idx_id]  # type: ignore[attr-defined]
-                                _snode._thread_local_buf_dtype = (  # type: ignore[attr-defined]
-                                    _snode.node.layout.get_dtype()
+                                scheduler_node._thread_local_buf_size = call_ranges[keep_idx_id]  # type: ignore[attr-defined]
+                                scheduler_node._thread_local_buf_dtype = (  # type: ignore[attr-defined]
+                                    scheduler_node.node.layout.get_dtype()
                                 )
 
                 for _node in node.get_outer_nodes():

@@ -530,9 +530,6 @@ class ExportedProgram:
         For now, we do not decompose joint graphs.
         """
         from torch._decomp import core_aten_decompositions
-        from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
-            _AddRuntimeAssertionsForInlineConstraintsPass,
-        )
         from torch._export.passes.lift_constants_pass import (
             ConstantAttrMap,
             lift_constants_pass,
@@ -661,13 +658,6 @@ class ExportedProgram:
             self.constants[k] = v
 
         _replace_sym_size_ops_pass(gm)
-
-        if len(new_range_constraints) > 0:
-            res = _AddRuntimeAssertionsForInlineConstraintsPass(new_range_constraints)(
-                gm
-            )
-            assert res is not None
-            gm = res.graph_module
 
         exported_program = ExportedProgram(
             root=gm,
