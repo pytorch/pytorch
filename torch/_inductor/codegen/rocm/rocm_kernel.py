@@ -79,17 +79,15 @@ class ROCmTemplateKernel(ROCmKernel):
         if name_str is None:
             return ""
 
-        res = IndentedBuffer(initial_indent=2)
+        res = IndentedBuffer(initial_indent=8)
         res.tabwidth = 1
         res.splice(
-            f"""
-            {{
-              if (!{name_str}) {{
+            f"""  
+            if (!{name_str}) {{
                 int64_t {name_str}_size = {size_str};
                 if ({name_str}_size > 0) {{
-                  throw std::runtime_error("input {name_str} is null but size is not 0!");
+                    throw std::runtime_error("input {name_str} is null but size is not 0!");
                 }}
-              }}
             }}
             """
         )
