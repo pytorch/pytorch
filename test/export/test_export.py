@@ -180,7 +180,7 @@ class TestDynamismExpression(TestCase):
         res = gm(*inp)
         self.assertTrue(torchdynamo.utils.same(ref, res))
 
-    def test_export_constraints_error_not_in_range(self):
+    def test_export_constraints_error(self):
         class InvalidInputConflictWithInputConstraints(torch.nn.Module):
             def forward(self, x):
                 return x + 1
@@ -194,7 +194,6 @@ class TestDynamismExpression(TestCase):
                 dynamic_shapes={"x": {0: dim_x}},
             )
 
-    def test_export_constraints_error(self):
         class ConflictingConstraints(torch.nn.Module):
             def forward(self, x):
                 b = x.item()
@@ -576,7 +575,6 @@ class TestExport(TestCase):
         )
 
     # Predispatch has different expected results
-    @testing.expectedFailureSerDerPreDispatch
     def test_torch_fn(self):
         class M1(torch.nn.Module):
             def __init__(self):
@@ -591,7 +589,7 @@ class TestExport(TestCase):
                 x = x + x
                 return x
 
-        ep1 = export(M1(), (torch.randn(3, 3),))
+        ep1 = export(M1(), (torch.randn(3, 3),)).run_decompositions()
         expected_result = [
             ("linear_1", "builtin_function_or_method.linear"),
             ("linear_1", "builtin_function_or_method.linear"),
@@ -616,7 +614,9 @@ class TestExport(TestCase):
                 x = torch.add(x, x)
                 return x
 
-        ep2 = export(M2(), (torch.randn(3, 3), torch.randn(3, 3), torch.randn(3)))
+        ep2 = export(
+            M2(), (torch.randn(3, 3), torch.randn(3, 3), torch.randn(3))
+        ).run_decompositions()
         expected_result = [
             ("linear_1", "builtin_function_or_method.linear"),
             ("linear_1", "builtin_function_or_method.linear"),
@@ -2432,7 +2432,7 @@ def forward(self, x):
 
         # This is because we insert sym_constrain_range in the graph now
         if is_non_strict_test(self._testMethodName):
-            error_msg = r"Invalid value range for -1 between"
+            error_msg = "Invalid value range"
         else:
             error_msg = "is outside of inline constraint"
         with self.assertRaisesRegex(RuntimeError, error_msg):
@@ -3061,8 +3061,6 @@ def forward(self, x):
         with self.assertRaisesRegex(ValueError, "Trying to flatten user inputs"):
             exported_program.module()(torch.rand(2, 3), torch.rand(2, 3))
 
-    @testing.expectedFailureSerDerPreDispatch  # linear shouldn't decompose
-    @testing.expectedFailurePreDispatchRunDecomp  # no action needed here
     def test_export_decomps_simple(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -3077,9 +3075,6 @@ def forward(self, x):
         ep = export(m, inp)
         state_dict = ep.state_dict
 
-        FileCheck().check_count("torch.ops.aten.t.default", 1, exactly=True).run(
-            ep.graph_module.code
-        )
         self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
 
         core_aten_ep = ep.run_decompositions()
@@ -3786,8 +3781,8 @@ def forward(self, x):
 
         inp = (torch.randn(4, 4),)
         mod = Foo()
-        ep_strict = torch.export.export(mod, inp)
-        ep_non_strict = torch.export.export(mod, inp, strict=False)
+        ep_strict = torch.export.export(mod, inp).run_decompositions()
+        ep_non_strict = torch.export.export(mod, inp, strict=False).run_decompositions()
 
         gm_unflat_non_strict = unflatten(ep_non_strict)
         self.assertTrue(hasattr(gm_unflat_non_strict, "bar"))
@@ -3804,8 +3799,8 @@ graph():
     %x : [num_users=1] = placeholder[target=x]
     %weight : [num_users=1] = get_attr[target=weight]
     %bias : [num_users=1] = get_attr[target=bias]
-    %t : [num_users=1] = call_function[target=torch.ops.aten.t.default](args = (%weight,), kwargs = {})
-    %addmm : [num_users=1] = call_function[target=torch.ops.aten.addmm.default](args = (%bias, %x, %t), kwargs = {})
+    %permute : [num_users=1] = call_function[target=torch.ops.aten.permute.default](args = (%weight, [1, 0]), kwargs = {})
+    %addmm : [num_users=1] = call_function[target=torch.ops.aten.addmm.default](args = (%bias, %x, %permute), kwargs = {})
     return addmm""",
         )
 
@@ -3876,9 +3871,8 @@ graph():
     %x : [num_users=1] = placeholder[target=x]
     %weight : [num_users=1] = get_attr[target=weight]
     %bias : [num_users=1] = get_attr[target=bias]
-    %t : [num_users=1] = call_function[target=torch.ops.aten.t.default](args = (%weight,), kwargs = {})
-    %addmm : [num_users=1] = call_function[target=torch.ops.aten.addmm.default](args = (%bias, %x, %t), kwargs = {})
-    return addmm""",
+    %linear : [num_users=1] = call_function[target=torch.ops.aten.linear.default](args = (%x, %weight, %bias), kwargs = {})
+    return linear""",
         )
         self.assertExpectedInline(
             str(gm_unflat_non_strict.bar_different.leaf.linear.graph).strip(),
@@ -3887,9 +3881,8 @@ graph():
     %add_2 : [num_users=1] = placeholder[target=add_2]
     %weight : [num_users=1] = get_attr[target=weight]
     %bias : [num_users=1] = get_attr[target=bias]
-    %t_1 : [num_users=1] = call_function[target=torch.ops.aten.t.default](args = (%weight,), kwargs = {})
-    %addmm_1 : [num_users=1] = call_function[target=torch.ops.aten.addmm.default](args = (%bias, %add_2, %t_1), kwargs = {})
-    return addmm_1""",
+    %linear_1 : [num_users=1] = call_function[target=torch.ops.aten.linear.default](args = (%add_2, %weight, %bias), kwargs = {})
+    return linear_1""",
         )
 
         gm_flat_non_strict = ep_non_strict.module()
@@ -4434,7 +4427,7 @@ def forward(self, x):
 
         inps = (torch.ones(5),)
 
-        ep = torch.export.export(M(), inps)
+        ep = torch.export.export(M(), inps).run_decompositions()
         self.assertExpectedInline(
             str(ep.graph_module.code.strip()),
             """\
@@ -4952,7 +4945,9 @@ class TestOneOffModelExportResult(TestCase):
         k = torch.randn(1, 16, 16, 64, dtype=torch.bfloat16, device="cuda")
         v = torch.randn(1, 16, 16, 64, dtype=torch.bfloat16, device="cuda")
 
-        ep = torch.export.export(ScaledDotProductAttention(), (q, k, v))
+        ep = torch.export.export(
+            ScaledDotProductAttention(), (q, k, v)
+        ).run_decompositions()
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
             """\

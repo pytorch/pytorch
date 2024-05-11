@@ -32,6 +32,7 @@ from .functional_utils import (
     has_metadata_mutation,
     has_same_metadata,
     to_fun,
+    was_inductor_storage_resized,
 )
 from .schemas import (
     FunctionalTensorMetadataEq,
@@ -160,11 +161,9 @@ def run_functionalized_fw_and_collect_metadata(
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
             flat_f_outs = f(*flat_f_args)
             # We didn't do any tracing, so we don't need to process the
-            # unbacked symbols, they will just disappear into the ether.
-            # Also, prevent memoization from applying.
+            # unbacked symbols, they will just disappear into the ether
             if (fake_mode := detect_fake_mode()) and (shape_env := fake_mode.shape_env):
                 shape_env.pending_fresh_unbacked_symbols.clear()
-                fake_mode.epoch += 1
 
         if prior_autocast_states != _get_autocast_states():
             raise RuntimeError(
@@ -213,6 +212,7 @@ def run_functionalized_fw_and_collect_metadata(
                 mutates_data
                 and are_all_mutations_under_no_grad_or_inference_mode(f_arg)
             )
+            mutation_inductor_storage_resize = was_inductor_storage_resized(f_arg)
 
             if mutates_storage_metadata:
                 mutates_data = False
@@ -227,6 +227,7 @@ def run_functionalized_fw_and_collect_metadata(
                     mutations_hidden_from_autograd=mutations_hidden_from_autograd,
                     mutates_storage_metadata=mutates_storage_metadata,
                     mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
+                    mutation_inductor_storage_resize=mutation_inductor_storage_resize,
                     requires_grad=requires_grad,
                     keep_input_mutations=keep_input_mutations,
                 )
