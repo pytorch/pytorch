@@ -627,8 +627,7 @@ void enableProfiler(
     torch::profiler::impl::pushITTCallbacks(config, scopes);
     return;
   } else if (config.state == ProfilerState::PRIVATEUSE1) {
-    torch::profiler::impl::pushPRIVATEUSE1CallbacksStub(
-        c10::kPrivateUse1, config, scopes);
+    torch::profiler::impl::pushPRIVATEUSE1CallbacksStub(config, scopes);
     return;
   }
 

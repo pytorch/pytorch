@@ -4,8 +4,7 @@ namespace torch {
 namespace profiler {
 namespace impl {
 
-DEFINE_DISPATCH(pushPRIVATEUSE1CallbacksStub);
-REGISTER_NO_CPU_DISPATCH(pushPRIVATEUSE1CallbacksStub);
+PushPRIVATEUSE1CallbacksStub pushPRIVATEUSE1CallbacksStub;
 
 } // namespace impl
 } // namespace profiler
