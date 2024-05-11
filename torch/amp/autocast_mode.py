@@ -6,21 +6,7 @@ from typing import Any, Optional
 import torch
 from torch.types import _dtype
 
-__all__ = ["autocast_decorator", "autocast", "is_autocast_available", "DOC_TEST"]
-
-
-class DOC_TEST:
-    r"""
-    A test class for doc test.
-    """
-    def __init__(self) -> None:
-        pass
-
-    def test(self):
-        r"""
-        A test method.
-        """
-        print("test doc~")
+__all__ = ["autocast_decorator", "autocast", "is_autocast_available"]
 
 
 def is_autocast_available(device_type: str) -> bool:
