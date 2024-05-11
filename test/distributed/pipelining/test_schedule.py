@@ -59,18 +59,6 @@ class ExampleCode(torch.nn.Module):
 class ScheduleTest(MultiProcContinousTest):
     @classmethod
     def backend_str(cls) -> str:
-        # Check if GPU and NCCL are available
-        if not (
-            dist.is_available()
-            and dist.is_nccl_available()
-            and torch.cuda.device_count() > 1
-        ):
-            print(
-                "c10d NCCL not available or not enough GPUs, skipping tests",
-                file=sys.stderr,
-            )
-            sys.exit(0)
-
         # Testing with NCCL backend
         return "nccl"
 
@@ -184,6 +172,18 @@ class ScheduleTest(MultiProcContinousTest):
 instantiate_parametrized_tests(ScheduleTest)
 
 if __name__ == "__main__":
+    # Check if GPU and NCCL are available
+    if not (
+        dist.is_available()
+        and dist.is_nccl_available()
+        and torch.cuda.device_count() > 1
+    ):
+        print(
+            "c10d NCCL not available or not enough GPUs, skipping tests",
+            file=sys.stderr,
+        )
+        sys.exit(0)
+
     rank = int(os.getenv("RANK", -1))
     world_size = int(os.getenv("WORLD_SIZE", 2))
 
