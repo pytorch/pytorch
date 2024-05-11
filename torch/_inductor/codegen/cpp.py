@@ -230,24 +230,23 @@ def get_call_ranges(node: BaseSchedulerNode):
 def try_reset_var_index_to_thread_local_buf(name, var, index):
     if getattr(
         V.graph.scheduler.name_to_node.get(name, None),
-        "_use_thread_local_buf",
+        "_use_local_buf",
         False,
     ):
         # Modify the index to use thread id
         index_id = getattr(
             V.graph.scheduler.name_to_node.get(name, None),
-            "_index_with_tl_tid",
+            "_local_buf_index",
             None,
         )
-        assert isinstance(index_id, dict)
         sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)  # type: ignore[attr-defined]
         replacements = {}
         for x in sorted_symbols:
-            if x.name != f"x{index_id['keep_idx_id']}":  # type: ignore[attr-defined]
+            if x.name != f"x{index_id}":  # type: ignore[attr-defined]
                 # Remove the idx other than `keep_idx_id`
                 replacements[x] = "0"
         index = sympy_subs(index, replacements)  # type: ignore[arg-type]
-        var = "thread_local_buffer_ptr"
+        var = "local_buffer_data"
     return var, index
 
 
@@ -1970,26 +1969,21 @@ class CppKernel(Kernel):
             stack.enter_context(code.indent())
             if loop_nest.root:
                 if has_outer_loop_kernel and getattr(
-                    kernels[0], "_has_thread_local_buf", False
+                    kernels[0], "_use_local_buf", False
                 ):
-                    # Codegen the thread_local_buf
-                    _thread_local_buf_size = getattr(
-                        kernels[0], "_thread_local_buf_size", 0
-                    )
+                    # Codegen the Local Buffer
                     # For dynamic size, rename s to ks
-                    _thread_local_buf_size = self.rename_indexing(
-                        _thread_local_buf_size
+                    _local_buf_size = self.rename_indexing(
+                        getattr(kernels[0], "_local_buf_size", 0)
                     )
                     dtype = DTYPE_TO_CPP[
-                        getattr(kernels[0], "_thread_local_buf_dtype", None)  # type: ignore[index]
+                        getattr(kernels[0], "_local_buf_dtype", None)  # type: ignore[index]
                     ]
-                    allocate = f"std::make_unique<{dtype} []>({_thread_local_buf_size})"
+                    allocate = f"std::make_unique<{dtype} []>({_local_buf_size})"
                     code.splice(
-                        f"std::unique_ptr<{dtype} []> thread_local_buffer = {allocate};"
+                        f"std::unique_ptr<{dtype} []> local_buffer = {allocate};"
                     )
-                    code.splice(
-                        f"{dtype}* thread_local_buffer_ptr = thread_local_buffer.get();"
-                    )
+                    code.splice(f"{dtype}* local_buffer_data = local_buffer.get();")
                 gen_loops(loop_nest.root)
             else:
                 gen_kernel(loop_nest.kernel)
@@ -3399,6 +3393,9 @@ class OuterLoopFusedKernel(CppKernel):
     def __init__(self, kernel_group):
         super().__init__(kernel_group.args, kernel_group.ws.num_threads)
         self.inner: List["LoopLevel"] = []
+        self._use_local_buf: bool = False
+        self._local_buf_size: int = 0
+        self._local_buf_dtype = torch.float32
 
     def decide_parallel_depth(self, max_parallel_depth, threads) -> int:
         kernels_parallel_depth = []
@@ -3688,7 +3685,7 @@ class CppScheduling(BaseScheduling):
                 cpp_kernel_proxy_list: List[CppKernelProxy] = []
                 nodes_list: List[List[SchedulerNode]] = []
 
-                def _can_use_thread_local_buffer(node):
+                def _can_use_local_buffer(node):
                     outer_loop_fusion_depth = node.outer_loop_fusion_depth
                     for _node in node.get_outer_nodes():
                         call_ranges = get_call_ranges(_node)
@@ -3701,27 +3698,37 @@ class CppScheduling(BaseScheduling):
                             return False
                     return True
 
-                if _can_use_thread_local_buffer(node):
-                    assert isinstance(node, OuterLoopFusedSchedulerNode)
-                    flatten_node = node.get_nodes()  # Get all of the schedulerNode
-                    for fused_scheduler_node in node.get_outer_nodes():
-                        call_ranges = get_call_ranges(fused_scheduler_node)
-                        keep_idx_id = len(call_ranges) - 1
-                        scheduler_nodes = fused_scheduler_node.get_nodes()
-                        for scheduler_node in scheduler_nodes:
-                            if not scheduler_node.is_reduction() and all(
-                                user.node in flatten_node
-                                for user in scheduler_node.users
-                            ):  # all users inside same OuterLoopFusedSchedulerNode
-                                scheduler_node._use_thread_local_buf = True  # type: ignore[attr-defined]
-                                # Record index which will be used in local buf indexing
-                                scheduler_node._index_with_tl_tid = {  # type: ignore[attr-defined]
-                                    "keep_idx_id": keep_idx_id,
-                                }
-                                scheduler_node._thread_local_buf_size = call_ranges[keep_idx_id]  # type: ignore[attr-defined]
-                                scheduler_node._thread_local_buf_dtype = (  # type: ignore[attr-defined]
-                                    scheduler_node.node.layout.get_dtype()
-                                )
+                if _can_use_local_buffer(node):
+
+                    def annotate_node_with_local_buf(node):
+                        # Here we annotate the SchedulerNode with local buf.
+                        assert isinstance(node, OuterLoopFusedSchedulerNode)
+                        flatten_node = node.get_nodes()  # Get all of the schedulerNode
+                        for fused_scheduler_node in node.get_outer_nodes():
+                            call_ranges = get_call_ranges(fused_scheduler_node)
+                            keep_idx_id = len(call_ranges) - 1
+                            scheduler_nodes = fused_scheduler_node.get_nodes()
+                            for scheduler_node in scheduler_nodes:
+                                # all users inside same OuterLoopFusedSchedulerNode
+                                if not scheduler_node.is_reduction() and all(
+                                    user.node in flatten_node
+                                    for user in scheduler_node.users
+                                ):
+                                    # TODO <Leslie> Set the extra attr of SchedulerNode is a bit hacky.
+                                    # We may define a new subclass of SchedulerNode, convert SchedulerNode to
+                                    # to the new subclass here. However, we need to ensure all the attr of SchedulerNode
+                                    # copied into this new subclass object.
+                                    scheduler_node._use_local_buf = True  # type: ignore[attr-defined]
+                                    # Record index which will be used in local buf indexing
+                                    scheduler_node._local_buf_index = keep_idx_id  # type: ignore[attr-defined]
+                                    scheduler_node._local_buf_size = call_ranges[keep_idx_id]  # type: ignore[attr-defined]
+                                    scheduler_node._local_buf_dtype = (  # type: ignore[attr-defined]
+                                        scheduler_node.node.layout.get_dtype()
+                                    )
+                                    # At most 1 node with local buf for each OuterLoopFusedSchedulerNode
+                                    return
+
+                    annotate_node_with_local_buf(node)
 
                 for _node in node.get_outer_nodes():
                     assert isinstance(_node, (FusedSchedulerNode, SchedulerNode))
@@ -3745,33 +3752,27 @@ class CppScheduling(BaseScheduling):
                     cpp_kernel_proxy_list,
                 )
                 if any(
-                    getattr(node, "_use_thread_local_buf", False)
-                    for node in node.get_nodes()
+                    getattr(node, "_use_local_buf", False) for node in node.get_nodes()
                 ):
                     kernels = outer_fusion_cpp_kernel_proxy.loop_nest.get_kernels()
                     assert len(kernels) == 1
                     assert isinstance(kernels[0], OuterLoopFusedKernel)
                     outer_loop_fusion_kernel = kernels[0]
-                    outer_loop_fusion_kernel._has_thread_local_buf = True  # type: ignore[attr-defined]
-                    _thread_local_buf_size_list = [
-                        node._thread_local_buf_size  # type: ignore[attr-defined]
+                    outer_loop_fusion_kernel._use_local_buf = True
+                    _local_buf_size_list = [
+                        node._local_buf_size  # type: ignore[attr-defined]
                         for node in node.get_nodes()
-                        if getattr(node, "_thread_local_buf_size", False)
+                        if getattr(node, "_local_buf_size", False)
                     ]
-                    assert len(_thread_local_buf_size_list) == 1
-                    outer_loop_fusion_kernel._thread_local_buf_size = (  # type: ignore[attr-defined]
-                        _thread_local_buf_size_list[0]
-                    )
-
-                    _thread_local_buf_dtype_list = [
-                        node._thread_local_buf_dtype  # type: ignore[attr-defined]
+                    assert len(_local_buf_size_list) == 1
+                    outer_loop_fusion_kernel._local_buf_size = _local_buf_size_list[0]
+                    _local_buf_dtype_list = [
+                        node._local_buf_dtype  # type: ignore[attr-defined]
                         for node in node.get_nodes()
-                        if getattr(node, "_thread_local_buf_dtype", False)
+                        if getattr(node, "_local_buf_dtype", False)
                     ]
-                    assert len(_thread_local_buf_dtype_list) == 1
-                    outer_loop_fusion_kernel._thread_local_buf_dtype = (  # type: ignore[attr-defined]
-                        _thread_local_buf_dtype_list[0]
-                    )
+                    assert len(_local_buf_dtype_list) == 1
+                    outer_loop_fusion_kernel._local_buf_dtype = _local_buf_dtype_list[0]
 
                 kernel_group.finalize_kernel(
                     outer_fusion_cpp_kernel_proxy,
@@ -3784,11 +3785,11 @@ class CppScheduling(BaseScheduling):
                 metrics.generated_cpp_vec_kernel_count = generated_cpp_vec_kernel_count
                 # Clear the annotation for the thread_local buffer
                 for _snode in node.get_nodes():
-                    if getattr(_snode, "_use_thread_local_buf", None) is not None:
-                        delattr(_snode, "_use_thread_local_buf")
-                        delattr(_snode, "_index_with_tl_tid")
-                        delattr(_snode, "_thread_local_buf_size")
-                        delattr(_snode, "_thread_local_buf_dtype")
+                    if getattr(_snode, "_use_local_buf", None) is not None:
+                        delattr(_snode, "_use_local_buf")
+                        delattr(_snode, "_local_buf_index")
+                        delattr(_snode, "_local_buf_size")
+                        delattr(_snode, "_local_buf_dtype")
                 # Similar as comment in
                 # https://github.com/pytorch/pytorch/blob/469383755fe416eb1c41fa724762ad3eaecdff07/torch/_inductor/codegen/cpp.py#L3269-L3272
                 # Kernels share the same global contexts like V.graph.wrapper_code, V.kernel.args.
