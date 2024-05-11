@@ -22,7 +22,6 @@ if TEST_NUMPY:
 
 
 class TestDTypeInfo(TestCase):
-
     def test_invalid_input(self):
         for dtype in [
             torch.float16,
