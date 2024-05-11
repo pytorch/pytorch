@@ -227,7 +227,7 @@ def get_call_ranges(node: BaseSchedulerNode):
     return call_ranges
 
 
-def try_reset_var_index_to_thread_local_buf(name, var, index):
+def try_reset_var_index_to_local_buf(name, var, index):
     if getattr(
         V.graph.scheduler.name_to_node.get(name, None),
         "_use_local_buf",
@@ -1757,7 +1757,7 @@ class CppKernel(Kernel):
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
         index = self.rename_indexing(index)
-        var, index = try_reset_var_index_to_thread_local_buf(name, var, index)
+        var, index = try_reset_var_index_to_local_buf(name, var, index)
         line = f"{var}[{cexpr_index(index)}]"
         if V.graph.get_dtype(name) in [torch.float16]:
             line = f"static_cast<float>({line})"
@@ -1772,7 +1772,7 @@ class CppKernel(Kernel):
         self.cache_fp32_cse_var_before_lowp_store(value)
         index = self.rename_indexing(index)
         if mode is None:
-            var, index = try_reset_var_index_to_thread_local_buf(name, var, index)
+            var, index = try_reset_var_index_to_local_buf(name, var, index)
             line = f"{var}[{cexpr_index(index)}] = {value};"
         elif mode == "atomic_add":
             if not config.cpp.dynamic_threads and self.num_threads == 1:
@@ -2328,7 +2328,7 @@ class CppVecKernel(CppKernel):
             return super().load(name, index)
         elif stride == 1:
             # load contiguously
-            var, index = try_reset_var_index_to_thread_local_buf(name, var, index)
+            var, index = try_reset_var_index_to_local_buf(name, var, index)
             line = self._get_vec_load_line(var, index, dtype, self._load_mask)
             csevar = self.cse.generate(self.loads, line)  # type: ignore[assignment]
         else:
@@ -2362,7 +2362,7 @@ class CppVecKernel(CppKernel):
         stride = self._try_get_const_stride(index, tiling_var)
         code = IndentedBuffer()
         if stride == 1:
-            var, index = try_reset_var_index_to_thread_local_buf(name, var, index)
+            var, index = try_reset_var_index_to_local_buf(name, var, index)
             var_expr = f"{var} + {cexpr_index(index)}"
             if dtype == torch.float:
                 code.writeline(f"{value}.store({var_expr});")
