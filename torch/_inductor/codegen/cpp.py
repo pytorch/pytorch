@@ -3287,6 +3287,7 @@ class CppKernelProxy(CppKernel):
                 metrics.generated_kernel_count -= 1
 
                 run(kernel)
+                # Update can_use_local_buf attr of CPPKernelProxy
                 self.can_use_local_buf = (
                     self.can_use_local_buf and kernel.can_use_local_buf
                 )
@@ -3793,7 +3794,7 @@ class CppScheduling(BaseScheduling):
                         can_use_local_buf and cpp_kernel_proxy.can_use_local_buf
                     )
                     if not can_use_local_buf:
-                        # Failed to use local buf
+                        # Failed to use local buf by kernel codegn
                         return False
 
                     cpp_kernel_proxy_list.append(cpp_kernel_proxy)
@@ -3842,6 +3843,9 @@ class CppScheduling(BaseScheduling):
                 return True
 
             if not try_outer_loop_fusion_with_local_buf(node):
+                # Do codegen without local buffer
+                #   1. Try Outer Loop Fusion at first
+                #   2. If failed then standard codegen
                 # Reset generated_cpp_vec_kernel_count to codegen again
                 metrics.generated_cpp_vec_kernel_count = generated_cpp_vec_kernel_count
                 # Clear the annotation for the local buffer
