@@ -265,7 +265,8 @@ def output_csv(output_file, headers, row):
     else:
         lines = [headers]
 
-    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+    if output_file != DEFAULT_OUTPUT_FILE:
+        os.makedirs(os.path.dirname(output_file), exist_ok=True)
     lines.append([(f"{x:.6f}" if isinstance(x, float) else x) for x in row])
     with open(output_file, "w") as fd:
         writer = csv.writer(fd, lineterminator="\n")
