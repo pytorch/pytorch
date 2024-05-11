@@ -2913,7 +2913,7 @@ class ROCmCodeCache:
     cache_clear = staticmethod(cache.clear)
     _SOURCE_CODE_SUFFIX = "cpp"
 
-    log.debug(f"HIP compiler version:\n{rocm_compiler_version()}")
+    log.debug("HIP compiler version:\n%s", rocm_compiler_version())
 
     @classmethod
     def write(cls, source_code, dst_file_ext) -> Tuple[str, str]:

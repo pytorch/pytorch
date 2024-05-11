@@ -986,7 +986,6 @@ class AlgorithmSelectorCache(PersistentCache):
             ):
                 return no_op
 
-            log.debug(f"Precompiling {len(choices)} choices with {num_workers} workers")
             # TODO(eelison) - debug issue
             # NB(tenpercent) - uncommenting also disables parallel precompilation for the CK backend
             # if torch.version.hip:

@@ -322,7 +322,7 @@ class CKGemmTemplate(CKTemplate):
             if config.rocm.n_max_profiling_configs
             else filtered_instances
         )
-        log.debug(f"generated {len(chosen_instances)} ck instances: {chosen_instances}")
+        log.debug("generated %d ck instances after filter: %s", len(chosen_instances), chosen_instances)
         return chosen_instances
 
     @staticmethod
@@ -345,7 +345,6 @@ class CKGemmTemplate(CKTemplate):
             input_reorder=input_reorder,
         )
         ops = template.gen_ops()
-        log.debug(f"ck instance choices: {ops}")
         for op in ops:
             template.maybe_append_choice(
                 choices,

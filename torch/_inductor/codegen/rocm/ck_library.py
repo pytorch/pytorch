@@ -171,7 +171,7 @@ def gen_ops_library() -> List[CKGemmOperation]:
 
     op_instances = parse_instances(grep_result.stdout.strip().split("\n"))
 
-    log.debug(f"ck instances from library: {len(op_instances)}")
+    log.debug("ck instances from library: %d", len(op_instances))
 
     schedulers = [
         "BlockGemmPipelineScheduler::Intrawave",
