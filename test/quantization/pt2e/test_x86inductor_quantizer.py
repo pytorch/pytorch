@@ -1965,6 +1965,47 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 count += 1
 
     @skipIfNoX86
+    def test_set_module_for_dynamic_quant(self):
+        """Test that quantize the specific submodule for dynamic quantization."""
+
+        with override_quantized_engine("x86"), torch.no_grad():
+            for is_qat in [False, True]:
+                m = TestHelperModules.SelfAttnLikeModule(input_dim=64).eval()
+                example_inputs = (torch.randn(1, 4, 64),)
+                # only quantize `self.q_proj` `self.v_proj`
+                dynamic_config = xiq.get_default_x86_inductor_quantization_config(
+                    is_dynamic=True, is_qat=is_qat
+                )
+                quantizer = (
+                    X86InductorQuantizer()
+                    .set_module_name("q_proj", dynamic_config)
+                    .set_module_name("v_proj", dynamic_config)
+                )
+                node_occurrence = {
+                    # for quantize input
+                    torch.ops.quantized_decomposed.choose_qparams.tensor: 1,
+                    torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 1,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 1,
+                    # each for q_proj and v_proj
+                    # torch.ops.quantized_decomposed.quantize_per_channel.default: 2,
+                    torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
+                }
+                node_list = [
+                    torch.ops.quantized_decomposed.choose_qparams.tensor,
+                    torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
+                    torch.ops.aten.linear.default,
+                ]
+                self._test_quantizer(
+                    m,
+                    example_inputs,
+                    quantizer,
+                    node_occurrence,
+                    node_list,
+                    is_qat=True,
+                )
+
+    @skipIfNoX86
     def test_filter_conv2d_recipe(self):
         """
         Test removing conv2d from default recipe of X86InductorQuantizer.
