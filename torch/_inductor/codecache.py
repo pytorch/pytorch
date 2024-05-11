@@ -1277,7 +1277,6 @@ cdll.LoadLibrary("__lib_path__")
             try:
                 # Check if the output file exist, and compile when not.
                 output_path = x86_isa_help_builder.get_target_file_path()
-                print("!!! output_path: ", output_path)
                 if not os.path.isfile(output_path):
                     status, target_file = x86_isa_help_builder.build()
                     if status:
@@ -2316,9 +2315,6 @@ class CppCodeCache:
             "vec_isa": pick_vec_isa(),
         }
 
-        print("!!!! cls.cpp_compile_command_flags: ", cls.cpp_compile_command_flags)
-        print("!!!! compile_command: ", compile_command)
-
         from torch._inductor.cpp_builder import CppBuilder, CppTorchCudaOptions
 
         dummy_builder = CppBuilder(
@@ -2331,8 +2327,6 @@ class CppCodeCache:
         # guarantee the source code hash contains ISA difference.
         dummy_cmd = repr(dummy_builder.get_command_line())
         key, input_path = write(source_code, "cpp", extra=dummy_cmd)
-
-        print("!!! input_path: ", input_path)
 
         if key not in cls.cache:
             from filelock import FileLock
