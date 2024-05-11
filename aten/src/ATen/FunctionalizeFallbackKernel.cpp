@@ -335,6 +335,9 @@ static at::Tensor& set__functionalize(at::Tensor& self, const at::Tensor& src) {
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(src));
   auto self_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(self);
   auto src_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(src);
+  // See Note [Ordering of resize_() and set_()]
+  TORCH_CHECK(!self_impl->was_inductor_storage_resized(),
+    "storage_resize_() followed by set_() in torch.compile is not supported today");
   self_impl->set__impl(src_impl);
   return self;
 }
