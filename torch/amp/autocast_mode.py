@@ -17,6 +17,9 @@ class DOC_TEST:
         pass
 
     def test(self):
+        r"""
+        A test method.
+        """
         print("test doc~")
 
 
