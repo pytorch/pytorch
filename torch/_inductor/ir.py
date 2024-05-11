@@ -3627,7 +3627,7 @@ class ChoiceCaller:
 
     def benchmark(self, *args, out) -> float:
         algo = self.to_callable()
-        return do_bench(lambda: algo(*args, out=out))
+        return do_bench(algo, args, {"out": out})
 
     def call_name(self) -> str:
         raise NotImplementedError
@@ -4839,18 +4839,18 @@ class ResizeStorageBytes(MutatingFirstArgExternKernel):
         mark_node_as_mutating(self, variable)
 
 
-class BindNNParameter(ExternKernelAlloc):
-    def __init__(self, variable, placeholder):
-        variable.freeze_layout()
+class SetSourceTensorKernel(ExternKernelAlloc):
+    def __init__(self, self_tensor, storage_tensor):
+        self_tensor.freeze_layout()
         super().__init__(
-            variable.get_layout(),
-            [variable, placeholder],
-            python_kernel_name="torch.ops.prims._bind_nn_parameter",
+            self_tensor.get_layout(),
+            [self_tensor, storage_tensor],
+            python_kernel_name="torch.ops.aten.set_.source_Tensor",
         )
-        V.graph.never_reuse_buffers.add(variable.data.get_name())
-        V.graph.never_reuse_buffers.add(placeholder.get_name())
+        V.graph.never_reuse_buffers.add(self_tensor.data.get_name())
+        V.graph.never_reuse_buffers.add(storage_tensor.get_name())
         V.graph.never_reuse_buffers.add(self.get_name())
-        mark_node_as_mutating(self, variable, placeholder)
+        mark_node_as_mutating(self, self_tensor, storage_tensor)
 
     def get_inputs_that_alias_output(self):
         return [self.inputs[0].get_name(), self.inputs[1].get_name()]
@@ -6653,7 +6653,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
                 torch::List<int64_t> padding,
                 torch::List<int64_t> dilation,
                 int64_t groups,
-                double inv_output_scale,
+                double output_scale,
                 int64_t output_zero_point,
                 c10::optional<c10::ScalarType> output_dtype,
                 c10::string_view attr,
@@ -6829,7 +6829,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
                 torch::List<int64_t> padding,
                 torch::List<int64_t> dilation,
                 int64_t groups,
-                double inv_output_scale,
+                double output_scale,
                 int64_t output_zero_point,
                 c10::optional<c10::ScalarType> output_dtype,
                 c10::string_view binary_attr,
@@ -7045,7 +7045,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
                 at::Tensor weight_scales,
                 at::Tensor weight_zero_points,
                 c10::optional<at::Tensor> bias,
-                double inv_output_scale,
+                double output_scale,
                 int64_t output_zero_point,
                 c10::optional<c10::ScalarType> output_dtype,
                 c10::string_view post_op_name,
