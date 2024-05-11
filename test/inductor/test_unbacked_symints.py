@@ -188,6 +188,30 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipCUDAIf(not HAS_CUDA, "requires cuda")
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    def test_colin(self, device):
+        def fn(data, shapes):
+            # unbacked = torch.ones(shapes.tolist()).cuda()
+            # dynamic_shape = data.reshape(*shapes.tolist(), -1)
+            nz = torch.nonzero(shapes)
+            unbacked = nz
+            # add data becaused it has concerete shapes and we need it
+            # otherwise scheduler say we cant fuse a commonb uffer with unbacked symints
+            squared = unbacked + data
+            # buf2 and buf3 must have shared data that doesn't have unbacked symints
+            # buf3 must depend on buf2's ancestors
+            reduced = torch.sum(squared + data)
+            return squared, reduced
+
+        # inp = torch.randn(3, 3, 2, device="cuda")
+        example_inputs = (torch.randn(1,).cuda(), torch.tensor([2, 5]).cuda(),)
+
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
 
 instantiate_device_type_tests(
     TestUnbackedSymints, globals(), only_for=(GPU_TYPE, "cpu")
