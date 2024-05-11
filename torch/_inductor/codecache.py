@@ -2935,7 +2935,8 @@ class ROCmCodeCache:
         cls, source_code, dst_file_ext, extra_args: Optional[List[str]] = None
     ) -> Tuple[str, str, str]:
         """
-        Compiles CUDA source_code into a file with dst_file_ext extension.
+        Compiles source_code into a file with dst_file_ext extension,
+        using the compile command specific for the ROCm platform.
         Returns a tuple of dst_file_path, hash_key, source_code_path
         """
         key, input_path = cls.write(source_code, dst_file_ext)
