@@ -2385,7 +2385,6 @@ class CppVecKernel(CppKernel):
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.output(name)
         self.cache_fp32_cse_var_before_lowp_store(value)
-        index = self.rename_indexing(index)
         code = self._get_store_line(value, var, index, V.graph.get_dtype(name), name)
         self.stores.splice(code.map(lambda x: DeferredLine(name, x)))
 
