@@ -218,6 +218,30 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
     return prefix, parallel_prefix, local_init
 
 
+def try_reset_var_index_to_thread_local_buf(name, var, index):
+    if getattr(
+        V.graph.scheduler.name_to_node.get(name, None),
+        "_use_thread_local_buf",
+        False,
+    ):
+        # Modify the index to use thread id
+        index_id = getattr(
+            V.graph.scheduler.name_to_node.get(name, None),
+            "_index_with_tl_tid",
+            None,
+        )
+        assert isinstance(index_id, dict)
+        sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)  # type: ignore[attr-defined]
+        replacements = {}
+        for x in sorted_symbols:
+            if x.name != f"x{index_id['keep_idx_id']}":  # type: ignore[attr-defined]
+                # Remove the idx other than `keep_idx_id`
+                replacements[x] = "0"
+        index = sympy_subs(index, replacements)  # type: ignore[arg-type]
+        var = "thread_local_buffer_ptr"
+    return var, index
+
+
 @functools.lru_cache
 def stride_at(index: sympy.Expr, var: sympy.Symbol):
     replacement = {var: var + 1}
@@ -1667,26 +1691,7 @@ class CppKernel(Kernel):
         var = self.args.input(name)
         index = self.rename_indexing(index)
 
-        if getattr(
-            V.graph.scheduler.name_to_node.get(name, None),
-            "_use_thread_local_buf",
-            False,
-        ):
-            # Modify the index to use thread id
-            index_id = getattr(
-                V.graph.scheduler.name_to_node.get(name, None),
-                "_index_with_tl_tid",
-                None,
-            )
-            assert isinstance(index_id, dict)
-            sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)  # type: ignore[attr-defined]
-            replacements = {}
-            for x in sorted_symbols:
-                if x.name != f"x{index_id['keep_idx_id']}":  # type: ignore[attr-defined]
-                    # Remove the idx other than `keep_idx_id`
-                    replacements[x] = "0"
-            index = sympy_subs(index, replacements)  # type: ignore[arg-type]
-            var = "thread_local_buffer_ptr"
+        var, index = try_reset_var_index_to_thread_local_buf(name, var, index)
 
         line = f"{var}[{cexpr_index(index)}]"
         if V.graph.get_dtype(name) in [torch.float16]:
@@ -1701,26 +1706,8 @@ class CppKernel(Kernel):
         self.cache_fp32_cse_var_before_lowp_store(value)
         index = self.rename_indexing(index)
         if mode is None:
-            if getattr(
-                V.graph.scheduler.name_to_node.get(name, None),
-                "_use_thread_local_buf",
-                False,
-            ):
-                # Modify the index to use thread id
-                index_id = getattr(
-                    V.graph.scheduler.name_to_node.get(name, None),
-                    "_index_with_tl_tid",
-                    None,
-                )
-                sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)  # type: ignore[attr-defined]
-                replacements = {}
-                for x in sorted_symbols:
-                    assert isinstance(index_id, dict)
-                    if x.name != f"x{index_id['keep_idx_id']}":  # type: ignore[attr-defined]
-                        # Remove the idx other than `keep_idx_id`
-                        replacements[x] = "0"
-                index = sympy_subs(index, replacements)  # type: ignore[arg-type]
-                var = "thread_local_buffer_ptr"
+            var, index = try_reset_var_index_to_thread_local_buf(name, var, index)
+
             line = f"{var}[{cexpr_index(index)}] = {value};"
         elif mode == "atomic_add":
             if not config.cpp.dynamic_threads and self.num_threads == 1:
@@ -1834,7 +1821,10 @@ class CppKernel(Kernel):
         threads = parallel_num_threads()
         assert self.call_ranges is not None
         kernels = loop_nest.get_kernels()
-        if any(isinstance(kernel, OuterLoopFusedKernel) for kernel in kernels):
+        has_outer_loop_kernel = any(
+            isinstance(kernel, OuterLoopFusedKernel) for kernel in kernels
+        )
+        if has_outer_loop_kernel:
             assert len(kernels) == 1
             assert isinstance(kernels[0], OuterLoopFusedKernel)
             par_depth = kernels[0].decide_parallel_depth(
@@ -1872,24 +1862,6 @@ class CppKernel(Kernel):
 
             def gen_kernel(kernel):
                 if isinstance(kernel, OuterLoopFusedKernel):
-                    if getattr(kernel, "_has_thread_local_buf", False):
-                        _thread_local_buf_size = getattr(
-                            kernel, "_thread_local_buf_size", 0
-                        )
-                        # For dynamic size, rename s to ks
-                        _thread_local_buf_size = self.rename_indexing(
-                            _thread_local_buf_size
-                        )
-                        dtype = "float"
-                        allocate = (
-                            f"std::make_unique<{dtype} []>({_thread_local_buf_size})"
-                        )
-                        code.splice(
-                            f"thread_local std::unique_ptr<{dtype} []> thread_local_buffer = {allocate};"
-                        )
-                        code.splice(
-                            f"{dtype}* thread_local_buffer_ptr = thread_local_buffer.get();"
-                        )
                     for loop in kernel.inner:
                         if loop.inner:
                             gen_loops(loop.inner, loop.is_reduction)
@@ -1980,6 +1952,27 @@ class CppKernel(Kernel):
 
             stack.enter_context(code.indent())
             if loop_nest.root:
+                if has_outer_loop_kernel and getattr(
+                    kernels[0], "_has_thread_local_buf", False
+                ):
+                    # Codegen the thread_local_buf
+                    _thread_local_buf_size = getattr(
+                        kernels[0], "_thread_local_buf_size", 0
+                    )
+                    # For dynamic size, rename s to ks
+                    _thread_local_buf_size = self.rename_indexing(
+                        _thread_local_buf_size
+                    )
+                    dtype = DTYPE_TO_CPP[
+                        getattr(kernels[0], "_thread_local_buf_dtype", None)  # type: ignore[index]
+                    ]
+                    allocate = f"std::make_unique<{dtype} []>({_thread_local_buf_size})"
+                    code.splice(
+                        f"std::unique_ptr<{dtype} []> thread_local_buffer = {allocate};"
+                    )
+                    code.splice(
+                        f"{dtype}* thread_local_buffer_ptr = thread_local_buffer.get();"
+                    )
                 gen_loops(loop_nest.root)
             else:
                 gen_kernel(loop_nest.kernel)
@@ -2275,26 +2268,8 @@ class CppVecKernel(CppKernel):
             return super().load(name, index)
         elif stride == 1:
             # load contiguously
-            if getattr(
-                V.graph.scheduler.name_to_node.get(name, None),
-                "_use_thread_local_buf",
-                False,
-            ):
-                # Modify the index to use thread id
-                index_id = getattr(
-                    V.graph.scheduler.name_to_node.get(name, None),
-                    "_index_with_tl_tid",
-                    None,
-                )
-                assert isinstance(index_id, dict)
-                sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)  # type: ignore[attr-defined]
-                replacements = {}
-                for x in sorted_symbols:
-                    if x.name != f"x{index_id['keep_idx_id']}":  # type: ignore[attr-defined]
-                        # Remove the idx other than `keep_idx_id`
-                        replacements[x] = "0"
-                index = sympy_subs(index, replacements)  # type: ignore[arg-type]
-                var = "thread_local_buffer_ptr"
+
+            var, index = try_reset_var_index_to_thread_local_buf(name, var, index)
 
             line = self._get_vec_load_line(var, index, dtype, self._load_mask)
             csevar = self.cse.generate(self.loads, line)  # type: ignore[assignment]
@@ -2326,32 +2301,12 @@ class CppVecKernel(CppKernel):
             isinstance(value, CppCSEVariable) and value.is_vec
         ), value
         tiling_var = self.itervars[self.tiling_idx]
-        var_expr = f"{var} + {cexpr_index(index)}"
         stride = self._try_get_const_stride(index, tiling_var)
         code = IndentedBuffer()
         if stride == 1:
+            var, index = try_reset_var_index_to_thread_local_buf(name, var, index)
+            var_expr = f"{var} + {cexpr_index(index)}"
             if dtype == torch.float:
-                if getattr(
-                    V.graph.scheduler.name_to_node.get(name, None),
-                    "_use_thread_local_buf",
-                    False,
-                ):
-                    # Modify the index to use thread id
-                    index_id = getattr(
-                        V.graph.scheduler.name_to_node.get(name, None),
-                        "_index_with_tl_tid",
-                        None,
-                    )
-                    sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)  # type: ignore[attr-defined]
-                    replacements = {}
-                    for x in sorted_symbols:
-                        assert isinstance(index_id, dict)
-                        if x.name != f"x{index_id['keep_idx_id']}":  # type: ignore[attr-defined]
-                            # Remove the idx other than `keep_idx_id`
-                            replacements[x] = "0"
-                    index = sympy_subs(index, replacements)  # type: ignore[arg-type]
-                    var = "thread_local_buffer_ptr"
-                    var_expr = f"{var} + {cexpr_index(index)}"
                 code.writeline(f"{value}.store({var_expr});")
             else:
                 code.writeline(f"{value}.store({var_expr}, {self.tiling_factor});")
@@ -3749,9 +3704,7 @@ class CppScheduling(BaseScheduling):
                                     # Skip if any node' user is outside of current OuterLoopFusedSchedulerNode
                                     continue
                                 # Only Support torch.float32 for now
-                                _snode._use_thread_local_buf = (  # type: ignore[attr-defined]
-                                    _snode.node.layout.get_dtype() == torch.float32
-                                )
+                                _snode._use_thread_local_buf = True  # type: ignore[attr-defined]
                                 # Record current node's index which will be used in codegen
                                 _snode._index_with_tl_tid = {  # type: ignore[attr-defined]
                                     "keep_idx_id": keep_idx_id,
