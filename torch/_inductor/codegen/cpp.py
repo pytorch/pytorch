@@ -250,6 +250,55 @@ def try_reset_var_index_to_thread_local_buf(name, var, index):
     return var, index
 
 
+def cppkernel_load_handler(func):
+    def decorator(self, name: str, index: sympy.Expr):
+        _use_local_buf = getattr(
+            V.graph.scheduler.name_to_node.get(name, None),
+            "_use_local_buf",
+            False,
+        )
+        if isinstance(self, CppTile2DKernel):
+            if _use_local_buf:
+                self.can_use_local_buf = False
+        elif isinstance(self, CppVecKernel):
+            index = self.rename_indexing(index)
+            tiling_var = self.itervars[self.tiling_idx]
+            stride = self._try_get_const_stride(index, tiling_var)
+            if _use_local_buf and stride != 1:
+                self.can_use_local_buf = False
+        else:
+            assert isinstance(self, CppKernel)
+        return func(self, name, index)
+
+    return decorator
+
+
+def cppkernel_store_handler(func):
+    def decorator(self, name, index, value, mode=None):
+        _use_local_buf = getattr(
+            V.graph.scheduler.name_to_node.get(name, None),
+            "_use_local_buf",
+            False,
+        )
+        if isinstance(self, CppTile2DKernel):
+            if _use_local_buf:
+                self.can_use_local_buf = False
+        elif isinstance(self, CppVecKernel):
+            index = self.rename_indexing(index)
+            tiling_var = self.itervars[self.tiling_idx]
+            stride = self._try_get_const_stride(index, tiling_var)
+            if _use_local_buf and stride != 1:
+                self.can_use_local_buf = False
+        else:
+            assert isinstance(self, CppKernel)
+            if _use_local_buf and mode is not None:
+                # Doesn't support atomic_add
+                self.can_use_local_buf = False
+        return func(self, name, index, value, mode)
+
+    return decorator
+
+
 @functools.lru_cache
 def stride_at(index: sympy.Expr, var: sympy.Symbol):
     replacement = {var: var + 1}
@@ -1538,6 +1587,7 @@ class CppKernel(Kernel):
         self.poststores = IndentedBuffer()
         self.num_threads = num_threads  # num_threads the kernel specialized for
         self.reduction_omp_dec: Dict[Tuple[str, str], str] = {}
+        self.can_use_local_buf = True
 
     def _gen_parallel_reduction_buffers(
         self,
@@ -1703,12 +1753,11 @@ class CppKernel(Kernel):
             index, itervar
         )
 
+    @cppkernel_load_handler
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
         index = self.rename_indexing(index)
-
         var, index = try_reset_var_index_to_thread_local_buf(name, var, index)
-
         line = f"{var}[{cexpr_index(index)}]"
         if V.graph.get_dtype(name) in [torch.float16]:
             line = f"static_cast<float>({line})"
@@ -1716,6 +1765,7 @@ class CppKernel(Kernel):
         csevar.update_on_args("load", (name, index), {})
         return csevar
 
+    @cppkernel_store_handler
     def store(self, name, index, value, mode=None):
         assert "buf" in name
         var = self.args.output(name)
@@ -1723,7 +1773,6 @@ class CppKernel(Kernel):
         index = self.rename_indexing(index)
         if mode is None:
             var, index = try_reset_var_index_to_thread_local_buf(name, var, index)
-
             line = f"{var}[{cexpr_index(index)}] = {value};"
         elif mode == "atomic_add":
             if not config.cpp.dynamic_threads and self.num_threads == 1:
@@ -2267,10 +2316,10 @@ class CppVecKernel(CppKernel):
             csevar.is_vec = True
             return csevar
 
+    @cppkernel_load_handler
     def load(self, name: str, index: sympy.Expr):
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.input(name)
-        index = self.rename_indexing(index)
         dtype = V.graph.get_dtype(name)
         tiling_var = self.itervars[self.tiling_idx]
         stride = self._try_get_const_stride(index, tiling_var)
@@ -2279,9 +2328,7 @@ class CppVecKernel(CppKernel):
             return super().load(name, index)
         elif stride == 1:
             # load contiguously
-
             var, index = try_reset_var_index_to_thread_local_buf(name, var, index)
-
             line = self._get_vec_load_line(var, index, dtype, self._load_mask)
             csevar = self.cse.generate(self.loads, line)  # type: ignore[assignment]
         else:
@@ -2327,6 +2374,7 @@ class CppVecKernel(CppKernel):
             )
         return code
 
+    @cppkernel_store_handler
     def store(self, name, index, value, mode=None):
         assert "buf" in name
         assert mode is None
@@ -2634,6 +2682,7 @@ class CppTile2DKernel(CppVecKernel):
 
         return tile_var
 
+    @cppkernel_load_handler
     def load(self, name: str, index: sympy.Expr):
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.input(name)
@@ -2657,6 +2706,7 @@ class CppTile2DKernel(CppVecKernel):
             new_index = self.transform_indexing(index)
             return super().load(name, new_index)
 
+    @cppkernel_store_handler
     def store(self, name, index, value, mode=None):
         assert "buf" in name
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
@@ -3238,6 +3288,9 @@ class CppKernelProxy(CppKernel):
                 metrics.generated_kernel_count -= 1
 
                 run(kernel)
+                self.can_use_local_buf = (
+                    self.can_use_local_buf and kernel.can_use_local_buf
+                )
                 return kernel
 
         def run(kernel):
@@ -3680,7 +3733,7 @@ class CppScheduling(BaseScheduling):
         if isinstance(node, OuterLoopFusedSchedulerNode):
             generated_cpp_vec_kernel_count = metrics.generated_cpp_vec_kernel_count
 
-            def try_outer_loop_fusion(node: OuterLoopFusedSchedulerNode):
+            def try_outer_loop_fusion_with_local_buf(node: OuterLoopFusedSchedulerNode):
                 assert isinstance(node, OuterLoopFusedSchedulerNode)
                 cpp_kernel_proxy_list: List[CppKernelProxy] = []
                 nodes_list: List[List[SchedulerNode]] = []
@@ -3730,10 +3783,19 @@ class CppScheduling(BaseScheduling):
 
                     annotate_node_with_local_buf(node)
 
+                can_use_local_buf = True
+
                 for _node in node.get_outer_nodes():
                     assert isinstance(_node, (FusedSchedulerNode, SchedulerNode))
                     cpp_kernel_proxy = CppKernelProxy(kernel_group)
                     cpp_kernel_proxy.codegen_nodes(_node.get_nodes())  # type: ignore[arg-type]
+
+                    can_use_local_buf = (
+                        can_use_local_buf and cpp_kernel_proxy.can_use_local_buf
+                    )
+                    if not can_use_local_buf:
+                        # Failed to use local buf
+                        return False
 
                     cpp_kernel_proxy_list.append(cpp_kernel_proxy)
                     nodes_list.append(_node.get_nodes())  # type: ignore[arg-type]
@@ -3780,10 +3842,10 @@ class CppScheduling(BaseScheduling):
                 )
                 return True
 
-            if not try_outer_loop_fusion(node):
+            if not try_outer_loop_fusion_with_local_buf(node):
                 # Reset generated_cpp_vec_kernel_count to codegen again
                 metrics.generated_cpp_vec_kernel_count = generated_cpp_vec_kernel_count
-                # Clear the annotation for the thread_local buffer
+                # Clear the annotation for the local buffer
                 for _snode in node.get_nodes():
                     if getattr(_snode, "_use_local_buf", None) is not None:
                         delattr(_snode, "_use_local_buf")
@@ -3794,12 +3856,39 @@ class CppScheduling(BaseScheduling):
                 # https://github.com/pytorch/pytorch/blob/469383755fe416eb1c41fa724762ad3eaecdff07/torch/_inductor/codegen/cpp.py#L3269-L3272
                 # Kernels share the same global contexts like V.graph.wrapper_code, V.kernel.args.
                 with torch._inductor.config.patch(inplace_buffers=False):
+                    cpp_kernel_proxy_list: List[CppKernelProxy] = []
+                    nodes_list: List[List[SchedulerNode]] = []
                     for _node in node.get_outer_nodes():
                         assert isinstance(_node, (FusedSchedulerNode, SchedulerNode))
                         _nodes: List[SchedulerNode] = _node.get_nodes()  # type: ignore[assignment]
                         cpp_kernel_proxy = CppKernelProxy(kernel_group)
                         cpp_kernel_proxy.codegen_nodes(_nodes)
-                        kernel_group.finalize_kernel(cpp_kernel_proxy, _nodes)
+
+                        cpp_kernel_proxy_list.append(cpp_kernel_proxy)
+                        nodes_list.append(_nodes)
+
+                    # Note that, in the future, when every kernel can be vectorized,
+                    # the function select_tiling will be much easier, and we'll be able to lift
+                    # check_outer_fusion_loop_level_attr to the fusion phase,
+                    # avoiding grouping kernels at fusion time that "look like we'll be able to fuse them"
+                    # but then we actually won't.
+                    if node.check_outer_fusion_loop_level_attr(
+                        cpp_kernel_proxy_list, node.outer_loop_fusion_depth
+                    ):
+                        # Merge the cpp_kernel_proxy_list into cpp_kernel_proxy
+                        outer_fusion_cpp_kernel_proxy = node.merge_outer_fusion_kernels(
+                            cpp_kernel_proxy_list,
+                        )
+                        kernel_group.finalize_kernel(
+                            outer_fusion_cpp_kernel_proxy,
+                            [_node for _nodes in nodes_list for _node in _nodes],
+                        )
+                    else:
+                        # Fall back to standard loop codegen
+                        for _kernel_proxy, _nodes in zip(
+                            cpp_kernel_proxy_list, nodes_list
+                        ):
+                            kernel_group.finalize_kernel(_kernel_proxy, _nodes)
         else:
             nodes: List[SchedulerNode] = node.get_nodes()  # type: ignore[assignment]
             cpp_kernel_proxy = CppKernelProxy(kernel_group)
