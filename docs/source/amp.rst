@@ -47,7 +47,6 @@ Autocasting
 .. currentmodule:: torch.amp
 
 .. autoclass:: DOC_TEST
-    :members:
     .. automethod:: test
 
 .. currentmodule:: torch
