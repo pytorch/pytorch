@@ -399,7 +399,6 @@ regardless of whether autocast is enabled.
 
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes
-.. py:module:: torch.amp
 .. py:module:: torch.amp.autocast_mode
 .. py:module:: torch.cpu.amp.autocast_mode
 .. py:module:: torch.cuda.amp.autocast_mode
