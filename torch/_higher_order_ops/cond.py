@@ -1,30 +1,21 @@
 import contextlib
 
 import torch
-import torch._subclasses.functional_tensor
-
 import torch.utils._pytree as pytree
-
 from torch._C import DispatchKey
-from torch._C._functorch import (
-    _add_batch_dim,
-    get_unwrapped,
-    is_batchedtensor,
-    maybe_get_bdim,
-)
-from torch._functorch.utils import exposed_in
-from torch._guards import detect_fake_mode
+from torch._dispatch.python import suspend_functionalization
+from torch._functorch.aot_autograd import AOTConfig, create_joint, from_fun
 
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
     _set_compilation_env,
-    autograd_not_implemented,
     reenter_make_fx,
     unique_graph_id,
     UnsupportedAliasMutationException,
+    _unstack_pytree,
+    _stack_pytree
 )
-
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
@@ -32,9 +23,25 @@ from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
     track_tensor_tree,
+    make_fx
 )
+from torch._subclasses.functional_tensor import (
+    disable_functional_mode,
+    FunctionalTensor,
+)
+
+from torch._C._functorch import (
+    _add_batch_dim,
+    get_unwrapped,
+    is_batchedtensor,
+    maybe_get_bdim,
+)
+import torch._subclasses.functional_tensor
+from torch._functorch.utils import exposed_in
+from torch._guards import detect_fake_mode
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils._python_dispatch import _get_current_dispatch_mode
+from torch.multiprocessing.reductions import StorageWeakRef
 
 
 @exposed_in("torch")
@@ -150,6 +157,133 @@ In order to do this, we need implementations for each of the dispatch keys.
 """
 cond_op = HigherOrderOperator("cond")
 
+dummy_aot_config = AOTConfig(
+    fw_compiler=None,  # type: ignore[arg-type]
+    bw_compiler=None,  # type: ignore[arg-type]
+    partition_fn=None,  # type: ignore[arg-type]
+    decompositions={},
+    num_params_buffers=0,
+    aot_id=0,
+    keep_inference_input_mutations=False,
+)
+
+
+def create_fw_bw_graph(true_fn, false_fn, operands):
+
+    # Note:[HOP create fw_bw graph] We create "clean" environments for make_fx by suspending all dispatch keys
+    # between Autograd and Python key. Currently, we only suspend functionalization but more can be
+    # added when required. Will encounter two problems if we don't suspend functionalization:
+    #
+    # 1. make_fx fails to capture operations on input: the inputs are wrapped as _to_functional_tensor_wrapper,
+    # but they will be unwrapped before entering ProxyTorchDispatchMode as part of the dispatching.
+    # However, it's the outside wrapper that tracer creates proxies for. This casuses tracer fail to
+    # fetch the proxy for the inputs and fail to capture any operations on them.
+    #
+    # 2. make_fx fails to capture output: the outputs after ProxyTorchDispatchMode are further
+    # wrapped as FunctionalTensorWrapper in Functionalize key after return. However, the tracer
+    # only associates the inner tensor with proxy in ProxyTorchDispatchMode. Therefore,
+    # when creating the output node, it fails to associate the wrapped tensor with its proxy.
+    # Instead, it will create _tensor_constant as output.
+
+    with suspend_functionalization(), disable_functional_mode():
+        with disable_proxy_modes_tracing():
+
+            def _from_fun(t):
+                if isinstance(t, torch.Tensor):
+                    if t.dtype != torch.bool:
+                        return torch.empty_strided(
+                            t.size(),
+                            t.stride(),
+                            dtype=t.dtype,
+                            requires_grad=t.requires_grad,
+                        )
+                    else:
+                        # clone of a functional tensor produces a functional tensor
+                        # but we want to avoid it so we clone a non-functional version
+                        maybe_unfunc_t = t
+                        if isinstance(t, FunctionalTensor):
+                            torch._sync(t)
+                            maybe_unfunc_t = from_fun(t)
+                        elif torch._is_functional_tensor(t):
+                            # need to handle both types of functionalization here:
+                            # these are the tensors that came from the user,
+                            # which could be either FunctionalTensorWrapper or FunctionalTensor
+                            torch._sync(t)
+                            maybe_unfunc_t = torch._from_functional_tensor(t)
+                        return maybe_unfunc_t.clone()
+                return t
+
+            num_mapped_args = len(operands)
+
+            unwrapped_mapped_operands = pytree.tree_map(_from_fun, operands)
+            # example_operands = _unstack_pytree(unwrapped_mapped_operands)[0]
+            example_operands = unwrapped_mapped_operands
+
+            #Note, the true_fn and the false_fn produce the same output
+            #shape, thus we can simply generate the example outputs from the true_fn.
+            example_flat_out = pytree.tree_map(
+                _from_fun, true_fn(*example_operands)
+            )
+            # example_flat_out = [example_flat_out]
+            if any(
+                not isinstance(out, torch.Tensor)
+                for out in example_flat_out
+                if out is not None
+            ):
+                raise RuntimeError(
+                    "Expect outputs of map only contains tensors or None. "
+                    f"Got types {[type(out) for out in example_flat_out]}."
+                )
+            example_grad = [_from_fun(out) for out in example_flat_out]
+
+            fw_true_graph = make_fx(true_fn)(*example_operands)
+            fw_false_graph = make_fx(false_fn)(*example_operands)
+
+        def joint_f(fn, *joint_mapped_args):
+            mapped_input = joint_mapped_args[:num_mapped_args]
+            mapped_grads = joint_mapped_args[num_mapped_args:]
+
+            def fw_with_masks(*args):
+                fw_out = fn(*args)
+                # fw_out = [fw_out]
+                return fw_out, [
+                    True
+                    if isinstance(ret, torch.Tensor) and ret.requires_grad
+                    else False
+                    for ret in fw_out
+                ]
+
+            joint = create_joint(fw_with_masks, aot_config=dummy_aot_config)
+            _, grads = joint(
+                list(mapped_input),
+                [
+                    grad
+                    for grad in mapped_grads
+                    if grad is not None and grad.requires_grad
+                ],
+            )
+
+            # In order to keep map functional for backward graph,
+            # we clone outputs that are aliasing inputs
+            input_storage = {
+                StorageWeakRef(arg._typed_storage())
+                for arg in joint_mapped_args
+                if isinstance(arg, torch.Tensor)
+            }
+
+            def maybe_clone(t):
+                if (
+                    isinstance(t, torch.Tensor)
+                    and StorageWeakRef(t._typed_storage()) in input_storage
+                ):
+                    return t.clone()
+                return t
+
+            return pytree.tree_map(maybe_clone, grads)
+
+        joint_true_graph = make_fx(joint_f)(true_fn, *example_operands, *example_grad)
+        joint_false_graph = make_fx(joint_f)(false_fn, *example_operands, *example_grad)
+        return fw_true_graph, fw_false_graph, joint_true_graph, joint_false_graph
 
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     assert isinstance(
@@ -246,11 +380,72 @@ def cond_op_dense(pred, true_fn, false_fn, operands):
     else:
         return false_fn(*operands)
 
+class CondAutogradOp(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, pred, fw_true_graph, fw_false_graph, joint_true_graph, joint_false_graph, operands):
+        ctx._pred = pred
+        ctx._joint_true_graph = joint_true_graph
+        ctx._joint_false_graph = joint_false_graph
+        ctx.save_for_backward(*operands)
+        
+        with torch._C._AutoDispatchBelowAutograd():
+            # with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
+            #     res = torch.compile(while_loop_op, backend="eager", fullgraph=True)(
+            #         cond_graph, fw_graph, flat_args[:num_mapped_args], flat_args[num_mapped_args:]
+            #     )
+            # return (*cond_op(pred, fw_true_graph, fw_false_graph, operands),)
+            return cond_op(pred, fw_true_graph, fw_false_graph, operands)
+            # res = cond_op(pred, fw_true_graph, fw_false_graph, operands)
+            # return res
 
-cond_op.py_impl(DispatchKey.Autograd)(
-    autograd_not_implemented(cond_op, deferred_error=True)
-)
+    @staticmethod
+    def backward(ctx, *flat_grads):       
+        operands = ctx.saved_tensors
 
+        # with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
+        #     grads = torch.compile(while_loop_op, backend="eager", fullgraph=True)(
+        #         ctx._cond_graph, ctx._bw_graph, full_res, pos_args
+        #     )
+        
+        grads = cond_op(ctx._pred, ctx._joint_true_graph, ctx._joint_false_graph, operands + flat_grads)
+        return None, None, None, None, None, *grads
+
+def cond_wrapper(pred, true_fn, false_fn, operands):
+    flat_operands, operands_spec = pytree.tree_flatten(operands)
+    if not all(isinstance(t, torch.Tensor) for t in flat_operands):
+        raise RuntimeError(f"Cond operands can only consist of tensors. Got xs {flat_operands}.")
+
+    out_spec = None
+
+    def flat_true_fn(*flat_args):
+        xs = pytree.tree_unflatten(list(flat_args), operands_spec)
+        unflattened_out = true_fn(*xs)
+        flat_out, tmp_out_spec = pytree.tree_flatten(unflattened_out)
+
+        nonlocal out_spec
+        out_spec = tmp_out_spec
+        return flat_out
+    
+    def flat_false_fn(*flat_args):
+        xs = pytree.tree_unflatten(list(flat_args), operands_spec)
+        unflattened_out = false_fn(*xs)
+        flat_out, tmp_out_spec = pytree.tree_flatten(unflattened_out)
+
+        nonlocal out_spec
+        out_spec = tmp_out_spec
+        return flat_out
+
+    return pytree.tree_unflatten(
+        cond_op(pred, flat_true_fn, flat_false_fn, flat_operands), out_spec  # type: ignore[arg-type]
+    )
+
+@cond_op.py_impl(DispatchKey.Autograd)
+def cond_autograd(pred, true_fn, false_fn, operands):
+    # true_fn_wrap = cond_wrapper(pred, true_fn, operands)
+    # false_fn_wrap = cond_wrapper(pred, false_fn, operands)
+    fw_true_graph, fw_false_graph, joint_true_graph, joint_false_graph = create_fw_bw_graph(true_fn, false_fn, operands)
+    flat_out = CondAutogradOp.apply(pred, fw_true_graph, fw_false_graph, joint_true_graph, joint_false_graph, operands)
+    return flat_out
 
 @cond_op.py_impl(ProxyTorchDispatchMode)
 def inner(mode, pred, true_fn, false_fn, operands):

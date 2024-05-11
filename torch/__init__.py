@@ -1912,7 +1912,8 @@ def compile(model: Optional[Callable] = None, *,
 
 from torch import export as export
 
-from torch._higher_order_ops import cond
+# from torch._higher_order_ops import cond
+# from torch._higher_order_ops import map
 
 def _register_device_module(device_type, module):
     r"""Register an external runtime module of the specific :attr:`device_type`

@@ -9,6 +9,8 @@ from torch._higher_order_ops.utils import (
     _has_potential_branch_input_mutation,
     reenter_make_fx,
     UnsupportedAliasMutationException,
+    _unstack_pytree,
+    _stack_pytree
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -255,46 +257,6 @@ def trace_map(proxy_mode, func_overload, f, xs, pos_args):
     return track_tensor_tree(
         expanded_outs, out_proxy, constant=None, tracer=proxy_mode.tracer
     )
-
-
-def _unstack_pytree(xs):
-    flat_xs, inspec = pytree.tree_flatten(xs)
-    if not all(isinstance(xs, torch.Tensor) for xs in flat_xs):
-        raise RuntimeError(f"Leaves of xs must be Tensor {flat_xs}")
-
-    if not all(xs.shape[0] == flat_xs[0].shape[0] for xs in flat_xs):
-        raise RuntimeError(
-            f"Leaves of xs must have same leading dimension size {[xs.shape for xs in flat_xs]}"
-        )
-
-    a = zip(*flat_xs)
-
-    pytrees = []
-    for tuple in a:
-        pytrees.append(pytree.tree_unflatten(tuple, inspec))
-    return pytrees
-
-
-def _stack_pytree(pytrees):
-    flat_out = []
-    out_spec = None
-    for pt in pytrees:
-        flat_pt, out_spec = pytree.tree_flatten(pt)
-        flat_out.append(flat_pt)
-    assert out_spec is not None
-    b = zip(*flat_out)
-    stacked_out = []
-    for leaves in b:
-        if all(isinstance(leaf, torch.Tensor) for leaf in leaves):
-            stacked_out.append(torch.stack(leaves))
-        elif all(leaf is None for leaf in leaves):
-            # Backward graph can return None output when forward inputs doesn't require grad.
-            # When we eagerly execute backward graph, we need to call _stack_pytree on its output,
-            # therefore we need to deal with None output.
-            stacked_out.append(None)  # type: ignore[arg-type]
-        else:
-            raise RuntimeError(f"Cannot stack {leaves}.")
-    return pytree.tree_unflatten(stacked_out, out_spec)
 
 
 @map_impl.py_impl(DispatchKey.CompositeExplicitAutograd)
