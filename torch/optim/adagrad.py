@@ -158,7 +158,7 @@ Adagrad.__doc__ = (
             &\textbf{input}      : \gamma \text{ (lr)}, \: \theta_0 \text{ (params)}, \: f(\theta)
                 \text{ (objective)}, \: \lambda \text{ (weight decay)},                          \\
             &\hspace{12mm}    \tau \text{ (initial accumulator value)}, \: \eta\text{ (lr decay)}\\
-            &\textbf{initialize} :  state\_sum_0 \leftarrow 0                             \\[-1.ex]
+            &\textbf{initialize} :  state\_sum_0 \leftarrow \tau                          \\[-1.ex]
             &\rule{110mm}{0.4pt}                                                                 \\
             &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
             &\hspace{5mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
@@ -183,6 +183,8 @@ Adagrad.__doc__ = (
         lr (float, optional): learning rate (default: 1e-2)
         lr_decay (float, optional): learning rate decay (default: 0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        initial_accumulator_value (float, optional): initial value of the
+            sum of squares of gradients (default: 0)
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-10)
         {_foreach_doc}
