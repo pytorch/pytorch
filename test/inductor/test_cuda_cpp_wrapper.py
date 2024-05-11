@@ -98,7 +98,6 @@ if TEST_WITH_ROCM:
 if config.abi_compatible:
     xfail_list = [
         "test_bernoulli1_cuda",  # cpp fallback op naming issue
-        "test_conv_backward_cuda",
         "test_profiler_mark_wrapper_call_cuda",
         "test_scaled_dot_product_attention_cuda_dynamic_shapes",
     ]
@@ -191,6 +190,7 @@ if RUN_CUDA:
         BaseTest("test_bitwise"),  # int32
         BaseTest("test_bmm1"),
         BaseTest("test_bmm2"),
+        BaseTest("test_buffer_use_after_remove"),
         BaseTest("test_cat"),  # alias
         BaseTest("test_convolution1"),
         BaseTest("test_conv_backward"),

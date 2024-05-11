@@ -251,7 +251,7 @@ def should_pad_bench(
         return False
 
     do_bench = functools.partial(
-        torch._inductor.runtime.runtime_utils.do_bench,
+        torch._inductor.runtime.runtime_utils.do_bench_gpu,
         warmup=5,
     )
 

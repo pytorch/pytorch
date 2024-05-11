@@ -213,11 +213,35 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     hip_stream.synchronize();
   }
 
+  void synchronizeEvent(void* event) const override {
+    if (!event)
+      return;
+    hipEvent_t hip_event = static_cast<hipEvent_t>(event);
+    C10_HIP_CHECK(hipEventSynchronize(hip_event));
+  }
+
   void recordDataPtrOnStream(
     const c10::DataPtr& data_ptr,
     const Stream& stream) const override {
     HIPStreamMasqueradingAsCUDA hip_stream{stream};
     HIPCachingAllocatorMasqueradingAsCUDA::recordStreamMasqueradingAsCUDA(data_ptr, hip_stream);
+  }
+
+  double elapsedTime(void* event1, void* event2, const DeviceIndex device_index)
+      const override {
+    TORCH_CHECK(
+        event1 && event2,
+        "Both events must be recorded before calculating elapsed time.");
+    int orig_device;
+    C10_HIP_CHECK(hipGetDevice(&orig_device));
+    C10_HIP_CHECK(hipSetDevice(device_index));
+    hipEvent_t hip_event1 = static_cast<hipEvent_t>(event1);
+    hipEvent_t hip_event2 = static_cast<hipEvent_t>(event2);
+    float time_ms = 0;
+    // raise hipErrorNotReady if either event is recorded but not yet completed
+    C10_HIP_CHECK(hipEventElapsedTime(&time_ms, hip_event1, hip_event2));
+    C10_HIP_CHECK(hipSetDevice(orig_device));
+    return static_cast<double>(time_ms);
   }
 };
 
