@@ -652,12 +652,14 @@ def _jit_onnx_convert_pattern_from_subblock(
     block: Block,
     n: Node,
     env: Dict[Value, Value],
+    values_in_env: Set[Value],
 ) -> List[Value]: ...
 def _jit_pass_onnx_block(
     old_block: Block,
     new_block: Block,
     operator_export_type: _onnx.OperatorExportTypes,
     env: Dict[Value, Value],
+    values_in_env: Set[Value],
     is_sub_block: _bool,
 ) -> Dict[Value, Value]: ...
 def _jit_pass_onnx_assign_scoped_names_for_node_and_value(graph: Graph) -> None: ...
@@ -1891,7 +1893,6 @@ class _CudaDeviceProperties:
     is_multi_gpu_board: _int
     max_threads_per_multi_processor: _int
     gcnArchName: str
-    uuid: str
 
 # Functions related to SDPA
 class _SDPAParams:

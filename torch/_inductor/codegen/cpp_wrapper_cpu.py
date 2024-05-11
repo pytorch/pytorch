@@ -1148,22 +1148,6 @@ class CppWrapperCpu(WrapperCodeGen):
         # ArrayRefTensor and at::Tensor is still fragile.
         self.allow_stack_allocation = False
 
-        # HACK: val_to_arg_str jams multiple arguments together using a comma. If that
-        # ever breaks, it needs to be reworked to be able to return multiple arguments,
-        # and the split-on-comma code here needs to be removed.
-        def is_number(s: str):
-            try:
-                int(s)
-                return True
-            except ValueError:
-                pass
-
-            try:
-                float(s)
-                return True
-            except ValueError:
-                return False
-
         wrapped_args = []
         for x in args:
             pieces = x.split(", ")
@@ -1172,7 +1156,9 @@ class CppWrapperCpu(WrapperCodeGen):
                 # ArrayRefTensors. The code flowing into here uses `0` for nullptr,
                 # which convert_arrayref_tensor_to_tensor would blindly coerce to int,
                 # so just avoid wrapping integers.
-                if not is_number(piece):
+                # Name matching is to find tensor is hacky, but fixing all the
+                # ArrayRefTensor issues is not a priority for now.
+                if isinstance(piece, str) and piece.startswith(("buf", "arg")):
                     piece = f"convert_arrayref_tensor_to_tensor({piece})"
                 wrapped_args.append(piece)
 
@@ -1492,6 +1478,7 @@ class CppWrapperCpu(WrapperCodeGen):
         writer=None,
         known_statically=False,
         graph=None,  # for per-graph caching
+        is_bool=False,
     ):
         # Because the memory planning is done in two passes (see the implementation
         # of self.generate), the writeline behavior is different in the two passes.
@@ -1503,12 +1490,13 @@ class CppWrapperCpu(WrapperCodeGen):
             writer = self
 
         var = f"int_array_{next(self.int_array_id)}"
+        ctype = "int32_t" if is_bool else "int64_t"
         if var not in self.declared_int_array_vars:
             self.declared_int_array_vars.add(var)
             if known_statically:
-                writer.writeline(f"static constexpr int64_t {var}[] = {int_array};")
+                writer.writeline(f"static constexpr {ctype} {var}[] = {int_array};")
             else:
-                writer.writeline(f"int64_t {var}[] = {int_array};")
+                writer.writeline(f"const {ctype} {var}[] = {int_array};")
         return var
 
     def make_buffer_allocation(self, buffer):
@@ -2319,12 +2307,14 @@ if (py_{buf_name}.get() == NULL) {{
             # FIXME handle embedded optional types?
             result = f"{{{', '.join(self.val_to_arg_str(x) for x in val)}}}"
             if config.abi_compatible:
+                assert len(val) > 0, "Empty array is not supported in C"
                 static = self.is_statically_known_list_of_ints(val)
                 # Need to pass the array length because we can't use std::vector
                 int_var_array = self.codegen_int_array_var(
                     result,
                     known_statically=static,
                     graph=self.get_codegened_graph(),
+                    is_bool=isinstance(val[0], bool),
                 )
                 return f"{int_var_array}, {len(val)}"
             else:
