@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 import torch
 from torch import Tensor
@@ -10,6 +10,7 @@ from .optimizer import (
     _fused_doc,
     _maximize_doc,
     _use_grad_for_differentiable,
+    DeviceDict,
     Optimizer,
 )
 
@@ -439,9 +440,6 @@ def _multi_tensor_sgd(
                 device_params[i].add_(device_grads[i], alpha=-lr)
 
 
-DeviceDict = Optional[Dict[Optional[torch.device], Tensor]]
-
-
 def _fused_sgd(
     params: List[Tensor],
     grads: List[Tensor],
@@ -462,10 +460,10 @@ def _fused_sgd(
     if has_sparse_grad:
         raise RuntimeError("`_fused_sgd` does not support sparse gradients")
     grad_scale_dict: DeviceDict = (
-        {grad_scale.device: grad_scale} if grad_scale is not None else None
+        {grad_scale.device: grad_scale} if grad_scale is not None else {}
     )
     found_inf_dict: DeviceDict = (
-        {found_inf.device: found_inf} if found_inf is not None else None
+        {found_inf.device: found_inf} if found_inf is not None else {}
     )
 
     no_momentum_buffer = momentum == 0
@@ -483,7 +481,7 @@ def _fused_sgd(
         _,
     ) in grouped_tensors.items():
         device_grad_scale, device_found_inf = None, None
-        if grad_scale_dict is not None and grad_scale is not None:
+        if grad_scale is not None:
             device_grad_scale = grad_scale_dict.setdefault(
                 device, grad_scale.to(device)
             )

@@ -1,6 +1,4 @@
-from typing import Dict, List, Optional, Tuple, Union
-
-from typing_extensions import TypeAlias
+from typing import List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
@@ -19,6 +17,7 @@ from .optimizer import (
     _stack_if_compiling,
     _use_grad_for_differentiable,
     _view_as_real,
+    DeviceDict,
     Optimizer,
     ParamsT,
 )
@@ -600,9 +599,6 @@ def _multi_tensor_adam(
             )
 
 
-DeviceDict: TypeAlias = Dict[Optional[torch.device], Tensor]
-
-
 def _fused_adam(
     params: List[Tensor],
     grads: List[Tensor],
@@ -657,13 +653,13 @@ def _fused_adam(
     ) in grouped_tensors.items():
         device_grad_scale, device_found_inf = None, None
         if grad_scale is not None:
-            if device not in grad_scale_dict:
-                grad_scale_dict[device] = grad_scale.to(device, non_blocking=True)
-            device_grad_scale = grad_scale_dict[device]
+            device_grad_scale = grad_scale_dict.setdefault(
+                device, grad_scale.to(device, non_blocking=True)
+            )
         if found_inf is not None:
-            if found_inf not in found_inf_dict:
-                found_inf_dict[device] = found_inf.to(device, non_blocking=True)
-            device_found_inf = found_inf_dict[device]
+            device_found_inf = found_inf_dict.setdefault(
+                device, found_inf.to(device, non_blocking=True)
+            )
         if lr_dict is not None and device not in lr_dict:
             lr_dict[device] = lr.to(device=device, non_blocking=True)  # type: ignore[union-attr]
             lr = lr_dict[device]
