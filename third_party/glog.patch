@@ -1,0 +1,53 @@
+diff --git bazel/glog.bzl bazel/glog.bzl
+index f9b33d4..b95d8da 100644
+--- bazel/glog.bzl
++++ bazel/glog.bzl
+@@ -13,6 +13,22 @@ def glog_library(namespace='google', with_gflags=1, **kwargs):
+     else:
+         gendir = '$(GENDIR)'
+ 
++    native.cc_library(
++        name = 'glog_headers',
++        visibility = [ '//visibility:public' ],
++        hdrs = [
++            ':logging_h',
++            ':raw_logging_h',
++            ':stl_logging_h',
++            ':vlog_is_on_h',
++            'src/glog/log_severity.h',
++        ],
++        strip_include_prefix = 'src',
++        deps = [
++            '@com_github_gflags_gflags//:gflags_headers',
++        ] if with_gflags else [],
++    )
++
+     native.cc_library(
+         name = 'glog',
+         visibility = [ '//visibility:public' ],
+@@ -39,14 +55,6 @@ def glog_library(namespace='google', with_gflags=1, **kwargs):
+             'src/utilities.h',
+             'src/vlog_is_on.cc',
+         ],
+-        hdrs = [
+-            ':logging_h',
+-            ':raw_logging_h',
+-            ':stl_logging_h',
+-            ':vlog_is_on_h',
+-            'src/glog/log_severity.h',
+-        ],
+-        strip_include_prefix = 'src',
+         copts = [
+             # Disable warnings that exists in glog.
+             '-Wno-sign-compare',
+@@ -77,9 +85,7 @@ def glog_library(namespace='google', with_gflags=1, **kwargs):
+             # Use gflags to parse CLI arguments.
+             '-DHAVE_LIB_GFLAGS',
+         ] if with_gflags else []),
+-        deps = [
+-            '@com_github_gflags_gflags//:gflags',
+-        ] if with_gflags else [],
++        deps = [':glog_headers'],
+         **kwargs
+     )
+ 

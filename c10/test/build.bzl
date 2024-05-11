@@ -61,7 +61,7 @@ def define_targets(rules):
         name = "util/bit_cast_test",
         srcs = ["util/bit_cast_test.cpp"],
         deps = [
-            "//c10/util:bit_cast",
+            "//c10:headers",
             "@com_google_googletest//:gtest_main",
         ],
     )
@@ -70,7 +70,7 @@ def define_targets(rules):
         name = "util/ssize_test",
         srcs = ["util/ssize_test.cpp"],
         deps = [
-            "//c10/util:ssize",
+            "//c10",
             "@com_google_googletest//:gtest_main",
         ],
     )

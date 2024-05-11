@@ -1,0 +1,27 @@
+diff --git bazel/gflags.bzl bazel/gflags.bzl
+index 533fd61..616dd4e 100644
+--- bazel/gflags.bzl
++++ bazel/gflags.bzl
+@@ -92,12 +92,20 @@ def gflags_library(hdrs=[], srcs=[], threads=1):
+     else:
+         name += "_nothreads"
+         copts += ["-DNO_THREADS"]
++
++    headers  = name + "_headers"
+     native.cc_library(
+-        name       = name,
++        name       = headers,
+         hdrs       = hdrs,
++        include_prefix = 'gflags',
++        visibility = ["//visibility:public"],
++    )
++
++    native.cc_library(
++        name       = name,
+         srcs       = srcs,
+         copts      = copts,
+         linkopts   = linkopts,
+         visibility = ["//visibility:public"],
+-        include_prefix = 'gflags'
++        deps = [headers],
+     )

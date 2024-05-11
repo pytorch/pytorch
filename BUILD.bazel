@@ -1,5 +1,4 @@
 load("@bazel_skylib//lib:paths.bzl", "paths")
-load("@pybind11_bazel//:build_defs.bzl", "pybind_extension")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 load("@rules_python//python:defs.bzl", "py_library", "py_test")
 load("@pytorch//third_party:substitution.bzl", "header_template_rule", "template_rule")
@@ -33,6 +32,24 @@ COMMON_COPTS = [
     # https://github.com/pytorch/pytorch/pull/55292
     "-DCUB_WRAPPED_NAMESPACE=at_cuda_detail",
 ])
+
+cc_binary(
+    name = "libc10.so",
+    deps = [
+        "//c10",
+    ],
+    linkshared = True,
+)
+
+cc_library(
+    name = "c10",
+    srcs = [
+        ":libc10.so",
+    ],
+    deps = [
+        "//c10:headers",
+    ],
+)
 
 aten_generation_srcs = ["aten/src/ATen/native/native_functions.yaml"] + ["aten/src/ATen/native/tags.yaml"] + glob(["aten/src/ATen/templates/**"])
 
@@ -305,13 +322,14 @@ cc_library(
         ],
     ) + [
         ":aten_src_ATen_config",
+        ":aten_src_ATen_cuda_config",
         ":generated_aten_cpp",
     ],
     includes = [
         "aten/src",
     ],
     deps = [
-        "//c10",
+        "//c10:headers",
     ],
 )
 
@@ -330,7 +348,7 @@ intern_build_aten_ops(
     deps = [
         ":aten_headers",
         "@fbgemm",
-        "@mkl",
+        "@mkl_headers",
         "@sleef",
     ],
 )
@@ -369,6 +387,7 @@ cc_library(
         ":torch_headers",
         "@fbgemm",
         "@ideep",
+        "@fmt",
     ],
     alwayslink = True,
 )
@@ -383,7 +402,6 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":aten_headers",
-        "//c10",
         "@cuda",
         "@cuda//:cuda_driver",
         "@cuda//:nvrtc",
@@ -403,7 +421,6 @@ cc_binary(
 cc_library(
     name = "aten_cuda_cpp",
     srcs = [":aten_cuda_cpp_srcs"] + generated_cuda_cpp,
-    hdrs = [":aten_src_ATen_cuda_config"],
     copts = ATEN_COPTS,
     visibility = ["//visibility:public"],
     deps = [
@@ -432,7 +449,7 @@ cu_library(
     visibility = ["//visibility:public"],
     deps = [
         ":aten_cuda_cpp",
-        "//c10/util:bit_cast",
+        "//c10:headers",
         "@cuda//:cublas",
         "@cuda//:cufft",
         "@cuda//:cusparse",
@@ -516,7 +533,6 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":caffe2_core_macros",
-        "//c10",
     ],
 )
 
@@ -637,7 +653,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":caffe2_headers",
-        "//c10",
+        "//c10:headers",
     ],
     alwayslink = True,
 )
@@ -656,7 +672,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":caffe2_headers",
-        "//c10",
+        "//c10:headers",
     ],
     alwayslink = True,
 )
@@ -678,7 +694,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":caffe2_headers",
-        "//c10",
+        "//c10:headers",
     ],
     alwayslink = True,
 )
@@ -713,10 +729,10 @@ cc_library(
     deps = [
         ":aten_headers",
         ":caffe2_headers",
-        "//c10",
-        "@com_github_google_flatbuffers//:flatbuffers",
+        "//c10:headers",
+        "@com_github_google_flatbuffers//:public_headers",
         "@local_config_python//:python_headers",
-        "@onnx",
+        "@onnx//:onnx_headers",
     ],
     alwayslink = True,
 )
@@ -745,8 +761,8 @@ torch_sources = {
     )
 }.keys()
 
-cc_library(
-    name = "torch",
+cc_binary(
+    name = "libtorch.so",
     srcs = if_cuda(glob(
         libtorch_cuda_sources,
         exclude = [
@@ -768,14 +784,38 @@ cc_library(
     deps = [
         ":caffe2",
         ":torch_headers",
-        "@kineto",
         "@cpp-httplib",
+        "@com_github_google_flatbuffers//:flatbuffers",
+        "@kineto",
     ] + if_cuda([
         "@cuda//:nvToolsExt",
         "@cutlass",
         ":torch_cuda",
     ]),
-    alwayslink = True,
+    linkshared = True,
+)
+
+cc_library(
+    name = "torch",
+    srcs = [
+        ":libtorch.so",
+    ],
+    deps = [
+        ":torch_headers",
+        ":c10",
+        "@mkl",
+    ] + if_cuda([
+        "@cuda",
+        "@cuda//:cublas",
+        "@cuda//:curand",
+        "@cuda//:cufft",
+        "@cuda//:cusolver",
+        "@cuda//:cusparse",
+        "@cuda//:nvrtc",
+        "@cuda//:nvToolsExt",
+        "@cudnn",
+    ]),
+    visibility = ["//visibility:public"],
 )
 
 cc_library(
@@ -788,6 +828,7 @@ cc_library(
         ":torch",
     ],
 )
+
 
 cc_library(
     name = "libtorch_headers",
@@ -812,30 +853,42 @@ cc_library(
     ],
 )
 
-cc_library(
-    name = "torch_python",
+cc_binary(
+    name = "libtorch_python.so",
     srcs = libtorch_python_core_sources
-        + if_cuda(libtorch_python_cuda_sources)
+        + if_cuda(glob(libtorch_python_cuda_sources, exclude = ["torch/csrc/cuda/python_nccl.cpp"]))
         + if_cuda(libtorch_python_distributed_sources)
-        + GENERATED_AUTOGRAD_PYTHON,
-    hdrs = glob([
-        "torch/csrc/generic/*.cpp",
+        + GENERATED_AUTOGRAD_PYTHON
+        + glob([
+            "torch/csrc/generic/*.cpp",
     ]),
     copts = COMMON_COPTS + if_cuda(["-DUSE_CUDA=1"]),
     deps = [
         ":torch",
-        ":shm",
+        "@cpp-httplib",
         "@pybind11",
+        "@kineto",
+        "@fmt",
+    ],
+    linkshared = True,
+)
+
+cc_library(
+    name = "torch_python",
+    srcs = [
+        ":libtorch_python.so",
     ],
 )
 
-pybind_extension(
-    name = "torch/_C",
+cc_binary(
+    name = "torch/_C.so",
     srcs = ["torch/csrc/stub.c"],
     deps = [
         ":torch_python",
-        ":aten_nvrtc",
+        ":shm",
+        "@pybind11",
     ],
+    linkshared = True,
 )
 
 cc_library(
@@ -847,14 +900,13 @@ cc_library(
         "functorch/csrc/dim/*.cpp",
     ]),
     deps = [
-        ":aten_nvrtc",
-        ":torch_python",
+        ":libtorch_headers",
         "@pybind11",
     ],
 )
 
-pybind_extension(
-    name = "functorch/_C",
+cc_binary(
+    name = "functorch/_C.so",
     copts=[
         "-DTORCH_EXTENSION_NAME=_C"
     ],
@@ -863,9 +915,9 @@ pybind_extension(
     ],
     deps = [
         ":functorch",
-        ":torch_python",
-        ":aten_nvrtc",
+        ":torch",
     ],
+    linkshared = True,
 )
 
 cc_binary(

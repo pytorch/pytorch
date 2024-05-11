@@ -263,7 +263,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
     # Build torch, the Python module, and tests for CPU-only
     tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" --config=cpu-only :torch :torch/_C.so :all_tests
   else
-    tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" //...
+    tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" //:all
   fi
 else
   # check that setup.py would fail with bad arguments

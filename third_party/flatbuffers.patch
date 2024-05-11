@@ -1,0 +1,45 @@
+diff --git a/BUILD.bazel b/BUILD.bazel
+index de910bc..52f72b8 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -28,16 +28,15 @@ config_setting(
+ # Public flatc library to compile flatbuffer files at runtime.
+ cc_library(
+     name = "flatbuffers",
+-    hdrs = ["//:public_headers"],
+     linkstatic = 1,
+-    strip_include_prefix = "/include",
+     deps = ["//src:flatbuffers"],
+ )
+ 
+ # Public C++ headers for the Flatbuffers library.
+-filegroup(
++cc_library(
+     name = "public_headers",
+-    srcs = [
++    strip_include_prefix = "/include",
++    hdrs = [
+         "include/flatbuffers/allocator.h",
+         "include/flatbuffers/array.h",
+         "include/flatbuffers/base.h",
+diff --git a/src/BUILD.bazel b/src/BUILD.bazel
+index 66c355d..54222cd 100644
+--- a/src/BUILD.bazel
++++ b/src/BUILD.bazel
+@@ -18,7 +18,7 @@ cc_library(
+         "reflection.cpp",
+         "util.cpp",
+     ],
+-    hdrs = ["//:public_headers"],
++    deps = ["//:public_headers"],
+     linkopts = select({
+         # TODO: Bazel uses `clang` instead of `clang++` to link
+         # C++ code on BSD. Temporarily adding these linker flags while
+@@ -28,7 +28,6 @@ cc_library(
+         "//:platform_openbsd": ["-lm"],
+         "//conditions:default": [],
+     }),
+-    strip_include_prefix = "/include",
+     visibility = ["//:__pkg__"],
+ )
+ 

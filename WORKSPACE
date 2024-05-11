@@ -57,6 +57,9 @@ load(':bazel/glog.bzl', 'glog_library')
 # TODO: figure out why enabling gflags leads to SIGSEV on the logging init
 glog_library(with_gflags=0)
     """,
+    patches = [
+        "@//third_party:glog.patch",
+    ],
     strip_prefix = "glog-0.4.0",
     urls = [
         "https://github.com/google/glog/archive/v0.4.0.tar.gz",
@@ -65,6 +68,9 @@ glog_library(with_gflags=0)
 
 http_archive(
     name = "com_github_gflags_gflags",
+    patches = [
+        "@//third_party:gflags.patch",
+    ],
     strip_prefix = "gflags-2.2.2",
     urls = [
         "https://github.com/gflags/gflags/archive/v2.2.2.tar.gz",
@@ -164,7 +170,7 @@ new_local_repository(
 
 new_local_repository(
     name = "opentelemetry-cpp",
-    build_file = "//third_party::opentelemetry-cpp.BUILD",
+    build_file = "//third_party:opentelemetry-cpp.BUILD",
     path = "third_party/opentelemetry-cpp",
 )
 
@@ -261,9 +267,14 @@ new_local_repository(
     path = "third_party/cudnn_frontend/",
 )
 
-local_repository(
+new_patched_local_repository(
     name = "com_github_google_flatbuffers",
+    build_file = "@//third_party/flatbuffers:BUILD.bazel",
     path = "third_party/flatbuffers",
+    patch_strip = 1,
+    patches = [
+        "@//third_party:flatbuffers.patch",
+    ],
 )
 
 local_repository(

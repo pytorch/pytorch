@@ -4,6 +4,7 @@ def define_targets(rules):
         srcs = ["TypeCast.cpp"],
         hdrs = ["TypeCast.h"],
         linkstatic = True,
+        alwayslink = True,
         local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
         deps = [
@@ -33,7 +34,6 @@ def define_targets(rules):
         local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
         deps = [
-            ":bit_cast",
             "//c10/macros",
             "@fmt",
         ] + rules.select({
@@ -49,24 +49,11 @@ def define_targets(rules):
     )
 
     rules.cc_library(
-        name = "bit_cast",
-        hdrs = ["bit_cast.h"],
-        visibility = ["//:__subpackages__"],
-    )
-
-    rules.cc_library(
-        name = "ssize",
-        hdrs = ["ssize.h"],
-        linkstatic = True,
-        visibility = ["//:__subpackages__"],
-        deps = [":base"],
-    )
-
-    rules.cc_library(
         name = "typeid",
         srcs = ["typeid.cpp"],
         hdrs = ["typeid.h"],
         linkstatic = True,
+        alwayslink = True,
         local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
         deps = [
@@ -80,10 +67,6 @@ def define_targets(rules):
         name = "headers",
         srcs = rules.glob(
             ["*.h"],
-            exclude = [
-                "bit_cast.h",
-                "ssize.h",
-            ],
         ),
         visibility = [
             "//:__pkg__",

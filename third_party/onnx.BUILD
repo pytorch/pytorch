@@ -43,6 +43,34 @@ genrule(
 )
 
 cc_library(
+    name = "onnx_headers",
+    hdrs = glob([
+        "onnx/*.h",
+        "onnx/version_converter/*.h",
+        "onnx/common/*.h",
+        "onnx/defs/**/*.h",
+        "onnx/shape_inference/*.h",
+        "onnx/version_converter/adapters/*.h",
+    ]) + [
+        "onnx/onnx-ml.pb.h",
+        "onnx/onnx-operators-ml.pb.h",
+        "onnx/onnx-data.pb.h",
+    ],
+    includes = [
+        ".",
+        "onnx/",
+    ],
+    defines = [
+        "ONNX_ML=1",
+        "ONNX_NAMESPACE=onnx_torch",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":onnx_proto_lib",
+    ],
+)
+
+cc_library(
     name = "onnx",
     srcs = glob(
         [
@@ -56,29 +84,9 @@ cc_library(
             "onnx/cpp2py_export.cc",
         ],
     ),
-    hdrs = glob([
-        "onnx/*.h",
-        "onnx/version_converter/*.h",
-        "onnx/common/*.h",
-        "onnx/defs/**/*.h",
-        "onnx/shape_inference/*.h",
-        "onnx/version_converter/adapters/*.h",
-    ]) + [
-        "onnx/onnx-ml.pb.h",
-        "onnx/onnx-operators-ml.pb.h",
-        "onnx/onnx-data.pb.h",
-    ],
-    defines = [
-        "ONNX_ML=1",
-        "ONNX_NAMESPACE=onnx_torch",
-    ],
-    includes = [
-        ".",
-        "onnx/",
-    ],
     visibility = ["//visibility:public"],
     deps = [
-        ":onnx_proto_lib",
+        ":onnx_headers",
     ],
 )
 
