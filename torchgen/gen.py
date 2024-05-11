@@ -49,8 +49,8 @@ from torchgen.context import (
 from torchgen.gen_aoti_c_shim import (
     gen_aoti_c_shim,
     gen_static_dispatch_backend_call_signature,
-    get_backend_index_for_aoti,
     get_fallback_op_name,
+    get_header_for_aoti,
 )
 from torchgen.gen_functionalization_type import (
     gen_functionalization_definition,
@@ -2353,54 +2353,28 @@ def gen_source_files(
             else:
                 raise AssertionError(f"unrecognized {dispatch_key} for ufunc")
 
-        structured_func_group_dict = {
-            f"{func_group.functional.namespace}.{func_group.functional.func.name}": func_group
-            for func_group in structured_native_functions
-        }
+        structured_func_group_dict = dict()
+        for func_group in structured_native_functions:
+            for func in func_group.functions():
+                if func.structured_delegate is not None:
+                    structured_func_group_dict[func.structured_delegate] = func_group
+                    break
+
         if dispatch_key in (DispatchKey.CPU, DispatchKey.CUDA):
             fallbacks = dict()
             for func in native_functions:
                 op_name = get_fallback_op_name(func)
                 if op_name in inductor_fallback_ops:
-                    fallbacks[op_name] = (
-                        func,
-                        structured_func_group_dict.get(
-                            f"{func.namespace}.{func.func.name.name}", None
-                        ),
-                    )
+                    fallbacks[op_name] = func
             fallback_native_functions = tuple(
                 value for _, value in sorted(fallbacks.items())
-            )
-
-            def get_header(
-                func: NativeFunction,
-                func_group: Optional[NativeFunctionsGroup],
-            ) -> Optional[str]:
-                backend_index = get_backend_index_for_aoti(
-                    func, func_group, dispatch_key, backend_indices
-                )
-                return (
-                    None
-                    if backend_index is None
-                    else f"#include <ATen/ops/{func.root_name}_{backend_index.dispatch_key.lower()}_dispatch.h>"
-                )
-
-            def headers_for_aoti() -> str:
-                headers = []
-                for func, func_group in fallback_native_functions:
-                    header = get_header(func, func_group)
-                    if header is not None:
-                        headers.append(header)
-                return "\n".join(sorted(set(headers)))
-
-            extra_headers = (
-                extra_cuda_headers if is_cuda_dispatch_key(dispatch_key) else ""
             )
 
             # header files were checked in for ABI-compatiblilty checking
             header_file_name = f"c_shim_{dispatch_key.lower()}.h"
             new_header = gen_aoti_c_shim(
                 fallback_native_functions,
+                structured_func_group_dict,
                 dispatch_key,
                 backend_indices,
                 header=True,
@@ -2442,10 +2416,25 @@ codegen to generate the correct cpp call for this op. Contact AOTInductor team f
                     )
 
             # cpp files are always generated on-the-fly
+            def headers_for_aoti() -> str:
+                headers = []
+                for func in fallback_native_functions:
+                    header = get_header_for_aoti(
+                        func, structured_func_group_dict, dispatch_key, backend_indices
+                    )
+                    if header is not None:
+                        headers.append(header)
+                return "\n".join(sorted(set(headers)))
+
+            extra_headers = (
+                extra_cuda_headers if is_cuda_dispatch_key(dispatch_key) else ""
+            )
+
             aoti_fm.write(
                 f"c_shim_{dispatch_key.lower()}.cpp",
                 lambda: gen_aoti_c_shim(
                     fallback_native_functions,
+                    structured_func_group_dict,
                     dispatch_key,
                     backend_indices,
                     header=False,
