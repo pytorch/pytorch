@@ -20,6 +20,19 @@
 
 namespace at {
 
+static std::vector<std::string> generic_precisions = {"default", "tf32", "bf16", "ieee"};
+static std::vector<std::string> cuda_precisions = {"default", "tf32", "ieee"};
+static std::vector<std::string> mkldnn_precisions = {"default", "bf16", "ieee"};
+
+static void warn_invalid_fp32_precision(const std::string& backend, std::string& precision) {
+  bool invalid_cuda = backend == "cuda" && std::find(cuda_precisions.begin(), cuda_precisions.end(), precision) == cuda_precisions.end();
+  bool invalid_mkldnn = backend == "mkldnn" && std::find(mkldnn_precisions.begin(), mkldnn_precisions.end(), precision) == mkldnn_precisions.end();
+  if (invalid_cuda || invalid_mkldnn){
+    precision = "ieee";
+    TORCH_WARN("Invalid precision for ", backend, " precision: ", precision, "reset precision to ieee");
+  }
+}
+
 static void fp32_precision_valid_check(const std::string& backend, const std::string& op, const std::string& precision=std::string()) {
   static std::vector<std::string> backends = {"generic", "mkldnn", "cuda"};
   static std::vector<std::string> operators = {"conv", "matmul", "rnn", "all"};
@@ -29,11 +42,6 @@ static void fp32_precision_valid_check(const std::string& backend, const std::st
   TORCH_CHECK(std::find(operators.begin(), operators.end(), op) != operators.end(), "Invalid operator: ", op);
 
   if (precision.size() != 0) {
-
-    static std::vector<std::string> generic_precisions = {"default", "tf32", "bf16", "ieee"};
-    static std::vector<std::string> cuda_precisions = {"default", "tf32", "ieee"};
-    static std::vector<std::string> mkldnn_precisions = {"default", "bf16", "ieee"};
-
     if (backend == "generic") {
       TORCH_CHECK(op == "all", "Invalid operation for generic backend: ", op);
     } else if (backend == "cuda") {
@@ -267,6 +275,7 @@ std::string Context::float32Precision(const std::string& backend, const std::str
   if (precision == "default")
     precision = fp32_precision.find("generic")->second.find("all")->second;
   TORCH_CHECK(precision != "default");
+  warn_invalid_fp32_precision(backend, precision);
   return precision;
 }
 
