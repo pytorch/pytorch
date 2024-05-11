@@ -582,7 +582,7 @@ def _multi_tensor_adam(
 
             step_size = _stack_if_compiling([(lr / bc) * -1 for bc in bias_correction1])
 
-            bias_correction2_sqrt = [_dispatch_sqrt(bc) for bc in bias_correction2]
+            bias_correction2_sqrt = [_dispatch_sqrt(bc) for bc in bias_correction2]  # type: ignore[arg-type]
 
             if amsgrad:
                 # Maintains the maximum of all 2nd moment running avg. till now

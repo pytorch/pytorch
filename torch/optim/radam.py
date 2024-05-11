@@ -473,7 +473,7 @@ def _multi_tensor_radam(
         else:
             rect = [
                 _dispatch_sqrt(
-                    (rho_t - 4)
+                    (rho_t - 4)  # type: ignore[arg-type]
                     * (rho_t - 2)
                     * rho_inf
                     / ((rho_inf - 4) * (rho_inf - 2) * rho_t)
