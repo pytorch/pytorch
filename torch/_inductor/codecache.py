@@ -1430,10 +1430,24 @@ def valid_vec_isa_list() -> List[VecISA]:
         return []
 
     isa_list = []
-    _cpu_supported_isa = x86_isa_checker()
-    for isa in supported_vec_isa_list:
-        if str(isa) in _cpu_supported_isa:
-            isa_list.append(isa)
+    arch = platform.machine()
+    """
+    arch value is x86_64 on Linux, and the value is AMD64 on Windows.
+    """
+    if arch == "x86_64" or arch == "AMD64":
+        _cpu_supported_isa = x86_isa_checker()
+        for isa in supported_vec_isa_list:
+            if str(isa) in _cpu_supported_isa:
+                isa_list.append(isa)
+    else:
+        # Process Apple M serises CPU's NEON.
+        if cur_os != "win32":
+            with open("/proc/cpuinfo") as _cpu_info:
+                _cpu_info_content = _cpu_info.read()
+                for isa in supported_vec_isa_list:
+                    if str(isa) in _cpu_info_content and isa:
+                        isa_list.append(isa)
+
     return isa_list
 
 
