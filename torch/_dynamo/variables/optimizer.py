@@ -139,12 +139,9 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # track indices to not set so we don't need to
         # in the variable tracker realize the whole state
         # we handle guarding the state specially
-        indices_to_ignore = set()
         for ind, group in enumerate(self.value.param_groups):
             if safe_to_set_capturable(group):
                 group["capturable"] = True
-            else:
-                indices_to_ignore.add(ind)
 
         param_groups_vt = LazyVariableTracker.realize_all(
             VariableBuilder(tx, AttrSource(self.source, "param_groups"))(
@@ -155,8 +152,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
             key = ConstDictVariable._HashableTracker(
                 ConstantVariable.create("capturable")
             )
-            if key in param_group_vt.items and ind not in indices_to_ignore:
-                param_group_vt.items[key] = ConstantVariable.create(True)
+            param_group_vt.items[key] = ConstantVariable.create(True)
 
     def get_python_args(self, *args, **kwargs):
         """Get python values equivalent to the variable tracker args"""
