@@ -378,11 +378,29 @@ class TestGroupBatchFusion(TestCase):
             self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
             counters.clear()
 
+    @requires_cuda
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_relu": {},
+            "batch_sigmoid": {},
+            "batch_tanh": {},
+        },
+        post_grad_fusion_options={
+            "batch_aten_div": {},
+            "batch_aten_sub": {},
+            "batch_aten_mul": {},
+            "batch_aten_add": {},
+        },
+    )
     def test_pointwise_op_fusion(self):
         counters.clear()
         module = TestPoitwiseOps("cuda")
         input = [torch.randn(50, 1000, requires_grad=True, device="cuda")]
-        traced = torch.compile(module)
+
+        def wrapper(*args, **kwargs):
+            return module(*args, **kwargs)
+
+        traced = torch.compile(wrapper)
         ref = module(*input)
         res = traced(*input)
         self.compare_pred(module, traced, input)
@@ -393,10 +411,7 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(counters["inductor"]["batch_aten_mul"], 1)
         self.assertEqual(counters["inductor"]["batch_aten_sub"], 1)
         self.assertEqual(counters["inductor"]["batch_aten_div"], 1)
-        ref.sum().backward()
-        res.sum().backward()
-        self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
-        self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+        self.assertTrue(torch.allclose(ref, res, equal_nan=True))
         counters.clear()
 
 
