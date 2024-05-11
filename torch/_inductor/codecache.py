@@ -1408,7 +1408,12 @@ supported_vec_isa_list = [VecAVX512(), VecAVX2(), VecNEON()]
 # we only cache some key isa information.
 @functools.lru_cache(None)
 def valid_vec_isa_list() -> List[VecISA]:
+    if sys.platform == "darwin" and platform.processor() == "arm":
+        return [VecNEON()]
+
     cur_os = sys.platform
+    if cur_os != "linux" and cur_os != "win32":
+        return []
 
     if platform.machine() == "s390x":
         with open("/proc/cpuinfo") as _cpu_info:
