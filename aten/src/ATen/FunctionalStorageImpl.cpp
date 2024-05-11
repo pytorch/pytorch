@@ -97,7 +97,16 @@ FunctionalStorageImpl::FunctionalStorageImpl(const Tensor& base)
       /*resizable=*/true
     ),
     base_(base)
-  {
+{
+  // SparseTensorImpl has no storage, so we cannot query its nbytes.
+  // (original_storage_size is only used for storage resizing in fsdp anyway, which does not apply to sparse)
+  // Same for XLA
+  if (base.unsafeGetTensorImpl()->has_storage() && base.device().type() != c10::DeviceType::XLA) {
+    original_storage_size_ = base.unsafeGetTensorImpl()->unsafe_storage().unsafeGetStorageImpl()->sym_nbytes();
+  } else {
+    original_storage_size_ = -1;
+  }
+  curr_storage_size_ = original_storage_size_;
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(base_));
 }
 

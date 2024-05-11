@@ -607,6 +607,37 @@ class TestCuda(TestCase):
         self.assertTrue(event.query())
         self.assertGreater(start_event.elapsed_time(event), 0)
 
+    def test_generic_stream_event(self):
+        stream = torch.Stream("cuda")
+        self.assertEqual(stream.device_index, torch.cuda.current_device())
+        cuda_stream = torch.cuda.Stream(
+            stream_id=stream.stream_id,
+            device_index=stream.device_index,
+            device_type=stream.device_type,
+        )
+        self.assertEqual(stream.stream_id, cuda_stream.stream_id)
+        self.assertNotEqual(stream.stream_id, torch.cuda.current_stream().stream_id)
+
+        event1 = torch.Event("cuda", enable_timing=True)
+        event2 = torch.Event("cuda", enable_timing=True)
+        self.assertEqual(event1.event_id, 0)
+        a = torch.randn(1000)
+        b = torch.randn(1000)
+        with torch.cuda.stream(cuda_stream):
+            a_cuda = a.to("cuda", non_blocking=True)
+            b_cuda = b.to("cuda", non_blocking=True)
+            self.assertEqual(stream.stream_id, torch.cuda.current_stream().stream_id)
+        event1.record(stream)
+        event1.synchronize()
+        self.assertTrue(event1.query())
+        c_cuda = a_cuda + b_cuda
+        event2.record()
+        event2.synchronize()
+        self.assertTrue(event2.query())
+        self.assertNotEqual(event1.event_id, event2.event_id)
+        self.assertEqual(c_cuda.cpu(), a + b)
+        self.assertTrue(event1.elapsed_time(event2) > 0)
+
     def test_record_stream(self):
         cycles_per_ms = get_cycles_per_ms()
 

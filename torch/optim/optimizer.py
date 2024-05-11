@@ -118,6 +118,27 @@ def _dispatch_sqrt(
         return math.sqrt(x)
 
 
+def _disable_dynamo_if_unsupported(single_tensor_fn=None):
+    # workaround for torchscript BC
+    # it requires all called functions to be in the
+    # global environment at the site at which the
+    # maybe_fallback closure is created
+    if single_tensor_fn:
+        globals()[single_tensor_fn.__name__] = single_tensor_fn
+
+    def wrapper(func):
+        @functools.wraps(func)
+        def maybe_fallback(self, *args, **kwargs):
+            if is_compiling() and not kwargs.get("capturable", False):
+                return torch._disable_dynamo(func(self, *args, **kwargs))
+            else:
+                return func(self, *args, **kwargs)
+
+        return maybe_fallback
+
+    return wrapper
+
+
 # For any optimizer with a faster implementation, we attempt to default to the
 # fastest + stablest whenever possible. For foreach, the requirements are to have
 # native params all on CUDA. For fused, there's currently the additional requirement

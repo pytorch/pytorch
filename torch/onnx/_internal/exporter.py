@@ -814,7 +814,7 @@ class ONNXProgram:
             ...         )  # Mutate buffer through in-place addition
             ...         return output
             >>> inputs = (torch.rand((64, 1, 28, 28), dtype=torch.float32), torch.randn(3))
-            >>> exported_program = torch.export.export(CustomModule(), args=inputs)
+            >>> exported_program = torch.export.export(CustomModule(), args=inputs).run_decompositions({})
             >>> onnx_program = torch.onnx.dynamo_export(exported_program, *inputs)
             >>> pprint.pprint(onnx_program.model_signature)
             ExportGraphSignature(input_specs=[InputSpec(kind=<InputKind.PARAMETER: 2>,
