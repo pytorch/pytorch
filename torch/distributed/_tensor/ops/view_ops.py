@@ -21,17 +21,21 @@ from torch.distributed._tensor._utils import compute_local_shape
 from torch.distributed._tensor.api import Shard
 from torch.distributed._tensor.op_schema import (
     OpSchema,
-    OutputSharding,
+    OpStrategy,
+    PlacementStrategy,
     RuntimeSchemaInfo,
+    StrategyType,
 )
 from torch.distributed._tensor.ops.utils import (
+    generate_redistribute_costs,
     normalize_dim,
     normalize_dims,
     prod,
-    register_prop_rule,
+    register_op_strategy,
 )
 
 from torch.distributed._tensor.placement_types import DTensorSpec, Placement, Replicate
+from torch.distributed.device_mesh import DeviceMesh
 from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
 
 aten = torch.ops.aten
@@ -631,44 +635,76 @@ def propagate_shape_and_sharding(
     return (tuple(out_shape), output_placements, shardable_dims)
 
 
-def register_prop_rule_map(
+def register_op_strategy_map(
     aten_op_overload: torch._ops.OpOverload,
     local_op_name: Callable[..., torch.Tensor],
     schema_info: Optional[RuntimeSchemaInfo] = None,
 ) -> None:
     spec: Op = ops[local_op_name]
 
-    @register_prop_rule(aten_op_overload, schema_info=schema_info)
-    def reshape_prop(op_schema: OpSchema) -> OutputSharding:
+    @register_op_strategy(aten_op_overload, schema_info=schema_info)
+    def reshape_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
         rules = spec.dim_map(*op_schema.args_schema, **op_schema.kwargs_schema)
-        input_dtensor_spec = cast(DTensorSpec, op_schema.args_schema[0])
-        mesh = input_dtensor_spec.mesh
-
-        assert isinstance(
-            input_dtensor_spec, DTensorSpec
-        ), "Expected first input to be a DTensorSpec"
-        global_in_shape = input_dtensor_spec.shape
+        input_strategy = cast(OpStrategy, op_schema.args_schema[0])
+        global_in_shape = input_strategy.output_shape
         assert global_in_shape is not None, "Shape required."
 
-        with disable_proxy_modes_tracing(), unset_fake_temporarily():
-            (
-                global_out_shape,
-                shard_out,
-                shardable_dims,
-            ) = propagate_shape_and_sharding(
-                input_dtensor_spec.placements,
-                tuple(global_in_shape),
-                rules,
-                mesh.shape,
-            )
+        output_strategy = OpStrategy([])
+        for input_placement_strategy in input_strategy.strategies:
+            input_src_spec = input_placement_strategy.output_spec
 
-        if shard_out is not None:
-            # no reshard needed
-            output_dtensor_spec = DTensorSpec(mesh=mesh, placements=tuple(shard_out))
+            with disable_proxy_modes_tracing(), unset_fake_temporarily():
+                (
+                    global_out_shape,
+                    shard_out,
+                    shardable_dims,
+                ) = propagate_shape_and_sharding(
+                    input_src_spec.placements,
+                    tuple(global_in_shape),
+                    rules,
+                    mesh.shape,
+                )
 
-            # We only need the local shape to lower the call into the local op
-            args = op_schema.args_schema
+            if shard_out is not None:
+                input_target_spec = input_src_spec
+                redistribute_costs = [[0.0] * mesh.ndim]
+            else:
+                # TODO: optimize this. we shouldn't simply blindly replicate
+                #       unshardable dims ...
+                # FIXME: this can be wrong for situations where we have
+                #        [Shard(0), Shard(0)]
+                input_target_placements = [
+                    p
+                    if not isinstance(p, Shard) or shardable_dims[p.dim][mesh_dim]
+                    else Replicate()
+                    for mesh_dim, p in enumerate(input_src_spec.placements)
+                ]
+                input_target_spec = DTensorSpec(
+                    placements=tuple(input_target_placements),
+                    mesh=input_src_spec.mesh,
+                    tensor_meta=input_src_spec.tensor_meta,
+                )
+                redistribute_costs = [
+                    generate_redistribute_costs(input_strategy, input_target_spec)
+                ]
+
+                with disable_proxy_modes_tracing(), unset_fake_temporarily():
+                    (
+                        global_out_shape,
+                        shard_out,
+                        shardable_dims,
+                    ) = propagate_shape_and_sharding(
+                        input_target_placements,
+                        tuple(global_in_shape),
+                        rules,
+                        mesh.shape,
+                    )
+
+            assert shard_out is not None
+            output_target_spec = DTensorSpec(mesh=mesh, placements=tuple(shard_out))
+
             shape_argnum = spec.shape_argnum
+            non_tensor_arg_suggestions = None
             if shape_argnum is not None:
                 # compute the local shape from the global shape, then return
                 # a resharding even if we don't really reshard, the only reason
@@ -677,75 +713,47 @@ def register_prop_rule_map(
                 local_out_shape = compute_local_shape(
                     list(global_out_shape), mesh, shard_out
                 )
+                non_tensor_arg_suggestions = {shape_argnum: local_out_shape}
 
-                suggested_schema = OpSchema(
-                    op=op_schema.op,
-                    args_schema=args[:shape_argnum]
-                    + (tuple(local_out_shape),)
-                    + args[shape_argnum + 1 :],
-                    kwargs_schema=op_schema.kwargs_schema,
+            output_strategy.strategies.append(
+                PlacementStrategy(
+                    output_specs=output_target_spec,
+                    input_specs=(input_target_spec,),
+                    redistribute_cost=redistribute_costs,
+                    non_tensor_arg_suggestions=non_tensor_arg_suggestions,
                 )
-                return OutputSharding(
-                    output_spec=output_dtensor_spec,
-                    redistribute_schema=suggested_schema,
-                    needs_redistribute=True,
-                )
-
-            return OutputSharding(output_spec=output_dtensor_spec)
-
-        else:
-            # TODO: optimize this. we shouldn't simply blindly replicate
-            #       unshardable dims ...
-            # FIXME: this can be wrong for situations where we have
-            #        [Shard(0), Shard(0)]
-            suggested_placements = [
-                p
-                if not isinstance(p, Shard) or shardable_dims[p.dim][mesh_dim]
-                else Replicate()
-                for mesh_dim, p in enumerate(input_dtensor_spec.placements)
-            ]
-            return OutputSharding(
-                output_spec=None,
-                redistribute_schema=OpSchema(
-                    op=op_schema.op,
-                    args_schema=(
-                        DTensorSpec(
-                            placements=tuple(suggested_placements),
-                            mesh=input_dtensor_spec.mesh,
-                            tensor_meta=input_dtensor_spec.tensor_meta,
-                        ),
-                    )
-                    + op_schema.args_schema[1:],
-                    kwargs_schema=op_schema.kwargs_schema,
-                ),
             )
 
+        return output_strategy
 
-register_prop_rule_map(aten.squeeze.default, torch.squeeze)
-register_prop_rule_map(
+
+register_op_strategy_map(aten.squeeze.default, torch.squeeze)
+register_op_strategy_map(
     aten.squeeze.dim, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
 )
-register_prop_rule_map(aten.view.default, Tensor.view, schema_info=RuntimeSchemaInfo(1))
-register_prop_rule_map(
+register_op_strategy_map(
+    aten.view.default, Tensor.view, schema_info=RuntimeSchemaInfo(1)
+)
+register_op_strategy_map(
     aten.reshape.default, torch.reshape, schema_info=RuntimeSchemaInfo(1)
 )
-register_prop_rule_map(
+register_op_strategy_map(
     aten._unsafe_view.default, Tensor.view, schema_info=RuntimeSchemaInfo(1)
 )
-register_prop_rule_map(
+register_op_strategy_map(
     aten.unsqueeze.default, torch.unsqueeze, schema_info=RuntimeSchemaInfo(1)
 )
-register_prop_rule_map(
+register_op_strategy_map(
     aten.expand.default, Tensor.expand, schema_info=RuntimeSchemaInfo(1)
 )
-register_prop_rule_map(
+register_op_strategy_map(
     aten.permute.default, torch.permute, schema_info=RuntimeSchemaInfo(1)
 )
-register_prop_rule_map(
+register_op_strategy_map(
     aten.repeat.default, Tensor.repeat, schema_info=RuntimeSchemaInfo(1)
 )
-register_prop_rule_map(
+register_op_strategy_map(
     aten.transpose.int, torch.transpose, schema_info=RuntimeSchemaInfo(1)
 )
-register_prop_rule_map(aten.view_as_complex.default, torch.view_as_complex)
-register_prop_rule_map(aten.view_as_real.default, torch.view_as_real)
+register_op_strategy_map(aten.view_as_complex.default, torch.view_as_complex)
+register_op_strategy_map(aten.view_as_real.default, torch.view_as_real)

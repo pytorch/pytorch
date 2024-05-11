@@ -163,7 +163,6 @@ class TestViewOps(DTensorTestBase):
         )
 
         for in_shard in all_sharding_choices:
-            # print(f'   |--- {in_shard}')
             in_dt = distribute_tensor(args[0], device_mesh, in_shard)
 
             comm_mode = CommDebugMode()

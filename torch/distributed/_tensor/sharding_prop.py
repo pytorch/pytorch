@@ -1,15 +1,11 @@
 from functools import lru_cache
 from itertools import chain
-from typing import Callable, cast, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Callable, cast, Dict, List, Optional, Sequence, Union
 
 import torch
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
-from torch.distributed._tensor._utils import (
-    compute_local_shape,
-    compute_local_stride,
-    try_find_mesh_from_args,
-)
+from torch.distributed._tensor._utils import try_find_mesh_from_args
 from torch.distributed._tensor.op_schema import (
     OpInfo,
     OpSchema,
@@ -45,16 +41,6 @@ class ShardingPropagator:
         # op map to save static argnum to decide to reuse sharding prop cache or re-run sharding prop
         self.op_to_schema_info: Dict[OpOverload, RuntimeSchemaInfo] = {}
         self.propagate_op_sharding = lru_cache(None)(self.propagate_op_sharding_non_cached)  # type: ignore[method-assign]
-        # op map to save indices of size (and stride) args which may need to be modified in sharding prop
-        self.op_to_size_and_stride_idx: Dict[
-            OpOverload, Union[int, Tuple[int, int]]
-        ] = {
-            aten.new_empty.default: 1,
-            aten.new_full.default: 1,
-            aten.new_ones.default: 1,
-            aten.new_zeros.default: 1,
-            aten.new_empty_strided.default: (1, 2),
-        }
 
     def register_sharding_prop_rule(
         self,
@@ -229,7 +215,7 @@ class ShardingPropagator:
                 # single Op strategy
                 output_strategy = self._select_strategy(op_strategy)
 
-                # check if we need to redistribute the input
+                # check if we need to redistribute the tensor args in the input
                 needs_redistribute = False
                 expected_input_specs = []
 
@@ -260,15 +246,22 @@ class ShardingPropagator:
                     )
                     suggestion_schema._inplace_rewrap_schema_suggestion(op_schema)
 
-                # size and stride args need to be modified for new factory ops, potentially
-                if op_schema.op in self.op_to_size_and_stride_idx:
-                    assert isinstance(output_strategy.output_spec, DTensorSpec)
-                    # It happens when the output has the same shape as the input
-                    # and the input placements are not all Replicate().
-                    if output_strategy.output_spec.is_sharded():
-                        needs_redistribute = True
-                        suggestion_schema = self._adjust_size_and_stride_args(
-                            op_schema, output_strategy.output_spec, mesh
+                # check if we need to adjust the non-tensor args in the input:
+                # e.g., shape (and stride) args need to be modified for view ops
+                # and new factory ops, potentially
+                needs_adjustment = False
+                if output_strategy.non_tensor_arg_suggestions is not None:
+                    schema = suggestion_schema or op_schema
+                    expected_input_schema = list(schema.args_schema)
+                    for idx, arg in output_strategy.non_tensor_arg_suggestions.items():
+                        if expected_input_schema[idx] != arg:
+                            expected_input_schema[idx] = arg
+                            needs_adjustment = True
+                    if needs_adjustment:
+                        suggestion_schema = OpSchema(
+                            schema.op,
+                            tuple(expected_input_schema),
+                            schema.kwargs_schema,
                         )
 
                 # construct output spec for the op
@@ -298,7 +291,7 @@ class ShardingPropagator:
                 output_sharding = OutputSharding(
                     output_specs,
                     suggestion_schema,
-                    needs_redistribute=needs_redistribute,
+                    needs_redistribute=needs_redistribute or needs_adjustment,
                 )
             elif isinstance(op_strategy, TupleStrategy):
                 # tuple strategy output sharding processing
@@ -441,30 +434,3 @@ class ShardingPropagator:
 
         # for eager execution, we just select the one with the minimal redistribute cost
         return strategy.strategies[strategy_costs.index(min(strategy_costs))]
-
-    def _adjust_size_and_stride_args(
-        self, op_schema: OpSchema, spec: DTensorSpec, mesh: DeviceMesh
-    ) -> OpSchema:
-        size_stride_idx = self.op_to_size_and_stride_idx[op_schema.op]
-        if isinstance(size_stride_idx, tuple):
-            size_idx, stride_idx = size_stride_idx
-        else:
-            size_idx = size_stride_idx
-            stride_idx = None
-
-        expected_input_schema = list(op_schema.args_schema)
-        size = cast(list, expected_input_schema[size_idx])
-        # # adjust size to be the same as that of the _local_tensor
-        # # of the DTensor input arg at index 0, which is inferred
-        expected_input_schema[size_idx] = compute_local_shape(
-            size, mesh, spec.placements
-        )
-
-        # adjust the stride arg for aten.new_empty_strided.default
-        if stride_idx:
-            stride = cast(list, expected_input_schema[stride_idx])
-            expected_input_schema[stride_idx] = compute_local_stride(
-                stride, mesh, spec.placements
-            )
-
-        return OpSchema(op_schema.op, tuple(expected_input_schema), {})

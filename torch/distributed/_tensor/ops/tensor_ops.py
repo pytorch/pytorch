@@ -4,6 +4,7 @@ from typing import cast, List, Optional, Sequence, Tuple
 
 import torch
 
+from torch.distributed._tensor._utils import compute_local_shape, compute_local_stride
 from torch.distributed._tensor.op_schema import (
     OpSchema,
     OpStrategy,
@@ -182,11 +183,12 @@ def new_factory_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     # Currently there are two strategies:
     # 1. let the output be replicated
     # 2. let the output follow the input if input and output have the same shape
+    _shape_idx, _stride_idx = 1, 2
     input_strategy = op_schema.args_schema[0]
     assert isinstance(input_strategy, OpStrategy)
-    input_shape = input_strategy.output_shape
-    output_shape = op_schema.args_schema[1]
-    assert isinstance(output_shape, list)
+    global_in_shape = input_strategy.output_shape
+    global_out_shape = op_schema.args_schema[_shape_idx]
+    assert isinstance(global_out_shape, list)
 
     new_factory_strategy = OpStrategy([])
     for arg_strategy in input_strategy.strategies:
@@ -200,14 +202,34 @@ def new_factory_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
             )
         )
 
-        if tuple(input_shape) == tuple(output_shape) and input_spec.is_sharded():
+        if (
+            tuple(global_in_shape) == tuple(global_out_shape)
+            and input_spec.is_sharded()
+        ):
             # NOTE: for new_empty_strided, currently the non-replicate sharding
             #       is supported only when the shape is evenly shardable
             if (
                 op_schema.op == aten.new_empty_strided.default
-                and not is_tensor_evenly_shardable(input_shape, input_spec)
+                and not is_tensor_evenly_shardable(global_in_shape, input_spec)
             ):
                 continue
+
+            non_tensor_arg_suggestions = {}
+            # adjust the size arg (at index 1) to be the same as that of the _local_tensor
+            # of the DTensor input arg at index 0, which is inferred
+            local_shape = compute_local_shape(
+                global_out_shape, mesh, input_spec.placements
+            )
+            non_tensor_arg_suggestions[_shape_idx] = local_shape
+
+            # adjust the stride arg (at index 2) for aten.new_empty_strided.default
+            if op_schema.op == aten.new_empty_strided.default:
+                global_out_stride = op_schema.args_schema[_stride_idx]
+                assert isinstance(global_out_stride, list)
+                local_stride = compute_local_stride(
+                    global_out_stride, mesh, input_spec.placements
+                )
+                non_tensor_arg_suggestions[_stride_idx] = local_stride
 
             new_factory_strategy.strategies.append(
                 PlacementStrategy(
@@ -215,6 +237,7 @@ def new_factory_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
                     input_specs=(input_spec,),
                     # encouraging new tensor placement to be the same as input
                     redistribute_cost=[[-0.1] * mesh.ndim],
+                    non_tensor_arg_suggestions=non_tensor_arg_suggestions,
                 )
             )
 
