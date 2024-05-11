@@ -566,13 +566,8 @@ def memory_summary(device: Union[Device, int] = None, abbreviated: bool = False)
                 freed_prefval = freed
 
             lines.append(
-                " {:<21} | {} | {} | {} | {} ".format(
-                    submetric_name,
-                    formatter(current, current_prefval),
-                    formatter(peak, peak_prefval),
-                    formatter(allocated, allocated_prefval),
-                    formatter(freed, freed_prefval),
-                ),
+                f" {submetric_name:<21} | {formatter(current, current_prefval)} | {formatter(peak, peak_prefval)} | "
+                f"{formatter(allocated, allocated_prefval)} | {formatter(freed, freed_prefval)} ",
             )
 
     metrics_to_display = [
@@ -591,13 +586,8 @@ def memory_summary(device: Union[Device, int] = None, abbreviated: bool = False)
         freed = stats[prefix + "freed"]
 
         lines.append(
-            " {:<21} | {} | {} | {} | {} ".format(
-                metric_name,
-                formatter(current, current),
-                formatter(peak, peak),
-                formatter(allocated, allocated),
-                formatter(freed, freed),
-            ),
+            f" {metric_name:<21} | {formatter(current, current)} | {formatter(peak, peak)} | "
+            f"{formatter(allocated, allocated)} | {formatter(freed, freed)} ",
         )
 
     lines.append("=" * 75)
