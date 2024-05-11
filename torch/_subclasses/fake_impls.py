@@ -269,7 +269,7 @@ def unique2(
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
-    if (nnz := arg.unique_memo) is None:
+    if arg.unique_memo is None:
         # Avoid importing sympy at a module level
         from torch.fx.experimental.symbolic_shapes import (
             _constrain_range_for_size,
@@ -285,7 +285,8 @@ def unique2(
             # symint cannot equal zero).  We could also unconditionally
             # allocate an unbacked SymInt and not refine its range,
             # but this seems more precise.
-            nnz = 0
+            nnz = arg._unique_memo = 0
+            arg._unique_memo_vc = arg._version
         else:
             nnz = fake_mode.shape_env.create_unbacked_symint()
 
@@ -298,7 +299,7 @@ def unique2(
 
         arg.unique_memo = nnz
 
-    ret = [arg.new_empty((nnz,))]
+    ret = [arg.new_empty((arg.unique_memo,))]
 
     if return_inverse:
         ret.append(torch.empty_like(arg))
@@ -340,18 +341,14 @@ def local_scalar_dense(fake_mode, func, arg):
     ):
         # Without symints/symfloats, cannot handle this
         raise DataDependentOutputException(func)
-    if (r := arg.item_memo) is not None:
-        return r
     if is_float_dtype(arg.dtype):
-        r = fake_mode.shape_env.create_unbacked_symfloat()
+        return fake_mode.shape_env.create_unbacked_symfloat()
     elif is_integer_dtype(arg.dtype):
-        r = fake_mode.shape_env.create_unbacked_symint()
+        return fake_mode.shape_env.create_unbacked_symint()
     elif is_boolean_dtype(arg.dtype):
-        r = fake_mode.shape_env.create_unbacked_symbool()
+        return fake_mode.shape_env.create_unbacked_symbool()
     else:
         raise NotImplementedError(f"local_scalar_dense/item NYI for {arg.dtype}")
-    arg.item_memo = r
-    return r
 
 
 @register_op_impl(torch.ops.aten.nonzero.default)
@@ -363,7 +360,9 @@ def nonzero(fake_mode, func, arg):
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
-    if (nnz := arg.nonzero_memo) is None:
+    if arg.nonzero_memo is not None:
+        nnz = arg.nonzero_memo
+    else:
         # Avoid importing sympy at a module level
         from torch.fx.experimental.symbolic_shapes import (
             _constrain_range_for_size,
@@ -379,7 +378,9 @@ def nonzero(fake_mode, func, arg):
             # symint cannot equal zero).  We could also unconditionally
             # allocate an unbacked SymInt and not refine its range,
             # but this seems more precise.
-            nnz = 0
+            nnz = arg._nonzero_memo = 0
+            arg._nonzero_memo_vc = arg._version
+            arg._nonzero_memo_epoch = fake_mode.epoch
         else:
             nnz = fake_mode.shape_env.create_unbacked_symint()
 
@@ -390,7 +391,11 @@ def nonzero(fake_mode, func, arg):
 
             _constrain_range_for_size(nnz, max=maxval)
 
-        arg.nonzero_memo = nnz
+            if not torch.is_inference_mode_enabled():
+                # arg._version N/A in inference mode
+                arg._nonzero_memo = nnz
+                arg._nonzero_memo_vc = arg._version
+                arg._nonzero_memo_epoch = fake_mode.epoch
 
     return arg.new_empty((nnz, arg.dim()), dtype=torch.int64)
 
