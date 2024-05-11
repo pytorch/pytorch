@@ -397,14 +397,19 @@ class DeviceTypeTestBase(TestCase):
             # Add the device param kwarg if the test needs device or devices.
             param_kwargs = {} if param_kwargs is None else param_kwargs
             test_sig_params = inspect.signature(test).parameters
+            #import pdb
+            #pdb.set_trace()
             if 'device' in test_sig_params or 'devices' in test_sig_params:
                 device_arg: str = cls._init_and_get_primary_device()
                 if hasattr(test, 'num_required_devices'):
                     device_arg = cls.get_all_devices()
                 _update_param_kwargs(param_kwargs, 'device', device_arg)
-
+            #import pdb
+            #pdb.set_trace()
             # Apply decorators based on param kwargs.
             for decorator in decorator_fn(param_kwargs):
+                #import pdb
+                #pdb.set_trace()
                 test = decorator(test)
 
             # Constructs the test
@@ -437,6 +442,8 @@ class DeviceTypeTestBase(TestCase):
                 return result
 
             assert not hasattr(cls, name), f"Redefinition of test {name}"
+            #import pdb
+            #pdb.set_trace()
             setattr(cls, name, instantiated_test)
 
         def default_parametrize_fn(test, generic_cls, device_cls):
@@ -448,6 +455,8 @@ class DeviceTypeTestBase(TestCase):
 
         # If one of the @dtypes* decorators is present, also parametrize over the dtypes set by it.
         dtypes = cls._get_dtypes(test)
+        #import pdb
+        #pdb.set_trace()
         if dtypes is not None:
 
             def dtype_parametrize_fn(test, generic_cls, device_cls, dtypes=dtypes):
@@ -473,6 +482,7 @@ class DeviceTypeTestBase(TestCase):
                 dtype_kwarg = param_kwargs['dtypes'] if 'dtypes' in param_kwargs else param_kwargs['dtype']
             test_name = f'{name}{test_suffix}{device_suffix}{_dtype_test_suffix(dtype_kwarg)}'
 
+            print(test_name)
             instantiate_test_helper(cls=cls, name=test_name, test=test, param_kwargs=param_kwargs,
                                     decorator_fn=decorator_fn)
 
@@ -832,6 +842,7 @@ class OpDTypes(Enum):
     any_one = 4  # Test precisely one supported dtype
     none = 5  # Instantiate no dtype variants (no dtype kwarg needed)
     any_common_cpu_cuda_one = 6  # Test precisely one supported dtype that is common to both cuda and cpu
+    any_common_cpu_xpu_one = 7 # Test precisely one supported dtype that is common to both xpu and cpu
 
 
 # Arbitrary order
@@ -909,6 +920,8 @@ class ops(_TestParametrizer):
                                'instantiate_parametrized_tests()')
 
         op = check_exhausted_iterator = object()
+        #import pdb
+        #pdb.set_trace()
         for op in self.op_list:
             # Determine the set of dtypes to use.
             dtypes: Union[Set[torch.dtype], Set[None]]
@@ -941,13 +954,19 @@ class ops(_TestParametrizer):
                     dtypes = {next(dtype for dtype in ANY_DTYPE_ORDER if dtype in supported)}
                 else:
                     dtypes = {}
-
+            elif self.opinfo_dtypes == OpDTypes.any_common_cpu_xpu_one:
+                # Tries to pick a dtype that supports both CPU and CUDA
+                supported = set(op.dtypes).intersection(op.dtypesIfXPU)
+                if supported:
+                    dtypes = {next(dtype for dtype in ANY_DTYPE_ORDER if dtype in supported)}
+                else:
+                    dtypes = {}
             elif self.opinfo_dtypes == OpDTypes.none:
                 dtypes = {None}
             else:
                 raise RuntimeError(f"Unknown OpDType: {self.opinfo_dtypes}")
 
-            if self.allowed_dtypes is not None:
+            if self.allowed_dtypes is not None and dtypes is not None:
                 dtypes = dtypes.intersection(self.allowed_dtypes)
 
             # Construct the test name; device / dtype parts are handled outside.
@@ -992,6 +1011,7 @@ class ops(_TestParametrizer):
                     decorator_fn = partial(op.get_decorators, generic_cls.__name__,
                                            test.__name__, device_cls.device_type, dtype)
 
+                    #print("create test {} op={} dtype={} param_kwargs={} decorator_fn={}".format(test_name, op, dtype, param_kwargs, decorator_fn))
                     yield (test_wrapper, test_name, param_kwargs, decorator_fn)
                 except Exception as ex:
                     # Provides an error message for debugging before rethrowing the exception
@@ -1040,6 +1060,11 @@ class skipCUDAIf(skipIf):
 
     def __init__(self, dep, reason):
         super().__init__(dep, reason, device_type='cuda')
+
+class skipXPUIf(skipIf):
+
+    def __init__(self, dep, reason):                                           
+        super().__init__(dep, reason, device_type='xpu') 
 
 # Skips a test on Lazy if the condition is true.
 class skipLazyIf(skipIf):
@@ -1356,6 +1381,17 @@ def onlyCUDAAndPRIVATEUSE1(fn):
 
     return only_fn
 
+def onlyCUDAAndXPU(fn):
+    @wraps(fn)
+    def only_fn(self, *args, **kwargs):
+        if self.device_type not in ('cuda', 'xpu'):
+            reason = f"onlyCUDAAndXPU: doesn't run on {self.device_type}"
+            raise unittest.SkipTest(reason)
+
+        return fn(self, *args, **kwargs)
+
+    return only_fn
+
 def disablecuDNN(fn):
 
     @wraps(fn)
@@ -1562,6 +1598,9 @@ def skipLazy(fn):
 
 def skipMeta(fn):
     return skipMetaIf(True, "test doesn't work with meta tensors")(fn)
+
+def skipXPU(fn):
+    return skipXPUIf(True, "test doesn't work with XPU tensors")(fn)
 
 def skipXLA(fn):
     return skipXLAIf(True, "Marked as skipped for XLA")(fn)

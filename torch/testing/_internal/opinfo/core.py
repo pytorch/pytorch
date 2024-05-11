@@ -25,6 +25,7 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types,
     floating_and_complex_types_and,
     floating_types,
+    empty_types,
 )
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
@@ -95,18 +96,26 @@ class DecorateInfo:
         self.dtypes = dtypes
         self.active_if = active_if
 
+        print("init decorators: {} {} {} {} {}".format(self.cls_name, self.test_name, self.device_type, self.dtypes, self.active_if))
+
         # Validate dtypes
         if self.dtypes is not None:
             for dtype in self.dtypes:
                 assert isinstance(dtype, torch.dtype)
 
     def is_active(self, cls_name, test_name, device_type, dtype, param_kwargs):
+        print("is_active: {} {} {} {} {} {}".format(self.decorators, self.active_if, 
+                                                 (self.cls_name is None or self.cls_name == cls_name), 
+                                                 (self.test_name is None or self.test_name == test_name), 
+                                                 (self.device_type is None or self.device_type == device_type), 
+                                                 (self.dtypes is None or dtype in self.dtypes)))   
+        print("is_active details: {} {} {} {}".format(self.cls_name, cls_name, self.test_name, test_name))
         return (
             self.active_if
             and (self.cls_name is None or self.cls_name == cls_name)
             and (self.test_name is None or self.test_name == test_name)
             and (self.device_type is None or self.device_type == device_type)
-            and (self.dtypes is None or dtype in self.dtypes)
+            and (self.dtypes is None or G in self.dtypes)
             # Support callables over kwargs to determine if the decorator is active.
             and (
                 self.active_if(param_kwargs)
@@ -680,6 +689,9 @@ class OpInfo:
     # information about which tests to skip
     skips: Tuple = tuple()
 
+    # skip xpu by default
+    skipXPU: bool = True
+
     # decorators to apply to generated tests
     decorators: Tuple = tuple()
 
@@ -723,6 +735,9 @@ class OpInfo:
     # dtypes this function is expected to work with on CUDA
     dtypesIfCUDA: _dispatch_dtypes = None
 
+    # dtypes this function is expected to work with on XPU
+    dtypesIfXPU: _dispatch_dtypes = None
+
     # dtypes this function is expected to work with on ROCM
     dtypesIfROCM: _dispatch_dtypes = None
 
@@ -731,6 +746,9 @@ class OpInfo:
 
     # backward dtypes this function is expected to work with on CUDA
     backward_dtypesIfCUDA: _dispatch_dtypes = None
+
+    # backward dtypes this function is expected to work with on XPU
+    backward_dtypesIfXPU: _dispatch_dtypes = None
 
     # backward dtypes this function is expected to work with on ROCM
     backward_dtypesIfROCM: _dispatch_dtypes = None
@@ -945,6 +963,19 @@ class OpInfo:
                 else self.dtypes
             )
         )
+
+        self.backward_dtypesIfXPU = (
+            set(self.backward_dtypesIfXPU)
+            if self.backward_dtypesIfXPU is not None
+            else (
+                self.backward_dtypes
+                if self.backward_dtypes is not None
+                else self.dtypesIfXPU
+                if self.dtypesIfXPU is not None
+                else self.dtypes
+            )
+        )
+
         self.backward_dtypes = (
             set(self.backward_dtypes)
             if self.backward_dtypes is not None
@@ -954,6 +985,11 @@ class OpInfo:
         self.dtypesIfCUDA = (
             set(self.dtypesIfCUDA) if self.dtypesIfCUDA is not None else self.dtypes
         )
+
+        self.dtypesIfXPU = (
+            set(self.dtypesIfXPU) if self.dtypesIfXPU is not None else self.dtypes
+        )
+
         self.dtypesIfROCM = (
             set(self.dtypesIfROCM)
             if self.dtypesIfROCM is not None
@@ -990,6 +1026,19 @@ class OpInfo:
                 )
             else:
                 self.inplace_operator_variant = None
+
+        if self.skipXPU == True:
+            skip_dtypes= self.dtypesIfXPU
+            
+            if self.skips is not None:
+                #self.skips = (*self.skips, DecorateInfo(unittest.skip, 'TestCommon', 'test_compare_cpu',  device_type="xpu", dtypes=skip_dtypes))
+                self.skips = (*self.skips, DecorateInfo(unittest.skip, device_type="xpu", dtypes=None))
+            else:
+                #self.skips = (DecorateInfo(unittest.skip, 'TestCommon', 'test_compare_cpu',  device_type="xpu", dtypes=skip_dtypes))
+                self.skips = (DecorateInfo(unittest.skip, device_type="xpu", dtypes=None))
+            print("#### skipXPU on {} {} {}".format(self.name, skip_dtypes, self.skips))
+        else:
+            print("#### Don't skipXPU on {}".format(self.name))
 
         self.decorators = (*self.decorators, *self.skips)
 
@@ -1125,6 +1174,9 @@ class OpInfo:
             self.aliases = tuple(AliasInfo(a) for a in self.aliases)  # type: ignore[assignment]
         else:
             self.aliases = ()
+        
+        
+
 
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
@@ -1329,6 +1381,8 @@ class OpInfo:
     def get_decorators(self, test_class, test_name, device, dtype, param_kwargs):
         """Returns the decorators targeting the given test."""
         result = []
+        #import pdb
+        #pdb.set_trace()
         for decorator in self.decorators:
             if isinstance(decorator, DecorateInfo):
                 if decorator.is_active(
@@ -1345,6 +1399,9 @@ class OpInfo:
         device_type = torch.device(device_type).type
         if device_type == "cuda":
             return self.dtypesIfROCM if TEST_WITH_ROCM else self.dtypesIfCUDA
+        if device_type == "xpu":
+            return self.dtypesIfXPU
+
         return self.dtypes
 
     def supported_backward_dtypes(self, device_type):
@@ -1361,6 +1418,8 @@ class OpInfo:
                 if TEST_WITH_ROCM
                 else self.backward_dtypesIfCUDA
             )
+        elif device_type == "xpu":
+            backward_dtypes = self.backward_dtypesIfXPU
         else:
             backward_dtypes = self.backward_dtypes
 
@@ -1515,6 +1574,7 @@ class ReductionOpInfo(OpInfo):
             yield tuple(),
             {},
         ),
+        skipXPU: bool = True,
         # Options from the OpInfo base class
         **kwargs,
     ):
@@ -1538,7 +1598,7 @@ class ReductionOpInfo(OpInfo):
         # Override OpInfo defaults and call base class __init__
         kwargs.setdefault("inplace_variant", None)
         kwargs.setdefault("sample_inputs_func", sample_inputs_func)
-        super().__init__(name, promotes_int_to_float=promotes_int_to_float, **kwargs)
+        super().__init__(name, promotes_int_to_float=promotes_int_to_float, skipXPU = skipXPU, **kwargs)
 
         self.identity = identity
         self.nan_policy = nan_policy
@@ -2103,6 +2163,7 @@ class BinaryUfuncInfo(OpInfo):
         supports_rhs_python_scalar=True,  # Whether the operator allows Tensor x scalar inputs
         supports_one_python_scalar=False,  # Whether the operator allows scalar x tensor and tensor x scalar inputs
         supports_two_python_scalars=False,  # Whether the operator allows scalar x scalar inputs
+        skipXPU=True,
         **kwargs,
     ):
         self._original_binary_ufunc_args = locals().copy()
@@ -2123,6 +2184,7 @@ class BinaryUfuncInfo(OpInfo):
             sample_inputs_func=sample_inputs_func,
             reference_inputs_func=reference_inputs_func,
             error_inputs_func=make_error_inputs_elementwise_binary(error_inputs_func),
+            skipXPU=skipXPU,
             **kwargs,
         )
 
@@ -2451,6 +2513,7 @@ class UnaryUfuncInfo(OpInfo):
         reference_inputs_func=reference_inputs_elementwise_unary,
         sample_kwargs=lambda device, dtype, input: ({}, {}),
         reference_numerics_filter=None,  # Filters values in the range of the domain specified above but that should not be tested
+        skipXPU=True,
         **kwargs,
     ):
         self._original_unary_ufunc_args = locals().copy()
@@ -2460,8 +2523,10 @@ class UnaryUfuncInfo(OpInfo):
             dtypes=dtypes,
             sample_inputs_func=sample_inputs_func,
             reference_inputs_func=reference_inputs_func,
+            skipXPU=skipXPU,
             **kwargs,
         )
+        
         self.domain = domain
         self.handles_complex_extremal_values = handles_complex_extremal_values
         self.handles_large_floats = handles_large_floats
@@ -2593,6 +2658,7 @@ class SpectralFuncInfo(OpInfo):
         ndimensional: SpectralFuncType,
         sample_inputs_func=sample_inputs_spectral_ops,
         decorators=None,
+        skipXPU=True,
         **kwargs,
     ):
         self._original_spectral_func_args = dict(locals()).copy()
@@ -2613,6 +2679,7 @@ class SpectralFuncInfo(OpInfo):
             dtypes=dtypes,
             decorators=decorators,
             sample_inputs_func=sample_inputs_func,
+            skipXPU=skipXPU,
             **kwargs,
         )
         self.ref = ref
@@ -2631,6 +2698,7 @@ class ShapeFuncInfo(OpInfo):
         dtypesIfCUDA=None,
         dtypesIfROCM=None,
         sample_inputs_func=None,
+        skipXPU=True,
         **kwargs,
     ):
         super().__init__(
@@ -2639,6 +2707,7 @@ class ShapeFuncInfo(OpInfo):
             dtypesIfCUDA=dtypesIfCUDA,
             dtypesIfROCM=dtypesIfROCM,
             sample_inputs_func=sample_inputs_func,
+            skipXPU=skipXPU,
             **kwargs,
         )
         self.ref = ref

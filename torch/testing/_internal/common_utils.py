@@ -227,7 +227,7 @@ if os.getenv("SLOW_TESTS_FILE", ""):
 if os.getenv("DISABLED_TESTS_FILE", ""):
     disabled_tests_dict = maybe_load_json(os.getenv("DISABLED_TESTS_FILE", ""))
 
-NATIVE_DEVICES = ('cpu', 'cuda', 'meta', torch._C._get_privateuse1_backend_name())
+NATIVE_DEVICES = ('cpu', 'cuda', 'meta', 'xpu', torch._C._get_privateuse1_backend_name())
 
 check_names = ['orin', 'concord', 'galen', 'xavier', 'nano', 'jetson', 'tegra']
 IS_JETSON = any(name in platform.platform() for name in check_names)
@@ -389,6 +389,8 @@ def compose_parametrize_fns(old_parametrize_fn, new_parametrize_fn):
                      old_parametrize_fn=old_parametrize_fn,
                      new_parametrize_fn=new_parametrize_fn):
         old_tests = list(old_parametrize_fn(test, generic_cls, device_cls))
+        import pdb
+        pdb.set_trace()
         for (old_test, old_test_name, old_param_kwargs, old_dec_fn) in old_tests:
             for (new_test, new_test_name, new_param_kwargs, new_dec_fn) in \
                     new_parametrize_fn(old_test, generic_cls, device_cls):
@@ -403,6 +405,8 @@ def compose_parametrize_fns(old_parametrize_fn, new_parametrize_fn):
                                                    old_test_name)
 
                 def merged_decorator_fn(param_kwargs, old_dec_fn=old_dec_fn, new_dec_fn=new_dec_fn):
+                    import pdb
+                    pdb.set_trace()
                     return list(old_dec_fn(param_kwargs)) + list(new_dec_fn(param_kwargs))
 
                 yield (new_test, merged_test_name, full_param_kwargs, merged_decorator_fn)
