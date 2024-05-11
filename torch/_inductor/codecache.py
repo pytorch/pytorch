@@ -1402,7 +1402,8 @@ def x86_isa_checker() -> List[str]:
 
 
 invalid_vec_isa = InvalidVecISA()
-supported_vec_isa_list = [VecAVX512(), VecAVX2(), VecNEON()]
+supported_x86_vec_isa_list = [VecAVX512(), VecAVX2()]
+supported_vec_isa_list = [VecNEON()]
 
 
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
@@ -1413,11 +1414,25 @@ def valid_vec_isa_list() -> List[VecISA]:
     if sys.platform == "darwin" and platform.processor() == "arm":
         return [VecNEON()]
 
+    Arch = platform.machine()
     cur_os = sys.platform
-    if cur_os != "linux" and cur_os != "win32":
+    isa_list = []
+    """
+    Process Intel x86 ISAs.
+    Note: Arch value is x86_64 on Linux, and the value is AMD64 on Windows.
+    """
+    if Arch == "x86_64" or Arch == "AMD64":
+        if cur_os == "linux" or cur_os == "win32":
+            _cpu_supported_isa = x86_isa_checker()
+            for isa in supported_x86_vec_isa_list:
+                if str(isa) in _cpu_supported_isa:
+                    isa_list.append(isa)
+            return isa_list
+
+    if cur_os != "linux":
         return []
 
-    if platform.machine() == "s390x":
+    if Arch == "s390x":
         with open("/proc/cpuinfo") as _cpu_info:
             while True:
                 line = _cpu_info.readline()
@@ -1431,12 +1446,12 @@ def valid_vec_isa_list() -> List[VecISA]:
                             return [VecZVECTOR()]
         return []
 
-    isa_list = []
-    _cpu_supported_isa = x86_isa_checker()
-    for isa in supported_vec_isa_list:
-        if str(isa) in _cpu_supported_isa:
-            isa_list.append(isa)
-    return isa_list
+    with open("/proc/cpuinfo") as _cpu_info:
+        _cpu_info_content = _cpu_info.read()
+        for isa in supported_vec_isa_list:
+            if str(isa) in _cpu_info_content and isa:
+                isa_list.append(isa)
+        return isa_list
 
 
 def pick_vec_isa() -> VecISA:
