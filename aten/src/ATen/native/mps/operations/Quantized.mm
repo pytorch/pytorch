@@ -133,8 +133,8 @@ Tensor _weight_int4pack_mm_mps(const Tensor& A, const Tensor& B, int64_t qGroupS
       mtl_setBuffer(computeEncoder, qScaleAndZeros, 2);
       mtl_setBuffer(computeEncoder, C, 3);
       [computeEncoder setBytes:sizes.data() length:sizeof(uint32_t) * sizes.size() atIndex:4];
-      [computeEncoder dispatchThreads: MTLSizeMake(N, M, 1)
-                threadsPerThreadgroup: MTLSizeMake(std::min(maxThreadsPerGroup, M), 1, 1)];
+      [computeEncoder dispatchThreads:MTLSizeMake(N, M, 1)
+                threadsPerThreadgroup:MTLSizeMake(std::min(maxThreadsPerGroup, M), 1, 1)];
 #if _CAPTURE_KERNEL
       if (getMPSProfiler().isCapturing()) {
         getMPSProfiler().stopCapture(mpsStream);
