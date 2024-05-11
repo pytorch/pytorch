@@ -127,12 +127,36 @@ def _disable_dynamo_if_unsupported(single_tensor_fn=None):
         globals()[single_tensor_fn.__name__] = single_tensor_fn
 
     def wrapper(func):
+        import inspect
+
+        disabled_func = torch._disable_dynamo(func)
+        ps = inspect.signature(func).parameters
+        has_state_steps = True
+        try:
+            state_steps_ind = list(ps.keys()).index("state_steps")
+        except ValueError:
+            has_state_steps = False
+
+        # Today, there are cases where we stack state steps
+        # and pass them as the value arg of foreach ops.
+        # Having state steps on cuda as the value arg is not supported in eager,
+        # but this only occurs in the rare case that the user explicitly deletes
+        # the capturable flag. If capturable=True, this is not a problem.
         @functools.wraps(func)
-        def maybe_fallback(self, *args, **kwargs):
-            if is_compiling() and not kwargs.get("capturable", False):
-                return torch._disable_dynamo(func(self, *args, **kwargs))
+        def maybe_fallback(*args, **kwargs):
+            if is_compiling() and (
+                not kwargs.get("capturable", False)
+                and has_state_steps
+                and (args[state_steps_ind] and args[state_steps_ind][0].is_cuda)
+                or (
+                    "state_steps" in kwargs
+                    and kwargs["state_steps"]
+                    and kwargs["state_steps"][0].is_cuda
+                )
+            ):
+                return disabled_func(*args, **kwargs)
             else:
-                return func(self, *args, **kwargs)
+                return func(*args, **kwargs)
 
         return maybe_fallback
 
