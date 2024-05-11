@@ -228,7 +228,7 @@ Adagrad.__doc__ = (
         {_differentiable_doc}
         fused (bool, optional): whether the fused implementation (CPU only) is used.
             Currently, `torch.float64`, `torch.float32`, `torch.float16`, and `torch.bfloat16`
-            are supported. (default: None). Please note that the fused implementations does not
+            are supported. (default: None). Please note that the fused implementation does not
             support sparse or complex gradients.
     .. _Adaptive Subgradient Methods for Online Learning and Stochastic
         Optimization: http://jmlr.org/papers/v12/duchi11a.html
