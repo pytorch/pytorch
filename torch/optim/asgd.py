@@ -246,9 +246,7 @@ def _single_tensor_asgd(
             param.add_(grad, alpha=-eta_value)  # update parameter
 
         # averaging
-        # The compiler will only launch one kernel
-        # and it does not support data-dependent control flow
-        if torch._utils.is_compiling() or capturable or mu.item() != 1:
+        if capturable or mu.item() != 1:
             ax.add_(param.sub(ax).mul_(mu))
         else:
             ax.copy_(param)
@@ -377,7 +375,7 @@ def _multi_tensor_asgd(
             torch._foreach_mul_(new_etas, lr)
             torch._foreach_copy_(grouped_etas, new_etas)
         else:
-            step = _get_value(grouped_state_steps[0])
+            step = grouped_state_steps[0].item()
             new_etas = []
             new_mus = []
 
