@@ -129,6 +129,20 @@ def are_all_mutations_under_no_grad_or_inference_mode(t):
         )
 
 
+def was_inductor_storage_resized(t):
+    if is_traceable_wrapper_subclass(t):
+        attrs, _ = t.__tensor_flatten__()
+        if any(was_inductor_storage_resized(getattr(t, attr)) for attr in attrs):
+            raise RuntimeError(
+                f"storage resizing is not supported on tensor subclass: {type(t)}"
+            )
+    elif not isinstance(t, torch.Tensor):
+        return False
+    else:
+        assert isinstance(t, FunctionalTensor)
+        return torch._functionalize_was_inductor_storage_resized(t.elem)
+
+
 # f_arg here is either
 # (1) A FunctionalTensor(_to_functional_tensor(FakeTensor))
 # (2) A traceable tensor subclass that holds a FunctionalTensor
@@ -383,8 +397,13 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
             ]:
                 suffix = True
                 # Can only copy_/set_ into an input, and can only do so once
-                assert n.args[0] in placeholders
-                placeholders.remove(n.args[0])
+                # this is mostly a hack to avoid failing XLA tests.
+                # See https://github.com/pytorch/pytorch/pull/122434#issuecomment-2101012113
+                if "set_buffer_donor_" not in str(n.args[0]):
+                    assert (
+                        n.args[0] in placeholders
+                    ), f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
+                    placeholders.remove(n.args[0])
                 mutation_count += 1
             else:
                 assert (
@@ -401,8 +420,11 @@ def propagate_input_mutation_stacktraces(fx_g: torch.fx.Graph) -> None:
         if isinstance(n.target, torch._ops.OpOverload):
             if n.target is torch.ops.aten.copy_.default:
                 # Can only copy_ into an input, and can only do so once
-                assert n.args[0] in placeholders
-                placeholders.remove(n.args[0])
+                if "set_buffer_donor_" not in str(n.args[0]):
+                    assert (
+                        n.args[0] in placeholders
+                    ), f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
+                    placeholders.remove(n.args[0])
                 copy_from_node = n.args[1]
                 # Pre-condition: every node has a "stack_trace" field in its meta,
                 # but copy_() nodes do not (since we manually added them during functionalization).
@@ -418,10 +440,13 @@ def _check_if_mutation_can_be_in_graph(
     mutations_hidden_from_autograd,
     mutations_under_no_grad_or_inference_mode,
     mutates_storage_metadata,
+    mutation_inductor_storage_resize,
     requires_grad,
 ):
     if keep_input_mutations:
-        in_graph = (mutates_data or mutates_storage_metadata) and (
+        in_graph = (
+            mutates_data or mutates_storage_metadata or mutation_inductor_storage_resize
+        ) and (
             (not mutates_metadata and not requires_grad)
             or mutations_hidden_from_autograd
             or mutations_under_no_grad_or_inference_mode
@@ -431,8 +456,17 @@ def _check_if_mutation_can_be_in_graph(
     # See Note [set_() Input Mutations in AOTAutograd]
     # If there was a `set_()`, we require that all mutations were under no_grad,
     # so we can (safely) emit the set_() in the graph at runtime
-    if mutates_storage_metadata:
-        assert (
-            in_graph
-        ), "input tensor encountered a set_(), but had other mutations that prevented us from including it in the graph safely"
+    # resize_() gets the same treatment
+    if mutation_inductor_storage_resize or mutates_storage_metadata:
+        op_name = "resize_" if mutation_inductor_storage_resize else "set_"
+        assert in_graph, f"""\
+Encountered a {op_name} on a graph input, but the input has other mutations that we cannot
+keep in the graph. This is not supported today. Current state:
+  keep_input_mutations={keep_input_mutations}
+  mutates_data={mutates_data}
+  mutates_metadata={mutates_metadata}
+  mutations_hidden_from_autograd={mutations_hidden_from_autograd}
+  mutations_under_no_grad_or_inference_mode={mutations_under_no_grad_or_inference_mode}
+  mutation_inductor_storage_resize={mutation_inductor_storage_resize}
+  requires_grad={requires_grad}"""
     return in_graph
