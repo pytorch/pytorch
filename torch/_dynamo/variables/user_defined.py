@@ -2,6 +2,7 @@
 
 import collections
 import contextlib
+import enum
 import functools
 import importlib
 import inspect
@@ -107,11 +108,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         from .. import trace_rules
-        from . import ConstantVariable
+        from . import ConstantVariable, EnumVariable
         from .builder import VariableBuilder
 
         if name == "__name__":
             return ConstantVariable.create(self.value.__name__)
+        elif name == "__qualname__":
+            return ConstantVariable.create(self.value.__qualname__)
 
         source = AttrSource(self.source, name) if self.source is not None else None
         try:
@@ -142,14 +145,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if self.value is collections.OrderedDict and name == "fromkeys":
             return super().var_getattr(tx, name)
 
-        if name in getattr(self.value, "__dict__", {}) or (
+        if ConstantVariable.is_literal(obj):
+            return ConstantVariable.create(obj)
+        elif isinstance(obj, enum.Enum):
+            return EnumVariable(obj)
+        elif name in getattr(self.value, "__dict__", {}) or (
             self.value.__module__.startswith("torch.")
             or self.value.__module__ == "torch"
         ):
             if source:
                 return VariableBuilder(tx, source)(obj)
-        elif ConstantVariable.is_literal(obj):
-            return ConstantVariable.create(obj)
 
         return super().var_getattr(tx, name)
 
@@ -572,6 +577,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 keys = list(self.value.keys())
                 assert all(map(ConstantVariable.is_literal, keys))
                 install_guard(self.source.make_guard(GuardBuilder.DICT_CONST_KEYS))
+                tx.output.guard_on_key_order.add(self.source.name())
                 return TupleVariable([ConstantVariable.create(k) for k in keys])
 
             if (
@@ -583,6 +589,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ):
                 assert not kwargs
                 assert self.source  # OrderedDict, dict subtypes must always have source
+
+                # TODO(anijain2305) - Why do we need to guard on all keys?
                 install_guard(self.source.make_guard(GuardBuilder.DICT_CONST_KEYS))
                 return ConstantVariable.create(
                     args[0].as_python_constant() in self.value
@@ -601,6 +609,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                             [key, self.odict_getitem(tx, key)],
                         )
                     )
+                tx.output.guard_on_key_order.add(self.source.name())
                 return TupleVariable(items)
 
             if method is collections.OrderedDict.__getitem__ and len(args) == 1:
@@ -696,6 +705,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             example_value = self.value(*args, **kwargs)
             source = RandomValueSource(random_call_index)
             tx.output.random_calls.append((self.value, args, kwargs))
+            # TODO: arguably, this should route to wrap_symint/wrap_symfloat
+            # (currently hypothetical), but I'm not going to poke my hand in
+            # this nest for now
             return VariableBuilder(tx, source).wrap_unspecialized_primitive(
                 example_value
             )
@@ -821,16 +833,22 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             subobj = NO_SUCH_SUBOBJ
             getattr_fn = self._check_for_getattr()
             if isinstance(getattr_fn, types.FunctionType):
+                # Dynamo is going to trace the __getattr__ function with
+                # args=name. Set the source accordingly.
+                new_source = None
+                if self.source:
+                    new_source = AttrSource(self.source, "__getattr__")
                 return variables.UserMethodVariable(
-                    getattr_fn, self, source=source
+                    getattr_fn, self, source=new_source
                 ).call_function(tx, [ConstantVariable.create(name)], {})
             elif getattr_fn is not None:
                 unimplemented("UserDefined with non-function __getattr__")
 
         if isinstance(subobj, property):
-            # Rewrite the source being explicit about reading it statically.
             if self.source:
-                source = AttrSource(self.source, name, get_static=True)
+                # Read the class attribute to reach the property
+                source = AttrSource(AttrSource(self.source, "__class__"), name)
+                # Get the getter function
                 source = AttrSource(source, "fget")
             return variables.UserMethodVariable(
                 subobj.fget, self, source=source
@@ -901,6 +919,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return VariableBuilder(tx, source)(subobj)
             elif ConstantVariable.is_literal(subobj):
                 return ConstantVariable.create(subobj)
+            elif (
+                type(subobj) == torch.utils._pytree.TreeSpec
+                or type(subobj) == torch.utils._pytree.LeafSpec
+                or type(value) == torch.utils._pytree.TreeSpec
+            ):
+                from .builder import SourcelessBuilder
+
+                return SourcelessBuilder.create(tx, subobj)
 
         if (
             name not in getattr(value, "__dict__", {})
@@ -985,6 +1011,30 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             tx,
             ODictGetItemSource(self.source, index),
         )(collections.OrderedDict.__getitem__(self.value, key.as_python_constant()))
+
+
+class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
+    def __init__(
+        self,
+        value,
+        **kwargs,
+    ):
+        super().__init__(value, **kwargs)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        fn_variable = variables.UserFunctionVariable(self.value.forward.__func__)
+        args = [self] + args
+        return tx.inline_user_function_return(
+            fn_variable,
+            args,
+            kwargs,
+        )
 
 
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):

@@ -13,6 +13,7 @@ from typing_extensions import Self
 
 import torch
 import torch.autograd.profiler as prof
+from torch._C import _get_privateuse1_backend_name
 from torch._C._profiler import (
     _add_execution_trace_observer,
     _disable_execution_trace_observer,
@@ -131,8 +132,8 @@ class _KinetoProfile:
             self.use_device = "cuda"
         elif ProfilerActivity.XPU in self.activities:
             self.use_device = "xpu"
-        else:
-            self.use_device = "privateuseone"
+        elif ProfilerActivity.PrivateUse1 in self.activities:
+            self.use_device = _get_privateuse1_backend_name()
 
         # user-defined metadata to be amended to the trace
         self.preset_metadata: Dict[str, str] = dict()
@@ -145,19 +146,20 @@ class _KinetoProfile:
         self.stop_trace()
 
     def prepare_trace(self):
-        self.profiler = prof.profile(
-            use_cuda=(ProfilerActivity.CUDA in self.activities),
-            use_cpu=(ProfilerActivity.CPU in self.activities),
-            use_mtia=(ProfilerActivity.MTIA in self.activities),
-            use_device=self.use_device,
-            record_shapes=self.record_shapes,
-            with_flops=self.with_flops,
-            profile_memory=self.profile_memory,
-            with_stack=self.with_stack,
-            with_modules=self.with_modules,
-            use_kineto=True,
-            experimental_config=self.experimental_config,
-        )
+        if self.profiler is None:
+            self.profiler = prof.profile(
+                use_cuda=(ProfilerActivity.CUDA in self.activities),
+                use_cpu=(ProfilerActivity.CPU in self.activities),
+                use_mtia=(ProfilerActivity.MTIA in self.activities),
+                use_device=self.use_device,
+                record_shapes=self.record_shapes,
+                with_flops=self.with_flops,
+                profile_memory=self.profile_memory,
+                with_stack=self.with_stack,
+                with_modules=self.with_modules,
+                use_kineto=True,
+                experimental_config=self.experimental_config,
+            )
         self.profiler._prepare_trace()
 
     def start_trace(self):
@@ -206,7 +208,8 @@ class _KinetoProfile:
 
     def export_chrome_trace(self, path: str):
         """
-        Exports the collected trace in Chrome JSON format.
+        Exports the collected trace in Chrome JSON format. If kineto is enabled, only
+        last cycle in schedule is exported.
         """
         assert self.profiler
         if path.endswith(".gz"):
@@ -818,7 +821,10 @@ class ExecutionTraceObserver(_ITraceObserver):
 
         if self._registered:
             self.stop()
-            _save_triton_kernels()
+            try:
+                _save_triton_kernels()
+            except Exception as e:
+                warn(f"Execution trace failed to save kernels: {e}")
             _remove_execution_trace_observer()
             self._registered = False
 
