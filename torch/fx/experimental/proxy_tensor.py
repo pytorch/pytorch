@@ -437,13 +437,16 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     if func is torch.ops.aten.lift_fresh.default:
         func = torch.ops.aten.lift_fresh_copy.default
 
-    proxy_out = proxy_mode.tracer.create_proxy(
-        "call_function",
-        func,
-        proxy_args,
-        proxy_kwargs,
-        name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__),
-    )
+    if func == torch.ops.aten.alias.default:
+        proxy_out = proxy_args[0]
+    else:
+        proxy_out = proxy_mode.tracer.create_proxy(
+            "call_function",
+            func,
+            proxy_args,
+            proxy_kwargs,
+            name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__),
+        )
 
     # This makes DCE marginally less likely to DCE inplace operations.
     # It is not strictly necessary
