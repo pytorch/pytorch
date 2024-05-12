@@ -352,7 +352,7 @@ test_inductor_cpp_wrapper_abi_compatible() {
   export TORCHINDUCTOR_ABI_COMPATIBLE=1
   echo "Testing Inductor cpp wrapper mode with TORCHINDUCTOR_ABI_COMPATIBLE=1"
   # cpu stack allocation causes segfault and needs more investigation
-  python test/run_test.py --include inductor/test_cpu_cpp_wrapper
+  TORCHINDUCTOR_STACK_ALLOCATION=0 python test/run_test.py --include inductor/test_cpu_cpp_wrapper
   python test/run_test.py --include inductor/test_cuda_cpp_wrapper
 }
 
@@ -523,8 +523,8 @@ test_single_dynamo_benchmark() {
 }
 
 test_inductor_micro_benchmark() {
-  TEST_REPORTS_DIR=$(pwd)/test/test-micro-reports
-  python benchmarks/gpt_fast/benchmark.py
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  python benchmarks/gpt_fast/benchmark.py --output "${TEST_REPORTS_DIR}/gpt_fast_benchmark.csv"
 }
 
 test_dynamo_benchmark() {
