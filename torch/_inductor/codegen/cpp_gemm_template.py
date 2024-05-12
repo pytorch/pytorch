@@ -83,16 +83,23 @@ extern "C"
         int64_t k_block_end = K0_blocks;
     {%- endif %}
         for (int64_t mc = m_block_start; mc < m_block_end; mc += Mc_blocks) {
-            int64_t m_start = mc * M0;
-            int64_t m_end = std::min((mc + Mc_blocks) * M0, M);
+            const int64_t m_start = mc * M0;
+            const int64_t m_end = std::min((mc + Mc_blocks) * M0, M);
+            const int64_t m_size = m_end - m_start;
             for (int64_t nc = n_block_start; nc < n_block_end; ++nc) {
-                int64_t n_start = nc * N0;
-                // TODO(jgong5): use float32 temporary buffer to support bfloat16/float16 gemm
+                const int64_t n_start = nc * N0;
+                const int64_t n_size = N0;
+                {%- if use_local_acc %}
+                {{ kernel.define_buffer("acc_local_buf", ["m_end - m_start", "N0"]) }}
+                {%- set acc = kernel.local_buffers["acc_local_buf"] %}
+                {%- else %}
+                {%- set acc = kernel.slice_nd(Y, [("m_start", "m_end"), ("n_start", "n_start + N0")]) %}
+                {%- endif %}
                 {%- if inp is not none and beta != 0 %}
-                for (int64_t m = m_start; m < m_end; ++m) {
+                for (int64_t m = 0; m < m_size; ++m) {
                     #pragma omp simd
-                    for (int64_t n = n_start; n < n_start + N0; ++n) {
-                        {{kernel.index(Y, ["m", "n"])}} = {{beta}} * {{kernel.index(inp, ["m", "n"])}};
+                    for (int64_t n = 0; n < n_size; ++n) {
+                        {{kernel.index(acc, ["m", "n"])}} = {{beta}} * {{kernel.index(inp, ["m + m_start", "n + n_start"])}};
                     }
                 }
                 {%- endif %}
@@ -102,17 +109,18 @@ extern "C"
                     {%- set tile_X = kernel.slice_nd(X, [("m_start", "m_end"), ("k_start", "k_end")]) %}
                     {%- set tile_W_3d = kernel.slice_nd(W, [("nc", "nc + 1"), ("k_start", "k_end"), ()]) %}
                     {%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
-                    {%- set tile_Y = kernel.slice_nd(Y, [("m_start", "m_end"), ("n_start", "n_start + N0")]) %}
                     {%- if inp is not none and beta != 0 %}
-                    {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, tile_Y, accum=True)|indent(20, false) }}
+                    {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=True)|indent(20, false) }}
                     {%- else %}
                     if (kc == k_block_start) {
-                        {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, tile_Y, accum=False)|indent(24, false) }}
+                        {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=False)|indent(24, false) }}
                     } else {
-                        {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, tile_Y, accum=True)|indent(24, false) }}
+                        {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=True)|indent(24, false) }}
                     }
                     {%- endif %}
                 }
+                {%- set tile_Y = kernel.slice_nd(Y, [("m_start", "m_end"), ("n_start", "n_start + N0")]) %}
+                {{ kernel.store_output(tile_Y, acc, epilogue_nodes, ("m_start", "n_start"))|indent(16, false) }}
             }
         }
     }
@@ -328,7 +336,6 @@ class CppPackedGemmTemplate(CppTemplate):
         epilogue_nodes: Optional[List[ir.IRNode]] = None,
         **kwargs,
     ) -> str:
-        assert not epilogue_nodes, "Epilogue nodes are not supported for GEMM template."
         assert len(self.input_nodes) >= 2
 
         X, W = self.input_nodes[0], self.input_nodes[1]
@@ -339,9 +346,12 @@ class CppPackedGemmTemplate(CppTemplate):
             # Use the updated prepacked weight buffer
             W = template_buffer_node.inputs[1]
             Y = template_buffer_node
-        if epilogue_nodes is not None and len(epilogue_nodes) > 0:
+
+        # TODO(jgong5): support local accumulation
+        use_local_acc = False
+        if epilogue_nodes:
             Y = cast(ir.Buffer, epilogue_nodes[-1])
-        assert self.output_node is not None
+            assert Y.get_name() in V.kernel.inplace_update_buffers
 
         micro_gemm = create_micro_gemm(
             f"{kernel.kernel_name}_micro_gemm",
@@ -367,6 +377,7 @@ class CppPackedGemmTemplate(CppTemplate):
             is_dynamic_M=self.is_dynamic_M,
             template=self,
             kernel=kernel,
-            epilogues=epilogue_nodes,
+            epilogue_nodes=epilogue_nodes,
+            use_local_acc=use_local_acc,
         )
         return self._template_from_string(GEMM_TEMPLATE).render(**options)
