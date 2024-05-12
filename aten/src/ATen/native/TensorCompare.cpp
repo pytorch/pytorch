@@ -21,7 +21,6 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_aminmax_native.h>
 #include <ATen/ops/_assert_async_native.h>
 #include <ATen/ops/_assert_scalar_native.h>
 #include <ATen/ops/_functional_assert_async_native.h>
@@ -878,17 +877,6 @@ std::tuple<Tensor, Tensor> qmin(const Tensor& self, int64_t dim, bool keepdim) {
       at::_make_per_tensor_quantized_tensor(
           min, self.q_scale(), self.q_zero_point()),
       min_indices);
-}
-
-// DEPRECATED: Use at::aminmax instead
-std::tuple<Tensor, Tensor> _aminmax(
-    const Tensor& self,
-    int64_t dim,
-    bool keepdim) {
-  TORCH_WARN_ONCE(
-      "_aminmax is deprecated as of PyTorch 1.11 and will be removed in a future release. Use aminmax instead."
-      " This warning will only appear once per process.");
-  return at::aminmax(self, dim, keepdim);
 }
 
 TORCH_IMPL_FUNC(clamp_out)
