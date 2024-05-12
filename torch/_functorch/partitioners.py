@@ -96,7 +96,10 @@ def _extract_graph_with_inputs_outputs(joint_graph, inputs, outputs):
         env[node] = new_node
 
     for node in joint_graph.nodes:
-        if node in inputs:
+        if node in env:
+            # Node must be one of our inputs. (Any member of env which wasn't an
+            # input to start must have been created by this loop and won't be in
+            # joint_graph.nodes).
             continue
         elif node.op == "placeholder":
             env[node] = InvalidNode
