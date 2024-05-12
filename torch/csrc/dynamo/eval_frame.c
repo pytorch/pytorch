@@ -30,7 +30,6 @@ inline static void eval_frame_callback_set(PyObject* obj) {
   PyThread_tss_set(&eval_frame_callback_key, obj);
 }
 
-
 // 3.13 Not supported at all. See cpython_defs.c for hints
 #if !(IS_PYTHON_3_13_PLUS)
 
@@ -682,7 +681,8 @@ static PyObject* _custom_eval_frame(
   }
 }
 
-#else
+#else // IS_PYTHON_3_13_PLUS
+
 // Fake definitions for everything we removed
 
 typedef struct THPPyInterpreterFrame {
@@ -693,7 +693,7 @@ typedef struct THPPyInterpreterFrame {
 inline static void enable_eval_frame_shim(PyThreadState* tstate) {}
 inline static void enable_eval_frame_default(PyThreadState* tstate) {}
 
-static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {};
+static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {NULL};
 
 static PyTypeObject THPPyInterpreterFrameType = {
     PyVarObject_HEAD_INIT(NULL, 0)
