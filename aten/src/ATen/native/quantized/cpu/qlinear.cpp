@@ -316,7 +316,7 @@ at::Tensor PackedLinearWeight::apply_with_input_q_dq_qweight_dq_output_fp32_impl
       fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
 
   auto input_contig = input.expect_contiguous();
-  const auto* input_ptr = input_contig->data_ptr<float>();
+  const auto* input_ptr = input_contig->const_data_ptr<float>();
 
   TORCH_CHECK(
       input.dim() >= 2,
@@ -485,7 +485,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl_xnnp(
 
     xnn_operator_t xnnp_op = nullptr;
 
-    const float* weight_scales_data = w_scales.data_ptr<float>();
+    const float* weight_scales_data = w_scales.const_data_ptr<float>();
 
     // prepare weights
     underlying_t w_zp = static_cast<underlying_t>(
@@ -931,7 +931,6 @@ static at::Tensor linear_int8_with_onednn_weight(
     c10::string_view& unary_post_op_algorithm) {
   using ideep::tensor;
   const int64_t dim = input.dim();
-  output_scale = 1.0f / output_scale;
   TORCH_CHECK(input.scalar_type() == c10::ScalarType::Byte,
       "qlinear with mkldnn tensor: data type of input should be uint8 (unsigned char).");
   TORCH_CHECK(onednn_weight.scalar_type() == c10::ScalarType::Char,
