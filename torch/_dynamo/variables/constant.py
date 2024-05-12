@@ -20,8 +20,6 @@ _type_to_assert_reason = {
     # not possible. This is a solvable problem, but one we have not taken on yet. As such, input sets are not allowed to
     # become SetVariables. The solution here is to create a ConstantSetVariable that is more like a ConstantVariable.
     # As this does not exist, we cannot add sets to this invariant.
-    list: "List types must use ListVariable.",
-    dict: "Dict types must use ConstDictVariable.",
     torch.Tensor: "Tensor types must use TensorVariable.",
     torch.SymInt: "SymInts must use SymNodeVariable. "
     "If the underlying value is static, we will create a ConstantVariable and specialize.",
@@ -34,12 +32,10 @@ class ConstantVariable(VariableTracker):
     def create(value, **kwargs) -> VariableTracker:
         source = kwargs.get("source", None)
         is_literal = ConstantVariable.is_literal(value)
-        if not is_literal:
-            for disallowed_type, reason in _type_to_assert_reason.items():
-                assert not isinstance(value, disallowed_type), reason
 
-        # Routing for list and tuple literals.
-        if is_literal and isinstance(value, (list, tuple)):
+        # list and tuple should not be wrapped as ConstantVariable.
+        # This is workaround for legacy code where we call ConstantVariable.create with list and tuple.
+        if isinstance(value, (list, tuple)):
             items = []
             for i, x in enumerate(value):
                 item_source = GetItemSource(source, i) if source else None
@@ -52,6 +48,10 @@ class ConstantVariable(VariableTracker):
                     )
                 )
             return variables.BaseListVariable.cls_for(type(value))(items, **kwargs)
+
+        if not is_literal:
+            for disallowed_type, reason in _type_to_assert_reason.items():
+                assert not isinstance(value, disallowed_type), reason
 
         return ConstantVariable(value, **kwargs)
 
@@ -102,7 +102,7 @@ class ConstantVariable(VariableTracker):
         if type(obj) in common_constant_types:
             return True
         # The structure within is_literal get routed to variables.BaseListVariable
-        if type(obj) in (list, tuple, set, frozenset, torch.Size):
+        if type(obj) in (set, frozenset, torch.Size):
             return all(ConstantVariable.is_literal(x) for x in obj)
         return False
 
