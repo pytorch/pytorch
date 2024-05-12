@@ -579,7 +579,7 @@ void SerializeTensorData(const SerializeParams<float>& params) {
       BlobSerializationOptions_FloatFormat_FLOAT_BFLOAT16) {
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     std::unique_ptr<float[]> tmp_buffer;
-    const float* src = nullptr
+    const float* src = nullptr;
     if (params.context.device() == CPU) {
       src = params.input.data();
     } else {
@@ -1023,7 +1023,7 @@ DESERIALIZE_IMPL(float, FMT_BFLOAT16) {
       params.tensor_proto.raw_data().data());
 
   // If we are on a big-endian machine, byte-swap the serialized data.
-  const fbgemm::bfloat16* src = nullptr
+  const fbgemm::bfloat16* src = nullptr;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   std::unique_ptr<fbgemm::bfloat16[]> bswap_buffer;
   if (kIsLittleEndian) {
@@ -1038,7 +1038,7 @@ DESERIALIZE_IMPL(float, FMT_BFLOAT16) {
   // bfloat16 to float conversion.
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   std::unique_ptr<float[]> tmp_buffer;
-  float* dest = nullptr
+  float* dest = nullptr;
   if (params.context.device() == CPU) {
     dest = params.dest.data();
   } else {
