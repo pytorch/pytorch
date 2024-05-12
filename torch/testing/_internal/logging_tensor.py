@@ -136,7 +136,8 @@ class LoggingTensorHandler(logging.Handler):
             self.tracebacks_list.append(record.traceback)
 
 def log_input(name: str, var: object):
-    logging.getLogger("LoggingTensor").info("input %s %s %s", (name,), {}, var)
+    # likely an error, unsure of how to fix. See #125031
+    logging.getLogger("LoggingTensor").info("input", (name,), {}, var)  # noqa: PLE1205
 
 class GatherTraceback(logging.Filter):
     def __init__(self, python=True, script=True, cpp=False):
