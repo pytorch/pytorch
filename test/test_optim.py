@@ -1,6 +1,5 @@
 # Owner(s): ["module: optimizer"]
 import functools
-import itertools
 import math
 import tempfile
 from typing import Any, Dict, Tuple
@@ -22,12 +21,11 @@ from torch.testing._internal.common_optimizers import (
     optim_db, optims, OptimizerErrorEnum, _get_optim_inputs_including_global_cliquey_kwargs, TensorTracker)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, largeTensorTest, onlyCPU, onlyCUDA, skipMPS, TEST_WITH_ROCM, onlyNativeDeviceTypes)
-from torch.testing._internal.common_utils import markDynamoStrictTest, parametrize, run_tests, TestCase
+from torch.testing._internal.common_utils import markDynamoStrictTest, parametrize, run_tests, TestCase, TEST_WITH_TORCHDYNAMO
 from torch.testing._internal.common_cuda import _create_scaling_case
 from torch.testing._internal.common_dtype import floating_types_and
 
 FP16_REDUCED_PRECISION = {'atol': 1e-5, 'rtol': 1e-4}
-
 
 def rosenbrock(tensor):
     assert tensor.size() == torch.Size([2]), f"Requires tensor with 2 scalars but got {tensor.size()}"
@@ -126,51 +124,55 @@ class TestOptimRenewed(TestCase):
     @optims(optim_db, dtypes=[torch.float32])
     def test_forloop_goes_right_direction(self, device, dtype, optim_info, contiguous, with_lrsched):
         optim_cls = optim_info.optim_cls
-        optim_inputs = optim_info.optim_inputs_func(device=device)
         schedulers_constructors = optim_info.scheduler_inputs if with_lrsched else [None]
-        for optim_input, schedulers_constructor in itertools.product(optim_inputs, schedulers_constructors):
-            if "foreach" in optim_info.supported_impls:
-                optim_input.kwargs["foreach"] = False  # force forloop
-            if contiguous:
-                weight = Parameter(torch.randn((10, 5), device=device, dtype=dtype))
-                bias = Parameter(torch.randn((10), device=device, dtype=dtype))
-            else:
-                weight = Parameter(torch.randn((10, 5, 2), device=device, dtype=dtype)[..., 0])
-                bias = Parameter(torch.randn((10, 2), device=device, dtype=dtype)[..., 0])
-            input = torch.randn(5, device=device, dtype=dtype)
 
-            optimizer = optim_cls([weight, bias], **optim_input.kwargs)
-            schedulers = [s(optimizer) for s in (schedulers_constructor if schedulers_constructor else [])]
-
-            def closure():
-                optimizer.zero_grad()
-                loss = (weight.mv(input) + bias).pow(2).sum()
-                loss.backward()
-                if optim_info.only_supports_sparse_grads:
-                    # For this test, we naively convert the Tensor layout, which we know does
-                    # NOT represent the expected use case for optims like SparseAdam!
-                    weight.grad = weight.grad.to_sparse()
-                    bias.grad = bias.grad.to_sparse()
-                return loss
-
-            initial_value = closure().item()
-            for _ in range(20):
-                if optim_info.step_requires_closure:
-                    loss = optimizer.step(closure)
+        for schedulers_constructor in schedulers_constructors:
+            # with tensor LR we need fresh inputs for each scheduler
+            # or mutating it will carry across iters
+            optim_inputs = optim_info.optim_inputs_func(device=device)
+            for optim_input in optim_inputs:
+                if "foreach" in optim_info.supported_impls:
+                    optim_input.kwargs["foreach"] = False  # force forloop
+                if contiguous:
+                    weight = Parameter(torch.randn((10, 5), device=device, dtype=dtype))
+                    bias = Parameter(torch.randn((10), device=device, dtype=dtype))
                 else:
-                    loss = closure()
-                    optimizer.step()
+                    weight = Parameter(torch.randn((10, 5, 2), device=device, dtype=dtype)[..., 0])
+                    bias = Parameter(torch.randn((10, 2), device=device, dtype=dtype)[..., 0])
+                input = torch.randn(5, device=device, dtype=dtype)
 
-                for scheduler in schedulers:
-                    if isinstance(scheduler, ReduceLROnPlateau):
-                        scheduler.step(loss)
+                optimizer = optim_cls([weight, bias], **optim_input.kwargs)
+                schedulers = [s(optimizer) for s in (schedulers_constructor if schedulers_constructor else [])]
+
+                def closure():
+                    optimizer.zero_grad()
+                    loss = (weight.mv(input) + bias).pow(2).sum()
+                    loss.backward()
+                    if optim_info.only_supports_sparse_grads:
+                        # For this test, we naively convert the Tensor layout, which we know does
+                        # NOT represent the expected use case for optims like SparseAdam!
+                        weight.grad = weight.grad.to_sparse()
+                        bias.grad = bias.grad.to_sparse()
+                    return loss
+
+                initial_value = closure().item()
+                for _ in range(20):
+                    if optim_info.step_requires_closure:
+                        loss = optimizer.step(closure)
                     else:
-                        scheduler.step()
+                        loss = closure()
+                        optimizer.step()
 
-            if optim_input.kwargs.get("maximize", False):
-                self.assertGreater(closure().item(), initial_value)
-            else:
-                self.assertLess(closure().item(), initial_value)
+                    for scheduler in schedulers:
+                        if isinstance(scheduler, ReduceLROnPlateau):
+                            scheduler.step(loss)
+                        else:
+                            scheduler.step()
+
+                if optim_input.kwargs.get("maximize", False):
+                    self.assertGreater(closure().item(), initial_value)
+                else:
+                    self.assertLess(closure().item(), initial_value)
 
 
     @onlyCUDA
@@ -179,43 +181,46 @@ class TestOptimRenewed(TestCase):
     @optims(optim_db, dtypes=[torch.float32])
     def test_forloop_goes_right_direction_multigpu(self, device, dtype, optim_info, with_lrsched):
         optim_cls = optim_info.optim_cls
-        optim_inputs = optim_info.optim_inputs_func(device=device)
         schedulers_constructors = optim_info.scheduler_inputs if with_lrsched else [None]
-        for optim_input, schedulers_constructor in itertools.product(optim_inputs, schedulers_constructors):
-            if "foreach" in optim_info.supported_impls:
-                optim_input.kwargs["foreach"] = False  # force forloop
+        for schedulers_constructor in schedulers_constructors:
+            # We need a fresh set of inputs if we have a tensor LR
+            # to not carry mutations across iterations.
+            optim_inputs = optim_info.optim_inputs_func(device=device)
+            for optim_input in optim_inputs:
+                if "foreach" in optim_info.supported_impls:
+                    optim_input.kwargs["foreach"] = False  # force forloop
 
-            weight = Parameter(torch.randn((10, 5), device="cuda:0", dtype=dtype))
-            bias = Parameter(torch.randn((10), device="cuda:1", dtype=dtype))
-            inpt = torch.randn(5, device="cuda:0", dtype=dtype)
+                weight = Parameter(torch.randn((10, 5), device="cuda:0", dtype=dtype))
+                bias = Parameter(torch.randn((10), device="cuda:1", dtype=dtype))
+                inpt = torch.randn(5, device="cuda:0", dtype=dtype)
 
-            optimizer = optim_cls([weight, bias], **optim_input.kwargs)
-            schedulers = [s(optimizer) for s in (schedulers_constructor if schedulers_constructor else [])]
+                optimizer = optim_cls([weight, bias], **optim_input.kwargs)
+                schedulers = [s(optimizer) for s in (schedulers_constructor if schedulers_constructor else [])]
 
-            def closure():
-                optimizer.zero_grad()
-                loss = (weight.mv(inpt).cuda(1) + bias).pow(2).sum()
-                loss.backward()
-                if optim_info.only_supports_sparse_grads:
-                    # For this test, we naively convert the Tensor layout, which we know does
-                    # NOT represent the expected use case for optims like SparseAdam!
-                    weight.grad = weight.grad.to_sparse()
-                    bias.grad = bias.grad.to_sparse()
-                return loss
+                def closure():
+                    optimizer.zero_grad()
+                    loss = (weight.mv(inpt).cuda(1) + bias).pow(2).sum()
+                    loss.backward()
+                    if optim_info.only_supports_sparse_grads:
+                        # For this test, we naively convert the Tensor layout, which we know does
+                        # NOT represent the expected use case for optims like SparseAdam!
+                        weight.grad = weight.grad.to_sparse()
+                        bias.grad = bias.grad.to_sparse()
+                    return loss
 
-            initial_value = closure().item()
-            for _ in range(20):
-                loss = optimizer.step(closure)
-                for scheduler in schedulers:
-                    if isinstance(scheduler, ReduceLROnPlateau):
-                        scheduler.step(loss)
-                    else:
-                        scheduler.step()
+                initial_value = closure().item()
+                for _ in range(20):
+                    loss = optimizer.step(closure)
+                    for scheduler in schedulers:
+                        if isinstance(scheduler, ReduceLROnPlateau):
+                            scheduler.step(loss)
+                        else:
+                            scheduler.step()
 
-            if optim_input.kwargs.get("maximize", False):
-                self.assertGreater(closure().item(), initial_value)
-            else:
-                self.assertLess(closure().item(), initial_value)
+                if optim_input.kwargs.get("maximize", False):
+                    self.assertGreater(closure().item(), initial_value)
+                else:
+                    self.assertLess(closure().item(), initial_value)
 
 
     @optims(optim_db, dtypes=[torch.float32])
@@ -227,7 +232,9 @@ class TestOptimRenewed(TestCase):
             bias = Parameter(torch.randn((10), device=device, dtype=dtype))
             inpt = torch.randn(5, device=device, dtype=dtype)
 
-            optimizer = optim_cls([{"params": [weight]}, {"params": [bias], "lr": 0.01}])
+            # avoid endless recompiles by wrapping LR in a tensor if we're compiling
+            lr = torch.tensor(0.01) if torch._utils.is_compiling() else 0.01
+            optimizer = optim_cls([{"params": [weight]}, {"params": [bias], "lr": lr}])
             schedulers = [scheduler_c(optimizer) for scheduler_c in schedulers_c]
 
             def closure():
@@ -826,7 +833,9 @@ class TestOptimRenewed(TestCase):
             st_max_mem, mt_max_mem = max_mems
             intermediate_size = nparams * param.nelement() * param.element_size()
             nintermediates = 1  # we expect a budget of 1 intermediate most of the time
-            if kwargs.get('capturable') or optim_cls.__name__ in ["Adadelta", "ASGD", "RAdam"]:
+
+            # Check the param group directly to handle if the compiler set capturable
+            if optimizer.param_groups[0].get("capturable", False) or optim_cls.__name__ in ["Adadelta", "ASGD", "RAdam"]:
                 # with capturable in Adam(W), we have 2 extra intermediates for the bias_corrections
                 # with Adadelta, we have 2 extra for (acc_delta + eps) and (square_avg + eps)
                 # ASGD allocates axs, 2x mus, 2x etas, and grads at the same time
@@ -834,18 +843,33 @@ class TestOptimRenewed(TestCase):
                 if optim_cls.__name__ == "NAdam":
                     # with capturable in NAdam, we have 3 extra intermediates for the
                     # bias_correction, mus, and mu_nexts
-                    nintermediates = 5
+                    if TEST_WITH_TORCHDYNAMO:
+                        # With dynamo, the eager/FX backend appears to hold memory longer than
+                        # vanilla eager: https://github.com/pytorch/pytorch/issues/125511
+                        nintermediates = 8
+                    else:
+                        nintermediates = 5
 
                 if optim_cls.__name__ == "RAdam":
                     # RAdam has four intermediates with capturable
                     # num, unrect_step_size, buffer, grouped_grads
-                    nintermediates = 4
+                    if TEST_WITH_TORCHDYNAMO:
+                        # With dynamo, the eager/FX backend appears to hold memory than
+                        # vanilla eager: https://github.com/pytorch/pytorch/issues/125511
+                        nintermediates = 6
+                    else:
+                        nintermediates = 4
 
             elif optim_cls.__name__ in ["NAdam", "Adagrad", "RMSprop"]:
                 # NAdam uses two intermediates at the same time (grads & exp_avg_sq_sqrt)
                 # Adagrad uses std and grads at the same time
                 # RMSprop uses avg and grads
                 nintermediates = 2
+
+            # Dynamo ST uses less mem than eager in the case of Adam/Adagrad/Nadam/RAdam
+            # which makes the foreach memory check fail
+            if TEST_WITH_TORCHDYNAMO:
+                st_max_mem += 6000
 
             expected_max_mem = st_max_mem + intermediate_size * nintermediates
             # hipcc currently can't generate efficient code for the small buffer optimization
