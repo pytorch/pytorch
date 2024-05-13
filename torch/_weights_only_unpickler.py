@@ -65,7 +65,7 @@ from pickle import (
 )
 from struct import unpack
 from sys import maxsize, modules
-from typing import Any, Dict, List, Type
+from typing import Any, Dict, List, Set, Type
 
 import torch
 
