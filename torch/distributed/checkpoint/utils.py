@@ -302,7 +302,10 @@ def _find_shard(tensor: ShardedTensor, index: MetadataIndex) -> Shard:
 
 def find_tensor_shard(tensor: torch.Tensor, index: MetadataIndex) -> torch.Tensor:
     if isinstance(tensor, DTensor):
-        return tensor.to_local()
+        local_tensor = tensor.to_local()
+        if hasattr(local_tensor, "_local_shards"):
+            return getattr(local_tensor, "_local_shards")[0]
+        return local_tensor
     if isinstance(tensor, ShardedTensor):
         return _find_shard(tensor, index).tensor
     if index.offset is not None:

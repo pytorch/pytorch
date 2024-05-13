@@ -218,6 +218,8 @@ def _create_default_metadata_only_plan(state_dict: STATE_DICT_TYPE) -> SavePlan:
 
 def _create_write_items(fqn: str, object: Any) -> List[WriteItem]:
     if isinstance(object, DTensor):
+        if hasattr(object.to_local(), "_local_shards"):
+            return object.create_write_items(fqn) # pyre-ignore[16]
         return [_create_write_items_for_dtensor(fqn, object)]
     elif isinstance(object, ShardedTensor):
         return [
@@ -243,7 +245,10 @@ def _create_chunk_from_dtensor(tensor: DTensor) -> ChunkStorageMetadata:
 
 def _create_chunk_list(tensor: torch.Tensor) -> List[ChunkStorageMetadata]:
     if isinstance(tensor, DTensor):
-        local_chunks = [_create_chunk_from_dtensor(tensor)]
+        if hasattr(tensor.to_local(), "_local_shards"):
+            local_chunks = getattr(tensor.to_local(), "local_chunks") # pyre-ignore[16]
+        else:
+            local_chunks = [_create_chunk_from_dtensor(tensor)]
     elif isinstance(tensor, ShardedTensor):
         local_chunks = [
             _chunk_for_shard(shard.metadata) for shard in tensor.local_shards()
