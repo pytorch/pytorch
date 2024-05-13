@@ -37,12 +37,13 @@ def _no_mutation(self, *args, **kwargs):
 
 def _create_immutable_container_class(
     base: Type[_T],
-    mutable_functions: Iterable[str],
-    namespace: Optional[Dict[str, Any]] = None,
+    mutable_methods: Iterable[str],
+    namespace: Optional[Dict[str, Any]] = None
 ) -> Type[_T]:
-    namespace = namespace or {}
-    namespace.update((method, _no_mutation) for method in mutable_functions)
-    return types.new_class("immutable_" + base.__name__, (base,), namespace)
+    kwds = dict.fromkeys(mutable_methods, _no_mutation)
+    if namespace is not None:
+        kwds.update(namespace)
+    return types.new_class("immutable_" + base.__name__, (base,), kwds)
 
 
 immutable_list = _create_immutable_container_class(
