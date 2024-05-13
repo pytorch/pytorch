@@ -281,7 +281,7 @@ class TestPublicBindings(TestCase):
 
     def test_modules_can_be_imported(self):
         failures = []
-        for _, modname, _ in _discover_path_importables(str(torch.__path__), "torch"):
+        for _, modname, _ in _find_all_importables(torch):
             try:
                 # TODO: fix "torch/utils/model_dump/__main__.py"
                 # which calls sys.exit() when we try to import it
@@ -536,7 +536,7 @@ class TestPublicBindings(TestCase):
                     if not elem.startswith('_'):
                         check_one_element(elem, modname, mod, is_public=True, is_all=False)
 
-        for _, modname, _ in _discover_path_importables(str(torch.__path__), "torch"):
+        for _, modname, _ in _find_all_importables(torch):
             test_module(modname)
 
         test_module('torch')
