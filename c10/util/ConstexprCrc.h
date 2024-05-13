@@ -1,7 +1,9 @@
 #pragma once
 
+#include <c10/macros/Macros.h>
 #include <c10/util/IdWrapper.h>
 #include <c10/util/string_view.h>
+
 #include <cstddef>
 #include <cstdint>
 

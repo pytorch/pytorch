@@ -3,6 +3,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <string>
+#include <string.h>
 #include "caffe2/core/common.h"
 
 namespace caffe2 {

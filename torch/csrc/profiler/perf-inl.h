@@ -2,8 +2,6 @@
 
 #if defined(__ANDROID__) || defined(__linux__)
 
-#include <unistd.h>
-
 #include <sys/ioctl.h>
 #include <sys/syscall.h>
 
@@ -12,6 +10,9 @@
 #endif /* __ANDROID__ || __linux__ */
 
 #include <torch/csrc/profiler/perf.h>
+
+#include <limits>
+#include <unistd.h>
 
 namespace torch {
 namespace profiler {

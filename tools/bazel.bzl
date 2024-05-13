@@ -5,6 +5,8 @@ load("@pip_deps//:requirements.bzl", "requirement")
 load("@pytorch//c10/macros:cmake_configure_file.bzl", "cmake_configure_file")
 load("@pytorch//tools/config:defs.bzl", "if_cuda")
 
+package(default_copts = ["-std=c++17"])
+
 def _genrule(**kwds):
     if _enabled(**kwds):
         native.genrule(**kwds)

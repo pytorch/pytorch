@@ -46,7 +46,10 @@ def define_targets(rules):
                 "util/typeid_test.cpp",
             ],
         ),
-        copts = ["-Wno-deprecated-declarations"],
+        copts = [
+            "-Wno-deprecated-declarations",
+            "-std=c++17",
+        ],
         deps = [
             ":Macros",
             ":complex_math_test_common",
