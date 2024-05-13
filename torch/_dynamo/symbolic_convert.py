@@ -1360,8 +1360,8 @@ class InstructionTranslatorBase(
             return self.store_attr_graph_break(inst)
         val, obj = self.popn(2)
 
-        if isinstance(obj, NNModuleVariable):
-            # We don't allow side effects during export
+        if isinstance(obj, NNModuleVariable) and not isinstance(val, ConstantVariable):
+            # We don't allow side effects during export on non-constant values
             # https://github.com/pytorch/torchdynamo/issues/1475
             assert (
                 not self.export
@@ -2295,7 +2295,10 @@ class InstructionTranslator(InstructionTranslatorBase):
         for i, var in enumerate(self.stack):
             if type.__instancecheck__(ContextWrappingVariable, var):
                 ctx = cast(ContextWrappingVariable, var)
-                stack_ctx_vars.append((i, tuple(ctx.target_values)))
+                target_values = (
+                    () if ctx.target_values is None else tuple(ctx.target_values)
+                )
+                stack_ctx_vars.append((i, target_values))
                 # Replace the current stack var with the context class
                 ctx.reconstruct_type(cg)
                 cg.extend_output(create_swap(len(self.stack) - i + 1))
@@ -2307,9 +2310,11 @@ class InstructionTranslator(InstructionTranslatorBase):
                 ContextWrappingVariable, var := self.symbolic_locals[name]
             ):
                 ctx = cast(ContextWrappingVariable, var)
-                argnames_ctx_vars.append((name, tuple(ctx.target_values)))
+                target_values = (
+                    () if ctx.target_values is None else tuple(ctx.target_values)
+                )
+                argnames_ctx_vars.append((name, target_values))
                 # Replace the local with the context class
-                cg.append_output(create_instruction("LOAD_FAST", argval=name))
                 ctx.reconstruct_type(cg)
                 cg.append_output(create_instruction("STORE_FAST", argval=name))
 

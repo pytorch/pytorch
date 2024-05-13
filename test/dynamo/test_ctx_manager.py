@@ -1052,21 +1052,23 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         graph = eager.graphs[0]
         actual = normalize_gm(graph.print_readable(False))
 
-        expected = """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self):
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
 
-        x = torch.ones(1)
+        x: "f32[1]" = torch.ones(1)
 
-        y = torch.zeros(1)
+        y: "f32[1]" = torch.zeros(1)
 
-        add = x + y;  x = y = None
+        add: "f32[1]" = x + y;  x = y = None
 
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable()
         return (add,)
-"""
-        self.assertExpectedInline(actual, expected)
+""",
+        )
 
     def test_disable_saved_tensors_hooks_prev_disabled(self):
         def fn(z):
@@ -1090,21 +1092,23 @@ class GraphModule(torch.nn.Module):
         graph = eager.graphs[0]
         actual = normalize_gm(graph.print_readable(False))
 
-        expected = """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self):
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
 
-        x = torch.ones(1)
+        x: "f32[1]" = torch.ones(1)
 
-        y = torch.zeros(1)
+        y: "f32[1]" = torch.zeros(1)
 
-        add = x + y;  x = y = None
+        add: "f32[1]" = x + y;  x = y = None
 
         _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable('Previously disabled message')
         return (add,)
-"""
-        self.assertExpectedInline(actual, expected)
+""",
+        )
 
     def test_disable_saved_tensors_hooks_prev_disabled_nested(self):
         def fn(z):
@@ -1134,27 +1138,29 @@ class GraphModule(torch.nn.Module):
         graph = eager.graphs[0]
         actual = normalize_gm(graph.print_readable(False))
 
-        expected = """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self):
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
 
-        x = torch.ones(1)
+        x: "f32[1]" = torch.ones(1)
 
-        y = torch.zeros(1)
+        y: "f32[1]" = torch.zeros(1)
 
         _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable('This is not supported inner')
 
-        add = x + y;  y = None
+        add: "f32[1]" = x + y;  y = None
 
         _saved_tensors_hooks_disable_2 = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
 
-        add_1 = add + x;  add = x = None
+        add_1: "f32[1]" = add + x;  add = x = None
 
         _saved_tensors_hooks_disable_3 = torch._C._autograd._saved_tensors_hooks_disable('Previously disabled message')
         return (add_1,)
-"""
-        self.assertExpectedInline(actual, expected)
+""",
+        )
 
     def test_disable_saved_tensors_hooks_graph_break(self):
         def fn(x):
@@ -1171,37 +1177,41 @@ class GraphModule(torch.nn.Module):
         def check_graph(actual, expected):
             self.assertExpectedInline(actual, expected)
 
-        expected = """\
+        graph = eager.graphs[0]
+        actual = normalize_gm(graph.print_readable(False))
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_ : torch.Tensor):
+    def forward(self, L_x_: "f32[]"):
         l_x_ = L_x_
 
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
 
-        y = l_x_ + 1;  l_x_ = None
+        y: "f32[]" = l_x_ + 1;  l_x_ = None
 
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable()
         return (y,)
-"""
-        graph = eager.graphs[0]
-        actual = normalize_gm(graph.print_readable(False))
-        check_graph(actual, expected)
+""",
+        )
 
-        expected = """\
+        graph = eager.graphs[1]
+        actual = normalize_gm(graph.print_readable(False))
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_y_ : torch.Tensor):
+    def forward(self, L_y_: "f32[]"):
         l_y_ = L_y_
 
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
 
-        mul = l_y_ * 2;  l_y_ = None
+        mul: "f32[]" = l_y_ * 2;  l_y_ = None
 
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable()
         return (mul,)
-"""
-        graph = eager.graphs[1]
-        actual = normalize_gm(graph.print_readable(False))
-        check_graph(actual, expected)
+""",
+        )
 
     def test_context_wrapping_grad_mode_decorator(self):
         ctx_wrappers = [(torch.enable_grad, True), (torch.no_grad, False)]
@@ -1311,6 +1321,49 @@ class GraphModule(torch.nn.Module):
             torch._dynamo.graph_break()
             with ctx:
                 x = x + 1
+            return x
+
+        x = torch.zeros(10, requires_grad=False)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_inactive_context_graph_break_local_nullctx(self):
+        import contextlib
+
+        # test with context manager that results in None target_values
+        def fn(x):
+            x = x + 1
+            ctx = contextlib.nullcontext()
+            torch._dynamo.graph_break()
+            with ctx:
+                x = x + 1
+            return x
+
+        x = torch.zeros(10, requires_grad=False)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_inactive_context_graph_break_local_nullctx2(self):
+        import contextlib
+
+        # test with nullcontext where graph break happens
+        # in an inlined function that returns something
+        def gn():
+            torch._dynamo.graph_break()
+            return [0, 1, 2]
+
+        def fn(x):
+            x = x + 1
+            ctx = contextlib.nullcontext()
+            lst = gn()
+            with ctx:
+                x = x + lst[1]
             return x
 
         x = torch.zeros(10, requires_grad=False)

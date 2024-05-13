@@ -169,8 +169,8 @@ class TestCutlassBackend(TestCase):
         def mm(a, b):
             return a @ b
 
-        a = torch.randn(100, 10).cuda().half()
-        b = torch.randn(10, 100).cuda().half()
+        a = torch.randn(128, 16).cuda().half()
+        b = torch.randn(16, 128).cuda().half()
 
         with config.patch(
             {
@@ -184,6 +184,59 @@ class TestCutlassBackend(TestCase):
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
             Y = mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_max_autotune_cutlass_backend_regular_mm_streamk(
+        self, dynamic: bool = False, max_autotune_gemm_backends: str = "CUTLASS"
+    ):
+        """
+        Make sure autotuning mm in sub processes work without crashes.
+        """
+
+        if max_autotune_gemm_backends == "CUTLASS" and torch.version.hip:
+            return
+
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        def mm(a, b):
+            return a @ b
+
+        a = torch.randn(128, 16).cuda().half()
+        b = torch.randn(16, 128).cuda().half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": True,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_dir": _CUTLASS_DIR,
+                "cuda.cutlass_max_profiling_configs": 2,
+                "cuda.cutlass_op_allowlist_regex": "stream_k",  # only stream-k GEMM Kernels
+            }
+        ):
+            for M, K, N in (
+                (128, 16, 128),
+                (1024, 256, 1024),
+                (
+                    16384,
+                    1024,
+                    16384,
+                ),
+                (
+                    16384,
+                    1408,
+                    16384,
+                ),
+            ):
+                a = torch.randn(M, K).cuda().half()
+                b = torch.randn(K, N).cuda().half()
+                Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
+                Y = mm(a, b)
+                # we need relaxed numerical limits due to the sheer size of the
+                # matmuls involved. Many small addition differences add up.
+                torch.testing.assert_close(Y_compiled, Y, atol=0.01, rtol=0.01)
 
     def _test_max_autotune_cutlass_backend_epilogue_fusion(
         self,

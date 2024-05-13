@@ -37,7 +37,7 @@ from torch._inductor.metrics import is_metric_table_enabled, log_kernel_metadata
 from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
 from torch._prims_common import is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
-from torch.utils._sympy.symbol import symbol_is_type, SymT
+from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils._triton import has_triton_package
 
@@ -49,7 +49,7 @@ from ..ir import IRNode, TritonTemplateBuffer
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..runtime.hints import ReductionHint, TRITON_MAX_BLOCK
 from ..runtime.runtime_utils import (
-    do_bench,
+    do_bench_gpu,
     get_max_y_grid,
     green_text,
     next_power_of_2,
@@ -58,6 +58,7 @@ from ..runtime.runtime_utils import (
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..utils import (
     cache_on_self,
+    get_bounds_index_expr,
     get_dtype_size,
     get_fused_kernel_name,
     get_kernel_metadata,
@@ -75,7 +76,6 @@ from .common import (
     CSE,
     CSEVariable,
     DeferredLine,
-    free_symbol_startswith,
     IndentedBuffer,
     index_prevent_reordering,
     Kernel,
@@ -86,6 +86,7 @@ from .common import (
 )
 from .multi_kernel import MultiKernel
 from .triton_utils import config_of, signature_of, signature_to_meta
+
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -617,7 +618,7 @@ class TritonOverrides(OpOverrides):
         elif bug == "accuracy":
             return f"{x} + 1"
         elif bug is None:
-            return ops.maximum("0", x)
+            return ops.maximum(ops.constant(0, torch.int32), x)
         else:
             raise AssertionError(
                 f"unrecognized config triton.inject_relu_bug_TESTING_ONLY = {bug!r}"
@@ -862,11 +863,9 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def sign(x):
-        def to_int(s):
-            return f"{s}.to(tl.int8)"
-
-        left = to_int(ops.lt("0", x))
-        right = to_int(ops.lt(x, "0"))
+        z = ops.constant(0, torch.int32)
+        left = ops.to_dtype((ops.lt(z, x)), torch.int8)
+        right = ops.to_dtype((ops.lt(x, z)), torch.int8)
         sub = ops.sub(left, right)
         return f"{sub}.to({x}.dtype)"
 
@@ -914,8 +913,9 @@ class TritonKernelOverrides(TritonOverrides):
     def index_expr(cls, expr, dtype):
         indexing = V.kernel.indexing(expr, block_ptr=False)
         assert isinstance(indexing, IndexingOptions)
-        # This is called from CSEProxy.__getattr__,  so we'll set the bounds there
-        var = V.kernel.cse.generate(V.kernel.compute, indexing.index_str)
+        var = V.kernel.cse.generate(
+            V.kernel.compute, indexing.index_str, bounds=get_bounds_index_expr(expr)
+        )
 
         if dtype not in {torch.int32, torch.int64}:
             var = V.kernel.cse.generate(V.kernel.compute, cls.to_dtype(var, dtype))
@@ -927,10 +927,14 @@ class TritonKernelOverrides(TritonOverrides):
         with V.kernel.mask_loads(mask) as new_mask:
             result = body()
 
+        # Remove once CSEVariables track the dtype
+        if result.bounds.is_bool:
+            other = bool(other)
         # Take dtype from result to prevent accidental promotion
         other = V.kernel.cse.generate(
             V.kernel.compute,
             f"tl.full({result}.shape, {triton_constant(other)}, {result}.dtype)",
+            bounds=ValueRanges.wrap(other),
         )
         return ops.where(new_mask, result, other)
 
@@ -1010,6 +1014,7 @@ class IterationRangesRoot(IterationRanges):
         self,
         name: str,
         numel: sympy.Expr,
+        # TODO: this is probably SymTy.INDEX and SymTy.RINDEX
         prefix: str,
         index: int,
         kernel: TritonKernel,
@@ -1224,7 +1229,9 @@ class IterationRangesEntry(IterationRanges):
         for arg in self.expr.args[1:]:
             if not isinstance(arg, (sympy.Integer, sympy.Symbol)):
                 symbols = arg.free_symbols
-                if len(symbols) > 0 and all(s.name.startswith("s") for s in symbols):
+                if len(symbols) > 0 and all(
+                    symbol_is_type(s, SymT.SIZE) for s in symbols
+                ):
                     precomputed_args.append(arg)
         return precomputed_args
 
@@ -1569,7 +1576,7 @@ class TritonKernel(Kernel):
 
     def is_indirect_indexing(self, index: sympy.Expr):
         # tmpX  means indirect indexing
-        return free_symbol_startswith(index, "tmp")
+        return free_symbol_is_type(index, SymT.TMP)
 
     def is_broadcasted(self, index: sympy.Expr):
         # Note. This may not be correct when there is indirect indexing
@@ -1653,7 +1660,8 @@ class TritonKernel(Kernel):
                 # so if everything goes fine, lower level replacements will come up empty
                 symbols = a.free_symbols
                 if len(symbols) > 0 and all(
-                    s.name.startswith("s") or s.name.startswith("ps") for s in symbols
+                    symbol_is_type(s, (SymT.SIZE, SymT.PRECOMPUTED_SIZE))
+                    for s in symbols
                 ):
                     replacements = {a: V.graph.sizevars.lookup_precomputed_size(a)}
                     index = sympy_subs(index, replacements)
@@ -1665,20 +1673,22 @@ class TritonKernel(Kernel):
         mask_vars: Set[str] = set()
         for var in index_vars:
             assert isinstance(var, sympy.Symbol)
-            has_rindex = has_rindex or var.name.startswith("r")
+            has_rindex = has_rindex or symbol_is_type(var, SymT.RINDEX)
             if override_mask:
                 pass
-            elif var.name.startswith("tmp"):
+            elif symbol_is_type(var, SymT.TMP):
                 # indirect indexing
                 cse_var = self.cse.varname_map[var.name]
                 mask_vars.update(cse_var.mask_vars)
-            elif var.name.startswith(("ps", "i")) or symbol_is_type(
-                var, (SymT.UNBACKED_INT, SymT.SIZE)
+            elif symbol_is_type(
+                var, (SymT.UNBACKED_INT, SymT.SIZE, SymT.PRECOMPUTED_SIZE, SymT.INDEX)
             ):
                 pass
             else:
                 # var is one of xN, yN or rN
-                assert var.name[0] in "xyr", var.name
+                assert symbol_is_type(
+                    var, (SymT.RINDEX, SymT.XBLOCK, SymT.YBLOCK)
+                ), var.name
                 mask_vars.add(f"{var.name[0]}mask")
 
         need_dense = (
@@ -2643,7 +2653,7 @@ class TritonKernel(Kernel):
 
             result.writeline("args = get_args()")
             result.writeline(
-                "ms = do_bench(lambda: call(args), rep=40, fast_flush=True)"
+                "ms = do_bench_gpu(lambda: call(args), rep=40, fast_flush=True)"
             )
             result.writeline(f"num_gb = {num_gb}")
             result.writeline("gb_per_s = num_gb / (ms / 1e3)")
@@ -4027,13 +4037,13 @@ class TritonScheduling(BaseScheduling):
         else:
             # We have to clone the inplace updated arguments to avoid earlier calls
             # generating out of range indices for later calls.
-            ms = do_bench(lambda: call(wrapped_jit_function.clone_args(*args)[0]))
+            ms = do_bench_gpu(lambda: call(wrapped_jit_function.clone_args(*args)[0]))
 
             # overhead of cloning args gives bias for fusing the kernel
             # in the case of mutating/in-placeable second fusion
             # TODO - would be better as a hook in triton do_bench that reset
             # the input values between benchmarking
-            ms = ms - do_bench(lambda: wrapped_jit_function.clone_args(*args))
+            ms = ms - do_bench_gpu(lambda: wrapped_jit_function.clone_args(*args))
 
         log.debug(
             "The fused kernel for %s took %.3f ms to run",
