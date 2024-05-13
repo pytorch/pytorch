@@ -324,7 +324,6 @@ def pipe_split():
     no-op if your annotated module is run eagerly.
 
     Example:
-    >>> # xdoctest: +SKIP
     >>> def forward(self, x):
     >>>     x = torch.mm(x, self.mm_param)
     >>>     x = torch.relu(x)

@@ -22,11 +22,10 @@ class _CustomReducer:
     reduces losses of multiple microbatches into one value.
 
     Example:
-    >>> # xdoctest: +SKIP
-    >>> sum_reducer = _CustomReducer(
-    >>>     torch.tensor(0.0),
-    >>>     lambda a, b: a + b
-    >>> )
+        >>> sum_reducer = _CustomReducer(
+        >>>     torch.tensor(0.0),
+        >>>     lambda a, b: a + b
+        >>> )
     """
 
     def __init__(self, init_value, reduce_fn):

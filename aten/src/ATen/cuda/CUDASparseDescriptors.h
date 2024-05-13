@@ -273,6 +273,7 @@ class TORCH_CUDA_CPP_API CuSparseSpSMDescriptor
 };
 #endif
 
+#if (defined(USE_ROCM) && ROCM_VERSION >= 50200) || !defined(USE_ROCM)
 class TORCH_CUDA_CPP_API CuSparseSpGEMMDescriptor
     : public CuSparseDescriptor<cusparseSpGEMMDescr, &cusparseSpGEMM_destroyDescr> {
  public:
@@ -282,6 +283,7 @@ class TORCH_CUDA_CPP_API CuSparseSpGEMMDescriptor
     descriptor_.reset(raw_descriptor);
   }
 };
+#endif
 
 #endif // AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API()
 

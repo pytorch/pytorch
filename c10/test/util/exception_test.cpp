@@ -34,7 +34,8 @@ TEST(ExceptionTest, TORCH_INTERNAL_ASSERT_DEBUG_ONLY) {
 }
 
 // On these platforms there's no assert
-#if !defined(__ANDROID__) && !defined(__APPLE__)
+#if !defined(__ANDROID__) && !defined(__APPLE__) && \
+    !(defined(USE_ROCM) && ROCM_VERSION < 40100)
 TEST(ExceptionTest, CUDA_KERNEL_ASSERT) {
   // This function always throws even in NDEBUG mode
   ASSERT_DEATH_IF_SUPPORTED({ CUDA_KERNEL_ASSERT(false); }, "Assert");

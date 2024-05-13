@@ -235,8 +235,10 @@ COMMON_HIP_FLAGS = [
     '-fPIC',
     '-D__HIP_PLATFORM_AMD__=1',
     '-DUSE_ROCM=1',
-    '-DHIPBLAS_V2',
 ]
+
+if ROCM_VERSION is not None and ROCM_VERSION >= (6, 0):
+    COMMON_HIP_FLAGS.append('-DHIPBLAS_V2')
 
 COMMON_HIPCC_FLAGS = [
     '-DCUDA_HAS_FP16=1',
@@ -1081,7 +1083,8 @@ def CUDAExtension(name, sources, *args, **kwargs):
     libraries.append('torch_cpu')
     libraries.append('torch_python')
     if IS_HIP_EXTENSION:
-        libraries.append('amdhip64')
+        assert ROCM_VERSION is not None
+        libraries.append('amdhip64' if ROCM_VERSION >= (3, 5) else 'hip_hcc')
         libraries.append('c10_hip')
         libraries.append('torch_hip')
     else:
@@ -1904,8 +1907,9 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
             if CUDNN_HOME is not None:
                 extra_ldflags.append(f'-L{os.path.join(CUDNN_HOME, "lib64")}')
         elif IS_HIP_EXTENSION:
+            assert ROCM_VERSION is not None
             extra_ldflags.append(f'-L{_join_rocm_home("lib")}')
-            extra_ldflags.append('-lamdhip64')
+            extra_ldflags.append('-lamdhip64' if ROCM_VERSION >= (3, 5) else '-lhip_hcc')
     return extra_ldflags
 
 

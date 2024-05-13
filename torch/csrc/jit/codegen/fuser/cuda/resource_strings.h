@@ -15,6 +15,7 @@ cases*/
 
 #if defined(USE_ROCM)
 static auto type_declarations_template = at::jit::CodeTemplate(R"(
+${RuntimeHeader}
 ${HalfHeader}
 ${BFloat16Header}
 ${RandHeader}

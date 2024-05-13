@@ -599,7 +599,7 @@ def assert_array_compare(
         if (x_id == y_id).all().item() is not True:
             msg = build_err_msg(
                 [x, y],
-                err_msg + f"\nx and y {hasval} location mismatch:",
+                err_msg + "\nx and y %s location mismatch:" % (hasval),
                 verbose=verbose,
                 header=header,
                 names=("x", "y"),
@@ -1168,7 +1168,7 @@ def decorate_methods(cls, decorator, testmatch=None):
 
     """
     if testmatch is None:
-        testmatch = re.compile(rf"(?:^|[\\b_\\.{os.sep}-])[Tt]est")
+        testmatch = re.compile(r"(?:^|[\\b_\\.%s-])[Tt]est" % os.sep)
     else:
         testmatch = re.compile(testmatch)
     cls_attr = cls.__dict__
