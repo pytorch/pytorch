@@ -923,6 +923,11 @@ class TritonKernelOverrides(TritonOverrides):
 
     @staticmethod
     def masked(mask, body, other):
+        if mask is not None and torch.version.hip is not None:
+            mask = V.kernel.cse.generate(
+                V.kernel.compute,
+                f"{mask}.to(tl.int1)",
+            )
         with V.kernel.mask_loads(mask) as new_mask:
             result = body()
 
@@ -1974,10 +1979,7 @@ class TritonKernel(Kernel):
                 line = f"tl.load({var} + ({original_index}))"
                 append_broadcast = indexing.expand_str
             else:
-                if torch.version.hip is not None and indexing.mask_str != "None":
-                    line = f"tl.load({var} + ({indexing.index_str}), ({indexing.mask_str}).to(tl.int1){ep}{other})"
-                else:
-                    line = f"tl.load({var} + ({indexing.index_str}), {indexing.mask_str}{ep}{other})"
+                line = f"tl.load({var} + ({indexing.index_str}), {indexing.mask_str}{ep}{other})"
 
             dtype = V.graph.get_dtype(name)
             if dtype in (torch.float16, torch.bfloat16):
