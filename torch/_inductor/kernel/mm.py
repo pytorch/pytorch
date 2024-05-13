@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 
 import torch
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
+from torch._inductor.codegen.cpp_gemm_template import CppPackedGemmTemplate
 from torch._inductor.virtualized import V
 from .. import config as inductor_config
 from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
@@ -19,6 +20,7 @@ from ..select_algorithm import (
 from ..utils import (
     use_aten_gemm_kernels,
     use_ck_template,
+    use_cpp_packed_gemm_template,
     use_cutlass_template,
     use_max_autotune,
     use_triton_template,
@@ -152,9 +154,15 @@ def tuned_mm(mat1, mat2, *, layout=None):
     if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
 
-    if static_shape and is_nonzero and use_ck_template(layout, m, n, k):
+    if use_ck_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(
-            choices, layout, [mat1, mat2]
+            choices, layout, [mat1, mat2])
+
+    if use_cpp_packed_gemm_template(layout, mat1, mat2):
+        CppPackedGemmTemplate.add_choices(
+            choices,
+            layout,
+            [mat1, mat2],
         )
 
     if len(choices) == 0 and not use_aten_gemm_kernels():
@@ -311,6 +319,15 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 alpha=alpha,
                 beta=beta,
             )
+
+    if use_cpp_packed_gemm_template(layout, mat1, mat2):
+        CppPackedGemmTemplate.add_choices(
+            choices,
+            layout,
+            [inp_expanded, mat1, mat2],
+            alpha=alpha,
+            beta=beta,
+        )
 
     add_aten_fallback = False
     if len(choices) == 0:

@@ -1446,7 +1446,7 @@ def _setup_trace_module_map(
                 raise RuntimeError(
                     "Only type of the `nn.Module` should be "
                     "passed in the set for argument `export_modules_as_functions`. "
-                    "Got `%s`." % (type(v).__name__)
+                    f"Got `{type(v).__name__}`."
                 )
 
         module_typenames = {_find_typename(v) for v in export_modules_as_functions}
