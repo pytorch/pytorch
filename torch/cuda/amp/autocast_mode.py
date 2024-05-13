@@ -1,5 +1,6 @@
 import collections
 import functools
+import warnings
 
 import torch
 
@@ -31,6 +32,7 @@ class autocast(torch.amp.autocast_mode.autocast):
             self.device = "cuda"
             self.fast_dtype = dtype
             return
+        warnings.warn("torch.cuda.amp.autocast(args...) is deprecated. Please use torch.amp.autocast('cpu', args...) instead.")
         super().__init__(
             "cuda", enabled=enabled, dtype=dtype, cache_enabled=cache_enabled
         )

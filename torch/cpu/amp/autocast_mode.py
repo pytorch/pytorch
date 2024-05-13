@@ -1,4 +1,5 @@
 from typing import Any
+import warnings
 
 import torch
 
@@ -22,6 +23,7 @@ class autocast(torch.amp.autocast_mode.autocast):
             self.device = "cpu"
             self.fast_dtype = dtype
             return
+        warnings.warn("torch.cpu.amp.autocast(args...) is deprecated. Please use torch.amp.autocast('cpu', args...) instead.")
         super().__init__(
             "cpu", enabled=enabled, dtype=dtype, cache_enabled=cache_enabled
         )
