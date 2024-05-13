@@ -88,12 +88,6 @@
 #     disables use of system-wide nccl (we will use our submoduled
 #     copy in third_party/nccl)
 #
-#   BUILD_CAFFE2_OPS=0
-#     disable Caffe2 operators build
-#
-#   BUILD_CAFFE2=0
-#     disable Caffe2 build
-#
 #   USE_IBVERBS
 #     toggle features related to distributed support
 #
@@ -245,13 +239,12 @@ if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
 import platform
 
 BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
-BUILD_PYTORCH_USING_LIBTORCH_WHL = (
-    os.getenv("BUILD_PYTORCH_USING_LIBTORCH_WHL", "0") == "1"
-)
+BUILD_PYTORCH_USING_LIBTORCH_WHL = False
 
 # set up appropriate env variables
-if BUILD_LIBTORCH_WHL:
+if not BUILD_LIBTORCH_WHL:
     # Set up environment variables for ONLY building libtorch.so and not libtorch_python.so
+
     # functorch is not supported without python
     os.environ["BUILD_FUNCTORCH"] = "OFF"
     os.environ["BUILD_PYTHONLESS"] = "ON"
