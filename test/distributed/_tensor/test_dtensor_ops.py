@@ -485,7 +485,7 @@ dtensor_fails = {
     xfail("unsafe_split"),
     xfail("unsafe_chunk"),
     xfail("_unsafe_masked_index"),
-    xfail("_unsafe_masked_index_put_accumulate"),
+    xfail("_unsafe_masked_index_add"),
     xfail("var_mean"),
     xfail("var_mean", "unbiased"),
     xfail("vdot"),

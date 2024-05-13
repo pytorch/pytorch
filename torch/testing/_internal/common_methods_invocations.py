@@ -5288,7 +5288,7 @@ def sample_inputs__unsafe_masked_index(op_info, device, dtype, requires_grad, **
         mask = functools.reduce(torch.logical_and, masks)
         yield SampleInput(make_arg(self_shape), mask, indices, fill_value)
 
-def sample_inputs__unsafe_masked_index_put_accumulate(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs__unsafe_masked_index_add(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     def make_idx(n, m, dim, d):
@@ -16843,14 +16843,14 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs__unsafe_masked_index),
-    OpInfo('_unsafe_masked_index_put_accumulate',
+    OpInfo('_unsafe_masked_index_add',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
            supports_out=False,
            supports_inplace_autograd=False,
            supports_scripting=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs__unsafe_masked_index_put_accumulate),
+           sample_inputs_func=sample_inputs__unsafe_masked_index_add),
     OpInfo('__getitem__',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes

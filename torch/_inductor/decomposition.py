@@ -82,7 +82,7 @@ decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 decomps_to_exclude = [
     aten._unsafe_index,
     aten._unsafe_masked_index,
-    aten._unsafe_masked_index_put_accumulate,
+    aten._unsafe_masked_index_add,
     aten._scaled_dot_product_flash_attention_for_cpu.default,  # See comments in torch/_decomp/decompositions.py
     aten._softmax_backward_data,
     aten.clamp_max,
