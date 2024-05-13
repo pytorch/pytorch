@@ -105,7 +105,7 @@ def _skip_annotate(
     # 1) Skip annotate if any node is already annotated
     if _is_annotated(nodes):
         skip_annotate = True
-    # 2) TODO: Skip annotate if a) filter_fn is provided and b) any node does not pass the filter
+    # 2) Skip annotate if a) filter_fn is provided and b) any node fails the filter
     if filter_fn and any(not filter_fn(node) for node in nodes):
         skip_annotate = True
     return skip_annotate

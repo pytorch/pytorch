@@ -3,7 +3,6 @@ import functools
 import itertools
 import operator
 import warnings
-from collections import OrderedDict
 from dataclasses import dataclass
 from typing import (
     Any,
@@ -17,6 +16,8 @@ from typing import (
     TYPE_CHECKING,
     Union,
 )
+
+from typing_extensions import TypeAlias
 
 import torch
 import torch.nn.functional as F
@@ -40,10 +41,10 @@ from torch.ao.quantization.quantizer.quantizer import (
 )
 from torch.ao.quantization.quantizer.utils import (
     _get_module_name_filter,
+    _is_annotated,
     _skip_annotate,
 )
 from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
-    _is_annotated,
     get_bias_qspec,
     get_input_act_qspec,
     get_output_act_qspec,
@@ -150,7 +151,7 @@ def _mark_nodes_as_annotated(nodes: List[Node]):
             node.meta[QUANT_ANNOTATION_KEY]._annotated = True
 
 
-AnnotatorType = Callable[
+AnnotatorType: TypeAlias = Callable[
     [
         "X86InductorQuantizer",
         torch.fx.GraphModule,
@@ -160,30 +161,29 @@ AnnotatorType = Callable[
     Optional[List[List[Node]]],
 ]
 
-X86_ANNOTATOR_COLLECTIONS: Dict[str, Dict[str, AnnotatorType]] = {
-    "STATIC": OrderedDict(),
-    "DYNAMIC": OrderedDict(),
-    "STATIC_QAT_ONLY": OrderedDict(),
+X86_ANNOTATORS_REGISTRY: Dict[str, Dict[str, AnnotatorType]] = {
+    "STATIC": {},
+    "DYNAMIC": {},
+    "STATIC_QAT_ONLY": {},
 }
 
-STATIC_ANNOTATORS = X86_ANNOTATOR_COLLECTIONS["STATIC"]
-DYNAMIC_ANNOTATORS = X86_ANNOTATOR_COLLECTIONS["DYNAMIC"]
-STATIC_QAT_ONLY_ANNOTATORS = X86_ANNOTATOR_COLLECTIONS["STATIC_QAT_ONLY"]
+AnnotatorsType: TypeAlias = Dict[str, AnnotatorType]
+
+# Annotators collection
+STATIC_ANNOTATORS: AnnotatorsType = X86_ANNOTATORS_REGISTRY["STATIC"]
+DYNAMIC_ANNOTATORS: AnnotatorsType = X86_ANNOTATORS_REGISTRY["DYNAMIC"]
+STATIC_QAT_ONLY_ANNOTATORS: AnnotatorsType = X86_ANNOTATORS_REGISTRY["STATIC_QAT_ONLY"]
 # For static QAT, apply the `STATIC_QAT_ONLY_ANNOTATORS` and `STATIC_ANNOTATORS` in order.
 
 
-AnnotatorCollectionType = Dict[str, AnnotatorType]
-
-
 def register_annotator(
-    annotators_list: Union[AnnotatorCollectionType, List[AnnotatorCollectionType]],
+    annotators_list: Union[AnnotatorsType, List[AnnotatorsType]],
     annotator_name: Optional[str] = None,
 ):
+    # register annotator functions into one or more annotator collections.
     def decorator(
         annotator: AnnotatorType,
-        annotators_list: Union[
-            AnnotatorCollectionType, List[AnnotatorCollectionType]
-        ] = annotators_list,
+        annotators_list: Union[AnnotatorsType, List[AnnotatorsType]] = annotators_list,
         annotator_name: Optional[str] = annotator_name,
     ) -> AnnotatorType:
         if not isinstance(annotators_list, list):
@@ -582,6 +582,8 @@ class X86InductorQuantizer(Quantizer):
         quantization_config: Optional[QuantizationConfig],
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> torch.fx.GraphModule:
+        """Select the annotator functions according to the `quantization_config` and apply."""
+
         # <TODO> implement the support for None to be canceling out previous annotations
         if quantization_config is None:
             return model
@@ -592,12 +594,11 @@ class X86InductorQuantizer(Quantizer):
         ):
             annotators = DYNAMIC_ANNOTATORS
         else:
-            annotators = STATIC_ANNOTATORS.copy()
+            annotators = STATIC_ANNOTATORS
             if quantization_config.is_qat:
                 # Apply QAT-specific annotators first
-                qat_annotators = STATIC_QAT_ONLY_ANNOTATORS.copy()
-                qat_annotators.update(STATIC_ANNOTATORS)
-                annotators = qat_annotators
+                for annotator_func in STATIC_QAT_ONLY_ANNOTATORS.values():
+                    annotator_func(self, model, quantization_config, filter_fn)
 
         for annotator_func in annotators.values():
             annotator_func(self, model, quantization_config, filter_fn)
