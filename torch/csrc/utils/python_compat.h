@@ -34,7 +34,7 @@ PyCode_GetNFreevars(PyCodeObject* code) {
 }
 
 // Provided by CPython but getting the header for them is very hard
-extern void _PyWeakref_ClearRef(PyWeakReference *self);
+extern void _PyWeakref_ClearRef(PyWeakReference* self);
 
 #ifdef __cplusplus
 }
