@@ -1132,14 +1132,16 @@ class Tensor(torch._C.TensorBase):
         # hasattr(cpu_tensor, "__cuda_array_interface__") is False.
         if not self.is_cuda:
             raise AttributeError(
-                f"Can't get __cuda_array_interface__ on non-CUDA tensor type: {self.type()} "
+                "Can't get __cuda_array_interface__ on non-CUDA tensor type: %s "
                 "If CUDA data is required use tensor.cuda() to copy tensor to device memory."
+                % self.type()
             )
 
         if self.is_sparse:
             raise AttributeError(
-                f"Can't get __cuda_array_interface__ on sparse type: {self.type()} "
+                "Can't get __cuda_array_interface__ on sparse type: %s "
                 "Use Tensor.to_dense() to convert to a dense tensor first."
+                % self.type()
             )
 
         # RuntimeError, matching tensor.__array__() behavior.

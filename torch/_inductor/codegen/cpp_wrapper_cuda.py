@@ -23,8 +23,7 @@ if TYPE_CHECKING:
 def is_int(s: str) -> bool:
     # Cpp code gen adds L at the end of ints
     # Lets remove it for checking whether we have an int or not
-    # TODO: do we need to check if this is int32 or int64?
-    if isinstance(s, str) and s[-1] == "L":
+    if s and s[-1] == "L":
         s = s[:-1]
     try:
         int(s)

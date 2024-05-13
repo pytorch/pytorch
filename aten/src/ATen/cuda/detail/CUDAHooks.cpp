@@ -151,7 +151,11 @@ bool CUDAHooks::isPinnedPtr(const void* data) const {
     return false;
   }
 #endif
+#if !defined(USE_ROCM) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
   return attr.type == cudaMemoryTypeHost;
+#else
+  return attr.memoryType == cudaMemoryTypeHost;
+#endif
 }
 
 bool CUDAHooks::hasCUDA() const {
@@ -173,7 +177,7 @@ bool CUDAHooks::hasCuDNN() const {
 bool CUDAHooks::hasCuSOLVER() const {
 #if defined(CUDART_VERSION) && defined(CUSOLVER_VERSION)
   return true;
-#elif AT_ROCM_ENABLED()
+#elif AT_ROCM_ENABLED() && defined(ROCM_VERSION) && ROCM_VERSION >= 50300
   return true;
 #else
   return false;
@@ -183,7 +187,7 @@ bool CUDAHooks::hasCuSOLVER() const {
 bool CUDAHooks::hasCuBLASLt() const {
 #if defined(CUDART_VERSION)
   return true;
-#elif AT_ROCM_ENABLED()
+#elif AT_ROCM_ENABLED() && defined(ROCM_VERSION) && ROCM_VERSION >= 50700
   return true;
 #else
   return false;
