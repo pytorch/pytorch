@@ -127,7 +127,7 @@ def get_eltwise_fn(name):
     elif name == 'hardswish_':
         return torch.nn.Hardswish(inplace=True)
     else:
-        raise NameError('Eltwise function %s not found' % name)
+        raise NameError(f'Eltwise function {name} not found')
 
 
 @unittest.skipIf(IS_AVX512_UNSUPPORTED, "This test fails for BF16 on machines without AVX512.")

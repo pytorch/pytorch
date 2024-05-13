@@ -1234,11 +1234,7 @@ class TestProfiler(TestCase):
                 for e in op_events:
                     args = e["args"]
                     if e["name"] == "aten::add":
-                        self.assertEqual(
-                            args["Input Strides"],
-                            [[17, 1], [25, 2], []]
-                        )
-
+                        self.assertEqual(args["Input Strides"], [[17, 1], [25, 2], []])
 
     def test_profiler_fwd_bwd_link(self):
         with _profile(use_kineto=True) as prof:
