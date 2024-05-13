@@ -550,9 +550,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(cnts.op_count, """4""")
 
     def test_prune_torch_check(self):
-        log_stream, ctx = logs_to_string(
-            "torch._dynamo.output_graph", "graph_code"
-        )
+        log_stream, ctx = logs_to_string("torch._dynamo.output_graph", "graph_code")
 
         @torch.compile(fullgraph=True, dynamic=True, backend="eager")
         def f(x, y):
@@ -562,12 +560,13 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         with ctx():
             f(torch.randn(80, 100), 80)
 
-        out = "\n".join(
-            log_stream.getvalue().strip().split("\n")[3:]
-        ).strip()
-        self.assertExpectedInline(out, """\
+        out = "\n".join(log_stream.getvalue().strip().split("\n")[3:]).strip()
+        self.assertExpectedInline(
+            out,
+            """\
 def forward(self):
-        return ()""")
+        return ()""",
+        )
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_split_aot_autograd(self):

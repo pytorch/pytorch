@@ -1479,7 +1479,7 @@ class OutputGraph:
             if (
                 node.op == "call_method"
                 and isinstance(node.args[0].meta["example_value"], torch.Tensor)
-                and node.target in ["size", "stride", "storage_offset"]
+                and node.target in ["size", "stride", "storage_offset", "item"]
             ):
                 return True
             if node.op == "call_function" and node.target in [
