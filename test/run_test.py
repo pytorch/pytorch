@@ -1195,7 +1195,9 @@ def parse_args():
         and get_pr_number() is not None
         and not strtobool(os.environ.get("NO_TD", "False"))
         and not IS_SLOW
-        and not TEST_WITH_ROCM,
+        and not TEST_WITH_ROCM
+        and not IS_MACOS
+        and not "onnx" in BUILD_ENVIRONMENT,
     )
     parser.add_argument(
         "additional_unittest_args",
