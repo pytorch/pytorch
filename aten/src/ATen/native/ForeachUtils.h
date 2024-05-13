@@ -178,6 +178,12 @@ inline bool _check_tensors_do_type_promotion_with_scalars(
 // - All tensors must be non-overlapping and dense
 // - Resulting tensor must have the same dtype as the input one
 
+// [note: what's ``does_op_promote_integer_inputs_to_float=true``?]
+//     ``does_op_promote_integer_inputs_to_float=true`` means that the result of
+//     the op will be float even if inputs are integer or boolean, which
+//     currently fast path does not support. In short, this flag, when
+//     turned on, gatekeeps the op from going down the fastpath.
+
 // Please, make sure to call check_foreach_api_restrictions before calling this
 // method. There is a set of preconditions that have to be satisfied.
 inline bool check_fast_path_restrictions(
@@ -216,7 +222,7 @@ inline std::vector<c10::Scalar> convert_tensor_to_scalar_list(
       scalarList_.scalar_type(),
       "convert_tensor_to_scalar_list",
       [&]() {
-        const scalar_t* scalar_data = scalarList_.data_ptr<scalar_t>();
+        const scalar_t* scalar_data = scalarList_.const_data_ptr<scalar_t>();
         TORCH_CHECK(
             (expect_length == scalarList_.size(0)),
             "Expected length of scalars to match input of length ",
@@ -231,6 +237,7 @@ inline std::vector<c10::Scalar> convert_tensor_to_scalar_list(
   return scalarList;
 }
 
+// see: [note: what's ``does_op_promote_integer_inputs_to_float=true``?]
 inline bool can_use_fast_route(
     ArrayRef<TensorList> tensorLists,
     ArrayRef<Scalar> scalarList = {},
@@ -239,6 +246,7 @@ inline bool can_use_fast_route(
       tensorLists, scalarList, does_op_promote_integer_inputs_to_float);
 }
 
+// see: [note: what's ``does_op_promote_integer_inputs_to_float=true``?]
 inline bool can_use_fast_route(
     TensorList tensors1,
     TensorList tensors2,
