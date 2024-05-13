@@ -242,7 +242,7 @@ BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
 BUILD_PYTORCH_USING_LIBTORCH_WHL = False
 
 # set up appropriate env variables
-if not BUILD_LIBTORCH_WHL:
+if BUILD_LIBTORCH_WHL:
     # Set up environment variables for ONLY building libtorch.so and not libtorch_python.so
 
     # functorch is not supported without python
