@@ -1712,8 +1712,14 @@ class GuardBuilder(GuardBuilderBase):
                 self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
+        # For tensors that are part of the Dynamo extracted Fx graph module, an
+        # ID_MATCH suffices. Once we turn on inline_inbuilt_nn_modules, these
+        # will be lifted as inputs and have a TENSOR_MATCH guard.
+        # For FSDP modules, we must use TENSOR_MATCH because FSDP module is
+        # traced using UnspecializedNNModuleVariable and therefore lifts the
+        # params as inputs.
         if (
-            not torch._dynamo.config.guard_nn_modules and guard.is_nn_module()
+            guard.is_nn_module() and not guard.is_fsdp_module()
         ) or match_on_id_for_tensor(guard):
             self.ID_MATCH(guard)
         else:
