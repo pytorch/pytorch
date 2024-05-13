@@ -38,7 +38,7 @@ def _no_mutation(self, *args, **kwargs):
 def _create_immutable_container_class(
     base: Type[_T],
     mutable_methods: Iterable[str],
-    namespace: Optional[Dict[str, Any]] = None
+    namespace: Optional[Dict[str, Any]] = None,
 ) -> Type[_T]:
     kwds = dict.fromkeys(mutable_methods, _no_mutation)
     if namespace is not None:
