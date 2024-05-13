@@ -138,7 +138,7 @@ class ValueRanges(Generic[_T]):
             if not sympy_generic_le(lower, upper):
                 raise ValueRangeError(f"Invalid ranges [{lower}:{upper}]")
         except TypeError:
-            raise TypeError(f"Could not compare {lower} <= {upper}")
+            raise TypeError(f"Could not compare {lower} <= {upper}")  # noqa: TRY200
         # Because this is a frozen class
         object.__setattr__(self, "lower", lower)
         object.__setattr__(self, "upper", upper)
@@ -340,6 +340,9 @@ class SymPyValueRangeAnalysis:
 
     @staticmethod
     def constant(value, dtype):
+        if isinstance(value, ValueRanges):
+            assert value.is_singleton()
+            value = value.lower
         # NB: value is NOT a sympy expression, it's a constant!
         is_python = isinstance(value, (int, float, bool))
         assert is_python or isinstance(
@@ -472,15 +475,46 @@ class SymPyValueRangeAnalysis:
         else:
             return ValueRanges.coordinatewise_monotone_map(a, b, operator.floordiv)
 
-    @staticmethod
-    def mod(x, y):
+    @classmethod
+    def mod(cls, x, y):
         x = ValueRanges.wrap(x)
         y = ValueRanges.wrap(y)
-        if x.is_singleton() and y.is_singleton() and y.lower != 0:
-            return ValueRanges.wrap(x.lower % y.lower)
-        if y.lower <= 0:
+        # nb. We implement C semantics
+
+        def c_mod(a, b):
+            ret = abs(a) % abs(b)
+            if a < 0:
+                ret *= -1
+            return ret
+
+        def c_div(a, b):
+            x = a / b
+            return sympy.Integer(x) if x.is_finite else x
+
+        if 0 in y:
             return ValueRanges.unknown()
-        return ValueRanges(0, y.upper)
+        elif y.is_singleton():
+            y_val = abs(y.lower)
+            # If it wraps, we need to take the whole interval
+
+            # The function is locally linear if they are in the same class
+            if c_div(x.lower, y_val) == c_div(x.upper, y_val):
+                return ValueRanges.increasing_map(x, lambda u: c_mod(u, y_val))
+            if x.upper < 0:
+                # Negative case
+                return ValueRanges(-y_val + 1, 0)
+            elif x.lower > 0:
+                # Positive case
+                return ValueRanges(0, y_val - 1)
+            else:
+                # Mixed case
+                lower = max(-y_val + 1, x.lower)
+                upper = min(y_val - 1, x.upper)
+                return ValueRanges(lower, upper)
+        else:
+            # Too difficult, we bail out
+            upper = cls.abs(y).upper - 1
+            return ValueRanges(-upper, upper)
 
     @classmethod
     def modular_indexing(cls, a, b, c):
@@ -632,7 +666,9 @@ class SymPyValueRangeAnalysis:
         b = ValueRanges.wrap(b)
         c = ValueRanges.wrap(c)
         a = a.boolify()
-        assert b.is_bool == c.is_bool
+        # We sometimes write unknown without specifying the type correctly
+        # In particular, we do that when initialising the bounds for loads in bounds.py
+        assert b.is_bool == c.is_bool or ValueRanges.unknown() in (b, c)
         if b.is_bool:
             return ValueRanges(sympy.And(b.lower, c.lower), sympy.Or(b.upper, c.upper))
         else:
@@ -713,6 +749,13 @@ class SymPyValueRangeAnalysis:
     @staticmethod
     def atan(x):
         return ValueRanges.increasing_map(x, OpaqueUnaryFn_atan)
+
+    @staticmethod
+    def trunc(x):
+        def trunc(x):
+            return sympy.Integer(x) if x.is_finite else x
+
+        return ValueRanges.increasing_map(x, trunc)
 
 
 class ValueRangeAnalysis(SymPyValueRangeAnalysis):
@@ -798,10 +841,7 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
         if x == ValueRanges.unknown():
             return x
 
-        def trunc(x):
-            return sympy.Integer(x) if x.is_finite else x
-
-        return ValueRanges.increasing_map(x, trunc)
+        return cls.trunc(x)
 
     @classmethod
     def sub(cls, a, b):

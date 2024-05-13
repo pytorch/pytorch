@@ -22,7 +22,18 @@ import warnings
 import weakref
 from enum import Enum
 from os.path import dirname, join
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 from unittest.mock import patch
 
 import torch
@@ -30,7 +41,6 @@ import torch.fx
 import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch import _guards
-from torch._subclasses import fake_tensor
 from torch._utils_internal import log_export_usage
 from torch.export.dynamic_shapes import _process_dynamic_shapes
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
@@ -57,7 +67,6 @@ from . import config, convert_frame, external_utils, trace_rules, utils
 from .code_context import code_context
 from .exc import CondOpArgsMismatchError, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
-from .types import CacheEntry, DynamoCallback
 from .utils import common_constant_types, compile_times
 
 log = logging.getLogger(__name__)
@@ -69,6 +78,10 @@ null_context = contextlib.nullcontext
 
 
 import sympy
+
+if TYPE_CHECKING:
+    from torch._subclasses import fake_tensor
+    from .types import CacheEntry, DynamoCallback
 
 
 # See https://github.com/python/typing/pull/240
@@ -117,6 +130,17 @@ class OptimizedModule(torch.nn.Module):
     _torchdynamo_orig_callable: Callable[..., Any]
     get_compiler_config: Callable[[], Any]
 
+    _opt_mod_attributes = {
+        "_orig_mod",
+        "dynamo_ctx",
+        "_torchdynamo_orig_callable",
+        "get_compiler_config",
+        "forward",
+        "_forward",
+        "__dict__",
+        "named_children_walk",
+    }
+
     def __init__(self, mod: torch.nn.Module, dynamo_ctx):
         super().__init__()
         # Installs the params/buffer
@@ -155,6 +179,15 @@ class OptimizedModule(torch.nn.Module):
         if name == "_orig_mod":
             return self._modules["_orig_mod"]
         return getattr(self._orig_mod, name)
+
+    def __setattr__(self, name, val):
+        # Allow patching over class attributes
+        if hasattr(type(self), name):
+            return super().__setattr__(name, val)
+
+        if name in OptimizedModule._opt_mod_attributes:
+            return super().__setattr__(name, val)
+        return setattr(self._orig_mod, name, val)
 
     def _call_lazy_check(self, *args, **kwargs):
         if hasattr(self._orig_mod, "_initialize_hook"):
@@ -295,32 +328,8 @@ class _TorchDynamoContext:
         fn = innermost_fn(fn)
 
         # add context containing GraphModule to any GraphModule forward functions
-        from torch.fx._lazy_graph_module import _LazyGraphModule
-
-        if isinstance(fn, _LazyGraphModule) or (
-            isinstance(getattr(fn, "__self__", None), _LazyGraphModule)
-            and fn.__name__ == "_lazy_forward"
-        ):
-            # Since dynamo will run the forward method for the GraphModule shortly
-            # anyways, it does not hurt to do the real recompilation here if
-            # this is a _LazyGraphModule. This makes it easier for dynamo to
-            # optimize a _LazyGraphModule.
-
-            lazy_gm = fn if isinstance(fn, _LazyGraphModule) else fn.__self__
-
-            _LazyGraphModule.force_recompile(lazy_gm)
-
-            # Assume that the underlying node metadata of `fn`,
-            # a GraphModule instance, accurately represents
-            # all instances of type(fn).
-            code_context.get_context(lazy_gm.forward.__code__)[
-                "orig_graphmodule"
-            ] = weakref.ref(lazy_gm)
-
-            if not isinstance(fn, _LazyGraphModule):
-                # replace fn with the real forward method
-                fn = lazy_gm.forward
-        elif isinstance(fn, GraphModule):
+        if isinstance(fn, GraphModule):
+            # add context containing GraphModule to any GraphModule forward functions
             code_context.get_context(fn.forward.__code__)[
                 "orig_graphmodule"
             ] = weakref.ref(fn)
@@ -339,6 +348,22 @@ class _TorchDynamoContext:
             new_mod.get_compiler_config = get_compiler_config
 
             return new_mod
+
+        if inspect.isclass(fn):
+            # User has wrapped the class with compile/disable decorator. Apply
+            # disable to init/call method.
+            cls_obj = fn
+            if isinstance(self, DisableContext):
+                # Disable on init is useful for reconstruction of bytecodes where we
+                # want to prevent Dynamo from tracing into the init function. Check
+                # test_reconstruction in test_model_output.py.
+                cls_obj.__init__ = self(cls_obj.__init__)
+            cls_obj.__call__ = self(cls_obj.__call__)
+            if issubclass(cls_obj, torch.nn.Module):
+                # NN module variable tracker directly inlines the _call_impl. Disable it.
+                cls_obj._call_impl = self(cls_obj._call_impl)
+            return cls_obj
+
         assert callable(fn)
 
         try:
@@ -348,7 +373,8 @@ class _TorchDynamoContext:
         if (
             (filename is None or trace_rules.check(fn))
             and (
-                getattr(fn, "__name__", "") not in ["_call_impl", "_wrapped_call_impl"]
+                getattr(fn, "__name__", "")
+                not in ["_call_impl", "_wrapped_call_impl", "_lazy_forward"]
             )
             and filename not in DONT_WRAP_FILES
         ):
@@ -387,7 +413,11 @@ class _TorchDynamoContext:
             cleanups = [enter() for enter in self.enter_exit_hooks]
             prior = set_eval_frame(callback)
             try:
-                return fn(*args, **kwargs)
+                # Ensure that if an assertion occurs after graph pushes
+                # something onto the DynamicLayerStack then we pop it off (the
+                # constructed graph code isn't guarded with try/finally).
+                with torch._C._functorch._PreserveDynamicLayerStack():
+                    return fn(*args, **kwargs)
             finally:
                 set_eval_frame(prior)
                 for cleanup in cleanups:
@@ -528,8 +558,8 @@ class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
 
 
 def check_if_dynamo_supported():
-    if sys.version_info >= (3, 12):
-        raise RuntimeError("Python 3.12+ not yet supported for torch.compile")
+    if sys.version_info >= (3, 13):
+        raise RuntimeError("Python 3.13+ not yet supported for torch.compile")
 
 
 def is_dynamo_supported():
@@ -753,7 +783,12 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         if "tensor_dict" in self.current_node.meta:
             arg.node.meta["tensor_dict"] = self.current_node.meta["tensor_dict"]
         if "example_value" in self.current_node.meta:
+            # NB: intentionally do not use set_example_value
             arg.node.meta["example_value"] = self.current_node.meta["example_value"]
+        if "unbacked_bindings" in self.current_node.meta:
+            arg.node.meta["unbacked_bindings"] = self.current_node.meta[
+                "unbacked_bindings"
+            ]
         return arg
 
     def output(self, target, args, kwargs):
@@ -777,8 +812,13 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         if "val" in self.current_node.meta:
             result_proxy.node.meta["val"] = self.current_node.meta["val"]
         if "example_value" in self.current_node.meta:
+            # NB: intentionally do not use set_example_value
             result_proxy.node.meta["example_value"] = self.current_node.meta[
                 "example_value"
+            ]
+        if "unbacked_bindings" in self.current_node.meta:
+            result_proxy.node.meta["unbacked_bindings"] = self.current_node.meta[
+                "unbacked_bindings"
             ]
         if self.current_node.op != "output":
             result_proxy.node._rename(
@@ -804,32 +844,31 @@ class ExportResult(NamedTuple):
 
 def check_signature_rewritable(graph):
     input_errors = []
-    for node in graph.graph.nodes:
-        if node.op == "placeholder":
-            assert hasattr(node, "_dynamo_source")
-            source = node._dynamo_source
-            user_stacks = graph._source_to_user_stacks.get(source)
-            if user_stacks is None:
+    for node in graph.graph.find_nodes(op="placeholder"):
+        assert hasattr(node, "_dynamo_source")
+        source = node._dynamo_source
+        user_stacks = graph._source_to_user_stacks.get(source)
+        if user_stacks is None:
+            continue
+        assert len(user_stacks) > 0
+        # In some cases we may not have a useful stack.  Look for a
+        # useful stack
+        stack = None
+        for s in user_stacks:
+            if len(s) == 0:
                 continue
-            assert len(user_stacks) > 0
-            # In some cases we may not have a useful stack.  Look for a
-            # useful stack
-            stack = None
-            for s in user_stacks:
-                if len(s) == 0:
-                    continue
-                stack = s
-                break
-            if stack is None:
-                msg = f"{source.name()}, a closed over free variable"
-            else:
-                tb = "".join(traceback.format_list(stack))
-                extra = ""
-                if len(user_stacks) > 1:
-                    extra = f"(elided {len(user_stacks)-1} more accesses)"
-                msg = f"{source.name()}, accessed at:\n{tb}{extra}"
-            # TODO: option to print ALL of the stack traces at once
-            input_errors.append(msg)
+            stack = s
+            break
+        if stack is None:
+            msg = f"{source.name()}, a closed over free variable"
+        else:
+            tb = "".join(traceback.format_list(stack))
+            extra = ""
+            if len(user_stacks) > 1:
+                extra = f"(elided {len(user_stacks)-1} more accesses)"
+            msg = f"{source.name()}, accessed at:\n{tb}{extra}"
+        # TODO: option to print ALL of the stack traces at once
+        input_errors.append(msg)
 
     if input_errors:
         raise UserError(
@@ -1166,7 +1205,18 @@ def export(
                     else fake_mode
                 )
 
-                with ambient_fake_mode, enable_python_dispatcher():
+                # We reran fake tensor propagation, but we didn't do
+                # anything with the resulting unbacked SymInts.  Drop them
+                # from the pending list.
+                # NB: this is wrong if graph_captured_result has
+                # data-dependent output size!
+                ignore_fresh_unbacked = null_context()
+                if shape_env := ambient_fake_mode.shape_env:
+                    ignore_fresh_unbacked = shape_env.ignore_fresh_unbacked_symbols()
+
+                with (
+                    ambient_fake_mode
+                ), enable_python_dispatcher(), ignore_fresh_unbacked:
                     params_and_buffers = {
                         **named_parameters,
                         **named_buffers,
@@ -1306,10 +1356,8 @@ def export(
                     )
 
             assert graph is not None
-            for node in graph.graph.nodes:
-                if node.op == "get_attr" and isinstance(
-                    getattr(graph, node.target), torch.Tensor
-                ):
+            for node in graph.graph.find_nodes(op="get_attr"):
+                if isinstance(getattr(graph, node.target), torch.Tensor):
                     node.meta["val"] = fake_mode.from_tensor(
                         getattr(graph, node.target), static_shapes=True
                     )

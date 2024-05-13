@@ -120,7 +120,7 @@ class FoldConvBatchNormHelper {
   /**
    * In this step we find all Conv - BatchNorm patterns in the graph
    * and extract the corresponding parameters for these two modules,
-   * and record informations for the modifications of the graph without
+   * and record information for the modifications of the graph without
    * actually performing these modifications.
    */
   void analyze(Module& module, const PatternInfo& pattern);

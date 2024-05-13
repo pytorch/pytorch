@@ -11,7 +11,7 @@ def clearcache() -> None:
 
 def _add_file(filename: str) -> None:
     try:
-        with open(filename) as f:
+        with tokenize.open(filename) as f:
             tokens = list(tokenize.generate_tokens(f.readline))
     except OSError:
         cache[filename] = {}

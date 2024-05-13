@@ -14,6 +14,8 @@ from torch._library.abstract_impl import AbstractImplCtx
 from torch.library import get_ctx
 
 from .autograd import autograd_kernel_indirection, construct_autograd_kernel
+import torch._library.infer_schema
+from torch._library.infer_schema import infer_schema
 
 """
 For a detailed guide on custom ops, please see
@@ -767,134 +769,6 @@ def validate_function_matches_schema(
 
     compare(positional, schema.arguments.flat_positional)
     compare(kwargonly, schema.arguments.flat_kwarg_only)
-
-
-def infer_schema(prototype_function: typing.Callable, mutated_args=()) -> str:
-    """Given a function with type hints, parses a schema.
-
-    We make some assumptions to make our lives easier that correspond to how people
-    write custom ops in real life:
-    - none of the outputs alias any of the inputs or each other.
-    - only the args listed in mutated_args are being mutated.
-
-    Callers (e.g. the custom ops API) are responsible for checking these assumptions.
-    """
-    sig = inspect.signature(prototype_function)
-
-    def error_fn(what):
-        raise ValueError(
-            f"infer_schema(func): {what} " f"Got func with signature {sig})"
-        )
-
-    params = []
-    for idx, (name, param) in enumerate(sig.parameters.items()):
-        if not supported_param(param):
-            error_fn("We do not support positional-only args, varargs, or varkwargs.")
-
-        if param.annotation is inspect.Parameter.empty:
-            error_fn(f"Parameter {name} must have a type annotation.")
-
-        if param.annotation not in SUPPORTED_PARAM_TYPES.keys():
-            error_fn(
-                f"Parameter {name} has unsupported type {param.annotation}. "
-                f"The valid types are: {SUPPORTED_PARAM_TYPES.keys()}."
-            )
-
-        if param.default is not inspect.Parameter.empty:
-            error_fn(
-                f"Parameter {name} has a default value; this is not supported. "
-                f"If you want to use default values then create a function with "
-                f"default values that invokes the custom op."
-            )
-        schema_type = SUPPORTED_PARAM_TYPES[param.annotation]
-        if name in mutated_args:
-            if not schema_type.startswith("Tensor"):
-                error_fn(f"Parameter {name} is in mutable_args but only Tensors or collections of Tensors can be mutated")
-            schema_type = f"Tensor(a{idx}!){schema_type[len('Tensor'):]}"
-        params.append(f"{schema_type} {name}")
-    ret = parse_return(sig.return_annotation, error_fn)
-    return f"({', '.join(params)}) -> {ret}"
-
-
-def derived_types(
-    base_type, cpp_type, list_base, optional_base_list, optional_list_base
-):
-    result = [
-        (base_type, cpp_type),
-        (typing.Optional[base_type], f"{cpp_type}?"),
-    ]
-
-    def derived_seq_types(typ):
-        return [
-            typing.Sequence[typ],  # type: ignore[valid-type]
-            typing.List[typ],  # type: ignore[valid-type]
-        ]
-
-    if list_base:
-        for seq_typ in derived_seq_types(base_type):
-            result.append((seq_typ, f"{cpp_type}[]"))  # type: ignore[valid-type]
-    if optional_base_list:
-        for seq_typ in derived_seq_types(typing.Optional[base_type]):
-            result.append((seq_typ, f"{cpp_type}?[]"))  # type: ignore[valid-type]
-    if optional_list_base:
-        for seq_typ in derived_seq_types(base_type):  # type: ignore[valid-type]
-            result.append((typing.Optional[seq_typ], f"{cpp_type}[]?"))  # type: ignore[valid-type]
-    return result
-
-
-def get_supported_param_types():
-    data = [
-        # (python type, schema type, type[] variant, type?[] variant, type[]? variant
-        (torch.Tensor, "Tensor", True, True, False),
-        (int, "SymInt", True, False, True),
-        (float, "float", True, False, True),
-        (bool, "bool", True, False, True),
-        (str, "str", False, False, False),
-        (torch.types.Number, "Scalar", True, False, False),
-        (torch.dtype, "ScalarType", False, False, False),
-        (torch.device, "Device", False, False, False),
-    ]
-    result = []
-    for line in data:
-        result.extend(derived_types(*line))
-    return dict(result)
-
-
-SUPPORTED_RETURN_TYPES = {
-    torch.Tensor: "Tensor",
-    typing.List[torch.Tensor]: "Tensor[]",
-    int: "SymInt",
-    float: "float",
-    bool: "bool",
-    torch.types.Number: "Scalar",
-}
-
-
-def parse_return(annotation, error_fn):
-    if annotation is None:
-        return "()"
-
-    origin = typing.get_origin(annotation)
-    if origin is not tuple:
-        if annotation not in SUPPORTED_RETURN_TYPES.keys():
-            error_fn(
-                f"Return has unsupported type {annotation}. "
-                f"The valid types are: {SUPPORTED_RETURN_TYPES}."
-            )
-        return SUPPORTED_RETURN_TYPES[annotation]
-
-    args = typing.get_args(annotation)
-    for arg in args:
-        if arg not in SUPPORTED_RETURN_TYPES:
-            error_fn(
-                f"Return has unsupported type {annotation}. "
-                f"The valid types are: {SUPPORTED_RETURN_TYPES}."
-            )
-
-    return "(" + ", ".join([SUPPORTED_RETURN_TYPES[arg] for arg in args]) + ")"
-
-
-SUPPORTED_PARAM_TYPES = get_supported_param_types()
 
 
 def report_error_callback(custom_op: typing.Any, key: str) -> None:

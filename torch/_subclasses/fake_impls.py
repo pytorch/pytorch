@@ -258,6 +258,61 @@ def dyn_shape(fake_mode, func, *args, **kwargs):
     raise DynamicOutputShapeException(func)
 
 
+@register_op_impl(aten._unique2.default)
+def unique2(
+    fake_mode, func, arg, sorted=True, return_inverse=False, return_counts=False
+):
+    if (
+        fake_mode.shape_env is None
+        or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+    ):
+        # Without symints/symfloats, cannot handle this
+        raise DynamicOutputShapeException(func)
+
+    if (nnz := arg.unique_memo) is None:
+        # Avoid importing sympy at a module level
+        from torch.fx.experimental.symbolic_shapes import (
+            _constrain_range_for_size,
+            has_free_symbols,
+        )
+
+        if not has_free_symbols(arg.numel()) and arg.numel() == 0:
+            # If numel is zero, then the output size must be zero.
+            # In this case, we must not allocate an unbacked SymInt,
+            # because if we do, it will immediately get refined to
+            # zero, but this will be inconsistent with size oblivious
+            # tests (which will continue to claim that the unbacked
+            # symint cannot equal zero).  We could also unconditionally
+            # allocate an unbacked SymInt and not refine its range,
+            # but this seems more precise.
+            nnz = 0
+        else:
+            nnz = fake_mode.shape_env.create_unbacked_symint()
+
+            maxval = sys.maxsize - 1
+
+            if not has_free_symbols(arg.numel()):
+                maxval = int(arg.numel())
+
+            _constrain_range_for_size(nnz, max=maxval)
+
+        arg.unique_memo = nnz
+
+    ret = [arg.new_empty((nnz,))]
+
+    if return_inverse:
+        ret.append(torch.empty_like(arg))
+    else:
+        ret.append(arg.new_empty(0))
+
+    if return_counts:
+        ret.append(torch.empty_like(arg))
+    else:
+        ret.append(arg.new_empty(0))
+
+    return tuple(ret)
+
+
 @register_op_impl(aten.repeat_interleave.Tensor)
 def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
     if output_size is None:
@@ -279,17 +334,24 @@ def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
 
 @register_op_impl(torch.ops.aten._local_scalar_dense.default)
 def local_scalar_dense(fake_mode, func, arg):
-    if fake_mode.shape_env is None or not fake_mode.shape_env.allow_scalar_outputs:
+    if fake_mode.shape_env is None or (
+        not fake_mode.shape_env.allow_scalar_outputs
+        and not fake_mode.allow_scalar_outputs
+    ):
         # Without symints/symfloats, cannot handle this
         raise DataDependentOutputException(func)
+    if (r := arg.item_memo) is not None:
+        return r
     if is_float_dtype(arg.dtype):
-        return fake_mode.shape_env.create_unbacked_symfloat()
+        r = fake_mode.shape_env.create_unbacked_symfloat()
     elif is_integer_dtype(arg.dtype):
-        return fake_mode.shape_env.create_unbacked_symint()
+        r = fake_mode.shape_env.create_unbacked_symint()
     elif is_boolean_dtype(arg.dtype):
-        return fake_mode.shape_env.create_unbacked_symbool()
+        r = fake_mode.shape_env.create_unbacked_symbool()
     else:
         raise NotImplementedError(f"local_scalar_dense/item NYI for {arg.dtype}")
+    arg.item_memo = r
+    return r
 
 
 @register_op_impl(torch.ops.aten.nonzero.default)
@@ -301,9 +363,7 @@ def nonzero(fake_mode, func, arg):
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
-    if arg.nonzero_memo is not None:
-        nnz = arg.nonzero_memo
-    else:
+    if (nnz := arg.nonzero_memo) is None:
         # Avoid importing sympy at a module level
         from torch.fx.experimental.symbolic_shapes import (
             _constrain_range_for_size,
@@ -319,8 +379,7 @@ def nonzero(fake_mode, func, arg):
             # symint cannot equal zero).  We could also unconditionally
             # allocate an unbacked SymInt and not refine its range,
             # but this seems more precise.
-            nnz = arg._nonzero_memo = 0
-            arg._nonzero_memo_vc = arg._version
+            nnz = 0
         else:
             nnz = fake_mode.shape_env.create_unbacked_symint()
 
@@ -331,10 +390,7 @@ def nonzero(fake_mode, func, arg):
 
             _constrain_range_for_size(nnz, max=maxval)
 
-            if not torch.is_inference_mode_enabled():
-                # arg._version N/A in inference mode
-                arg._nonzero_memo = nnz
-                arg._nonzero_memo_vc = arg._version
+        arg.nonzero_memo = nnz
 
     return arg.new_empty((nnz, arg.dim()), dtype=torch.int64)
 
@@ -859,6 +915,31 @@ def meta__efficient_attention_forward(fake_mode, func, *args, **kwargs):
     )
 
     return res, logsum_exp, seed, offset, actual_max_seqlen_q, actual_max_seqlen_k
+
+
+@register_op_impl(torch.ops.aten._pack_padded_sequence.default)
+def _pack_padded_sequence(fake_mode, func, inputs, lengths, batch_first):
+    if (
+        fake_mode.shape_env is None
+        or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+    ):
+        # Without symints/symfloats, cannot handle this
+        raise DynamicOutputShapeException(func)
+
+    new_batch_size = fake_mode.shape_env.create_unbacked_symint()
+
+    from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
+
+    _constrain_range_for_size(new_batch_size)
+
+    if not batch_first:
+        # Inputs should have shape (batch_size, seq_len, *)
+        inputs = inputs.transpose(0, 1)
+
+    res_size = inputs.shape[1:]
+    packed_data = inputs.new_empty(res_size)
+    batch_size = inputs.new_empty((new_batch_size,))
+    return (packed_data, batch_size)
 
 
 FAST_OP_IMPLEMENTATIONS = {}

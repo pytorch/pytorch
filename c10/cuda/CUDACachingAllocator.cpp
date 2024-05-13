@@ -66,9 +66,9 @@ namespace Native {
 //   smallest available free block or allocate a new block using cudaMalloc.
 // - To reduce fragmentation, requests between 1MB and 10MB will allocate and
 //   split a 20MB block, if no free block of sufficient size is available.
-// - To further reduce fragmentation, blocks >= 200MB are not allowed to be
-//   split. These oversize cached blocks will still satisfy requests within
-//   20MB of the oversize cached block size.
+// - To further reduce fragmentation, blocks >= max_split_size are not allowed
+//   to be split. These oversize cached blocks will still satisfy requests
+//   within 1MB of the oversize cached block size.
 //
 // With this allocator, allocations and frees should logically be considered
 // "usages" of the memory segment associated with streams, just like kernel
@@ -778,12 +778,9 @@ struct MempoolIdHash {
 };
 
 cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
-#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
   if (at::cuda::currentStreamCaptureStatusMayInitCtx() ==
       at::cuda::CaptureStatus::None) {
-#endif
     return C10_CUDA_ERROR_HANDLED(cudaMalloc(p, size));
-#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
   } else {
     // It's ok to capture cudaMallocs, as long as we never cudaFree those
     // addresses before replay.
@@ -792,7 +789,6 @@ cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
     at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
     return C10_CUDA_ERROR_HANDLED(cudaMalloc(p, size));
   }
-#endif
 }
 
 } // anonymous namespace
@@ -1149,7 +1145,7 @@ class DeviceCachingAllocator {
           "CUDA out of memory. Tried to allocate ",
           format_size(alloc_size),
           ". GPU ",
-          device,
+          static_cast<int>(device),
           " has a total capacity of ",
           format_size(device_total),
           " of which ",
@@ -2183,7 +2179,6 @@ class DeviceCachingAllocator {
   }
 
   BlockPool& get_pool(size_t size, cudaStream_t stream) {
-#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
     // captures_underway is a conservative guess that the current stream may be
     // capturing. It's only non-empty if some thread has begun and not yet ended
     // a capture, so it's usually 0, and we can short-circuit
@@ -2201,7 +2196,6 @@ class DeviceCachingAllocator {
         }
       }
     }
-#endif
     if (size <= kSmallSize) {
       return small_blocks;
     } else {

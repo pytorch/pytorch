@@ -206,14 +206,12 @@ def main() -> None:
     )
 
     print("grouped native ops with out variant: %d" % len(native_functions_groups))
-    supported_functions_num = sum(
-        [len(groups) for groups in supported_functions_groups]
-    )
+    supported_functions_num = sum(len(groups) for groups in supported_functions_groups)
     print("generated functions groups with out variant: %d" % supported_functions_num)
 
     print("\nview grouped native ops: %d" % len(native_functions_view_groups))
     supported_view_functions_num = sum(
-        [len(groups) for groups in supported_functions_view_groups]
+        len(groups) for groups in supported_functions_view_groups
     )
     print("generated functions view groups: %d" % supported_view_functions_num)
 
