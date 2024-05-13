@@ -967,7 +967,7 @@ class TestCreation(TestCase):
         nstr = ["123", "123"]
         result = np.array([123, 123], dtype=int)
         for type in types:
-            msg = "String conversion for %s" % type
+            msg = f"String conversion for {type}"
             assert_equal(np.array(nstr, dtype=type), result, err_msg=msg)
 
     def test_void(self):
@@ -1623,7 +1623,7 @@ class TestMethods(TestCase):
         a = np.arange(101, dtype=dtype)
         b = np.flip(a)
         for kind in self.sort_kinds:
-            msg = "scalar sort, kind=%s" % kind
+            msg = f"scalar sort, kind={kind}"
             c = a.copy()
             c.sort(kind=kind)
             assert_equal(c, a, msg)
@@ -1639,7 +1639,7 @@ class TestMethods(TestCase):
         a = np.arange(-50, 51, dtype=dtype)
         b = np.flip(a)
         for kind in self.sort_kinds:
-            msg = "scalar sort, kind=%s" % (kind)
+            msg = f"scalar sort, kind={kind}"
             c = a.copy()
             c.sort(kind=kind)
             assert_equal(c, a, msg)
@@ -1779,13 +1779,13 @@ class TestMethods(TestCase):
         ai = a * 1j + 1
         bi = b * 1j + 1
         for kind in self.sort_kinds:
-            msg = "complex argsort, kind=%s" % kind
+            msg = f"complex argsort, kind={kind}"
             assert_equal(ai.copy().argsort(kind=kind), a, msg)
             assert_equal(bi.copy().argsort(kind=kind), b, msg)
         ai = a + 1j
         bi = b + 1j
         for kind in self.sort_kinds:
-            msg = "complex argsort, kind=%s" % kind
+            msg = f"complex argsort, kind={kind}"
             assert_equal(ai.copy().argsort(kind=kind), a, msg)
             assert_equal(bi.copy().argsort(kind=kind), b, msg)
 
@@ -1846,10 +1846,10 @@ class TestMethods(TestCase):
         # test for floats arrays containing nans. Explicitly test
         # half, single, and double precision floats to verify that
         # the NaN-handling is correct.
-        msg = "Test real (%s) searchsorted with nans, side='l'" % a.dtype
+        msg = f"Test real ({a.dtype}) searchsorted with nans, side='l'"
         b = a.searchsorted(a, side="left")
         assert_equal(b, np.arange(3), msg)
-        msg = "Test real (%s) searchsorted with nans, side='r'" % a.dtype
+        msg = f"Test real ({a.dtype}) searchsorted with nans, side='r'"
         b = a.searchsorted(a, side="right")
         assert_equal(b, np.arange(1, 4), msg)
         # check keyword arguments
@@ -3320,20 +3320,20 @@ class TestArgmax(TestCase):
             sup.filter(RuntimeWarning, "invalid value encountered in reduce")
             val = np.max(arr)
 
-        assert_equal(np.argmax(arr), pos, err_msg="%r" % arr)
-        assert_equal(arr[np.argmax(arr)], val, err_msg="%r" % arr)
+        assert_equal(np.argmax(arr), pos, err_msg=f"{arr!r}")
+        assert_equal(arr[np.argmax(arr)], val, err_msg=f"{arr!r}")
 
         # add padding to test SIMD loops
         rarr = np.repeat(arr, 129)
         rpos = pos * 129
-        assert_equal(np.argmax(rarr), rpos, err_msg="%r" % rarr)
-        assert_equal(rarr[np.argmax(rarr)], val, err_msg="%r" % rarr)
+        assert_equal(np.argmax(rarr), rpos, err_msg=f"{rarr!r}")
+        assert_equal(rarr[np.argmax(rarr)], val, err_msg=f"{rarr!r}")
 
         padd = np.repeat(np.min(arr), 513)
         rarr = np.concatenate((arr, padd))
         rpos = pos
-        assert_equal(np.argmax(rarr), rpos, err_msg="%r" % rarr)
-        assert_equal(rarr[np.argmax(rarr)], val, err_msg="%r" % rarr)
+        assert_equal(np.argmax(rarr), rpos, err_msg=f"{rarr!r}")
+        assert_equal(rarr[np.argmax(rarr)], val, err_msg=f"{rarr!r}")
 
     def test_maximum_signed_integers(self):
         a = np.array([1, 2**7 - 1, -(2**7)], dtype=np.int8)
@@ -3429,20 +3429,20 @@ class TestArgmin(TestCase):
             sup.filter(RuntimeWarning, "invalid value encountered in reduce")
             min_val = np.min(arr)
 
-        assert_equal(np.argmin(arr), pos, err_msg="%r" % arr)
-        assert_equal(arr[np.argmin(arr)], min_val, err_msg="%r" % arr)
+        assert_equal(np.argmin(arr), pos, err_msg=f"{arr!r}")
+        assert_equal(arr[np.argmin(arr)], min_val, err_msg=f"{arr!r}")
 
         # add padding to test SIMD loops
         rarr = np.repeat(arr, 129)
         rpos = pos * 129
-        assert_equal(np.argmin(rarr), rpos, err_msg="%r" % rarr)
-        assert_equal(rarr[np.argmin(rarr)], min_val, err_msg="%r" % rarr)
+        assert_equal(np.argmin(rarr), rpos, err_msg=f"{rarr!r}")
+        assert_equal(rarr[np.argmin(rarr)], min_val, err_msg=f"{rarr!r}")
 
         padd = np.repeat(np.max(arr), 513)
         rarr = np.concatenate((arr, padd))
         rpos = pos
-        assert_equal(np.argmin(rarr), rpos, err_msg="%r" % rarr)
-        assert_equal(rarr[np.argmin(rarr)], min_val, err_msg="%r" % rarr)
+        assert_equal(np.argmin(rarr), rpos, err_msg=f"{rarr!r}")
+        assert_equal(rarr[np.argmin(rarr)], min_val, err_msg=f"{rarr!r}")
 
     def test_minimum_signed_integers(self):
         a = np.array([1, -(2**7), -(2**7) + 1, 2**7 - 1], dtype=np.int8)

@@ -855,7 +855,7 @@ class TestDelete(TestCase):
     def _check_inverse_of_slicing(self, indices):
         a_del = delete(self.a, indices)
         nd_a_del = delete(self.nd_a, indices, axis=1)
-        msg = "Delete failed for obj: %r" % indices
+        msg = f"Delete failed for obj: {indices!r}"
         assert_array_equal(setxor1d(a_del, self.a[indices,]), self.a, err_msg=msg)
         xor = setxor1d(nd_a_del[0, :, 0], self.nd_a[0, indices, 0])
         assert_array_equal(xor, self.nd_a[0, :, 0], err_msg=msg)
