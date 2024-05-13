@@ -8,7 +8,7 @@ import re
 import sys
 from copy import copy, deepcopy
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, cast, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 
@@ -17,9 +17,10 @@ import torch.fx
 from torch._inductor import dependencies
 from torch._prims_common import is_float_dtype
 from torch.utils import _pytree as pytree
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
+from ..._dynamo.utils import counters
 
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
@@ -34,6 +35,7 @@ from ..scheduler import (
 )
 from ..utils import (
     cache_on_self,
+    get_bounds_index_expr,
     get_fused_kernel_name,
     is_welford_reduction,
     parallel_num_threads,
@@ -841,7 +843,7 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def constant(val, dtype):
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        assert opt_ctx and opt_ctx.dtype is not None
+        assert opt_ctx and opt_ctx.dtype is not None, opt_ctx
         dtype = opt_ctx.dtype
         if dtype in DTYPE_LOWP_FP:
             # Since load promotes all half-precision inputs to float, constants
@@ -854,7 +856,12 @@ class CppOverrides(OpOverrides):
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         assert opt_ctx and opt_ctx.dtype is not None
         dtype = opt_ctx.dtype
-        return ops.to_dtype(cexpr(V.kernel.rename_indexing(expr)), dtype)
+
+        idx_str = cexpr(V.kernel.rename_indexing(expr))
+        var = V.kernel.cse.generate(
+            V.kernel.compute, idx_str, bounds=get_bounds_index_expr(expr)
+        )
+        return ops.to_dtype(var, dtype)
 
     @staticmethod
     def masked(mask, body, other):
@@ -1353,7 +1360,7 @@ class CppVecOverrides(CppOverrides):
         ], f"{__name__} does not support {dtype}"
         node: torch.fx.Node = V.interpreter.current_node
         assert node and isinstance(node, torch.fx.Node)
-        opt_ctx_x = get_opt_ctx(node.args[1])  # type: ignore[arg-type]
+        opt_ctx_x = get_opt_ctx(node.args[1])
         assert opt_ctx_x
         assert opt_ctx_x.dtype is not None
         assert isinstance(V.kernel, CppVecKernel)
@@ -1451,7 +1458,10 @@ class CppVecOverrides(CppOverrides):
         if stride == 0:
             return CppOverrides.index_expr(expr, dtype)
         elif stride is not None:
-            value = ops.to_dtype(cexpr(index), dtype)
+            idx = V.kernel.cse.generate(
+                V.kernel.compute, cexpr(index), bounds=get_bounds_index_expr(expr)
+            )
+            value = ops.to_dtype(idx, dtype)
             if isinstance(value, OpsValue):
                 value = value.value
             csevar = V.kernel.arange(value, stride)
@@ -2330,7 +2340,7 @@ class CppVecKernel(CppKernel):
             reduction_factor = (
                 self.tiling_factor if self.tiling_idx >= self.reduction_depth else 1
             )
-            self.weight_recp_vec_range = reduction_size // reduction_factor
+            self.weight_recp_vec_range = FloorDiv(reduction_size, reduction_factor)
             self.non_parallel_reduction_prefix.writeline(
                 self.welford_weight_reciprocal_vec(dtype, None)
             )
@@ -2389,8 +2399,7 @@ class CppVecKernel(CppKernel):
         index = self.rename_indexing(index)
         var = self.args.output(name)
         out_dtype = V.graph.get_dtype(name)
-        # Only float reductions are vectorized currently
-        dtype = torch.float
+        dtype = torch.float if out_dtype.is_floating_point else torch.int64
         code = IndentedBuffer()
         if self.tiling_idx >= self.reduction_depth:
             # Horizontal reduction
@@ -2400,16 +2409,11 @@ class CppVecKernel(CppKernel):
         else:
             # Vertical reduction
             if out_dtype != dtype:
-                if out_dtype in DTYPE_LOWP_FP and dtype == torch.float:
-                    _lowp_fp_tmpvar_vec = f"{DTYPE_TO_CPP[out_dtype]}_{value}"
-                    code.writeline(
-                        f"auto {_lowp_fp_tmpvar_vec} = at::vec::convert<{DTYPE_TO_CPP[out_dtype]}>({value});"
-                    )
-                    value = _lowp_fp_tmpvar_vec
-                else:
-                    raise AssertionError(
-                        f"Unsupported reduction type from {dtype} to {out_dtype}"
-                    )
+                converted_value = f"{DTYPE_TO_CPP[out_dtype]}_{value}"
+                code.writeline(
+                    f"auto {converted_value} = at::vec::convert<{DTYPE_TO_CPP[out_dtype]}>({value});"
+                )
+                value = converted_value
             code.splice(self._get_store_line(value, var, index, out_dtype))
         self.reduction_suffix.splice(code.map(lambda x: DeferredLine(name, x)))
 
@@ -2464,7 +2468,7 @@ class CppVecKernel(CppKernel):
 
     def welford_weight_reciprocal_vec(self, dtype, num_threads=None):
         vec_num_range_thread = (
-            (self.weight_recp_vec_range + num_threads - 1) // num_threads
+            CeilDiv(self.weight_recp_vec_range, num_threads)
             if num_threads
             else self.weight_recp_vec_range
         )
@@ -3562,6 +3566,8 @@ class CppScheduling(BaseScheduling):
         return self._why_fuse_nodes(node1, node2) is not None
 
     def can_fuse_horizontal(self, node1, node2):
+        if node1.is_template() or node2.is_template():
+            return False
         if (
             len(node1.get_nodes()) + len(node2.get_nodes())
             > config.cpp.max_horizontal_fusion_size
@@ -3642,6 +3648,9 @@ class CppScheduling(BaseScheduling):
             return 0
 
     def can_fuse_vertical(self, node1, node2):
+        # TODO(jgong5): support vertical fusion for template nodes
+        if node1.is_template() or node2.is_template():
+            return False
         return (
             self._can_fuse_horizontal_impl(node1, node2) and not node1.is_reduction()
         ) or self.can_fuse_vertical_outer_loop(node1, node2)
@@ -3698,6 +3707,42 @@ class CppScheduling(BaseScheduling):
         if args_num > CppScheduling.MAX_FUSED_KERNEL_ARGS_NUM:
             self._set_flush_status(True)
 
+    def is_cpp_template(self, node: BaseSchedulerNode) -> bool:
+        return isinstance(node, SchedulerNode) and isinstance(
+            node.node, ir.CppTemplateBuffer
+        )
+
+    def codegen_template(
+        self, template_node: BaseSchedulerNode, epilogue_nodes: List[SchedulerNode]
+    ):
+        """
+        Codegen a CPP template, possibly with fused epilogues
+        """
+        counters["inductor"]["cpp_epilogue_fusion_counter"] += len(epilogue_nodes)
+        assert self.is_cpp_template(
+            template_node
+        ), "Template node passed to CppScheduler.codegen_template must be a SchedulerNode that wraps a CppTemplateBuffer"
+        template_node = cast(SchedulerNode, template_node)
+        _, (_, rnumel) = template_node.group
+        assert rnumel == ()
+        ctb: ir.CppTemplateBuffer = cast(ir.CppTemplateBuffer, template_node.node)
+        epilogue_ir_nodes: List[ir.Buffer] = [n.node for n in epilogue_nodes]
+        assert all(
+            isinstance(n, ir.ComputedBuffer) for n in epilogue_ir_nodes
+        ), "Epilogue nodes must all be instances of ir.ComputedBuffer"
+        kernel, render = ctb.make_kernel_render(ctb, epilogue_nodes=epilogue_ir_nodes)
+        with kernel:
+            for node in [template_node, *epilogue_nodes]:
+                node.mark_run()
+            src_code = render()
+
+        with V.set_kernel_handler(kernel):
+            node_schedule = [template_node, *epilogue_nodes]
+            kernel_name = self.define_kernel(src_code, node_schedule, kernel.args)
+        kernel.call_kernel(kernel_name, ctb)
+        V.graph.removed_buffers |= kernel.removed_buffers
+        self.scheduler.free_buffers()
+
     def _get_scheduled_num_args(self):
         return self.kernel_group.get_num_args()
 
@@ -3707,7 +3752,7 @@ class CppScheduling(BaseScheduling):
     def codegen_sync(self):
         pass
 
-    def define_kernel(self, src_code, nodes):
+    def define_kernel(self, src_code, nodes, kernel_args=None):
         wrapper = V.graph.wrapper_code
         fused_name = (
             get_fused_kernel_name(nodes, config.cpp.descriptive_names)
@@ -3723,7 +3768,8 @@ class CppScheduling(BaseScheduling):
         src_code = src_code.replace("#pragma CMT", "//")
 
         compile_wrapper = IndentedBuffer()
-        _, _, arg_types = self.kernel_group.args.cpp_argdefs()
+        args = self.kernel_group.args if kernel_args is None else kernel_args
+        _, _, arg_types = args.cpp_argdefs()
         if not V.graph.cpp_wrapper:
             compile_wrapper.writeline(f"async_compile.cpp_pybinding({arg_types!r}, '''")
         compile_wrapper.splice(src_code, strip=True)
