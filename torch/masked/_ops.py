@@ -210,7 +210,7 @@ ord (int, float, optional): the order of vector norm. Default: 2.
 ord (int, float): the order of vector norm. Default: 2.
   See :func:`torch.linalg.vector_norm` for a list of supported norms.""",
         unbiased="""\
-unbiased (bool): when True, use Bessel’s correction, otherwise, compute
+unbiased (bool): when True, use Bessel's correction, otherwise, compute
   the uncorrected sample variance.""",
         eps="""\
 eps (float, optional): small value to avoid division by zero. Default: {default}.""",

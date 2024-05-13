@@ -72,7 +72,7 @@ if config.is_fbcode():
     from torch._inductor.fb.utils import log_optimus_to_scuba, time_and_log
 else:
     # no-op decorator
-    def time_and_log(attr: str, extra_loggings: Optional[Dict[str, str]] = None):
+    def time_and_log(attr: str):
         return dynamo_utils.identity
 
 
@@ -390,6 +390,24 @@ def fake_tensor_prop(
     return fake_mode
 
 
+def should_use_remote_fx_graph_cache():
+    if config.fx_graph_remote_cache:
+        return True
+    if not config.is_fbcode():
+        return False
+    if torch.version.hip is not None:
+        return False
+
+    try:
+        from triton.runtime.fb_memcache import MEMCACHE_VERSION
+    except ModuleNotFoundError:
+        return False
+
+    return MEMCACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
+        "pytorch/remote_cache:fx_graph_memcache_version"
+    )
+
+
 # pass config dict back to user
 def get_patched_config_dict(config_patches=None) -> Dict[str, Any]:
     with config.patch(config_patches):
@@ -398,10 +416,7 @@ def get_patched_config_dict(config_patches=None) -> Dict[str, Any]:
 
 @DebugContext.wrap
 @torch.utils._python_dispatch._disable_current_modes()
-@time_and_log(
-    attr="compilation time (in seconds)",
-    extra_loggings={"config_dict": str(get_patched_config_dict())},
-)
+@time_and_log(attr="compilation time (in seconds)")
 # Need this decorator for compile_fx_inner even if we already have one for
 # compile_fx. The reason is the compilation for backward graph may happen after
 # compile_fx return and we may want to use the _LazyGraphModule for compiling
@@ -478,9 +493,15 @@ def compile_fx_inner(
 
     start = time.time()
 
-    if config.fx_graph_cache and not aot_mode:
+    fx_graph_remote_cache = should_use_remote_fx_graph_cache()
+    if (config.fx_graph_cache or fx_graph_remote_cache) and not aot_mode:
         compiled_graph = FxGraphCache.load(
-            fx_codegen_and_compile, gm, example_inputs, graph_kwargs
+            fx_codegen_and_compile,
+            gm,
+            example_inputs,
+            graph_kwargs,
+            local=config.fx_graph_cache,
+            remote=fx_graph_remote_cache,
         )
     else:
         compiled_graph = fx_codegen_and_compile(
@@ -708,7 +729,9 @@ def fx_codegen_and_compile(
             payload_fn=lambda: gm.print_readable(print_output=False),
         )
         if config.is_fbcode():
-            log_optimus_to_scuba()
+            log_optimus_to_scuba(
+                extra_logging={"pt2_configs": str(get_patched_config_dict())}
+            )
 
     with V.set_fake_mode(fake_mode), maybe_disable_comprehensive_padding(
         example_inputs
