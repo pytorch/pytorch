@@ -351,6 +351,12 @@ def cprofile_wrapper(func):
 
         maybe_upload_prof_stats_to_manifold(str(profile_path))  # fb-only
 
+        torch._logging.trace_structured(
+            "artifact",
+            lambda: { "name": "dynamo_cprofile_prof", "type": "prof", "encoding": "ascii" },
+            payload_fn=lambda: base64.encodebytes(open(profile_path, 'rb').read()),
+        )
+
         return retval
 
     return profile_wrapper
