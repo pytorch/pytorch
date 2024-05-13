@@ -675,13 +675,10 @@ class DistributedTest:
                 for b in gathered_bufs_m2:
                     self.assertEqual(b, buf2)
 
-        def _validate_profiler_nccl_meta(self, prof):
+        def _sanity_check_profiler_nccl_meta(self, nccl_meta_events):
             """Torch profiler includes nccl metadata in an inserted operator called "record_param_comms"
             We test for basic fields in this profiler event that correspond to the nccl communication
             collectives"""
-            nccl_meta_events = get_profiler_nccl_meta(prof)
-            self.assertGreater(len(nccl_meta_events), 0)
-
             per_coll_meta = defaultdict(list)
             for e in nccl_meta_events:
                 args = e.get("args", {})
@@ -6949,18 +6946,25 @@ class DistributedTest:
             torch_profiler_ctx = torch.profiler.profile(activities=[cpu_act, cuda_act])
             prof = self._test_ddp_profiling(profiler_ctx=torch_profiler_ctx)
 
-            if dist.get_backend() == "nccl":
-                nccl_meta = self._validate_profiler_nccl_meta(prof)
-                self.assertEqual(len(nccl_meta["allreduce"]), 2)
-                self.assertEqual(len(nccl_meta["wait"]), 1)
+            if dist.get_backend() != "nccl":
+                return
 
-                # check allreduce message sizes
-                a0 = nccl_meta["allreduce"][0]
-                self.assertEqual(a0["Out msg nelems"], 100, msg=f"{a0}")
-                self.assertEqual(a0["dtype"], "Float", msg=f"{a0}")
-                a1 = nccl_meta["allreduce"][1]
-                self.assertEqual(a1["Out msg nelems"], 1, msg=f"{a1}")
-                self.assertEqual(a1["dtype"], "Int", msg=f"{a1}")
+            nccl_meta_events = get_profiler_nccl_meta(prof)
+            self.assertGreater(len(nccl_meta_events), 0)
+
+            nccl_meta = self._sanity_check_profiler_nccl_meta(nccl_meta_events)
+
+            # additionally check the specific collectives in this test case
+            self.assertEqual(len(nccl_meta["allreduce"]), 2)
+            self.assertEqual(len(nccl_meta["wait"]), 1)
+
+            # check allreduce message sizes
+            a0 = nccl_meta["allreduce"][0]
+            self.assertEqual(a0["Out msg nelems"], 100, msg=f"{a0}")
+            self.assertEqual(a0["dtype"], "Float", msg=f"{a0}")
+            a1 = nccl_meta["allreduce"][1]
+            self.assertEqual(a1["Out msg nelems"], 1, msg=f"{a1}")
+            self.assertEqual(a1["dtype"], "Int", msg=f"{a1}")
 
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(
