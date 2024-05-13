@@ -17,6 +17,8 @@ from torch.testing._internal.common_device_type import (
 
 from torch.testing._internal.common_utils import IS_MACOS, parametrize, TEST_MKL
 
+from .test_torchinductor import check_model
+
 aten = torch.ops.aten
 
 
@@ -49,6 +51,8 @@ def patches(fn):
 
 
 class TestSelectAlgorithm(TestCase):
+    common = check_model
+
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
@@ -67,7 +71,6 @@ class TestSelectAlgorithm(TestCase):
                 super().__init__()
                 self.linear = torch.nn.Linear(in_features, out_features, bias)
 
-            @torch.compile
             def forward(self, x):
                 return self.linear(x)
 
@@ -75,7 +78,7 @@ class TestSelectAlgorithm(TestCase):
         mod = M(bias=bias).to(dtype=dtype).eval()
         B = (2, batch_size) if input_3d else (batch_size,)
         v = torch.randn(*B, in_features).to(dtype=dtype)
-        mod(v)
+        self.common(mod, (v,))
         self.assertEqual(
             counters["inductor"]["select_algorithm_autotune"],
             1 if out_features != 1 else 0,
@@ -104,9 +107,69 @@ class TestSelectAlgorithm(TestCase):
         counters.clear()
         mod = M(bias=bias).to(dtype=dtype).eval()
         v = torch.randn(in_features, batch_size).to(dtype=dtype)
-        mod(v.transpose(0, 1))
+        self.common(mod, (v.transpose(0, 1),))
         # TODO(jgong5): support transposed input
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 0)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("bias", (True, False))
+    @parametrize("epilogue", ("relu", "gelu", "silu"))
+    @dtypes(torch.float)
+    def test_linear_with_pointwise(self, bias, epilogue, dtype):
+        batch_size = 384
+        in_features = 196
+        out_features = 384
+
+        class M(torch.nn.Module):
+            def __init__(self, bias, epilogue):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+                if epilogue == "relu":
+                    self.epilogue = torch.nn.ReLU()
+                elif epilogue == "gelu":
+                    self.epilogue = torch.nn.GELU()
+                elif epilogue == "silu":
+                    self.epilogue = torch.nn.SiLU()
+
+            def forward(self, x):
+                return self.epilogue(self.linear(x))
+
+        counters.clear()
+        mod = M(bias=bias, epilogue=epilogue).to(dtype=dtype).eval()
+        v = torch.randn(batch_size, in_features).to(dtype=dtype)
+        self.common(mod, (v,))
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("bias", (True, False))
+    @dtypes(torch.float)
+    def test_linear_with_transpose(self, bias, dtype):
+        batch_size = 384
+        in_features = 196
+        out_features = 128
+
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+
+            def forward(self, x, y):
+                return self.linear(x).transpose(0, 1) + y
+
+        counters.clear()
+        mod = M(bias=bias).to(dtype=dtype).eval()
+        v = torch.randn(batch_size, in_features).to(dtype=dtype)
+        u = torch.randn(out_features, batch_size).to(dtype=dtype)
+        self.common(mod, (v, u))
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
@@ -115,7 +178,14 @@ class _DynamicShapesTestBase(TestCase):
 
 
 class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
+    common = check_model
     test_linear_dynamic_shapes = TestSelectAlgorithm.test_linear_static_shapes
+    test_linear_with_pointwise_dynamic_shapes = (
+        TestSelectAlgorithm.test_linear_with_pointwise
+    )
+    test_linear_with_transpose_dynamic_shapes = (
+        TestSelectAlgorithm.test_linear_input_transpose
+    )
 
 
 instantiate_device_type_tests(TestSelectAlgorithm, globals(), only_for="cpu")
