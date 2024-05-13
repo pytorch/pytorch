@@ -60,6 +60,7 @@ class ROCmTemplate(KernelTemplate):
             A ROCmTemplateCaller object representing the generated ROCm template caller.
         """
         kernel_name = f"rocm_{self.name}"
+        kernel_hash_name = f"rocm_{self.name}_{next(self.index_counter)}"
         with patch.object(
             V.graph, "get_dtype", self._fake_get_dtype(self.output_node)
         ), ROCmTemplateKernel(
@@ -67,7 +68,7 @@ class ROCmTemplate(KernelTemplate):
         ) as kernel:
             code = self.render(kernel=kernel, **kwargs)
             _, call_args, _ = kernel.args.python_argdefs()
-            log.debug("Generated Code:\n%s", code)
+            log.debug("Autotune key: %s, Generated Code:\n%s", kernel_hash_name, code)
             log.debug(
                 "Args: cpp_argdefs: %s, python_argdefs: %s",
                 kernel.args.cpp_argdefs(),
@@ -90,9 +91,6 @@ class ROCmTemplate(KernelTemplate):
         extra_args = V.graph.sizevars.size_hints(
             map(sympy.expand, call_args[len(expected_args) :])
         )
-
-        kernel_hash_name = f"rocm_{self.name}_{next(self.index_counter)}"
-
         # create the BenchmarkRequest
         bmreq = ROCmBenchmarkRequest(
             kernel_name=kernel_name,
