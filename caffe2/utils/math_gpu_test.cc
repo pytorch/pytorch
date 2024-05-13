@@ -224,8 +224,6 @@ TEST(MathUtilGPUTest, testCopyVector) {
 
 namespace {
 
-constexpr float kEps = 1e-5;
-
 class GemmBatchedGPUTest
     : public testing::TestWithParam<testing::tuple<bool, bool>> {
  protected:
