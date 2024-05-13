@@ -6,6 +6,7 @@
 
 namespace c10 {
 
+C10_API void* alloc_cpu_aligned(size_t nbytes, int alignment);
 C10_API void* alloc_cpu(size_t nbytes);
 C10_API void free_cpu(void* data);
 

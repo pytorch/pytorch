@@ -8,6 +8,7 @@
 #if AT_MKLDNN_ENABLED()
 #include <dnnl.hpp>
 #include <ideep.hpp>
+#include <c10/core/impl/alloc_cpu.h>
 #endif
 
 #include <caffe2/core/common.h>
@@ -15,6 +16,28 @@
 #include <ATen/native/DispatchStub.h>
 
 #include <sstream>
+
+#if AT_MKLDNN_ENABLED()
+void* torch_cpu_malloc(size_t size, int alignment)
+{
+  return c10::alloc_cpu_aligned(size, alignment);
+}
+
+void torch_cpu_free(void* data)
+{
+  c10::free_cpu(data);
+}
+
+bool register_pytorch_memory_alloction_api_to_dnnl()
+{
+  bool b_reg = register_dnnl_cpu_memory_alloction_apis(torch_cpu_malloc, torch_cpu_free);
+  printf("reg dnnl alloction: %d.\n", b_reg);
+  return b_reg;
+}
+
+bool g_b_registered_dnnl_alloction = register_pytorch_memory_alloction_api_to_dnnl();
+
+#endif
 
 namespace at {
 

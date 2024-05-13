@@ -81,7 +81,7 @@ constexpr bool is_thp_alloc(C10_UNUSED size_t nbytes) {
 #endif
 } // namespace
 
-void* alloc_cpu(size_t nbytes) {
+void* alloc_cpu_aligned(size_t nbytes, int alignment) {
   if (nbytes == 0) {
     return nullptr;
   }
@@ -95,7 +95,7 @@ void* alloc_cpu(size_t nbytes) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   void* data;
 #ifdef __ANDROID__
-  data = memalign(gAlignment, nbytes);
+  data = memalign(alignment, nbytes);
   CAFFE_ENFORCE(
       data,
       "DefaultCPUAllocator: not enough memory: you tried to allocate ",
@@ -103,9 +103,9 @@ void* alloc_cpu(size_t nbytes) {
       " bytes.");
 #elif defined(_MSC_VER)
 #ifdef USE_MIMALLOC
-  data = mi_malloc_aligned(nbytes, gAlignment);
+  data = mi_malloc_aligned(nbytes, alignment);
 #else
-  data = _aligned_malloc(nbytes, gAlignment);
+  data = _aligned_malloc(nbytes, alignment);
 #endif
   CAFFE_ENFORCE(
       data,
@@ -148,6 +148,10 @@ void* alloc_cpu(size_t nbytes) {
   }
 
   return data;
+}
+
+void* alloc_cpu(size_t nbytes){
+  return alloc_cpu_aligned(nbytes, gAlignment);
 }
 
 void free_cpu(void* data) {
