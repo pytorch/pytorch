@@ -1681,15 +1681,7 @@ class TritonKernel(Kernel):
                 cse_var = self.cse.varname_map[var.name]
                 mask_vars.update(cse_var.mask_vars)
             elif symbol_is_type(
-                var,
-                (
-                    SymT.UNBACKED_INT,
-                    SymT.SIZE,
-                    SymT.PRECOMPUTED_SIZE,
-                    SymT.INDEX,
-                    SymT.FLOAT,
-                    SymT.UNBACKED_FLOAT,
-                ),
+                var, (SymT.UNBACKED_INT, SymT.SIZE, SymT.PRECOMPUTED_SIZE, SymT.INDEX)
             ):
                 pass
             else:
