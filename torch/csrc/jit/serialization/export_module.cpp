@@ -450,7 +450,7 @@ void ScriptModuleSerializer::serialize(
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
     bool save_mobile_debug_info) {
-  C10_LOG_API_USAGE_ONCE("torch.script.save");
+  C10_LOG_API_USAGE_ONCE("torch.jit.save");
   writeExtraFiles(module, extra_files);
   // Serialize the model object
   writeArchive(
