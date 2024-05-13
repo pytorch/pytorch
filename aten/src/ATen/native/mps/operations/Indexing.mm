@@ -42,7 +42,7 @@
 #include <ATen/ops/view_as_real.h>
 #endif
 
-#define NONZERO_MAX_SIZE 1024
+#define NONZERO_MAX_SIZE (2 ^ 24)
 
 namespace at::native {
 namespace mps {
