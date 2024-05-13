@@ -939,7 +939,15 @@ def _lower_dynamic_weighted_ref_functional(
         else:
             raise ValueError(f"Lowering is not supported for op '{func_node.target}'")
         with model.graph.inserting_before(func_node):
-            packed_weight = model.graph.create_node("call_function", prepack_op, tuple(prepack_args), {})
+            # kwargs of the func node are needed for prepack op (i.e., quantized::linear_prepack)
+            # They are not needed for compute op (i.e., quantized::linear)
+            kwargs = func_node.kwargs
+            # F.linear uses 'bias' key for bias while qlinear_prepack uses 'B' for bias
+            if func_node.target == F.linear and 'bias' in kwargs:
+                kwargs = kwargs.copy()
+                kwargs['B'] = kwargs['bias']
+                del kwargs['bias']
+            packed_weight = model.graph.create_node("call_function", prepack_op, tuple(prepack_args), kwargs)
 
         # Step 3: Replace reference pattern with the corresponding quantized op
         func_node.target = q_relu_func if relu_node is not None else q_func
@@ -947,7 +955,8 @@ def _lower_dynamic_weighted_ref_functional(
             func_node.args = (pattern_input, packed_weight, reduce_range_node)
         else:
             func_node.args = (pattern_input, packed_weight)
-
+        # kwargs for func_node has been moved to kwargs for prepack op
+        func_node.kwargs = {}
         if relu_node is not None:
             relu_node.replace_all_uses_with(func_node)
 
