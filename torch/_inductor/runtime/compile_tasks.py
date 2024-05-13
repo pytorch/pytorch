@@ -33,7 +33,9 @@ def _reload_python_module_in_subproc(key, path):
 def _reload_python_module(key, path):
     with open(path) as f:
         try:
-            code = compile(f.read(), path, "exec")
+            code_str = f.read()
+            print("\n===etaf-debug===\n", code_str)
+            code = compile(code_str, path, "exec")
         except Exception as e:
             raise RuntimeError(
                 f"Failed to import {path}\n{type(e).__name__}: {e}"
