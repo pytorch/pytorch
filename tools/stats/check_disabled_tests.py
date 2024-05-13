@@ -7,7 +7,6 @@ from tempfile import TemporaryDirectory
 from typing import Any, Dict, Generator, Tuple
 
 from tools.stats.upload_stats_lib import (
-    download_gha_artifacts,
     download_s3_artifacts,
     is_rerun_disabled_tests,
     unzip,
@@ -110,12 +109,6 @@ def get_test_reports(
 
         artifact_paths = download_s3_artifacts(
             "test-reports", workflow_run_id, workflow_run_attempt
-        )
-        for path in artifact_paths:
-            unzip(path)
-
-        artifact_paths = download_gha_artifacts(
-            "test-report", workflow_run_id, workflow_run_attempt
         )
         for path in artifact_paths:
             unzip(path)
