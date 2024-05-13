@@ -184,46 +184,6 @@ class ROCmTemplateKernel(ROCmKernel):
         if node.get_workspace_size() > 0:
             wrapper.writeline(wrapper.make_free_by_names(["workspace"]))
 
-    def dtype(self, node: IRNode) -> Optional[str]:
-        """
-        Generates code which represents dtype of a given node.
-        """
-
-        if node is None:
-            return "void"
-        return DTYPE_TO_CPP.get(node.get_layout().dtype)
-
-    def max_valid_index(self, node: IRNode, default=-1):
-        # Helper method, called into from CUTLASSGemmTemplate
-        if node is None:
-            return default
-        max_valid_offset = 0
-        for i in range(len(node.get_size())):
-            max_valid_offset += (node.get_size()[i] - 1) * node.get_stride()[i]
-        return max_valid_offset
-
-    def offset(self, node: IRNode) -> str:
-        """
-        Generates code which represents offset of a given node.
-        """
-
-        if node is None:
-            return "0"
-        return str(node.get_layout().offset)
-
-    def ptr(self, node: IRNode) -> str:
-        """
-        Generates code which represents pointer of a given node.
-        """
-
-        if node is None:
-            return "nullptr"
-        arg_name = self.arg_name(node)
-        if arg_name is None:
-            return "nullptr"
-        offset = self.offset(node)
-        return arg_name if offset == "0" else f"{arg_name} + {offset}"
-
     def size(
         self,
         node: IRNode,
@@ -253,49 +213,6 @@ class ROCmTemplateKernel(ROCmKernel):
 
         val = sympy_product(sizes)
         return cexpr(self.rename_indexing(val))
-
-    def stride(self, node: IRNode, index: int, default_value: int = 0) -> str:
-        """
-        Hook called from template code to get the stride of an arg.
-        Generates code which represents stride of a given node at index.
-        If node is None, returns default_value.
-
-        TODO: Will add needed args to pass it in if it is dynamic.
-        """
-
-        if node is None:
-            return str(default_value)
-
-        index = _normalize_idx(index, len(node.get_size()))
-        if index < 0:
-            return str(default_value)
-
-        stride = node.get_stride()[index]
-        return cexpr(self.rename_indexing(stride))
-
-    def row_or_column_stride(self, node: IRNode, default_value: int = 0) -> str:
-        """
-        Hook called from template code to get the row or column stride of an arg.
-        This is required by some CUTLASS 2.X APIs.
-        If the node is in row_major, it returns stride[-2].
-        If the node is in column_major, it returns stride[-1].
-
-        TODO: Will add needed args to pass it in if it is dynamic.
-        """
-
-        if node is None or len(node.get_stride()) < 2:
-            return str(default_value)
-
-        stride0 = node.get_stride()[-1]
-        stride1 = node.get_stride()[-2]
-        if stride0 == 1:
-            return cexpr(self.rename_indexing(stride1))
-        elif stride1 == 1:
-            return cexpr(self.rename_indexing(stride0))
-        else:
-            raise RuntimeError(
-                f"At least 1 stride should be 1. Strides: {node.get_stride()=}"
-            )
 
 
 class ROCmTemplateCaller(ChoiceCaller):
