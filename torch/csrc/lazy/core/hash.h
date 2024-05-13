@@ -108,6 +108,8 @@ static inline hash_t Hash(const c10::Scalar& value) {
 }
 
 static inline hash_t TensorHash(const at::Tensor& tensor) {
+  TORCH_INTERNAL_ASSERT(
+      false, "Unsupported scalar type:"); // This is to figure out where to add the tests.
   at::Tensor ctensor = tensor.contiguous();
   int64_t size = ctensor.numel() * ctensor.element_size();
   switch (ctensor.scalar_type()) {
