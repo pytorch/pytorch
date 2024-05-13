@@ -8,6 +8,7 @@
 #include <sstream>
 
 #include <c10/macros/Macros.h>
+#include <c10/util/Backtrace.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Flags.h>
 #include <c10/util/StringUtil.h>
@@ -126,7 +127,13 @@ constexpr bool IsUsingGoogleLogging() {
  */
 C10_API void ShowLogInfoToStderr();
 
-C10_API void SetStackTraceFetcher(std::function<string(void)> fetcher);
+C10_API void SetStackTraceFetcher(std::function<::c10::Backtrace()> fetcher);
+
+/**
+ * Convenience function for non-lazy stack trace fetchers. The Backtrace
+ * overload should be preferred when stringifying the backtrace is expensive.
+ */
+C10_API void SetStackTraceFetcher(std::function<std::string()> fetcher);
 
 using EnforceNotMet = ::c10::Error;
 
