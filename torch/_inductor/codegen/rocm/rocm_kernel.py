@@ -339,7 +339,7 @@ class ROCmTemplateCaller(ChoiceCaller):
         )
 
     def __str__(self):
-        return f"ROCmTemplateCaller(source_file={self.bmreq.source_file})"
+        return f"ROCmTemplateCaller(source_file={self.bmreq.source_file}, {self.info_dict()})"
 
     def call_name(self) -> str:
         return f"rocm_template_kernels.{self.name}"
