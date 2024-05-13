@@ -242,7 +242,7 @@ SGD.__doc__ = (
 
 def sgd(
     params: List[Tensor],
-    grads: List[Tensor],
+    d_p_list: List[Tensor],
     momentum_buffer_list: List[Optional[Tensor]],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
@@ -297,7 +297,7 @@ def sgd(
 
     func(
         params,
-        grads,
+        d_p_list,
         momentum_buffer_list,
         weight_decay=weight_decay,
         momentum=momentum,
