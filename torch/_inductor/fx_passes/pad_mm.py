@@ -1,4 +1,5 @@
 import functools
+import operator
 from typing import List, Optional, Union
 
 import torch
@@ -266,7 +267,14 @@ def should_pad_bench_key(
 
 
 def get_non_view_def(node):
-    if node.op == "call_function" and utils.is_view(node.target):
+    if node.op == operator.getitem:
+        return get_non_view_def(node.args[0])
+
+    if (
+        node.op == "call_function"
+        and isinstance(node.target, torch._ops.OpOverload)
+        and utils.is_view(node.target)
+    ):
         return get_non_view_def(node.all_input_nodes[0])
 
     return node
@@ -274,6 +282,11 @@ def get_non_view_def(node):
 
 def should_exclude_padding_time(match, arg_name):
     node_def = get_non_view_def(match.kwargs[arg_name])
+
+    # constant padding converts tensors to contiguous so even if the input tensor
+    # can be planned layout transform is not free. TODO - way to pad and preserve layout ?
+    if not fetch_fake_tensors(match, (arg_name,))[0].is_contiguous():
+        return False
 
     # optimistically assume we should be able to memory plan away
     # all non inputs
