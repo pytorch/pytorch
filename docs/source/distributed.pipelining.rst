@@ -177,6 +177,27 @@ Note that since we split our model into three stages, we must run this script wi
 
   torchrun --nproc_per_node=3 example.py
 
+Pipeline Transformation APIs
+============================
+
+The following set of APIs transform your model into a pipeline representation.
+
+.. currentmodule:: torch.distributed.pipelining
+
+.. autoclass:: SplitPoint
+
+.. autofunction:: pipeline
+
+.. autoclass:: Pipe
+
+.. autofunction:: annotate_split_points
+
+.. autofunction:: pipe_split
+
+.. autoclass:: ArgsChunkSpec
+
+.. autoclass:: KwargsChunkSpec
+
 Microbatch Utilities
 ====================
 
@@ -189,3 +210,18 @@ Microbatch Utilities
 .. autofunction:: split_args_kwargs_into_chunks
 
 .. autofunction:: merge_chunks
+
+Pipeline Schedules
+==================
+
+.. automodule:: torch.distributed.pipelining.PipelineSchedule
+
+.. currentmodule:: torch.distributed.pipelining.PipelineSchedule
+
+.. autoclass:: ScheduleGPipe
+
+.. autoclass:: Schedule1F1B
+
+.. autoclass:: ScheduleInterleaved1F1B
+
+.. autoclass:: ScheduleLoopedBFS

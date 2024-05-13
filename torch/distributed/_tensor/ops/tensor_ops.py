@@ -18,6 +18,7 @@ from torch.distributed._tensor.ops.embedding_ops import _MaskPartial
 from torch.distributed._tensor.ops.utils import (
     generate_redistribute_costs,
     is_tensor_dim_sharded,
+    is_tensor_evenly_shardable,
     is_tensor_partial,
     is_tensor_shardable,
     normalize_dim,
@@ -173,22 +174,49 @@ def create_like_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
         aten.new_full.default,
         aten.new_ones.default,
         aten.new_zeros.default,
-        aten.new_empty_strided.default,  # TODO: re-think new_empty_strided
+        aten.new_empty_strided.default,
     ],
     schema_info=RuntimeSchemaInfo(1, ["dtype"]),
 )
 def new_factory_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
-    # TODO: maybe we should generate all possible shardings intead of just stay
-    # replicated for new factory methods
+    # Currently there are two strategies:
+    # 1. let the output be replicated
+    # 2. let the output follow the input if input and output have the same shape
     input_strategy = op_schema.args_schema[0]
-    new_factory_strategy = OpStrategy([])
     assert isinstance(input_strategy, OpStrategy)
+    input_shape = input_strategy.output_shape
+    output_shape = op_schema.args_schema[1]
+    assert isinstance(output_shape, list)
+
+    new_factory_strategy = OpStrategy([])
     for arg_strategy in input_strategy.strategies:
         input_spec = arg_strategy.output_spec
         replica_spec = DTensorSpec(mesh, tuple([Replicate()] * mesh.ndim))
         new_factory_strategy.strategies.append(
-            PlacementStrategy(output_specs=replica_spec, input_specs=(input_spec,))
+            PlacementStrategy(
+                output_specs=replica_spec,
+                input_specs=(input_spec,),
+                redistribute_cost=[[0.0] * mesh.ndim],
+            )
         )
+
+        if tuple(input_shape) == tuple(output_shape) and input_spec.is_sharded():
+            # NOTE: for new_empty_strided, currently the non-replicate sharding
+            #       is supported only when the shape is evenly shardable
+            if (
+                op_schema.op == aten.new_empty_strided.default
+                and not is_tensor_evenly_shardable(input_shape, input_spec)
+            ):
+                continue
+
+            new_factory_strategy.strategies.append(
+                PlacementStrategy(
+                    output_specs=input_spec,
+                    input_specs=(input_spec,),
+                    # encouraging new tensor placement to be the same as input
+                    redistribute_cost=[[-0.1] * mesh.ndim],
+                )
+            )
 
     return new_factory_strategy
 

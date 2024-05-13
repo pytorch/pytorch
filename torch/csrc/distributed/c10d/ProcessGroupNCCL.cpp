@@ -475,12 +475,16 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
 ProcessGroupNCCL::WorkNCCL::~WorkNCCL() = default;
 
 bool ProcessGroupNCCL::WorkNCCL::isCompleted() {
-  checkAndSetException();
+  if (!ncclComm_->isAborted()) {
+    checkAndSetException();
+  }
   return exception() || finishedGPUExecutionInternal();
 }
 
 bool ProcessGroupNCCL::WorkNCCL::isStarted() {
-  checkAndSetException();
+  if (!ncclComm_->isAborted()) {
+    checkAndSetException();
+  }
   return exception() || startedGPUExecutionInternal();
 }
 
@@ -1250,6 +1254,11 @@ void ProcessGroupNCCL::heartbeatMonitor() {
         lastTimePollStore = currentTime;
         if (globalStore_->check({std::string(EXCEPTION_DUMP)})) {
           int timeOutRank = -1;
+          if (!shouldDump_.load()) {
+            LOG(ERROR)
+                << logPrefix()
+                << "First PG on this rank detecting the dump signal through tcpstore.";
+          }
           shouldDump_.store(true);
           try {
             auto vec = globalStore_->get(std::string(EXCEPTION_DUMP));
@@ -1295,6 +1304,11 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       if (heartbeat != heartBeatCounter) {
         heartBeatCounter = heartbeat;
       } else {
+        if (!shouldDump_.load()) {
+          LOG(ERROR)
+              << logPrefix()
+              << "First PG on this rank that detected no heartbeat of its watchdog.";
+        }
         shouldDump_.store(true);
         // No heartbeat increase detected and timeout.
         errorMsg = c10::str(
@@ -1337,16 +1351,18 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     cpp_dumper.value()([](const std::string& line) { LOG(INFO) << line; });
   }
 
-  // Store debug info to storage if no other thread does it. (By default to
-  // local disk)
-  std::future<bool> asyncDebugDump = std::async(
-      std::launch::async, [this]() { return this->dumpDebuggingInfo(); });
+  if (checkDumpSignal && shouldDump_.load()) {
+    // Store debug info to storage if no other thread does it. (By default to
+    // local disk)
+    std::future<bool> asyncDebugDump = std::async(
+        std::launch::async, [this]() { return this->dumpDebuggingInfo(); });
 
-  // wait for the dump until timeout
-  waitForFutureOrTimeout(
-      asyncDebugDump,
-      std::chrono::milliseconds(waitTimeoutDumpInMilSec_),
-      "Flight recorder dump in heartbeatMonitor");
+    // wait for the dump until timeout
+    waitForFutureOrTimeout(
+        asyncDebugDump,
+        std::chrono::milliseconds(waitTimeoutDumpInMilSec_),
+        "Flight recorder dump in heartbeatMonitor");
+  }
 
   if (get_gil_checker() != nullptr) {
     auto fut = launchAsyncGilCheck();
@@ -1567,6 +1583,16 @@ void ProcessGroupNCCL::watchdogHandler() {
 
       // If work hits an exception (either an error or timeout)
       if (work.exception()) {
+        // log as soon as exception is detected
+        LOG(ERROR) << c10::str(
+            logPrefix(),
+            "Exception (either an error or timeout) detected by watchdog at work: ",
+            work.seq_,
+            ", last enqueued NCCL work: ",
+            lastEnqueuedSeq_,
+            ", last completed NCCL work: ",
+            lastCompletedSeq_,
+            ".");
         // try to dump flight records if exception happens.
         // Flight recorder behavior should be independent of desync Debug
         if (dumpOnException_) {
@@ -1576,6 +1602,10 @@ void ProcessGroupNCCL::watchdogHandler() {
                 reinterpret_cast<uint8_t*>(&rank),
                 reinterpret_cast<uint8_t*>(&rank) + sizeof(rank));
             globalStore_->set(std::string(EXCEPTION_DUMP), vec);
+            if (!shouldDump_.load()) {
+              LOG(ERROR) << logPrefix()
+                         << "First watchdog to set the dump signal.";
+            }
             // signal the monitor thread to start dumping
             shouldDump_.store(true);
             // This sleep is used to give time for dumping before throwing
