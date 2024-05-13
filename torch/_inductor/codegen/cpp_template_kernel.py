@@ -133,6 +133,12 @@ class CppTemplateKernel(Kernel):
         sizes = parse_expr_with_index_symbols(sizes)
         return L.view(node, sizes).data
 
+    def permute(self, node, dims):
+        node = wrap_with_tensorbox(node)
+        permuted = L.permute(node, dims).data
+        assert isinstance(permuted, ir.ReinterpretView)
+        return permuted
+
     @property
     def assert_function(self) -> str:
         if V.graph.aot_mode:
@@ -168,6 +174,7 @@ class CppTemplateKernel(Kernel):
         src: ir.Buffer,
         epilogue_nodes: Optional[List[ir.IRNode]] = None,
         offsets: Optional[List[Any]] = None,
+        reindexer: Optional[Callable[[List[Any]], List[Any]]] = None,
     ):
         """
         Store the `src` buffer to the `dst` buffer. The size of `src` and `dst` should match.
@@ -177,13 +184,19 @@ class CppTemplateKernel(Kernel):
         Notes:
         1. `src` and `dst` buffer could be the same buffer in which case we are doing in-place compute
            and stores. In case `epilogue_nodes` are not provided, we do nothing.
-        2. `src` or `dst` buffer could be a sub-slice of the ranges the `epilogue_nodes` work on. In this
-           the `offsets` could be provided to adjust the indices passed to `epilogue_nodes` during codegen
-           and the data ranges are also configured according to the sizes of `src` and `dst`.
+        2. The `epilogue_nodes`, if exist, have computations on `src` before storing to `dst` but since
+           they come form the original Inductor IR, they might need to be adjusted before working with
+           `src` and `dst` as outlined below:
+           a) `src` or `dst` buffer could be a sub-slice of the ranges the `epilogue_nodes`work on.
+              In this case, the `offsets` could be provided to adjust the indices passed to
+              `epilogue_nodes` during codegen and the data ranges are also configured according to
+              the sizes of `src` and `dst`.
+           b) `dst` might be indexed in a different way as the `epilogue_nodes`, hence a `reindexer` is
+              needed on the indices to `epilogue_nodes` to match the indexing of `dst`.
         """
         assert dst.get_size() == src.get_size()
         if epilogue_nodes:
-            var_sizes = (tuple(src.get_size()), ())
+            var_sizes = (tuple(dst.get_size()), ())
             var_ranges = {
                 sympy.Symbol(f"z{i}"): sz for i, sz in enumerate(var_sizes[0])
             }
@@ -195,13 +208,6 @@ class CppTemplateKernel(Kernel):
                 offsets = [0] * len(var_sizes[0])
             assert len(offsets) == len(var_sizes[0])
             offsets = parse_expr_with_index_symbols(offsets)
-
-            template_bufs = [
-                name
-                for name in epilogue_nodes[0].get_read_names()
-                if isinstance(V.graph.get_buffer(name), ir.CppTemplateBuffer)
-            ]
-            assert len(template_bufs) == 1, "Only one template buffer is supported"
 
             kernel_group = KernelGroup()
             kernel_group.args = self.args
@@ -219,10 +225,12 @@ class CppTemplateKernel(Kernel):
                     assert len(args[0]) == len(var_sizes[0])
                     assert len(args[1]) == 0
                     new_args = [arg + offset for arg, offset in zip(args[0], offsets)]  # type: ignore[arg-type]
+                    if reindexer is not None:
+                        new_args = reindexer(new_args)
                     V.ops.store(
                         output_name,
                         output_index,
-                        node.data.inner_fn(new_args).value,
+                        node.data.make_loader()(new_args).value,
                     )
 
                 body = ir.LoopBody(fn, (list(var_ranges.keys()), ()), var_ranges)
@@ -233,7 +241,7 @@ class CppTemplateKernel(Kernel):
             kernel_group.finalize_kernel(cpp_kernel_proxy, [])
             return kernel_group.loops_code.getvalue()
         else:
-            # TODO: support local acc buffer to avoid assertion below
+            # TODO(jgong5): support local acc buffer to avoid assertion below
             assert dst.get_name() == src.get_name() and dst.layout == src.layout
             return ""
 

@@ -183,6 +183,9 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
     test_linear_with_pointwise_dynamic_shapes = (
         TestSelectAlgorithm.test_linear_with_pointwise
     )
+    test_linear_with_transpose_dynamic_shapes = (
+        TestSelectAlgorithm.test_linear_input_transpose
+    )
 
 
 instantiate_device_type_tests(TestSelectAlgorithm, globals(), only_for="cpu")

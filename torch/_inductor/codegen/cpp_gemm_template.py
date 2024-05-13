@@ -24,7 +24,7 @@ extern "C"
 {
     {{kernel.maybe_codegen_profile()}}
     constexpr int64_t num_threads = {{num_threads}};
-    constexpr int64_t N = {{kernel.size(Y, 1)}};
+    constexpr int64_t N = {{kernel.size(GemmOut, 1)}};
     constexpr int64_t K = {{kernel.size(X, 1)}};
     constexpr int64_t M0 = {{micro_gemm.register_blocking.block_m}};
     constexpr int64_t N0 = {{micro_gemm.register_blocking.block_n}};
@@ -36,7 +36,7 @@ extern "C"
 
     // TODO(jgong5): improve cache blocking with CPU info (Mc, Kc)
     {%- if is_dynamic_M %}
-    const int64_t M = {{kernel.size(Y, 0)}};
+    const int64_t M = {{kernel.size(GemmOut, 0)}};
     const int64_t M0_blocks = (M + M0 - 1) / M0;
     {%- if num_threads > 1 %}
     const auto [Mt_blocks, Nt_blocks, Kt_blocks] = mm_get_thread_blocking(M, N, K, M0, N0, K0, num_threads);
@@ -48,7 +48,7 @@ extern "C"
     const int64_t Mc_blocks = Mt_blocks;
     const int64_t Kc_blocks = Kt_blocks;
     {%- else %}
-    constexpr int64_t M = {{kernel.size(Y, 0)}};
+    constexpr int64_t M = {{kernel.size(GemmOut, 0)}};
     constexpr int64_t M0_blocks = (M + M0 - 1) / M0;
     constexpr int64_t Mt_blocks = {{template.thread_blocking().block_m}};
     constexpr int64_t Nt_blocks = {{template.thread_blocking().block_n}};
@@ -93,7 +93,7 @@ extern "C"
                 {{ kernel.define_buffer("acc_local_buf", ["m_end - m_start", "N0"]) }}
                 {%- set acc = kernel.local_buffers["acc_local_buf"] %}
                 {%- else %}
-                {%- set acc = kernel.slice_nd(Y, [("m_start", "m_end"), ("n_start", "n_start + N0")]) %}
+                {%- set acc = kernel.slice_nd(GemmOut, [("m_start", "m_end"), ("n_start", "n_start + N0")]) %}
                 {%- endif %}
                 {%- if inp is not none and beta != 0 %}
                 for (int64_t m = 0; m < m_size; ++m) {
@@ -119,8 +119,16 @@ extern "C"
                     }
                     {%- endif %}
                 }
-                {%- set tile_Y = kernel.slice_nd(Y, [("m_start", "m_end"), ("n_start", "n_start + N0")]) %}
-                {{ kernel.store_output(tile_Y, acc, epilogue_nodes, ("m_start", "n_start"))|indent(16, false) }}
+                {%- if reindexer is not none %}
+                {%- set Y_maybe_transposed = kernel.permute(Y, reindexer([0,1])) %}
+                {%- else %}
+                {%- set Y_maybe_transposed = Y %}
+                {%- endif %}
+                {%- set tile_Y = kernel.slice_nd(Y_maybe_transposed, [("m_start", "m_end"), ("n_start", "n_start + N0")]) %}
+                {{ kernel.store_output(
+                      tile_Y, acc, epilogue_nodes, offsets=("m_start", "n_start"), reindexer=reindexer
+                   )|indent(16, false)
+                }}
             }
         }
     }
@@ -347,11 +355,15 @@ class CppPackedGemmTemplate(CppTemplate):
             W = template_buffer_node.inputs[1]
             Y = template_buffer_node
 
+        template_buffer = Y
+        Y_is_transposed = False
         # TODO(jgong5): support local accumulation
         use_local_acc = False
         if epilogue_nodes:
             Y = cast(ir.Buffer, epilogue_nodes[-1])
             assert Y.get_name() in V.kernel.inplace_update_buffers
+            if Y.get_size() == list(reversed(template_buffer.get_size())):
+                Y_is_transposed = True
 
         micro_gemm = create_micro_gemm(
             f"{kernel.kernel_name}_micro_gemm",
@@ -370,6 +382,7 @@ class CppPackedGemmTemplate(CppTemplate):
             W=W,
             inp=inp,
             Y=Y,
+            GemmOut=template_buffer,
             beta=self.beta,
             alpha=self.alpha,
             num_threads=self.num_threads,
@@ -378,6 +391,7 @@ class CppPackedGemmTemplate(CppTemplate):
             template=self,
             kernel=kernel,
             epilogue_nodes=epilogue_nodes,
+            reindexer=(lambda x: list(reversed(x))) if Y_is_transposed else None,
             use_local_acc=use_local_acc,
         )
         return self._template_from_string(GEMM_TEMPLATE).render(**options)
