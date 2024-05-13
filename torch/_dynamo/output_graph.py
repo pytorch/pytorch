@@ -1430,7 +1430,9 @@ class OutputGraph:
                 return True
             if not isinstance(b_node, fx.Node):
                 return False
-            b = b_node.meta["example_value"]
+            b = b_node.meta.get("example_value")
+            if b is None:
+                return False
             if b is True:
                 return True
             if (
@@ -1448,7 +1450,7 @@ class OutputGraph:
             if isinstance(a, (int, float, bool)):
                 return True
             if isinstance(a, fx.Node):
-                return isinstance(a.meta["example_value"], SymTypes)
+                return isinstance(a.meta.get("example_value"), SymTypes)
             return False
 
         # NB: We assume that you cannot do mutations on int/float/bool,
@@ -1460,7 +1462,7 @@ class OutputGraph:
             if node.op != "call_function":
                 return False
             # TODO: I don't think it's possible to have a bare int/float here?
-            if not isinstance(node.meta["example_value"], SymTypes):
+            if not isinstance(node.meta.get("example_value"), SymTypes):
                 return False
             # TODO: This will bail here if you ever end up with a more complicated
             # computation function, like sum(list_of_ints), even though it
@@ -1478,7 +1480,7 @@ class OutputGraph:
         def is_accessor_node(node):
             if (
                 node.op == "call_method"
-                and isinstance(node.args[0].meta["example_value"], torch.Tensor)
+                and isinstance(node.args[0].meta.get("example_value"), torch.Tensor)
                 and node.target in ["size", "stride", "storage_offset", "item"]
             ):
                 return True

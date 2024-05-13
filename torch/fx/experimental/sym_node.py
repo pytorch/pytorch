@@ -174,10 +174,12 @@ class SymNode:
             return None
 
     def maybe_as_bool(self):
-        from sympy.logic.boolalg import Boolean
+        import sympy
 
-        if isinstance(self.expr, Boolean):
-            return bool(self.expr)
+        if self.expr is sympy.true:
+            return True
+        elif self.expr is sympy.false:
+            return False
         else:
             return None
 
