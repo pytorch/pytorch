@@ -1,6 +1,8 @@
 # Owner(s): ["oncall: export"]
 
 
+import unittest
+
 import torch
 import torch.utils._pytree as pytree
 from torch._dynamo.testing import EagerAndRecordGraphs
@@ -359,6 +361,64 @@ def forward(self, token, x, cc):
     getitem_1 = with_effects[1];  with_effects = None
     add = torch.ops.aten.add.Tensor(x, getitem_1);  x = getitem_1 = None
     return (getitem, add)""",  # noqa: B950
+        )
+
+    @parametrize("pre_dispatch", [True, False])
+    @parametrize("fakify_script_obj", [True, False])
+    def test_torchbind_alias(self, pre_dispatch, fakify_script_obj):
+        class F2(torch.nn.Module):
+            def __init__(self, foo):
+                super().__init__()
+                self.foo = foo
+
+            def forward(self, x):
+                return x + torch.ops._TorchScriptTesting.takes_foo(self.foo, x)
+
+        class F1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.alpha = torch.classes._TorchScriptTesting._Foo(10, 20)
+                if not fakify_script_obj:
+                    qual_name = self.alpha._type().qualified_name()
+                    if torch._library.fake_class_registry.has_fake_class(qual_name):
+                        torch._library.fake_class_registry.deregister_fake_class(
+                            "_TorchScriptTesting::_Foo"
+                        )
+                self.beta = self.alpha
+                self.gamma = self.alpha
+                self.foo = F2(self.gamma)
+
+            def forward(self, x):
+                return (
+                    x
+                    + torch.ops._TorchScriptTesting.takes_foo(self.gamma, x)
+                    + self.foo(x)
+                )
+
+        self._test_export_same_as_eager(
+            F1(), (torch.ones(2, 3),), strict=False, pre_dispatch=pre_dispatch
+        )
+
+    # TODO(pianpwk): look into this
+    @unittest.expectedFailure
+    @parametrize("pre_dispatch", [True, False])
+    @parametrize("fakify_script_obj", [True, False])
+    def test_torchbind_input_and_alias(self, pre_dispatch, fakify_script_obj):
+        # alias as model attribute
+        class F3(torch.nn.Module):
+            def forward(self, x, foo):
+                self.foo = foo
+                return x + self.foo.add_tensor(x)
+
+        foo = torch.classes._TorchScriptTesting._Foo(10, 20)
+        if not fakify_script_obj:
+            qual_name = foo._type().qualified_name()  # type: ignore[att-defined]
+            if torch._library.fake_class_registry.has_fake_class(qual_name):
+                torch._library.fake_class_registry.deregister_fake_class(
+                    "_TorchScriptTesting::_Foo"
+                )
+        self._test_export_same_as_eager(
+            F3(), (torch.ones(2, 3), foo), strict=False, pre_dispatch=pre_dispatch
         )
 
     @parametrize("pre_dispatch", [True, False])
