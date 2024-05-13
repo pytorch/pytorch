@@ -68,6 +68,7 @@ from torch.utils._traceback import format_frame, CapturedTraceback
 from torch._utils_internal import signpost_event
 from torch._subclasses.meta_utils import is_sparse_any
 import torch.utils._pytree as pytree
+from torch.utils._sympy.symbol import SymT, make_symbol, symbol_is_type
 
 from torch._logging import LazyString
 
@@ -439,7 +440,7 @@ def has_free_symbols(val: Union[SymInt, torch.Tensor]) -> bool:
 # Like free_symbols, but filtered to only report unbacked symbols
 def free_unbacked_symbols(x):
     # NB: keep synced with is_unbacked_symint
-    return {s for s in free_symbols(x) if s.name.startswith(("u", "f"))}
+    return {s for s in free_symbols(x) if symbol_is_type(s, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT))}
 
 # WARNING: Don't use this on Dynamo produced graphs, they don't have meta
 # setup!
@@ -1431,7 +1432,7 @@ class ShapeGuardPrinter(StrPrinter):
         self.var_to_sources = var_to_sources
 
     def _print_Not(self, expr):
-        return 'not %s' % (self.parenthesize(expr.args[0], PRECEDENCE["Not"]))
+        return 'not {}'.format(self.parenthesize(expr.args[0], PRECEDENCE["Not"]))
 
     def _print_And(self, expr):
         return self.stringify(expr.args, " and ", PRECEDENCE["And"])
@@ -1661,7 +1662,7 @@ class DimConstraints:
                 # We are given a congruence of the form base % divisor == 0 with a free variable s. So:
                 # - we transform this into an equation of the form base = divisor * tmp;
                 # - we solve this equation for s to get a linear solution with free variable tmp.
-                tmp = sympy.Symbol("tmp", integer=True)
+                tmp = sympy.Symbol("reduce_congruences_tmp", integer=True)
                 symbol, solution = sympy.solve_linear(base - divisor * tmp, symbols=[s])
                 # See https://docs.sympy.org/latest/modules/solvers/solvers.html#sympy.solvers.solvers.solve_linear
                 # for how to interpret the results.
@@ -1726,7 +1727,10 @@ class DimConstraints:
             if s not in self._substitutions
         }
 
-    def solve(self, disable_congruences=True, disable_equivalences=True):
+    def solve(
+        self,
+        _disable_forced_specializations=False,
+    ):
         """Solve the system of constraint equations to find simplified constraints
         """
         self._raise_inconsistencies()
@@ -1753,7 +1757,8 @@ class DimConstraints:
                 self.add(expr.xreplace({s: self._substitutions[s]}))
             self._raise_inconsistencies()
 
-        self._specialize_divisor_symbols()
+        if not _disable_forced_specializations:
+            self._specialize_divisor_symbols()
 
         # solve linear congruences
         # NOTE(avik): We do not need to solve them for symbols that have already been specialized.
@@ -1770,7 +1775,7 @@ class DimConstraints:
                         self._dcp.symbol_to_source[tmp] = [ConstantSource(tmp_name)]
                         r = try_solve(sympy.Eq(base, divisor * tmp), s)
                         self._dynamic_results.add(self._dcp.doprint(sympy.Eq(s, r[1])))
-                    elif disable_congruences:
+                    elif not _disable_forced_specializations:
                         self._force_specialization(s)
                         self._univariate_inequalities.pop(s, None)
 
@@ -1795,7 +1800,7 @@ class DimConstraints:
         symbolic_equivalences = self._symbolic_equivalences
         self._symbolic_equivalences = []
         for source, expr in symbolic_equivalences:
-            if disable_equivalences and not self._is_supported_equivalence(expr):
+            if not _disable_forced_specializations and not self._is_supported_equivalence(expr):
                 for s in expr.free_symbols:
                     self._force_specialization(s)
                     sexpr = self._dcp._print_Symbol(s)
@@ -1886,9 +1891,10 @@ class DimConstraints:
     ):
         """Format a message for constraint violation erros"""
         if self._dcp.source_name_to_debug_name:
-            def transform(s):
+
+            def transform(s, inverse=False):
                 for k, v in self._dcp.source_name_to_debug_name.items():
-                    s = s.replace(k, v)
+                    s = s.replace(k, v) if not inverse else s.replace(v, k)
                 return s
 
             results = defaultdict(dict)
@@ -1934,6 +1940,15 @@ class DimConstraints:
                     assert op == "==", t
                     results[left]["eq"] = sympy.sympify(right)
 
+            # order forced specializations based on name
+            forced_specializations = {
+                k: forced_specializations[k]
+                for k in sorted(
+                    forced_specializations.keys(),
+                    key=lambda x: x.split(" = ")[1],
+                )
+            }
+
             buf = ""
             debug_names = set()
             if forced_specializations:
@@ -1953,16 +1968,23 @@ class DimConstraints:
             if match is not None:
                 debug_names.update(match.expand(r'\1').split(', '))
 
-            for k, c in sorted(results.items()):
+            # order results by source name
+            results = {
+                k: results[k] for k in sorted(
+                    results.keys(),
+                    key=lambda x: transform(x, inverse=True),
+                )
+            }
+            for k, c in results.items():
                 # if k not in debug_names:
                 #     continue
                 if "eq" in c:
                     other = c["eq"]
                     if isinstance(other, int):
-                        others.append(f"{k} = None  # {other}")
+                        others.append(f"{k} = {other}")
                     elif self._is_supported_equivalence(other):
                         s = next(iter(other.free_symbols))
-                        if s not in results:
+                        if str(s) not in results:
                             modulus, remainder = sympy.polys.polytools.div(other, s)
                             c_min = c.get("min", 2)
                             min_ = math.ceil((c_min - remainder) / modulus)
@@ -3025,7 +3047,7 @@ class ShapeEnv:
     def create_unbacked_symfloat(self):
         """Create a symbolic float without a hint value
         """
-        symbol: sympy.Symbol = sympy.Symbol(f"f{next(self.unbacked_symfloat_counter)}")
+        symbol: sympy.Symbol = make_symbol(SymT.UNBACKED_FLOAT, next(self.unbacked_symfloat_counter))
         self.counter["create_unbacked_symbol"] += 1
         if not self._ignore_fresh_unbacked_symbols_tls():
             self.pending_fresh_unbacked_symbols.append(symbol)
@@ -3043,7 +3065,7 @@ class ShapeEnv:
     def create_unbacked_symint(self):
         """Create a symbolic integer without a hint value
         """
-        symbol: sympy.Symbol = sympy.Symbol(f"u{next(self.unbacked_symint_counter)}", integer=True)
+        symbol: sympy.Symbol = make_symbol(SymT.UNBACKED_INT, next(self.unbacked_symint_counter), integer=True)
         if not self._ignore_fresh_unbacked_symbols_tls():
             self.pending_fresh_unbacked_symbols.append(symbol)
         self.counter["create_unbacked_symbol"] += 1
@@ -3060,14 +3082,13 @@ class ShapeEnv:
     def is_unbacked_symint(self, symbol: sympy.Symbol) -> bool:
         """Check if a sympy symbol matches the naming convention for unbacked symbols
         """
-        # NB: keep synced with free_unbacked_symbols
-        return str(symbol).startswith("u")
+        return symbol_is_type(symbol, SymT.UNBACKED_INT)
 
     @record_shapeenv_event()
     def create_unbacked_symbool(self):
         """Create a symbolic boolean without a hint value
         """
-        symbol: sympy.Symbol = sympy.Symbol(f"u{next(self.unbacked_symint_counter)}", integer=True)
+        symbol: sympy.Symbol = make_symbol(SymT.UNBACKED_INT, next(self.unbacked_symint_counter), integer=True)
         if not self._ignore_fresh_unbacked_symbols_tls():
             self.pending_fresh_unbacked_symbols.append(symbol)
         self.counter["create_unbacked_symbol"] += 1
@@ -3179,7 +3200,7 @@ class ShapeEnv:
             # If we're not duck shaping, we always create a new symbol
             # Even if we're duck shaping, if we haven't seen this particular
             # value before, we also create a new symbol
-            sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=positive, integer=True)
+            sympy_expr = make_symbol(SymT.SIZE, len(self.var_to_val), positive=positive, integer=True)
             # We always associate vars to vals
             if isinstance(val, int):
                 self.var_to_val[sympy_expr] = sympy.Integer(val)
@@ -3303,6 +3324,7 @@ class ShapeEnv:
         # (See docs on EqualityConstraint for details of the encoding.)
         equalities_inputs: Optional[EqualityConstraint] = None,
         _simplified=False,
+        _disable_forced_specializations=False,
         # Indicates if we should produce guards for known static values.
         ignore_static=True,
     ) -> List[str]:
@@ -3729,12 +3751,13 @@ class ShapeEnv:
                     constraints = symbol_to_constraints[symbol]
                     for c in constraints:
                         if isinstance(c, StrictMinMaxConstraint):
-                            var_with_range = self._render_range_for_constraint_violation(source, c)
-                            msg = (
-                                f"Not all values of {var_with_range} "
-                                f"satisfy the generated guard {guard_expr}."
-                            )
-                            record_constraint_violation(c.warn_only, self._debug_name(source), msg)
+                            if not _disable_forced_specializations:
+                                var_with_range = self._render_range_for_constraint_violation(source, c)
+                                msg = (
+                                    f"Not all values of {var_with_range} "
+                                    f"satisfy the generated guard {guard_expr}."
+                                )
+                                record_constraint_violation(c.warn_only, self._debug_name(source), msg)
                         elif isinstance(c, RelaxedUnspecConstraint):
                             # This is fine, we allow guards here as long as it
                             # didn't constrain it to one value  (we don't
@@ -4007,8 +4030,12 @@ class ShapeEnv:
             equiv[canonicalize_bool_expr(expr)] = sympy.true
             equiv[canonicalize_bool_expr(sympy.Not(expr))] = sympy.false
             if isinstance(expr, sympy.Rel):
-                # multiplying by -1 changes the direction of the inequality
-                dual = type(expr)(-expr.rhs, -expr.lhs)
+                if isinstance(expr, (sympy.Eq, sympy.Ne)):
+                    # multiplying by -1 ensures that equality is commutative
+                    dual = type(expr)(-expr.lhs, -expr.rhs)
+                else:
+                    # multiplying by -1 changes the direction of the inequality
+                    dual = type(expr)(-expr.rhs, -expr.lhs)
                 equiv[canonicalize_bool_expr(dual)] = sympy.true
                 equiv[canonicalize_bool_expr(sympy.Not(dual))] = sympy.false
 
@@ -4094,7 +4121,7 @@ class ShapeEnv:
             # we have to increase it by offset (and conversely, the new
             # variables have to have their value range bounds adjusted as
             # well)
-            s = sympy.Symbol(f"shape_{idx}", positive=True, integer=True)
+            s = sympy.Symbol(f"evaluate_static_shape_{idx}", positive=True, integer=True)
 
             # Note:
             #   Offset might be a fraction(e.g. aten.split.Tensor), but shapes are always integers.
@@ -4896,7 +4923,7 @@ class ShapeEnv:
             stack = CapturedTraceback.extract(skip=1)
             ra = RuntimeAssert(expr, msg, stack)
             # TODO: Do this in a way that is less janky than int(s.name[1:])
-            cands = sorted([s for s in expr.free_symbols if s.name.startswith("u")], key=lambda s: int(s.name[1:]))
+            cands = sorted((s for s in expr.free_symbols if symbol_is_type(s, SymT.UNBACKED_INT)), key=lambda s: int(s.name[1:]))
             # Is None when prefer_deferred_runtime_asserts_over_guards=True
             # and the guard in question has no unbacked SymInts in front
             ix = cands[-1] if cands else None
