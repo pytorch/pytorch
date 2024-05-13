@@ -362,16 +362,16 @@ def verify_skippables(module: nn.Sequential) -> None:
         # Layer3 pops "1to3".
 
         nn.Sequential(Layer1(), Layer2())
-        #               └──── ?
+        #               +---- ?
 
         nn.Sequential(Layer2(), Layer3())
-        #                   ? ────┘
+        #                   ? ----+
 
         nn.Sequential(Layer1(), Layer2(), Layer3(), Layer3())
-        #               └───────────────────┘       ^^^^^^
+        #               +-------------------+       ^^^^^^
 
         nn.Sequential(Layer1(), Layer1(), Layer2(), Layer3())
-        #             ^^^^^^      └───────────────────┘
+        #             ^^^^^^      +-------------------+
 
     To use the same name for multiple skip tensors, they must be isolated by
     different namespaces. See :meth:`isolate()
@@ -427,5 +427,5 @@ def verify_skippables(module: nn.Sequential) -> None:
 
     if msgs:
         raise TypeError(
-            "one or more pairs of stash and pop do not match:\n\n%s" "" % "\n".join("* %s" % x for x in msgs)
+            "one or more pairs of stash and pop do not match:\n\n{}" "".format("\n".join(f"* {x}" for x in msgs))
         )

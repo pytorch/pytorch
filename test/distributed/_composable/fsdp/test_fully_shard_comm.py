@@ -12,12 +12,14 @@ import torch.nn.functional as F
 
 from torch.distributed._composable import checkpoint, replicate
 from torch.distributed._composable.fsdp import (
-    FSDP,
+    FSDPModule,
     fully_shard,
     MixedPrecisionPolicy,
     OffloadPolicy,
 )
 from torch.distributed._composable.fsdp._fsdp_collectives import (
+    _div_if_needed,
+    _get_gradient_divide_factors,
     foreach_all_gather,
     foreach_all_gather_copy_out,
     foreach_reduce,
@@ -207,6 +209,18 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
                 reduce_scatter_dtype=torch.float32,
             )
 
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_reduce_scatter_fp16(self):
+        param_sizes = self._get_param_sizes()
+        default_stream = torch.cuda.current_stream()
+        stream = torch.cuda.Stream()
+        for reduce_scatter_stream in (default_stream, stream):
+            self._test_reduce_scatter(
+                param_sizes,
+                reduce_scatter_stream=reduce_scatter_stream,
+                reduce_scatter_dtype=torch.float16,
+            )
+
     def _test_reduce_scatter(
         self,
         param_sizes: List[torch.Size],
@@ -238,17 +252,24 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             orig_dtype=orig_params[0].dtype,
             reduce_dtype=reduce_scatter_dtype,
             device=self.device,
-            divide_factors=fsdp_param_group._grad_divide_factors,
             all_reduce_group=None,
             all_reduce_stream=all_reduce_stream,
         )
         torch.cuda.current_stream().wait_event(view_out_event)
 
         # Check reduce-scatter correctness
+        predivide_factor, postdivide_factor = _get_gradient_divide_factors(
+            group, None, reduce_scatter_dtype
+        )
         reduced_grads = [grad.detach().clone() for grad in unsharded_grads]
         for grad in reduced_grads:
-            dist.all_reduce(grad, group=group)
-            grad /= self.world_size
+            _div_if_needed(grad, predivide_factor)
+            dist.all_reduce(
+                grad,
+                group=group,
+                op=dist.ReduceOp.AVG if predivide_factor is None else dist.ReduceOp.SUM,
+            )
+            _div_if_needed(grad, postdivide_factor)
         for fsdp_param, reduced_grad in zip(fsdp_params, reduced_grads):
             sharded_grad = fsdp_param.sharded_param.grad
             self.assertIsInstance(sharded_grad, DTensor)
@@ -478,7 +499,7 @@ class TestFullyShardBackwardPrefetch(FSDPTest):
         """
         Test a model with a linear module then a split into two linear modules,
         where we run backward through one path first before the other, meaning
-        that (1) onlyh one linear of the two split is used per backward and (2)
+        that (1) only one linear of the two split is used per backward and (2)
         the initial shared linear is used in both backwards.
         """
         dim = 8
@@ -512,8 +533,8 @@ class TestFullyShardBackwardPrefetch(FSDPTest):
             loss2.sum().backward(retain_graph=True)
             expected_events = [
                 ("unshard", "1.lin2", TrainingState.PRE_BACKWARD),
-                # Check that `1.lin1` is not prefetched since it is not used
-                # for this backward
+                # NOTE: This `1.lin1` unshard is a mistargeted prefetch.
+                ("unshard", "1.lin1", TrainingState.PRE_BACKWARD),
                 ("post_backward", "1.lin2", TrainingState.POST_BACKWARD),
                 ("unshard", "0", TrainingState.PRE_BACKWARD),
                 ("post_backward", "0", TrainingState.POST_BACKWARD),
@@ -524,10 +545,11 @@ class TestFullyShardBackwardPrefetch(FSDPTest):
             model.set_is_last_backward(True)
             loss1.sum().backward()
             expected_events = [
-                # Check that `1.lin2` is not unsharded
-                ("unshard", "1.lin1", TrainingState.PRE_BACKWARD),
-                ("post_backward", "1.lin1", TrainingState.POST_BACKWARD),
+                # NOTE: `1.lin1` is already unsharded from the mistargeted
+                # prefetch in the first backward.
+                # Prefetch `0`
                 ("unshard", "0", TrainingState.PRE_BACKWARD),
+                ("post_backward", "1.lin1", TrainingState.POST_BACKWARD),
                 ("post_backward", "0", TrainingState.POST_BACKWARD),
             ]
             self.assertEqual(events, expected_events)
@@ -630,13 +652,13 @@ class TestFullyShardUnshardMultiProcess(FSDPTest):
 
             def forward(self, x: torch.Tensor):
                 y1, work1 = self.reduce_module1(x)
-                if isinstance(self.mlps.mlp1, FSDP):
+                if isinstance(self.mlps.mlp1, FSDPModule):
                     self.mlps.mlp1.unshard(async_op=True)
                 y2, work2 = self.reduce_module2(x)
-                if isinstance(self.mlps.mlp2, FSDP):
+                if isinstance(self.mlps.mlp2, FSDPModule):
                     self.mlps.mlp2.unshard(async_op=True)
                 y3, work3 = self.reduce_module3(x)
-                if isinstance(self.mlps.mlp3, FSDP):
+                if isinstance(self.mlps.mlp3, FSDPModule):
                     self.mlps.mlp3.unshard(async_op=True)
                 return self.mlps([y1, y2, y3], [work1, work2, work3])
 
