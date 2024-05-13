@@ -181,3 +181,6 @@ select = [
 "torch/utils/collect_env.py" = [
     "UP", # collect_env.py needs to work with older versions of Python
 ]
+"torch/_vendor/**" = [
+    "UP", # No need to mess with _vendor
+]

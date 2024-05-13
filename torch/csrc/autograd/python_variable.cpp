@@ -746,14 +746,31 @@ static PyObject* THPVariable_make_wrapper_subclass(
   HANDLE_TH_ERRORS
   // NB: pin_memory doesn't actually do anything
   // TODO: strides variant?
+
+  // cls: Python subclass type
+  // size, strides, storage_offset, memory_format, dtype: self-explanatory
+  // layout: memory layout, e.g. for types of Nested Tensors or other sparse
+  //         tensors
+  // pin_memory, requires_grad: self-explanatory
+  // dispatch_sizes_strides_policy: string - which sizes/strides we should
+  //                                dispatch to a custom python implementation.
+  // dispatch_device: whether to dispatch to a custom python implementation
+  //                  for device
+  // dispatch_layout: whether to dispatch to a custom python implementation
+  //                  for layout
+  // _extra_dispatch_keys: additional dispatch keys to add to the tensor
+  // storage_size: if provided, skip storage size calculation and just use the
+  //               value provided. One use case is for Nested Tensor, where the
+  //               storage size cannot be calculated from the sizes/strides
+  //               (because they contain a NestedInt).
   static PythonArgParser parser({
       "_make_wrapper_subclass(PyObject* cls, SymIntArrayRef size, SymIntArrayRef? strides=None, "
       "SymInt? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
       "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
       "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False, "
-      "DispatchKeySet _extra_dispatch_keys=None)",
+      "DispatchKeySet _extra_dispatch_keys=None, SymInt? storage_size=None)",
   });
-  ParsedArgs<14> parsed_args{};
+  ParsedArgs<15> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
 
@@ -803,7 +820,11 @@ static PyObject* THPVariable_make_wrapper_subclass(
 
     c10::SymInt size_bytes;
     auto dtype_itemsize = static_cast<int64_t>(options.dtype().itemsize());
-    if (sym_strides.has_value()) {
+    auto storage_size = r.toSymIntOptional(14);
+
+    if (storage_size.has_value()) {
+      size_bytes = storage_size.value();
+    } else if (sym_strides.has_value()) {
       size_bytes = at::detail::computeStorageNbytes(
           sym_sizes,
           sym_strides.value(),
@@ -2266,6 +2287,21 @@ int THPVariableMetaType_init(PyObject* cls, PyObject* args, PyObject* kwargs) {
     return 0;
   }
 
+  // Forbid subclassing _TensorBase directly
+  py::tuple mro =
+      py::reinterpret_borrow<py::tuple>(((PyTypeObject*)cls)->tp_mro);
+  bool is_subclass_of_thpvariable = false;
+  for (py::handle h : mro) {
+    if (h.ptr() == THPVariableClass) {
+      is_subclass_of_thpvariable = true;
+      break;
+    }
+  }
+  if (!is_subclass_of_thpvariable) {
+    PyErr_SetString(PyExc_RuntimeError, "Cannot subclass _TensorBase directly");
+    return -1;
+  }
+
   // If the user provided a torch_dispatch implementation, disable
   // torch_function.
   py::object torch_dispatch_impl = py::reinterpret_steal<py::object>(
@@ -2275,13 +2311,6 @@ int THPVariableMetaType_init(PyObject* cls, PyObject* args, PyObject* kwargs) {
   if (torch_dispatch_impl.ptr() != torch_dispatch_default.ptr()) {
     py::object torch_function_impl = py::reinterpret_steal<py::object>(
         PyObject_GetAttrString(cls, "__torch_function__"));
-    // This will only fail if the user subclasses _TensorBase directly.
-    // Ignore the error here to let the class __init__ code fail with a nice
-    // error message.
-    if (!torch_function_impl) {
-      PyErr_Clear();
-      return 0;
-    }
     py::object torch_function_default_bound = py::reinterpret_steal<py::object>(
         PyObject_GetAttrString(THPVariableClass, "__torch_function__"));
 
