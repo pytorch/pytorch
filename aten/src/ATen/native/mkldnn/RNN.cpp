@@ -82,6 +82,10 @@ REGISTER_NO_CPU_DISPATCH(lstm_mkldnn_stub);
 
 namespace at::native {
 
+static bool enabled_fpmatch_mode_bf16_for_fp32_for_mkldnn_rnn() {
+  return at::globalContext().float32Precision("mkldnn", "rnn") == "bf16";
+}
+
 struct RNNParams {
   ideep::rnn_kind mode;
   int64_t seq_length;
@@ -277,10 +281,15 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
       cy_, rnn.dst_iter_c_desc(get_mkldnn_dtype(cy_)));
   w1_ = weight_ih.is_mkldnn() ? itensor_from_tensor(weight_ih) : itensor_view_from_dense(weight_ih, rnn.weights_layer_desc(input_size, get_mkldnn_dtype(weight_ih)));
   w2_ = weight_hh.is_mkldnn() ? itensor_from_tensor(weight_hh) : itensor_view_from_dense(weight_hh, rnn.weights_iter_desc(get_mkldnn_dtype(weight_hh)));
+  ideep::attr_t op_attr = ideep::attr_t();
+  if (enabled_fpmatch_mode_bf16_for_fp32_for_mkldnn_rnn() &&
+      input.scalar_type() == at::kFloat) {
+    op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
+  }
   if (at::GradMode::is_enabled()) {
     Tensor workspace = Tensor();
     auto pd = ideep::lstm_forward_training::prepare(
-        x, hx, cx, w1_, w2_, b, y, hy, cy, reverse);
+        x, hx, cx, w1_, w2_, b, y, hy, cy, reverse, op_attr);
     workspace = at::empty(pd.workspace_desc().get_size() / sizeof(uint8_t), input.options().dtype(at::kByte));
     ideep::tensor mkldnn_workspace;
     mkldnn_workspace.init(
@@ -290,7 +299,22 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
     return std::make_tuple(output, hy_, cy_, workspace);
   } else {
     ideep::lstm_forward_inference::compute(
-        x, hx, cx, w1_, w2_, b, y, hy, cy, reverse, ideep::prop_kind::forward_inference);
+        x,
+        hx,
+        cx,
+        w1_,
+        w2_,
+        b,
+        y,
+        hy,
+        cy,
+        reverse,
+        ideep::prop_kind::forward_inference,
+        /*scale=*/-1,
+        /*zp=*/-1,
+        /*weights_scale_mask=*/-1,
+        /*weights_scales=*/std::vector<float>(),
+        op_attr);
     return std::make_tuple(output, hy_, cy_, Tensor());
   }
 }
@@ -434,7 +458,34 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
   ideep::tensor mkldnn_workspace;
   mkldnn_workspace.init(
       forward_hint.workspace_desc(), workspace.template data_ptr<uint8_t>());
-  ideep::lstm_backward::compute(forward_hint, x, hx, cx, w1, w2, b, y, hy, cy, diff_y, diff_hy, diff_cy, mkldnn_workspace, diff_x, diff_hx, diff_cx, diff_w1, diff_w2, diff_b, reverse);
+  ideep::attr_t op_attr = ideep::attr_t();
+  if (enabled_fpmatch_mode_bf16_for_fp32_for_mkldnn_rnn() &&
+      input.scalar_type() == at::kFloat) {
+    op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
+  }
+  ideep::lstm_backward::compute(
+      forward_hint,
+      x,
+      hx,
+      cx,
+      w1,
+      w2,
+      b,
+      y,
+      hy,
+      cy,
+      diff_y,
+      diff_hy,
+      diff_cy,
+      mkldnn_workspace,
+      diff_x,
+      diff_hx,
+      diff_cx,
+      diff_w1,
+      diff_w2,
+      diff_b,
+      reverse,
+      op_attr);
   auto diff_b2_ = at::clone(diff_b_);
   return std::make_tuple(diff_x_, diff_w1_, diff_w2_, diff_b_, diff_b2_, diff_hx_, diff_cx_);
 }

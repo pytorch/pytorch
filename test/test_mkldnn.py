@@ -1480,6 +1480,7 @@ class TestMkldnn(TestCase):
         return input
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
+    @bf32_on_and_off()
     def test_lstm(self):
         seed = 2023
         torch.manual_seed(seed)
