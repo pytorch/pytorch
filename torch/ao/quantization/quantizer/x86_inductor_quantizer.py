@@ -355,7 +355,7 @@ class X86InductorQuantizer(Quantizer):
         self.operator_type_qconfig: Dict[
             torch._ops.OpOverloadPacket, Optional[QuantizationConfig]
         ] = {}
-        self.module_name_config: Dict[str, Optional[QuantizationConfig]] = {}
+        self.module_name_qconfig: Dict[str, Optional[QuantizationConfig]] = {}
 
     @classmethod
     def get_supported_quantization_configs(cls) -> List[QuantizationConfig]:
@@ -435,7 +435,7 @@ class X86InductorQuantizer(Quantizer):
         assert (
             quantization_config is not None
         ), " quantization_config == None is not supported yet"
-        self.module_name_config[module_name] = quantization_config
+        self.module_name_qconfig[module_name] = quantization_config
         return self
 
     def _set_aten_operator_qconfig(
@@ -604,12 +604,12 @@ class X86InductorQuantizer(Quantizer):
             annotator_func(self, model, quantization_config, filter_fn)
         return model
 
-    def _annotate_quantization_by_module_name_config(
+    def _annotate_quantization_by_module_name_qconfig(
         self, model: torch.fx.GraphModule
     ) -> torch.fx.GraphModule:
-        for module_name, config in self.module_name_config.items():
+        for module_name, qconfig in self.module_name_qconfig.items():
             self._annotate_by_single_config(
-                model, config, _get_module_name_filter(module_name)
+                model, qconfig, _get_module_name_filter(module_name)
             )
         return model
 
@@ -635,8 +635,8 @@ class X86InductorQuantizer(Quantizer):
         """
 
         # Step1: Recipe of fusion patterns like conv/linear.
-        if self.module_name_config:
-            self._annotate_quantization_by_module_name_config(model)
+        if self.module_name_qconfig:
+            self._annotate_quantization_by_module_name_qconfig(model)
         if self.operator_type_qconfig or self.global_config:
             self._annotate_static_quantization_by_op_type_and_global_config(model)
 
@@ -659,8 +659,8 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_for_dynamic_quantization_config(
         self, model: torch.fx.GraphModule
     ) -> torch.fx.GraphModule:
-        if self.module_name_config:
-            self._annotate_quantization_by_module_name_config(model)
+        if self.module_name_qconfig:
+            self._annotate_quantization_by_module_name_qconfig(model)
         if self.operator_type_qconfig or self.global_config:
             self._annotate_dynamic_quantization_by_op_type_and_global_config(model)
         return model
