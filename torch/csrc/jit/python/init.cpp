@@ -1388,12 +1388,12 @@ void initJITBindings(PyObject* module) {
           if (size == 0) {
             return size;
           }
+          py::gil_scoped_acquire acquire;
           if (!data) {
             // See [Note: write_record_metadata]
             buffer.attr("seek")(
                 size, py::module::import("os").attr("SEEK_CUR"));
           } else {
-            py::gil_scoped_acquire acquire;
             auto memory_view = py::memoryview::from_memory(
                 reinterpret_cast<const char*>(data), size);
             buffer.attr("write")(std::move(memory_view));
