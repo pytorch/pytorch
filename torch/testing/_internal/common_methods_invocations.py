@@ -11512,6 +11512,12 @@ def reference_flatten(input, start_dim=0, end_dim=-1):
     out_shape = in_shape[:start_dim] + (flatten_bit_dim,) + in_shape[end_dim + 1:]
     return np.reshape(input, out_shape)
 
+
+def sample_inputs_alias_copy(op_info, device, dtype, requires_grad, **kwargs):
+    tensor = make_tensor((S,), dtype=dtype, device=device, requires_grad=requires_grad)
+    yield SampleInput(tensor)
+
+
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
     UnaryUfuncInfo('abs',
@@ -20984,6 +20990,12 @@ op_db: List[OpInfo] = [
                 device_type="cuda",
             ),
         ),
+    ),
+    OpInfo('alias_copy',
+        # Doesn't support complex for some reason?
+        dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+        supports_out=True,
+        sample_inputs_func=sample_inputs_alias_copy,
     ),
 ]
 op_db += opinfo.definitions.op_db
