@@ -2471,7 +2471,7 @@ def forward(self, x):
         mod = Mod()
         torch._dynamo.export(mod)(y)
 
-        with self.assertRaisesRegex(ConstraintViolationError, "dimx = None  # 3"):
+        with self.assertRaisesRegex(ConstraintViolationError, "dimx = 3"):
             torch._dynamo.export(mod, dynamic_shapes=({0: torch.export.Dim("dimx")},))(
                 y
             )
@@ -3071,6 +3071,20 @@ def forward(self, x):
         ]:
             gm, _ = torch._dynamo.export(f, aten_graph=True)(*example_inputs)
             self.assertEqual(gm(*example_inputs), f(*example_inputs))
+
+    @unittest.expectedFailure  # TODO: Not sure why dynamo creates a new inputs for self.a
+    def test_sum_param(self):
+        # Setting a new attribute inside forward()
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.randn(3, 2)
+
+            def forward(self, x):
+                self.b = 2
+                return x.sum() + self.a.sum() + self.b
+
+        torch._dynamo.export(Foo())(torch.randn(3, 2))
 
     def test_mixed_real_and_fake_inputs(self):
         class _TestPattern(torch.nn.Module):

@@ -4309,7 +4309,7 @@ class TestQuantizedLinear(TestCase):
                 if post_op in ("none", "relu", "gelu"):
                     qy_cpu = qlinear_op(
                         qx_cpu, x_scale, x_zp, qw_packed, w_scales, w_zps,
-                        b, 1.0 / used_y_scale, used_y_zp, output_dtype,
+                        b, used_y_scale, used_y_zp, output_dtype,
                         post_op, unary_post_op_args, post_op_algo
                     )
                     if post_op == "relu":
@@ -4330,7 +4330,7 @@ class TestQuantizedLinear(TestCase):
                         accum = accum.bfloat16()
                     qy_cpu = qlinear_op(
                         qx_cpu, x_scale, x_zp, qw_packed, w_scales, w_zps,
-                        b, 1.0 / used_y_scale, used_y_zp, output_dtype,
+                        b, used_y_scale, used_y_zp, output_dtype,
                         accum, x2_scale, x2_zp, "sum", binary_alpha,
                         unary_post_op, unary_post_op_args, post_op_algo
                     )
@@ -4348,7 +4348,7 @@ class TestQuantizedLinear(TestCase):
                     binary_alpha = 1.0  # we only support alpha=1.0 now
                     qy_cpu = qlinear_op(
                         qx_cpu, x_scale, x_zp, qw_packed, w_scales, w_zps,
-                        b, 1.0 / used_y_scale, used_y_zp, output_dtype,
+                        b, used_y_scale, used_y_zp, output_dtype,
                         x2, 1.0, 0, "add", binary_alpha,
                         unary_post_op, unary_post_op_args, post_op_algo
                     )
@@ -6796,7 +6796,7 @@ class TestQuantizedConv(TestCase):
                 pads,
                 dilations,
                 groups,
-                1.0 / Y_scale,  # Kernel expects pass in reciprocal of scale in fake quant
+                Y_scale,
                 Y_zero_point,
                 qconv_output_dtype,
                 post_op.binary_attr,
@@ -6818,7 +6818,7 @@ class TestQuantizedConv(TestCase):
                 pads,
                 dilations,
                 groups,
-                1.0 / Y_scale,  # Kernel expects pass in reciprocal of scale in fake quant
+                Y_scale,
                 Y_zero_point,
                 qconv_output_dtype,
                 post_op.unary_attr,
