@@ -1,3 +1,4 @@
+import base64
 import collections
 import cProfile
 import dis
@@ -353,8 +354,12 @@ def cprofile_wrapper(func):
 
         torch._logging.trace_structured(
             "artifact",
-            lambda: { "name": "dynamo_cprofile_prof", "type": "prof", "encoding": "ascii" },
-            payload_fn=lambda: base64.encodebytes(open(profile_path, 'rb').read()),
+            lambda: {
+                "name": "dynamo_cprofile_prof",
+                "type": "prof",
+                "encoding": "ascii",
+            },
+            payload_fn=lambda: base64.encodebytes(open(profile_path, "rb").read()),
         )
 
         return retval
