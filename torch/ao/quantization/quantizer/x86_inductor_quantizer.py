@@ -179,8 +179,13 @@ def register_annotator(
     annotators_list: Union[AnnotatorCollectionType, List[AnnotatorCollectionType]],
     annotator_name: Optional[str] = None,
 ):
-    def decorator(annotator: AnnotatorType):
-        nonlocal annotators_list, annotator_name
+    def decorator(
+        annotator: AnnotatorType,
+        annotators_list: Union[
+            AnnotatorCollectionType, List[AnnotatorCollectionType]
+        ] = annotators_list,
+        annotator_name: Optional[str] = annotator_name,
+    ) -> AnnotatorType:
         if not isinstance(annotators_list, list):
             annotators_list = [annotators_list]
         annotator_name = annotator_name or annotator.__name__
@@ -577,7 +582,7 @@ class X86InductorQuantizer(Quantizer):
         quantization_config: Optional[QuantizationConfig],
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> torch.fx.GraphModule:
-        # TODO: implement the support for None to be canceling out previous annotations
+        # <TODO> implement the support for None to be canceling out previous annotations
         if quantization_config is None:
             return model
 

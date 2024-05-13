@@ -1965,7 +1965,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 count += 1
 
     @skipIfNoX86
-    def test_set_module_for_dynamic_quant(self):
+    def test_set_module_name_for_dynamic_quant(self):
         """Test that quantize the specific submodule for dynamic quantization."""
 
         with override_quantized_engine("x86"), torch.no_grad():
@@ -1982,18 +1982,27 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     .set_module_name("v_proj", dynamic_config)
                 )
                 node_occurrence = {
-                    # for quantize input
+                    # ops for quantizing/de-quantizing input
                     torch.ops.quantized_decomposed.choose_qparams.tensor: 1,
                     torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 1,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 1,
                     # each for q_proj and v_proj
-                    # torch.ops.quantized_decomposed.quantize_per_channel.default: 2,
                     torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
                 }
                 node_list = [
+                    # ops for quantizing/de-quantizing input
                     torch.ops.quantized_decomposed.choose_qparams.tensor,
                     torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
+                    # op for de-quantizing `q_proj`'s weight
+                    torch.ops.quantized_decomposed.dequantize_per_channel.default,
+                    # q_proj
+                    torch.ops.aten.linear.default,
+                    # k_proj
+                    torch.ops.aten.linear.default,
+                    # op for de-quantizing `v_proj`'s weight
+                    torch.ops.quantized_decomposed.dequantize_per_channel.default,
+                    # v_proj
                     torch.ops.aten.linear.default,
                 ]
                 self._test_quantizer(
