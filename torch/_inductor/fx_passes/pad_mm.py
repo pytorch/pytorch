@@ -139,7 +139,7 @@ def pad_addmm(
         )
 
     # the add broadcasts, so we only pad if the dimension != 1
-    if input is not None and k_padded_length == 0:
+    if input is not None:
         if n_padded_length != 0:
             if input.dim() == 2 and input.shape[1] != 1:
                 input = pad_dim(input, n_padded_length, 1)
