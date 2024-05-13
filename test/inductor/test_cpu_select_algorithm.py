@@ -58,11 +58,11 @@ class TestSelectAlgorithm(TestCase):
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @parametrize("batch_size", (1, 2, 1000))
-    @parametrize("in_features", (1, 2, 1000))
-    @parametrize("out_features", (1, 32, 1024))
+    @parametrize("in_features", (1, 1000))
+    @parametrize("out_features", (1, 1024))
     @parametrize("bias", (True, False))
     @parametrize("input_3d", (True, False))
-    @dtypes(torch.float)
+    @dtypes(torch.float, torch.bfloat16, torch.half)
     def test_linear_static_shapes(
         self, batch_size, in_features, out_features, bias, input_3d, dtype
     ):
