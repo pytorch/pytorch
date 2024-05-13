@@ -456,10 +456,10 @@ class TestBoolArray(TestCase):
         for i in list(range(9, 6000, 507)) + [7764, 90021, -10]:
             d = np.array([False] * 100043, dtype=bool)
             d[i] = True
-            assert_(np.any(d), msg="%r" % i)
+            assert_(np.any(d), msg=f"{i!r}")
             e = np.array([True] * 100043, dtype=bool)
             e[i] = False
-            assert_(not np.all(e), msg="%r" % i)
+            assert_(not np.all(e), msg=f"{i!r}")
 
     def test_logical_not_abs(self):
         assert_array_equal(~self.t, self.f)
@@ -831,20 +831,20 @@ class TestTypes(TestCase):
         #           shouldn't narrow the float/complex type
         for a in [np.array([True, False]), np.array([-3, 12], dtype=np.int8)]:
             b = 1.234 * a
-            assert_equal(b.dtype, np.dtype("f8"), "array type %s" % a.dtype)
+            assert_equal(b.dtype, np.dtype("f8"), f"array type {a.dtype}")
             b = np.float64(1.234) * a
-            assert_equal(b.dtype, np.dtype("f8"), "array type %s" % a.dtype)
+            assert_equal(b.dtype, np.dtype("f8"), f"array type {a.dtype}")
             b = np.float32(1.234) * a
-            assert_equal(b.dtype, np.dtype("f4"), "array type %s" % a.dtype)
+            assert_equal(b.dtype, np.dtype("f4"), f"array type {a.dtype}")
             b = np.float16(1.234) * a
-            assert_equal(b.dtype, np.dtype("f2"), "array type %s" % a.dtype)
+            assert_equal(b.dtype, np.dtype("f2"), f"array type {a.dtype}")
 
             b = 1.234j * a
-            assert_equal(b.dtype, np.dtype("c16"), "array type %s" % a.dtype)
+            assert_equal(b.dtype, np.dtype("c16"), f"array type {a.dtype}")
             b = np.complex128(1.234j) * a
-            assert_equal(b.dtype, np.dtype("c16"), "array type %s" % a.dtype)
+            assert_equal(b.dtype, np.dtype("c16"), f"array type {a.dtype}")
             b = np.complex64(1.234j) * a
-            assert_equal(b.dtype, np.dtype("c8"), "array type %s" % a.dtype)
+            assert_equal(b.dtype, np.dtype("c8"), f"array type {a.dtype}")
 
         # The following use-case is problematic, and to resolve its
         # tricky side-effects requires more changes.
@@ -976,7 +976,7 @@ class TestFromiter(TestCase):
         # Raise an exception at the desired index in the iterator.
         for e in range(n):
             if e == eindex:
-                raise NIterError("error at index %s" % eindex)
+                raise NIterError(f"error at index {eindex}")
             yield e
 
     @parametrize("dtype", [int])
