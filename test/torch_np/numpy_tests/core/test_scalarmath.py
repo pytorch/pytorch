@@ -363,9 +363,9 @@ class TestModulus(TestCase):
         b = np.array(1.0, dtype=dt)
         a = np.nextafter(np.array(0.0, dtype=dt), -b)
         rem = operator.mod(a, b)
-        assert_(rem <= b, "dt: %s" % dt)
+        assert_(rem <= b, f"dt: {dt}")
         rem = operator.mod(-a, -b)
-        assert_(rem >= -b, "dt: %s" % dt)
+        assert_(rem >= -b, f"dt: {dt}")
 
         # Check nans, inf
         #     with suppress_warnings() as sup:
@@ -380,14 +380,14 @@ class TestModulus(TestCase):
             finf = np.array(np.inf, dtype=dt)
             fnan = np.array(np.nan, dtype=dt)
             rem = operator.mod(fone, fzer)
-            assert_(np.isnan(rem), "dt: %s" % dt)
+            assert_(np.isnan(rem), f"dt: {dt}")
             # MSVC 2008 returns NaN here, so disable the check.
             # rem = operator.mod(fone, finf)
             # assert_(rem == fone, 'dt: %s' % dt)
             rem = operator.mod(fone, fnan)
-            assert_(np.isnan(rem), "dt: %s" % dt)
+            assert_(np.isnan(rem), f"dt: {dt}")
             rem = operator.mod(finf, fone)
-            assert_(np.isnan(rem), "dt: %s" % dt)
+            assert_(np.isnan(rem), f"dt: {dt}")
             for op in [floordiv_and_mod, divmod]:
                 div, mod = op(fone, fzer)
                 assert_(np.isinf(div)) and assert_(np.isnan(mod))
