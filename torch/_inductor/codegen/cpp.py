@@ -228,15 +228,14 @@ def cpp_kernel_load_handler(func):
             and local_buffer.original_node_name == name
         )
         index = self.rename_indexing(index)
-        if isinstance(self, CppTile2DKernel) and use_local_buf:
-            self.can_use_local_buf = False
-        elif isinstance(self, CppVecKernel):
-            tiling_var = self.itervars[self.tiling_idx]
-            stride = self._try_get_const_stride(index, tiling_var)
-            if use_local_buf and stride != 1:
+        if use_local_buf:
+            if isinstance(self, CppTile2DKernel):
                 self.can_use_local_buf = False
-        else:
-            assert isinstance(self, CppKernel)
+            elif isinstance(self, CppVecKernel):
+                tiling_var = self.itervars[self.tiling_idx]
+                stride = self._try_get_const_stride(index, tiling_var)
+                if stride != 1:
+                    self.can_use_local_buf = False
         return func(self, name, index)
 
     return decorator
@@ -251,18 +250,18 @@ def cpp_kernel_store_handler(func):
             and local_buffer.original_node_name == name
         )
         index = self.rename_indexing(index)
-        if isinstance(self, CppTile2DKernel) and use_local_buf:
-            self.can_use_local_buf = False
-        elif isinstance(self, CppVecKernel):
-            tiling_var = self.itervars[self.tiling_idx]
-            stride = self._try_get_const_stride(index, tiling_var)
-            if use_local_buf and stride != 1:
+        if use_local_buf:
+            if isinstance(self, CppTile2DKernel):
                 self.can_use_local_buf = False
-        else:
-            assert isinstance(self, CppKernel)
-            if use_local_buf and mode is not None:
-                # Doesn't support atomic_add
-                self.can_use_local_buf = False
+            elif isinstance(self, CppVecKernel):
+                tiling_var = self.itervars[self.tiling_idx]
+                stride = self._try_get_const_stride(index, tiling_var)
+                if stride != 1:
+                    self.can_use_local_buf = False
+            else:
+                if mode is not None:
+                    # Doesn't support atomic_add
+                    self.can_use_local_buf = False
         return func(self, name, index, value, mode)
 
     return decorator
@@ -2026,13 +2025,11 @@ class CppKernel(Kernel):
             if loop_nest.root:
                 if has_outer_loop_kernel and self.get_local_buffer() is not None:
                     # Codegen the Local Buffer
-                    local_buffer_scheduler_node = self.get_local_buffer()
-                    assert isinstance(local_buffer_scheduler_node, LocalBuffer)
+                    local_buffer = self.get_local_buffer()
+                    assert isinstance(local_buffer, LocalBuffer)
                     # For dynamic size, rename s to ks
-                    local_buf_size = self.rename_indexing(
-                        local_buffer_scheduler_node.local_buf_size
-                    )
-                    dtype = DTYPE_TO_CPP[local_buffer_scheduler_node.local_buf_dtype]
+                    local_buf_size = self.rename_indexing(local_buffer.local_buf_size)
+                    dtype = DTYPE_TO_CPP[local_buffer.local_buf_dtype]
                     allocate = f"std::make_unique<{dtype} []>({local_buf_size})"
                     code.splice(
                         f"std::unique_ptr<{dtype} []> local_buffer = {allocate};"
@@ -2362,10 +2359,10 @@ class CppVecKernel(CppKernel):
             isinstance(value, CppCSEVariable) and value.is_vec
         ), value
         tiling_var = self.itervars[self.tiling_idx]
+        var_expr = f"{var} + {cexpr_index(index)}"
         stride = self._try_get_const_stride(index, tiling_var)
         code = IndentedBuffer()
         if stride == 1:
-            var_expr = f"{var} + {cexpr_index(index)}"
             if dtype == torch.float:
                 code.writeline(f"{value}.store({var_expr});")
             else:
@@ -3286,12 +3283,12 @@ class CppKernelProxy(CppKernel):
                 metrics.generated_kernel_count -= 1
 
                 assert isinstance(kernel, CppKernel)
-                # Pass the local buf from CPPKernelProxy to Kernel
+                # Propagate local buffer from CPPKernelProxy to Kernel
                 kernel.set_local_buffer(self.get_local_buffer())
 
                 run(kernel)
 
-                # Pass can_use_local_buf from kernel to CPPKernelProxy
+                # Propagate can_use_local_buf from kernel to CPPKernelProxy
                 self.can_use_local_buf = (
                     self.can_use_local_buf and kernel.can_use_local_buf
                 )
@@ -3734,6 +3731,8 @@ class CppScheduling(BaseScheduling):
         """
         kernel_group = self.kernel_group
         generated_cpp_vec_kernel_count = metrics.generated_cpp_vec_kernel_count
+        cpp_kernel_proxy_list: List[CppKernelProxy] = []
+        nodes_list: List[List[SchedulerNode]] = []
         assert isinstance(node, OuterLoopFusedSchedulerNode)
 
         def try_outer_loop_fusion_with_local_buf(node: OuterLoopFusedSchedulerNode):
@@ -3741,8 +3740,8 @@ class CppScheduling(BaseScheduling):
             Codegen code with fused outer loop and local Buffer.
             """
             assert isinstance(node, OuterLoopFusedSchedulerNode)
-            cpp_kernel_proxy_list: List[CppKernelProxy] = []
-            nodes_list: List[List[SchedulerNode]] = []
+            cpp_kernel_proxy_list.clear()
+            nodes_list.clear()
 
             def get_call_ranges(node: BaseSchedulerNode):
                 assert isinstance(node, (SchedulerNode, FusedSchedulerNode))
@@ -3765,7 +3764,6 @@ class CppScheduling(BaseScheduling):
                 return False
 
             local_buffers = []
-
             for fused_scheduler_node in node.get_outer_nodes():
                 call_ranges = get_call_ranges(fused_scheduler_node)
                 keep_idx_id = len(call_ranges) - 1
@@ -3786,11 +3784,9 @@ class CppScheduling(BaseScheduling):
                         break
                 if len(local_buffers) > 0:
                     break
-
             if len(local_buffers) == 0:
                 # No local buffer found
                 return False
-
             assert len(local_buffers) == 1
 
             for _node in node.get_outer_nodes():
@@ -3798,24 +3794,16 @@ class CppScheduling(BaseScheduling):
                 cpp_kernel_proxy = CppKernelProxy(kernel_group)
                 cpp_kernel_proxy.set_local_buffer(local_buffers[0])
                 cpp_kernel_proxy.codegen_nodes(_node.get_nodes())  # type: ignore[arg-type]
-
                 if not cpp_kernel_proxy.can_use_local_buf:
                     # Failed to use local buf by checking the kernel codegn
                     return False
-
                 cpp_kernel_proxy_list.append(cpp_kernel_proxy)
                 nodes_list.append(_node.get_nodes())  # type: ignore[arg-type]
 
-            # Note that, in the future, when every kernel can be vectorized,
-            # the function select_tiling will be much easier, and we'll be able to lift
-            # check_outer_fusion_loop_level_attr to the fusion phase,
-            # avoiding grouping kernels at fusion time that "look like we'll be able to fuse them"
-            # but then we actually won't.
             if not node.check_outer_fusion_loop_level_attr(
                 cpp_kernel_proxy_list, node.outer_loop_fusion_depth
             ):
                 return False
-            # Merge the cpp_kernel_proxy_list into cpp_kernel_proxy
             outer_fusion_cpp_kernel_proxy = node.merge_outer_fusion_kernels(
                 cpp_kernel_proxy_list,
             )
@@ -3826,17 +3814,14 @@ class CppScheduling(BaseScheduling):
             return True
 
         if not try_outer_loop_fusion_with_local_buf(node):
-            # Do codegen without local buffer
-            #   1. Try Outer Loop Fusion.
-            #   2. If failed, fallback to standard codegen/
             # Reset generated_cpp_vec_kernel_count to codegen again
             metrics.generated_cpp_vec_kernel_count = generated_cpp_vec_kernel_count
+            cpp_kernel_proxy_list.clear()
+            nodes_list.clear()
             # Similar as comment in
             # https://github.com/pytorch/pytorch/blob/469383755fe416eb1c41fa724762ad3eaecdff07/torch/_inductor/codegen/cpp.py#L3269-L3272
             # Kernels share the same global contexts like V.graph.wrapper_code, V.kernel.args.
             with torch._inductor.config.patch(inplace_buffers=False):
-                cpp_kernel_proxy_list: List[CppKernelProxy] = []
-                nodes_list: List[List[SchedulerNode]] = []
                 for _node in node.get_outer_nodes():
                     assert isinstance(_node, (FusedSchedulerNode, SchedulerNode))
                     _nodes: List[SchedulerNode] = _node.get_nodes()  # type: ignore[assignment]
