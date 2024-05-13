@@ -3265,6 +3265,7 @@ SKIP_DIRS = [
     "<frozen importlib",
     "<__array_function__ internals>",
     _config_module.__file__,
+    "triton/backends",
 ]
 SKIP_DIRS.extend(filter(None, (_module_dir(m) for m in BUILTIN_SKIPLIST)))
 
@@ -3298,7 +3299,7 @@ FBCODE_INLINE_FILES_IN_SKIPPED_DIRS_RE = re.compile(
 
 def _recompile_re():
     global SKIP_DIRS_RE
-    SKIP_DIRS_RE = re.compile(f"^({'|'.join(map(re.escape, SKIP_DIRS))})")
+    SKIP_DIRS_RE = re.compile(f".*({'|'.join(map(re.escape, SKIP_DIRS))})")
 
 
 def add(import_name: str):
