@@ -22,8 +22,8 @@ from torch import inf
 from torch.nn import Parameter
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
-    (gradcheck, gradgradcheck, run_tests, TestCase, download_file, IS_CI, NoTest,
-     skipIfSlowGradcheckEnv, suppress_warnings)
+    (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, download_file, IS_CI,
+     NoTest, skipIfSlowGradcheckEnv, suppress_warnings)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
 import torch.backends.mps
@@ -40,6 +40,7 @@ from torch.testing._internal.common_methods_invocations import (
 )
 from torch.testing._internal.common_device_type import ops, dtypes, instantiate_device_type_tests, OpDTypes
 from torch.testing._internal.common_nn import NNTestCase
+from torch.testing._internal.common_quantization import _group_quantize_tensor
 import numpy as np
 import torch
 import torch.utils._pytree as pytree
@@ -59,6 +60,10 @@ _ref_test_ops = tuple(
         op_db,
     )
 )
+
+def xfailIfMacOS14_4Plus(func):
+    return unittest.expectedFailure(func) if product_version > 14.3 else func  # noqa: F821
+
 
 def mps_ops_grad_modifier(ops):
     XFAILLIST_GRAD = {
@@ -226,6 +231,7 @@ def mps_ops_modifier(ops):
         '__radd__',
         '__rmul__',
         '__getitem__',
+        'abs',
         'add',
         'argwhere',
         'atleast_1d',
@@ -285,8 +291,8 @@ def mps_ops_modifier(ops):
         'narrow_copy',
         'nn.functional.conv1d',
         'nn.functional.conv_transpose1d',
-        'nn.functional.padcircular',
         'nn.functional.feature_alpha_dropoutwithout_train',
+        'nn.functional.padcircular',
         'nn.functional.unfold',
         'nonzero',
         'ones',
@@ -382,6 +388,7 @@ def mps_ops_modifier(ops):
         'half',
         'hstack',
         'int',
+        'isclose',
         'isnan',
         'ldexp',
         'log10',
@@ -402,12 +409,13 @@ def mps_ops_modifier(ops):
         'mean',
         'ne',
         'neg',
-        'nn.functional.rms_norm',
         'nn.functional.padconstant',
         'nn.functional.padreflect',
         'nn.functional.padreplicate',
         'nn.functional.pixel_shuffle',
         'nn.functional.pixel_unshuffle',
+        'nn.functional.rms_norm',
+        'nn.functional.softsign',
         'nn.functional.tanhshrink',
         'prod',
         'reciprocal',
@@ -4599,6 +4607,33 @@ class TestMPS(TestCaseMPS):
         helper([7, 5, 2, 4, 6], 'sum')
         helper([8, 4, 5, 7, 6], 'mean')
 
+    def test_mse_loss_strided_output(self):
+        # https://github.com/pytorch/pytorch/issues/124621
+        lf = nn.MSELoss(reduction='none')
+        model_cpu = nn.Sequential(
+            nn.Conv1d(3, 3, 1),
+        )
+        model_mps = copy.deepcopy(model_cpu).to("mps")
+
+        x = torch.randn(128, 10, 3)
+        x = x.permute(0, 2, 1)
+
+        x_mps = x.detach().clone().to("mps").permute(0, 2, 1)
+        x_mps = x_mps.permute(0, 2, 1)
+
+        y = model_cpu(x)
+        y_mps = model_mps(x_mps)
+
+        y = y.permute(0, 2, 1)[:, :5, :]
+        y_mps = y_mps.permute(0, 2, 1)[:, :5, :]
+
+        y_hat = torch.randn(128, 5, 3)
+        y_hat_mps = y_hat.detach().clone().to("mps")
+
+        loss = lf(y, y_hat)
+        loss_mps = lf(y_mps, y_hat_mps)
+        self.assertEqual(loss, loss_mps)
+
     # Binary Cross Enropy
     def test_bce_loss_simple(self):
         def helper(shape, reduction):
@@ -6468,6 +6503,18 @@ class TestMPS(TestCaseMPS):
             for shape in [(2, 8, 4, 5)]:
                 for alpha in [0.000001, 1.0, 2.3, 0.34, 23]:
                     helper(shape, alpha, memory_fromat)
+
+    def test_elu_strided_output(self):
+        # https://github.com/pytorch/pytorch/issues/124834
+        elu_input = torch.randn(1, 1024, 500)
+        alpha = float(1)
+        inplace = False
+
+        elu_input_noncontiguous = elu_input.transpose(1, 2)
+        self.assertEqual(
+            F.elu(elu_input_noncontiguous.to('cpu'), alpha, inplace),
+            F.elu(elu_input_noncontiguous.to('mps'), alpha, inplace)
+        )
 
     # Test glu
     def test_glu(self):
@@ -9050,6 +9097,45 @@ class TestLinalgMPS(TestCaseMPS):
                         "The operator 'aten::_linalg_eigh.eigenvalues' is not currently implemented for the MPS device."):
                     raise e
 
+    @parametrize("m", [32, 64])
+    @parametrize("k", [32, 64])
+    @parametrize("n", [48, 64])
+    def test__int4_mm(self, m, k, n):
+        q_group = 32
+        inner_k_tiles = 2
+
+        torch.manual_seed(1)
+        a_f32 = torch.rand((m, k), device="mps")
+        b_f32 = torch.rand((k, n), device="mps")
+
+        def convert_weight_to_int4pack(b):
+            b_int32, b_scales_and_zeros = _group_quantize_tensor(
+                b, n_bit=4, q_group_size=q_group
+            )
+            b_int4pack = torch._convert_weight_to_int4pack(
+                b_int32.cpu(), inner_k_tiles
+            ).to(device="mps")
+
+            return b_int4pack, b_scales_and_zeros
+
+        def weight_int4pack_mm(a, b_int4pack, b_scales_and_zeros):
+            return torch._weight_int4pack_mm(
+                a, b_int4pack, q_group, b_scales_and_zeros
+            ).to(device="mps")
+
+        b_int4pack, b_scales_and_zeros_f32 = convert_weight_to_int4pack(b_f32)
+
+        for dtype in [torch.float16, torch.float32] + ([torch.bfloat16] if product_version > 14.0 else []):
+            a = a_f32.to(dtype=dtype)
+            b = b_f32.to(dtype=dtype)
+            b_scales_and_zeros = b_scales_and_zeros_f32.to(dtype=dtype)
+            ref = torch.mm(a, b)
+            res = weight_int4pack_mm(a, b_int4pack, b_scales_and_zeros)
+
+            mean_err = ((res - ref).abs() / ref).mean()
+            self.assertTrue(mean_err < 0.05)
+
+
 
 
 
@@ -9144,7 +9230,7 @@ class TestViewOpsMPS(TestCaseMPS):
         # Note: only validates storage on native device types
         # because some accelerators, like XLA, do not expose storage
         if base.device.type == 'mps':
-            if base.storage().data_ptr() != other.storage().data_ptr():
+            if base.untyped_storage().data_ptr() != other.untyped_storage().data_ptr():
                 return False
 
         return True
@@ -9266,6 +9352,14 @@ class TestViewOpsMPS(TestCaseMPS):
 
         v[0, 1] = 0
         self.assertEqual(t[1, 0], v[0, 1])
+
+    def test_inplace_view_add(self):
+        # https://github.com/pytorch/pytorch/issues/96153
+        t_mps = torch.ones((2, 6,), device='mps')[1].reshape(2, 3)
+        t_cpu = torch.ones((2, 6,), device='cpu')[1].reshape(2, 3)
+        t_mps = t_mps + 1
+        t_cpu = t_cpu + 1
+        self.assertEqual(t_mps, t_cpu)
 
     def test_t_inplace_view(self, device="mps"):
         t = torch.ones(5, 5, device=device)
@@ -11324,6 +11418,8 @@ class TestRNNMPS(TestCaseMPS):
             for test_options in self.LSTM_TEST_CASES:
                 self._lstm_helper(num_layers=num_layers, dtype=dtype, device=device, **test_options)
 
+    # Broke on MacOS-14.4 (but works on 14.2), see https://github.com/pytorch/pytorch/issues/125803
+    @xfailIfMacOS14_4Plus
     def test_lstm_backward(self, device="mps", dtype=torch.float32):
         for num_layers in [1, 2, 5]:
             for test_options in self.LSTM_TEST_CASES:
@@ -11844,6 +11940,7 @@ class TestCommon(TestCase):
             cpu_tensor = ones("cpu")
             self.assertEqual(mps_tensor.cpu(), cpu_tensor)
 
+
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
 # This requires mps to be properly registered in the device generic test framework which is not the
 # case right now. We can probably use `allow_mps` introduced in https://github.com/pytorch/pytorch/pull/87342
@@ -11851,6 +11948,7 @@ class TestCommon(TestCase):
 instantiate_device_type_tests(TestConsistency, globals(), only_for="cpu")
 instantiate_device_type_tests(TestErrorInputs, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestCommon, globals(), allow_mps=True, only_for="mps")
+instantiate_device_type_tests(TestLinalgMPS, globals(), allow_mps=True, only_for="mps")
 
 if __name__ == "__main__":
     run_tests()

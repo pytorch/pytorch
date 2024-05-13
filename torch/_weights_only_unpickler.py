@@ -65,7 +65,7 @@ from pickle import (
 )
 from struct import unpack
 from sys import maxsize, modules
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Type
 
 import torch
 
@@ -174,7 +174,7 @@ class Unpickler:
         # to be allowed as the second argument to `torch._tensor._rebuild_from_type_v2`
         # This enables rebuilding of tensor subclasses defined outside the `torch` package.
         # See [Note: Criteria for allowing out-of-core tensor subclasses] for details on the criteria.
-        self.tensor_subclasses_found = set()
+        self.tensor_subclasses_found: Set[Type] = set()
 
     def load(self):
         """Read a pickled object representation from the open file.
@@ -249,11 +249,11 @@ class Unpickler:
                                 is not torch.Tensor.__getattribute__
                             )
                             try:
-                                custom_get = class_type.__get__ is not None
+                                custom_get = class_type.__get__ is not None  # type: ignore[attr-defined]
                             except AttributeError:
                                 custom_get = False
                             try:
-                                custom_get_attr = class_type.__getattr__ is not None
+                                custom_get_attr = class_type.__getattr__ is not None  # type: ignore[attr-defined]
                             except AttributeError:
                                 custom_get_attr = False
                             # Tensor.__setstate__ might be called in `_rebuild_from_type_v2`
@@ -265,7 +265,7 @@ class Unpickler:
                                 class_type.__setattr__ is not object.__setattr__
                             )
                             try:
-                                custom_set = class_type.__set__ is not None
+                                custom_set = class_type.__set__ is not None  # type: ignore[attr-defined]
                             except AttributeError:
                                 custom_set = False
                             # tp_alloc is called by `Tensor._rebuild_wrapper_subclass` and `Tensor.as_subclass`

@@ -4,12 +4,12 @@ import operator
 from collections import defaultdict
 from copy import deepcopy
 from enum import Enum
-from itertools import chain
-from typing import Any, cast, Dict, List, Optional, Tuple, Union
+from typing import Any, cast, Dict, List, Optional, Set, Tuple, Union
 
 import torch
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
+from torch._library.fake_class_registry import FakeScriptObject
 from torch.export._tree_utils import reorder_kwargs
 from torch.export.exported_program import (
     ConstantArgument,
@@ -56,7 +56,16 @@ def _assign_attr(
         assert isinstance(from_obj, torch.Tensor)
         to_module.register_buffer(field, from_obj, persistent=persistent)
     elif attr_kind == _AttrKind.CONSTANT:
-        assert isinstance(from_obj, (torch.Tensor, torch.ScriptObject))
+        assert not isinstance(
+            from_obj, FakeScriptObject
+        ), "FakeScriptObject should only exist during tracing."
+        assert isinstance(
+            from_obj,
+            (
+                torch.Tensor,
+                torch.ScriptObject,
+            ),
+        )
         setattr(to_module, field, from_obj)
 
 
@@ -190,15 +199,16 @@ class UnflattenedModule(torch.nn.Module):
                 persistent=persistent,
             )
 
-        for fqn in chain(
-            self.graph_signature.lifted_tensor_constants,
-            self.graph_signature.lifted_custom_objs,
-        ):
-            constant = export_module.constants[fqn]
-            if isinstance(constant, torch.Tensor):
-                constant = constant.clone()
+        # use id map so we don't double-clone aliased constants
+        id_to_const: Dict[int, Union[torch.Tensor, torch._C.ScriptObject]] = {}
+        for fqn, constant in export_module.constants.items():
+            if id(constant) not in id_to_const:
+                if isinstance(constant, torch.Tensor):
+                    constant = constant.clone()
+                id_to_const[id(constant)] = constant
+            _constant = id_to_const[id(constant)]
             _assign_attr(
-                constant,
+                _constant,
                 self,
                 fqn,
                 attr_kind=_AttrKind.CONSTANT,
@@ -207,6 +217,7 @@ class UnflattenedModule(torch.nn.Module):
         # This is to handle parameters/buffers that point to the same tensor
         # object id -> list of (node_name, target_name)
         consts_map: Dict[int, List[Tuple[str, str]]] = defaultdict(list)
+        consts_targets: Set[str] = set()
 
         def add_to_consts_map(obj_id, node_name, target_name):
             name_list = consts_map[obj_id]
@@ -221,6 +232,7 @@ class UnflattenedModule(torch.nn.Module):
                 add_to_consts_map(
                     id(export_module.state_dict[s.target]), s.arg.name, s.target
                 )
+                consts_targets.add(s.target)
             elif (
                 (s.kind == InputKind.BUFFER and not s.persistent)
                 or s.kind == InputKind.CONSTANT_TENSOR
@@ -231,6 +243,16 @@ class UnflattenedModule(torch.nn.Module):
                 add_to_consts_map(
                     id(export_module.constants[s.target]), s.arg.name, s.target
                 )
+                consts_targets.add(s.target)
+
+        # add constants that are aliased and don't appear in graph signature
+        for const_name, const in export_module.constants.items():
+            if const_name not in consts_targets:
+                assert (
+                    id(const) in consts_map
+                ), "Constants should be either aliased or appear in graph signature"
+                ph_name, _ = consts_map[id(const)][0]
+                add_to_consts_map(id(const), ph_name, const_name)
 
         # node name -> list of possible targets
         inputs_to_state: Dict[str, List[str]] = {}
@@ -573,9 +595,11 @@ class _ModuleFrame:
             _add_submodule(
                 parent.module,
                 accessor,
-                self.module
-                if self.cached_graph_module is None
-                else self.cached_graph_module,
+                (
+                    self.module
+                    if self.cached_graph_module is None
+                    else self.cached_graph_module
+                ),
             )
             self.parent_call_module = parent.graph.call_module(accessor)
 
@@ -604,9 +628,11 @@ class _ModuleFrame:
                         op="call_function",
                         target=operator.getitem,
                         args=(flat_args, idx),
-                        name=arg.name
-                        if not isinstance(arg, ConstantArgument)
-                        else f"_constant_{idx}",
+                        name=(
+                            arg.name
+                            if not isinstance(arg, ConstantArgument)
+                            else f"_constant_{idx}"
+                        ),
                     )
                     if isinstance(arg, ConstantArgument):
                         continue
