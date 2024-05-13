@@ -1771,6 +1771,29 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                         "profiling out of range",
                     )
 
+    def _schedule_helper(self, warmup, active, repeat):
+        with profile(
+            schedule=torch.profiler.schedule(
+                skip_first=0, wait=0, warmup=warmup, active=active, repeat=repeat
+            )
+        ) as prof:
+            for i in range(100):
+                torch.add(1, 2)
+                prof.step()
+        for ev in prof.key_averages():
+            if ev.key == "aten::add":
+                return ev.count
+        return 0
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_schedule_function_count(self):
+        self.assertEqual(self._schedule_helper(warmup=0, active=1, repeat=1), 1)
+        self.assertEqual(self._schedule_helper(warmup=0, active=5, repeat=0), 100)
+        self.assertEqual(self._schedule_helper(warmup=0, active=5, repeat=10), 50)
+        self.assertEqual(self._schedule_helper(warmup=1, active=5, repeat=0), 83)
+        self.assertEqual(self._schedule_helper(warmup=10, active=10, repeat=4), 40)
+        self.assertEqual(self._schedule_helper(warmup=50, active=1, repeat=0), 1)
+
 
 class SimpleNet(nn.Module):
     def __init__(self):

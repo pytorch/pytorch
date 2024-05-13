@@ -310,22 +310,23 @@ test_dynamo_shard() {
 test_inductor_distributed() {
   # Smuggle a few multi-gpu tests here so that we don't have to request another large node
   echo "Testing multi_gpu tests in test_torchinductor"
-  pytest test/inductor/test_torchinductor.py -k test_multi_gpu
-  pytest test/inductor/test_aot_inductor.py -k test_non_default_cuda_device
-  pytest test/inductor/test_aot_inductor.py -k test_replicate_on_devices
-  pytest test/distributed/test_c10d_functional_native.py
-  pytest test/distributed/_tensor/test_dtensor_compile.py
-  pytest test/distributed/tensor/parallel/test_fsdp_2d_parallel.py
-  pytest test/distributed/_composable/fsdp/test_fully_shard_comm.py
-  pytest test/distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_multi_group
-  pytest test/distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_with_activation_checkpointing
-  pytest test/distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_2d_mlp
-  pytest test/distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_hsdp
-  pytest test/distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_2d_transformer_checkpoint_resume
-  pytest test/distributed/_composable/fsdp/test_fully_shard_frozen.py
-  pytest test/distributed/_composable/fsdp/test_fully_shard_mixed_precision.py -k test_compute_dtype
-  pytest test/distributed/_composable/fsdp/test_fully_shard_mixed_precision.py -k test_reduce_dtype
-  pytest test/distributed/fsdp/test_fsdp_tp_integration.py -k test_fsdp_tp_integration
+  python test/run_test.py -i inductor/test_torchinductor.py -k test_multi_gpu --verbose
+  python test/run_test.py -i inductor/test_aot_inductor.py -k test_non_default_cuda_device --verbose
+  python test/run_test.py -i inductor/test_aot_inductor.py -k test_replicate_on_devices --verbose
+  python test/run_test.py -i distributed/test_c10d_functional_native.py --verbose
+  python test/run_test.py -i distributed/_tensor/test_dtensor_compile.py --verbose
+  python test/run_test.py -i distributed/tensor/parallel/test_fsdp_2d_parallel.py --verbose
+  python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_comm.py --verbose
+  python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_multi_group --verbose
+  python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_with_activation_checkpointing --verbose
+  python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_2d_mlp --verbose
+  python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_hsdp --verbose
+  python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_2d_transformer_checkpoint_resume --verbose
+  python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_gradient_accumulation --verbose
+  python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_frozen.py --verbose
+  python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_mixed_precision.py -k test_compute_dtype --verbose
+  python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_mixed_precision.py -k test_reduce_dtype --verbose
+  python test/run_test.py -i distributed/fsdp/test_fsdp_tp_integration.py -k test_fsdp_tp_integration --verbose
 
   # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
   # with if required # gpus aren't available
@@ -519,6 +520,11 @@ test_single_dynamo_benchmark() {
       --actual "$TEST_REPORTS_DIR/${name}_$suite.csv" \
       --expected "benchmarks/dynamo/ci_expected_accuracy/${TEST_CONFIG}_${name}.csv"
   fi
+}
+
+test_inductor_micro_benchmark() {
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  python benchmarks/gpt_fast/benchmark.py --output "${TEST_REPORTS_DIR}/gpt_fast_benchmark.csv"
 }
 
 test_dynamo_benchmark() {
@@ -1208,6 +1214,8 @@ elif [[ "$TEST_CONFIG" == deploy ]]; then
   test_torch_deploy
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   test_inductor_distributed
+elif [[ "${TEST_CONFIG}" == *inductor-micro-benchmark* ]]; then
+  test_inductor_micro_benchmark
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   install_torchvision
   id=$((SHARD_NUMBER-1))

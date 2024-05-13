@@ -7,6 +7,7 @@ on:
       - Dockerfile
       - docker.Makefile
       - .github/workflows/docker-release.yml
+      - .github/scripts/generate_docker_release_matrix.py
   push:
     branches:
       - nightly
@@ -126,20 +127,25 @@ jobs:
         run: |
           make -f docker.Makefile "${BUILD_IMAGE_TYPE}-image"
       - name: Push nightly tags
-        if: ${{ github.event.ref == 'refs/heads/nightly' && matrix.image_type == 'runtime' }}
+        if: ${{ github.event.ref == 'refs/heads/nightly' && matrix.image_type == 'runtime' && matrix.build_platforms == 'linux/amd4' }}
         run: |
           PYTORCH_DOCKER_TAG="${PYTORCH_VERSION}-cuda${CUDA_VERSION_SHORT}-cudnn${CUDNN_VERSION}-runtime"
-
+          CUDA_SUFFIX="-cu${CUDA_VERSION}"
           PYTORCH_NIGHTLY_COMMIT=$(docker run ghcr.io/pytorch/pytorch-nightly:"${PYTORCH_DOCKER_TAG}" \
                                           python -c 'import torch; print(torch.version.git_version[:7],end="")')
 
           docker tag ghcr.io/pytorch/pytorch-nightly:"${PYTORCH_DOCKER_TAG}" \
-                 ghcr.io/pytorch/pytorch-nightly:"${PYTORCH_NIGHTLY_COMMIT}-cu${CUDA_VERSION}"
-          docker push ghcr.io/pytorch/pytorch-nightly:"${PYTORCH_NIGHTLY_COMMIT}-cu${CUDA_VERSION}"
+                 ghcr.io/pytorch/pytorch-nightly:"${PYTORCH_NIGHTLY_COMMIT}${CUDA_SUFFIX}"
 
-          docker tag ghcr.io/pytorch/pytorch-nightly:"${PYTORCH_NIGHTLY_COMMIT}-cu${CUDA_VERSION}" \
-                 ghcr.io/pytorch/pytorch-nightly:latest
-          docker push ghcr.io/pytorch/pytorch-nightly:latest
+          docker push ghcr.io/pytorch/pytorch-nightly:"${PYTORCH_NIGHTLY_COMMIT}${CUDA_SUFFIX}"
+
+          # Please note, here we ned to pin specific verison of CUDA as with latest label
+          if [[ ${CUDA_VERSION_SHORT} == "12.1" ]]; then
+            docker tag ghcr.io/pytorch/pytorch-nightly:"${PYTORCH_NIGHTLY_COMMIT}${CUDA_SUFFIX}" \
+                    ghcr.io/pytorch/pytorch-nightly:latest
+            docker push ghcr.io/pytorch/pytorch-nightly:latest
+          fi
+
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()
