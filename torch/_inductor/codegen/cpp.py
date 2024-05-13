@@ -223,9 +223,9 @@ def try_reset_var_index_to_local_buf(self, name, var, index):
     local_buffer = self.get_local_buffer()
     if (
         isinstance(local_buffer, LocalBuffer)
-        and local_buffer._original_node_name == name
+        and local_buffer.original_node_name == name
     ):
-        index_id = local_buffer._local_buf_index
+        index_id = local_buffer.local_buf_index
         sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)  # type: ignore[attr-defined]
         replacements = {}
         for x in sorted_symbols:
@@ -233,7 +233,7 @@ def try_reset_var_index_to_local_buf(self, name, var, index):
                 # Remove the idx other than `keep_idx_id`
                 replacements[x] = "0"
         index = sympy_subs(index, replacements)  # type: ignore[arg-type]
-        var = local_buffer._local_buf_name
+        var = local_buffer.local_buf_name
     return var, index
 
 
@@ -241,17 +241,17 @@ def cpp_kernel_load_handler(func):
     def decorator(self, name: str, index: sympy.Expr):
         assert isinstance(self, CppKernel)
         local_buffer = self.get_local_buffer()
-        _use_local_buf = (
+        use_local_buf = (
             isinstance(local_buffer, LocalBuffer)
-            and local_buffer._original_node_name == name
+            and local_buffer.original_node_name == name
         )
         index = self.rename_indexing(index)
-        if isinstance(self, CppTile2DKernel) and _use_local_buf:
+        if isinstance(self, CppTile2DKernel) and use_local_buf:
             self.can_use_local_buf = False
         elif isinstance(self, CppVecKernel):
             tiling_var = self.itervars[self.tiling_idx]
             stride = self._try_get_const_stride(index, tiling_var)
-            if _use_local_buf and stride != 1:
+            if use_local_buf and stride != 1:
                 self.can_use_local_buf = False
         else:
             assert isinstance(self, CppKernel)
@@ -264,21 +264,21 @@ def cpp_kernel_store_handler(func):
     def decorator(self, name, index, value, mode=None):
         assert isinstance(self, CppKernel)
         local_buffer = self.get_local_buffer()
-        _use_local_buf = (
+        use_local_buf = (
             isinstance(local_buffer, LocalBuffer)
-            and local_buffer._original_node_name == name
+            and local_buffer.original_node_name == name
         )
         index = self.rename_indexing(index)
-        if isinstance(self, CppTile2DKernel) and _use_local_buf:
+        if isinstance(self, CppTile2DKernel) and use_local_buf:
             self.can_use_local_buf = False
         elif isinstance(self, CppVecKernel):
             tiling_var = self.itervars[self.tiling_idx]
             stride = self._try_get_const_stride(index, tiling_var)
-            if _use_local_buf and stride != 1:
+            if use_local_buf and stride != 1:
                 self.can_use_local_buf = False
         else:
             assert isinstance(self, CppKernel)
-            if _use_local_buf and mode is not None:
+            if use_local_buf and mode is not None:
                 # Doesn't support atomic_add
                 self.can_use_local_buf = False
         return func(self, name, index, value, mode)
@@ -370,11 +370,11 @@ class LocalBuffer:
         local_buf_size: int,
         local_buf_dtype: torch.dtype,
     ):
-        self._original_node_name = node.get_name()
-        self._local_buf_index = local_buf_index
-        self._local_buf_size = local_buf_size
-        self._local_buf_dtype = local_buf_dtype
-        self._local_buf_name = "local_buffer_data"
+        self.original_node_name = node.get_name()
+        self.local_buf_index = local_buf_index
+        self.local_buf_size = local_buf_size
+        self.local_buf_dtype = local_buf_dtype
+        self.local_buf_name = "local_buffer_data"
 
 
 class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
@@ -2029,11 +2029,11 @@ class CppKernel(Kernel):
                     local_buffer_scheduler_node = self.get_local_buffer()
                     assert isinstance(local_buffer_scheduler_node, LocalBuffer)
                     # For dynamic size, rename s to ks
-                    _local_buf_size = self.rename_indexing(
-                        local_buffer_scheduler_node._local_buf_size
+                    local_buf_size = self.rename_indexing(
+                        local_buffer_scheduler_node.local_buf_size
                     )
-                    dtype = DTYPE_TO_CPP[local_buffer_scheduler_node._local_buf_dtype]
-                    allocate = f"std::make_unique<{dtype} []>({_local_buf_size})"
+                    dtype = DTYPE_TO_CPP[local_buffer_scheduler_node.local_buf_dtype]
+                    allocate = f"std::make_unique<{dtype} []>({local_buf_size})"
                     code.splice(
                         f"std::unique_ptr<{dtype} []> local_buffer = {allocate};"
                     )
@@ -3453,9 +3453,6 @@ class OuterLoopFusedKernel(CppKernel):
     def __init__(self, kernel_group):
         super().__init__(kernel_group.args, kernel_group.ws.num_threads)
         self.inner: List["LoopLevel"] = []
-        self._use_local_buf: bool = False
-        self._local_buf_size: int = 0
-        self._local_buf_dtype = torch.float32
 
     def decide_parallel_depth(self, max_parallel_depth, threads) -> int:
         kernels_parallel_depth = []
