@@ -1844,7 +1844,8 @@ class TritonKernel(Kernel):
             mask = (
                 f"{next(iter(mask_vars))}"
                 if len(mask_vars) == 1
-                else f"({' & '.join(str(v) for v in mask_vars)})"
+                # sorted for deterministic order
+                else f"({' & '.join(sorted(map(str, mask_vars)))})"
             )
         return mask
 
