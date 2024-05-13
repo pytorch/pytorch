@@ -5,7 +5,7 @@ set(TORCH_RPC_TEST_SOURCES
   ${TORCH_RPC_TEST_DIR}/test_wire_serialization.cpp
 )
 set(TORCH_RPC_TEST_DEPENDENCY_LIBS
-  torch gtest fmt::fmt-header-only
+  torch gtest
 )
 
 if(USE_GLOO)
