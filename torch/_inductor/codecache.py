@@ -564,26 +564,6 @@ class FxGraphCachePickler(pickle.Pickler):
 
 
 @functools.lru_cache(None)
-def get_inductor_code_hash() -> bytes:
-    """
-    Compute a hash of all inductor code modules. Used by the FxGraph cache
-    so any inductor code changes would result in new cache keys.
-    """
-    inductor_root = os.path.dirname(__file__)
-
-    contents: Dict[str, bytes] = {}
-    for lib in pkgutil.iter_modules([inductor_root]):
-        spec = lib.module_finder.find_spec(lib.name, None)
-        assert spec is not None
-        module = spec.origin
-        assert module is not None
-        with open(module, "rb") as f:
-            contents[module] = f.read()
-
-    return hashlib.sha256(pickle.dumps(contents)).digest()
-
-
-@functools.lru_cache(None)
 def torch_key():
     """
     Compute a key that contains relevant information about torch source files
