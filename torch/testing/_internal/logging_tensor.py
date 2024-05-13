@@ -80,7 +80,7 @@ class LoggingTensor(torch.Tensor):
 
         with cls.context():
             rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
-        logger.info(f"{func.__module__}.{func.__name__} {args} {kwargs} {rs}")
+        logger.info("%s", f"{func.__module__}.{func.__name__} {args} {kwargs} {rs}")
         return rs
 
 class LoggingTensorMode(TorchDispatchMode):
@@ -88,7 +88,7 @@ class LoggingTensorMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
         rs = func(*args, **kwargs)
-        logger.info(f"{func.__module__}.{func.__name__} {args} {kwargs} {rs}")
+        logger.info("%s", f"{func.__module__}.{func.__name__} {args} {kwargs} {rs}")
         return rs
 
 class LoggingTensorReentrant(LoggingTensor):
@@ -137,7 +137,7 @@ class LoggingTensorHandler(logging.Handler):
             self.tracebacks_list.append(record.traceback)
 
 def log_input(name: str, var: object):
-    logger.info("input", (name,), {}, var) # noqa: PLE1205
+    logger.info("input", (name,), {}, var)  # noqa: PLE1205
 
 class GatherTraceback(logging.Filter):
     def __init__(self, python=True, script=True, cpp=False):

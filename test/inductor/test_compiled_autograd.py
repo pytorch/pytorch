@@ -802,7 +802,6 @@ main()
 
         compiled_fn(inputs)
 
-
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
     def test_custom_fn_output_metadata(self):
         def my_compiler_fn(gm):
