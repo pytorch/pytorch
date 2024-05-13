@@ -104,24 +104,25 @@ def _get_current_dispatch_mode():
     return None
 
 
-def _detect_functional_mode():
+def _detect_infra_mode(key):
+    assert key in [torch._C._TorchDispatchModeKey.FUNCTIONAL, torch._C._TorchDispatchModeKey.PROXY]
     from torch._ops import _get_dispatch_mode_pre_dispatch
 
-    pre_dispatch_functional_mode = _get_dispatch_mode_pre_dispatch(
-        torch._C._TorchDispatchModeKey.FUNCTIONAL
+    pre_dispatch_mode = _get_dispatch_mode_pre_dispatch(
+        key
     )
-    post_dispatch_functional_mode = torch._C._get_dispatch_mode(
-        torch._C._TorchDispatchModeKey.FUNCTIONAL
-    )
-
-    assert (pre_dispatch_functional_mode is None) or (
-        post_dispatch_functional_mode is None
+    post_dispatch_mode = torch._C._get_dispatch_mode(
+        key
     )
 
-    if pre_dispatch_functional_mode is None:
-        return post_dispatch_functional_mode
+    assert (pre_dispatch_mode is None) or (
+        post_dispatch_mode is None
+    )
 
-    return pre_dispatch_functional_mode
+    if pre_dispatch_mode is None:
+        return post_dispatch_mode
+
+    return pre_dispatch_mode
 
 
 def _unset_infra_mode(key):
@@ -159,7 +160,7 @@ def _get_current_dispatch_mode_stack():
     return [_get_dispatch_stack_at(i) for i in range(stack_len)]
 
 
-def _push_mode(mode):
+def _push_mode(mode: TorchDispatchMode):
     k = mode._dispatch_key if hasattr(mode, "_dispatch_key") else None
     assert k is None or k == torch._C.DispatchKey.PreDispatch
     if k is None:
