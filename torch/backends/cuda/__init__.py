@@ -15,7 +15,6 @@ __all__ = [
     "preferred_blas_library",
     "cufft_plan_cache",
     "matmul",
-    "SDPBackend",
     "SDPAParams",
     "enable_cudnn_sdp",
     "cudnn_sdp_enabled",
