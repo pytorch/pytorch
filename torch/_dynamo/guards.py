@@ -727,10 +727,12 @@ class GuardBuilder(GuardBuilderBase):
     def get_guard_manager_type(self, source, example_value):
         guard_manager_enum = GuardManagerType.GUARD_MANAGER
         if self.requires_key_order_guarding(source):
-            assert isinstance(example_value, dict)
+            if isinstance(example_value, set):
+                guard_manager_enum = GuardManagerType.GUARD_MANAGER
+            # assert isinstance(example_value, dict), breakpoint()
             # If keys method is not overriden, we can use PyDict_Next to get key
             # orderings. Read more in guards.cpp
-            if type(example_value).keys is type({}).keys:
+            elif type(example_value).keys is type({}).keys:
                 guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
             else:
                 guard_manager_enum = GuardManagerType.DICT_SUBCLASS_GUARD_MANAGER
