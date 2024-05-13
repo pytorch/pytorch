@@ -210,3 +210,18 @@ Microbatch Utilities
 .. autofunction:: split_args_kwargs_into_chunks
 
 .. autofunction:: merge_chunks
+
+Pipeline Schedules
+==================
+
+.. automodule:: torch.distributed.pipelining.PipelineSchedule
+
+.. currentmodule:: torch.distributed.pipelining.PipelineSchedule
+
+.. autoclass:: ScheduleGPipe
+
+.. autoclass:: Schedule1F1B
+
+.. autoclass:: ScheduleInterleaved1F1B
+
+.. autoclass:: ScheduleLoopedBFS

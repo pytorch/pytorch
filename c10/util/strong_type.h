@@ -20,12 +20,6 @@
 #include <type_traits>
 #include <utility>
 
-#if __cplusplus >= 201703L
-#define STRONG_NODISCARD [[nodiscard]]
-#else
-#define STRONG_NODISCARD
-#endif
-
 #if defined(_MSC_VER) && !defined(__clang__) && __MSC_VER < 1922
 #define STRONG_CONSTEXPR
 #else
@@ -131,18 +125,18 @@ public:
     swap(a.val, b.val);
   }
 
-  STRONG_NODISCARD
+  [[nodiscard]]
   constexpr T& value_of() & noexcept { return val;}
-  STRONG_NODISCARD
+  [[nodiscard]]
   constexpr const T& value_of() const & noexcept { return val;}
-  STRONG_NODISCARD
+  [[nodiscard]]
   constexpr T&& value_of() && noexcept { return std::move(val);}
 
-  STRONG_NODISCARD
+  [[nodiscard]]
   friend constexpr T& value_of(type& t) noexcept { return t.val;}
-  STRONG_NODISCARD
+  [[nodiscard]]
   friend constexpr const T& value_of(const type& t) noexcept { return t.val;}
-  STRONG_NODISCARD
+  [[nodiscard]]
   friend constexpr T&& value_of(type&& t) noexcept { return std::move(t).val;}
 private:
   T val;
@@ -196,7 +190,7 @@ namespace impl {
   template <
     typename T,
     typename = impl::WhenStrongType<T>>
-  STRONG_NODISCARD
+  [[nodiscard]]
   constexpr
   auto
   access(T&& t)
@@ -219,7 +213,7 @@ class equality::modifier<::strong::type<T, Tag, M...>>
 {
   using type = ::strong::type<T, Tag, M...>;
 public:
-  STRONG_NODISCARD
+  [[nodiscard]]
   friend
   STRONG_CONSTEXPR
   auto
@@ -232,7 +226,7 @@ public:
     return value_of(lh) == value_of(rh);
   }
 
-  STRONG_NODISCARD
+  [[nodiscard]]
   friend
   STRONG_CONSTEXPR
   auto
@@ -255,7 +249,7 @@ namespace impl
     using TT = underlying_type_t<T>;
     using OT = underlying_type_t<Other>;
   public:
-    STRONG_NODISCARD
+    [[nodiscard]]
     friend
     STRONG_CONSTEXPR
     auto operator==(const T& lh, const Other& rh)
@@ -264,7 +258,7 @@ namespace impl
     {
       return value_of(lh) == impl::access(rh);
     }
-    STRONG_NODISCARD
+    [[nodiscard]]
     friend
     STRONG_CONSTEXPR
     auto operator==(const Other& lh, const T& rh)
@@ -273,7 +267,7 @@ namespace impl
     {
       return impl::access(lh) == value_of(rh) ;
     }
-    STRONG_NODISCARD
+    [[nodiscard]]
     friend
     STRONG_CONSTEXPR
     auto operator!=(const T& lh, const Other rh)
@@ -282,7 +276,7 @@ namespace impl
     {
       return value_of(lh) != impl::access(rh);
     }
-    STRONG_NODISCARD
+    [[nodiscard]]
     friend
     STRONG_CONSTEXPR
     auto operator!=(const Other& lh, const T& rh)
@@ -311,7 +305,7 @@ namespace impl
     using TT = underlying_type_t<T>;
     using OT = underlying_type_t<Other>;
   public:
-    STRONG_NODISCARD
+    [[nodiscard]]
     friend
     STRONG_CONSTEXPR
     auto operator<(const T& lh, const Other& rh)
@@ -320,7 +314,7 @@ namespace impl
     {
       return value_of(lh) < impl::access(rh);
     }
-    STRONG_NODISCARD
+    [[nodiscard]]
     friend
     STRONG_CONSTEXPR
     auto operator<(const Other& lh, const T& rh)
@@ -330,7 +324,7 @@ namespace impl
       return impl::access(lh) < value_of(rh) ;
     }
 
-    STRONG_NODISCARD
+    [[nodiscard]]
     friend
     STRONG_CONSTEXPR
     auto operator<=(const T& lh, const Other& rh)
@@ -339,7 +333,7 @@ namespace impl
     {
       return value_of(lh) <= impl::access(rh);
     }
-    STRONG_NODISCARD
+    [[nodiscard]]
     friend
     STRONG_CONSTEXPR
     auto operator<=(const Other& lh, const T& rh)
@@ -349,7 +343,7 @@ namespace impl
       return impl::access(lh) <= value_of(rh) ;
     }
 
-    STRONG_NODISCARD
+    [[nodiscard]]
     friend
     STRONG_CONSTEXPR
     auto operator>(const T& lh, const Other& rh)
@@ -358,7 +352,7 @@ namespace impl
     {
       return value_of(lh) > impl::access(rh);
     }
-    STRONG_NODISCARD
+    [[nodiscard]]
     friend
     STRONG_CONSTEXPR
     auto operator>(const Other& lh, const T& rh)
@@ -368,7 +362,7 @@ namespace impl
       return impl::access(lh) > value_of(rh) ;
     }
 
-    STRONG_NODISCARD
+    [[nodiscard]]
     friend
     STRONG_CONSTEXPR
     auto operator>=(const T& lh, const Other& rh)
@@ -377,7 +371,7 @@ namespace impl
     {
       return value_of(lh) >= impl::access(rh);
     }
-    STRONG_NODISCARD
+    [[nodiscard]]
     friend
     STRONG_CONSTEXPR
     auto operator>=(const Other& lh, const T& rh)
@@ -491,7 +485,7 @@ class ordered::modifier<::strong::type<T, Tag, M...>>
 {
   using type = ::strong::type<T, Tag, M...>;
 public:
-  STRONG_NODISCARD
+  [[nodiscard]]
   friend
   STRONG_CONSTEXPR
   auto
@@ -504,7 +498,7 @@ public:
     return value_of(lh) < value_of(rh);
   }
 
-  STRONG_NODISCARD
+  [[nodiscard]]
   friend
   STRONG_CONSTEXPR
   auto
@@ -517,7 +511,7 @@ public:
     return value_of(lh) <= value_of(rh);
   }
 
-  STRONG_NODISCARD
+  [[nodiscard]]
   friend
   STRONG_CONSTEXPR
   auto
@@ -530,7 +524,7 @@ public:
     return value_of(lh) > value_of(rh);
   }
 
-  STRONG_NODISCARD
+  [[nodiscard]]
   friend
   STRONG_CONSTEXPR
 
@@ -833,7 +827,7 @@ class affine_point<D>::modifier<::strong::type<T, Tag, M...>>
 public:
   using difference = std::conditional_t<std::is_same<D, void>{}, strong::type<base_diff_type, Tag, strong::difference>, D>;
   static_assert(std::is_constructible<difference, base_diff_type>::value, "");
-  STRONG_NODISCARD
+  [[nodiscard]]
   friend
   STRONG_CONSTEXPR
   difference
@@ -868,7 +862,7 @@ public:
     return lh;
   }
 
-  STRONG_NODISCARD
+  [[nodiscard]]
   friend
   STRONG_CONSTEXPR
   type
@@ -879,7 +873,7 @@ public:
     return lh += d;
   }
 
-  STRONG_NODISCARD
+  [[nodiscard]]
   friend
   STRONG_CONSTEXPR
   type
@@ -890,7 +884,7 @@ public:
     return rh+= d;
   }
 
-  STRONG_NODISCARD
+  [[nodiscard]]
   friend
   STRONG_CONSTEXPR
   type
@@ -915,7 +909,7 @@ class pointer::modifier<::strong::type<T, Tag, M...>>
   using type = strong::type<T, Tag, M...>;
 public:
   template <typename TT = T>
-  STRONG_NODISCARD
+  [[nodiscard]]
   friend
   STRONG_CONSTEXPR
   auto
@@ -929,7 +923,7 @@ public:
   }
 
   template <typename TT = T>
-  STRONG_NODISCARD
+  [[nodiscard]]
   friend
   STRONG_CONSTEXPR
   auto
@@ -943,7 +937,7 @@ public:
   }
 
   template <typename TT = T>
-  STRONG_NODISCARD
+  [[nodiscard]]
   friend
   STRONG_CONSTEXPR
   auto
@@ -957,7 +951,7 @@ public:
   }
 
   template <typename TT = T>
-  STRONG_NODISCARD
+  [[nodiscard]]
   friend
   STRONG_CONSTEXPR
   auto
@@ -970,7 +964,7 @@ public:
     return value_of(t) != nullptr;
   }
 
-  STRONG_NODISCARD
+  [[nodiscard]]
   STRONG_CONSTEXPR
   decltype(*std::declval<const T&>())
   operator*()
@@ -980,7 +974,7 @@ public:
     return *value_of(self);
   }
 
-  STRONG_NODISCARD
+  [[nodiscard]]
   STRONG_CONSTEXPR
   decltype(&(*std::declval<const T&>())) operator->() const { return &operator*();}
 };
@@ -991,7 +985,7 @@ struct arithmetic
   class modifier
   {
   public:
-    STRONG_NODISCARD
+    [[nodiscard]]
     friend
     STRONG_CONSTEXPR
     T
@@ -1062,7 +1056,7 @@ struct arithmetic
       return lh;
     }
 
-    STRONG_NODISCARD
+    [[nodiscard]]
     friend
     STRONG_CONSTEXPR
     T
@@ -1074,7 +1068,7 @@ struct arithmetic
       return lh;
     }
 
-    STRONG_NODISCARD
+    [[nodiscard]]
     friend
     STRONG_CONSTEXPR
     T
@@ -1086,7 +1080,7 @@ struct arithmetic
       return lh;
     }
 
-    STRONG_NODISCARD
+    [[nodiscard]]
     friend
     STRONG_CONSTEXPR
     T
@@ -1098,7 +1092,7 @@ struct arithmetic
       return lh;
     }
 
-    STRONG_NODISCARD
+    [[nodiscard]]
     friend
     STRONG_CONSTEXPR
     T
@@ -1111,7 +1105,7 @@ struct arithmetic
     }
 
     template <typename TT = T, typename = decltype(value_of(std::declval<TT>()) % value_of(std::declval<TT>()))>
-    STRONG_NODISCARD
+    [[nodiscard]]
     friend
     STRONG_CONSTEXPR
     T
@@ -1195,7 +1189,7 @@ struct bitarithmetic
       return lh;
     }
 
-    STRONG_NODISCARD
+    [[nodiscard]]
     friend
     STRONG_CONSTEXPR
     T
@@ -1207,7 +1201,7 @@ struct bitarithmetic
       return T(v);
     }
 
-    STRONG_NODISCARD
+    [[nodiscard]]
     friend
     STRONG_CONSTEXPR
     T
@@ -1219,7 +1213,7 @@ struct bitarithmetic
       return lh;
     }
 
-    STRONG_NODISCARD
+    [[nodiscard]]
     friend
     STRONG_CONSTEXPR
     T
@@ -1231,7 +1225,7 @@ struct bitarithmetic
       return lh;
     }
 
-    STRONG_NODISCARD
+    [[nodiscard]]
     friend
     STRONG_CONSTEXPR
     T
@@ -1244,7 +1238,7 @@ struct bitarithmetic
     }
 
     template <typename C>
-    STRONG_NODISCARD
+    [[nodiscard]]
     friend
     STRONG_CONSTEXPR
     T
@@ -1257,7 +1251,7 @@ struct bitarithmetic
     }
 
     template <typename C>
-    STRONG_NODISCARD
+    [[nodiscard]]
     friend
     STRONG_CONSTEXPR
     T
@@ -1290,7 +1284,7 @@ struct indexed<void> {
     using type = strong::type<T, Tag, Ms...>;
   public:
     template<typename I>
-    STRONG_NODISCARD
+    [[nodiscard]]
     auto
     operator[](
       const I &i)
@@ -1302,7 +1296,7 @@ struct indexed<void> {
     }
 
     template<typename I>
-    STRONG_NODISCARD
+    [[nodiscard]]
     auto
     operator[](
       const I &i)
@@ -1314,7 +1308,7 @@ struct indexed<void> {
     }
 
     template<typename I>
-    STRONG_NODISCARD
+    [[nodiscard]]
     auto
     operator[](
       const I &i)
@@ -1326,7 +1320,7 @@ struct indexed<void> {
     }
 
     template<typename I, typename C = cref>
-    STRONG_NODISCARD
+    [[nodiscard]]
     auto
     at(
       const I &i)
@@ -1337,7 +1331,7 @@ struct indexed<void> {
     }
 
     template<typename I, typename R = ref>
-    STRONG_NODISCARD
+    [[nodiscard]]
     auto
     at(
       const I &i)
@@ -1348,7 +1342,7 @@ struct indexed<void> {
     }
 
     template<typename I, typename R = rref>
-    STRONG_NODISCARD
+    [[nodiscard]]
     auto
     at(
       const I &i)
@@ -1366,7 +1360,7 @@ class indexed<I>::modifier<type<T, Tag, M...>>
 {
   using type = ::strong::type<T, Tag, M...>;
 public:
-  STRONG_NODISCARD
+  [[nodiscard]]
   auto
   operator[](
     const I& i)
@@ -1378,7 +1372,7 @@ public:
     return value_of(self)[impl::access(i)];
   }
 
-  STRONG_NODISCARD
+  [[nodiscard]]
   auto
   operator[](
     const I& i)
@@ -1390,7 +1384,7 @@ public:
     return value_of(self)[impl::access(i)];
   }
 
-  STRONG_NODISCARD
+  [[nodiscard]]
   auto
   operator[](
     const I& i)
@@ -1403,7 +1397,7 @@ public:
   }
 
   template <typename TT = T>
-  STRONG_NODISCARD
+  [[nodiscard]]
   auto
   at(
     const I& i)
@@ -1415,7 +1409,7 @@ public:
   }
 
   template <typename TT = T>
-  STRONG_NODISCARD
+  [[nodiscard]]
   auto
   at(
     const I& i)
@@ -1427,7 +1421,7 @@ public:
   }
 
   template <typename TT = T>
-  STRONG_NODISCARD
+  [[nodiscard]]
   auto
   at(
     const I& i)

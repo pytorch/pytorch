@@ -90,17 +90,6 @@ immutable_dict = compatibility(is_backward_compatible=True)(immutable_dict)
 
 
 # Register immutable collections for PyTree operations
-def _immutable_list_flatten(d: List[Any]) -> Tuple[List[Any], Context]:
-    return _list_flatten(d)
-
-
-def _immutable_list_unflatten(
-    values: Iterable[Any],
-    context: Context,
-) -> List[Any]:
-    return immutable_list(_list_unflatten(values, context))
-
-
 def _immutable_dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
     return _dict_flatten(d)
 
@@ -112,17 +101,28 @@ def _immutable_dict_unflatten(
     return immutable_dict(_dict_unflatten(values, context))
 
 
-register_pytree_node(
-    immutable_list,
-    _immutable_list_flatten,
-    _immutable_list_unflatten,
-    serialized_type_name="torch.fx.immutable_collections.immutable_list",
-    flatten_with_keys_fn=_list_flatten_with_keys,
-)
+def _immutable_list_flatten(d: List[Any]) -> Tuple[List[Any], Context]:
+    return _list_flatten(d)
+
+
+def _immutable_list_unflatten(
+    values: Iterable[Any],
+    context: Context,
+) -> List[Any]:
+    return immutable_list(_list_unflatten(values, context))
+
+
 register_pytree_node(
     immutable_dict,
     _immutable_dict_flatten,
     _immutable_dict_unflatten,
     serialized_type_name="torch.fx.immutable_collections.immutable_dict",
     flatten_with_keys_fn=_dict_flatten_with_keys,
+)
+register_pytree_node(
+    immutable_list,
+    _immutable_list_flatten,
+    _immutable_list_unflatten,
+    serialized_type_name="torch.fx.immutable_collections.immutable_list",
+    flatten_with_keys_fn=_list_flatten_with_keys,
 )

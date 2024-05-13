@@ -1914,7 +1914,7 @@ def get_real_value(node, tracer):
         return cache[node]
 
     op = node.op
-    args, kwargs = torch.fx.node.map_arg(  # type: ignore[misc]
+    args, kwargs = torch.fx.node.map_arg(
         (node.args, node.kwargs),
         lambda n: get_real_value(n, tracer),
     )
