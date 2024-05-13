@@ -234,8 +234,8 @@ def generate_conda_matrix(os: str) -> List[Dict[str, str]]:
             gpu_arch_version = "" if arch_version == "cpu" else arch_version
             for use_split_build in ["true", "false"]:
                 build_name = f"conda-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
-                        ".", "_"
-                    )
+                    ".", "_"
+                )
                 if use_split_build == "true":
                     build_name += "-experimental-split-build"
                 ret.append(
@@ -251,7 +251,7 @@ def generate_conda_matrix(os: str) -> List[Dict[str, str]]:
                         "use_split_build": use_split_build,
                         "build_name": build_name,
                     }
-            )
+                )
     return ret
 
 
@@ -307,6 +307,7 @@ def generate_libtorch_matrix(
                     "build_name": f"libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{abi_version}".replace(
                         ".", "_"
                     ),
+                    "use_split_build": "false",
                 }
             )
     return ret
@@ -355,8 +356,8 @@ def generate_wheels_matrix(
             )
             for use_split_build in ["true", "false"]:
                 build_name = f"conda-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
-                        ".", "_"
-                    )
+                    ".", "_"
+                )
                 if use_split_build == "true":
                     build_name += "-experimental-split-build"
 
