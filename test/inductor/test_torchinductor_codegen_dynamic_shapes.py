@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-import faulthandler; faulthandler.enable()
 import importlib
 import os
 import sys
