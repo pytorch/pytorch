@@ -2062,8 +2062,8 @@ def _constrain_as_size(symbol, min: Optional[builtins.int] = None, max: Optional
     This function has unusual semantics which distinguish it from
     _constrain_as_value.  Specifically, in some circumstances in framework
     code, we will treat this int as >= 2 (when we do a size-oblivious guard).
-    This makes it easier to This makes it easier to use the unbacked int in
-    size contexts, as we will often attempt to guard on a size being zero/one
+    This makes it easier to use the unbacked int in size contexts,
+    as we will often attempt to guard on a size being zero/one
     (e.g., when computing the contiguity of a tensor, or testing if
     broadcasting can occur), which will not work on unbacked SymInts.
     However, if we conservatively assume that the size is not zero/one, we will
