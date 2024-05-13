@@ -78,7 +78,50 @@ class FP32Precision:
             raise AttributeError("Unknown attribute " + name)
 
 
-fp32_precision = FP32Precision("generic", "all")
+def set_flags(_fp32_precision=None):
+    orig_flags = (torch._C._get_fp32_precision("generic", "all"),)
+    if _fp32_precision is not None:
+        torch._C._set_fp32_precision(_fp32_precision, "generic", "all")
+    return orig_flags
+
+
+@contextmanager
+def flags(fp32_precision="ieee"):
+    with __allow_nonbracketed_mutation():
+        orig_flags = set_flags(fp32_precision)
+    try:
+        yield
+    finally:
+        with __allow_nonbracketed_mutation():
+            set_flags(*orig_flags)
+
+
+def _get_fp32_precision(backend, op):
+    def inner():
+        return torch._C._get_fp32_precision(backend, op)
+
+    return inner
+
+
+def _set_fp32_precision(backend, op):
+    def inner(precision):
+        return torch._C._set_fp32_precision(precision, backend, op)
+
+    return inner
+
+
+class GenericModule(PropModule):
+    def __init__(self, m, name):
+        super().__init__(m, name)
+
+    fp32_precision = ContextProp(
+        _get_fp32_precision("generic", "all"), _set_fp32_precision("generic", "all")
+    )
+
+
+import sys
+
+sys.modules[__name__] = GenericModule(sys.modules[__name__], __name__)
 
 from torch.backends import (
     cpu as cpu,

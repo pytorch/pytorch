@@ -142,12 +142,20 @@ void Context::setUserEnabledNNPACK(bool e) {
 bool Context::allowTF32CuDNN(const std::string& op) const {
   bool allow_tf32 = false;
   if (op.size() == 0){
-    allow_tf32 = float32Precision("cuda", "rnn") == "tf32" && float32Precision("cuda", "conv") == "tf32";
+    bool allow_tf32_rnn = float32Precision("cuda", "rnn") == "tf32";
+    bool allow_tf32_conv = float32Precision("cuda", "conv") == "tf32";
+    if (allow_tf32_rnn != allow_tf32_conv) {
+      std::string msg =
+          "We allow to set different float32 precision for conv and rnn but you are querying float32 precision without a specific op.";
+      msg += "The current float32 precision for conv is " +
+          float32Precision("cuda", "conv") + " and for rnn is " +
+          float32Precision("cuda", "rnn");
+      TORCH_WARN(msg);
+    }
+    return allow_tf32_cudnn;
   } else {
-    allow_tf32 = float32Precision("cuda", op) == "tf32";
+    return float32Precision("cuda", op) == "tf32";
   }
-  TORCH_CHECK(allow_tf32_cudnn == allow_tf32);
-  return allow_tf32;
 }
 
 void Context::setAllowTF32CuDNN(bool b, const std::string& op) {
@@ -264,6 +272,23 @@ void Context::setAllowTF32CuBLAS(bool b) {
 }
 
 Float32MatmulPrecision Context::float32MatmulPrecision() const {
+  bool warn_user = false;
+  if (float32Precision("cuda", "matmul") == "tf32") {
+    warn_user = warn_user ||
+        at::Float32MatmulPrecision::HIGHEST == float32_matmul_precision;
+  } else if (float32Precision("mkldnn", "matmul") == "tf32") {
+    warn_user = warn_user ||
+        at::Float32MatmulPrecision::HIGHEST == float32_matmul_precision ||
+        at::Float32MatmulPrecision::HIGH == float32_matmul_precision;
+  }
+  if (warn_user) {
+    std::string msg =
+        "We allow to set different float32 matmul precision for mkldnn and cuda but you are querying float32 matmul precision without a specific backend.";
+    msg += "The current float32 matmul precision for cuda is " +
+        float32Precision("cuda", "matmul") + " and for mkldnn is " +
+        float32Precision("mkldnn", "matmul");
+    TORCH_WARN(msg);
+  }
   return float32_matmul_precision;
 }
 
@@ -312,6 +337,16 @@ void Context::setFloat32MatmulPrecision(const std::string &s) {
 void Context::setFloat32Precision(const std::string& p, const std::string& backend, const std::string& op) {
   fp32_precision_valid_check(backend, op, p);
   fp32_precision[backend][op] = p;
+  // For backward compatible
+  if (fp32_precision["cuda"]["conv"] == fp32_precision["cuda"]["rnn"]) {
+    if (fp32_precision["cuda"]["conv"] == "tf32") {
+      allow_tf32_cudnn = true;
+    } else {
+      allow_tf32_cudnn = false;
+    }
+  } else {
+    allow_tf32_cudnn = false;
+  }
 }
 
 at::LinalgBackend Context::linalgPreferredBackend() const {
