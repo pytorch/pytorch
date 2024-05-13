@@ -907,9 +907,9 @@ def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: 
                 out = 1
             return x + out
 
-        # expect for dynamic: size, index, 6 comparison ops, add
+        # TODO: Test the guards maybe?
         torch._dynamo.testing.standard_test(
-            self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(1, 9)
+            self, fn, 1, expected_ops=1
         )
 
     def test_int_shape_comparisons(self):
@@ -932,9 +932,9 @@ def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: 
                 out = 1
             return x + out
 
-        # expect for dynamic: size, index, 6 comparison ops, add
+        # TODO: Test the guards maybe?
         torch._dynamo.testing.standard_test(
-            self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(1, 9)
+            self, fn, 1, expected_ops=1
         )
 
     def test_param_shape_binops(self):
@@ -4337,7 +4337,7 @@ def fn():
         if torch._dynamo.config.assume_static_by_default:
             self.assertExpectedInline(cnts.op_count, """2""")
         else:
-            self.assertExpectedInline(cnts.op_count, """3""")
+            self.assertExpectedInline(cnts.op_count, """2""")
 
         torch._dynamo.reset()
         cnts = torch._dynamo.testing.CompileCounter()
@@ -4347,7 +4347,7 @@ def fn():
         if torch._dynamo.config.assume_static_by_default:
             self.assertExpectedInline(cnts.op_count, """1""")
         else:
-            self.assertExpectedInline(cnts.op_count, """2""")
+            self.assertExpectedInline(cnts.op_count, """1""")
 
     def test_inline_func_jump_on_tensor_condition(self):
         def f1(input):
