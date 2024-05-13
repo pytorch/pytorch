@@ -224,8 +224,8 @@
 #   BUILD_LIBTORCH_WHL
 #      Builds libtorch.so and its dependencies as a wheel
 #
-#   BUILD_PYTORCH_USING_LIBTORCH_WHL
-#      Builds pytorch as a wheel using libtorch.so from a seperate wheel [not supported yet]
+#   BUILD_PYTHON_ONLY
+#      Builds pytorch as a wheel using libtorch.so from a seperate wheel
 
 import os
 import sys
