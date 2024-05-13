@@ -17,7 +17,7 @@ __all__ = ["autocast", "custom_fwd", "custom_bwd"]
 class autocast(torch.amp.autocast_mode.autocast):
     r"""See :class:`torch.autocast`.
 
-    ``torch.cuda.amp.autocast(args...)`` is equivalent to ``torch.autocast("cuda", args...)``
+    ``torch.cuda.amp.autocast(args...)`` is deprecated. Please use ``torch.amp.autocast("cuda", args...)`` instead.
     """
 
     def __init__(
