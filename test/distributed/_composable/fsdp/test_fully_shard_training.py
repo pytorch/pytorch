@@ -10,6 +10,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.distributed._composable import checkpoint, replicate
 from torch.distributed._composable.fsdp import (
     CPUOffloadPolicy,
@@ -30,6 +31,11 @@ from torch.distributed.checkpoint.state_dict import (
     get_optimizer_state_dict,
 )
 from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor.parallel import (
+    ColwiseParallel,
+    parallelize_module,
+    RowwiseParallel,
+)
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -927,6 +933,75 @@ class TestFullyShard2DTraining(FSDPTest):
             losses: List[torch.Tensor] = []
             for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+                losses.append(_model(inp).sum())
+                losses[-1].backward()
+                _optim.step()
+            self.assertEqual(losses[0], losses[1])
+
+    @skip_if_lt_x_gpu(2)
+    def test_2d_mlp_with_transposed_row_parallel(self):
+        """
+        Tests that the normal colwise + rowwise MLP sharding is equivalent to
+        colwise + colwise MLP sharding when the second linear does not include
+        a transpose before matmul.
+        """
+
+        class ColRowMLP(nn.Module):
+            def __init__(self, dim: int):
+                super().__init__()
+                self.w1 = nn.Linear(dim, 4 * dim, bias=False)
+                self.w2 = nn.Linear(4 * dim, dim, bias=False)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return F.gelu(self.w2(F.gelu(self.w1(x))))
+
+        class LinearWithoutTranspose(nn.Module):
+            def __init__(self, in_dim: int, out_dim: int):
+                super().__init__()
+                self.weight = nn.Parameter(torch.randn((in_dim, out_dim)))
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return x @ self.weight  # no transpose!
+
+        class ColColMLP(nn.Module):
+            def __init__(self, dim: int):
+                super().__init__()
+                self.w1 = nn.Linear(dim, 4 * dim, bias=False)
+                self.w2 = LinearWithoutTranspose(4 * dim, dim)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return F.gelu(self.w2(F.gelu(self.w1(x))))
+
+        global_mesh = self.init_global_mesh()
+        dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
+        dim = 8
+        torch.manual_seed(42)
+        ref_model, model = ColRowMLP(dim), ColColMLP(dim)
+        # Ensure the same initial weights
+        model.w1.weight.detach().copy_(ref_model.w1.weight)
+        model.w2.weight.t().detach().copy_(ref_model.w2.weight)
+
+        ref_model = parallelize_module(
+            ref_model,
+            tp_mesh,
+            {"w1.weight": ColwiseParallel(), "w2.weight": RowwiseParallel()},
+        )
+        fully_shard(ref_model, mesh=dp_mesh)
+        ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
+        model = parallelize_module(
+            model,
+            tp_mesh,
+            {"w1.weight": ColwiseParallel(), "w2.weight": ColwiseParallel()},
+        )
+        fully_shard(model, mesh=dp_mesh)
+        optim = torch.optim.AdamW(model.parameters(), lr=1e-2, foreach=True)
+
+        torch.manual_seed(42 + dp_mesh.get_local_rank() + 1)
+        inp = torch.randn((4, dim), device="cuda")
+        for iter_idx in range(10):
+            losses: List[torch.Tensor] = []
+            for _model, _optim in ((ref_model, ref_optim), (model, optim)):
+                _optim.zero_grad()
                 losses.append(_model(inp).sum())
                 losses[-1].backward()
                 _optim.step()
