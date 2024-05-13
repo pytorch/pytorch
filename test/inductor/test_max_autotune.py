@@ -622,6 +622,20 @@ class TestMaxAutotune(TestCase):
     def test_empty_conv_input_with_1x1_kernel(self):
         self.test_empty_conv_input(kernel_size=1)
 
+    def test_non_contiguous_input(self):
+        """
+        Make sure the triton template can work with non-contiguous inputs without crash.
+        Check https://github.com/pytorch/pytorch/issues/125437 for more details.
+        """
+        x = torch.empty_strided((50257, 32768), ((1, 50304)), dtype=torch.bfloat16, device='cuda')
+        y = torch.empty_strided((32768, 768), (768, 1), dtype=torch.bfloat16, device='cuda')
+
+        @torch.compile(mode="max-autotune")
+        def f(x, y):
+            return x @ y
+
+        f(x, y)
+
 
 class TestBenchmarkRequest(BenchmarkRequest):
     def __init__(
