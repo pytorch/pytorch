@@ -503,6 +503,8 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(cnts.frame_count, """1""")  # no recompile
         self.assertEqual(f(x, 5.0), cf(x, 5.0))
         self.assertExpectedInline(cnts.frame_count, """2""")  # guard worked
+        self.assertEqual(f(x, math.nan), cf(x, math.nan))
+        self.assertExpectedInline(cnts.frame_count, """3""")  # nan always recompiles
 
     @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=True)
     def test_unspec_float_output(self):

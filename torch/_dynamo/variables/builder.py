@@ -55,6 +55,7 @@ from ..source import (
     ConstantSource,
     ConstDictKeySource,
     ConvertIntSource,
+    FloatTensorSource,
     GetItemSource,
     GradSource,
     is_constant_source,
@@ -1504,8 +1505,8 @@ class VariableBuilder:
         # SymFloat wrapping is special.  We first wrap it in the same way we
         # do an unspecialized primitive, and then we item() it into a
         # SymFloat.  Removal of the item() call is left to a later FX pass,
-        # mostly because that pass is more easily done after decomposition
-        # (Dynamo doesn't do decomposition right now).
+        # mostly because that pass is more easily done after we have lowered
+        # to ATen ops.  (Dynamo doesn't do decomposition right now).
 
         if self.name in self.tx.output.unspec_variable_map:
             return self.tx.output.unspec_variable_map[self.name]
@@ -1520,10 +1521,11 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value, source=self.source)
 
-        # NB: We don't do automatic dynamic.  Since we have a guard mechanism,
-        # there isn't really any downside to trying to be dynamic for float
-        # all the time.  Unlike ints, this won't make codegen perf worse.
-        # Modest cost to compile time.
+        # NB: At the point we've gotten here, we don't assume static by
+        # default.  Since we have a guard mechanism, there isn't really any
+        # downside to trying to be dynamic for float all the time.  Unlike
+        # ints, this won't make codegen perf worse.  Modest cost to compile
+        # time.
 
         wrapped_value = torch.tensor(value)
         # TODO: Switch RandomValueSource over to use this, this is more
@@ -1531,7 +1533,13 @@ class VariableBuilder:
         assert not isinstance(self.get_source(), RandomValueSource)
         install_guard(self.get_source().make_guard(GuardBuilder.TYPE_MATCH))
 
-        options = {"source": self.get_source(), "raw_value": value}
+        # The FloatTensorSource here is just for pedantic correctness: if you
+        # guard against an UnspecializedPythonVariable, you need to guard
+        # against the tensor-ified version of the local, otherwise it's not a
+        # Tensor.  However, we never let the UnspecializedPythonVariable escape
+        # here, so there should never actually be any guards against this
+        # source.
+        options = {"source": FloatTensorSource(self.get_source()), "raw_value": value}
 
         # TODO: Maybe the tensor-ification should be built into the source,
         # rather than by special pattern match
@@ -1550,11 +1558,6 @@ class VariableBuilder:
         )
         assert isinstance(unspec_var, UnspecializedPythonVariable)
         self.tx.output.unspec_variable_map[self.name] = unspec_var
-
-        # I guess hypothetically constant source could happen, I kind of want
-        # to handle this totally differently though... no reason to create the
-        # fake tensor in that case
-        assert not is_constant_source(self.get_source())
 
         if self.tx.export and not isinstance(self.get_source(), LocalSource):
             raise AssertionError(
@@ -1606,7 +1609,10 @@ class VariableBuilder:
         shape_env = self.tx.output.shape_env
         item_symbol = shape_env.create_unspecified_symbol(
             value,
-            # !!! Interesting !!!
+            # Interesting!  Normally if you do compute on a Variable (the
+            # compute in this case being an item() call), you end up with a
+            # new variable that doesn't have source, but in this case, we can
+            # still put a source on it.
             source=self.source,
             # If we put in a Tensor input, definitely dynamic (if you wanted
             # it to be static, gotta bail out earlier)
@@ -1624,7 +1630,7 @@ class VariableBuilder:
         item_unspec_var = SymNodeVariable(
             item_proxy,
             item_example_value,
-            source=self.get_source(),  # !!! Interesting !!!
+            source=self.get_source(),  # Interesting as above!
         )
 
         return item_unspec_var
