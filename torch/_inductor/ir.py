@@ -3718,6 +3718,13 @@ class CUDATemplateBuffer(TemplateBuffer):
         return self.workspace_size if self.workspace_size is not None else 0
 
 
+class CppTemplateBuffer(TemplateBuffer):
+    def __init__(self, layout, inputs, make_kernel_render, template, choice):
+        super().__init__(layout, inputs, make_kernel_render)
+        self.template = template
+        self.choice = choice
+
+
 @dataclasses.dataclass
 class InputsKernel(Buffer):
     inputs: List[Buffer]
@@ -6266,7 +6273,7 @@ class MKLPackedLinear(ExternKernelAlloc):
         )
 
     @classmethod
-    def create(cls, x, packed_w, orig_w, batch_size):
+    def create(cls, x, packed_w, orig_w, B, batch_size):
         x = cls.require_stride1(cls.realize_input(x))
         orig_w = cls.require_stride1(cls.realize_input(orig_w))
         *m, _ = x.get_size()
@@ -6274,7 +6281,11 @@ class MKLPackedLinear(ExternKernelAlloc):
         output_size = list(m) + [oc]
         output_stride = make_contiguous_strides_for(output_size)
         inputs = [x, packed_w, orig_w]
-        constant_args = [None, batch_size]
+        constant_args = [batch_size]
+        if B is not None:
+            inputs += [B]
+        else:
+            constant_args.insert(0, None)
 
         return MKLPackedLinear(
             layout=FixedLayout(
