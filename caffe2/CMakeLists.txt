@@ -1967,27 +1967,6 @@ if(BUILD_PYTHON)
     set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
     set_source_files_properties(${TORCH_SRC_DIR}/../caffe2/operators/box_with_nms_limit_op.cc PROPERTIES COMPILE_FLAGS -Wno-attributes)
   endif()
-  # Allow different install locations for libcaffe2
-  # For setuptools installs (that all build Python), install libcaffe2 into
-  # site-packages, alongside the torch libraries. The pybind11 library needs
-  # an rpath to the torch library folder
-  # For cmake installs, including c++ only installs, install libcaffe2 into
-  # CMAKE_INSTALL_PREFIX/lib . The pybind11 library can have a hardcoded
-  # rpath
-  set(caffe2_pybind11_rpath "${_rpath_portable_origin}")
-  if(${BUILDING_WITH_TORCH_LIBS})
-    # site-packages/caffe2/python/caffe2_pybind11_state
-    # site-packages/torch/lib
-    set(caffe2_pybind11_rpath "${_rpath_portable_origin}/../../torch/lib")
-  endif(${BUILDING_WITH_TORCH_LIBS})
-
-  # Must also include `CMAKE_SHARED_LINKER_FLAGS` in linker flags for
-  # `caffe2_pybind11_state_*` targets because paths to required libraries may
-  # need to be found there (e.g., specifying path to `libiomp5` with `LDFLAGS`).
-  set(_caffe2_pybind11_state_linker_flags "${CMAKE_SHARED_LINKER_FLAGS}")
-  if(APPLE)
-    set(_caffe2_pybind11_state_linker_flags "${_caffe2_pybind11_state_linker_flags} -undefined dynamic_lookup")
-  endif()
 
   # generated pb files are copied from build/caffe2 to caffe2
   # if we copied them back to build this would create a build cycle
