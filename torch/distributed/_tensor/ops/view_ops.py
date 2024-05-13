@@ -17,7 +17,6 @@ import torch
 
 from torch import Tensor
 from torch._subclasses.fake_tensor import unset_fake_temporarily
-from torch.distributed._tensor._utils import compute_local_shape
 from torch.distributed._tensor.api import Shard
 from torch.distributed._tensor.op_schema import (
     OpSchema,
@@ -458,54 +457,29 @@ def dim_reduction(
     )
 
 
-@dataclass
-class Op:
-    dim_map: Callable[..., DimMap]
-    shape_argnum: Optional[int] = None
-
-
-ops: Dict[Callable[..., torch.Tensor], Op] = {
-    torch.atleast_1d: Op(dim_map=lambda x: dim_pad_left(x.ndim, 1)),
-    torch.atleast_2d: Op(dim_map=lambda x: dim_pad_left(x.ndim, 2)),
-    torch.atleast_3d: Op(dim_map=lambda x: dim_atleast_3d(x.ndim)),
-    torch.broadcast_to: Op(
-        dim_map=lambda input, shape: expand(input.shape, shape), shape_argnum=1
+dim_maps: Dict[Callable[..., torch.Tensor], Callable[..., DimMap]] = {
+    torch.atleast_1d: lambda x: dim_pad_left(x.ndim, 1),
+    torch.atleast_2d: lambda x: dim_pad_left(x.ndim, 2),
+    torch.atleast_3d: lambda x: dim_atleast_3d(x.ndim),
+    torch.broadcast_to: lambda input, shape: expand(input.shape, shape),
+    Tensor.expand: lambda self, *sizes: expand(self.shape, normalize_sizes(sizes)),
+    torch.flatten: lambda tensor: dim_flatten(tensor.ndim),
+    torch.movedim: lambda input, source, destination: dim_movedim(
+        input.ndim, source, destination
     ),
-    Tensor.expand: Op(
-        dim_map=lambda self, *sizes: expand(self.shape, normalize_sizes(sizes)),
-        shape_argnum=1,
+    torch.permute: lambda input, dims: tuple(
+        InputDim(i) for i in normalize_dims(dims, input.ndim)
     ),
-    torch.flatten: Op(dim_map=lambda tensor: dim_flatten(tensor.ndim)),
-    torch.movedim: Op(
-        dim_map=lambda input, source, destination: dim_movedim(
-            input.ndim, source, destination
-        )
-    ),
-    torch.permute: Op(
-        dim_map=lambda input, dims: tuple(
-            InputDim(i) for i in normalize_dims(dims, input.ndim)
-        )
-    ),
-    torch.ravel: Op(dim_map=lambda tensor: dim_flatten(tensor.ndim)),
-    Tensor.repeat: Op(dim_map=lambda self, *sizes: dim_repeat(self.ndim, sizes)),
-    torch.reshape: Op(
-        dim_map=lambda input, shape: view_groups(input.shape, shape),
-        shape_argnum=1,
-    ),
-    torch.squeeze: Op(dim_map=lambda input, dim=None: dim_squeeze(input.shape, dim)),
-    torch.tile: Op(dim_map=lambda input, dims: dim_tile(input.ndim, dims)),
-    torch.transpose: Op(
-        dim_map=lambda input, dim0, dim1: dim_transpose(input.ndim, dim0, dim1)
-    ),
-    torch.unsqueeze: Op(dim_map=lambda input, dim: dim_unsqueeze(input.ndim, dim)),
-    Tensor.view: Op(
-        dim_map=lambda input, *shape: view_groups(input.shape, shape),
-        shape_argnum=1,
-    ),
-    torch.view_as_complex: Op(
-        dim_map=lambda input: dim_flatten(input.ndim, input.ndim - 2)
-    ),
-    torch.view_as_real: Op(dim_map=lambda input: dim_view_as_real(input.shape)),
+    torch.ravel: lambda tensor: dim_flatten(tensor.ndim),
+    Tensor.repeat: lambda self, *sizes: dim_repeat(self.ndim, sizes),
+    torch.reshape: lambda input, shape: view_groups(input.shape, shape),
+    torch.squeeze: lambda input, dim=None: dim_squeeze(input.shape, dim),
+    torch.tile: lambda input, dims: dim_tile(input.ndim, dims),
+    torch.transpose: lambda input, dim0, dim1: dim_transpose(input.ndim, dim0, dim1),
+    torch.unsqueeze: lambda input, dim: dim_unsqueeze(input.ndim, dim),
+    Tensor.view: lambda input, *shape: view_groups(input.shape, shape),
+    torch.view_as_complex: lambda input: dim_flatten(input.ndim, input.ndim - 2),
+    torch.view_as_real: lambda input: dim_view_as_real(input.shape),
 }
 
 
@@ -640,11 +614,11 @@ def register_op_strategy_map(
     local_op_name: Callable[..., torch.Tensor],
     schema_info: Optional[RuntimeSchemaInfo] = None,
 ) -> None:
-    spec: Op = ops[local_op_name]
+    dim_map: Callable[..., DimMap] = dim_maps[local_op_name]
 
     @register_op_strategy(aten_op_overload, schema_info=schema_info)
     def reshape_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
-        rules = spec.dim_map(*op_schema.args_schema, **op_schema.kwargs_schema)
+        rules = dim_map(*op_schema.args_schema, **op_schema.kwargs_schema)
         input_strategy = cast(OpStrategy, op_schema.args_schema[0])
         global_in_shape = input_strategy.output_shape
         assert global_in_shape is not None, "Shape required."
@@ -655,7 +629,7 @@ def register_op_strategy_map(
 
             with disable_proxy_modes_tracing(), unset_fake_temporarily():
                 (
-                    global_out_shape,
+                    _global_out_shape,
                     shard_out,
                     shardable_dims,
                 ) = propagate_shape_and_sharding(
@@ -690,7 +664,7 @@ def register_op_strategy_map(
 
                 with disable_proxy_modes_tracing(), unset_fake_temporarily():
                     (
-                        global_out_shape,
+                        _global_out_shape,
                         shard_out,
                         shardable_dims,
                     ) = propagate_shape_and_sharding(
@@ -702,25 +676,11 @@ def register_op_strategy_map(
 
             assert shard_out is not None
             output_target_spec = DTensorSpec(mesh=mesh, placements=tuple(shard_out))
-
-            shape_argnum = spec.shape_argnum
-            non_tensor_arg_suggestions = None
-            if shape_argnum is not None:
-                # compute the local shape from the global shape, then return
-                # a resharding even if we don't really reshard, the only reason
-                # for this type of resharding is to lower the global shape to
-                # local shape
-                local_out_shape = compute_local_shape(
-                    list(global_out_shape), mesh, shard_out
-                )
-                non_tensor_arg_suggestions = {shape_argnum: local_out_shape}
-
             output_strategy.strategies.append(
                 PlacementStrategy(
                     output_specs=output_target_spec,
                     input_specs=(input_target_spec,),
                     redistribute_cost=redistribute_costs,
-                    non_tensor_arg_suggestions=non_tensor_arg_suggestions,
                 )
             )
 

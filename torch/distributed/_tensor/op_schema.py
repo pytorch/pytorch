@@ -82,9 +82,6 @@ class PlacementStrategy:
     # this operator it might have multiple placement strategies
     redistribute_cost: Optional[List[List[float]]] = None
 
-    # sometimes non-tensor arguments need to be adjusted for the placement strategy
-    non_tensor_arg_suggestions: Optional[Dict[int, Any]] = None
-
     @cached_property
     def output_spec(self) -> DTensorSpec:
         """
