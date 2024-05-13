@@ -2485,7 +2485,24 @@ class CPUReproTests(TestCase):
             metrics.reset()
             self.common(fn, (x,))
             assert len(metrics.cpp_outer_loop_fused_inner_counts) == 1
-            assert metrics.cpp_outer_loop_fused_inner_counts[0] == 2
+            assert metrics.cpp_outer_loop_fused_inner_counts[0].inner_kernel_number == 2
+
+    def test_local_buffer_in_outer_loop_fusion(self):
+        def fn(x):
+            max = torch.nn.functional.softmax(x, dim=-1)
+            return x - max
+
+        x = torch.randn(4, 12, 1023, 1022)
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x,))
+            assert len(metrics.cpp_outer_loop_fused_inner_counts) == 1
+            assert metrics.cpp_outer_loop_fused_inner_counts[0].inner_kernel_number == 3
+            assert (
+                metrics.cpp_outer_loop_fused_inner_counts[0].with_local_buffer is True
+            )
 
     def test_argmin(self):
         def fn(x):
