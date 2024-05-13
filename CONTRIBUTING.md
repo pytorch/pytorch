@@ -790,7 +790,7 @@ USE_PRECOMPILED_HEADERS=1 python setup.py develop
 ```
 
 This adds a build step where the compiler takes `<ATen/ATen.h>` and essentially
-dumps it's internal AST to a file so the compiler can avoid repeating itself for
+dumps its internal AST to a file so the compiler can avoid repeating itself for
 every `.cpp` file.
 
 One caveat is that when enabled, this header gets included in every file by default.
@@ -1321,7 +1321,7 @@ There are two possible choices for which commit to use:
 1. Checkout commit `B`, the head of the PR (manually committed by the PR
    author).
 2. Checkout commit `C`, the hypothetical result of what would happen if the PR
-   were merged into it's destination (usually `main`).
+   were merged into its destination (usually `main`).
 
 For all practical purposes, most people can think of the commit being used as
 commit `B` (choice **1**).
