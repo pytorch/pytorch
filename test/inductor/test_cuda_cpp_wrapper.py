@@ -99,6 +99,7 @@ if config.abi_compatible:
     xfail_list = [
         "test_bernoulli1_cuda",  # cpp fallback op naming issue
         "test_profiler_mark_wrapper_call_cuda",
+        "test_randint_cuda",
         "test_scaled_dot_product_attention_cuda_dynamic_shapes",
     ]
     for test_name in xfail_list:
@@ -209,6 +210,7 @@ if RUN_CUDA:
         BaseTest("test_multi_device"),
         BaseTest("test_multi_threading"),
         BaseTest("test_profiler_mark_wrapper_call"),
+        BaseTest("test_randint"),
         BaseTest("test_reduction1"),  # Reduction
         BaseTest("test_relu"),  # multiple inputs
         BaseTest("test_repeat_interleave_2"),
