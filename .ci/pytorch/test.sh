@@ -523,8 +523,8 @@ test_single_dynamo_benchmark() {
 }
 
 test_inductor_micro_benchmark() {
-  TEST_REPORTS_DIR=$(pwd)/test/test-micro-reports
-  python benchmarks/gpt_fast/benchmark.py
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  python benchmarks/gpt_fast/benchmark.py --output "${TEST_REPORTS_DIR}/gpt_fast_benchmark.csv"
 }
 
 test_dynamo_benchmark() {
@@ -1233,6 +1233,8 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   install_torchtext
   install_torchvision
   id=$((SHARD_NUMBER-1))
+  # https://github.com/opencv/opencv-python/issues/885
+  pip_install opencv-python==4.8.0.74
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
     checkout_install_torchbench hf_Bert hf_Albert nanogpt timm_vision_transformer
     PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_smoketest_perf

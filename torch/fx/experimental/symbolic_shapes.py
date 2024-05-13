@@ -1432,7 +1432,7 @@ class ShapeGuardPrinter(StrPrinter):
         self.var_to_sources = var_to_sources
 
     def _print_Not(self, expr):
-        return 'not %s' % (self.parenthesize(expr.args[0], PRECEDENCE["Not"]))
+        return 'not {}'.format(self.parenthesize(expr.args[0], PRECEDENCE["Not"]))
 
     def _print_And(self, expr):
         return self.stringify(expr.args, " and ", PRECEDENCE["And"])
