@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <limits>
 #include <omp.h>
+#include <memory>
 
 // WARNING: be extra careful when including more ATen/c10 header files here!
 // Because AOTInductor generated code will copy-paste this cpp_prefix.h for
