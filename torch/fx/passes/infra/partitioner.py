@@ -98,7 +98,7 @@ class CapabilityBasedPartitioner:
             merged_nodes = copy(partitions_by_id[self_id].nodes)
             merged_nodes.update(partitions_by_id[other_id].nodes)
 
-            def dfs_iter_find_cycle(all_user_nodes: List[Node]):
+            def dfs_iter_find_cycle(all_user_nodes: Set[Node]):
                 for user_node in all_user_nodes:
                     visited_partition_ids = set()
 
@@ -128,11 +128,11 @@ class CapabilityBasedPartitioner:
                 return False
 
             # check if merge would create cyclic dependency.
-            all_user_nodes = []
+            all_user_nodes = set()
             for node in merged_nodes:
                 for user_node in node.users:
                     if user_node not in merged_nodes:
-                        all_user_nodes.append(user_node)
+                        all_user_nodes.add(user_node)
 
             if dfs_iter_find_cycle(all_user_nodes):
                 # return false indicating cyclic dependency found and
@@ -260,7 +260,7 @@ class CapabilityBasedPartitioner:
         for id, partition in partitions_by_id.items():
             logger.debug("partition #%s: %s", id, [node.name for node in partition.nodes])
 
-        return list(partitions_by_id.values())
+        return [partition for partition in partitions_by_id.values() if partition.size() > 0]
 
     def fuse_partitions(self, partitions: List[Partition]) -> GraphModule:
         logger.debug("Fusing partitions...")

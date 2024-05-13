@@ -3627,7 +3627,7 @@ class ChoiceCaller:
 
     def benchmark(self, *args, out) -> float:
         algo = self.to_callable()
-        return do_bench(lambda: algo(*args, out=out))
+        return do_bench(algo, args, {"out": out})
 
     def call_name(self) -> str:
         raise NotImplementedError
@@ -3718,6 +3718,13 @@ class CUDATemplateBuffer(TemplateBuffer):
         return self.workspace_size if self.workspace_size is not None else 0
 
 
+class CppTemplateBuffer(TemplateBuffer):
+    def __init__(self, layout, inputs, make_kernel_render, template, choice):
+        super().__init__(layout, inputs, make_kernel_render)
+        self.template = template
+        self.choice = choice
+
+
 @dataclasses.dataclass
 class InputsKernel(Buffer):
     inputs: List[Buffer]
@@ -3756,6 +3763,8 @@ class InputsKernel(Buffer):
             # into TensorBox / StorageBox pair as a result of the
             # cls.copy_input call; so we should unwrap recursively
             return cls.unwrap_storage_for_input(x)
+        if isinstance(x, TorchBindObject):
+            return x
         assert isinstance(x, (Buffer, ReinterpretView)), x
         return x
 
@@ -4085,7 +4094,7 @@ class ExternKernel(InputsKernel):
         # Rerun fake tensor propagation, because Inductor may have changed the
         # strides of inputs and we need to determine accurately what the
         # output stride will be.
-        example_args = []
+        example_args: List[Union[torch.Tensor, torch._C.ScriptObject]] = []
 
         # We need to retain the constant values of fake tensors that we originally
         # propagated the graph with, because for some operators running without a
@@ -4093,6 +4102,8 @@ class ExternKernel(InputsKernel):
         for x in tensor_args:
             if x.get_name() in V.graph.constants:
                 example_args.append(V.graph.constants[x.get_name()])
+            elif x.get_name() in V.graph.torchbind_constants:
+                example_args.append(V.graph.torchbind_constants[x.get_name()])
             else:
                 example_args.append(ir_node_to_tensor(x, guard_shape=True))
 
@@ -4220,6 +4231,8 @@ class ExternKernel(InputsKernel):
         if isinstance(x, StorageBox):
             # TODO(jansel): impose layout preference on realized buffer
             x.realize()
+            return x
+        if isinstance(x, TorchBindObject):
             return x
         return cls.copy_input(x)
 
@@ -4839,18 +4852,18 @@ class ResizeStorageBytes(MutatingFirstArgExternKernel):
         mark_node_as_mutating(self, variable)
 
 
-class BindNNParameter(ExternKernelAlloc):
-    def __init__(self, variable, placeholder):
-        variable.freeze_layout()
+class SetSourceTensorKernel(ExternKernelAlloc):
+    def __init__(self, self_tensor, storage_tensor):
+        self_tensor.freeze_layout()
         super().__init__(
-            variable.get_layout(),
-            [variable, placeholder],
-            python_kernel_name="torch.ops.prims._bind_nn_parameter",
+            self_tensor.get_layout(),
+            [self_tensor, storage_tensor],
+            python_kernel_name="torch.ops.aten.set_.source_Tensor",
         )
-        V.graph.never_reuse_buffers.add(variable.data.get_name())
-        V.graph.never_reuse_buffers.add(placeholder.get_name())
+        V.graph.never_reuse_buffers.add(self_tensor.data.get_name())
+        V.graph.never_reuse_buffers.add(storage_tensor.get_name())
         V.graph.never_reuse_buffers.add(self.get_name())
-        mark_node_as_mutating(self, variable, placeholder)
+        mark_node_as_mutating(self, self_tensor, storage_tensor)
 
     def get_inputs_that_alias_output(self):
         return [self.inputs[0].get_name(), self.inputs[1].get_name()]
@@ -5400,13 +5413,14 @@ class FallbackKernel(ExternKernelAlloc):
     @staticmethod
     def find_device(tensor_args, example_output):
         if tensor_args:
-            return tensor_args[0].get_device()
+            devices = [arg.get_device() for arg in tensor_args if arg.get_device()]
+            return devices[0]
         if isinstance(example_output, torch.Tensor):
             return example_output.device
         if isinstance(example_output, (list, tuple)):
-            devices = {FallbackKernel.find_device(None, x) for x in example_output}
+            device_set = {FallbackKernel.find_device(None, x) for x in example_output}
             # Remove None
-            devices = [device for device in devices if device]
+            devices = [device for device in device_set if device]
             if len(devices) == 1:
                 return devices[0]
             for device in devices:
@@ -6266,7 +6280,7 @@ class MKLPackedLinear(ExternKernelAlloc):
         )
 
     @classmethod
-    def create(cls, x, packed_w, orig_w, batch_size):
+    def create(cls, x, packed_w, orig_w, B, batch_size):
         x = cls.require_stride1(cls.realize_input(x))
         orig_w = cls.require_stride1(cls.realize_input(orig_w))
         *m, _ = x.get_size()
@@ -6274,7 +6288,11 @@ class MKLPackedLinear(ExternKernelAlloc):
         output_size = list(m) + [oc]
         output_stride = make_contiguous_strides_for(output_size)
         inputs = [x, packed_w, orig_w]
-        constant_args = [None, batch_size]
+        constant_args = [batch_size]
+        if B is not None:
+            inputs += [B]
+        else:
+            constant_args.insert(0, None)
 
         return MKLPackedLinear(
             layout=FixedLayout(
@@ -6653,7 +6671,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
                 torch::List<int64_t> padding,
                 torch::List<int64_t> dilation,
                 int64_t groups,
-                double inv_output_scale,
+                double output_scale,
                 int64_t output_zero_point,
                 c10::optional<c10::ScalarType> output_dtype,
                 c10::string_view attr,
@@ -6829,7 +6847,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
                 torch::List<int64_t> padding,
                 torch::List<int64_t> dilation,
                 int64_t groups,
-                double inv_output_scale,
+                double output_scale,
                 int64_t output_zero_point,
                 c10::optional<c10::ScalarType> output_dtype,
                 c10::string_view binary_attr,
@@ -7045,7 +7063,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
                 at::Tensor weight_scales,
                 at::Tensor weight_zero_points,
                 c10::optional<at::Tensor> bias,
-                double inv_output_scale,
+                double output_scale,
                 int64_t output_zero_point,
                 c10::optional<c10::ScalarType> output_dtype,
                 c10::string_view post_op_name,
@@ -7629,7 +7647,7 @@ class EffectfulKernel(FallbackKernel):
         unbacked_bindings=None,
     ):
         super().__init__(
-            NoneLayout(layout.device),
+            layout,
             kernel,
             tensor_args,
             nontensor_args,
@@ -7658,6 +7676,21 @@ class EffectfulKernel(FallbackKernel):
 
     def has_side_effects(self):
         return True
+
+
+@dataclasses.dataclass
+class TorchBindObject(IRNode):
+    name: str
+    value: torch._C.ScriptObject
+
+    def get_name(self):
+        return self.name
+
+    def get_device(self):
+        return None  # is there a device??
+
+    def codegen_reference(self, writer=None):
+        return self.name
 
 
 class InterpreterShim(torch.fx.Interpreter):
