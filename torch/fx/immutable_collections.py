@@ -40,10 +40,10 @@ def _create_immutable_container_class(
     mutable_methods: Iterable[str],
     namespace: Optional[Dict[str, Any]] = None,
 ) -> Type[_T]:
-    kwds = dict.fromkeys(mutable_methods, _no_mutation)
+    ns = dict.fromkeys(mutable_methods, _no_mutation)
     if namespace is not None:
-        kwds.update(namespace)
-    return types.new_class("immutable_" + base.__name__, (base,), kwds)
+        ns.update(namespace)
+    return type("immutable_" + base.__name__, (base,), ns)
 
 
 immutable_list = _create_immutable_container_class(
