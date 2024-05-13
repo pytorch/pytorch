@@ -10588,7 +10588,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_autocast'),
                # Booleans mismatch: AssertionError: False is not true
                DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake'),
-               #DecorateInfo(unittest.skip, 'TestCommon', 'test_compare_cpu',  device_type="xpu", dtypes=None),
            )
         ),
     OpInfo('arange',

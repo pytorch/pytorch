@@ -1030,9 +1030,9 @@ class OpInfo:
             else:
                 #self.skips = (DecorateInfo(unittest.skip, 'TestCommon', 'test_compare_cpu',  device_type="xpu", dtypes=skip_dtypes))
                 self.skips = (DecorateInfo(unittest.skip, device_type="xpu", dtypes=None))
-            print("#### skipXPU on {} {} {}".format(self.name, skip_dtypes, self.skips))
+            #print("Skip XPU backend on {} with {} and {}".format(self.name, skip_dtypes, self.skips))
         else:
-            print("#### Don't skipXPU on {}".format(self.name))
+            print("Won't skip XPU backend on op {}".format(self.name))
 
         self.decorators = (*self.decorators, *self.skips)
 
@@ -1375,8 +1375,7 @@ class OpInfo:
     def get_decorators(self, test_class, test_name, device, dtype, param_kwargs):
         """Returns the decorators targeting the given test."""
         result = []
-        #import pdb
-        #pdb.set_trace()
+   
         for decorator in self.decorators:
             if isinstance(decorator, DecorateInfo):
                 if decorator.is_active(
