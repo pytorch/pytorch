@@ -1866,7 +1866,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             )
 
     @skipIfNoX86
-    def test_set_module_name(self):
+    def test_set_module_name_qconfig(self):
         """Test that quantize the specific submodule."""
 
         class Sub(torch.nn.Module):
@@ -1892,7 +1892,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         example_inputs = (torch.randn(3, 5),)
         # Set global to no quantization and then default config for a specific submodule.
         quantizer = X86InductorQuantizer()
-        quantizer.set_module_name(
+        quantizer.set_module_name_qconfig(
             "sub", xiq.get_default_x86_inductor_quantization_config()
         )
         node_occurrence = {
@@ -1914,7 +1914,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         self._test_quantizer(m, example_inputs, quantizer, node_occurrence, node_list)
 
     @skipIfNoX86
-    def test_set_module_name_with_underscores(self) -> None:
+    def test_set_module_name_qconfig_with_underscores(self) -> None:
         """Test that if a module name has an underscore, we can still quantize it."""
 
         class M(torch.nn.Module):
@@ -1930,7 +1930,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
 
         # Set global to no quantization and then default config for a specific submodule.
         quantizer = X86InductorQuantizer()
-        quantizer.set_module_name(
+        quantizer.set_module_name_qconfig(
             "foo_bar", xiq.get_default_x86_inductor_quantization_config()
         )
         example_inputs = (torch.randn(2, 2),)
@@ -1965,7 +1965,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 count += 1
 
     @skipIfNoX86
-    def test_set_module_name_for_dynamic_quant(self):
+    def test_set_module_name_qconfig_for_dynamic_quant(self):
         """Test that quantize the specific submodule for dynamic quantization."""
 
         with override_quantized_engine("x86"), torch.no_grad():
@@ -1978,8 +1978,8 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 )
                 quantizer = (
                     X86InductorQuantizer()
-                    .set_module_name("q_proj", dynamic_config)
-                    .set_module_name("v_proj", dynamic_config)
+                    .set_module_name_qconfig("q_proj", dynamic_config)
+                    .set_module_name_qconfig("v_proj", dynamic_config)
                 )
                 node_occurrence = {
                     # ops for quantizing/de-quantizing input
