@@ -1358,6 +1358,12 @@ class DeviceCachingAllocator {
     release_cached_blocks(context);
   }
 
+  void synchronizeEvents() {
+    auto context = maybeGatherContext(RecordContext::ALL);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    synchronize_and_free_events(context);
+  }
+
   /** Retrieves size of largest unused block held by the memory cache **/
   void cacheInfo(size_t* largest) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
@@ -2998,6 +3004,11 @@ class NativeCachingAllocator : public CUDAAllocator {
       da->emptyCache();
   }
 
+  void synchronizeEvents() {
+    for (auto& da : device_allocator)
+      da->synchronizeEvents();
+  }
+
   void* getBaseAllocation(void* ptr, size_t* outSize) override {
     Block* block = get_allocated_block(ptr);
     if (!block) {
@@ -3062,7 +3073,7 @@ class NativeCachingAllocator : public CUDAAllocator {
   std::shared_ptr<AllocatorState> getCheckpointState(
       c10::DeviceIndex device,
       MempoolId_t id) override {
-    emptyCache();
+    synchronizeEvents();
     return device_allocator[device]->getCheckpointState(id);
   }
 
