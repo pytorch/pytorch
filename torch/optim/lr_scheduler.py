@@ -156,6 +156,7 @@ class LRScheduler:
         epoch: Optional[int] = None,
     ):
         """Display the current learning rate.
+
         .. deprecated:: 2.4
             ``print_lr()`` is deprecated. Please use ``get_last_lr()`` to access the
             learning rate.
