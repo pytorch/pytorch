@@ -4498,6 +4498,7 @@ class ShapeEnv:
                 floor_div_atoms = lhs.atoms(FloorDiv).union(rhs.atoms(FloorDiv))
                 if len(floor_div_atoms) > 0 and any(a.divisor != 1 for a in floor_div_atoms):
                     raise NotImplementedError
+
                 # Never replace unbacked symbols with other unbacked symbols.
                 # This is error prone because you can cause references to
                 # unbacked symbols to time travel backwards.  E.g.,
@@ -4512,10 +4513,20 @@ class ShapeEnv:
                 # references u2 and u3 prior to them actually being bound at
                 # runtime.  It's pretty inconvenient to setup control
                 # dependencies for substitutions, so ban it entirely.
-                if isinstance(lhs, sympy.Symbol) and free_unbacked_symbols(lhs) and not free_unbacked_symbols(rhs):
-                    # short-circuit when no solving is needed
+                def trivial_solve(lhs, rhs):
+                    if isinstance(lhs, sympy.Symbol):
+                        if free_unbacked_symbols(lhs) and not free_unbacked_symbols(rhs):
+                            return True
+                        if symbol_is_type(lhs, SymT.FLOAT):
+                            return True
+                        # TODO: Maybe trivial solutions for int should also be
+                        # done?
+                    return False
+
+                # short-circuit when no solving is needed
+                if trivial_solve(lhs, rhs):
                     self._set_replacement(lhs, self._find(rhs), "trivial_lhs")
-                elif isinstance(rhs, sympy.Symbol) and free_unbacked_symbols(rhs) and not free_unbacked_symbols(lhs):
+                elif trivial_solve(rhs, lhs):
                     self._set_replacement(rhs, self._find(lhs), "trivial_rhs")
                 else:
                     r = try_solve(expr, free[0], floordiv_inequality=False)
@@ -4791,21 +4802,11 @@ class ShapeEnv:
 
             # Turn this into a boolean expression, no longer need to consult
             # concrete_val
-            suppress_maybe_guard_rel = False
             if concrete_val is sympy.true:
                 g = expr
             elif concrete_val is sympy.false:
                 g = sympy.Not(expr)
             else:
-                # WARNING: we cannot actually do simplifications on guards
-                # on floating point values, because Sympy generally does not
-                # think expressions on integers can ever be equal to floating
-                # point (e.g., sympy.Eq(s0/6, 0.5) evaluates to False).  Without
-                # very clear algebraic laws that hold for floating point, such
-                # simplifications are error prone anyway, so be sure not to
-                # maybe_guard_rel in those cases.
-                if not isinstance(concrete_val, sympy.Integer):
-                    suppress_maybe_guard_rel = True
                 g = sympy.Eq(expr, concrete_val)  # type: ignore[arg-type]
 
             if isinstance(g, sympy.Rel):
