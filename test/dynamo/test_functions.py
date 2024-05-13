@@ -2172,6 +2172,60 @@ class GraphModule(torch.nn.Module):
             opt_result = opt_fn(a, b, arg)
             self.assertTrue(same(opt_result, eager_result))
 
+    @parametrize(
+        "typ, info_func",
+        [
+            (int, np.iinfo),
+            (float, np.finfo),
+        ],
+        name_fn=lambda t, _: t.__name__,
+    )
+    def test_np_constant_collections_guards(self, typ, info_func):
+        def func_info(a, info):
+            return a + info.max
+
+        def func_dtype(a, dt):
+            return a + info_func(dt).max
+
+        dt_args = [
+            np.dtype(typ),
+            np.ones((1,), dtype=typ).dtype,
+            np.dtype(np.dtype(typ).name),
+            np.dtype(typ.__name__),
+        ]
+        cnts_1 = torch._dynamo.testing.CompileCounter()
+        opt_fn_dtype = torch._dynamo.optimize(cnts_1)(func_dtype)
+        a = torch.zeros(3, dtype=typ)
+        for arg in dt_args:
+            r = opt_fn_dtype(a, arg)
+        # each should produce an identical arg
+        self.assertEqual(cnts_1.frame_count, 1)
+
+        cnts_2 = torch._dynamo.testing.CompileCounter()
+        opt_fn_info = torch._dynamo.optimize(cnts_2)(func_info)
+        info_args = [info_func(dt) for dt in dt_args]
+        for arg in info_args:
+            r = opt_fn_info(a, arg)
+
+        # each should produce an identical arg
+        self.assertEqual(cnts_2.frame_count, 1)
+
+        if typ is float:
+            dt_extra = np.dtype(np.float16)
+        else:
+            dt_extra = np.dtype(np.int16)
+        info_extra = info_func(dt_extra)
+
+        eager_result_dtype = func_dtype(a, dt_extra)
+        compile_result_dtype = opt_fn_dtype(a, dt_extra)
+        self.assertEqual(cnts_1.frame_count, 2)
+        self.assertEqual(eager_result_dtype, compile_result_dtype)
+
+        eager_result_info = func_info(a, info_extra)
+        compile_result_info = opt_fn_info(a, info_extra)
+        self.assertEqual(cnts_2.frame_count, 2)
+        self.assertEqual(eager_result_info, compile_result_info)
+
     def test_compare_constant_and_tensor(self):
         for op in [
             operator.lt,

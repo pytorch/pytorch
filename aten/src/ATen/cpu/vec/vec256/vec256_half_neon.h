@@ -298,19 +298,18 @@ class Vectorized<c10::Half> {
     } else if (count == (size() >> 1)) {
       Vectorized<c10::Half> res;
       res.values.val[0] = vld1q_f16(reinterpret_cast<const float16_t*>(ptr));
-      res.values.val[1] = vdupq_n_f16(0);
+      std::memset(&res.values.val[1], 0, sizeof(res.values.val[1]));
       return res;
-    } else {
-      __at_align__ float16_t tmp_values[size()];
-      for (const auto i : c10::irange(size())) {
-        tmp_values[i] = 0;
-      }
-      std::memcpy(
-          tmp_values,
-          reinterpret_cast<const float16_t*>(ptr),
-          count * sizeof(float16_t));
-      return vld1q_f16_x2(reinterpret_cast<const float16_t*>(tmp_values));
     }
+    __at_align__ float16_t tmp_values[size()];
+    for (const auto i : c10::irange(size())) {
+      tmp_values[i] = 0;
+    }
+    std::memcpy(
+        tmp_values,
+        reinterpret_cast<const float16_t*>(ptr),
+        count * sizeof(float16_t));
+    return vld1q_f16_x2(reinterpret_cast<const float16_t*>(tmp_values));
   }
   void store(void* ptr, int64_t count = size()) const {
     if (count == size()) {

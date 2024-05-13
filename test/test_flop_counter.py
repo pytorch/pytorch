@@ -327,6 +327,133 @@ class TestFlopCounter(TestCase):
         self.assertExpectedInline(str(flops_fw_bw_math), """805306368""")
         self.assertExpectedInline(str(flops_fw_bw_efficient), """939524096""")
 
+    @unittest.skipIf(not HAS_CUDA, "CUDA not available")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION or not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+                     "Does not support all SDPA backends (pre-SM80 hardware on CUDA)")
+    def test_sdpa_nested_tensor(self):
+
+        def get_flops(q, k, v, backend, with_backward=False):
+            mode = FlopCounterMode()
+
+            if backend == "math":
+                backend = torch.backends.cuda.sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=False)
+            elif backend == "flash":
+                backend = torch.backends.cuda.sdp_kernel(enable_flash=True, enable_math=False, enable_mem_efficient=False)
+            elif backend == "mem_efficient":
+                backend = torch.backends.cuda.sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=True)
+
+            with backend, mode:
+                out = F.scaled_dot_product_attention(q, k, v, dropout_p=0, is_causal=True)
+                if with_backward:
+                    if out.is_nested:
+                        out.values().sum().backward()
+                    else:
+                        out.sum().backward()
+
+            return int(get_total_flops(mode))
+
+        def get_nested_inputs(
+            batch_size,
+            n_heads,
+            max_seq_len_q,
+            max_seq_len_k,
+            head_dim,
+            head_dim_v,
+            dtype,
+        ):
+            q_lengths = torch.tensor([
+                max_seq_len_q // 4,
+                max_seq_len_q // 4 * 2,
+                max_seq_len_q // 4 * 3,
+                max_seq_len_q // 4 * 4
+            ])
+            k_lengths = torch.tensor([
+                max_seq_len_k // 4,
+                max_seq_len_k // 4 * 2,
+                max_seq_len_k // 4 * 3,
+                max_seq_len_k // 4 * 4
+            ])
+            q_offsets, k_offsets = (
+                torch.cat((torch.tensor([0]), torch.cumsum(lengths, dim=0))).cuda()
+                for lengths in (q_lengths, k_lengths)
+            )
+            q_values = torch.randn(q_offsets[-1], head_dim * n_heads, dtype=dtype, requires_grad=True, device="cuda")
+            k_values = torch.randn(k_offsets[-1], head_dim * n_heads, dtype=dtype, requires_grad=True, device="cuda")
+            v_values = torch.randn(k_offsets[-1], head_dim_v * n_heads, dtype=dtype, requires_grad=True, device="cuda")
+
+            q = torch.nested.nested_tensor_from_jagged(q_values, q_offsets)
+            k = torch.nested.nested_tensor_from_jagged(k_values, k_offsets)
+            v = torch.nested.nested_tensor_from_jagged(v_values, k_offsets)
+
+            q = q.view(batch_size, -1, n_heads, head_dim).transpose(1, 2)
+            k = k.view(batch_size, -1, n_heads, head_dim).transpose(1, 2)
+            v = v.view(batch_size, -1, n_heads, head_dim_v).transpose(1, 2)
+
+            return q, k, v
+
+        def get_dense_flops(q, k, v, backend, with_backward=False):
+            def split_tensor(x):
+                return (
+                    y.unsqueeze(0).transpose(1, 2).detach().requires_grad_(True)
+                    for y in x.transpose(1, 2).unbind(0)
+                )
+            q_tensors = split_tensor(q)
+            k_tensors = split_tensor(k)
+            v_tensors = split_tensor(v)
+
+            flops = 0
+            for q_i, k_i, v_i in zip(q_tensors, k_tensors, v_tensors):
+                flops += get_flops(q_i, k_i, v_i, backend=backend, with_backward=with_backward)
+
+            return flops
+
+        uniform_config = {
+            "batch_size": 4,
+            "n_heads": 8,
+            "max_seq_len_q": 128,
+            "max_seq_len_k": 128,
+            "head_dim": 64,
+            "head_dim_v": 64,
+            "dtype": torch.float16,
+        }
+
+        # max_seq_len_q != max_seq_len_k doesn't work for flash attention with dense tensors.
+        differing_config = {
+            "batch_size": 4,
+            "n_heads": 8,
+            "max_seq_len_q": 128,
+            "max_seq_len_k": 256,
+            "head_dim": 64,
+            "head_dim_v": 64,
+            "dtype": torch.float16,
+        }
+
+        self.assertEqual(
+            get_dense_flops(*get_nested_inputs(**uniform_config), backend="flash", with_backward=False),
+            get_flops(*get_nested_inputs(**uniform_config), backend="flash", with_backward=False),
+        )
+        self.assertEqual(
+            get_dense_flops(*get_nested_inputs(**uniform_config), backend="mem_efficient", with_backward=False),
+            get_flops(*get_nested_inputs(**uniform_config), backend="mem_efficient", with_backward=False),
+        )
+        self.assertEqual(
+            get_dense_flops(*get_nested_inputs(**differing_config), backend="mem_efficient", with_backward=False),
+            get_flops(*get_nested_inputs(**differing_config), backend="mem_efficient", with_backward=False),
+        )
+
+        self.assertEqual(
+            get_dense_flops(*get_nested_inputs(**uniform_config), backend="flash", with_backward=True),
+            get_flops(*get_nested_inputs(**uniform_config), backend="flash", with_backward=True),
+        )
+        self.assertEqual(
+            get_dense_flops(*get_nested_inputs(**uniform_config), backend="mem_efficient", with_backward=True),
+            get_flops(*get_nested_inputs(**uniform_config), backend="mem_efficient", with_backward=True),
+        )
+        self.assertEqual(
+            get_dense_flops(*get_nested_inputs(**differing_config), backend="mem_efficient", with_backward=True),
+            get_flops(*get_nested_inputs(**differing_config), backend="mem_efficient", with_backward=True),
+        )
+
     def test_addmm_out(self):
         def f(x):
             y = torch.zeros(10, 10)

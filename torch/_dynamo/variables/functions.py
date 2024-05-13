@@ -328,9 +328,11 @@ class UserMethodVariable(UserFunctionVariable):
             self.obj, variables.NNModuleVariable
         ):
             module_attr = getattr(self.fn, "__module__", "")
+            # inline torch.nn.utils.parametrize
             if (
                 module_attr is not None
                 and module_attr.startswith("torch.nn.")
+                and module_attr != "torch.nn.utils.parametrize"
                 or self.is_constant
             ):
                 return self.obj.call_method(
