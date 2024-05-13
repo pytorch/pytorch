@@ -10421,8 +10421,6 @@ op_db: List[OpInfo] = [
                    ref=np.abs,
                    dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.chalf),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
-                   dtypesIfXPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
-                   skipXPU=False,
                    skips=(
                        DecorateInfo(unittest.skip("In-place abs not supported for complex tensors"), 'TestBwdGradients',
                                     'test_inplace_grad', dtypes=(torch.cdouble,)),
@@ -10545,7 +10543,6 @@ op_db: List[OpInfo] = [
                     supports_fwgrad_bwgrad=True,
                     supports_forward_ad=True,
                     supports_two_python_scalars=True,
-                    skipXPU=False,
                     decorators=(
                         DecorateInfo(
                             toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=0)}),
@@ -10575,7 +10572,6 @@ op_db: List[OpInfo] = [
            supports_autograd=False,
            error_inputs_func=error_inputs_item,
            sample_inputs_func=sample_inputs_item,
-           skipXPU=False,
            skips=(
                # Error testing item function variant
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',
@@ -10588,9 +10584,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_autocast'),
                # Booleans mismatch: AssertionError: False is not true
                DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake'),
-               #DecorateInfo(unittest.skip, 'TestCommon', 'test_compare_cpu',  device_type="xpu", dtypes=None),
-           )
-        ),
+           )),
     OpInfo('arange',
            dtypes=all_types_and(torch.bfloat16, torch.float16),
            supports_out=True,
@@ -10598,7 +10592,6 @@ op_db: List[OpInfo] = [
            is_factory_function=True,
            error_inputs_func=error_inputs_arange,
            sample_inputs_func=sample_inputs_arange,
-           skipXPU=False,
            skips=(
                # https://github.com/pytorch/pytorch/issues/81774
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
@@ -18019,7 +18012,6 @@ op_db: List[OpInfo] = [
                   supports_forward_ad=True,
                   supports_fwgrad_bwgrad=True,
                   sample_inputs_func=sample_repeat_tile,
-                  skipXPU=True,
                   skips=(
                       DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                   )),
@@ -19206,7 +19198,6 @@ op_db: List[OpInfo] = [
         result_dtype=torch.bool,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.all),
-        skipXPU=False,
         skips=(
             # FIXME: uint8 input returns uint8 instead of bool
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_result_dtype', dtypes=[torch.uint8]),
