@@ -23,7 +23,7 @@ class TORCH_API Timer {
   int64_t backward_comm_end_time = kUnsetTime;
 
  public:
-  enum class Event {
+  enum class Event : uint8_t {
     kForwardStart,
     kBackwardComputeStart,
     kBackwardComputeEnd,
