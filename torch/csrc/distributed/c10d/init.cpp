@@ -2525,7 +2525,8 @@ Example::
           "global_ranks_in_group",
           &::c10d::ProcessGroupNCCL::Options::global_ranks_in_group)
       .def_readwrite(
-          "group_name", &::c10d::ProcessGroupNCCL::Options::group_name);
+          "group_name", &::c10d::ProcessGroupNCCL::Options::group_name)
+      .def("disable_comm_split_share", &::c10d::ProcessGroupNCCL::Options::disable_comm_split_share);
 
 #endif
 

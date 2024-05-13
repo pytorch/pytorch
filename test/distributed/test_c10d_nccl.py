@@ -585,6 +585,16 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         self.assertEqual(backend.comm_split_count(), 1)
         self.assertEqual(tensor, original_tensor)
 
+        # test if disable_comm_split_share() is called for pg_options, we don't share memory across ranks
+        disable_split_share_pg_options = c10d.ProcessGroupNCCL.Options()
+        disable_split_share_pg_options.disable_comm_split_share()
+        pg_split_share_disabled = c10d.new_group([0], pg_options=disable_split_share_pg_options)
+        if self.rank == 0:
+            dist.broadcast(tensor, 0, group=pg_split_share_disabled)
+
+        self.assertEqual(backend.comm_split_count(), 2)
+        self.assertEqual(tensor, original_tensor)
+
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_non_blocking_init(self):

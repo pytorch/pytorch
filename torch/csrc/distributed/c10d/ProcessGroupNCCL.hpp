@@ -423,6 +423,16 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
 #endif
 
+    // Disable comm split share during NcclCommSplit to avoid resource
+    // contention during overlapping collectives for different sub process groups.
+    // It's a no-op if nccl version doesn't have comm split feature yet
+    // default value is INT_MIN (non-zero) so we need to turn it off when we want to
+    void disable_comm_split_share() {
+#ifdef NCCL_HAS_COMM_SPLIT
+        config.splitShare = 0;
+#endif
+    }
+
     // Optional "parent" backend and color to create communicators from
     // via `ncclCommSplit`
     std::shared_ptr<ProcessGroupNCCL> split_from;
