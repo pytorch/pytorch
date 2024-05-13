@@ -219,6 +219,9 @@ def get_profiler_nccl_meta(prof):
         events = json.load(f)["traceEvents"]
     print(f"Trace saved to {trace_file}")
 
+    # Comment to debug
+    os.remove(trace_file)
+
     return [e for e in events if e.get("name") == "record_param_comms"]
 
 # Base error message substring on unfinished reductions.
@@ -6949,6 +6952,8 @@ class DistributedTest:
             if dist.get_backend() != "nccl":
                 return
 
+            # Note comment out the "os.remove(trace_file)" in `get_profiler_nccl_meta()`
+            # to debug any mismatches.
             nccl_meta_events = get_profiler_nccl_meta(prof)
             self.assertGreater(len(nccl_meta_events), 0)
 
