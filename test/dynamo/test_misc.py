@@ -908,9 +908,7 @@ def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: 
             return x + out
 
         # TODO: Test the guards maybe?
-        torch._dynamo.testing.standard_test(
-            self, fn, 1, expected_ops=1
-        )
+        torch._dynamo.testing.standard_test(self, fn, 1, expected_ops=1)
 
     def test_int_shape_comparisons(self):
         def fn(x):
@@ -933,9 +931,7 @@ def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: 
             return x + out
 
         # TODO: Test the guards maybe?
-        torch._dynamo.testing.standard_test(
-            self, fn, 1, expected_ops=1
-        )
+        torch._dynamo.testing.standard_test(self, fn, 1, expected_ops=1)
 
     def test_param_shape_binops(self):
         class MyModule(torch.nn.Module):
