@@ -3062,6 +3062,7 @@ class NativeCachingAllocator : public CUDAAllocator {
   std::shared_ptr<AllocatorState> getCheckpointState(
       c10::DeviceIndex device,
       MempoolId_t id) override {
+    emptyCache();
     return device_allocator[device]->getCheckpointState(id);
   }
 
