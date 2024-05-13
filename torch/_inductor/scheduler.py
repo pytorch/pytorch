@@ -1356,14 +1356,14 @@ class Scheduler:
         self.logged_slow_fusion = set()
         self.fuse_nodes()
         self.finalize_multi_template_buffers()
-        self.nodes = comms.enforce_comm_node_ordering_for_fsdp(self.name_to_fused_node, self.nodes)
+        if config.raise_last_usage:
+            self.compute_last_usage()
+            self.nodes = memory_passes.raise_last_usage(self.name_to_fused_node, V.graph.graph_inputs, self.nodes)
+        self.nodes = comms.enforce_comm_ordering_for_fsdp(self.name_to_fused_node, V.graph.graph_inputs, self.nodes)
         if config.reorder_for_compute_comm_overlap:
             comms.decide_global_ordering_of_comms(self.nodes)
         # Refresh node_users and inverse_users to reflect fused nodes and grouped nodes
         self.compute_node_users()
-        if config.raise_last_usage:
-            self.compute_last_usage()
-            self.nodes = memory_passes.raise_last_usage(self.name_to_fused_node, V.graph.graph_inputs, self.nodes)
         if config.reorder_for_compute_comm_overlap:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.nodes = memory_passes.raise_primal_resize_zero_if_primal_is_unused(self.name_to_fused_node, V.graph.graph_inputs, self.nodes)
@@ -1372,8 +1372,6 @@ class Scheduler:
         # for snode in self.nodes:
         #     torch_log.warning(f"snode: {snode}, snode.node: {snode.node}, snode.debug_str(): {snode.debug_str()}")
 
-        # TODO(yf225): after memory-optimization, we might need to do compute_last_usage() again.
-        # We will see what error we get if we don't do it.
         V.debug.ir_post_fusion(self.nodes)
         V.debug.graph_diagram(self.nodes)
         self.debug_draw_graph()

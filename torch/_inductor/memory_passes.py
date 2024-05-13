@@ -9,31 +9,9 @@ from .utils import contains_collective, contains_wait, tuple_sorted, sympy_produ
 import logging
 from .virtualized import V
 from collections import defaultdict
+from .pass_utils import collect_node_to_input_prev_writes, get_users_from_unfused_nodes, get_all_reads
 
 torch_log = logging.getLogger("torch")
-
-
-def get_users_from_unfused_nodes(snode):
-    # if a fused node has 2 subnodes (A, B) and each subnode has 2 users (A1, A2) and (B1, B2),
-    # this function returns (A1, A2, B1, B2).
-    if isinstance(snode, scheduler._BaseGroupedSchedulerNode):
-        return list(set([user for snode in snode.snodes for user in snode.users]))
-    else:
-        return snode.users
-
-
-def _collect_reads(snode):
-    if isinstance(snode, scheduler._BaseGroupedSchedulerNode):
-        return [dep for snode in snode.snodes for dep in snode.read_writes.reads]
-    else:
-        return snode.read_writes.reads
-
-
-def _collect_writes(snode):
-    if isinstance(snode, scheduler._BaseGroupedSchedulerNode):
-        return [dep for snode in snode.snodes for dep in snode.read_writes.writes]
-    else:
-        return snode.read_writes.writes
 
 
 def raise_last_usage(
@@ -49,21 +27,7 @@ def raise_last_usage(
     If we found a consumer node of current node that satisfies the above conditions, we can schedule it right after the current node.
     After moving these consumer nodes up, we are able to immediately release the memory of their last-usage input args.
     """
-
-    write_map = defaultdict(set)  # bufX -> set of nodes that write to bufX (including itself)
-    node_to_input_prev_writes = defaultdict(set)  # nodeY -> set of writes nodes to nodeY's input args before nodeY
-    for snode in snodes:
-        for dep in _collect_writes(snode):
-            write_map[dep.name].add(snode.get_name())
-        if isinstance(snode.node, ir.ResizeStorageBytes):
-            write_map[snode.node.resized_buf_name].add(snode.get_name())
-        for dep in _collect_reads(snode):
-            node_to_input_prev_writes[snode].update(write_map[dep.name])
-            node_to_input_prev_writes[snode].discard(snode.get_name())
-            if isinstance(snode, scheduler._BaseGroupedSchedulerNode):
-                for sub_snode in snode.snodes:
-                    node_to_input_prev_writes[sub_snode].update(write_map[dep.name])
-                    node_to_input_prev_writes[sub_snode].discard(sub_snode.get_name())
+    node_to_input_prev_writes = collect_node_to_input_prev_writes(snodes)
 
     def get_numel_by_name(buf_name):
         def _compute_elems(buf):
@@ -115,8 +79,7 @@ def raise_last_usage(
             if isinstance(user.node.node, ir.ExternKernel) and user.node.node.op_overload is torch.ops.higher_order.run_and_save_rng_state:
                 continue
             if (
-                all(prev_write in scheduled for prev_write in node_to_input_prev_writes[user.node])
-                # and len(user.node.read_writes.writes) == 1 and list(user.node.read_writes.writes)[0].name == user.node.get_name()
+                all(prev_write_name in scheduled for prev_write_name in node_to_input_prev_writes[user.node])
                 and (
                     # if raising the user node saves memory
                     get_numel_by_name(user.node.get_name()) < sum(get_numel_by_name(x_name) for x_name in user.node.last_usage)
@@ -141,7 +104,7 @@ def raise_primal_resize_zero_if_primal_is_unused(
     primal_to_reads = defaultdict(set)  # argX -> set of nodes that reads argX
     primal_resize_zero_nodes = []
     for snode in snodes:
-        for dep in _collect_reads(snode):
+        for dep in get_all_reads(snode):
             if dep.name.startswith("arg"):
                 primal_to_reads[dep.name].add(snode.get_name())
     for snode in snodes:
