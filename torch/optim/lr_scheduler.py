@@ -164,7 +164,7 @@ class LRScheduler:
             "`LRScheduler.print_lr()` is being deprecated. To fetch the learning rate, "
             "please use `get_last_lr()` instead. For more details, "
             "see https://github.com/pytorch/pytorch/issues/99270.",
-            DeprecationWarning,
+            UserWarning,
         )
         if is_verbose:
             if epoch is None:
