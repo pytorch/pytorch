@@ -254,6 +254,8 @@ class CKGemmTemplate(CKTemplate):
 * Generated code for CK inductor backend
 * See {type(self).__module__}.{type(self).__qualname__}
 *
+* {op=}
+* 
 * {torch.__version__=}
 * {torch.version.git_version=}
 */
