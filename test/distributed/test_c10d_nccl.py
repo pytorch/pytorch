@@ -1076,7 +1076,7 @@ class DistributedDataParallelTest(
                 False, gradient_as_bucket_view=gradient_as_bucket_view
             )
         except Exception as ex:
-            self.fail("Unexpected exception: %s" % ex)
+            self.fail(f"Unexpected exception: {ex}")
 
         # Test find_unused_parameters defaults to False
         try:
@@ -1084,7 +1084,7 @@ class DistributedDataParallelTest(
                 True, test_default=True, gradient_as_bucket_view=gradient_as_bucket_view
             )
         except Exception as ex:
-            self.fail("Unexpected exception: %s" % ex)
+            self.fail(f"Unexpected exception: {ex}")
 
     # TODO: Combine the following tests once https://github.com/pytorch/pytorch/issues/55967
     # is resolved.

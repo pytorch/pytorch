@@ -2321,7 +2321,7 @@ ProcessGroupNCCL::Options::Options(bool is_high_priority_stream)
 
 static constexpr int CoalActive = 0x01, CoalColl = 0x02, CoalP2P = 0x04;
 
-void ProcessGroupNCCL::startCoalescing(OpType optype) {
+void ProcessGroupNCCL::startCoalescing() {
   // Other collective ops bump seq_ before creating a work. Thus, if coalesced
   // ops bump seq_ only after initing a work they will collide with (reuse) the
   // seq_ of the last non-coalesced collective.  Previously, seq_ was bumped
@@ -2333,18 +2333,12 @@ void ProcessGroupNCCL::startCoalescing(OpType optype) {
 
   // Don't bump op_id_ here, because startCoalescing isn't a logical operation.
   // Bump it for each logical op inside the coalescing group.
-  if (isP2POp(optype)) {
+  if (coalescing_state_ & CoalP2P) {
     seqP2P_++;
   } else {
     seqCollective_++;
   }
-  return startCoalescing();
-}
 
-// Do not call this directly, use startCoalescing(OpType) instead.
-// This ensures that appropriate sequence numbers are properly incremented which
-// are important for debugging.
-void ProcessGroupNCCL::startCoalescing() {
   coalescedDevice_.set_index(-1);
   coalescedComm_ = nullptr;
   coalescing_state_ |= CoalActive;
@@ -3511,7 +3505,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
         "nccl:all_gather");
   } else {
     const auto num_reduces = outputTensors_.size();
-    startCoalescing(OpType::ALLGATHER);
+    startCoalescing();
     for (const int i : c10::irange(num_reduces)) {
       auto& output = outputTensors_[i];
       auto& input = (i == rank_) ? inputTensor : output;
@@ -3644,7 +3638,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
         "nccl:reduce_scatter");
   } else {
     const auto num_reduces = inputTensors_.size();
-    startCoalescing(OpType::REDUCE_SCATTER);
+    startCoalescing();
     for (const int i : c10::irange(num_reduces)) {
       auto& input = inputTensors_[i];
       auto& output = (i == rank_) ? outputTensor : input;
