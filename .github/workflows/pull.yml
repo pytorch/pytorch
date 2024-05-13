@@ -36,7 +36,7 @@ jobs:
       contents: read
 
   get-workflow-type:
-    name: Check if user is in arc_users.yml
+    name: Check if user is in  arc_users.yml
     uses: ./.github/workflows/_runner-determinator.yml
     with:
       user_name: ${{ github.actor }}
