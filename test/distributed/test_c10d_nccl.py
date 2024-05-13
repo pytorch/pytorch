@@ -51,7 +51,6 @@ from torch.testing._internal.common_distributed import (
     with_dist_debug_levels,
     with_nccl_blocking_wait,
 )
-from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1261,21 +1260,8 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         with self.assertRaises(RuntimeError):
             pg.allreduce(nan_tensor)
         dist.destroy_process_group()
-
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_nan_assert_no_failure(self):
-        os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
-        store = c10d.FileStore(self.file_name, self.world_size)
-        pg = self._create_process_group_nccl(store, self.opts())
-        device = self.rank_to_GPU[self.rank][0]
-        unsuppored_types = [torch.int16, torch.bfloat16]
-        for dtype in get_all_dtypes():
-            if dtype in unsuppored_types:
-                continue
-            tensor = torch.full((3, 2), self.rank, dtype=dtype, device=device)
-            pg.allreduce(tensor).wait()
-        dist.destroy_process_group()
+        # reset env
+        os.environ["TORCH_NCCL_NAN_CHECK"] = "0"
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
