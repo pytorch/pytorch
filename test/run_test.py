@@ -1197,9 +1197,9 @@ def parse_args():
         and not IS_SLOW
         and not TEST_WITH_ROCM
         and not IS_MACOS
-        and not "onnx" in BUILD_ENVIRONMENT
-        and not "debug" in BUILD_ENVIRONMENT
-        and not "parallelnative" in BUILD_ENVIRONMENT,
+        and "onnx" not in BUILD_ENVIRONMENT
+        and "debug" not in BUILD_ENVIRONMENT
+        and "parallelnative" not in BUILD_ENVIRONMENT,
     )
     parser.add_argument(
         "additional_unittest_args",
