@@ -219,24 +219,6 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
     return prefix, parallel_prefix, local_init
 
 
-def try_reset_var_index_to_local_buf(self, name, var, index):
-    local_buffer = self.get_local_buffer()
-    if (
-        isinstance(local_buffer, LocalBuffer)
-        and local_buffer.original_node_name == name
-    ):
-        index_id = local_buffer.local_buf_index
-        sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)  # type: ignore[attr-defined]
-        replacements = {}
-        for x in sorted_symbols:
-            if x.name != f"x{index_id}":  # type: ignore[attr-defined]
-                # Remove the idx other than `keep_idx_id`
-                replacements[x] = "0"
-        index = sympy_subs(index, replacements)  # type: ignore[arg-type]
-        var = local_buffer.local_buf_name
-    return var, index
-
-
 def cpp_kernel_load_handler(func):
     def decorator(self, name: str, index: sympy.Expr):
         assert isinstance(self, CppKernel)
@@ -1598,6 +1580,26 @@ class CppKernel(Kernel):
     def get_local_buffer(self):
         return self.local_buffer
 
+    def generate_load_store_var_index(self, name, index, is_store=False):
+        var = self.args.output(name) if is_store else self.args.input(name)
+        local_buffer = self.get_local_buffer()
+        if (
+            self.can_use_local_buf
+            and isinstance(local_buffer, LocalBuffer)
+            and local_buffer.original_node_name == name
+        ):
+            # Reset var/index to local buffer
+            index_id = local_buffer.local_buf_index
+            sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)
+            replacements = {}
+            for x in sorted_symbols:
+                if x.name != f"x{index_id}":
+                    # Only keep index used by local buffer
+                    replacements[x] = "0"
+            index = sympy_subs(index, replacements)
+            var = local_buffer.local_buf_name
+        return var, index
+
     def _gen_parallel_reduction_buffers(
         self,
         acc,
@@ -1764,8 +1766,7 @@ class CppKernel(Kernel):
 
     @cpp_kernel_load_handler
     def load(self, name: str, index: sympy.Expr):
-        var = self.args.input(name)
-        var, index = try_reset_var_index_to_local_buf(self, name, var, index)
+        var, index = self.generate_load_store_var_index(name, index)
         line = f"{var}[{cexpr_index(index)}]"
         if V.graph.get_dtype(name) in [torch.float16]:
             line = f"static_cast<float>({line})"
@@ -1776,10 +1777,9 @@ class CppKernel(Kernel):
     @cpp_kernel_store_handler
     def store(self, name, index, value, mode=None):
         assert "buf" in name
-        var = self.args.output(name)
+        var, index = self.generate_load_store_var_index(name, index, is_store=True)
         self.cache_fp32_cse_var_before_lowp_store(value)
         if mode is None:
-            var, index = try_reset_var_index_to_local_buf(self, name, var, index)
             line = f"{var}[{cexpr_index(index)}] = {value};"
         elif mode == "atomic_add":
             if not config.cpp.dynamic_threads and self.num_threads == 1:
@@ -2324,7 +2324,7 @@ class CppVecKernel(CppKernel):
     @cpp_kernel_load_handler
     def load(self, name: str, index: sympy.Expr):
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        var = self.args.input(name)
+        var, index = self.generate_load_store_var_index(name, index)
         dtype = V.graph.get_dtype(name)
         tiling_var = self.itervars[self.tiling_idx]
         stride = self._try_get_const_stride(index, tiling_var)
@@ -2333,7 +2333,6 @@ class CppVecKernel(CppKernel):
             return super().load(name, index)
         elif stride == 1:
             # load contiguously
-            var, index = try_reset_var_index_to_local_buf(self, name, var, index)
             line = self._get_vec_load_line(var, index, dtype, self._load_mask)
             csevar = self.cse.generate(self.loads, line)  # type: ignore[assignment]
         else:
@@ -2349,7 +2348,6 @@ class CppVecKernel(CppKernel):
         var: str,
         index: sympy.Expr,
         dtype: torch.dtype,
-        name: str = "",
     ):
         """
         Get a store line buffer that stores `value` into `var` at `index` of `dtype`. It handles
@@ -2367,7 +2365,6 @@ class CppVecKernel(CppKernel):
         stride = self._try_get_const_stride(index, tiling_var)
         code = IndentedBuffer()
         if stride == 1:
-            var, index = try_reset_var_index_to_local_buf(self, name, var, index)
             var_expr = f"{var} + {cexpr_index(index)}"
             if dtype == torch.float:
                 code.writeline(f"{value}.store({var_expr});")
@@ -2388,9 +2385,9 @@ class CppVecKernel(CppKernel):
             # this happens when we store a scalar into a vectorized buffer like "fill"
             value = self.broadcast(value)
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        var = self.args.output(name)
+        var, index = self.generate_load_store_var_index(name, index, is_store=True)
         self.cache_fp32_cse_var_before_lowp_store(value)
-        code = self._get_store_line(value, var, index, V.graph.get_dtype(name), name)
+        code = self._get_store_line(value, var, index, V.graph.get_dtype(name))
         self.stores.splice(code.map(lambda x: DeferredLine(name, x)))
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
