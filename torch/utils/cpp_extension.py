@@ -95,13 +95,10 @@ def _find_cuda_home() -> Optional[str]:
     cuda_home = os.environ.get('CUDA_HOME') or os.environ.get('CUDA_PATH')
     if cuda_home is None:
         # Guess #2
-        try:
-            which = 'where' if IS_WINDOWS else 'which'
-            with open(os.devnull, 'w') as devnull:
-                nvcc = subprocess.check_output([which, 'nvcc'],
-                                               stderr=devnull).decode(*SUBPROCESS_DECODE_ARGS).rstrip('\r\n')
-                cuda_home = os.path.dirname(os.path.dirname(nvcc))
-        except Exception:
+        nvcc_path = shutil.which("nvcc")
+        if nvcc_path is not None:
+            cuda_home = os.path.dirname(os.path.dirname(nvcc_path))
+        else:
             # Guess #3
             if IS_WINDOWS:
                 cuda_homes = glob.glob(
