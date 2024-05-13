@@ -30,11 +30,6 @@ from torch.distributed.checkpoint.state_dict import (
     get_optimizer_state_dict,
 )
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor.parallel import (
-    ColwiseParallel,
-    parallelize_module,
-    RowwiseParallel,
-)
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -42,6 +37,7 @@ from torch.testing._internal.common_fsdp import (
     FSDPTest,
     FSDPTestMultiThread,
     MLP,
+    MLPStack,
     patch_all_gather,
     patch_reduce_scatter,
     test_compiled_fsdp,
@@ -915,37 +911,13 @@ class TestFullyShard2DTraining(FSDPTest):
         dp_pg = dp_mesh.get_group()  # used for `replicate()`
 
         torch.manual_seed(42)
-        model = nn.Sequential(
-            nn.LayerNorm(mlp_dim, bias=False),
-            # Use multiplier of 3 to exercise uneven case
-            MLP(mlp_dim, dim_multiplier=3),
-            MLP(mlp_dim),
-            MLP(mlp_dim, dim_multiplier=3),
-        )
+        model = MLPStack(mlp_dim)
         ref_model = copy.deepcopy(model).cuda()
         replicate(ref_model, device_ids=[self.rank], process_group=dp_pg)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
-
-        model = parallelize_module(
-            model,
-            device_mesh=tp_mesh,
-            # Leave the layer norm as implicitly replicated
-            parallelize_plan={
-                # Pass `use_local_output=False` to keep as DTensor to preserve
-                # uneven activation dims
-                "1.in_proj": ColwiseParallel(use_local_output=False),
-                "1.out_proj": RowwiseParallel(use_local_output=False),
-                "2.in_proj": ColwiseParallel(use_local_output=False),
-                "2.out_proj": RowwiseParallel(use_local_output=False),
-                "3.in_proj": ColwiseParallel(use_local_output=False),
-                "3.out_proj": RowwiseParallel(),
-            },
+        model.parallelize(
+            tp_mesh, dp_mesh, use_activation_checkpointing, reshard_after_forward
         )
-        for mlp in model:
-            if use_activation_checkpointing:
-                checkpoint(mlp)
-            fully_shard(mlp, mesh=dp_mesh, reshard_after_forward=reshard_after_forward)
-        fully_shard(model, mesh=dp_mesh, reshard_after_forward=reshard_after_forward)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
         torch.manual_seed(42 + dp_pg.rank() + 1)
@@ -1108,37 +1080,13 @@ class TestFullyShardNDTraining(FSDPTest):
         dp_pg = dp_mesh.get_group()  # used for `replicate()`
 
         torch.manual_seed(42)
-        model = nn.Sequential(
-            nn.LayerNorm(mlp_dim, bias=False),
-            # Use multiplier of 3 to exercise uneven case
-            MLP(mlp_dim, dim_multiplier=3),
-            MLP(mlp_dim),
-            MLP(mlp_dim, dim_multiplier=3),
-        )
+        model = MLPStack(mlp_dim)
         ref_model = copy.deepcopy(model).cuda()
         replicate(ref_model, device_ids=[self.rank], process_group=dp_pg)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
-
-        model = parallelize_module(
-            model,
-            device_mesh=tp_mesh,
-            # Leave the layer norm as implicitly replicated
-            parallelize_plan={
-                # Pass `use_local_output=False` to keep as DTensor to preserve
-                # uneven activation dims
-                "1.in_proj": ColwiseParallel(use_local_output=False),
-                "1.out_proj": RowwiseParallel(use_local_output=False),
-                "2.in_proj": ColwiseParallel(use_local_output=False),
-                "2.out_proj": RowwiseParallel(use_local_output=False),
-                "3.in_proj": ColwiseParallel(use_local_output=False),
-                "3.out_proj": RowwiseParallel(),
-            },
+        model.parallelize(
+            tp_mesh, dp_mesh, use_activation_checkpointing, reshard_after_forward
         )
-        for mlp in model:
-            if use_activation_checkpointing:
-                checkpoint(mlp)
-            fully_shard(mlp, mesh=dp_mesh, reshard_after_forward=reshard_after_forward)
-        fully_shard(model, mesh=dp_mesh, reshard_after_forward=reshard_after_forward)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
         torch.manual_seed(42 + dp_pg.rank() + 1)
