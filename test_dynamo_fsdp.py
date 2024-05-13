@@ -485,13 +485,10 @@ def run(model, optim, n_iter, hidden_dim):
 
 def main_compiled(n_iter, activation_checkpoint, backend):
     model, optim, hidden_dim = init(activation_checkpoint=activation_checkpoint)
-    # per-param FSDP does lazy init using 1st run, so run it once to init using eager mode
-    run(model, optim, 1, hidden_dim)
-    print("done eager 1st run for compiled!")
 
     def compiler_fn(gm):
         torch_log.warning("Compiling autograd?")
-        return torch.compile(gm, backend=backend, fullgraph=True)
+        return torch.compile(gm, backend=backend, fullgraph=False)
 
     if apply_fsdp:
         torch._dynamo.config.trace_distributed = True
@@ -503,7 +500,7 @@ def main_compiled(n_iter, activation_checkpoint, backend):
     #     # HACK: delay rank 0 by X seconds, so that rank 1 will always fail first.
     #     import time
     #     time.sleep(600)
-    model_compiled = torch.compile(model, backend=backend, fullgraph=True)
+    model_compiled = torch.compile(model, backend=backend, fullgraph=False)
     with compiled_autograd.enable(compiler_fn):
         res = run(model_compiled, optim, n_iter, hidden_dim)
     print(f"res: {res}")
@@ -529,9 +526,6 @@ def main_compiled(n_iter, activation_checkpoint, backend):
 
 def main_eager(n_iter, activation_checkpoint):
     model, optim, hidden_dim = init(activation_checkpoint=activation_checkpoint)
-    # per-param FSDP does lazy init using 1st run, so run it once to init using eager mode
-    run(model, optim, 1, hidden_dim)
-    print("done eager 1st run for eager!")
 
     res = run(model, optim, n_iter, hidden_dim)
     for state in torch.distributed._composable_state._module_state_mapping.values():

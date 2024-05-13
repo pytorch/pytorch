@@ -254,7 +254,9 @@ class FSDPState(_State):
             t for t in flat_outputs if (torch.is_tensor(t) and t.requires_grad)
         )
         if tensors:
-            if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+            # Invariant: if Compiled Autograd is used, regardless of whether FWD is eager,
+            # we must use the Traceable FSDP codepath.
+            if not torch._dynamo.compiled_autograd.compiled_autograd_enabled:
                 register_multi_grad_hook(tensors, self._pre_backward, mode="any")
             else:
                 for tensor in tensors:
@@ -265,7 +267,7 @@ class FSDPState(_State):
         if self._state_ctx.post_backward_final_callback_queued:
             return
         self._state_ctx.post_backward_final_callback_queued = True
-        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        if not torch._dynamo.compiled_autograd.compiled_autograd_enabled:
             Variable._execution_engine.queue_callback(
                 functools.partial(FSDPState._root_post_backward_final_callback, self)
             )

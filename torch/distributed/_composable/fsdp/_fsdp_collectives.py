@@ -140,7 +140,7 @@ def foreach_all_gather(
             all_gather_inputs = [t for ts in param_all_gather_inputs for t in ts]
         inp_split_sizes = [t.numel() for t in all_gather_inputs]
         all_gather_input_numel = sum(inp_split_sizes)
-        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        if not torch._dynamo.compiled_autograd.compiled_autograd_enabled:
             all_gather_output = torch.empty(
                 (all_gather_input_numel * world_size,), dtype=dtype, device=device
             )
@@ -206,13 +206,14 @@ def foreach_all_gather_copy_out(
         fsdp_param.init_all_gather_outputs(
             all_gather_input_numels, all_gather_input_dtypes, world_size, device
         )  # no-op after 1st call
+        fsdp_param.init_unsharded_param()  # no-op after 1st call (needed for compile)
         fsdp_param.alloc_all_gather_outputs()
     all_gather_output = all_gather_output.view(world_size, -1)
     # NOTE: This is the biggest difference between eager and compile code path.
     # In eager, we directly copy from `all_gather_output` into `fsdp_param.all_gather_output` (`fsdp_param._unsharded_param` will be updated because of shared storage),
     # but in compile path we copy from `as_strided(all_gather_output)` into `fsdp_param._unsharded_param` to avoid having `fsdp_param.all_gather_output` as graph input.
     # They are equivalent and must produce the same result.
-    if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+    if not torch._dynamo.compiled_autograd.compiled_autograd_enabled:
         gen = (t for fsdp_param in fsdp_params for t in fsdp_param.all_gather_outputs)
         if all_gather_output.dtype == torch.uint8:
             out = [t.view(world_size, -1).view(torch.uint8) for t in gen]
@@ -237,7 +238,7 @@ def foreach_all_gather_copy_out(
         out = torch.ops.fsdp.split_contiguous_view_as_strided(all_gather_output, all_gather_input_split_sizes, orig_sizes, contiguous_orig_strides)
         for i, unsharded_param in enumerate(unsharded_params):
             ctx = contextlib.nullcontext()
-            if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+            if not torch._dynamo.compiled_autograd.compiled_autograd_enabled:
                 ctx = torch.autograd._unsafe_preserve_version_counter(unsharded_param)
             with torch.no_grad(), ctx:
                 unsharded_param.copy_(out[i])
@@ -361,7 +362,7 @@ def foreach_reduce_scatter_copy_in(
     world_size: int,
 ) -> None:
     reduce_scatter_input = reduce_scatter_input.view(world_size, -1)
-    if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+    if not torch._dynamo.compiled_autograd.compiled_autograd_enabled:
         torch._chunk_cat(
             unsharded_grads, dim=0, num_chunks=world_size, out=reduce_scatter_input
         )

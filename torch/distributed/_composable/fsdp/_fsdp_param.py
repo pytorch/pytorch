@@ -314,7 +314,7 @@ class FSDPParam:
         if hasattr(self, "_unsharded_param"):  # after the 1st all-gather
             inner_tensor = self._sharded_local_tensor
             if (
-                torch.distributed._functional_collectives.is_torchdynamo_compiling()
+                torch._dynamo.compiled_autograd.compiled_autograd_enabled
                 or not hasattr(inner_tensor, "fsdp_post_all_gather")
             ):
                 return  # already initialized
@@ -331,7 +331,7 @@ class FSDPParam:
             return
         inner_tensor = self._sharded_local_tensor
         if (
-            not torch.distributed._functional_collectives.is_torchdynamo_compiling()
+            not torch._dynamo.compiled_autograd.compiled_autograd_enabled
             and hasattr(inner_tensor, "fsdp_post_all_gather")
         ):
             all_gather_outputs = self._unflatten_all_gather_outputs()
@@ -356,7 +356,7 @@ class FSDPParam:
             storage_offset=0,
         )
         if self.is_dtensor:
-            if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+            if not torch._dynamo.compiled_autograd.compiled_autograd_enabled:
                 unsharded_param = _from_local_no_grad(
                     unsharded_param,
                     self._tp_spec.mesh,
@@ -404,7 +404,7 @@ class FSDPParam:
             )
         shard_rank = self.post_forward_mesh_info.shard_mesh_rank
         sharded_numel = numel // shard_world_size
-        if torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        if torch._dynamo.compiled_autograd.compiled_autograd_enabled:
             raise Exception("NYI(yf225): need to use ._unsharded_param instead of .all_gather_output for compile, to avoid having .all_gather_output as graph input")
         self._sharded_post_forward_param_data = (
             self.all_gather_outputs[0].narrow(
@@ -455,7 +455,7 @@ class FSDPParam:
             _raise_assert_with_print(
                 f"Expects size {self.sharded_size} but got {tensor.shape}"
             )
-        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        if not torch._dynamo.compiled_autograd.compiled_autograd_enabled:
             ret = _from_local_no_grad(
                 tensor,
                 self._global_mesh,
@@ -481,7 +481,7 @@ class FSDPParam:
         assert isinstance(self.post_forward_mesh_info, HSDPMeshInfo)
         # TODO: Prefer this DTensor to be read-only and generalize the
         # placement once we support TP.
-        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        if not torch._dynamo.compiled_autograd.compiled_autograd_enabled:
             ret = _from_local_no_grad(
                 tensor,
                 self.post_forward_mesh_info.mesh,
@@ -525,7 +525,7 @@ class FSDPParam:
         # TODO(yf225): support the len(self.all_gather_outputs) > 1 case (i.e. support custom fsdp_pre_all_gather)
         assert len(self.all_gather_outputs) == 1
         assert len(self.all_gather_output_storage_sizes) == 1
-        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        if not torch._dynamo.compiled_autograd.compiled_autograd_enabled:
             alloc_storage(self.all_gather_outputs[0], self.all_gather_output_storage_sizes[0])
         else:
             alloc_storage(self._unsharded_param, self.all_gather_output_storage_sizes[0])
@@ -541,7 +541,7 @@ class FSDPParam:
         # because .all_gather_output and ._unsharded_param share the same storage.
         # We use ._unsharded_param under compile just to avoid having .all_gather_output as graph input.
         assert len(self.all_gather_outputs) == 1
-        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        if not torch._dynamo.compiled_autograd.compiled_autograd_enabled:
             free_storage(self.all_gather_outputs[0])
         else:
             free_storage(self._unsharded_param)
@@ -552,7 +552,7 @@ class FSDPParam:
         if self.sharded_state == ShardedState.SHARDED:
             # TODO(yf225): support "fsdp_pre_all_gather" case under compile
             if (
-                not torch.distributed._functional_collectives.is_torchdynamo_compiling()
+                not torch._dynamo.compiled_autograd.compiled_autograd_enabled
                 and hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather")
             ):
                 sharded_local_tensor = self._sharded_local_tensor
@@ -577,7 +577,7 @@ class FSDPParam:
         elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             # TODO(yf225): support "fsdp_pre_all_gather" case under compile
             if (
-                not torch.distributed._functional_collectives.is_torchdynamo_compiling()
+                not torch._dynamo.compiled_autograd.compiled_autograd_enabled
                 and hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather")
             ):
                 raise NotImplementedError
