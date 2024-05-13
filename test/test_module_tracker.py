@@ -26,8 +26,10 @@ class TestModuleTracker(TestCase):
                 super().__init__()
                 self.a = Foo()
                 self.b = torch.nn.ModuleDict({"nest": Foo()})
+                self.c = torch.nn.ModuleList([Foo()])
 
             def forward(self, x):
+                x = self.c[0](x)
                 return self.b["nest"](self.a(x))
 
         mod = Mod()
@@ -43,8 +45,10 @@ class TestModuleTracker(TestCase):
         self.assertEqual(
             seen_fw,
             [
+                ({"Global", "Mod", "Mod.c.0"}, False),
                 ({"Global", "Mod", "Mod.a"}, False),
                 ({"Global", "Mod", "Mod.b.nest"}, False),
+                ({"Global", "Mod", "Mod.c.0"}, False),
                 ({"Global", "Mod", "Mod.a"}, False),
                 ({"Global", "Mod", "Mod.b.nest"}, False),
             ],
@@ -55,8 +59,10 @@ class TestModuleTracker(TestCase):
             [
                 ({"Global", "Mod", "Mod.b.nest"}, True),
                 ({"Global", "Mod", "Mod.a"}, True),
+                ({"Global", "Mod", "Mod.c.0"}, True),
                 ({"Global", "Mod", "Mod.b.nest"}, True),
                 ({"Global", "Mod", "Mod.a"}, True),
+                ({"Global", "Mod", "Mod.c.0"}, True),
             ],
         )
 
