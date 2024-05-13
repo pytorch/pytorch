@@ -206,9 +206,6 @@ class CacheBase:
         )
 
     def __init__(self) -> None:
-        if not torch.cuda.is_available():
-            return
-
         self.system = CacheBase.get_system()
 
     def get_local_cache(self) -> Dict[str, Any]:
@@ -936,8 +933,13 @@ class FxGraphCache:
 
         # HigherOrderOperators should be handled on a case-by-case basis.
         # Currently, we just skip caching if we have any.
+        # We also skip if there are any torchbind objects.
         for node in gm.graph.nodes:
             if isinstance(node.target, torch._ops.HigherOrderOperator):
+                raise BypassFxGraphCache
+            if node.op == "getattr" and isinstance(
+                getattr(gm, node.target), torch._C.ScriptObject
+            ):
                 raise BypassFxGraphCache
 
     @staticmethod
@@ -1031,6 +1033,7 @@ class CompiledFxGraph:
     mutated_inputs: Set[str]
     mutated_input_idxs: Set[int]
     constants: Dict[str, torch.Tensor]
+    torchbind_constants: Dict[str, torch._C.ScriptObject]
     output_strides: Optional[List[Optional[Tuple[int, ...]]]]
     disabled_cudagraphs_reason: Optional[str]
     metrics_deltas: metrics.CachedMetricsDeltas
@@ -1062,6 +1065,7 @@ class CompiledFxGraph:
         self.mutated_inputs = graph.mutated_inputs
         self.mutated_input_idxs = set(graph.mutated_input_idxs)
         self.constants = graph.constants
+        self.torchbind_constants = graph.torchbind_constants
         self.output_strides = output_strides
         self.disabled_cudagraphs_reason = disabled_cudagraphs_reason
         self.metrics_deltas = metrics_deltas

@@ -379,7 +379,7 @@ You can also pass the `CMAKE_VARS="..."` environment variable to specify additio
 See [setup.py](./setup.py) for the list of available variables.
 
 ```bash
-CMAKE_VARS="BUILD_CAFFE2=ON BUILD_CAFFE2_OPS=ON" make -f docker.Makefile
+make -f docker.Makefile
 ```
 
 ### Building the Documentation
