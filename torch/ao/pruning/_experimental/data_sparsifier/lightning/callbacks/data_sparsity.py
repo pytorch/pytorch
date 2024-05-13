@@ -1,7 +1,6 @@
 from collections import defaultdict
 from copy import deepcopy
-import torch
-from typing import Any, Optional, Dict
+from typing import Any, Optional, Dict, TYPE_CHECKING
 import pytorch_lightning as pl  # type: ignore[import]
 
 from ._data_sparstity_utils import (
@@ -9,6 +8,9 @@ from ._data_sparstity_utils import (
     _log_sparsified_level,
     _get_valid_name
 )
+
+if TYPE_CHECKING:
+    import torch
 
 
 class PostTrainingDataSparsity(pl.callbacks.Callback):
