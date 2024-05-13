@@ -1,4 +1,5 @@
 
+#include <torch/csrc/distributed/c10d/Work.hpp>
 #ifdef USE_C10D_NCCL
 
 #include <exception>
@@ -2247,6 +2248,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
       enableTiming_.load(),
       dist_debug_level_);
   if (record) {
+    bool isP2P = isP2POp(opType);
     // Ideally record every work that we enqueue, rather than every work we
     // create.
     // - at the time of this PR we do not currently enqueue every created work
@@ -2270,7 +2272,8 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
         inputs,
         outputs,
         r->ncclStartEvent_.get(),
-        r->ncclEndEvent_.get());
+        r->ncclEndEvent_.get(),
+        isP2P);
   }
   return r;
 }
@@ -2859,6 +2862,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // First let NCCL streams wait for input tensors allocation streams
   syncStream(device, ncclEvents_[key], ncclStream);
 
+  bool isP2P = isP2POp(opType);
   // Work itself will create the CUDA events on all GPUs of tensors
   c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> work;
   if (coalescing_state_) {
@@ -2878,7 +2882,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         {tensor},
         nullptr,
         nullptr,
-        /*isP2P=*/true);
+        isP2P);
     // TODO(whc) if we want to make the per-p2p-op flightrecorder entries get
     // their timings/states updated by proxy when the Work obj representing the
     // coalesce group gets its update, we could accumulate these trace_ids
@@ -2911,7 +2915,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         {tensor},
         work->ncclStartEvent_.get(),
         work->ncclEndEvent_.get(),
-        /*isP2P=*/true);
+        isP2P);
   }
 
   // is gpuGuard needed for the if block below, or can i swap them

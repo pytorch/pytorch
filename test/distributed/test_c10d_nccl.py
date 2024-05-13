@@ -3757,7 +3757,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             input_sizes = op_sizes[seq % ops_per_repeat]
             profiling_name = "nccl:recv 0<-1" if self.rank == 0 else "nccl:send 1->0"
             self.assertEqual(t["entries"][seq]["profiling_name"], profiling_name)
-            self.assertEqual(t["entries"][seq]["collective_seq_id"], expected_seq)
+            self.assertEqual(t["entries"][seq]["p2p_seq_id"], expected_seq)
             expected_seq += 1
             self.assertEqual(t["entries"][seq]["op_id"], expected_op_id)
             expected_op_id += 1

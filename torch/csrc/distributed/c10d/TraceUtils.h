@@ -32,6 +32,7 @@ static c10::IValue pg_id_key = "pg_id";
 static c10::IValue pg_name_key = "process_group";
 static c10::IValue collective_seq_id_key = "collective_seq_id";
 static c10::IValue p2p_seq_id_key = "p2p_seq_id";
+static c10::IValue is_p2p_key = "is_p2p";
 static c10::IValue op_id_key = "op_id";
 static c10::IValue profiling_name_key = "profiling_name";
 static c10::IValue input_sizes_key = "input_sizes";
@@ -498,7 +499,7 @@ struct NCCLTraceBuffer {
       const std::vector<at::Tensor>& outputs,
       Event* start,
       Event* end,
-      bool isP2P = "false") {
+      bool isP2P) {
     if (!enabled_) {
       return c10::nullopt;
     }
@@ -715,6 +716,7 @@ struct NCCLTraceBuffer {
               ? int64_t(*e.time_discovered_completed_)
               : c10::IValue());
       dict.insert(retired_key, e.retired_);
+      dict.insert(is_p2p_key, e.isP2P_);
 
       auto frames = new_list();
       for (int64_t frame : tb) {
