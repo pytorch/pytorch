@@ -200,6 +200,11 @@ static void check_shape_forward(const Tensor& input,
 //  but weight/bias and grad_weight/grad_bias are always CPU tensor.
 //
 
+static bool enabled_fpmatch_mode_bf16_for_fp32_for_mkldnn_conv(){
+  return at::globalContext().float32Precision("mkldnn", "conv") == "bf16";
+}
+
+
 static inline at::MemoryFormat mkldnn_convolution_memory_format(int64_t dims, bool is_channels_last) {
    auto memory_format =  at::MemoryFormat::Contiguous;
    if (is_channels_last) {
@@ -219,12 +224,15 @@ static void _mkldnn_convolution_out (
     IntArrayRef padding,
     int64_t groups,
     bool is_channels_last,
-    const ideep::attr_t& op_attr) {
+    ideep::attr_t& op_attr) {
   auto memory_format = mkldnn_convolution_memory_format(input_t.ndimension(), is_channels_last);
   auto input = input_t.is_mkldnn() ? input_t : input_t.contiguous(memory_format);
   auto weight = weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
   const ideep::tensor x = itensor_from_tensor(input, /*from_const_data_ptr*/true);
   const ideep::tensor w = itensor_from_tensor(weight, /*from_const_data_ptr*/true);
+  if (enabled_fpmatch_mode_bf16_for_fp32_for_mkldnn_conv() && input_t.scalar_type() ==at::kFloat){
+    op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
+  }
   if (bias.defined()) {
     const ideep::tensor b = itensor_from_tensor(bias, /*from_const_data_ptr*/true);
     ideep::convolution_forward::compute_v3(
@@ -470,6 +478,10 @@ Tensor mkldnn_convolution_pointwise_binary(
       po.append_eltwise(unary_alg, 0.f, 0.f);
     }
     op_attr.set_post_ops(po);
+
+    if (enabled_fpmatch_mode_bf16_for_fp32_for_mkldnn_conv() && input_t.scalar_type() ==at::kFloat){
+      op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
+    }
 
     if (bias.defined()) {
       const ideep::tensor b = itensor_from_tensor(bias);
@@ -717,6 +729,10 @@ Tensor _mkldnn_convolution_transpose(
   if (use_channels_last) {
     output.resize_(output_sizes, memory_format);
     y = itensor_from_tensor(output);
+  }
+
+  if (enabled_fpmatch_mode_bf16_for_fp32_for_mkldnn_conv() && input_t.scalar_type() ==at::kFloat){
+    op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
   }
 
   if (bias.defined()) {

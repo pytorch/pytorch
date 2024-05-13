@@ -26,6 +26,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     dtypes,
 )
+from torch.testing._internal.common_mkldnn import bf32_on_and_off
 
 # batched grad doesn't support mkldnn
 gradcheck = functools.partial(gradcheck, check_batched_grad=False)
@@ -279,12 +280,15 @@ class TestMkldnn(TestCase):
                 if bias:
                     self.assertEqual(conv.bias.grad, mkldnn_conv.bias.grad)
 
+    @bf32_on_and_off()
     def test_conv1d(self):
         self._test_conv_base(dim=1)
 
+    @bf32_on_and_off()
     def test_conv2d(self):
         self._test_conv_base(dim=2)
 
+    @bf32_on_and_off()
     def test_conv3d(self):
         self._test_conv_base(dim=3)
 
@@ -399,6 +403,7 @@ class TestMkldnn(TestCase):
                     self.assertEqual(conv1.bias.grad, conv2.bias.grad, atol=prec, rtol=prec)
                 self.assertEqual(x1.grad, x2.grad, atol=prec, rtol=prec)
 
+    @bf32_on_and_off()
     def test_conv_nhwc_fp32(self):
         self._test_conv_deconv_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=torch.float32)
         self._test_conv_deconv_nhwc_base(torch.nn.Conv2d, torch.channels_last, dtype=torch.float32)
@@ -434,6 +439,7 @@ class TestMkldnn(TestCase):
             self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.channels_last_3d, dtype=dtype, prec=prec)
 
 
+    @bf32_on_and_off()
     def test_conv_transpose_nhwc_fp32(self):
         self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.float32)
         self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.float32)
@@ -518,12 +524,15 @@ class TestMkldnn(TestCase):
                 if bias:
                     self.assertEqual(conv.bias.grad, conv_ref.bias.grad)
 
+    @bf32_on_and_off()
     def test_conv_transpose1d(self):
         self._test_conv_transpose_base(dim=1)
 
+    @bf32_on_and_off()
     def test_conv_transpose2d(self):
         self._test_conv_transpose_base(dim=2)
 
+    @bf32_on_and_off()
     def test_conv_transpose3d(self):
         self._test_conv_transpose_base(dim=3)
 
