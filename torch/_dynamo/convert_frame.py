@@ -71,7 +71,6 @@ from .guards import (
     GuardedCode,
 )
 from .hooks import Hooks
-from .output_graph import OutputGraph
 from .replay_record import ExecutionRecord
 from .symbolic_convert import InstructionTranslator, SpeculationLog
 from .trace_rules import is_numpy
@@ -304,12 +303,6 @@ def convert_frame_assert(
         code = frame.f_code
 
         cache_size = compute_cache_size(frame, cache_entry)
-        recompile_reasons = None
-        if is_recompilation(cache_size):
-            recompile_reasons = get_and_maybe_log_recompilation_reason(
-                cache_entry, frame
-            )
-
         input_codes.add(code)
         if code in output_codes:
             return None
@@ -355,29 +348,6 @@ def convert_frame_assert(
 
         if is_generator(code):
             unimplemented("generator")
-        exceeded, limit_type = exceeds_cache_size_limit(cache_size)
-        if exceeded:
-
-            def format_func_info(code):
-                return f"'{code.co_name}' ({code.co_filename}:{code.co_firstlineno})"
-
-            def format_guard_failures():
-                assert recompile_reasons, "TODO(whc) any other recompile reasons?"
-                return recompile_reasons[-1]
-
-            log.warning(
-                "torch._dynamo hit config.%s (%s)\n"
-                "   function: %s\n"
-                "   last reason: %s\n"
-                'To log all recompilation reasons, use TORCH_LOGS="recompiles".\n'
-                "To diagnose recompilation issues, see %s.",
-                limit_type,
-                getattr(config, limit_type),
-                format_func_info(code),
-                format_guard_failures(),
-                troubleshooting_url,
-            )
-            unimplemented(f"{limit_type} reached")
 
         if not has_tensor_in_frame(frame):
             return None
@@ -418,6 +388,7 @@ def convert_frame_assert(
             export,
             export_constraints,
             hooks,
+            cache_entry,
             cache_size,
             frame,
             frame_state=frame_state,
@@ -437,6 +408,9 @@ def convert_frame_assert(
 from collections import OrderedDict
 
 from torch.utils.hooks import RemovableHandle
+
+if typing.TYPE_CHECKING:
+    from .output_graph import OutputGraph
 
 # we have to use `OrderedDict` to make `RemovableHandle` work.
 _bytecode_hooks: Dict[int, BytecodeHook] = OrderedDict()
@@ -465,6 +439,7 @@ def _compile(
     export: bool,
     export_constraints,
     hooks: Hooks,
+    cache_entry,
     cache_size: CacheSizeRelevantForFrame,
     frame: Optional[types.FrameType] = None,
     frame_state=None,
@@ -673,6 +648,38 @@ def _compile(
         return guarded_code
 
     with compile_context(CompileContext(compile_id)):
+        # Check recompilations
+        recompile_reasons = None
+        if is_recompilation(cache_size) and frame:
+            recompile_reasons = get_and_maybe_log_recompilation_reason(
+                cache_entry, frame
+            )
+
+        exceeded, limit_type = exceeds_cache_size_limit(cache_size)
+        if exceeded:
+
+            def format_func_info(code):
+                return f"'{code.co_name}' ({code.co_filename}:{code.co_firstlineno})"
+
+            def format_guard_failures():
+                if not recompile_reasons:
+                    return "Unable to find recompilation reasons"
+                return recompile_reasons[-1]
+
+            log.warning(
+                "torch._dynamo hit config.%s (%s)\n"
+                "   function: %s\n"
+                "   last reason: %s\n"
+                'To log all recompilation reasons, use TORCH_LOGS="recompiles".\n'
+                "To diagnose recompilation issues, see %s.",
+                limit_type,
+                getattr(config, limit_type),
+                format_func_info(code),
+                format_guard_failures(),
+                troubleshooting_url,
+            )
+            unimplemented(f"{limit_type} reached")
+
         log.debug(
             "torchdynamo start compiling %s %s:%s, stack (elided %s frames):\n%s",
             code.co_name,
