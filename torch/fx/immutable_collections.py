@@ -1,3 +1,4 @@
+import types
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Type, TypeVar
 
 from torch.utils._pytree import (
@@ -41,7 +42,7 @@ def _create_immutable_container_class(
 ) -> Type[_T]:
     namespace = namespace or {}
     namespace.update((method, _no_mutation) for method in mutable_functions)
-    container_class = type("immutable_" + base.__name__, (base,), namespace)
+    container_class = types.new_class("immutable_" + base.__name__, (base,), namespace)
     return container_class
 
 
