@@ -59,7 +59,6 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class RandomDatasetMock(torch.utils.data.Dataset):
-
     def __getitem__(self, index):
         return torch.tensor([torch.rand(1).item(), random.uniform(0, 1)])
 
@@ -68,7 +67,6 @@ class RandomDatasetMock(torch.utils.data.Dataset):
 
 
 class TestCheckpoint(TestCase):
-
     # This runs checkpoint_sequential on each of the nets in
     # module_lists_to_compare, and compares them against the uncheckpointed model.
     # To compare, it checks outputs as well as input gradients and parameter gradients
@@ -116,9 +114,7 @@ class TestCheckpoint(TestCase):
     # Test whether checkpoint is being triggered or not. For this, we check
     # the number of times forward pass happens
     def test_checkpoint_trigger(self):
-
         class Net(nn.Module):
-
             def __init__(self):
                 super().__init__()
                 self.counter = 0
@@ -343,7 +339,6 @@ class TestCheckpoint(TestCase):
         # This should run without error
 
     def test_checkpoint_non_tensor(self):
-
         def run_fn(tensor1, tensor2):
             if tensor2 is None:
                 return tensor1
@@ -801,7 +796,6 @@ class TestONNXUtils(TestCase):
         self.assertEqual(paddings, [0, 3, 1, 0, 4, 2])
 
     def test_check_onnx_broadcast(self):
-
         def try_check_onnx_broadcast(dims1, dims2, expect_broadcast, expect_fail):
             broadcast = True
             fail = False
@@ -854,7 +848,6 @@ class TestONNXUtils(TestCase):
 
 
 class TestHipify(TestCase):
-
     def test_import_hipify(self):
         from torch.utils.hipify import hipify_python  # noqa: F401
 
