@@ -42,8 +42,7 @@ def _create_immutable_container_class(
 ) -> Type[_T]:
     namespace = namespace or {}
     namespace.update((method, _no_mutation) for method in mutable_functions)
-    container_class = types.new_class("immutable_" + base.__name__, (base,), namespace)
-    return container_class
+    return types.new_class("immutable_" + base.__name__, (base,), namespace)
 
 
 immutable_list = _create_immutable_container_class(
