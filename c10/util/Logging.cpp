@@ -45,7 +45,7 @@ std::function<::c10::Error::Backtrace()>& GetFetchStackTrace() {
         get_backtrace(/*frames_to_skip=*/1));
 #endif
   };
-  return &func;
+  return func;
 }
 } // namespace
 
