@@ -413,6 +413,19 @@ class BaseSchedulerNode:
             V.graph.wrapper_code.codegen_allocation(self.node)
             return
 
+        if (
+            hasattr(V.kernel, "local_buffer")
+            and V.kernel.local_buffer is not None
+            and hasattr(V.kernel.local_buffer, "original_node_name")
+            and V.kernel.local_buffer.original_node_name == self.node.get_name()
+        ):
+            # Avoid allocation of this buffer since its usage has been
+            # replaced with local buffer. And never resue this buffer,
+            # sinice it's not real allocated.
+            V.graph.never_reuse_buffers.add(self.node.get_name())
+            V.graph.wrapper_code.freed.add(self.node.get_name())
+            return
+
         # hacky check for if V.kernel is a real kernel or NullHandler
         if (
             hasattr(V.kernel, "args")

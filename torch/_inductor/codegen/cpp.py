@@ -3801,8 +3801,13 @@ class CppScheduling(BaseScheduling):
                 cpp_kernel_proxy_list.append(cpp_kernel_proxy)
                 nodes_list.append(_node.get_nodes())  # type: ignore[arg-type]
 
-            if not node.check_outer_fusion_loop_level_attr(
-                cpp_kernel_proxy_list, node.outer_loop_fusion_depth
+            if not (
+                node.check_outer_fusion_loop_level_attr(
+                    cpp_kernel_proxy_list, node.outer_loop_fusion_depth
+                )
+                # In the typical case, the local buffer should be corresponding to an output buffer,
+                # which stores with temp values at first before loading later.
+                and local_buffers[0].original_node_name in kernel_group.args.output_buffers
             ):
                 return False
             outer_fusion_cpp_kernel_proxy = node.merge_outer_fusion_kernels(
@@ -3812,6 +3817,10 @@ class CppScheduling(BaseScheduling):
                 outer_fusion_cpp_kernel_proxy,
                 [_node for _nodes in nodes_list for _node in _nodes],
             )
+
+            # Remove the node from kernel group args, since using local buffer now
+            kernel_group.args.output_buffers.pop(local_buffers[0].original_node_name)
+
             return True
 
         if not try_outer_loop_fusion_with_local_buf(node):
