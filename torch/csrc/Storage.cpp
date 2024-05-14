@@ -236,7 +236,7 @@ static void THPStorage_subclass_dealloc(PyObject* self) {
   if (type->tp_del) {
     PyObject_GC_Track(self);
     type->tp_del(self);
-    if (self->ob_refcnt > 0) {
+    if (Py_REFCNT(self) > 0) {
       // Resurrected (see above comment about resurrection from `__del__`)
       return;
     }
