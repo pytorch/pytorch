@@ -357,9 +357,11 @@ def cprofile_wrapper(func):
             lambda: {
                 "name": "dynamo_cprofile_prof",
                 "type": "prof",
-                "encoding": "ascii",
+                "encoding": "base64",
             },
-            payload_fn=lambda: base64.encodebytes(open(profile_path, "rb").read()),
+            payload_fn=lambda: base64.encodebytes(
+                open(profile_path, "rb").read()
+            ).decode("ascii"),
         )
 
         return retval
