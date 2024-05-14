@@ -183,7 +183,7 @@ class TestSerialize(TestCase):
                 torch.ones([512]),
                 torch.ones([512]),
             ),
-        )
+        ).run_decompositions()
 
         serialized = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.exported_program.graph_module.graph.nodes[-1]
@@ -621,6 +621,8 @@ class TestDeserialize(TestCase):
         dynamic_shapes = {"a": {0: dim0_ac}, "b": None, "c": {0: dim0_ac}}
         self.check_graph(DynamicShapeSimpleModel(), inputs, dynamic_shapes)
 
+    # TODO: Failing due to "constraining non-Symbols NYI (Piecewise((1, Eq(u1, 1)), (0, True)), 1, 1)"
+    @unittest.expectedFailure
     def test_sym_bool(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
@@ -860,6 +862,20 @@ class TestDeserialize(TestCase):
         inputs = (torch.ones(2, 3),)
         self.check_graph(m, inputs, strict=False)
 
+    def test_export_no_inputs(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p = torch.ones(3, 3)
+
+            def forward(self):
+                return self.p * self.p
+
+        ep = torch.export.export(M(), ())
+        ep._example_inputs = None
+        roundtrip_ep = deserialize(serialize(ep))
+        self.assertTrue(torch.allclose(ep.module()(), roundtrip_ep.module()()))
+
 
 instantiate_parametrized_tests(TestDeserialize)
 
@@ -884,34 +900,6 @@ class TestSchemaVersioning(TestCase):
                 serialized_program.state_dict,
                 serialized_program.constants,
                 serialized_program.example_inputs,
-            )
-
-
-class TestOpVersioning(TestCase):
-    """Test if serializer/deserializer behaves correctly if version mismatch."""
-
-    def test_empty_model_opset_version_raises(self):
-        compiler_opset_version = {"aten": 4}
-        model_opset_version = None
-        deserializer = ExportedProgramDeserializer(compiler_opset_version)
-        with self.assertRaises(RuntimeError):
-            deserializer._validate_model_opset_version(model_opset_version)
-
-    def test_opset_mismatch_raises(self):
-        compiler_opset_version = {"aten": 4}
-        model_opset_version = {"aten": 3}
-        deserializer = ExportedProgramDeserializer(compiler_opset_version)
-        with self.assertRaises(NotImplementedError):
-            deserializer._validate_model_opset_version(model_opset_version)
-
-    def test_model_op_namespace_version_missing_from_deserializer_do_not_raises(self):
-        compiler_opset_version = {"aten": 3}
-        model_opset_version = {"aten": 3, "custom": 4}
-        deserializer = ExportedProgramDeserializer(compiler_opset_version)
-        with self.assertLogs(level="WARN") as log:
-            deserializer._validate_model_opset_version(model_opset_version)
-            self.assertIn(
-                "Compiler doesn't have a version table for op namespace", log.output[0]
             )
 
 

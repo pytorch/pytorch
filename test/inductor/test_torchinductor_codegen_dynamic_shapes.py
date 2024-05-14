@@ -17,7 +17,7 @@ from torch.testing._internal.inductor_utils import (
     _check_has_dynamic_shape,
     GPU_TYPE,
     HAS_CPU,
-    HAS_GPU,
+    HAS_CUDA,
 )
 
 if IS_WINDOWS and IS_CI:
@@ -92,13 +92,7 @@ def check_codegen(
         _check_has_dynamic_shape(self, code)
     else:
         code = run_and_get_triton_code(run, *example_inputs, **kwargs)
-        triton_kernel_found = False
-        lines = code.split("\n")
-        for line in lines:
-            if "def triton" in line:
-                triton_kernel_found = True
-                continue
-        self.assertTrue(triton_kernel_found, f"Failed to find triton kernel\n{code}")
+        self.assertTrue("def triton" in code, f"Failed to find triton kernel\n{code}")
 
     assert called, "Ran graph without calling compile_fx"
 
@@ -378,7 +372,7 @@ if HAS_CPU:
     )
 
 
-if HAS_GPU and not TEST_WITH_ASAN:
+if HAS_CUDA and not TEST_WITH_ASAN:
 
     class DynamicShapesCodegenGPUTests(TestCase):
         maxDiff = None
@@ -404,5 +398,5 @@ if HAS_GPU and not TEST_WITH_ASAN:
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_GPU:
+    if HAS_CPU or HAS_CUDA:
         run_tests(needs="filelock")
