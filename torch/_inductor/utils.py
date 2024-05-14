@@ -991,14 +991,14 @@ def use_ck_template(layout, m, n, k):
     # platform check 
     if not torch.version.hip:
         return False
+    # tensors must be on GPU
+    if not layout.device.type == "cuda":
+        return False
     # hardware check, enable for CDNA3 only for now
     device_capability = torch.cuda.get_device_capability(layout.device)
     log.debug("Device capability %s", device_capability)
     # https://llvm.org/docs/AMDGPUUsage.html#amd-gcn-gfx940-gfx942-cdna3 
     if device_capability != (9, 4):
-        return False
-    # tensors must be on GPU
-    if not layout.device.type == "cuda":
         return False
     # supported input dtypes
     if layout.dtype not in [torch.float16, torch.bfloat16]:
