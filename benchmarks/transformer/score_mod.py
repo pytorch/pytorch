@@ -1,3 +1,4 @@
+import argparse
 import itertools
 from collections import defaultdict
 from dataclasses import asdict, dataclass
@@ -242,7 +243,7 @@ def generate_experiment_configs() -> List[ExperimentConfig]:
     return all_configs
 
 
-def main():
+def main(dynamic=False):
     seed = 123
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -254,4 +255,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--dynamic",
+        action="store_true",
+        help="Runs a dynamic shapes version of compiled flex attention.",
+    )
+
+    args = parser.parse_args()
+    main(args.dynamic)
