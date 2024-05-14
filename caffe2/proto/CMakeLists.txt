@@ -1,8 +1,4 @@
-if(BUILD_CAFFE2)
-  file(GLOB Caffe2_PROTOBUF_FILES "${CMAKE_CURRENT_SOURCE_DIR}/*.proto")
-else()
-  set(Caffe2_PROTOBUF_FILES "${CMAKE_CURRENT_SOURCE_DIR}/torch.proto;${CMAKE_CURRENT_SOURCE_DIR}/caffe2.proto")
-endif()
+set(Caffe2_PROTOBUF_FILES "${CMAKE_CURRENT_SOURCE_DIR}/torch.proto;${CMAKE_CURRENT_SOURCE_DIR}/caffe2.proto")
 
 caffe2_protobuf_generate_cpp_py(Caffe2_PROTO_SRCS Caffe2_PROTO_HEADERS Caffe2_PROTO_PY ${Caffe2_PROTOBUF_FILES})
 

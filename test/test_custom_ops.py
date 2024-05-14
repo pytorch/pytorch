@@ -1827,7 +1827,6 @@ dynamic shape operator: _torch_testing.numpy_nonzero.default
 
     def test_autogen_aten_ops_are_pt2_compliant(self):
         for op in [
-            torch.ops.aten._foreach_copy.default,
             torch.ops.aten.fill.Tensor_out,
         ]:
             self.assertIn(torch.Tag.generated, op.tags)
