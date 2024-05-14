@@ -135,8 +135,8 @@ class CKGemmTemplate(CKTemplate):
 
         Returns None if the op is not suitable, otherwise returns the op to be used.
         """
-        X_meta, W_meta, Y_meta = map(
-            lambda T: T.get_layout(), [*self.input_nodes, self.output_node]
+        X_meta, W_meta, Y_meta = (
+            T.get_layout() for T in [*self.input_nodes, self.output_node]
         )
         # disable the instance if dtypes don't match
         if op.a_element_dtype != self._TORCH_DTYPE_TO_CK[X_meta.dtype]:
@@ -293,14 +293,14 @@ class CKGemmTemplate(CKTemplate):
         )
 
     def _is_rcr_f16(self):
-        X_meta, W_meta, Y_meta = map(
-            lambda T: T.get_layout(), [*self.input_nodes, self.output_node]
+        X_meta, W_meta, Y_meta = (
+            T.get_layout() for T in [*self.input_nodes, self.output_node]
         )
-        X_dtype, W_dtype, Y_dtype = map(
-            lambda m: self._TORCH_DTYPE_TO_CK[m.dtype], (X_meta, W_meta, Y_meta)
+        X_dtype, W_dtype, Y_dtype = (
+            self._TORCH_DTYPE_TO_CK[m.dtype] for m in (X_meta, W_meta, Y_meta)
         )
-        X_layout, W_layout, Y_layout = map(
-            lambda m: torch_layout_to_ck_layout(m), (X_meta, W_meta, Y_meta)
+        X_layout, W_layout, Y_layout = (
+            torch_layout_to_ck_layout(m) for m in (X_meta, W_meta, Y_meta)
         )
 
         return (
@@ -317,14 +317,14 @@ class CKGemmTemplate(CKTemplate):
         Creates a list of `CKGemmOperation` instances that match the GEMM operation this template represents.
         The instances are guaranteed to have the correct layout, dtype and dimension padding for the GEMM input arguments.
 
-        An instance may invalidate the GEMM configuration at runtime; such instances will be assigned +inf runtime by the autotune process.
+        An instance may invalidate the GEMM configuration at runtime.
+        Such instances will be assigned +inf runtime by the autotune process.
         """
         unfiltered_instances = (
             gen_ops_preselected()
             if config.rocm.use_preselected_instances and self._is_rcr_f16()
             else gen_ops_library()
         )
-        log.debug(f"unfiltered instances: %s", unfiltered_instances)
         filtered_instances = list(
             filter(lambda op: self.filter_op(op), unfiltered_instances)
         )
