@@ -296,7 +296,7 @@ TEST(ShapeAnalysisTest, MovingConstantOutOfFusionGroups) {
 
 namespace {
 
-c10::optional<int64_t> sym_dim = c10::nullopt;
+std::optional<int64_t> sym_dim = c10::nullopt;
 
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 void assertShapeEqual(c10::SymbolicShape& a, c10::SymbolicShape& e) {
@@ -306,8 +306,8 @@ void assertShapeEqual(c10::SymbolicShape& a, c10::SymbolicShape& e) {
 }
 
 void assertShapeEqual(
-    c10::optional<std::vector<c10::SymbolicShape>>& actual,
-    std::vector<c10::optional<int64_t>> expected) {
+    std::optional<std::vector<c10::SymbolicShape>>& actual,
+    std::vector<std::optional<int64_t>> expected) {
   ASSERT_TRUE(actual.has_value());
   ASSERT_EQ(actual->size(), 1);
 
@@ -332,12 +332,12 @@ TEST(ShapeAnalysisTest, SymbolicShapeAPI) {
 
   // Check vector initializer list syntax
   c10::SymbolicShape ss_concrete =
-      std::vector<c10::optional<int64_t>>{1, 56, 56};
-  c10::SymbolicShape ss1 = std::vector<c10::optional<int64_t>>{sym_dim, 56, 56};
+      std::vector<std::optional<int64_t>>{1, 56, 56};
+  c10::SymbolicShape ss1 = std::vector<std::optional<int64_t>>{sym_dim, 56, 56};
   c10::SymbolicShape ss2 =
-      std::vector<c10::optional<int64_t>>{64, sym_dim, sym_dim};
+      std::vector<std::optional<int64_t>>{64, sym_dim, sym_dim};
   c10::SymbolicShape ss3 =
-      std::vector<c10::optional<int64_t>>{sym_dim, sym_dim, sym_dim, sym_dim};
+      std::vector<std::optional<int64_t>>{sym_dim, sym_dim, sym_dim, sym_dim};
 
   auto res = calculateSymbolicShapesOnOp(
       schema, std::vector<SSAInput>{const_size_1, const_size_1});
@@ -484,7 +484,7 @@ TEST(ShapeAnalysisTest, TestShapeMultipleReturns) {
   auto res =
       calculateSymbolicShapesOnOp(max_dim_op, {ss1, const_int, false_ival});
   c10::SymbolicShape expected_res =
-      c10::SymbolicShape(std::vector<c10::optional<int64_t>>{sym_dim});
+      c10::SymbolicShape(std::vector<std::optional<int64_t>>{sym_dim});
   assertShapeEqual(res->at(0), expected_res);
   // res0 and res1 should share the same symbolic symbol
   EXPECT_EQ(res->at(0), res->at(1));
