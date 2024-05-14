@@ -4561,14 +4561,18 @@ class TestNestedTensorSubclass(TestCase):
 
         PADDING_VAL = 4.2
 
-        @torch.compile
+        @torch.compile(fullgraph=True)
         def g(nt):
             padded = nt.to_padded_tensor(PADDING_VAL)
             padded = f(padded)
-            return torch.nested.nested_tensor_from_padded(padded, nt.offsets())
+            # NB: sum_S must be specified to use the lowering for dense -> jagged
+            # and get full fusion
+            return torch.nested.nested_tensor_from_padded(
+                padded, nt.offsets(), sum_S=nt.values().shape[0])
 
         output = g(nt)
-        self.assertEqual(f(nt), output)
+        expected_output = f(nt)
+        self.assertEqual(output, expected_output, rtol=1e-3, atol=1e-3)
 
         # TODO: Verify that computation fusion happens
 

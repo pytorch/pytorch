@@ -391,8 +391,8 @@ Example::
     return nested_view_from_values_offsets_lengths(values, offsets, lengths, ragged_idx=jagged_dim)
 
 
-def nested_tensor_from_padded(padded: Tensor, offsets: Tensor, ragged_idx=1):
+def nested_tensor_from_padded(padded: Tensor, offsets: Tensor, ragged_idx=1, sum_S=None):
     from torch.nested._internal.nested_tensor import nested_from_padded
 
     # TODO: implement this for the strided layout?
-    return nested_from_padded(padded, offsets, ragged_idx)
+    return nested_from_padded(padded, offsets, ragged_idx, sum_S)

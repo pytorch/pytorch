@@ -1247,7 +1247,7 @@ def to_padded_tensor_default(func, *args, **kwargs):
 
 @register_jagged_func(
     torch.ops.aten._nested_from_padded_tensor.default,
-    "padded: t, offsets: t, dummy: jt, dim: any?",
+    "padded: t, offsets: t, dummy: jt, dim: any?, sum_S: any?",
 )
 def _nested_from_padded_tensor_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
@@ -1269,7 +1269,9 @@ def _nested_from_padded_tensor_default(func, *args, **kwargs):
         padded = padded.unsqueeze(-1)
 
     if padded.is_cuda:
-        values = torch.ops.aten._fbgemm_dense_to_jagged_forward(padded, [offsets])
+        values = torch.ops.aten._fbgemm_dense_to_jagged_forward(
+            padded, [offsets], new_kwargs["sum_S"]
+        )
 
         # shape gymnastics part 2
         if len(padded_shape) > 3:
