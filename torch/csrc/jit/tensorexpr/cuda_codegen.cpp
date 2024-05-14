@@ -897,14 +897,6 @@ void CudaCodeGen::Initialize() {
   HalfChecker halfChecker(buffer_args());
   stmt_v->accept(&halfChecker);
 
-#if defined(USE_ROCM)
-#if ROCM_VERSION < 40200
-  os() << "#include <hip/hip_runtime.h>" << std::endl;
-  if (halfChecker.hasHalf()) {
-    os() << "#include <hip/hip_fp16.h>" << std::endl;
-  }
-#endif
-#endif
   os() << device_resource_string << shared_resource_string;
 
   if (has_random_) {
@@ -1319,9 +1311,7 @@ void CudaCodeGen::CompileToNVRTC(
 
 #if defined(USE_ROCM)
   std::vector<const char*> args = {"--std=c++17"};
-#if ROCM_VERSION >= 40200
   args.push_back("-hip-pch");
-#endif
 #else
   const std::string compute = std::string("--gpu-architecture=") +
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11010

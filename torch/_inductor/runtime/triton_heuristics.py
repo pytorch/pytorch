@@ -10,6 +10,7 @@ import operator
 import os
 import os.path
 import re
+import sys
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
@@ -32,7 +33,7 @@ from .runtime_utils import (
     ceildiv,
     conditional_product,
     create_bandwidth_info_str,
-    do_bench,
+    do_bench_gpu,
     dynamo_timed,
     get_first_attr,
     get_max_y_grid,
@@ -55,11 +56,17 @@ if triton is not None:
         from triton.compiler.compiler import ASTSource
     except ImportError:
         ASTSource = None
+
+    try:
+        from triton.backends.compiler import GPUTarget
+    except ImportError:
+        GPUTarget = None
 else:
     Config = object
     KernelInterface = object
     OutOfResources = object
     ASTSource = None
+    GPUTarget = None
 
 try:
     autograd_profiler = torch.autograd.profiler
@@ -117,6 +124,33 @@ def disable_pointwise_autotuning(inductor_meta):
     if inductor_meta.get("are_deterministic_algorithms_enabled"):
         return True
     return not inductor_meta.get("autotune_pointwise", True)
+
+
+def _dump_launch_params(args, kwargs, launcher, kernel_name):
+    call_args = []
+    call_kwargs = {}
+    for arg in args:
+        if isinstance(arg, (int, bool)):
+            call_args.append(str(arg))
+        else:
+            call_args.append("T")
+    for k, v in kwargs.items():
+        if isinstance(arg, (int, bool)):
+            call_kwargs[k] = v
+        else:
+            call_kwargs[k] = v
+    for k, v in launcher.config.kwargs.items():
+        call_kwargs[k] = v
+    call_kwargs["num_warps"] = launcher.config.num_warps
+    call_kwargs["num_stages"] = launcher.config.num_stages
+    args_str = ""
+    args_str += ", ".join(call_args)
+    for k, v in call_kwargs.items():
+        args_str += f", {k}={v}"
+
+    abs_path = os.path.abspath(sys.argv[0])
+    with open(f"{abs_path}.launch_params", "a") as f:
+        f.write(f"{kernel_name} | {args_str}\n")
 
 
 class CachingAutotuner(KernelInterface):
@@ -334,11 +368,22 @@ class CachingAutotuner(KernelInterface):
             else:
                 rocm_warp_size = 64
 
-            target = (
-                (compile_meta["device_type"], compile_meta["cc"])
-                if not torch.version.hip
-                else [compile_meta["device_type"], compile_meta["cc"], rocm_warp_size]
-            )
+            if GPUTarget:
+                target = GPUTarget(
+                    compile_meta["device_type"],
+                    compile_meta["cc"],
+                    rocm_warp_size if torch.version.hip else 32,
+                )
+            else:
+                target = (
+                    (compile_meta["device_type"], compile_meta["cc"])
+                    if not torch.version.hip
+                    else [
+                        compile_meta["device_type"],
+                        compile_meta["cc"],
+                        rocm_warp_size,
+                    ]
+                )
 
             options = {
                 "num_warps": compile_meta["num_warps"],
@@ -611,7 +656,7 @@ class CachingAutotuner(KernelInterface):
                 stream=stream,
             )
 
-        return do_bench(kernel_call, rep=40, fast_flush=True)
+        return do_bench_gpu(kernel_call, rep=40, fast_flush=True)
 
     def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
         from ..compile_fx import clone_preserve_strides
@@ -718,7 +763,7 @@ class CachingAutotuner(KernelInterface):
         E.g., assuming regular autotune only get one config C1; while max-autotune get 4 configs C1, C2, C3, C4
         and max-autotune figure out C3 is the best.
 
-        Then if coordinate descnt tuning is run with max-autotune disabled, it will start from C1;
+        Then if coordinate desecnt tuning is run with max-autotune disabled, it will start from C1;
         while if coordinate descent tuning is run with max-autotune enabled, it will start from C3.
         """
         if (
@@ -787,21 +832,22 @@ class CachingAutotuner(KernelInterface):
                 {**dict(zip(self.arg_names, args)), **launcher.config.kwargs, **kwargs}
             )
 
-        # guard the record function and only call it if profiling is currently
-        # in progress, to reduce latency when profiler is not turned on. Note that
-        # the "if" statement (instead of, say, a contextlib.nullcontext) is intentional;
+        if os.environ.get("TORCHINDUCTOR_DUMP_LAUNCH_PARAMS", 0) == "1":
+            _dump_launch_params(args, kwargs, launcher, self.fn.__name__)
+
         # it is faster than entering and exiting a context manager, even if the context
         # manager is a nullcontext.
         if autograd_profiler._is_profiler_enabled:
             # grid can be a tuple of ints or a string.
-            grid_info = (
-                grid if isinstance(grid, tuple) else getattr(grid, "grid_fn_str", None)
-            )
+            if isinstance(grid, tuple):
+                grid_info = str(grid)
+            else:
+                grid_info = getattr(grid, "grid_fn_str", "")
             with torch._C._profiler._RecordFunctionFast(
                 self.inductor_meta.get("kernel_name", "triton kernel"),
                 args,
                 {
-                    "kernel_file": self.filename,
+                    "kernel_file": "" if self.filename is None else self.filename,
                     "kernel_backend": "triton",
                     "grid": grid_info,
                     "stream": stream,
