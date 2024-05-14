@@ -485,6 +485,8 @@ class MetaConverter:
         self.storage_memo[s.id] = v
 
     def meta_storage(self, s: MetaStorageDesc, callback):
+        # If we are fakeifying a tensor that has a secretly-zero-sized storage,
+        # Need to make sure to resize the meta storage too.
         if self.get_storage_memo(s) is None:
             r_s = callback(
                 lambda: torch.empty(s.size, dtype=torch.uint8, device="meta")
@@ -1306,6 +1308,11 @@ class MetaConverter:
                 t.is_gradtrackingtensor and t.level == GRAD_TENSOR_SENTINEL_VALUE
             )
             assert_metadata_eq(assert_eq, t, r, skip_symbolic=True, skip_leaf=skip_leaf)
+            # Thanks to storage resizing, it's possible to end up with a tensor
+            # that advertises a real size, but has a storage that actually has zero bytes.
+            # Need to reflect this in the generated FakeTensor.
+            if t.storage is not None and t.storage.size == 0:
+                r.untyped_storage().resize_(0)
             self.set_tensor_memo(t, r)
 
         return self.get_tensor_memo(t)
