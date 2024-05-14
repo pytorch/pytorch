@@ -1,7 +1,6 @@
 # Owner(s): ["module: mta"]
 
 import itertools
-import os
 import random
 import re
 import unittest
@@ -133,7 +132,6 @@ def get_transform_func(num_tensors, dtype, device, is_fastpath):
 
 # note(crcrpar): `zero_size` is `False` unless (dtype, device) == (torch.float32, "cuda")
 # as the pair would go through `multi_tensor_apply_kernel` if inputs are not zero size.
-@unittest.mock.patch.dict(os.environ, {"KINETO_LOG_LEVEL": "5"})
 class TestForeach(TestCase):
     @property
     def is_cuda(self):

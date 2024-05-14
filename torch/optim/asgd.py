@@ -9,7 +9,6 @@ from .optimizer import (
     _differentiable_doc,
     _disable_dynamo_if_unsupported,
     _foreach_doc,
-    _get_capturable_supported_devices,
     _get_scalar_dtype,
     _get_value,
     _maximize_doc,
@@ -221,17 +220,11 @@ def _single_tensor_asgd(
 
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
         if not torch._utils.is_compiling() and capturable:
-            capturable_supported_devices = _get_capturable_supported_devices()
             assert (
-                param.device.type
-                == mu.device.type
-                == eta.device.type
-                == step_t.device.type
-                and param.device.type in capturable_supported_devices
-            ), (
-                f"If capturable=True, params, mus, etas, and state_steps must be "
-                f"on supported devices: {capturable_supported_devices}."
-            )
+                param.is_cuda and mu.is_cuda and eta.is_cuda and step_t.is_cuda
+            ) or (
+                param.is_xla and mu.is_xla and eta.is_xla and step_t.is_xla
+            ), "If capturable=True, params, mus, etas, and state_steps must be CUDA or XLA tensors."
 
         if torch.is_complex(param):
             grad = torch.view_as_real(grad)
@@ -294,14 +287,10 @@ def _multi_tensor_asgd(
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch._utils.is_compiling() and capturable:
-        capturable_supported_devices = _get_capturable_supported_devices(
-            supports_xla=False
-        )
         assert all(
-            p.device.type == mu.device.type == eta.device.type == step.device.type
-            and p.device.type in capturable_supported_devices
+            p.is_cuda and mu.is_cuda and eta.is_cuda and step.is_cuda
             for p, mu, eta, step in zip(params, mus, etas, state_steps)
-        ), f"If capturable=True, params, mus, etas, and state_steps must be on supported devices: {capturable_supported_devices}."
+        ), "If capturable=True, params, mus, etas, and state_steps must be CUDA tensors."
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, axs, mus, etas, state_steps]
