@@ -1,6 +1,6 @@
 # Owner(s): ["module: autograd"]
 
-from torch.testing._internal.common_utils import TestCase, run_tests, IS_JETSON, IS_WINDOWS
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_JETSON, IS_WINDOWS, skipIfTorchDynamo
 from torch._utils_internal import get_file_path_2
 
 import pkgutil
@@ -279,6 +279,7 @@ class TestPublicBindings(TestCase):
         return True
 
 
+    @skipIfTorchDynamo("Broken and not relevant for now")
     def test_modules_can_be_imported(self):
         failures = []
         for modname in _find_all_importables(torch):

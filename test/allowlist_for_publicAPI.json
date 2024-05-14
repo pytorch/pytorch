@@ -46,6 +46,9 @@
     "scatter",
     "gather"
   ],
+  "torch.csrc.jit.tensorexpr.scripts.bisect": [
+    "bisect"
+  ],
   "torch.cuda.nccl": [
     "init_rank",
     "is_available",

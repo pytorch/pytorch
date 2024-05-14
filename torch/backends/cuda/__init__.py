@@ -398,7 +398,7 @@ def sdp_kernel(
         ),
         FutureWarning,
     )
-    from torch.nn.attention import sdpa_kernel, SDPBackend
+    from torch.nn.attention import sdpa_kernel
 
     backend_list = []
     if enable_flash:

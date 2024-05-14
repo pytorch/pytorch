@@ -14,6 +14,7 @@ log = get_logger(__name__)
 
 __all__ = ["HealthCheckServer", "create_healthcheck_server"]
 
+
 class HealthCheckServer:
     """
     Interface for health check monitoring server, which can be extended

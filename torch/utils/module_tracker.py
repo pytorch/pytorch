@@ -12,6 +12,7 @@ from torch.utils._pytree import tree_flatten
 
 __all__ = ["ModuleTracker"]
 
+
 class ModuleTracker:
     """
     ``ModuleTracker`` is a context manager that tracks the nn.Module hierarchy during execution
