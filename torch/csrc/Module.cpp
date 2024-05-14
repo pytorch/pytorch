@@ -1034,7 +1034,9 @@ PyObject* THPModule_setFlushDenormal(PyObject* _unused, PyObject* arg) {
 PyObject* THPModule_getDefaultDtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   auto scalar_type = torch::tensors::get_default_scalar_type();
-  return Py_NewRef(torch::getTHPDtype(scalar_type));
+  auto dtype = (PyObject*)torch::getTHPDtype(scalar_type);
+  Py_INCREF(dtype);
+  return dtype;
   END_HANDLE_TH_ERRORS
 }
 
