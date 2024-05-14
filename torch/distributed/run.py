@@ -763,7 +763,7 @@ def _get_logs_specs_class(logs_specs_name: Optional[str]) -> Type[LogsSpecs]:
             )
 
         logging.info(
-            "Using logs_spec '%s' mapped to %s", logs_specs_name, str(logs_specs_cls)
+            "Using logs_spec '%s' mapped to %s", logs_specs_name, logs_specs_cls
         )
     else:
         logs_specs_cls = DefaultLogsSpecs
