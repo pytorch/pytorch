@@ -88,7 +88,7 @@ from .utils import (
     maybe_get_suppress_shape_guards_ctx,
     should_assume_input_aligned,
 )
-from .virtualized import V
+from .virtualized import NullHandler, V
 
 if TYPE_CHECKING:
     from torch._higher_order_ops.effects import _EffectType
@@ -1532,7 +1532,11 @@ class GraphLowering(torch.fx.Interpreter):
         if "cuda" in self.device_types:
             # first pass
             self.cpp_wrapper = False
-            compiled = self.compile_to_module().call
+            # Although triton.store_cubin was set in compile_fx, the backward pass didn't pick
+            # that up. In theory it should work by only setting triton.store_cubin to True here,
+            # but that will cause a problem when use_runtime_constant_folding is set.
+            with config.patch({"triton.store_cubin": True}):
+                compiled = self.compile_to_module().call
 
             def materialize(x):
                 if isinstance(x, (torch.SymInt, torch.SymFloat)):
@@ -1546,7 +1550,10 @@ class GraphLowering(torch.fx.Interpreter):
                     ), "Unknown type when creating real inputs" + str(type(x))
                     return x
 
-            if tracing_context := torch._guards.TracingContext.try_get():
+            tracing_context = torch._guards.TracingContext.try_get()
+            if tracing_context is not None and not isinstance(
+                V.real_inputs, NullHandler
+            ):
                 if tracing_context.output_strides:
                     tracing_context.output_strides.clear()
 
@@ -1559,7 +1566,17 @@ class GraphLowering(torch.fx.Interpreter):
                     materialize(x) for x in itertools.chain(params_flat, V.real_inputs)
                 ]
             else:
-                real_inputs = [materialize(x) for x in V.real_inputs]
+                # In the backward pass, V.real_inputs is not set.
+                # Generating random inputs based on self.example_inputs sometimes can be problematic,
+                # e.g. illegal memory access. A comprehensive fix is to autotune in a separate process.
+                real_inputs = [
+                    materialize(x)
+                    for x in (
+                        self.example_inputs
+                        if isinstance(V.real_inputs, NullHandler)
+                        else V.real_inputs
+                    )
+                ]
 
             if self.mutated_inputs:
                 from .compile_fx import clone_preserve_strides
@@ -1581,7 +1598,6 @@ class GraphLowering(torch.fx.Interpreter):
                     real_inputs[idx] = clone_preserve_strides(real_inputs[idx])
 
             with torch.utils._python_dispatch._disable_current_modes():
-                assert self.example_inputs is not None
                 compiled(real_inputs)
             del real_inputs
 
