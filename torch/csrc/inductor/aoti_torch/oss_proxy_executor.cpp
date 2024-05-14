@@ -147,7 +147,7 @@ OSSProxyExecutor::OSSProxyExecutor(const std::string& json_path, bool is_cpu) {
 
     std::string opName;
     std::string overloadName;
-    size_t pos = target.find(".", pos);
+    size_t pos = target.find(".");
     if (pos == std::string::npos) {
       opName = target;
       overloadName = "";

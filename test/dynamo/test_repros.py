@@ -160,6 +160,32 @@ def shapes_to_tensor(x, device=None):
     return torch.as_tensor(x, device=device)
 
 
+fw_graph = [None]
+bw_graph = [None]
+
+
+def aot_graph_capture_backend(gm, args):
+    from functorch.compile import min_cut_rematerialization_partition
+    from torch._functorch.aot_autograd import aot_module_simplified
+
+    def fw_compiler(gm, _):
+        fw_graph[0] = gm
+        return gm
+
+    def bw_compiler(gm, _):
+        bw_graph[0] = gm
+        return gm
+
+    return aot_module_simplified(
+        gm,
+        args,
+        fw_compiler,
+        bw_compiler,
+        partition_fn=min_cut_rematerialization_partition,
+        keep_inference_input_mutations=True,
+    )
+
+
 class Boxes:
     # from detectron2 poolers.py
     def __init__(self, tensor: torch.Tensor):
@@ -4415,8 +4441,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         try:
             from megablocks.layers import moe
             from megablocks.layers.arguments import Arguments
-        except ImportError:
-            raise unittest.SkipTest("requires megablocks")
+        except ImportError as e:
+            raise unittest.SkipTest("requires megablocks") from e
         bs, sl, hs, num_experts, top_k = (16, 1024, 512, 1, 1)
         args = Arguments(
             hidden_size=hs,
@@ -4644,6 +4670,69 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(type(actual), type(expected))
         self.assertEqual(actual.__dict__, expected.__dict__)
 
+    def test_storage_resize_forward_full_graph(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(4, 4))
+
+            def forward(self, x):
+                self.param.untyped_storage().resize_(
+                    self.param.numel() * self.param.itemsize
+                )
+                with torch.no_grad():
+                    torch._foreach_copy_([self.param], [x])
+                out = torch.matmul(self.param, self.param)
+                self.param.untyped_storage().resize_(0)
+                return out
+
+        def post_accumulate_grad_hook(param):
+            param.untyped_storage().resize_(0)
+
+        # Beginning of backward, resize and put data into the param
+        def pre_backward_hook(module, grad) -> None:
+            module.param.untyped_storage().resize_(
+                self.param.numel() * self.param.itemsize
+            )
+            with torch.no_grad():
+                # simulates loading data into param from allgather
+                module.param.fill_(2)
+
+        def post_forward_hook(module, args, output):
+            output.register_hook(functools.partial(pre_backward_hook, module))
+
+        x = torch.randn(4, 4)
+
+        mod_ref = TestModule()
+        mod_test = deepcopy(mod_ref)
+
+        # Start the param off with zero storage size to mimic fsdp
+        mod_ref.param.untyped_storage().resize_(0)
+        mod_test.param.untyped_storage().resize_(0)
+
+        # Resize storage at beginning of backward
+        # Free storage at end of backward
+        mod_ref.register_forward_hook(post_forward_hook, prepend=False)
+        mod_ref.param.register_post_accumulate_grad_hook(post_accumulate_grad_hook)
+        mod_test.register_forward_hook(post_forward_hook, prepend=False)
+        mod_test.param.register_post_accumulate_grad_hook(post_accumulate_grad_hook)
+
+        mod_test = torch.compile(mod_test, backend=aot_graph_capture_backend)
+
+        out_ref = mod_ref(x)
+        out_test = mod_test(x)
+        self.assertExpectedInline(
+            str(fw_graph[0].code.strip()),
+            """\
+def forward(self, primals_1, primals_2):
+    _foreach_copy = torch.ops.aten._foreach_copy.default([primals_1], [primals_2]);  primals_1 = primals_2 = None
+    getitem = _foreach_copy[0];  _foreach_copy = None
+    mm = torch.ops.aten.mm.default(getitem, getitem)
+    t_1 = torch.ops.aten.t.default(getitem);  getitem = None
+    return [mm, t_1]""",
+        )
+        self.assertEqual(out_ref, out_test)
+
     def test_super_in_staticmethod(self):
         class A:
             @staticmethod
@@ -4744,6 +4833,64 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(v.foo, 200)
         self.assertEqual(v.data.shape, (10, 20))
         self.assertEqual(type(v), Matrix)
+
+    def test_nn_parametrize(self):
+        class Module(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(10, 10))
+
+            def forward(self, x):
+                return self.param @ x
+
+        class Parametrization(torch.nn.Module):
+            def forward(self, x):
+                return torch.sin(x)
+
+        m = Module()
+        torch.nn.utils.parametrize.register_parametrization(
+            m, "param", Parametrization()
+        )
+
+        sin_found = False
+
+        def backend(gm, _):
+            nonlocal sin_found
+            for node in gm.graph.nodes:
+                if node.target is torch.sin:
+                    sin_found = True
+            return gm
+
+        opt_m = torch.compile(m, backend=backend, fullgraph=True)
+        inp = torch.randn(10, 10)
+        self.assertEqual(m(inp), opt_m(inp))
+        self.assertTrue(sin_found)
+
+        torch.nn.utils.parametrize.remove_parametrizations(m, "param")
+        sin_found = False
+        self.assertEqual(m(inp), opt_m(inp))
+        self.assertFalse(sin_found)
+
+    def test_nn_module_property_closure(self):
+        x = torch.randn(10, 10)
+
+        class Mod(torch.nn.Module):
+            @property
+            def y(self):
+                return torch.ones(10, 10) + x
+
+            def forward(self, x):
+                return x @ self.y
+
+        mod = Mod()
+
+        def fn(x):
+            return mod(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        inp = torch.randn(10, 10)
+        self.assertEqual(fn(inp), opt_fn(inp))
 
     def test_global_fn_mutation(self):
         def foo(x, y):
