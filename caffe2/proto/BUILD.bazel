@@ -35,21 +35,3 @@ proto_library(
     srcs = ["torch.proto"],
     deps = [":caffe2_proto"],
 )
-
-cc_proto_library(
-    name = "cc_proto",
-    visibility = ["//:__pkg__"],
-    deps = [":proto"],
-)
-
-proto_library(
-    name = "proto",
-    srcs = [
-        "caffe2_legacy.proto",
-        "hsm.proto",
-        "metanet.proto",
-        "predictor_consts.proto",
-        "prof_dag.proto",
-    ],
-    deps = [":caffe2_proto"],
-)
