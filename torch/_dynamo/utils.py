@@ -50,6 +50,8 @@ from typing import (
     ValuesView,
 )
 
+from torch._utils_internal import maybe_upload_prof_stats_to_manifold
+
 from ..utils.hooks import RemovableHandle
 
 try:
@@ -144,7 +146,7 @@ def cprofile_wrapper(func):
     def profile_wrapper(*args, **kwargs):
         global timer_counter
         profile_cnt = next(timer_counter)
-        profile_path = Path(func.__name__ + f"{profile_cnt}.profile")
+        profile_path = Path("/tmp/" + func.__name__ + f"{profile_cnt}.profile")
         prof = cProfile.Profile()
         prof.enable()
         start_ts = time.time()
@@ -182,6 +184,9 @@ def cprofile_wrapper(func):
             )
             ps.sort_stats(pstats.SortKey.TIME).print_stats(20)
             ps.sort_stats(pstats.SortKey.CUMULATIVE).print_stats(20)
+
+        maybe_upload_prof_stats_to_manifold(str(profile_path))  # fb-only
+
         return retval
 
     return profile_wrapper
@@ -672,6 +677,10 @@ class CompilationMetrics:
     compliant_custom_ops: Set[str]
     restart_reasons: Set[str]
     dynamo_time_before_restart_s: float
+    # Sometimes, we will finish analyzing a frame but conclude we don't want
+    # to install any guarded code.  True means we actually decided to install
+    # a compiled frame
+    has_guarded_code: bool
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
@@ -1810,7 +1819,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
                 "Tried to use data-dependent value in the subsequent computation. "
                 "This can happen when we encounter unbounded dynamic value that is unknown during tracing time.  "
                 "You will need to explicitly give hint to the compiler. Please take a look at "
-                f"constrain_as_value OR constrain_as_size APIs.  {cause}",
+                f"torch._check OR torch._check_is_size APIs.  {cause}",
                 case_name="constrain_as_size_example",
             )
         elif isinstance(cause, ValueRangeError):

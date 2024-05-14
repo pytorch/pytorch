@@ -60,6 +60,7 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    TYPE_CHECKING,
     Union,
 )
 
@@ -79,13 +80,16 @@ from torch._inductor.compile_fx import (
 from torch._inductor.cudagraph_utils import (
     check_for_mutation,
     FunctionID,
+    log_cudagraph_skip_and_bump_counter,
     WrappedFunction,
 )
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.storage import UntypedStorage
-from torch.types import _bool
 from torch.utils import _pytree as pytree
 from torch.utils.weak import TensorWeakRef
+
+if TYPE_CHECKING:
+    from torch.types import _bool
 
 StorageWeakRefPointer = int
 StorageDataPtr = int
@@ -109,9 +113,6 @@ log = torch._logging.getArtifactLogger(__name__, "cudagraphs")
 
 
 from . import config
-
-
-perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -586,16 +587,16 @@ class CUDAWarmupNode:
         }
 
         def get_non_cudagraph_inps():
-            non_cudagraph_inps = set()
+            non_cudagraph_inps = []
             for t in itertools.chain(new_inputs, self.wrapped_function.constants):
                 if (
                     isinstance(t, torch.Tensor)
                     and t.untyped_storage().data_ptr() not in existing_path_data_ptrs
                 ):
-                    non_cudagraph_inps.add(t.untyped_storage().data_ptr())
+                    non_cudagraph_inps.append(weakref.ref(t.untyped_storage()))
             return non_cudagraph_inps
 
-        non_cudagraph_inps = get_non_cudagraph_inps()
+        non_cudagraph_inps_storages = get_non_cudagraph_inps()
 
         if config.triton.slow_path_cudagraph_asserts and not self.already_warm:
             refs = list(self.path_live_weakrefs())
@@ -608,15 +609,26 @@ class CUDAWarmupNode:
         ), get_history_recording():
             out = self.wrapped_function.model(new_inputs)
 
+        # We need to know which outputs are allocated within the cudagraph pool
+        # so that we can deallocate them at the beginning of the next cudagraph step,
+        # and set their access to error.
+        # We use a weakref to the inputs storage, in case a block which was previously
+        # allocated to the general caching allocator pool gets reallocated to a private pool.
+
+        non_cudagraph_inps_storage_ptrs = set()
+        for storage in non_cudagraph_inps_storages:
+            s = storage()
+            if s is not None:
+                non_cudagraph_inps_storage_ptrs.add(s._cdata)
+
         assert len(new_inputs) == 0
 
         # sdpa returns cpu tensors when not recording cuda graph
         def add_ref(o):
             return (
-                o is not None
-                and isinstance(o, torch.Tensor)
+                isinstance(o, torch.Tensor)
                 and o.is_cuda
-                and o.untyped_storage().data_ptr() not in non_cudagraph_inps
+                and o.untyped_storage()._cdata not in non_cudagraph_inps_storage_ptrs
                 and o.untyped_storage().data_ptr() != 0
             )
 
@@ -628,11 +640,8 @@ class CUDAWarmupNode:
         )
 
         if config.triton.slow_path_cudagraph_asserts and not self.already_warm:
-            out_refs = self.path_live_weakrefs()
-            new_storages = [
-                t for t in out_refs if t.data_ptr() not in non_cudagraph_inps
-            ]
-            check_memory_pool(self.device_index, self.cuda_graphs_pool, new_storages)
+            out_refs = list(self.path_live_weakrefs())
+            check_memory_pool(self.device_index, self.cuda_graphs_pool, out_refs)
 
         return out
 
@@ -1816,7 +1825,7 @@ class CUDAGraphTreeManager:
         self, function_id: FunctionID, inputs: List[Tensor]
     ):
         node_id = self._get_node_id()
-        if has_mutation_str := check_for_mutation(
+        if maybe_mutation_str := check_for_mutation(
             self.ids_to_funcs[function_id],
             inputs,
             self._get_cuda_graph_recorded_tensor_checker(),
@@ -1826,7 +1835,7 @@ class CUDAGraphTreeManager:
             if function_id in self.warned_mutation:
                 return
             self.warned_mutation.add(function_id)
-            perf_hint_log.warning(has_mutation_str)
+            log_cudagraph_skip_and_bump_counter(maybe_mutation_str)
         else:
             self.non_cudagraph_managed_mutation_hint[node_id][function_id] = False
 

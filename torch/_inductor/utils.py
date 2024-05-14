@@ -48,6 +48,8 @@ from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
+from torch.utils._sympy.symbol import make_symbol, SymT
+from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from . import config
 from .runtime.runtime_utils import ceildiv as runtime_ceildiv
 
@@ -55,6 +57,8 @@ log = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
+
+ALIGNMENT = 16
 
 
 def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float:
@@ -536,6 +540,32 @@ def sympy_str(expr: sympy.Expr) -> str:
     return str(expr)
 
 
+def get_bounds_index_expr(index):
+    from .virtualized import V
+
+    # If this expression does not come from an FX node, we compute its bounds
+    if (
+        config.compute_all_bounds
+        and (fx_node := getattr(V.interpreter, "current_node", None))
+        and fx_node.target != "index_expr"
+    ):
+        return bound_sympy(index)
+    else:
+        return ValueRanges.unknown()
+
+
+def sympy_index_symbol_with_prefix(prefix: SymT, idx: int) -> sympy.Symbol:
+    """
+    Used to generate an integer-nonnegative symbol.
+    """
+    # This should never be used for creating shape/stride symbols, as those
+    # should all be allocated before Inductor.
+    assert prefix != SymT.SIZE
+    # NOTE: shape symbols are positive (> 0), but index variables are only
+    # non-negative (>= 0).
+    return make_symbol(prefix, idx, integer=True, nonnegative=True)
+
+
 def sympy_index_symbol(name: str) -> sympy.Symbol:
     """
     Used to generate an integer-nonnegative symbol.
@@ -571,14 +601,6 @@ def sympy_subs(expr: sympy.Expr, replacements: Dict[sympy.Expr, Any]) -> sympy.E
     )
 
 
-def free_symbol_startswith(index: sympy.Expr, prefix: str):
-    return any(v.name.startswith(prefix) for v in index.free_symbols)  # type: ignore[attr-defined]
-
-
-def free_symbol_has(index: sympy.Expr, pattern: str):
-    return any(pattern in v.name for v in index.free_symbols)  # type: ignore[attr-defined]
-
-
 def is_symbolic(a: Any) -> bool:
     return isinstance(a, torch.SymInt) or (
         isinstance(a, torch.Tensor)
@@ -590,7 +612,7 @@ def any_is_symbolic(*args: Any) -> bool:
     return any(is_symbolic(a) for a in args)
 
 
-def has_incompatible_cudagraph_ops(gm):
+def get_first_incompatible_cudagraph_node(gm):
     from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
     forbidden_set = {
@@ -627,10 +649,14 @@ def has_incompatible_cudagraph_ops(gm):
         )
     for node in gm.graph.nodes:
         if str(node.target) in forbidden_set:
-            return True
+            return node
         if (val := node.meta.get("val")) is not None and free_unbacked_symbols(val):
-            return True
-    return False
+            return node
+    return None
+
+
+def has_incompatible_cudagraph_ops(gm):
+    return get_first_incompatible_cudagraph_node(gm) is not None
 
 
 def output_node(gm: torch.fx.GraphModule):
@@ -655,6 +681,14 @@ def clear_on_fresh_inductor_cache(obj: Any):
     return obj
 
 
+def clear_inductor_caches():
+    """
+    Clear all registered caches.
+    """
+    for obj in _registered_caches:
+        obj.cache_clear()
+
+
 @contextlib.contextmanager
 def fresh_inductor_cache(cache_entries=None):
     """
@@ -663,8 +697,7 @@ def fresh_inductor_cache(cache_entries=None):
     Optionally, pass a dict as 'cache_entries' to get a list of filenames and sizes
     generated with this cache instance.
     """
-    for obj in _registered_caches:
-        obj.cache_clear()
+    clear_inductor_caches()
 
     inductor_cache_dir = tempfile.mkdtemp()
     try:
@@ -836,6 +869,15 @@ class IndentedBuffer:
         return res
 
 
+@contextlib.contextmanager
+def restore_stdout_stderr(initial_stdout, initial_stderr):
+    try:
+        yield
+    finally:
+        sys.stdout = initial_stdout
+        sys.stderr = initial_stderr
+
+
 class DeferredLineBase:
     """A line that can be 'unwritten' at a later time"""
 
@@ -937,6 +979,42 @@ def use_cutlass_template(layout, m, n, k):
             )
             return False
     return res
+
+
+def _use_template_for_cpu(layout):
+    return use_max_autotune() and layout.device.type == "cpu"
+
+
+def use_cpp_packed_gemm_template(layout, mat1, mat2):
+    from . import ir
+    from .codegen.cpp_micro_gemm import create_micro_gemm
+    from .kernel.mm_common import mm_args
+
+    if not _use_template_for_cpu(layout) or not _use_autotune_backend("CPP"):
+        return False
+
+    if not config.cpp.weight_prepack:
+        return False
+
+    layout_dtypes = [torch.float32]
+    m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2)
+    # TODO(jgong5): support dynamic shapes for n or k
+    if has_free_symbols((n, k)):
+        return False
+    if isinstance(mat2, ir.BaseView):
+        mat2 = mat2.unwrap_view()
+    micro_gemm = create_micro_gemm(
+        "micro_gemm", m, n, k, layout.dtype, num_threads=parallel_num_threads()
+    )
+    # TODO(jgong5): support n % n_block_size != 0
+    return (
+        layout.dtype in layout_dtypes
+        and micro_gemm is not None
+        and n % micro_gemm.register_blocking[1] == 0
+        and mat1.get_stride()[-1] == 1  # TODO(jgong5): support transposed input
+        and isinstance(mat2, ir.StorageBox)
+        and mat2.is_module_buffer()
+    )
 
 
 def use_aten_gemm_kernels():
@@ -1192,6 +1270,12 @@ def get_gpu_dram_gbps():
     return get_dram_gbps()
 
 
+def get_gpu_shared_memory():
+    from triton.runtime import driver
+
+    return driver.active.utils.get_device_properties(0).get("max_shared_mem", 0)
+
+
 def is_welford_reduction(reduction_type):
     return reduction_type.startswith("welford")
 
@@ -1276,13 +1360,13 @@ def pass_execution_and_save(func, gm, inp, msg):
 def is_collective(node):
     from . import ir
 
-    return isinstance(node, ir.CollectiveKernel) or type(node) == ir._CollectiveKernel
+    return type(node) == ir._CollectiveKernel
 
 
 def is_wait(node):
     from . import ir
 
-    return isinstance(node, ir.Wait) or type(node) == ir._WaitKernel
+    return type(node) == ir._WaitKernel
 
 
 def num_fw_fixed_arguments(dynamo_gm_num_inputs: int, aot_fw_gm_num_inputs: int):
@@ -1425,3 +1509,39 @@ def dump_node_schedule(node_schedule):
                 print(dep)
         else:
             raise RuntimeError(f"Unrecognized node type: {type(node)}")
+
+
+def tensor_is_aligned(tensor: torch.Tensor):
+    # See Note: [Input Alignment handling in Inductor]
+    # Right now, we don't try to guard on the alignment of the storage offset.
+    # When this comment was written, non-symbolic storage_offsets are not guarded on
+    # but symbolic storage_offsets are. For consistency, we suppress guard creation
+    # upon performing this check: that ensures that we don't add recompiles when we
+    # add this logic.
+    return (tensor.storage_offset() * get_dtype_size(tensor.dtype)) % ALIGNMENT == 0
+
+
+def should_assume_input_aligned(example_input: torch.Tensor):
+    # See Note: [Input Alignment handling in Inductor]
+
+    # right now, we only care about alignment for cuda tensors.
+    if example_input.device.type != "cuda":
+        return False
+    return config.assume_aligned_inputs or tensor_is_aligned(example_input)
+
+
+def maybe_get_suppress_shape_guards_ctx():
+    # Try to get TracingContext.try_get().fake_mode.shape_env.suppress_guards()
+    # If it's not available, return a nullcontext.
+
+    # If we're dealing with cudagraphs, we might not have a tracing_context
+    tracing_context = torch._guards.TracingContext.try_get()
+    if not tracing_context:
+        return contextlib.nullcontext()
+
+    # In standalone inductor compile mode, we might not have a shape_env attached to the fake mode
+    shape_env = tracing_context.fake_mode.shape_env
+    if not shape_env:
+        return contextlib.nullcontext()
+
+    return shape_env.suppress_guards()

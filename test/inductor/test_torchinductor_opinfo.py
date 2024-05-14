@@ -257,6 +257,19 @@ intentionally_not_handled = {
     "resize_": {b8, f16, f32, f64, i32, i64},
     "resize_as_": {b8, f16, f32, f64, i32, i64},
 }
+# This is only fixed when this config is set
+# We should eventually always turn it on
+import torch._functorch.config as functorch_config
+
+if not functorch_config.view_replay_for_aliased_outputs:
+    intentionally_not_handled['("as_strided", "partial_views")'] = {
+        b8,
+        f16,
+        f32,
+        f64,
+        i32,
+        i64,
+    }
 
 inductor_expected_failures_single_sample["cuda"].update(intentionally_not_handled)
 
