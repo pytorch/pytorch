@@ -2440,11 +2440,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   errorIfCapturingNonCapturableNCCL(capture_status);
 
   // Bump collective counter
-  if (isP2POp(opType)) {
-    seqP2P_++;
-  } else {
-    seqCollective_++;
-  }
+  seqCollective_++;
   op_id_++;
 
   auto device = getDevice(input);
@@ -2599,11 +2595,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   errorIfCapturingNonCapturableNCCL(capture_status);
 
   // Bump collective counter
-  if (isP2POp(opType)) {
-    seqP2P_++;
-  } else {
-    seqCollective_++;
-  }
+  seqCollective_++;
+
   // For coalescingManager collectives, there is no individual c++ call per
   // collective so there is no flight record and we increment seq*_ and op_id_
   // together. Compare this to startCoalesing/endCoalescing flow where we
@@ -2830,7 +2823,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     p2pTargetRank = isSendRecvSelf ? 0 : 1 - p2pRank;
 
     if (!coalescing_state_) {
-      // Bump sequence number. Don't do so if it's a batch P2P, it will be
+      // Bump P2P sequence number. Don't do so if it's a batch P2P, it will be
       // bumped in `startCoalescing`.
       seqP2P_++;
     }

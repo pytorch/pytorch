@@ -435,10 +435,12 @@ struct NCCLTraceBuffer {
     size_t pg_id_;
     std::tuple<std::string, std::string> pg_name_; // <group_name, group_desc>
 
-    // Both collective_seq_id_ and op_id_ are per_pg incrementing counters
-    // collective_seq_id refers to actual kernel launches (e.g. 1 per coalesced
-    // group) p2p_seq_id refers to p2p operations (e.g. 1 per send/recv) op_id
-    // refers to logical operations (e.g. one per op inside coalesced group)
+    // collective_seq_id and p2p_seq_id refer to actual kernel launches (e.g. 1
+    // per coalesced group).
+    // collective_seq_id only increments for true collective operations (over
+    // all ranks in the group). p2p_seq_id only increments over non-collective
+    // operations in the group. op_id refers to logical operations (e.g. one per
+    // op inside coalesced group)
     size_t collective_seq_id_;
     size_t p2p_seq_id_;
     size_t op_id_;
