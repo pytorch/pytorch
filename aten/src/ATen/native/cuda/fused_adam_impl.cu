@@ -20,8 +20,8 @@ void _fused_adam_cuda_impl_(
     const double weight_decay,
     const double eps,
     const bool maximize,
-    const c10::optional<at::Tensor>& grad_scale,
-    const c10::optional<at::Tensor>& found_inf) {
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
   std::vector<std::vector<at::Tensor>> tensor_lists{
       params.vec(), grads.vec(), exp_avgs.vec(), exp_avg_sqs.vec()};
 
@@ -66,8 +66,8 @@ void _fused_adam_cuda_impl_(
     const double weight_decay,
     const double eps,
     const bool maximize,
-    const c10::optional<at::Tensor>& grad_scale,
-    const c10::optional<at::Tensor>& found_inf) {
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
   std::vector<std::vector<at::Tensor>> tensor_lists{
       params.vec(), grads.vec(), exp_avgs.vec(), exp_avg_sqs.vec()};
 
