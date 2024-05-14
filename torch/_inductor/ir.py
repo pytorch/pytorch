@@ -3935,8 +3935,10 @@ def get_aten_cpp_kernel_name(kernel):
     )
     kernel_name = f"at::_ops::{opname}::call"
     return (
-        V.graph.wrapper_code.get_c_shim_func_name(kernel_name)
-        if V.graph.wrapper_code and config.abi_compatible
+        V.graph.wrapper_code.get_c_shim_func_name(  # type: ignore[attr-defined]
+            kernel_name
+        )
+        if V.graph.wrapper_code and V.graph.cpp_wrapper and config.abi_compatible
         else kernel_name
     )
 
@@ -5189,12 +5191,23 @@ class FallbackKernel(ExternKernelAlloc):
         *,
         unbacked_bindings=None,
     ):
+        if (
+            kernel == aten.mul.Tensor
+            and len(tensor_args) == 1
+            and len(nontensor_args) == 1
+        ):
+            # When aten.mul.Tensor's second arg is constant, cpp wrapper expects
+            # to call mul_Scalar. A more proper fix is to do it in decomposition.
+            # See https://github.com/pytorch/pytorch/issues/123478
+            kernel = aten.mul.Scalar
+
         super().__init__(
             layout,
             tuple(tensor_args),
             tuple(nontensor_args),
             op_overload=kernel,
         )
+
         # We need output buffers for generating kernel arguments in the
         # abi-compatible mode, where we retrieve outputs by pass each individual
         # output through the abi-compatible interface.
@@ -5210,7 +5223,6 @@ class FallbackKernel(ExternKernelAlloc):
             ),
         ), f"Fails to create FallbackKernel for {kernel}: {type(kernel)} not supported"
         self.op_overload = kernel
-
         self.unflatten_args = unflatten_args
         self.kwargs = {} if kwargs is None else kwargs
         V.graph.warn_fallback(self.python_kernel_name)
@@ -5500,15 +5512,6 @@ class FallbackKernel(ExternKernelAlloc):
         if kernel.namespace == "aten":  # type: ignore[union-attr]
             # Aten Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload)
-
-            if (
-                kernel == aten.mul.Tensor
-                and len(self.inputs) == 1
-                and len(self.constant_args) == 1
-            ):
-                # When aten.mul.Tensor's second arg is constant, cpp wrapper expects to call mul_Scalar
-                kernel = aten.mul.Scalar
-
             if V.graph.cpp_wrapper:
                 if (
                     config.is_fbcode()

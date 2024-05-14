@@ -257,11 +257,10 @@ def gen_declaration_and_definition(
         ret_assignments: List[str] = []
     else:
         args, callsite_exprs = gen_arguments(schema.arguments.flat_all)
-        if schema.name.name.inplace:
-            # ignore return values for inplace ops
-            ret_declarations, ret_assignments = [], []
-        else:
-            ret_declarations, ret_assignments = gen_returns(schema)
+        # ignore return values for inplace ops
+        ret_declarations, ret_assignments = (
+            ([], []) if schema.name.name.inplace else gen_returns(schema)
+        )
         args.extend(ret_declarations)
 
     declaration = f"AOTITorchError aoti_torch_{device}_{func_name}({', '.join(args)})"
