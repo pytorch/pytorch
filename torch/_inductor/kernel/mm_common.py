@@ -1,4 +1,5 @@
 import functools
+import itertools
 import logging
 from typing import cast, List, Tuple
 
@@ -113,7 +114,8 @@ def filtered_configs(
 
 
 # List of dictionaries to store the kernel configs. Configs that evaluate to true
-# will be utilised on the target platform
+# will be utilised on the target platform. The configs are as follows:
+# (BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps)
 mm_kernel_configs = [
     # "BLOCK_M", "BLOCK_N", "BLOCK_K", "num_stages", "num_warps"
     {"config": (16, 32, 16, 3, 2), "cond": True},
@@ -144,7 +146,12 @@ mm_kernel_configs = [
     {"config": (128, 128, 64, 3, 4), "cond": True},
     {"config": (128, 128, 64, 3, 8), "cond": True},
     {"config": (128, 128, 64, 5, 4), "cond": True},
-    {"config": (128, 128, 64, 5, 8), "cond": True},
+    {"config": (128, 128, 64, 5, 8), "cond": True},	
+] if inductor_config.max_autotune_gemm_search_space != "EXHAUSTIVE" else [
+    {"config": (BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps), "cond": True}
+    for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
+        [16, 32, 64, 128, 256], repeat=3
+    ) for num_stages in [1, 2, 3, 4, 5] for num_warps in [2, 4, 8]
 ]
 
 int8_mm_kernel_configs = [
