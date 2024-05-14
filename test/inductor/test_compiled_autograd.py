@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import functools
+import logging
 import re
 import sys
 import unittest
@@ -51,11 +52,11 @@ def hook3(gI, gO):
 
 
 class TestCompiledAutograd(TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         super().setUp()
         compiled_autograd.reset()
 
-    def tearDown(self):
+    def tearDown(self) -> None:
         super().tearDown()
         compiled_autograd.reset()
 
@@ -330,8 +331,6 @@ main()
             handle.remove()
 
     def test_inputs_aliasing_bytecode_stack_restore(self):
-        import logging
-
         logging.getLogger().setLevel(logging.WARNING)
         from torch.testing._internal.logging_tensor import LoggingTensor
 
@@ -764,7 +763,7 @@ main()
         self.check_output_and_recompiles(fn, count=2)
 
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
-    def test_logging_tensor_flaky(self):
+    def test_logging_tensor_flaky(self) -> None:
         # when you first run some test using triton and then run test_inputs_aliasing_bytecode_stack_restore
         # resulting in:
         #   - pytest: `TypeError: unsupported operand type(s) for +: 'Tensor' and 'LoggingTensor'`
@@ -784,8 +783,6 @@ main()
 
         with compiled_autograd.enable(compiler_fn):
             fn()
-
-        import logging
 
         logging.getLogger().setLevel(
             logging.WARNING
@@ -1534,7 +1531,6 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
         self.assertEqual(
             sum(1 for e in expected_logs if e in logs.getvalue()), len(expected_logs)
         )
-        torch._logging.set_logs(compiled_autograd_verbose=False)
 
     def test_verbose_logs_cpp(self):
         script = """
@@ -1557,7 +1553,6 @@ def main():
         result = model(x).sum()
         with torch._dynamo.compiled_autograd.enable(compiler_fn):
             result.backward()
-    torch._logging.set_logs(compiled_autograd_verbose=False)
 
 main()
 """
@@ -1621,7 +1616,6 @@ main()
                 # unused, verbose level already snapshot with contextmanager
                 torch._logging.set_logs(compiled_autograd_verbose=True)
                 fn()
-                torch._logging.set_logs(compiled_autograd_verbose=False)
 
         unexpected_logs = [
             "SumBackward0 (NodeCall 1)",
