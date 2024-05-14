@@ -509,7 +509,7 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
           check_for_nested_inputs,
           check_for_attn_mask,
           check_dtypes_low_precision
-	  );
+      );
           // check_cudnn_layout,
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
