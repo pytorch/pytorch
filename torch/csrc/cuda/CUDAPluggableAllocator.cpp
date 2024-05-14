@@ -166,7 +166,9 @@ void CUDAPluggableAllocator::emptyCache() {
   }
 }
 
-void CUDAPluggableAllocator::emptyUserPool(c10::DeviceIndex device, c10::cuda::MemPool& mempool) {
+void CUDAPluggableAllocator::emptyUserPool(
+    c10::DeviceIndex device,
+    c10::cuda::MemPool& mempool) {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support emptyUserPool. "
@@ -228,8 +230,9 @@ c10::cuda::CUDACachingAllocator::SnapshotInfo CUDAPluggableAllocator::
       "If you need it, please file an issue describing your use case.");
 }
 
-c10::cuda::CUDACachingAllocator::SnapshotInfo CUDAPluggableAllocator::
-    snapshot(c10::DeviceIndex device, c10::cuda::MemPool& mempool) {
+c10::cuda::CUDACachingAllocator::SnapshotInfo CUDAPluggableAllocator::snapshot(
+    c10::DeviceIndex device,
+    c10::cuda::MemPool& mempool) {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support snapshot. "
@@ -253,11 +256,9 @@ void CUDAPluggableAllocator::beginAllocateToPool(
   }
 }
 
-void CUDAPluggableAllocator::startUsingUserPool(
-    c10::DeviceIndex device) {
+void CUDAPluggableAllocator::startUsingUserPool(c10::DeviceIndex device) {
   TORCH_CHECK(
-      false,
-      "CUDAPluggableAllocator does not support startUsingUserPool. ");
+      false, "CUDAPluggableAllocator does not support startUsingUserPool. ");
 }
 
 void CUDAPluggableAllocator::endAllocateToPool(
@@ -276,11 +277,9 @@ void CUDAPluggableAllocator::releasePool(
   }
 }
 
-void CUDAPluggableAllocator::stopUsingUserPool(
-    c10::DeviceIndex device) {
+void CUDAPluggableAllocator::stopUsingUserPool(c10::DeviceIndex device) {
   TORCH_CHECK(
-      false,
-      "CUDAPluggableAllocator does not support stopUsingUserPool. ");
+      false, "CUDAPluggableAllocator does not support stopUsingUserPool. ");
 }
 
 void CUDAPluggableAllocator::recordHistory(

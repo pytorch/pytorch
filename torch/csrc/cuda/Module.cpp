@@ -1233,12 +1233,9 @@ static void registerCudaPluggableAllocator(PyObject* module) {
               return target == stream;
             });
       });
-  m.def(
-      "_cuda_startUsingUserPool",
-      [](int device) {
-        c10::cuda::CUDACachingAllocator::startUsingUserPool(
-            device);
-      });
+  m.def("_cuda_startUsingUserPool", [](int device) {
+    c10::cuda::CUDACachingAllocator::startUsingUserPool(device);
+  });
 
   m.def(
       "_cuda_endAllocateCurrentStreamToPool",

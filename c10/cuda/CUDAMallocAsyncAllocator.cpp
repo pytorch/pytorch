@@ -499,9 +499,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   }
 
   void emptyUserPool(c10::DeviceIndex device, MemPool& mempool) override {
-    TORCH_CHECK(
-          false,
-          "Not implemented.")
+    TORCH_CHECK(false, "Not implemented.")
   }
 
   void cacheInfo(c10::DeviceIndex device, size_t* maxWorkspaceGuess) override {
@@ -791,11 +789,8 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     capture_underway = true;
   }
 
-  void startUsingUserPool(
-      c10::DeviceIndex device) override {
-    TORCH_CHECK(
-        false,
-        "Not implemented.")
+  void startUsingUserPool(c10::DeviceIndex device) override {
+    TORCH_CHECK(false, "Not implemented.")
   }
 
   void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id)
@@ -849,9 +844,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   }
 
   void stopUsingUserPool(c10::DeviceIndex device) override {
-    TORCH_CHECK(
-        false,
-        "Not implemented.");
+    TORCH_CHECK(false, "Not implemented.");
   }
 
   void* raw_alloc(size_t nbytes) override {

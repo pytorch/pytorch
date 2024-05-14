@@ -30,9 +30,9 @@
 #include <c10/core/Stream.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/MemPool.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
+#include <c10/cuda/MemPool.h>
 
 #include <torch/custom_class.h>
 
