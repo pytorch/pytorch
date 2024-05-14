@@ -1244,8 +1244,6 @@ def main():
         "lib/*.pdb",
         "lib/torch_shm_manager",
         "lib/*.h",
-        "lib/libtorch_python*",
-        "lib/*shm*",
         "include/*.h",
         "include/ATen/*.h",
         "include/ATen/cpu/*.h",
@@ -1406,7 +1404,14 @@ def main():
         "utils/model_dump/code.js",
         "utils/model_dump/*.mjs",
     ]
-    if not BUILD_PYTORCH_USING_LIBTORCH_WHL:
+    if BUILD_PYTORCH_USING_LIBTORCH_WHL:
+        torch_package_data.extend(
+            [
+                "lib/libtorch_python*",
+                "lib/*shm*",
+            ]
+        )
+    else:
         torch_package_data.extend(
             [
                 "lib/*.so*",
@@ -1495,9 +1500,13 @@ def main():
         entry_points=entry_points,
         install_requires=install_requires,
         extras_require=extras_require,
-        package_dir=package_dir,
-        package_data=package_data,
-        include_package_data=True,
+        package_data={
+            "torch": torch_package_data,
+            "torchgen": torchgen_package_data,
+            "caffe2": [
+                "python/serialized_test/data/operator_test/*.zip",
+            ],
+        },
         url="https://pytorch.org/",
         download_url="https://github.com/pytorch/pytorch/tags",
         author="PyTorch Team",
