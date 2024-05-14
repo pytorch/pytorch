@@ -39,7 +39,8 @@ struct DynamicArg {
   int arg_index;
   DynamicArgType arg_type;
   int length;
-  json serialized_arg_val;
+  json serialized_arg_val; // Used for inspecting serialized optional tensor
+                           // lists
 };
 
 struct OpKernel {
@@ -78,7 +79,7 @@ class OSSProxyExecutor : public ProxyExecutor {
   void prefill_stack_with_static_arguments(
       int index,
       at::TypePtr schema_arg_type,
-      json thrift_arg,
+      json serialized_arg,
       OpKernel& op_kernel);
 
   void get_input_info_from_serialized(
@@ -90,6 +91,10 @@ class OSSProxyExecutor : public ProxyExecutor {
       const std::vector<c10::Argument>& schema_returns,
       json serialized_node,
       OpKernel& op_kernel);
+
+  c10::ScalarType convertSerializedScalarType(int scalarType);
+  c10::MemoryFormat convertSerializedMemoryFormat(int memoryFormat);
+  c10::Layout convertSerializedLayout(int layout);
 
   std::vector<OpKernel> op_kernels_;
   std::unique_ptr<c10::Device> device_;
