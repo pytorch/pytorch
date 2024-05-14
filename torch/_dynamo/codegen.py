@@ -48,7 +48,7 @@ class GraphOutputEntry:
 # So if an exception occurs, raise a wrapped exception
 # to notify that there's a dynamo bug.
 # Don't actually call this function!
-def _try_catch_call_compiled_fn(call):
+def _try_catch_call_compiled_fn(call, end):
     try:
         call
     except Exception as e:
@@ -57,6 +57,7 @@ def _try_catch_call_compiled_fn(call):
         raise torch._dynamo.exc.InternalTorchDynamoError(
             "Exception raised when running compiled function"
         ) from e
+    end
 
 
 class PyCodegen:
@@ -430,21 +431,27 @@ class PyCodegen:
 
         jump_target = create_instruction("NOP")
         call_and_jump_insts = create_call_function(len(graphargs), False)
-        call_and_jump_insts.append(create_jump_absolute(jump_target))
 
+        # replace "end" of the try block with a jump instruction
+        for i, inst in enumerate(try_catch_insts):
+            if inst.opname == "LOAD_FAST" and inst.argval == "end":
+                try_catch_insts[i] = create_jump_absolute(jump_target)
+
+        # replace "call" with a call_function bytecode
         for i, inst in enumerate(try_catch_insts):
             if inst.opname == "LOAD_FAST" and inst.argval == "call":
                 break
 
         if inst.exn_tab_entry is not None:
             inst.exn_tab_entry.start = call_and_jump_insts[0]
-            inst.exn_tab_entry.end = call_and_jump_insts[-2]
+            inst.exn_tab_entry.end = call_and_jump_insts[-1]
             inst.exn_tab_entry.depth = 0
             call_and_jump_insts[0].exn_tab_entry = inst.exn_tab_entry
 
         self.extend_output(try_catch_insts[:i])
         self.extend_output(call_and_jump_insts)
-        self.extend_output(try_catch_insts[i + 1 :])
+        # skip LOAD_FAST call and POP_TOP
+        self.extend_output(try_catch_insts[i + 2 :])
         self.append_output(jump_target)
 
     def load_import_from(self, module_name, object_name) -> None:
