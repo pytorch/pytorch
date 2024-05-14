@@ -1165,6 +1165,15 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return a - b
 
     @make_test
+    def test_set_update_bytecode(x):
+        # This produces bytecode SET_UPDATE since python 3.9
+        var = {"apple", "banana", "cherry"}
+        if isinstance(var, set):
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
     def test_set_contains(a, b):
         vals = set(["a", "b", "c"])
         if "a" in vals:
