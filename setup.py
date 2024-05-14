@@ -744,6 +744,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
             "caffe2.python.caffe2_pybind11_state_gpu",
             "caffe2.python.caffe2_pybind11_state_hip",
         ]
+        if BUILD_LIBTORCH_WHL:
+            caffe2_pybind_exts = []
         i = 0
         while i < len(self.extensions):
             ext = self.extensions[i]
