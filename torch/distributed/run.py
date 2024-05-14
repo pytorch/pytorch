@@ -415,7 +415,7 @@ logger = get_logger(__name__)
 
 def get_args_parser() -> ArgumentParser:
     """Parse the command line options."""
-    parser = ArgumentParser(description="Torch Distributed Elastic Training Launcher")
+    parser = ArgumentParser(description="Torch Distributed Elastic Training Launcher", allow_abbrev=False)
 
     #
     # Worker/node size related arguments.
