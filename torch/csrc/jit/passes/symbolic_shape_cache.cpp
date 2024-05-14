@@ -109,7 +109,7 @@ TORCH_API void cache_shape_function(
   shapeCache.Add(std::move(cache_key), std::move(can_ret_vec));
 }
 
-TORCH_API c10::optional<std::vector<at::SymbolicShape>>
+TORCH_API std::optional<std::vector<at::SymbolicShape>>
 get_cached_shape_function(
     const FunctionSchema* schema,
     const std::vector<SSAInput>& arg_vec) {
