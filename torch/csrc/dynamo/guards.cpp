@@ -2939,6 +2939,66 @@ class FuncKwDefaultsGuardAccessor : public GuardAccessor {
 };
 
 /**
+ * Represents func.__code__ accessor.
+ */
+class FuncCodeGuardAccessor : public GuardAccessor {
+ public:
+  FuncCodeGuardAccessor(
+      RootGuardManager* root,
+      py::object name,
+      std::string source,
+      py::handle example_value,
+      py::handle guard_manager_enum)
+      : GuardAccessor(
+            root,
+            std::move(name),
+            std::move(source),
+            example_value,
+            guard_manager_enum) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
+    PyObject* func = obj;
+    if (PyMethod_Check(obj)) {
+      func = PyMethod_GET_FUNCTION(obj); // borrowed ref
+    } else if (PyInstanceMethod_Check(obj)) {
+      func = PyInstanceMethod_GET_FUNCTION(obj); // borrowed ref
+    }
+    PyObject* x = PyFunction_GetCode(func); // borrowed ref
+    if (x == nullptr) {
+      PyErr_Clear();
+      return false;
+    }
+    return _guard_manager->check_nopybind(x);
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    PyObject* func = obj;
+    if (PyMethod_Check(obj)) {
+      func = PyMethod_GET_FUNCTION(obj); // borrowed ref
+    } else if (PyInstanceMethod_Check(obj)) {
+      func = PyInstanceMethod_GET_FUNCTION(obj); // borrowed ref
+    }
+    PyObject* x = PyFunction_GetCode(func);
+    if (x == nullptr) {
+      PyErr_Clear();
+      return GuardDebugInfo(
+          false,
+          std::string(repr() + ": Not a function on ") + get_source(),
+          0);
+    }
+
+    return _guard_manager->check_verbose_nopybind(x);
+  }
+
+  std::string repr() const override {
+    return "FuncCodeGuardAccessor";
+  }
+};
+
+/**
  * Represents f_globals acccessor. This sits as a child accessor of the
  * RootGuardManager.
  */
@@ -3464,6 +3524,10 @@ PyObject* torch_c_dynamo_guards_init() {
       GuardAccessor,
       std::unique_ptr<FuncKwDefaultsGuardAccessor>>(
       py_m, "FuncKwDefaultsGuardAccessor");
+  py::class_<
+      FuncCodeGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<FuncCodeGuardAccessor>>(py_m, "FuncCodeGuardAccessor");
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
       GlobalsGuardAccessor,
@@ -3712,7 +3776,6 @@ PyObject* torch_c_dynamo_guards_init() {
           py::arg("example_value"),
           py::arg("guard_manager_enum"),
           py::return_value_policy::reference)
-
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
       .def(
@@ -3724,6 +3787,26 @@ PyObject* torch_c_dynamo_guards_init() {
             // A unique key is used to save as the accessor key.
             py::str unique_key("__kwdefaults_accessor__");
             return self.get_child_manager<FuncKwDefaultsGuardAccessor>(
+                std::move(unique_key),
+                std::move(source),
+                std::move(example_value),
+                guard_manager_enum);
+          },
+          py::arg("source"),
+          py::arg("example_value"),
+          py::arg("guard_manager_enum"),
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "func_code_manager",
+          [](GuardManager& self,
+             std::string source,
+             py::object example_value,
+             py::handle guard_manager_enum) -> GuardManager* {
+            // A unique key is used to save as the accessor key.
+            py::str unique_key("__code__accessor__");
+            return self.get_child_manager<FuncCodeGuardAccessor>(
                 std::move(unique_key),
                 std::move(source),
                 std::move(example_value),
