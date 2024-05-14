@@ -856,6 +856,39 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Repro(), example_inputs)
 
+    def test_large_grid(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, primals_1, primals_2, primals_5):
+                view = torch.ops.aten.reshape.default(primals_5, [-1, 4, 128])
+                primals_5 = None
+                permute = torch.ops.aten.permute.default(view, [0, 2, 1])
+                clone = torch.ops.aten.clone.default(
+                    permute, memory_format=torch.contiguous_format
+                )
+                permute = None
+                view_1 = torch.ops.aten.reshape.default(clone, [-1, 4])
+                clone = None
+                permute_1 = torch.ops.aten.permute.default(primals_1, [1, 0])
+                primals_1 = None
+                addmm = torch.ops.aten.addmm.default(primals_2, view_1, permute_1)
+                primals_2 = None
+                return addmm
+
+        s0 = 727828
+        s1 = 512
+        example_inputs = (
+            torch.rand(2, 4, device=self.device),
+            torch.rand(2, device=self.device),
+            torch.rand(s0, s1, device=self.device),
+        )
+        self.check_model(Model(), example_inputs)
+
     def test_cond_simple(self):
         inputs = (
             torch.randn((10, 20), device=self.device),
@@ -2676,6 +2709,58 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(16, 16, 16, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    def test_nested_tensor_from_jagged(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mlp = nn.Sequential(
+                    nn.Linear(128, 64), nn.ReLU(), nn.Linear(64, 32), nn.Sigmoid()
+                )
+
+            def forward(self, values, offsets):
+                nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+                res = self.mlp(nt)
+                return res.values()
+
+        model = Model().to(device=self.device)
+
+        example_inputs_1 = (
+            torch.randn((15, 128), device=self.device),
+            torch.tensor([0, 3, 4, 10, 15], device=self.device),
+        )
+
+        # same "NT batch size", different actual amount of data
+        example_inputs_2 = (
+            torch.randn((31, 128), device=self.device),
+            torch.tensor([0, 1, 20, 25, 31], device=self.device),
+        )
+
+        # same actual amount of data, different "NT batch size"
+        example_inputs_3 = (
+            torch.randn((15, 128), device=self.device),
+            torch.tensor([0, 3, 10, 15], device=self.device),
+        )
+
+        # different "NT batch size"
+        example_inputs_4 = (
+            torch.randn((37, 128), device=self.device),
+            torch.tensor([0, 5, 16, 25, 29, 37], device=self.device),
+        )
+
+        dim0_values = Dim("dim0_values", min=1, max=128)
+        dim0_offsets = Dim("dim0_offsets", min=1, max=9)
+        dynamic_shapes = {"values": {0: dim0_values}, "offsets": {0: dim0_offsets}}
+        example_inputs_list = [
+            example_inputs_1,
+            example_inputs_2,
+            example_inputs_3,
+            example_inputs_4,
+        ]
+
+        self.check_model_with_multiple_inputs(
+            model, example_inputs_list, dynamic_shapes=dynamic_shapes
+        )
+
     def test_misc_1(self):
         class Model(nn.Module):
             def __init__(self):
@@ -2848,6 +2933,7 @@ CUDA_TEST_FAILURES = {
     # test_failures, xfail by default, set is_skip=True to skip
     "test_dup_unbacked_sym_decl": fail_abi_compatible_cuda(),
     "test_dup_unbacked_sym_decl_with_refinement": fail_abi_compatible_cuda(),
+    "test_large_grid": fail_cuda(),
     "test_normal_functional": fail_abi_compatible_cuda(),
     # There is a double-free issue which will be fixed in another PR
     # no ABI shim fn for torch.sort; remove this when adding one
