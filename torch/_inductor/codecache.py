@@ -564,23 +564,27 @@ class FxGraphCachePickler(pickle.Pickler):
 
 
 @functools.lru_cache(None)
-def get_inductor_code_hash() -> bytes:
+def torch_key():
     """
-    Compute a hash of all inductor code modules. Used by the FxGraph cache
-    so any inductor code changes would result in new cache keys.
+    Compute a key that contains relevant information about torch source files
     """
-    inductor_root = os.path.dirname(__file__)
+    if not config.is_fbcode():
+        inductor_root = os.path.dirname(__file__)
 
-    contents: Dict[str, bytes] = {}
-    for lib in pkgutil.iter_modules([inductor_root]):
-        spec = lib.module_finder.find_spec(lib.name, None)
-        assert spec is not None
-        module = spec.origin
-        assert module is not None
-        with open(module, "rb") as f:
-            contents[module] = f.read()
+        contents: Dict[str, bytes] = {torch.__version__: b""}
+        for lib in pkgutil.iter_modules([inductor_root]):
+            spec = lib.module_finder.find_spec(lib.name, None)
+            assert spec is not None
+            module = spec.origin
+            assert module is not None
+            with open(module, "rb") as f:
+                contents[module] = f.read()
 
-    return hashlib.sha256(pickle.dumps(contents)).digest()
+        return hashlib.sha256(pickle.dumps(contents)).digest()
+
+    from libfb.py import parutil
+
+    return parutil.get_file_contents("torch/src_hash.txt").rstrip()
 
 
 @dataclasses.dataclass
@@ -645,11 +649,9 @@ class FxGraphHashDetails:
         )
 
         # Also hash on various system info (including the triton compiler version).
-        self.torch_version = torch.__version__
+        self.torch_version = torch_key()
         self.system_info = CacheBase.get_system()
 
-        # And the inductor configuration and code.
-        self.inductor_code_hash = get_inductor_code_hash()
         try:
             self.inductor_config = config.save_config()
         except (TypeError, AttributeError) as e:
