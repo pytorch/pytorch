@@ -4,7 +4,15 @@ import os
 import torch
 import unittest
 from torch._inductor import config
-from torch._inductor.test_case import TestCase
+from torch._inductor.test_case import TestCase, run_tests
+
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+
+torch.set_float32_matmul_precision("high")
+if HAS_CUDA:
+    torch.cuda.memory._set_allocator_settings("expandable_segments:False")
+
+_CUTLASS_DIR = os.path.join(os.path.dirname(__file__), "../../third_party/cutlass/")
 
 log = logging.getLogger(__name__)
 
@@ -67,3 +75,11 @@ class TestCKBackend(TestCase):
             Y_compiled = torch.compile(mm, dynamic=False)(a, b)
             Y = mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
+
+
+if __name__ == "__main__":
+    from torch._inductor.utils import is_big_gpu
+
+    # Set env to make it work in CI.
+    if HAS_CUDA and HAS_CPU and is_big_gpu(0):
+        run_tests()
