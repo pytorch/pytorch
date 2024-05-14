@@ -235,8 +235,8 @@ if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
     )
     sys.exit(-1)
 
-import platform
 import os
+import platform
 
 python_min_version = (3, 8, 0)
 python_min_version_str = ".".join(map(str, python_min_version))
@@ -980,6 +980,10 @@ def configure_extension_build():
     main_link_args = []
     main_sources = ["torch/csrc/stub.c"]
 
+    if BUILD_LIBTORCH_WHL:
+        main_libraries = ["torch"]
+        main_sources = []
+
     if cmake_cache_vars["USE_CUDA"]:
         library_dirs.append(os.path.dirname(cmake_cache_vars["CUDA_CUDA_LIB"]))
 
@@ -1030,6 +1034,29 @@ def configure_extension_build():
                 macos_sysroot_path,
             ]
             extra_link_args += ["-arch", macos_target_arch]
+
+    def rename_torch_packages(package_list):
+        """
+        Create a dictionary from a list of package names, renaming packages where
+        the top-level package is 'torch' to 'libtorch'.
+        Args:
+            package_list (list of str): The list of package names.
+        Returns:
+            dict: A dictionary where keys are the package names with 'torch' replaced by 'libtorch',
+                and values are the original package names, only including those where the
+                top-level name is 'torch'.
+        """
+        result = {}
+        for package in package_list:
+            # Split the package name by dots to handle subpackages or modules
+            parts = package.split(".")
+            # Check if the top-level package is 'torch'
+            if parts[0] == "torch":
+                # Replace 'torch' with 'libtorch' in the top-level package name
+                new_key = "libtorch" + package[len("torch") :]
+                result[new_key] = package
+
+        return result
 
     def make_relative_rpath_args(path):
         if IS_DARWIN:
