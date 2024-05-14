@@ -7,6 +7,7 @@ import torch._inductor.config as inductor_config
 from torch._dynamo.testing import rand_strided
 from torch._inductor.fx_passes.pad_mm import (
     get_alignment_size,
+    get_pad_cache,
     get_padded_length,
     should_pad_common,
 )
@@ -383,6 +384,35 @@ class PadMMTest(TestCase):
         assert torch.allclose(
             res2, bmm_expected_result
         ), "BMM results are not identical"
+
+    @fresh_inductor_cache()
+    def test_exclude_padding(self):
+        @torch.compile()
+        def mm(a, b):
+            return a @ b
+
+        mm(torch.rand([25, 25], device="cuda"), torch.rand([25, 25], device="cuda"))
+        local_cache = get_pad_cache().get_local_cache()
+        self.assertTrue(len(local_cache) == 2)
+        FileCheck().check_count("exclude_pad:False", 2, exactly=True).run(
+            repr(local_cache)
+        )
+
+        @torch.compile()
+        def mm(a, b):
+            return (a + 1) @ b
+
+        mm(torch.rand([25, 25], device="cuda"), torch.rand([25, 25], device="cuda"))
+        local_cache = get_pad_cache().get_local_cache()
+        # reuse original base timing
+        self.assertTrue(len(local_cache) == 3)
+
+        FileCheck().check_count("exclude_pad:False", 3, exactly=True).run(
+            repr(local_cache)
+        )
+        FileCheck().check_count("exclude_pad:True", 1, exactly=True).run(
+            repr(local_cache)
+        )
 
 
 if __name__ == "__main__":

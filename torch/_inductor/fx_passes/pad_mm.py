@@ -1,4 +1,5 @@
 import functools
+import operator
 from typing import List, Optional, Union
 
 import torch
@@ -213,16 +214,29 @@ def get_pad_cache():
     return torch._inductor.codecache.LocalCache()
 
 
-def get_cached_should_pad(key):
+def get_cached_should_pad(key: str) -> bool:
     return get_pad_cache().lookup(key)
 
 
-def set_cached_should_pad(key, value):
+def set_cached_should_pad(key: str, value: bool):
+    return get_pad_cache().set_value(key, value=value)
+
+
+def get_cached_base_mm_benchmark_time(key: str) -> float:
+    return get_pad_cache().lookup(key)
+
+
+def set_cached_base_mm_benchmark_time(key: str, value: float):
     return get_pad_cache().set_value(key, value=value)
 
 
 def should_pad_bench_key(
-    mat1: Tensor, mat2: Tensor, op, input: Optional[Tensor] = None
+    match,
+    mat1: Tensor,
+    mat2: Tensor,
+    op,
+    input: Optional[Tensor] = None,
+    is_base_time_key=False,
 ) -> str:
     def tensor_key(t):
         return (t.shape, t.stride(), t.dtype)
@@ -230,15 +244,53 @@ def should_pad_bench_key(
     tf32_key = (
         None if mat1.dtype != torch.float32 else torch.backends.cuda.matmul.allow_tf32
     )
+
+    def fmt_pad(name):
+        if is_base_time_key:
+            return None
+        return f"exclude_pad:{should_exclude_padding_time(match, name)}"
+
     key = (
         tensor_key(mat1),
         tensor_key(mat2),
+        fmt_pad("mat1"),
+        fmt_pad("mat2"),
         op,
         input if input is None else tensor_key(input),
         tf32_key,
     )
 
-    return str(key)
+    key = str(key)
+    if is_base_time_key:
+        key = f"base mm time: {key}"
+    return key
+
+
+def get_non_view_def(node):
+    if node.op == operator.getitem:
+        return get_non_view_def(node.args[0])
+
+    if (
+        node.op == "call_function"
+        and isinstance(node.target, torch._ops.OpOverload)
+        and utils.is_view(node.target)
+    ):
+        return get_non_view_def(node.all_input_nodes[0])
+
+    return node
+
+
+def should_exclude_padding_time(match, arg_name):
+    node_def = get_non_view_def(match.kwargs[arg_name])
+
+    # constant padding converts tensors to contiguous so even if the input tensor
+    # can be planned layout transform is not free. TODO - way to pad and preserve layout ?
+    if not fetch_fake_tensors(match, (arg_name,))[0].is_contiguous():
+        return False
+
+    # optimistically assume we should be able to memory plan away
+    # all non inputs
+    return node_def.op != "placeholder"
 
 
 def should_pad_bench(
@@ -284,7 +336,7 @@ def should_pad_bench(
 
         # We don't want to look up the cache for cases that are trivially false
         # since it does file io
-        key = should_pad_bench_key(mat1, mat2, op, input)
+        key = should_pad_bench_key(match, mat1, mat2, op, input)
 
         cached_pad = get_cached_should_pad(key)
         if cached_pad is not None:
@@ -307,19 +359,48 @@ def should_pad_bench(
 
         mat1 = realize_tensor(mat1)
         mat2 = realize_tensor(mat2)
-        if op is torch.ops.aten.bmm or op is torch.ops.aten.mm:
-            ori_time = do_bench(
-                lambda: op(mat1, mat2),
-            )
-        else:
-            if input is not None:
-                input = realize_tensor(input)
-            ori_time = do_bench(
-                lambda: op(input, mat1, mat2),
-            )
+
+        # since we key on whether or not the inputs can be memory planned, set cache for the
+        # original time which is unaffected by whether or not the input can be planned
+        ori_time_key = should_pad_bench_key(
+            match, mat1, mat2, op, input, is_base_time_key=True
+        )
+        ori_time = get_cached_base_mm_benchmark_time(ori_time_key)
+        if ori_time is None:
+            if op is torch.ops.aten.bmm or op is torch.ops.aten.mm:
+                ori_time = do_bench(
+                    lambda: op(mat1, mat2),
+                )
+            else:
+                if input is not None:
+                    # realize bias for addmm
+                    input = realize_tensor(input)
+                ori_time = do_bench(
+                    lambda: op(input, mat1, mat2),
+                )
+            set_cached_base_mm_benchmark_time(ori_time_key, ori_time)
 
         mat1_pad = mat1
         mat2_pad = mat2
+
+        is_bmm = op is torch.ops.aten.bmm
+        mat1_pre_padded = should_exclude_padding_time(match, "mat1")
+        if mat1_pre_padded:
+            mat1_pad = pad_mat1(
+                mat1_pad,
+                m_padded_length=m_padded_length,
+                k_padded_length=k_padded_length,
+                is_bmm=is_bmm,
+            )
+
+        mat2_pre_padded = should_exclude_padding_time(match, "mat2")
+        if mat2_pre_padded:
+            mat2_pad = pad_mat2(
+                mat2_pad,
+                k_padded_length=k_padded_length,
+                n_padded_length=n_padded_length,
+                is_bmm=is_bmm,
+            )
 
         if op is torch.ops.aten.addmm:
             input_pad = None
@@ -333,6 +414,8 @@ def should_pad_bench(
                     m_padded_length,
                     k_padded_length,
                     n_padded_length,
+                    mat1_pre_padded=mat1_pre_padded,
+                    mat2_pre_padded=mat2_pre_padded,
                 ),
             )
         elif op is torch.ops.aten.mm:
@@ -343,6 +426,8 @@ def should_pad_bench(
                     m_padded_length,
                     k_padded_length,
                     n_padded_length,
+                    mat1_pre_padded=mat1_pre_padded,
+                    mat2_pre_padded=mat2_pre_padded,
                 ),
             )
         else:
@@ -353,6 +438,8 @@ def should_pad_bench(
                     m_padded_length,
                     k_padded_length,
                     n_padded_length,
+                    mat1_pre_padded=mat1_pre_padded,
+                    mat2_pre_padded=mat2_pre_padded,
                 ),
             )
 
