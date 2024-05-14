@@ -313,7 +313,6 @@ def get_c2_default_cxx_args():
         ],
         visibility = ["PUBLIC"],
         windows_preferred_linkage = "static" if is_arvr_mode() else None,
-        xcode_public_headers_symlinks = True,
     )
 
 def get_c2_aten_cpu_fbobjc_macosx_deps():
