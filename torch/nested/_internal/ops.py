@@ -5,7 +5,7 @@ import operator
 import torch
 from torch.nested._internal.sdpa import jagged_scaled_dot_product_attention
 
-from .nested_tensor import NestedTensor
+from .nested_tensor import _tensor_symint_registry, NestedTensor
 from typing import *  # noqa: F403
 import torch.nn.functional as F
 from torch.fx.operator_schemas import normalize_function
@@ -329,6 +329,7 @@ def jagged_torch_function(func, *args, **kwargs):
         torch.ops.aten.is_non_overlapping_and_dense.default,
         torch.ops.aten.sym_size.default,
         torch.ops.aten.dim.default,
+        torch.ops.aten.numel.default,
         torch.ops.aten.sym_numel.default,
         torch.ops.aten.sym_stride.default,
         torch.ops.aten.sym_storage_offset.default,
@@ -345,7 +346,7 @@ def tensor_attr_supported_getter(func, *args, **kwargs):
     if func == torch.ops.aten.dim.default:
         return len(args[0]._size)
 
-    if func == torch.ops.aten.sym_numel.default:
+    if func in (torch.ops.aten.sym_numel.default, torch.ops.aten.numel.default):
         if args[0]._lengths is not None:
             return int(sum(args[0]._lengths) * math.prod(args[0]._size[2:]))
         return args[0]._values.numel()
@@ -452,22 +453,36 @@ def _to_copy_default(func, *args, **kwargs):
 
     new_values = func(inp._values, **new_kwargs)
 
-    if new_layout == torch.jagged:
-        # Copy to a new Python subclass NestedTensor
-        new_offsets = inp._offsets.to(device=new_values.device)
-        _tensor_symint_registry[new_offsets] = _tensor_symint_registry[inp._offsets]
-        inp_kwargs = extract_kwargs(inp)
-        inp_kwargs["offsets"] = new_offsets
+    # Copy to a new Python subclass NestedTensor
+    new_offsets = inp._offsets.to(device=new_values.device)
+    _tensor_symint_registry[new_offsets] = _tensor_symint_registry[inp._offsets]
+    inp_kwargs = extract_kwargs(inp)
+    inp_kwargs["offsets"] = new_offsets
 
-        return NestedTensor(new_values, **inp_kwargs)
+    new_njt = NestedTensor(new_values, **inp_kwargs)
+
+    if new_layout == torch.jagged:
+        return new_njt
+
+    return torch._nested_jagged_to_strided(new_njt)
+
+
+@register_jagged_func(torch.ops.aten._nested_jagged_to_strided.default, "self: jt_all")
+def _nested_jagged_to_strided(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
 
     # Create a new C++ NT from the Python NestedTensor
     # Start by creating metadata needed by C++ NT
     ragged_source = inp.lengths() if inp.lengths() is not None else inp.offsets().diff()
+
     nested_sizes = torch.empty(
-        (inp.offsets().shape[0] - 1, new_values.dim()), dtype=torch.int64
+        (inp.offsets().shape[0] - 1, inp._values.dim()), dtype=torch.int64
     )
-    non_ragged_dims = list(range(new_values.dim()))
+    non_ragged_dims = list(range(inp._values.dim()))
     non_ragged_dims = (
         non_ragged_dims[: inp._ragged_idx - 1] + non_ragged_dims[inp._ragged_idx :]
     )
@@ -478,11 +493,11 @@ def _to_copy_default(func, *args, **kwargs):
     nested_strides = torch.empty_like(nested_sizes)
     nested_strides[:, :] = torch.tensor(inp._strides[1:])
     nested_offsets = inp.offsets() * functools.reduce(
-        lambda a, b: a * b, new_values.shape[1:]
+        lambda a, b: a * b, inp._values.shape[1:]
     )
     nested_offsets = nested_offsets[:-1]
     return torch._nested_view_from_buffer(
-        new_values.view(-1),
+        inp._values.view(-1),
         nested_size=nested_sizes,
         nested_strides=nested_strides,
         offsets=nested_offsets,
@@ -654,7 +669,7 @@ def unbind_int(func, *args, **kwargs):
 
     if inp._ragged_idx != 1:
         raise RuntimeError(
-            "unbind(): only supported for NestedTensor when jagged dimension is 1"
+            "unbind(): only supported for NestedTensor when ragged dimension is 1"
         )
 
     if lengths is None:

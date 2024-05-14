@@ -511,10 +511,7 @@ class TestNestedTensor(TestCase):
     @parametrize("layout", [torch.strided, torch.jagged], name_fn=layout_name)
     def test_to(self, layout):
         ntensors = 4
-        if layout == torch.strided:
-            nt = random_nt(torch.device('cpu'), torch.float32, ntensors, (4, 4), layout=layout)
-        else:
-            nt = random_nt_from_dims((7, None, 10), torch.device('cpu'), torch.float32, layout=layout)
+        nt = random_nt_from_dims((7, None, 10), torch.device('cpu'), torch.float32, layout=layout)
 
         def test_copy_behavior(t, non_blocking=False):
             self.assertIs(t, t.to(t, non_blocking=non_blocking))
@@ -549,8 +546,7 @@ class TestNestedTensor(TestCase):
             self.assertEqual(getter(nt), getter(nt.to('cpu', copy=False)))
             self.assertNotEqual(getter(nt), getter(nt.to('cpu', copy=True)))
 
-        if layout == torch.strided:  # TODO: Implement numel() for jagged
-            test_data_ptr(lambda nt: nt.data_ptr())
+        test_data_ptr(lambda nt: nt.data_ptr())
 
         if torch.cuda.is_available():
             for non_blocking in [True, False]:
@@ -565,18 +561,14 @@ class TestNestedTensor(TestCase):
                     self.assertIs(torch.int32, nt2.to(dtype=torch.int32).dtype)
                     self.assertEqual(nt2.device, nt2.to(dtype=torch.int32).device)
 
-        # Jagged to strided (should work)
-        if layout == torch.jagged:
-            strided_nt = torch.ops.aten._to_copy(nt, layout=torch.strided)
-            self.assertIs(strided_nt.layout, torch.strided)
-            self.assertEqual(strided_nt.device, nt.device)
-            self.assertEqual(strided_nt.size(2), nt.size(2))
-            self.assertEqual(strided_nt.unbind(), nt.unbind())
-
-        # Strided to jagged (not implemented yet)
-        if layout == torch.strided:
-            with self.assertRaises(RuntimeError):
-                jagged_nt = torch.ops.aten._to_copy(nt, layout=torch.jagged)
+        # Jagged <-> strided
+        new_layout = torch.jagged if layout == torch.strided else torch.strided
+        new_layout_nt = torch.ops.aten._to_copy(nt, layout=new_layout)
+        self.assertIs(new_layout_nt.layout, torch.strided)
+        self.assertEqual(new_layout_nt.device, nt.device)
+        self.assertEqual(new_layout_nt.size(2), nt.size(2))
+        self.assertEqual(new_layout_nt.unbind(), nt.unbind())
+        self.assertNotEqual(new_layout_nt.data_ptr(), nt.data_ptr())
 
     def test_copy_(self):
         ntensors = 4
@@ -3088,6 +3080,7 @@ class TestNestedTensorSubclass(TestCase):
             torch.ops.aten.is_non_overlapping_and_dense.default,
             torch.ops.aten.sym_size.default,
             torch.ops.aten.dim.default,
+            torch.ops.aten.numel.default,
             torch.ops.aten.sym_numel.default,
             torch.ops.aten.sym_stride.default,
             torch.ops.aten.sym_storage_offset.default,
@@ -3895,6 +3888,14 @@ class TestNestedTensorSubclass(TestCase):
         self.assertTrue(nt_contiguous.is_contiguous(memory_format=torch.contiguous_format))
         self.assertTrue(not nt_noncontiguous.is_contiguous(memory_format=torch.contiguous_format))
         self.assertTrue(nt_contiguous_narrow.is_contiguous(memory_format=torch.contiguous_format))
+
+    def test_layout_under_torch_dispatch_mode(self):
+        from torch.testing._internal.logging_tensor import capture_logs_with_logging_tensor_mode
+
+        nt = random_nt_from_dims([2, None, 3], torch.device('cpu'), torch.float32, layout=torch.jagged)
+
+        with capture_logs_with_logging_tensor_mode():
+            self.assertEqual(nt.layout, torch.jagged)
 
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     @parametrize("func", [torch.empty_like, torch.randn_like],

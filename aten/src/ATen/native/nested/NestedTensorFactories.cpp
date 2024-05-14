@@ -91,8 +91,8 @@ Tensor _to_copy_nested(
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   TORCH_CHECK(
       !layout.has_value() || self.layout() == layout.value() || layout.value() == Layout::Jagged,
-      "to(options) doesn't support converting to a different layout, "
-      "but we support only strided -> jagged conversion, you have ",
+      "to(options) doesn't generally support converting to a different layout, "
+      "but for NT we support strided -> jagged conversion, you have ",
       self.layout(),
       " and options.layout is set as ",
       layout.value());
