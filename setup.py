@@ -1450,10 +1450,22 @@ def main():
                 "include/tensorpipe/transport/uv/*.h",
             ]
         )
+    if get_cmake_cache_vars()["USE_KINETO"]:
+        torch_package_data.extend(
+            [
+                "include/kineto/*.h",
+            ]
+        )
     torchgen_package_data = [
-        "packaged/**/*.cpp",
-        "packaged/**/*.h",
-        "packaged/**/*.yaml",
+        # Recursive glob doesn't work in setup.py,
+        # https://github.com/pypa/setuptools/issues/1806
+        # To make this robust we should replace it with some code that
+        # returns a list of everything under packaged/
+        "packaged/ATen/*",
+        "packaged/ATen/native/*",
+        "packaged/ATen/templates/*",
+        "packaged/autograd/*",
+        "packaged/autograd/templates/*",
     ]
 
     if BUILD_LIBTORCH_WHL:
@@ -1479,7 +1491,7 @@ def main():
         }
 
     setup(
-        name="libtorch",
+        name=package_name,
         version=version,
         description=(
             "Tensors and Dynamic neural networks in "

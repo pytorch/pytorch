@@ -13,9 +13,6 @@ if(NOT BUILD_PYTHON)
   return()
 endif()
 
-# if(BUILD_PYTHONLESS)
-#  return()
-# endif()
 
 set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(TORCH_ROOT "${TORCH_SRC_DIR}/..")
