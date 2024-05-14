@@ -5,13 +5,15 @@ namespace torch {
 namespace profiler {
 namespace impl {
 
-using CallBackFnPtr = void (*) (const ProfilerConfig& config,
+using CallBackFnPtr = void (*)(
+    const ProfilerConfig& config,
     const std::unordered_set<at::RecordScope>& scopes);
 
 struct PushPRIVATEUSE1CallbacksStub {
   PushPRIVATEUSE1CallbacksStub() = default;
   PushPRIVATEUSE1CallbacksStub(const PushPRIVATEUSE1CallbacksStub&) = delete;
-  PushPRIVATEUSE1CallbacksStub& operator=(const PushPRIVATEUSE1CallbacksStub&) = delete;
+  PushPRIVATEUSE1CallbacksStub& operator=(const PushPRIVATEUSE1CallbacksStub&) =
+      delete;
 
   template <typename... ArgTypes>
   void operator()(ArgTypes&&... args) {
@@ -22,15 +24,17 @@ struct PushPRIVATEUSE1CallbacksStub {
     push_privateuse1_callbacks_fn = fn_ptr;
   }
 
-private:
+ private:
   CallBackFnPtr push_privateuse1_callbacks_fn = nullptr;
 };
 
-extern  __attribute__((__visibility__("default")))
-struct PushPRIVATEUSE1CallbacksStub pushPRIVATEUSE1CallbacksStub;
+extern TORCH_API struct PushPRIVATEUSE1CallbacksStub
+    pushPRIVATEUSE1CallbacksStub;
 
 struct RegisterPRIVATEUSE1Observer {
-  RegisterPRIVATEUSE1Observer(PushPRIVATEUSE1CallbacksStub &stub, CallBackFnPtr value) {
+  RegisterPRIVATEUSE1Observer(
+      PushPRIVATEUSE1CallbacksStub& stub,
+      CallBackFnPtr value) {
     stub.set_privateuse1_dispatch_ptr(value);
   }
 };

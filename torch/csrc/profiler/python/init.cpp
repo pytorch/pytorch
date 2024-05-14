@@ -321,7 +321,7 @@ void initPythonBindings(PyObject* module) {
       .value("KINETO", ActiveProfilerType::KINETO)
       .value("NVTX", ActiveProfilerType::NVTX)
       .value("ITT", ActiveProfilerType::ITT)
-      .value("PRIVATEUSE1",ActiveProfilerType::PRIVATEUSE1);
+      .value("PRIVATEUSE1", ActiveProfilerType::PRIVATEUSE1);
 
   py::enum_<ActivityType>(m, "ProfilerActivity")
       .value("CPU", ActivityType::CPU)

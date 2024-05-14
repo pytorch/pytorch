@@ -664,7 +664,7 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
            config.state == ProfilerState::KINETO_PRIVATEUSE1_FALLBACK ||
            config.state == ProfilerState::KINETO_ONDEMAND ||
            config.state == ProfilerState::NVTX ||
-           config.state == ProfilerState::ITT || 
+           config.state == ProfilerState::ITT ||
            config.state == ProfilerState::PRIVATEUSE1),
       "Can't disable Kineto profiler when it's not running");
 
@@ -677,9 +677,10 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
     return std::make_unique<ProfilerResult>();
   }
 
-  // Shared among NVTX, PRIVATEUSE1, KINETO, KINETO_GPU_FALLBACK, KINETO_PRIVATEUSE1_FALLBACK
+  // Shared among NVTX, PRIVATEUSE1, KINETO, KINETO_GPU_FALLBACK,
+  // KINETO_PRIVATEUSE1_FALLBACK
   std::unique_ptr<ProfilerResult> result;
-  if (state_ptr->config().state == ProfilerState::NVTX || 
+  if (state_ptr->config().state == ProfilerState::NVTX ||
       state_ptr->config().state == ProfilerState::PRIVATEUSE1) {
     result = std::make_unique<ProfilerResult>();
   }
