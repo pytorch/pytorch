@@ -629,36 +629,28 @@ static PyObject* set_autocast_xla_dtype(PyObject* _unused, PyObject* arg) {
 static PyObject* get_autocast_gpu_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   at::ScalarType current_dtype = at::autocast::get_autocast_gpu_dtype();
-  auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
-  Py_INCREF(dtype);
-  return dtype;
+  return Py_NewRef(torch::getTHPDtype(current_dtype));
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* get_autocast_cpu_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   at::ScalarType current_dtype = at::autocast::get_autocast_cpu_dtype();
-  auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
-  Py_INCREF(dtype);
-  return dtype;
+  return Py_NewRef(torch::getTHPDtype(current_dtype));
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* get_autocast_ipu_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   at::ScalarType current_dtype = at::autocast::get_autocast_ipu_dtype();
-  auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
-  Py_INCREF(dtype);
-  return dtype;
+  return Py_NewRef(torch::getTHPDtype(current_dtype));
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* get_autocast_xla_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   at::ScalarType current_dtype = at::autocast::get_autocast_xla_dtype();
-  auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
-  Py_INCREF(dtype);
-  return dtype;
+  return Py_NewRef(torch::getTHPDtype(current_dtype));
   END_HANDLE_TH_ERRORS
 }
 
