@@ -1241,13 +1241,11 @@ def main():
         "nn/parallel/*.pyi",
         "utils/data/*.pyi",
         "utils/data/datapipes/*.pyi",
-        "lib/*.so*",
-        "lib/*.dylib*",
-        "lib/*.dll",
-        "lib/*.lib",
         "lib/*.pdb",
         "lib/torch_shm_manager",
         "lib/*.h",
+        "lib/libtorch_python*",
+        "lib/*shm*",
         "include/*.h",
         "include/ATen/*.h",
         "include/ATen/cpu/*.h",
@@ -1408,7 +1406,15 @@ def main():
         "utils/model_dump/code.js",
         "utils/model_dump/*.mjs",
     ]
-
+    if not BUILD_PYTORCH_USING_LIBTORCH_WHL:
+        torch_package_data.extend(
+            [
+                "lib/*.so*",
+                "lib/*.dylib*",
+                "lib/*.dll",
+                "lib/*.lib",
+            ]
+        )
     if get_cmake_cache_vars()["BUILD_CAFFE2"]:
         torch_package_data.extend(
             [
@@ -1451,6 +1457,29 @@ def main():
         "packaged/autograd/*",
         "packaged/autograd/templates/*",
     ]
+
+    if BUILD_LIBTORCH_WHL:
+        modified_packages = []
+        for package in packages:
+            parts = package.split(".")
+            if parts[0] == "torch":
+                modified_packages.append("libtorch" + package[len("torch") :])
+        packages = modified_packages
+        package_dir = {"libtorch": "torch"}
+        torch_package_dir_name = "libtorch"
+        package_data = {"libtorch": torch_package_data}
+        extensions = []
+    else:
+        torch_package_dir_name = "torch"
+        package_dir = {}
+        package_data = {
+            "torch": torch_package_data,
+            "torchgen": torchgen_package_data,
+            "caffe2": [
+                "python/serialized_test/data/operator_test/*.zip",
+            ],
+        }
+
     setup(
         name=package_name,
         version=version,
@@ -1466,13 +1495,9 @@ def main():
         entry_points=entry_points,
         install_requires=install_requires,
         extras_require=extras_require,
-        package_data={
-            "torch": torch_package_data,
-            "torchgen": torchgen_package_data,
-            "caffe2": [
-                "python/serialized_test/data/operator_test/*.zip",
-            ],
-        },
+        package_dir=package_dir,
+        package_data=package_data,
+        include_package_data=True,
         url="https://pytorch.org/",
         download_url="https://github.com/pytorch/pytorch/tags",
         author="PyTorch Team",
