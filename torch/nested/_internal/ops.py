@@ -1129,11 +1129,7 @@ def _nested_from_padded_tensor_default(func, *args, **kwargs):
         padded = padded.unsqueeze(-1)
 
     if padded.is_cuda:
-        # TODO: examine the perf implications of this
-        total_L = offsets[-1].item()
-        values = torch.ops.aten._fbgemm_jagged_to_padded_dense_backward(
-            padded, [offsets], total_L
-        )
+        values = torch.ops.aten._fbgemm_dense_to_jagged_forward(padded, [offsets])
 
         # shape gymnastics part 2
         if len(padded_shape) > 3:
