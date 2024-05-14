@@ -72,8 +72,8 @@ def rocm_compiler_version() -> Optional[str]:
     rocm_compiler = _rocm_compiler()
     if not rocm_compiler:
         return None
+    import subprocess
     try:
-        import subprocess
         return subprocess.check_output([rocm_compiler, "--version"], text=True)
     except subprocess.CalledProcessError:
         return None
