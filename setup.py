@@ -1244,8 +1244,6 @@ def main():
         "lib/*.pdb",
         "lib/torch_shm_manager",
         "lib/*.h",
-        "lib/libtorch_python*",
-        "lib/*shm*",
         "include/*.h",
         "include/ATen/*.h",
         "include/ATen/cpu/*.h",
@@ -1406,7 +1404,14 @@ def main():
         "utils/model_dump/code.js",
         "utils/model_dump/*.mjs",
     ]
-    if not BUILD_PYTORCH_USING_LIBTORCH_WHL:
+    if BUILD_PYTORCH_USING_LIBTORCH_WHL:
+        torch_package_data.extend(
+            [
+                "lib/libtorch_python*",
+                "lib/*shm*",
+            ]
+        )
+    else:
         torch_package_data.extend(
             [
                 "lib/*.so*",
