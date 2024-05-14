@@ -33,9 +33,15 @@ if HAS_CUDA:
 
 
 # Define shared triton constants here.
-CONSTANT_C: tl.constexpr = 4
-STRING_CONSTANT_C: tl.constexpr = "CONSTANT_C"
-BOOL_CONSTANT_C: tl.constexpr = True
+if HAS_CUDA:
+    CONSTANT_C: tl.constexpr = 4
+    STRING_CONSTANT_C: tl.constexpr = "CONSTANT_C"
+    BOOL_CONSTANT_C: tl.constexpr = True
+else:
+    CONSTANT_C = 4
+    STRING_CONSTANT_C = "CONSTANT_C"
+    BOOL_CONSTANT_C =  True
+
 
 
 class KernelTests(torch._inductor.test_case.TestCase):
