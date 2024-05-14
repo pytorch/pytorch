@@ -49,17 +49,30 @@ class ModuleTracker:
     A Set containing the fqn for each module currently running their forward
     """
 
-    is_bw: bool
-    """
-    A boolean marking if this is currently running during the backward pass or not
-    """
-
     def __init__(self):
         self.parents = {"Global"}
-        # This is used to reset parents at the end of the backward
-        self.is_bw = False
         self._known_modules: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
         self._seen_modules = set()
+        self._has_callback = False
+
+    def _maybe_set_engine_callback(self):
+        # This assumes no concurrent calls to backward
+        if self._has_callback:
+            return
+
+        def callback():
+            self.parents = {"Global"}
+            self._has_callback = False
+
+        torch.autograd.Variable._execution_engine.queue_callback(callback)
+        self._has_callback = True
+
+    @property
+    def is_bw(self):
+        """
+        A boolean marking if this is currently running during the backward pass or not
+        """
+        return torch._C._current_graph_task_id() != -1
 
     def _get_mod_name(self, mod):
         if mod not in self._known_modules:
@@ -72,9 +85,8 @@ class ModuleTracker:
 
     def _get_append_fn(self, name, is_bw):
         def fn(*args):
-            if self.is_bw != is_bw:
-                self.parents = {"Global"}
-                self.is_bw = is_bw
+            if is_bw:
+                self._maybe_set_engine_callback()
             if name in self.parents:
                 print(
                     "The module hierarchy tracking seems to be messed up."
