@@ -50,9 +50,14 @@ TEST(IValueTest, DeepcopyTensors) {
   // NOTE: this is actually incorrect. Ideally, these _should_ be aliases.
   ASSERT_FALSE(copied_list[0].get().isAliasOf(copied_list[2].get()));
 
-  ASSERT_TRUE(copied_list[0].get().toTensor().allclose(tensor_list[0].get().toTensor()));
-  ASSERT_TRUE(copied_list[1].get().toTensor().allclose(tensor_list[1].get().toTensor()));
-  ASSERT_TRUE(copied_list[2].get().toTensor().allclose(tensor_list[2].get().toTensor()));
-  ASSERT_TRUE(copied_list[3].get().toTensor().allclose(tensor_list[3].get().toTensor()));
-  ASSERT_TRUE(copied_list[4].get().toTensor().allclose(tensor_list[4].get().toTensor()));
+  ASSERT_TRUE(copied_list[0].get().toTensor().allclose(
+      tensor_list[0].get().toTensor()));
+  ASSERT_TRUE(copied_list[1].get().toTensor().allclose(
+      tensor_list[1].get().toTensor()));
+  ASSERT_TRUE(copied_list[2].get().toTensor().allclose(
+      tensor_list[2].get().toTensor()));
+  ASSERT_TRUE(copied_list[3].get().toTensor().allclose(
+      tensor_list[3].get().toTensor()));
+  ASSERT_TRUE(copied_list[4].get().toTensor().allclose(
+      tensor_list[4].get().toTensor()));
 }
