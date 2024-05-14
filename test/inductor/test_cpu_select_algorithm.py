@@ -38,7 +38,14 @@ def patches(fn):
     def skip_cache(self, choices, name, key, benchmark):
         if benchmark is None:
             return {}
-        return benchmark(choices)
+        timings = benchmark(choices)
+        for choice, timing in timings.items():
+            if isinstance(choice, select_algorithm.ExternKernelCaller):
+                # we intentionally make ATEN kernel slower to cover the cases
+                # where template kernels are always chosen with fusions applied
+                # and correctness checks at runtime.
+                timings[choice] = timing * 1000
+        return timings
 
     for patcher in [
         dynamo_config.patch(verbose=True),
