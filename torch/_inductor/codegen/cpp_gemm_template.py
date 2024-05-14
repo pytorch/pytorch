@@ -145,7 +145,6 @@ class CppPackedGemmTemplate(CppTemplate):
         register_blocking: GemmBlocking,
         beta=1,
         alpha=1,
-        epilogues=None,
     ):
         assert layout.dtype in [torch.float, torch.bfloat16, torch.half]
         super().__init__("packed_gemm", input_nodes, layout)
@@ -153,7 +152,6 @@ class CppPackedGemmTemplate(CppTemplate):
         self.alpha = alpha
         self.num_threads = num_threads
         self.register_blocking = register_blocking
-        self.epilogues = epilogues
         m, n = layout.size
         _, k = input_nodes[0].get_size()
         self.m, self.n, self.k = m, n, k
@@ -221,7 +219,6 @@ class CppPackedGemmTemplate(CppTemplate):
         alpha=1,
         trans_w=False,
         input_indices=None,
-        epilogues=None,
     ):
         if input_indices is None:
             input_indices = list(range(len(input_nodes)))
@@ -243,26 +240,9 @@ class CppPackedGemmTemplate(CppTemplate):
 
         def maybe_to_dense(inputs, layout_or_out):
             new_inputs = list(inputs)
-            if isinstance(inputs[1], ir.IRNode):
-                W_node = inputs[1]
-                assert W_node.get_name() in V.graph.constants
-                W = V.graph.constants[W_node.get_name()]
-                if W.is_mkldnn:
-                    new_name = f"{W_node.get_name()}_dense"
-                    if new_name not in V.graph.constants:
-                        W = W.to_dense()
-                        # TODO(jgong5): we should remove the temporary constants ASAP
-                        V.graph.add_tensor_constant(W, new_name)
-                    new_inputs[1] = ir.ConstantBuffer(
-                        new_name,
-                        ir.FixedLayout(
-                            W.device, W.dtype, *V.graph.static_sizes_strides(W)
-                        ),
-                    )
-            else:
+            if isinstance(inputs[1], torch.Tensor):
                 W = inputs[1]
-                if W.is_mkldnn:
-                    new_inputs[1] = W.to_dense()
+                new_inputs[1] = W.to_dense() if W.is_mkldnn else W
             return new_inputs, layout_or_out
 
         def normalize_shapes(inputs, layout_or_out):
@@ -392,7 +372,6 @@ class CppPackedGemmTemplate(CppTemplate):
             register_blocking=micro_gemm.register_blocking,
             beta=beta,
             alpha=alpha,
-            epilogues=epilogues,
         )
         template.maybe_append_choice(choices)
         return template
@@ -415,16 +394,13 @@ class CppPackedGemmTemplate(CppTemplate):
             W = template_buffer_node.inputs[1]
             Y = template_buffer_node
 
-        if epilogue_nodes is None:
-            epilogue_nodes = self.epilogues
-
         template_buffer = Y
         Y_is_transposed = False
         use_local_acc = self.layout.dtype != torch.float
         if epilogue_nodes:
             Y = cast(ir.Buffer, epilogue_nodes[-1])
             assert Y.get_name() in V.kernel.inplace_update_buffers
-            if Y.get_size() == list(reversed(template_buffer.get_size())):
+            if Y.get_stride() == list(reversed(template_buffer.get_stride())):
                 Y_is_transposed = True
 
         micro_gemm = create_micro_gemm(

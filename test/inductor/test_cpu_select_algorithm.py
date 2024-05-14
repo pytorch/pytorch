@@ -203,7 +203,7 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
         TestSelectAlgorithm.test_linear_with_pointwise
     )
     test_linear_with_transpose_dynamic_shapes = (
-        TestSelectAlgorithm.test_linear_input_transpose
+        TestSelectAlgorithm.test_linear_with_transpose
     )
 
 
