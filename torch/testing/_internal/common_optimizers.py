@@ -1247,11 +1247,6 @@ optim_db: List[OptimizerInfo] = [
                 active_if=lambda kwargs: not kwargs["contiguous"],
             ),
             DecorateInfo(
-                skipIfTorchDynamo("initial_value is incorrect in dynamo, see #123202"),
-                "TestOptimRenewed",
-                "test_param_group_with_lrscheduler_goes_right_direction",
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
                 "TestOptimRenewed",
                 "test_tensor_lr",
@@ -1722,11 +1717,6 @@ optim_db: List[OptimizerInfo] = [
             "cuda",
         ),
         skips=(
-            DecorateInfo(
-                skipIfTorchDynamo("initial_value is incorrect in dynamo, see #123202"),
-                "TestOptimRenewed",
-                "test_param_group_with_lrscheduler_goes_right_direction",
-            ),
             DecorateInfo(
                 skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
                 "TestOptimRenewed",
