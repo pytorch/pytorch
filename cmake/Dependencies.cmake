@@ -1213,18 +1213,7 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
     list(APPEND HIP_CXX_FLAGS -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
     list(APPEND HIP_CXX_FLAGS -std=c++17)
-    if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "6.0.0")
-      list(APPEND HIP_CXX_FLAGS -DHIPBLAS_V2)
-    endif()
-    if(HIPBLASLT_CUSTOM_DATA_TYPE)
-      list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_CUSTOM_DATA_TYPE)
-    endif()
-    if(HIPBLASLT_CUSTOM_COMPUTE_TYPE)
-      list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_CUSTOM_COMPUTE_TYPE)
-    endif()
-    if(HIPBLASLT_HAS_GETINDEXFROMALGO)
-      list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_HAS_GETINDEXFROMALGO)
-    endif()
+    list(APPEND HIP_CXX_FLAGS -DHIPBLAS_V2)
     if(HIP_NEW_TYPE_ENUMS)
       list(APPEND HIP_CXX_FLAGS -DHIP_NEW_TYPE_ENUMS)
     endif()
@@ -1256,9 +1245,7 @@ if(USE_ROCM)
 
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       ${PYTORCH_HIP_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB} ${ROCM_ROCTX_LIB})
-    if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "5.7.0")
-      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS ${hipblaslt_LIBRARIES})
-    endif()
+    list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS ${hipblaslt_LIBRARIES})
 
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       roc::hipblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver)
@@ -1279,18 +1266,6 @@ if(USE_ROCM)
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()
-endif()
-
-# ---[ ROCm
-if(USE_ROCM AND ROCM_VERSION_DEV VERSION_LESS "5.2.0")
-  # We check again for USE_ROCM because it might have been set to OFF
-  # in the if above
-  include_directories(SYSTEM ${HIP_PATH}/include)
-  include_directories(SYSTEM ${HIPBLAS_PATH}/include)
-  include_directories(SYSTEM ${HIPFFT_PATH}/include)
-  include_directories(SYSTEM ${HIPSPARSE_PATH}/include)
-  include_directories(SYSTEM ${HIPRAND_PATH}/include)
-  include_directories(SYSTEM ${THRUST_PATH})
 endif()
 
 # ---[ NCCL
@@ -1834,8 +1809,6 @@ if(USE_KINETO)
       set(CUPTI_LIB_NAME "cupti.lib")
     endif()
 
-    set(NVPERF_HOST_LIB_NAME "libnvperf_host.so")
-
     find_library(CUPTI_LIBRARY_PATH ${CUPTI_LIB_NAME} PATHS
         ${CUDA_SOURCE_DIR}
         ${CUDA_SOURCE_DIR}/extras/CUPTI/lib64
@@ -1850,26 +1823,12 @@ if(USE_KINETO)
         ${CUDA_SOURCE_DIR}/include
         NO_DEFAULT_PATH)
 
-    find_library(NVPERF_HOST_LIBRARY_PATH ${NVPERF_HOST_LIB_NAME} PATHS
-        ${CUDA_SOURCE_DIR}
-        ${CUDA_SOURCE_DIR}/lib
-        ${CUDA_SOURCE_DIR}/lib64
-        ${CUDA_SOURCE_DIR}/extras/CUPTI/lib64
-        NO_DEFAULT_PATH)
-
     if(CUPTI_LIBRARY_PATH AND CUPTI_INCLUDE_DIR)
       message(STATUS "  CUPTI_INCLUDE_DIR = ${CUPTI_INCLUDE_DIR}")
       set(CUDA_cupti_LIBRARY ${CUPTI_LIBRARY_PATH})
       message(STATUS "  CUDA_cupti_LIBRARY = ${CUDA_cupti_LIBRARY}")
-      # CUPTI Range Profiler requires the NVPerf library
-      # for configuring metrics
-      if(NVPERF_HOST_LIBRARY_PATH)
-        set(CUDA_nvperf_host_LIBRARY ${NVPERF_HOST_LIBRARY_PATH})
-        message(STATUS "  CUDA_nvperf_host_LIBRARY = ${NVPERF_HOST_LIBRARY_PATH}")
-      endif()
       message(STATUS "Found CUPTI")
       set(LIBKINETO_NOCUPTI OFF CACHE STRING "" FORCE)
-
 
       # I've only tested this sanity check on Linux; if someone
       # runs into this bug on another platform feel free to
