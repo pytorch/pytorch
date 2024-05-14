@@ -864,11 +864,7 @@ def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: 
             return x + y
 
         torch._dynamo.testing.standard_test(
-            self,
-            fn,
-            1,
-            expected_ops=1,
-            expected_ops_dynamic=ifdynstaticdefault(1, 4)
+            self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(1, 4)
         )
 
     def test_int_int_comparisons(self):
