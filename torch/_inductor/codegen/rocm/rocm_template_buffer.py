@@ -1,5 +1,6 @@
 from ...ir import TemplateBuffer
 
+
 class ROCmTemplateBuffer(TemplateBuffer):
     def __init__(
         self,

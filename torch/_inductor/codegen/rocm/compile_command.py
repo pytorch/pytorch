@@ -1,22 +1,36 @@
-from functools import lru_cache
 import os
+from functools import lru_cache
 from typing import List, Optional
+
 from torch._inductor import config
 from torch._inductor.utils import is_linux
 
 
 def _rocm_include_paths() -> List[str]:
     from torch.utils import cpp_extension
-    rocm_include = os.path.join(config.rocm.rocm_home, 'include') if config.rocm.rocm_home else f"{cpp_extension._join_rocm_home('include')}"
-    ck_include = os.path.join(config.rocm.ck_dir, 'include')
+
+    rocm_include = (
+        os.path.join(config.rocm.rocm_home, "include")
+        if config.rocm.rocm_home
+        else f"{cpp_extension._join_rocm_home('include')}"
+    )
+    ck_include = os.path.join(config.rocm.ck_dir, "include")
     return [rocm_include, ck_include]
 
 
 def _rocm_lib_options() -> List[str]:
     from torch.utils import cpp_extension
 
-    rocm_lib_dir = os.path.join(config.rocm.rocm_home, 'lib') if config.rocm.rocm_home else cpp_extension._join_rocm_home('lib')
-    hip_lib_dir = os.path.join(config.rocm.rocm_home, 'hip', 'lib') if config.rocm.rocm_home else cpp_extension._join_rocm_home('hip', 'lib')
+    rocm_lib_dir = (
+        os.path.join(config.rocm.rocm_home, "lib")
+        if config.rocm.rocm_home
+        else cpp_extension._join_rocm_home("lib")
+    )
+    hip_lib_dir = (
+        os.path.join(config.rocm.rocm_home, "hip", "lib")
+        if config.rocm.rocm_home
+        else cpp_extension._join_rocm_home("hip", "lib")
+    )
 
     return [
         f"-L{rocm_lib_dir}",
@@ -57,10 +71,11 @@ def _rocm_compiler_options() -> List[str]:
 def _rocm_compiler() -> Optional[str]:
     if is_linux():
         if config.rocm.rocm_home:
-            return os.path.join(config.rocm.rocm_home, 'llvm', 'bin', 'clang')
+            return os.path.join(config.rocm.rocm_home, "llvm", "bin", "clang")
         try:
             from torch.utils import cpp_extension
-            return cpp_extension._join_rocm_home('llvm', 'bin', 'clang')
+
+            return cpp_extension._join_rocm_home("llvm", "bin", "clang")
         except OSError:
             # neither config.rocm.rocm_home nor env variable ROCM_HOME are set
             return "clang"
@@ -73,6 +88,7 @@ def rocm_compiler_version() -> Optional[str]:
     if not rocm_compiler:
         return None
     import subprocess
+
     try:
         return subprocess.check_output([rocm_compiler, "--version"], text=True)
     except subprocess.CalledProcessError:

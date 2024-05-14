@@ -1,7 +1,9 @@
 import logging
 import random
-import sympy
 from typing import List, Optional
+
+import sympy
+
 import torch
 from torch._inductor import config
 from torch._inductor.codegen.rocm.ck_library import gen_ops_library, gen_ops_preselected
@@ -14,6 +16,7 @@ log = logging.getLogger(__name__)
 
 from ...utils import IndentedBuffer
 
+
 def is_static_int(number):
     return isinstance(number, (int, sympy.Integer))
 
@@ -25,6 +28,7 @@ def torch_layout_to_ck_layout(torch_layout):
         return "Col"
     else:
         return None
+
 
 class CKGemmTemplate(CKTemplate):
     # the JINJA template for rendering CK Universal GEMMs
@@ -285,7 +289,7 @@ class CKGemmTemplate(CKTemplate):
             b_layout=op.b_layout,
             c_layout=op.c_layout,
             null_checks="".join(kernel.check_not_null(node) for node in (X, W, Y)),
-            version_comment=version_comment
+            version_comment=version_comment,
         )
 
     def _is_rcr_f16(self):
@@ -299,7 +303,14 @@ class CKGemmTemplate(CKTemplate):
             lambda m: torch_layout_to_ck_layout(m), (X_meta, W_meta, Y_meta)
         )
 
-        return X_dtype == "F16" and W_dtype == "F16" and Y_dtype == "F16" and X_layout == "Row" and W_layout == "Col" and Y_layout == "Row"
+        return (
+            X_dtype == "F16"
+            and W_dtype == "F16"
+            and Y_dtype == "F16"
+            and X_layout == "Row"
+            and W_layout == "Col"
+            and Y_layout == "Row"
+        )
 
     def gen_ops(self) -> List[CKGemmOperation]:
         """
@@ -324,7 +335,11 @@ class CKGemmTemplate(CKTemplate):
             if config.rocm.n_max_profiling_configs
             else filtered_instances
         )
-        log.debug("generated %d ck instances after filter: %s", len(chosen_instances), chosen_instances)
+        log.debug(
+            "generated %d ck instances after filter: %s",
+            len(chosen_instances),
+            chosen_instances,
+        )
         return chosen_instances
 
     @staticmethod

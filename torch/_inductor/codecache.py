@@ -54,7 +54,10 @@ from torch._dynamo.device_interface import get_registered_device_interfaces
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
-from torch._inductor.codegen.rocm.compile_command import rocm_compile_command, rocm_compiler_version
+from torch._inductor.codegen.rocm.compile_command import (
+    rocm_compile_command,
+    rocm_compiler_version,
+)
 from torch._inductor.runtime.compile_tasks import (
     _module_to_triton_kernel,
     _reload_python_module,
@@ -2955,7 +2958,10 @@ class ROCmCodeCache:
                     cmd_parts = cmd.split(" ")
                     try:
                         output = subprocess.check_output(
-                            cmd_parts, stderr=subprocess.STDOUT, text=True, env=os.environ
+                            cmd_parts,
+                            stderr=subprocess.STDOUT,
+                            text=True,
+                            env=os.environ,
                         )
                         log.debug("Compilation output: %s", output)
                     except subprocess.CalledProcessError as error:

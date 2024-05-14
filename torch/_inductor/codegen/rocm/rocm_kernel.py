@@ -1,21 +1,15 @@
 import logging
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
-from .rocm_benchmark_request import ROCmBenchmarkRequest
-from .rocm_template_buffer import ROCmTemplateBuffer
-from ...ir import (
-    Buffer,
-    ChoiceCaller,
-    IRNode,
-    Layout,
-    PrimitiveInfoType,
-    TensorBox,
-)
+from ...ir import Buffer, ChoiceCaller, IRNode, Layout, PrimitiveInfoType, TensorBox
 from ...utils import sympy_product
 from ...virtualized import V
 from ..common import IndentedBuffer, Kernel, OpOverrides
 
 from ..cpp_utils import CppPrinter, DTYPE_TO_CPP
+
+from .rocm_benchmark_request import ROCmBenchmarkRequest
+from .rocm_template_buffer import ROCmTemplateBuffer
 
 if TYPE_CHECKING:
     from torch._inductor.codegen.rocm.rocm_template import ROCmTemplate
@@ -251,9 +245,7 @@ class ROCmTemplateCaller(ChoiceCaller):
 
     def benchmark(self, *args, out) -> float:
         assert self.bmreq is not None
-        return self.bmreq.benchmark(
-            *args, output_tensor=out
-        )
+        return self.bmreq.benchmark(*args, output_tensor=out)
 
     def __str__(self):
         return f"ROCmTemplateCaller(source_file={self.bmreq.source_file}, {self.info_dict()})"

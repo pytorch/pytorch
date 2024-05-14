@@ -1,8 +1,8 @@
-
 import torch
 from torch._inductor.codegen.rocm.rocm_template import ROCmTemplate
 from torch._inductor.ir import IRNode
 from torch._inductor.utils import IndentedBuffer
+
 
 class CKTemplate(ROCmTemplate):
     """
@@ -19,7 +19,6 @@ class CKTemplate(ROCmTemplate):
         torch.float8_e4m3fnuz: "F8",
         torch.float8_e5m2fnuz: "BF8",
     }
-
 
     def header(self) -> IndentedBuffer:
         res = super().header()

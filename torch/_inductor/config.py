@@ -837,7 +837,9 @@ class rocm:
     ck_dir = os.environ.get(
         "TORCHINDUCTOR_CK_DIR",
         os.path.abspath(
-            os.path.join(os.path.dirname(torch.__file__), "../third_party/composable_kernel/")
+            os.path.join(
+                os.path.dirname(torch.__file__), "../third_party/composable_kernel/"
+            )
         ),
     )
 

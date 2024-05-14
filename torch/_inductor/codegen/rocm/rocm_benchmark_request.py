@@ -3,22 +3,12 @@ from __future__ import annotations
 import functools
 import logging
 from ctypes import byref, c_size_t, c_void_p
-from typing import (
-    Any,
-    Callable,
-    Iterable,
-    List,
-    Optional,
-    Union,
-)
+from typing import Any, Callable, Iterable, List, Optional, Union
 
 import torch
 
 from torch._inductor.autotune_process import GPUDeviceBenchmarkRequest, TensorMeta
-from torch._inductor.codecache import (
-    DLLWrapper,
-)
-from torch._inductor.codecache import ROCmCodeCache
+from torch._inductor.codecache import DLLWrapper, ROCmCodeCache
 
 log = logging.getLogger(__name__)
 

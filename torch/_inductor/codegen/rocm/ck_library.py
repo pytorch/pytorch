@@ -1,12 +1,13 @@
-from dataclasses import fields, replace
-from functools import lru_cache
 import logging
 import os
 import subprocess
+from dataclasses import fields, replace
+from functools import lru_cache
 from typing import List
 
-from torch._inductor.codegen.rocm.ck_universal_gemm_op import CKGemmOperation
 from torch._inductor import config
+
+from torch._inductor.codegen.rocm.ck_universal_gemm_op import CKGemmOperation
 
 log = logging.getLogger(__name__)
 
@@ -36,6 +37,7 @@ DeviceGemm_Xdl_CShuffleV3<Row, Col, Row, F16, F16, F16, F32, F16, PassThrough, P
 DeviceGemm_Xdl_CShuffleV3<Row, Col, Row, F16, F16, F16, F32, F16, PassThrough, PassThrough, PassThrough, GemmSpecialization::Default,    128, 32, 16,   64, 8, 8, 16, 16, 1, 1, S<8, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, S<8, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, 1, 1, S<1, 32, 1, 4>, 4, BlockGemmPipelineScheduler::Intrawave, BlockGemmPipelineVersion::v1>,
 """
 
+
 def parse_instances(str_instances: List[str]) -> List[CKGemmOperation]:
     """
     Parse the lines containing Universal Gemm template instances into `CKGemmOperation` instances
@@ -61,9 +63,7 @@ def parse_instances(str_instances: List[str]) -> List[CKGemmOperation]:
                 # parse template S<Index...>
                 i_next = s_template_args.find(">", i_current)
                 template_args.append(
-                    tuple(
-                        map(int, s_template_args[i_current + 2 : i_next].split(","))
-                    )
+                    tuple(map(int, s_template_args[i_current + 2 : i_next].split(",")))
                 )
                 i_current = i_next + 2
             else:
@@ -71,9 +71,7 @@ def parse_instances(str_instances: List[str]) -> List[CKGemmOperation]:
                 i_next = s_template_args.find(",", i_current)
                 template_args.append(
                     maybe_int(
-                        s_template_args[
-                            i_current : i_next if i_next != -1 else None
-                        ]
+                        s_template_args[i_current : i_next if i_next != -1 else None]
                     )
                 )
                 if i_next != -1:
@@ -94,6 +92,7 @@ def parse_instances(str_instances: List[str]) -> List[CKGemmOperation]:
 
         op_instances.append(new_instance)
     return op_instances
+
 
 def default_instances() -> List[CKGemmOperation]:
     # fallback: known working op instance for problem size M=2240 K=256 N=2048
@@ -153,6 +152,7 @@ def default_instances() -> List[CKGemmOperation]:
         )
     ]
 
+
 @lru_cache(None)
 def gen_ops_library() -> List[CKGemmOperation]:
     """
@@ -194,9 +194,7 @@ def gen_ops_library() -> List[CKGemmOperation]:
         sub_scheduler = instance.block_gemm_pipeline_scheduler == "BlkGemmPipeSched"
         sub_spec = instance.gemm_specialization == "GemmSpec"
         schedulers_range = (
-            schedulers
-            if sub_scheduler
-            else [instance.block_gemm_pipeline_scheduler]
+            schedulers if sub_scheduler else [instance.block_gemm_pipeline_scheduler]
         )
         spec_range = gemm_specs if sub_spec else [instance.gemm_specialization]
         for scheduler in schedulers_range:
@@ -210,6 +208,7 @@ def gen_ops_library() -> List[CKGemmOperation]:
                 )
 
     return substitute_instances
+
 
 @lru_cache(None)
 def gen_ops_preselected() -> List[CKGemmOperation]:

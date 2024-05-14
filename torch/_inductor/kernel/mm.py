@@ -3,11 +3,11 @@ import logging
 from typing import Any, Dict, List, Optional
 
 import torch
-from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from torch._inductor.codegen.cpp_gemm_template import CppPackedGemmTemplate
 from torch._inductor.virtualized import V
 from .. import config as inductor_config
 from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
+from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.wrapper import WrapperCodeGen
 from ..ir import FlexibleLayout
 from ..lowering import register_lowering
@@ -155,8 +155,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
 
     if use_ck_template(layout, m, n, k):
-        CKGemmTemplate.add_ck_gemm_choices(
-            choices, layout, [mat1, mat2])
+        CKGemmTemplate.add_ck_gemm_choices(choices, layout, [mat1, mat2])
 
     if use_cpp_packed_gemm_template(layout, mat1, mat2):
         CppPackedGemmTemplate.add_choices(
