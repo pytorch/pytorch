@@ -52,7 +52,6 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cpu-shared-with-deps-cxx11-abi
-      use_split_build: false
       build_environment: linux-binary-libtorch-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -116,7 +115,6 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda11_8-shared-with-deps-cxx11-abi
-      use_split_build: false
       build_environment: linux-binary-libtorch-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -182,7 +180,6 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda12_1-shared-with-deps-cxx11-abi
-      use_split_build: false
       build_environment: linux-binary-libtorch-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -248,7 +245,6 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda12_4-shared-with-deps-cxx11-abi
-      use_split_build: false
       build_environment: linux-binary-libtorch-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -314,7 +310,6 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-rocm6_0-shared-with-deps-cxx11-abi
-      use_split_build: false
       build_environment: linux-binary-libtorch-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -421,7 +416,6 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-rocm6_1-shared-with-deps-cxx11-abi
-      use_split_build: false
       build_environment: linux-binary-libtorch-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
