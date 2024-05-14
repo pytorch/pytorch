@@ -239,6 +239,51 @@ else:
         _load_global_deps()
     from torch._C import *  # noqa: F403
 
+# Set num_threads to be a better default for Linux accounting for cgroups
+cpus = os.cpu_count()
+
+import psutil
+physical_cpus = psutil.cpu_count(logical=False)
+if physical_cpus > 0 and physical_cpus < cpus:
+    cpus = physical_cpus
+
+allowed_cpus = len(psutil.Process().cpu_affinity())
+if allowed_cpus > 0 and allowed_cpus < cpus:
+    cpus = allowed_cpus
+
+try:
+    cgroup_dir = "/sys/fs/cgroup/cpu"
+    with open(f"{cgroup_dir}/cpu.cfs_quota_us") as f:
+        quota = int(f.read())
+    with open(f"{cgroup_dir}/cpu.cfs_period_us") as f:
+        period = int(f.read())
+    effective_cpus = math.ceil(quota / period)
+except Exception:
+    print("failed to parse!!! v1")
+    effective_cpus = -1
+
+if effective_cpus == -1:
+    try:
+        with open("/proc/self/cgroup") as f:
+            group_path = f.read().strip().split(":")[-1]
+        if not group_path.endswith("/"):
+            group_path += "/"
+        with open(f"/sys/fs/cgroup{group_path}cpu.max") as f:
+            quota, period = map(int, f.read().split(" "))
+        effective_cpus = math.ceil(quota / period)
+    except Exception:
+        print("failed to parse!!! v2")
+        pass
+
+if effective_cpus > 0 and effective_cpus < cpus:
+    cpus = effective_cpus
+
+from . import set_num_threads, get_num_threads
+
+print("before anything", get_num_threads())
+set_num_threads(cpus - 1)
+print("set to cpus - 1", get_num_threads())
+
 # Appease the type checker; ordinarily this binding is inserted by the
 # torch._C module initialization code in C
 if TYPE_CHECKING:
