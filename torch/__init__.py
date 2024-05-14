@@ -66,9 +66,11 @@ __all__ = [
 ################################################################################
 
 if sys.platform == 'win32':
+    import sysconfig
     pfiles_path = os.getenv('ProgramFiles', 'C:\\Program Files')
     py_dll_path = os.path.join(sys.exec_prefix, 'Library', 'bin')
     th_dll_path = os.path.join(os.path.dirname(__file__), 'lib')
+    usebase_path = os.path.join(sysconfig.get_config_var("userbase"), 'Library', 'bin')
 
     # When users create a virtualenv that inherits the base environment,
     # we will need to add the corresponding library directory into
@@ -79,7 +81,7 @@ if sys.platform == 'win32':
     else:
         base_py_dll_path = ''
 
-    dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, base_py_dll_path]))
+    dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, base_py_dll_path, usebase_path]))
 
     if all(not os.path.exists(os.path.join(p, 'nvToolsExt64_1.dll')) for p in dll_paths):
         nvtoolsext_dll_path = os.path.join(
@@ -1806,7 +1808,7 @@ def compile(model: Optional[Callable] = None, *,
     results are not applicable for subsequent calls (this is called a "guard
     failure), you can use TORCH_LOGS=guards to debug these situations.
     Multiple compiled results can be associated with a frame up to
-    ``torch._dynamo.config.cache_size_limit``, which defaults to 64; at which
+    ``torch._dynamo.config.cache_size_limit``, which defaults to 8; at which
     point we will fall back to eager.  Note that compile caches are per
     *code object*, not frame; if you dynamically create multiple copies of a
     function, they will all share the same code cache.
@@ -1832,7 +1834,8 @@ def compile(model: Optional[Callable] = None, *,
 
         - Experimental or debug in-tree backends can be seen with `torch._dynamo.list_backends(None)`
 
-        - To register an out-of-tree custom backend: https://pytorch.org/docs/main/torch.compiler_custom_backends.html
+        - To register an out-of-tree custom backend:
+       https://pytorch.org/docs/main/torch.compiler_custom_backends.html#registering-custom-backends
        mode (str): Can be either "default", "reduce-overhead", "max-autotune" or "max-autotune-no-cudagraphs"
 
         - "default" is the default mode, which is a good balance between performance and overhead
@@ -2057,10 +2060,10 @@ def _constrain_as_size(symbol, min: Optional[builtins.int] = None, max: Optional
       GuardOnDataDependentSymNode errors upon export, since we cannot guard on unbacked SymInts.
 
     This function has unusual semantics which distinguish it from
-    constrain_as_value.  Specifically, in some circumstances in framework
+    _constrain_as_value.  Specifically, in some circumstances in framework
     code, we will treat this int as >= 2 (when we do a size-oblivious guard).
-    This makes it easier to This makes it easier to use the unbacked int in
-    size contexts, as we will often attempt to guard on a size being zero/one
+    This makes it easier to use the unbacked int in size contexts,
+    as we will often attempt to guard on a size being zero/one
     (e.g., when computing the contiguity of a tensor, or testing if
     broadcasting can occur), which will not work on unbacked SymInts.
     However, if we conservatively assume that the size is not zero/one, we will

@@ -8,7 +8,7 @@
 
 namespace c10 {
 
-Error::Error(std::string msg, std::string backtrace, const void* caller)
+Error::Error(std::string msg, Backtrace backtrace, const void* caller)
     : msg_(std::move(msg)), backtrace_(std::move(backtrace)), caller_(caller) {
   refresh_what();
 }
@@ -23,7 +23,7 @@ Error::Error(
     const uint32_t line,
     const char* condition,
     const std::string& msg,
-    const std::string& backtrace,
+    Backtrace backtrace,
     const void* caller)
     : Error(
           str("[enforce fail at ",
@@ -34,7 +34,7 @@ Error::Error(
               condition,
               ". ",
               msg),
-          backtrace,
+          std::move(backtrace),
           caller) {}
 
 std::string Error::compute_what(bool include_backtrace) const {
@@ -51,15 +51,37 @@ std::string Error::compute_what(bool include_backtrace) const {
     }
   }
 
-  if (include_backtrace) {
-    oss << "\n" << backtrace_;
+  if (include_backtrace && backtrace_) {
+    oss << "\n" << backtrace_->get();
   }
 
   return oss.str();
 }
 
+const Backtrace& Error::backtrace() const {
+  return backtrace_;
+}
+
+const char* Error::what() const noexcept {
+  return what_
+      .ensure([this] {
+        try {
+          return compute_what(/*include_backtrace*/ true);
+        } catch (...) {
+          // what() is noexcept, we need to return something here.
+          return std::string{"<Error computing Error::what()>"};
+        }
+      })
+      .c_str();
+}
+
 void Error::refresh_what() {
-  what_ = compute_what(/*include_backtrace*/ true);
+  // Do not compute what_ eagerly, as it would trigger the computation of the
+  // backtrace. Instead, invalidate it, it will be computed on first access.
+  // refresh_what() is only called by non-const public methods which are not
+  // supposed to be called concurrently with any other method, so it is safe to
+  // invalidate here.
+  what_.reset();
   what_without_backtrace_ = compute_what(/*include_backtrace*/ false);
 }
 

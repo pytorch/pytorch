@@ -421,9 +421,19 @@ Tensor& set_storage_meta__symint(Tensor& result, Storage storage, c10::SymInt st
     // it.  TODO: Actually this might not quite be correct if we use special
     // pointers to track whether or not fake cuda tensors are pinned or not
     const auto itemsize = result.dtype().itemsize();
-    c10::SymInt size_bytes = at::detail::computeStorageNbytes(
+    c10::SymInt new_size_bytes = at::detail::computeStorageNbytes(
         size, stride, itemsize, std::move(storage_offset));
-    storage.set_nbytes(std::move(size_bytes));
+    // TODO: When there are unbacked SymInts, we unconditionally skip the
+    // setter.  This is technically wrong, but we cannot conveniently test
+    // the real condition in many cases, because a lot of people are using
+    // set_ just to swizzle metadata on a tensor, they didn't actually want
+    // to see if they need to resize the storage.
+    //
+    // The old behavior was to unconditionally set_nbytes, but I think not
+    // setting it is more safe.
+    if (new_size_bytes.has_hint() && storage.sym_nbytes().has_hint() && TORCH_GUARD_SIZE_OBLIVIOUS(new_size_bytes.sym_gt(storage.sym_nbytes()))) {
+      storage.set_nbytes(std::move(new_size_bytes));
+    }
   }
   return result;
 }
@@ -3217,16 +3227,28 @@ static inferSqueezeGeometry(const Tensor &tensor, std::bitset<dim_bitset_size> d
 namespace {
 // Named type instead of a pair/tuple so that we can be sure to
 // construct the vectors in place and get NRVO.
+template <typename T>
 struct InferUnsqueezeGeometryResult {
-  DimVector sizes;
-  DimVector strides;
-  InferUnsqueezeGeometryResult(IntArrayRef tensor_sizes, IntArrayRef tensor_strides)
+  SmallVector<T, kDimVectorStaticSize>sizes;
+  SmallVector<T, kDimVectorStaticSize> strides;
+  InferUnsqueezeGeometryResult(ArrayRef<T> tensor_sizes, ArrayRef<T> tensor_strides)
       : sizes(tensor_sizes.begin(), tensor_sizes.end())
       , strides(tensor_strides.begin(), tensor_strides.end()) {}
 };
-InferUnsqueezeGeometryResult
+
+InferUnsqueezeGeometryResult<c10::SymInt>
+inferUnsqueezeGeometry_symint(const Tensor& tensor, int64_t dim) {
+  InferUnsqueezeGeometryResult<c10::SymInt> result(tensor.sym_sizes(), tensor.sym_strides());
+  c10::SymInt new_stride = dim >= tensor.dim() ? 1 : result.sizes[dim] * result.strides[dim];
+  result.sizes.insert(result.sizes.begin() + dim, 1);
+  result.strides.insert(result.strides.begin() + dim, new_stride);
+
+  return result;
+}
+
+InferUnsqueezeGeometryResult<int64_t>
 inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
-  InferUnsqueezeGeometryResult result(tensor.sizes(), tensor.strides());
+  InferUnsqueezeGeometryResult<int64_t> result(tensor.sizes(), tensor.strides());
   int64_t new_stride = dim >= tensor.dim() ? 1 : result.sizes[dim] * result.strides[dim];
   result.sizes.insert(result.sizes.begin() + dim, 1);
   result.strides.insert(result.strides.begin() + dim, new_stride);
@@ -3367,8 +3389,8 @@ Tensor _unsafe_view(const Tensor& self, IntArrayRef size) {
 
 Tensor unsqueeze(const Tensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim() + 1);
-  auto g = inferUnsqueezeGeometry(self, dim);
-  return self.as_strided(g.sizes, g.strides);
+  auto g = inferUnsqueezeGeometry_symint(self, dim);
+  return self.as_strided_symint(g.sizes, g.strides);
 }
 
 Tensor unsqueeze_sparse(Tensor const &self, int64_t dim) {
@@ -4072,11 +4094,13 @@ void unbind_copy_int_out(const at::Tensor & self, int64_t dim, at::TensorList  o
   }
 }
 
-int64_t sparse_dim_strided(const at::Tensor& self) {
+int64_t sparse_dim_default(const Tensor& self) {
+  TORCH_CHECK(self.layout() == kStrided, "sparse_dim expected sparse or strided tensor layout but got ", self.layout());
   return 0;
 }
 
-int64_t dense_dim_strided(const at::Tensor& self) {
+int64_t dense_dim_default(const Tensor& self) {
+  TORCH_CHECK(self.layout() == kStrided, "dense_dim expected sparse or strided tensor layout but got ", self.layout());
   return self.dim();
 }
 

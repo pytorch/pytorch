@@ -17,7 +17,7 @@ from torch.testing._internal.inductor_utils import (
     _check_has_dynamic_shape,
     GPU_TYPE,
     HAS_CPU,
-    HAS_GPU,
+    HAS_CUDA,
 )
 
 if IS_WINDOWS and IS_CI:
@@ -40,7 +40,10 @@ from inductor.test_torchinductor import (
     run_and_get_triton_code,
     TestFailure,
 )
-from inductor.test_torchinductor_dynamic_shapes import make_dynamic_cls
+from inductor.test_torchinductor_dynamic_shapes import (
+    make_dynamic_cls,
+    test_failures as dynamic_shapes_test_failures,
+)
 
 
 # Checks for patterns in generated C++/Triton code to see if it's dynamic
@@ -89,13 +92,7 @@ def check_codegen(
         _check_has_dynamic_shape(self, code)
     else:
         code = run_and_get_triton_code(run, *example_inputs, **kwargs)
-        triton_kernel_found = False
-        lines = code.split("\n")
-        for line in lines:
-            if "def triton" in line:
-                triton_kernel_found = True
-                continue
-        self.assertTrue(triton_kernel_found, f"Failed to find triton kernel\n{code}")
+        self.assertTrue("def triton" in code, f"Failed to find triton kernel\n{code}")
 
     assert called, "Ran graph without calling compile_fx"
 
@@ -259,7 +256,6 @@ test_failures = {
         ("cpu", "cuda"), is_skip=True
     ),
     # need to enable CL with dynamic shapes
-    "test_conv_inference_heuristics_dynamic_shapes": TestFailure("cuda"),
     "test_scaled_dot_product_efficient_attention_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
@@ -325,7 +321,6 @@ test_failures = {
     # The following tests do not support dynamic shapes yet:
     #
     "test_cudnn_rnn_dynamic_shapes": TestFailure(("cuda",)),
-    "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
     # test_roi_align uses torchvision, which doesn't work with dynamic shapes
     "test_roi_align_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_aliased_buffer_reuse_dynamic_shapes": TestFailure(("cpu",)),
@@ -336,6 +331,7 @@ test_failures = {
     # Refinement means we don't actually generate dynamic shapes (but only on
     # cpu apparently?!)
     "test_nonzero_unbacked_refinement_dynamic_shapes": TestFailure(("cpu",)),
+    **dynamic_shapes_test_failures,
 }
 
 if TEST_WITH_ROCM:
@@ -376,7 +372,7 @@ if HAS_CPU:
     )
 
 
-if HAS_GPU and not TEST_WITH_ASAN:
+if HAS_CUDA and not TEST_WITH_ASAN:
 
     class DynamicShapesCodegenGPUTests(TestCase):
         maxDiff = None
@@ -402,5 +398,5 @@ if HAS_GPU and not TEST_WITH_ASAN:
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_GPU:
+    if HAS_CPU or HAS_CUDA:
         run_tests(needs="filelock")
