@@ -17,6 +17,7 @@ from torch.nn.attention._flex_attention import (
     _causal,
     _compose,
     _flex_attention,
+    _generate_alibi_bias,
     _identity,
     _rel_bias,
     _rel_causal,
@@ -63,7 +64,7 @@ test_score_mods = [
     _causal,
     _rel_bias,
     _rel_causal,
-    # _generate_alibi_bias(8),
+    _generate_alibi_bias(8),
 ]
 
 
@@ -189,6 +190,8 @@ class TestTemplatedSDPA(InductorTestCase):
         )
         ref_out2 = sdpa_partial(q2, k2, v2)
 
+        # Need to clear dynamo counters, since flex attention eager mode also uses dynamo tracing.
+        # We check dynamo counters["frames"]["ok"] to ensure there is no re-compilation.
         torch._dynamo.reset()
         # Compiling with dynamic shape in the first batch.
         compiled_sdpa = torch.compile(sdpa_partial, dynamic=True)
@@ -242,19 +245,24 @@ class TestTemplatedSDPA(InductorTestCase):
         )
         ref_out3 = sdpa_partial(q3, k3, v3)
 
+        # Need to clear dynamo counters, since flex attention eager mode also uses dynamo tracing.
+        # We check dynamo counters["frames"]["ok"] to ensure:
+        # 1, the first batch is compiled with static shape
+        # 2, the second batch is compiled with dynamic shape
+        # 3, no re-compilation in the third batch
         torch._dynamo.reset()
-        # Compiling with static shape in the first batch.
+        # The first batch.
         compiled_sdpa = torch.compile(sdpa_partial)
         compiled_out1 = compiled_sdpa(q1, k1, v1)
         self._check_equal(golden_out1, ref_out1, compiled_out1, dtype)
         self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
 
-        # Automatic compiling with dynamic shape in the second batch.
+        # The second batch (automatic dynamic).
         compiled_out2 = compiled_sdpa(q2, k2, v2)
         self._check_equal(golden_out2, ref_out2, compiled_out2, dtype)
         self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
 
-        # No re-compilation, use the compiled dynamic shape version.
+        # The third batch (no re-compilation).
         compiled_out3 = compiled_sdpa(q3, k3, v3)
         self._check_equal(golden_out3, ref_out3, compiled_out3, dtype)
         self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)

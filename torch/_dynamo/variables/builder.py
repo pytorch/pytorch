@@ -56,6 +56,7 @@ from ..source import (
     ConvertIntSource,
     GetItemSource,
     GradSource,
+    is_cell_contents,
     is_constant_source,
     is_from_defaults,
     is_from_optimizer_source,
@@ -1165,6 +1166,7 @@ class VariableBuilder:
                 # NN modules on the fly)
                 or self.source.guard_source().is_nn_module()
                 or is_from_defaults(self.source)
+                or is_cell_contents(self.source)
             ):
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
                 return ConstantVariable.create(value=value, source=self.source)
