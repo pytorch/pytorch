@@ -58,7 +58,7 @@ std::string Error::compute_what(bool include_backtrace) const {
   return oss.str();
 }
 
-const Error::Backtrace& Error::backtrace() const {
+const Backtrace& Error::backtrace() const {
   return backtrace_;
 }
 
