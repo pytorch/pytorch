@@ -99,7 +99,7 @@ def generate_inputs(
     return query, key, value
 
 
-def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
+def run_single_experiment(config: ExperimentConfig, dynamic=False) -> ExperimentResults:
     device = torch.device("cuda")
     query, key, value = generate_inputs(
         config.batch_size,
@@ -114,7 +114,7 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
     def eager_sdpa(query, key, value, _):
         return F.scaled_dot_product_attention(query, key, value)
 
-    compiled_sdpa = torch.compile(_flex_attention)
+    compiled_sdpa = torch.compile(_flex_attention, dynamic=dynamic)
 
     score_mod = config.score_mod
 
@@ -249,7 +249,9 @@ def main(dynamic=False):
     torch.manual_seed(seed)
     results = []
     for config in tqdm(generate_experiment_configs()):
-        results.append(Experiment(config, run_single_experiment(config)))
+        results.append(
+            Experiment(config, run_single_experiment(config, dynamic=dynamic))
+        )
 
     print_results(results)
 
