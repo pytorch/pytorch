@@ -4890,6 +4890,31 @@ def forward(self, x, y):
         unflattened = unflatten(ep)
         self.assertTrue(torch.allclose(m1(*inps), unflattened(*inps)))
 
+    @testing.expectedFailureRetraceability
+    def test_unused_aliases(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # param
+                self.alpha = torch.nn.Parameter(torch.randn(4))
+                self.beta = self.alpha
+                self.gamma = self.alpha
+
+            def forward(self, x):
+                return x + self.gamma
+
+        inps = (torch.randn(4),)
+        ep = export(Foo(), inps)
+        # placeholder nodes will be deduplicated in strict-mode,
+        # but check that all params still appear in state dict
+        for param in ["alpha", "beta", "gamma"]:
+            self.assertTrue(param in ep.state_dict)
+
+        # check that they also appear in unflattened state dict
+        unep = unflatten(ep)
+        for param in ["alpha", "beta", "gamma"]:
+            self.assertTrue(param in unep.state_dict())
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
