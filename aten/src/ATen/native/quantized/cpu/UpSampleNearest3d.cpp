@@ -36,9 +36,9 @@ static void upsample_nearest3d_out_frame(
     int64_t output_width,
     int64_t nbatch,
     int64_t channels,
-    c10::optional<double> scales_d,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_d,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   float depth_scale = compute_scales_value<float>(scales_d, input_depth, output_depth);
   float height_scale = compute_scales_value<float>(scales_h, input_height, output_height);
   float width_scale = compute_scales_value<float>(scales_w, input_width, output_width);
@@ -93,9 +93,9 @@ static void upsample_nearest3d_out_frame_nhwc(
     int64_t output_width,
     int64_t nbatch,
     int64_t channels,
-    c10::optional<double> scales_d,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_d,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   float depth_scale = compute_scales_value<float>(scales_d, input_depth, output_depth);
   float height_scale = compute_scales_value<float>(scales_h, input_height, output_height);
   float width_scale = compute_scales_value<float>(scales_w, input_width, output_width);
@@ -133,9 +133,9 @@ template <nn_compute_source_index_fn_t nn_compute_source_index_fn>
 Tensor _upsample_nearest3d_quantized_cpu(
     const Tensor& input,
     IntArrayRef output_size,
-    c10::optional<double> scales_d,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_d,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   TORCH_CHECK(
       output_size.size() == 3,
       "It is expected output_size equals to 3, but got size ",
@@ -217,9 +217,9 @@ Tensor _upsample_nearest3d_quantized_cpu(
 Tensor upsample_nearest3d_quantized_cpu(
     const Tensor& input,
     IntArrayRef osize,
-    c10::optional<double> scale_d,
-    c10::optional<double> scale_h,
-    c10::optional<double> scale_w) {
+    std::optional<double> scale_d,
+    std::optional<double> scale_h,
+    std::optional<double> scale_w) {
   return _upsample_nearest3d_quantized_cpu<nearest_neighbor_compute_source_index>(
       input, osize, scale_d, scale_h, scale_w);
 }
@@ -227,9 +227,9 @@ Tensor upsample_nearest3d_quantized_cpu(
 Tensor _upsample_nearest_exact3d_quantized_cpu(
     const Tensor& input,
     IntArrayRef osize,
-    c10::optional<double> scale_d,
-    c10::optional<double> scale_h,
-    c10::optional<double> scale_w) {
+    std::optional<double> scale_d,
+    std::optional<double> scale_h,
+    std::optional<double> scale_w) {
   return _upsample_nearest3d_quantized_cpu<nearest_neighbor_exact_compute_source_index>(
       input, osize, scale_d, scale_h, scale_w);
 }

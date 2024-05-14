@@ -126,8 +126,8 @@ template <bool ReLUFused = false>
 Tensor qcat(
     const c10::List<Tensor>& qxs,
     int64_t dim,
-    c10::optional<double> scale,
-    c10::optional<int64_t> zero_point) {
+    std::optional<double> scale,
+    std::optional<int64_t> zero_point) {
   TORCH_CHECK(is_valid_quantization_scheme(qxs[0]),
               "Only per-tensor quantization is supported in 'cat'!")
   double _scale = scale.has_value() ? scale.value() : qxs.get(0).q_scale();

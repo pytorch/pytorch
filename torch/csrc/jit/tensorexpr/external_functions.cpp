@@ -80,7 +80,7 @@ std::vector<at::Tensor> constructTensors(
     int64_t* buf_dims,
     int64_t* buf_strides,
     int8_t* buf_dtypes,
-    c10::optional<std::vector<std::pair<size_t, QIData>>> qdataArg) {
+    std::optional<std::vector<std::pair<size_t, QIData>>> qdataArg) {
   std::vector<void*> buf_data_vec;
   std::vector<std::vector<int64_t>> buf_dims_vec;
   std::vector<std::vector<int64_t>> buf_strides_vec;
@@ -123,7 +123,7 @@ std::vector<at::Tensor> constructTensors(
     }
   } else {
     // handle quantized
-    std::vector<c10::optional<QIData>> qdata(bufs_num, c10::nullopt);
+    std::vector<std::optional<QIData>> qdata(bufs_num, c10::nullopt);
     for (const auto& qd : *qdataArg) {
       qdata[qd.first] = qd.second;
     }
@@ -172,7 +172,7 @@ static std::vector<at::Tensor> constructTensors(
     int64_t* buf_strides,
     int8_t* buf_dtypes,
     std::vector<std::pair<size_t, QIData>> qdata) {
-  c10::optional<std::vector<std::pair<size_t, QIData>>> opt = std::move(qdata);
+  std::optional<std::vector<std::pair<size_t, QIData>>> opt = std::move(qdata);
   return constructTensors(
       bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes, opt);
 }
@@ -184,7 +184,7 @@ std::vector<at::Tensor> constructTensors2(
     int64_t* buf_dims,
     int64_t* buf_strides,
     int8_t* buf_dtypes,
-    c10::optional<std::vector<std::pair<size_t, QIData>>> qdataArg,
+    std::optional<std::vector<std::pair<size_t, QIData>>> qdataArg,
     size_t bufs_out_num) {
   std::vector<void*> buf_data_vec;
   std::vector<std::vector<int64_t>> buf_dims_vec;
@@ -233,7 +233,7 @@ std::vector<at::Tensor> constructTensors2(
     }
   } else {
     // handle quantized
-    std::vector<c10::optional<QIData>> qdata(bufs_in_num, c10::nullopt);
+    std::vector<std::optional<QIData>> qdata(bufs_in_num, c10::nullopt);
     for (const auto& qd : *qdataArg) {
       qdata[qd.first - bufs_out_num] = qd.second;
     }
@@ -283,7 +283,7 @@ static std::vector<at::Tensor> constructTensors2(
     int8_t* buf_dtypes,
     std::vector<std::pair<size_t, QIData>> qdata,
     size_t bufs_out_num = 0u) {
-  c10::optional<std::vector<std::pair<size_t, QIData>>> opt = std::move(qdata);
+  std::optional<std::vector<std::pair<size_t, QIData>>> opt = std::move(qdata);
   return constructTensors2(
       bufs_in_num,
       buf_data,
@@ -331,15 +331,15 @@ static at::Tensor quantized_mul_scalar(const at::Tensor& x, double scalar) {
 static at::Tensor quantized_cat(
     const c10::List<at::Tensor>& qxs,
     int64_t dim,
-    c10::optional<double> scale,
-    c10::optional<int64_t> zero) {
+    std::optional<double> scale,
+    std::optional<int64_t> zero) {
   const auto op = c10::Dispatcher::singleton()
                       .findSchemaOrThrow("quantized::cat", "")
                       .typed<at::Tensor(
                           c10::List<at::Tensor> const&,
                           int64_t,
-                          c10::optional<double>,
-                          c10::optional<int64_t>)>();
+                          std::optional<double>,
+                          std::optional<int64_t>)>();
   return op.redispatch(
       c10::DispatchKeySet({c10::DispatchKey::QuantizedCPU}),
       qxs,
@@ -972,7 +972,7 @@ void nnc_aten_upsample_nearest2d(
   const int64_t x_qzero = extra_args[1];
   const int64_t x_qdtype = extra_args[2];
   const auto is_quantized = x_qdtype != -1;
-  c10::optional<std::vector<std::pair<size_t, QIData>>> qdata;
+  std::optional<std::vector<std::pair<size_t, QIData>>> qdata;
   if (is_quantized) {
     qdata = {
         {1u,
@@ -992,9 +992,9 @@ void nnc_aten_upsample_nearest2d(
   auto r = at::upsample_nearest2d(
       x,
       (output_size_h != -1)
-          ? c10::optional<at::IntArrayRef>({output_size_h, output_size_w})
+          ? std::optional<at::IntArrayRef>({output_size_h, output_size_w})
           : c10::nullopt,
-      (scale_factor_h != -1.f) ? c10::optional<at::ArrayRef<double>>(
+      (scale_factor_h != -1.f) ? std::optional<at::ArrayRef<double>>(
                                      {scale_factor_h, scale_factor_w})
                                : c10::nullopt);
   memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
@@ -1015,7 +1015,7 @@ void nnc_aten_upsample_nearest2d_out(
   const int64_t x_qzero = extra_args[1];
   const int64_t x_qdtype = extra_args[2];
   const auto is_quantized = x_qdtype != -1;
-  c10::optional<std::vector<std::pair<size_t, QIData>>> qdata;
+  std::optional<std::vector<std::pair<size_t, QIData>>> qdata;
   if (is_quantized) {
     qdata = {
         {1u,
@@ -1042,9 +1042,9 @@ void nnc_aten_upsample_nearest2d_out(
   auto r = at::upsample_nearest2d(
       x,
       (output_size_h != -1)
-          ? c10::optional<at::IntArrayRef>({output_size_h, output_size_w})
+          ? std::optional<at::IntArrayRef>({output_size_h, output_size_w})
           : c10::nullopt,
-      (scale_factor_h != -1.f) ? c10::optional<at::ArrayRef<double>>(
+      (scale_factor_h != -1.f) ? std::optional<at::ArrayRef<double>>(
                                      {scale_factor_h, scale_factor_w})
                                : c10::nullopt);
   buf_data[0] = r.data_ptr();
