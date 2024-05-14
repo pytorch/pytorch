@@ -250,12 +250,12 @@ class CKGemmTemplate(CKTemplate):
         Y = self.output_node
         Bias = None  # TBD support gemm_bias
 
-        version_comment = rf"""/** 
+        version_comment = rf"""/**
 * Generated code for CK inductor backend
 * See {type(self).__module__}.{type(self).__qualname__}
 *
 * {op=}
-* 
+*
 * {torch.__version__=}
 * {torch.version.git_version=}
 */

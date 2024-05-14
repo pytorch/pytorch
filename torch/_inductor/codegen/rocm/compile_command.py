@@ -28,7 +28,7 @@ def _rocm_lib_options() -> List[str]:
 def _rocm_compiler_options() -> List[str]:
     opts = [
         config.rocm.compile_opt_level,
-        "-x", 
+        "-x",
         "hip",
         "-std=c++17",
         f"--offload-arch={';'.join(config.rocm.arch) or 'native'}",

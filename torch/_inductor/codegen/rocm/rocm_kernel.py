@@ -82,7 +82,7 @@ class ROCmTemplateKernel(ROCmKernel):
         res = IndentedBuffer(initial_indent=8)
         res.tabwidth = 1
         res.splice(
-            f"""  
+            f"""
             if (!{name_str}) {{
                 int64_t {name_str}_size = {size_str};
                 if ({name_str}_size > 0) {{

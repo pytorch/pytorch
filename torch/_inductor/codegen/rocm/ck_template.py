@@ -32,7 +32,7 @@ class CKTemplate(ROCmTemplate):
                 // CK headers
 
                 #ifdef DEBUG_LOG
-                #define DEBUG_LOG_TMP DEBUG_LOG                
+                #define DEBUG_LOG_TMP DEBUG_LOG
                 #undef DEBUG_LOG
                 #else
                 #define DEBUG_LOG_TMP 0
