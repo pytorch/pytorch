@@ -515,8 +515,7 @@ class HuggingfaceRunner(BenchmarkRunner):
         return device, model_name, model, example_inputs, batch_size
 
     def iter_model_names(self, args):
-        # model_names = list(BATCH_SIZE_KNOWN_MODELS.keys()) + list(EXTRA_MODELS.keys())
-        model_names = list(BATCH_SIZE_KNOWN_MODELS.keys())
+        model_names = list(BATCH_SIZE_KNOWN_MODELS.keys()) + list(EXTRA_MODELS.keys())
         model_names = set(model_names)
         model_names = sorted(model_names)
 
