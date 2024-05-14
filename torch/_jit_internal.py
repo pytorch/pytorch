@@ -1308,7 +1308,7 @@ def _get_named_tuple_properties(
 def _create_named_tuple(
     t, unqual_name: str, field_names: List[str], defaults: Tuple[Any, ...]
 ):
-    TupleType = collections.namedtuple(unqual_name, field_names, defaults=defaults)  # type: ignore[call-arg, no-redef, misc]
+    TupleType = collections.namedtuple(unqual_name, field_names, defaults=defaults, rename=True)  # type: ignore[call-arg, no-redef, misc]
     return TupleType(*t)
 
 
