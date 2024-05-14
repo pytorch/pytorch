@@ -46,6 +46,7 @@ from torch._inductor.utils import (
 from torch._inductor.virtualized import V
 from torch._prims_common import is_integer_dtype
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.library import _scoped_library
 from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_cuda import (
@@ -758,6 +759,70 @@ class CommonTemplate:
                 torch.tensor([False, False, True, True]),
             ),
         )
+
+    @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    def test_torch_compile_override_registration(self):
+        dynamic = False
+        namespace_name = "aten"
+        dispatch_key = "CPU"
+        device = torch.device("cpu")
+        if self.device.lower() == "cuda":
+            dispatch_key = "CUDA"
+            device = torch.device("cuda")
+
+        unary_op_set = ["abs", "acos"]
+
+        def fn(x, op_name=""):
+            return getattr(torch, op_name)(x)
+
+        # Invoke torch.compile directly to get referent results
+        x = torch.randn(3, 4, device=device)
+
+        ref_array = []
+        for unary_op_name in unary_op_set:
+            opt_fn = torch.compile(functools.partial(fn, op_name=unary_op_name))
+            ref = opt_fn(x)
+            ref_array.append(ref)
+
+        def register_ops(op_set, dispatch_key, torch_compile_op_lib_impl):
+            for _op_name in op_set:
+                qualified_op_name = f"{namespace_name}::{_op_name}"
+                _, overload_names = torch._C._jit_get_operation(qualified_op_name)
+                for overload_name in overload_names:
+                    try:
+                        reg_op_name = qualified_op_name
+                        schema = torch._C._get_schema(qualified_op_name, overload_name)
+                        if schema.overload_name:
+                            reg_op_name = f"{qualified_op_name}.{schema.overload_name}"
+                        torch_compile_op_lib_impl._impl_with_aoti_compile(  # noqa: F821
+                            reg_op_name, dispatch_key
+                        )
+                    except Exception as e:
+                        continue
+
+        with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
+            register_ops(unary_op_set, dispatch_key, torch_compile_op_lib_impl)
+
+            res_array = []
+            for unary_op_name in unary_op_set:
+                res_array.append(getattr(torch, unary_op_name)(x))
+
+            for ref, res in zip(ref_array, res_array):
+                self.assertEqual(ref, res)
+
+        a = torch.randn(128, device=device)
+        min_tensor = torch.randn(128, device=device)
+        max_tensor = min_tensor + 0.5
+
+        ref_with_min = torch.ops.aten.clamp(a, min_tensor)
+        ref_with_min_max = torch.ops.aten.clamp(a, min_tensor, max_tensor)
+
+        with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
+            register_ops(["clamp"], dispatch_key, torch_compile_op_lib_impl)
+            res_with_min = torch.ops.aten.clamp(a, min_tensor)
+            res_with_min_max = torch.ops.aten.clamp(a, min_tensor, max_tensor)
+            self.assertEqual(ref_with_min, res_with_min)
+            self.assertEqual(ref_with_min_max, res_with_min_max)
 
     def test_add_const_int(self):
         def fn(a):
