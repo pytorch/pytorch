@@ -1,10 +1,11 @@
 # Owner(s): ["module: inductor"]
 import logging
 import os
-import torch
 import unittest
+
+import torch
 from torch._inductor import config
-from torch._inductor.test_case import TestCase, run_tests
+from torch._inductor.test_case import run_tests, TestCase
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
@@ -16,6 +17,7 @@ _CUTLASS_DIR = os.path.join(os.path.dirname(__file__), "../../third_party/cutlas
 
 log = logging.getLogger(__name__)
 
+
 def _get_path_without_sccache() -> str:
     """
     Get the PATH environment variable without sccache.
@@ -23,6 +25,7 @@ def _get_path_without_sccache() -> str:
     path_envs = os.environ.get("PATH", "").split(":")
     path_envs = [env for env in path_envs if "/opt/cache/bin" not in env]
     return ":".join(path_envs)
+
 
 class TestCKBackend(TestCase):
     def setUp(self):
@@ -61,7 +64,7 @@ class TestCKBackend(TestCase):
         a = torch.randn(2240, 256, **tensor_options)
         b = torch.randn(256, 2048, **tensor_options)
 
-        assert 'rocm' in dir(config)
+        assert "rocm" in dir(config)
 
         with config.patch(
             {
