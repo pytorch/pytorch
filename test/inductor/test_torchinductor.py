@@ -5949,6 +5949,7 @@ class CommonTemplate:
                 (a, b),
             )
 
+    @skipIfXpu
     def test_nll_loss_backward(self):
         def fn(a, b, c):
             return aten.nll_loss_backward(
