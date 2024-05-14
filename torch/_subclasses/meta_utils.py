@@ -34,10 +34,10 @@ from torch._C._functorch import (
     maybe_get_level,
     peek_interpreter_stack,
 )
+from torch.utils._mode_utils import no_dispatch
 
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import WeakIdKeyDictionary
-from torch.utils._mode_utils import no_dispatch
 
 if TYPE_CHECKING:
     from torch._C._autograd import CreationMeta
@@ -506,6 +506,8 @@ class MetaConverter:
         self.storage_memo[s.id] = v
 
     def meta_storage(self, s: MetaStorageDesc, callback):
+        # If we are fakeifying a tensor that has a secretly-zero-sized storage,
+        # Need to make sure to resize the meta storage too.
         if self.get_storage_memo(s) is None:
             r_s = callback(
                 lambda: torch.empty(s.size, dtype=torch.uint8, device="meta"),
@@ -1339,7 +1341,9 @@ class MetaConverter:
                         if self.copy_data:
                             with torch.no_grad(), no_dispatch():
                                 r.real_tensor.untyped_storage().copy_(s.data)
-                                r.untyped_storage().real_storage = r.real_tensor.untyped_storage()
+                                r.untyped_storage().real_storage = (
+                                    r.real_tensor.untyped_storage()
+                                )
                     else:
                         # You're in crazy town; somehow you gave us a tensor
                         # that wasn't a view, but had nonzero storage offset,
@@ -1384,7 +1388,10 @@ class MetaConverter:
                             if self.copy_data:
                                 with torch.no_grad(), no_dispatch():
                                     r.real_tensor.set_(
-                                        r_s.real_storage, t.storage_offset, t.size, t.stride
+                                        r_s.real_storage,
+                                        t.storage_offset,
+                                        t.size,
+                                        t.stride,
                                     )
 
                 if t.grad is not None:
@@ -1406,6 +1413,11 @@ class MetaConverter:
                 t.is_gradtrackingtensor and t.level == GRAD_TENSOR_SENTINEL_VALUE
             )
             assert_metadata_eq(assert_eq, t, r, skip_symbolic=True, skip_leaf=skip_leaf)
+            # Thanks to storage resizing, it's possible to end up with a tensor
+            # that advertises a real size, but has a storage that actually has zero bytes.
+            # Need to reflect this in the generated FakeTensor.
+            if t.storage is not None and t.storage.size == 0:
+                r.untyped_storage().resize_(0)
             self.set_tensor_memo(t, r)
 
         return self.get_tensor_memo(t)

@@ -8,6 +8,7 @@ from .optimizer import (
     _differentiable_doc,
     _disable_dynamo_if_unsupported,
     _foreach_doc,
+    _get_capturable_supported_devices,
     _get_scalar_dtype,
     _maximize_doc,
     _use_grad_for_differentiable,
@@ -235,9 +236,11 @@ def _single_tensor_rprop(
 
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
         if not torch._utils.is_compiling() and capturable:
-            assert (param.is_cuda and step.is_cuda) or (
-                param.is_xla and step.is_xla
-            ), "If capturable=True, params and state_steps must be CUDA or XLA tensors."
+            capturable_supported_devices = _get_capturable_supported_devices()
+            assert (
+                param.device.type == step.device.type
+                and param.device.type in capturable_supported_devices
+            ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
 
         step += 1
 
@@ -299,10 +302,12 @@ def _multi_tensor_rprop(
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch._utils.is_compiling() and capturable:
+        capturable_supported_devices = _get_capturable_supported_devices()
         assert all(
-            (p.is_cuda and step.is_cuda) or (p.is_xla and step.is_xla)
+            p.device.type == step.device.type
+            and p.device.type in capturable_supported_devices
             for p, step in zip(params, state_steps)
-        ), "If capturable=True, params and state_steps must be CUDA or XLA tensors."
+        ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, prevs, step_sizes, state_steps]
