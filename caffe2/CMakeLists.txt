@@ -110,21 +110,11 @@ endif()
 add_subdirectory(core)
 add_subdirectory(serialize)
 add_subdirectory(utils)
-if(BUILD_CAFFE2 OR (NOT USE_FBGEMM))
+if(NOT USE_FBGEMM)
   add_subdirectory(perfkernels)
 endif()
 
-# Skip modules that are not used by libtorch mobile yet.
-if(BUILD_CAFFE2 AND NOT INTERN_BUILD_MOBILE)
-  add_subdirectory(core/nomnigraph)
-  if(USE_NVRTC)
-    add_subdirectory(cuda_rtc)
-  endif()
-  if(BUILD_CAFFE2_OPS)
-  endif()
-  add_subdirectory(proto)
-endif()
-if(NOT BUILD_CAFFE2 AND NOT INTERN_BUILD_MOBILE)
+if(NOT INTERN_BUILD_MOBILE)
   add_subdirectory(proto)
 endif()
 
@@ -585,17 +575,10 @@ if(NOT INTERN_BUILD_MOBILE AND NOT BUILD_LITE_INTERPRETER)
     ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
   )
 
-  # Disable legacy import of building without Caffe2 support
-  if(BUILD_CAFFE2)
-    list(APPEND TORCH_SRCS
-      ${TORCH_SRC_DIR}/csrc/jit/serialization/import_legacy.cpp
-    )
-  else()
-    set_source_files_properties(
-      ${TORCH_SRC_DIR}/csrc/jit/serialization/import.cpp
-      PROPERTIES COMPILE_FLAGS "-DC10_DISABLE_LEGACY_IMPORT"
-    )
-  endif()
+  set_source_files_properties(
+    ${TORCH_SRC_DIR}/csrc/jit/serialization/import.cpp
+    PROPERTIES COMPILE_FLAGS "-DC10_DISABLE_LEGACY_IMPORT"
+  )
   if(USE_DISTRIBUTED)
     append_filelist("libtorch_distributed_base_sources" TORCH_SRCS)
     if(NOT WIN32)
@@ -809,11 +792,6 @@ if(HAVE_SOVERSION)
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
 endif()
 torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
-if(BUILD_CAFFE2 AND NOT MSVC)
-  # Caffe2 has too many signed-unsigned violation, but the framework is dead
-  # So no point in fixing those
-  target_compile_options(torch_cpu PRIVATE "-Wno-sign-compare")
-endif()
 
 # Ignore Wdeprecated-XXX errors from third-party libraries
 if(NOT MSVC)
@@ -1921,14 +1899,6 @@ if(BUILD_TEST)
       endif()
     endforeach()
   endif()
-
-  # For special tests that explicitly uses dependencies, we add them here
-  if(BUILD_CAFFE2 AND USE_MPI)
-    target_link_libraries(mpi_test MPI::MPI_CXX)
-    if(USE_CUDA)
-      target_link_libraries(mpi_gpu_test MPI::MPI_CXX)
-    endif()
-  endif()
 endif()
 
 if(MSVC)
@@ -1996,11 +1966,6 @@ if(BUILD_PYTHON)
     # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
     set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
     set_source_files_properties(${TORCH_SRC_DIR}/../caffe2/operators/box_with_nms_limit_op.cc PROPERTIES COMPILE_FLAGS -Wno-attributes)
-  endif()
-
-  # ---[ Python.
-  if(BUILD_CAFFE2)
-  target_compile_definitions(torch PRIVATE BUILD_CAFFE2)
   endif()
 
   # generated pb files are copied from build/caffe2 to caffe2
