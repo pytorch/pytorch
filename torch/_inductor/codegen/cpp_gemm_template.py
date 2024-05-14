@@ -362,7 +362,7 @@ class CppPackedGemmTemplate(CppTemplate):
         if epilogue_nodes:
             Y = cast(ir.Buffer, epilogue_nodes[-1])
             assert Y.get_name() in V.kernel.inplace_update_buffers
-            if Y.get_size() == list(reversed(template_buffer.get_size())):
+            if Y.get_stride() == list(reversed(template_buffer.get_stride())):
                 Y_is_transposed = True
 
         micro_gemm = create_micro_gemm(
