@@ -80,16 +80,18 @@ struct OpArgData {
   std::vector<std::string> dtypes;
   std::vector<c10::IValue> concrete_inputs;
   std::vector<std::vector<int64_t>> shapes_for_kineto_event;
+  std::vector<shape> strides;
 };
 
 auto parseArgData(
     const std::vector<op_input_t>& input_shapes,
     const std::vector<op_input_t>& concrete_inputs) {
   if (input_shapes.empty()) {
-    return OpArgData{false, {}, {}, {}, {}};
+    return OpArgData{false, {}, {}, {}, {}, {}};
   }
 
   std::vector<shape> shapes(input_shapes.size());
+  std::vector<shape> strides(input_shapes.size());
   std::vector<std::vector<int64_t>> shapes_for_kineto_event(
       input_shapes.size());
 
@@ -103,14 +105,19 @@ auto parseArgData(
               shapes[i] = t.sizes_;
               shapes_for_kineto_event[i] = t.sizes_;
               dtypes[i] = std::string(scalarTypeToTypeMeta(t.dtype_).name());
+              strides[i] = t.strides_;
             },
             [&](const std::vector<TensorMetadata>& l) {
               std::vector<std::vector<int64_t>> shape;
               shape.reserve(l.size());
+              std::vector<std::vector<int64_t>> stride;
+              stride.reserve(l.size());
               for (const auto& t : l) {
                 shape.emplace_back(t.sizes_);
+                stride.emplace_back(t.strides_);
               }
               shapes[i] = shape;
+              strides[i] = stride;
               dtypes[i] = "TensorList";
             },
             [&](const c10::IValue& val) { dtypes[i] = "Scalar"; },
@@ -141,7 +148,12 @@ auto parseArgData(
   }
 
   return OpArgData{
-      true, shapes, dtypes, concrete_inputs_list, shapes_for_kineto_event};
+      true,
+      shapes,
+      dtypes,
+      concrete_inputs_list,
+      shapes_for_kineto_event,
+      strides};
 }
 
 struct MetadataBase {
@@ -194,7 +206,7 @@ struct AddTensorboardFields : public MetadataBase {
     result->visit_if_base<PyExtraFieldsBase>([&, this](const auto& i) -> void {
       this->addMetadata("Python id", std::to_string(i.id_));
 
-      c10::optional<std::string> parent_id;
+      std::optional<std::string> parent_id;
       std::shared_ptr<Result> parent = result->parent_.lock();
       while (parent && !parent_id.has_value()) {
         parent->visit_if_base<PyExtraFieldsBase>(
@@ -236,6 +248,7 @@ struct AddGenericMetadata : public MetadataBase {
     if (arg_data.has_data) {
       if (get_record_concrete_inputs_enabled()) {
         addMetadata("Input Dims", variantShapesToStr(arg_data.shapes));
+        addMetadata("Input Strides", variantShapesToStr(arg_data.strides));
       } else {
         addMetadata(
             "Input Dims", shapesToStr(arg_data.shapes_for_kineto_event));
