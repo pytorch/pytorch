@@ -4471,7 +4471,7 @@ class TestBlockStateAbsorption(TestCase):
         )
         self.assertEqual(rc, "False", "Triton was imported when importing torch!")
 
-
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaOptims(TestCase):
     # These tests will be instantiate with instantiate_device_type_tests
     # to apply the new OptimizerInfo structure.
