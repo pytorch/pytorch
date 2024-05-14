@@ -472,14 +472,6 @@ class TritonCSEVariable(CSEVariable):
         self.mask_vars: Set[str] = set()
 
     def update_on_args(self, name, args, kwargs):
-        # When making a variable that is going to be used in indirect indexing
-        # if we are within a masked block, it means that the result is always a
-        # valid index, so you shouldn't include any of the dependent variables
-        # in the resulting load mask
-        if (
-            fx_node := getattr(V.interpreter, "current_node", None)
-        ) and fx_node.target.startswith("masked"):
-            return
         for arg in args:
             if isinstance(arg, TritonCSEVariable):
                 self.mask_vars.update(arg.mask_vars)
@@ -938,7 +930,9 @@ class TritonKernelOverrides(TritonOverrides):
             f"tl.full({result}.shape, {triton_constant(other)}, {result}.dtype)",
             bounds=ValueRanges.wrap(other),
         )
-        return ops.where(new_mask, result, other)
+        ret = ops.where(new_mask, result, other)
+        ret.mask_vars.remove(new_mask)
+        return ret
 
     @staticmethod
     def load_seed(name, offset):
