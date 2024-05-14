@@ -40,40 +40,6 @@ IF (APL_FOUND)
 #include <stdio.h>
 float x[4] = { 1, 2, 3, 4 };
 float y[4] = { .1, .01, .001, .0001 };
-int four = 4;
-int one = 1;
-extern double sdot_();
-int main() {
-  int i;
-  double r = sdot_(&four, x, &one, y, &one);
-  exit((float)r != (float).1234);
-}" BLAS_F2C_DOUBLE_WORKS )
-  CHECK_C_SOURCE_RUNS("
-#include <stdlib.h>
-#include <stdio.h>
-float x[4] = { 1, 2, 3, 4 };
-float y[4] = { .1, .01, .001, .0001 };
-int four = 4;
-int one = 1;
-extern float sdot_();
-int main() {
-  int i;
-  double r = sdot_(&four, x, &one, y, &one);
-  exit((float)r != (float).1234);
-}" BLAS_F2C_FLOAT_WORKS )
-MESSAGE(STATUS "BLAS_F2C_FLOAT_WORKS: ${BLAS_F2C_FLOAT_WORKS}")
-MESSAGE(STATUS "BLAS_F2C_DOUBLE_WORKS: ${BLAS_F2C_DOUBLE_WORKS}")  
-  IF (BLAS_F2C_DOUBLE_WORKS AND NOT BLAS_F2C_FLOAT_WORKS)
-    MESSAGE(STATUS "This BLAS uses the F2C return conventions")
-    SET(BLAS_F2C TRUE)
-  ELSE (BLAS_F2C_DOUBLE_WORKS AND NOT BLAS_F2C_FLOAT_WORKS)
-    SET(BLAS_F2C FALSE)
-  ENDIF(BLAS_F2C_DOUBLE_WORKS AND NOT BLAS_F2C_FLOAT_WORKS)
-  CHECK_C_SOURCE_RUNS("
-#include <stdlib.h>
-#include <stdio.h>
-float x[4] = { 1, 2, 3, 4 };
-float y[4] = { .1, .01, .001, .0001 };
 extern float cblas_sdot();
 int main() {
   int i;
