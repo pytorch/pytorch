@@ -14649,7 +14649,7 @@
   dispatch:
     CUDA: _fbgemm_dense_to_jagged_forward_symint
 
-- func: _nested_from_padded_tensor(Tensor padded, Tensor offsets, Tensor dummy, int dim=1) -> Tensor
+- func: _nested_from_padded_tensor(Tensor padded, Tensor offsets, Tensor dummy, int dim=1, SymInt? sum_S=None) -> Tensor
   variants: function
   device_check: NoCheck
   dispatch: {}

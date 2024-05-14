@@ -552,10 +552,10 @@ def nested_view_from_values_offsets_lengths(
 
 
 @torch._dynamo.allow_in_graph
-def nested_from_padded(padded, offsets, ragged_idx=1):
+def nested_from_padded(padded, offsets, ragged_idx=1, sum_S=None):
     if ragged_idx != 1:
         raise RuntimeError("nested_from_padded(): only ragged_idx=1 supported for now")
 
     return torch._nested_from_padded_tensor(
-        padded, offsets, _nt_view_dummy(), ragged_idx
+        padded, offsets, _nt_view_dummy(), ragged_idx, sum_S
     )
