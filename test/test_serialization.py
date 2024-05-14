@@ -1027,7 +1027,7 @@ class TestSerialization(TestCase, SerializationMixin):
             self.assertIsNone(torch.load(f, weights_only=False))
             f.seek(0)
             # Safe load should assert
-            with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported class __builtin__.print"):
+            with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported global: GLOBAL __builtin__.print"):
                 torch.load(f, weights_only=True)
 
     @parametrize('weights_only', (False, True))
@@ -4067,7 +4067,7 @@ class RebuildFromTypeV2Spoof(torch.Tensor):
         return super().__new__(cls, elem)
 
     def __reduce_ex__(self, protocol):
-        return (torch._tensor._rebuild_from_type_v2, (RebuildFromTypeV2Spoof, torch.Tensor, (True), {}))
+        return (torch._tensor._rebuild_from_type_v2, (RebuildFromTypeV2Spoof, torch.Tensor, (True,), {}))
 
 
 class TestSubclassSerialization(TestCase):
@@ -4241,7 +4241,7 @@ class TestSubclassSerialization(TestCase):
         Tests import semantic for tensor subclass and the {add/get/clear}_safe_globals APIs
         '''
         # Needed to prevent UnboundLocalError: local variable 'TwoTensor' referenced before assignment
-        global TwoTensor
+        # global TwoTensor
         t = TwoTensor(torch.randn(2, 3), torch.randn(2, 3))
         p = torch.nn.Parameter(t)
         sd = OrderedDict([('t', t), ('p', p)])
@@ -4339,7 +4339,9 @@ class TestSubclassSerialization(TestCase):
 
         with TemporaryFileName() as f:
             torch.save(inp, f)
-            with self.assertRaisesRegex(pickle.UnpicklingError, "second arg of _rebuild_from_type_v2"):
+            # subclass will be pushed onto unpickler's stack as a string
+            # and only gets converted to the type if it is argument 1 to _rebuild_from_type_v2
+            with self.assertRaisesRegex(TypeError, "'str' object is not callable"):
                 loaded = torch.load(f, weights_only=True)
 
 
