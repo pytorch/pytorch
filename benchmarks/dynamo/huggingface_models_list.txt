@@ -49,3 +49,4 @@ TrOCRForCausalLM,64
 XGLMForCausalLM,32
 XLNetLMHeadModel,16
 YituTechConvBert,32
+Reformer,8
