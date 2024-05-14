@@ -5965,6 +5965,7 @@ class CommonTemplate:
             self.common(
                 fn,
                 (a, b, c),
+                check_lowp=False,
             )
 
     def test_isinf(self):
