@@ -37,6 +37,9 @@ CUDA_AARCH64_ARCH = ["cuda-aarch64"]
 CPU_S390X_ARCH = ["cpu-s390x"]
 
 
+CUDA_AARCH64_ARCH = ["cuda-aarch64"]
+
+
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "11.8": (
         "nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | "  # noqa: B950
@@ -140,6 +143,8 @@ def arch_type(arch_version: str) -> str:
         return "cuda-aarch64"
     elif arch_version in CPU_S390X_ARCH:
         return "cpu-s390x"
+    elif arch_version in CUDA_AARCH64_ARCH:
+        return "cuda-aarch64"
     else:  # arch_version should always be "cpu" in this case
         return "cpu"
 
@@ -161,6 +166,7 @@ WHEEL_CONTAINER_IMAGES = {
     "cpu-aarch64": f"pytorch/manylinuxaarch64-builder:cpu-aarch64-{DEFAULT_TAG}",
     "cuda-aarch64": f"pytorch/manylinuxaarch64-builder:cuda12.4-{DEFAULT_TAG}",
     "cpu-s390x": f"pytorch/manylinuxs390x-builder:cpu-s390x-{DEFAULT_TAG}",
+    "cuda-aarch64": f"pytorch/manylinuxaarch64-builder:cuda12.4-{DEFAULT_TAG}",
 }
 
 CONDA_CONTAINER_IMAGES = {
@@ -354,6 +360,7 @@ def generate_wheels_matrix(
                 or arch_version == "cpu-aarch64"
                 or arch_version == "cuda-aarch64"
                 or arch_version == "cpu-s390x"
+                or arch_version == "cuda-aarch64"
                 else arch_version
             )
 
