@@ -216,25 +216,8 @@ def register_onednn_fusion_ops():
             return result
 
         @register_lowering(torch.ops.mkldnn._linear_pointwise.binary)
-        def linear_binary(
-            x: TensorBox, y: TensorBox, w: TensorBox, b: TensorBox, attr, layout=None
-        ):
-            choices: List[ChoiceCaller] = []
-            if len(choices) == 0 or use_aten_gemm_kernels():
-                choices.append(
-                    aten_mkldnn_linear_binary.bind((x, y, w, b), layout, attr=attr)
-                )
-            assert w.get_name() in V.graph.constants
-            input_gen_fns = {
-                1: lambda x: V.graph.constants[x.get_name()],
-            }
-            return autotune_select_algorithm(
-                "linear_binary",
-                choices,
-                [x, y, w, b],
-                layout,
-                input_gen_fns=input_gen_fns,
-            )
+        def linear_binary(x: TensorBox, y: TensorBox, w: TensorBox, b: TensorBox, attr):
+            return TensorBox.create(ir.LinearBinary.create(x, y, w, b, attr))
 
         @register_lowering(torch.ops.mkldnn._convolution_transpose_pointwise)
         def convolution_transpose_unary(
