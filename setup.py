@@ -1,5 +1,5 @@
 # Welcome to the PyTorch setup.py.
-#
+# modification
 # Environment variables you are probably interested in:
 #
 #   DEBUG
@@ -87,6 +87,12 @@
 #   USE_SYSTEM_NCCL=0
 #     disables use of system-wide nccl (we will use our submoduled
 #     copy in third_party/nccl)
+#
+#   BUILD_CAFFE2_OPS=0
+#     disable Caffe2 operators build
+#
+#   BUILD_CAFFE2=0
+#     disable Caffe2 build
 #
 #   USE_IBVERBS
 #     toggle features related to distributed support
@@ -230,6 +236,7 @@ if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
     sys.exit(-1)
 
 import platform
+import os
 
 python_min_version = (3, 8, 0)
 python_min_version_str = ".".join(map(str, python_min_version))
@@ -238,6 +245,19 @@ if sys.version_info < python_min_version:
         f"You are using Python {platform.python_version()}. Python >={python_min_version_str} is required."
     )
     sys.exit(-1)
+
+BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
+BUILD_PYTORCH_USING_LIBTORCH_WHL = False
+
+# set up appropriate env variables
+if BUILD_LIBTORCH_WHL:
+    # Set up environment variables for ONLY building libtorch.so and not libtorch_python.so
+
+    # functorch is not supported without python
+    os.environ["BUILD_FUNCTORCH"] = "OFF"
+    os.environ["BUILD_PYTHONLESS"] = "ON"
+else:
+    os.environ["BUILD_PYTHONLESS"] = "OFF"
 
 import filecmp
 import glob
@@ -341,6 +361,10 @@ version = get_torch_version()
 report(f"Building wheel {package_name}-{version}")
 
 cmake = CMake()
+
+DEFAULT_PACKAGE_NAME = "libtorch" if BUILD_LIBTORCH_WHL else "torch"
+
+package_name = os.getenv("TORCH_PACKAGE_NAME", DEFAULT_PACKAGE_NAME)
 
 
 def get_submodule_folders():
@@ -458,11 +482,12 @@ def build_deps():
 
     check_submodules()
     check_pydep("yaml", "pyyaml")
+    build_python = not BUILD_LIBTORCH_WHL
 
     build_caffe2(
         version=version,
         cmake_python_library=cmake_python_library,
-        build_python=True,
+        build_python=build_python,
         rerun_cmake=RERUN_CMAKE,
         cmake_only=CMAKE_ONLY,
         cmake=cmake,
@@ -719,6 +744,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
             "caffe2.python.caffe2_pybind11_state_gpu",
             "caffe2.python.caffe2_pybind11_state_hip",
         ]
+        if BUILD_LIBTORCH_WHL:
+            caffe2_pybind_exts = []
         i = 0
         while i < len(self.extensions):
             ext = self.extensions[i]
