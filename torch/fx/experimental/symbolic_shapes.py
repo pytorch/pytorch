@@ -1432,7 +1432,7 @@ class ShapeGuardPrinter(StrPrinter):
         self.var_to_sources = var_to_sources
 
     def _print_Not(self, expr):
-        return 'not %s' % (self.parenthesize(expr.args[0], PRECEDENCE["Not"]))
+        return 'not {}'.format(self.parenthesize(expr.args[0], PRECEDENCE["Not"]))
 
     def _print_And(self, expr):
         return self.stringify(expr.args, " and ", PRECEDENCE["And"])
@@ -1727,7 +1727,10 @@ class DimConstraints:
             if s not in self._substitutions
         }
 
-    def solve(self, disable_congruences=True, disable_equivalences=True):
+    def solve(
+        self,
+        _disable_forced_specializations=False,
+    ):
         """Solve the system of constraint equations to find simplified constraints
         """
         self._raise_inconsistencies()
@@ -1754,7 +1757,8 @@ class DimConstraints:
                 self.add(expr.xreplace({s: self._substitutions[s]}))
             self._raise_inconsistencies()
 
-        self._specialize_divisor_symbols()
+        if not _disable_forced_specializations:
+            self._specialize_divisor_symbols()
 
         # solve linear congruences
         # NOTE(avik): We do not need to solve them for symbols that have already been specialized.
@@ -1771,7 +1775,7 @@ class DimConstraints:
                         self._dcp.symbol_to_source[tmp] = [ConstantSource(tmp_name)]
                         r = try_solve(sympy.Eq(base, divisor * tmp), s)
                         self._dynamic_results.add(self._dcp.doprint(sympy.Eq(s, r[1])))
-                    elif disable_congruences:
+                    elif not _disable_forced_specializations:
                         self._force_specialization(s)
                         self._univariate_inequalities.pop(s, None)
 
@@ -1796,7 +1800,7 @@ class DimConstraints:
         symbolic_equivalences = self._symbolic_equivalences
         self._symbolic_equivalences = []
         for source, expr in symbolic_equivalences:
-            if disable_equivalences and not self._is_supported_equivalence(expr):
+            if not _disable_forced_specializations and not self._is_supported_equivalence(expr):
                 for s in expr.free_symbols:
                     self._force_specialization(s)
                     sexpr = self._dcp._print_Symbol(s)
@@ -1887,9 +1891,10 @@ class DimConstraints:
     ):
         """Format a message for constraint violation erros"""
         if self._dcp.source_name_to_debug_name:
-            def transform(s):
+
+            def transform(s, inverse=False):
                 for k, v in self._dcp.source_name_to_debug_name.items():
-                    s = s.replace(k, v)
+                    s = s.replace(k, v) if not inverse else s.replace(v, k)
                 return s
 
             results = defaultdict(dict)
@@ -1935,6 +1940,15 @@ class DimConstraints:
                     assert op == "==", t
                     results[left]["eq"] = sympy.sympify(right)
 
+            # order forced specializations based on name
+            forced_specializations = {
+                k: forced_specializations[k]
+                for k in sorted(
+                    forced_specializations.keys(),
+                    key=lambda x: x.split(" = ")[1],
+                )
+            }
+
             buf = ""
             debug_names = set()
             if forced_specializations:
@@ -1954,16 +1968,23 @@ class DimConstraints:
             if match is not None:
                 debug_names.update(match.expand(r'\1').split(', '))
 
-            for k, c in sorted(results.items()):
+            # order results by source name
+            results = {
+                k: results[k] for k in sorted(
+                    results.keys(),
+                    key=lambda x: transform(x, inverse=True),
+                )
+            }
+            for k, c in results.items():
                 # if k not in debug_names:
                 #     continue
                 if "eq" in c:
                     other = c["eq"]
                     if isinstance(other, int):
-                        others.append(f"{k} = None  # {other}")
+                        others.append(f"{k} = {other}")
                     elif self._is_supported_equivalence(other):
                         s = next(iter(other.free_symbols))
-                        if s not in results:
+                        if str(s) not in results:
                             modulus, remainder = sympy.polys.polytools.div(other, s)
                             c_min = c.get("min", 2)
                             min_ = math.ceil((c_min - remainder) / modulus)
@@ -3303,6 +3324,7 @@ class ShapeEnv:
         # (See docs on EqualityConstraint for details of the encoding.)
         equalities_inputs: Optional[EqualityConstraint] = None,
         _simplified=False,
+        _disable_forced_specializations=False,
         # Indicates if we should produce guards for known static values.
         ignore_static=True,
     ) -> List[str]:
@@ -3729,12 +3751,13 @@ class ShapeEnv:
                     constraints = symbol_to_constraints[symbol]
                     for c in constraints:
                         if isinstance(c, StrictMinMaxConstraint):
-                            var_with_range = self._render_range_for_constraint_violation(source, c)
-                            msg = (
-                                f"Not all values of {var_with_range} "
-                                f"satisfy the generated guard {guard_expr}."
-                            )
-                            record_constraint_violation(c.warn_only, self._debug_name(source), msg)
+                            if not _disable_forced_specializations:
+                                var_with_range = self._render_range_for_constraint_violation(source, c)
+                                msg = (
+                                    f"Not all values of {var_with_range} "
+                                    f"satisfy the generated guard {guard_expr}."
+                                )
+                                record_constraint_violation(c.warn_only, self._debug_name(source), msg)
                         elif isinstance(c, RelaxedUnspecConstraint):
                             # This is fine, we allow guards here as long as it
                             # didn't constrain it to one value  (we don't
@@ -4007,8 +4030,12 @@ class ShapeEnv:
             equiv[canonicalize_bool_expr(expr)] = sympy.true
             equiv[canonicalize_bool_expr(sympy.Not(expr))] = sympy.false
             if isinstance(expr, sympy.Rel):
-                # multiplying by -1 changes the direction of the inequality
-                dual = type(expr)(-expr.rhs, -expr.lhs)
+                if isinstance(expr, (sympy.Eq, sympy.Ne)):
+                    # multiplying by -1 ensures that equality is commutative
+                    dual = type(expr)(-expr.lhs, -expr.rhs)
+                else:
+                    # multiplying by -1 changes the direction of the inequality
+                    dual = type(expr)(-expr.rhs, -expr.lhs)
                 equiv[canonicalize_bool_expr(dual)] = sympy.true
                 equiv[canonicalize_bool_expr(sympy.Not(dual))] = sympy.false
 
