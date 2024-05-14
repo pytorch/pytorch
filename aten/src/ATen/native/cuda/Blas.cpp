@@ -839,11 +839,11 @@ static bool _scaled_mm_allowed_device() {
 
 std::tuple<Tensor&, Tensor&>
 _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
-          const c10::optional<at::Tensor>& bias,
-          c10::optional<c10::ScalarType> out_dtype,
-          const c10::optional<at::Tensor>& scale_a,
-          const c10::optional<at::Tensor>& scale_b,
-          const c10::optional<at::Tensor>& scale_result,
+          const std::optional<at::Tensor>& bias,
+          std::optional<c10::ScalarType> out_dtype,
+          const std::optional<at::Tensor>& scale_a,
+          const std::optional<at::Tensor>& scale_b,
+          const std::optional<at::Tensor>& scale_result,
           bool use_fast_accum,
           Tensor& out, Tensor& amax) {
   // Check sizes
@@ -1022,11 +1022,11 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
 
 std::tuple<Tensor, Tensor>
 _scaled_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
-          const c10::optional<at::Tensor>& bias,
-          c10::optional<c10::ScalarType> out_dtype,
-          const c10::optional<at::Tensor>& scale_a,
-          const c10::optional<at::Tensor>& scale_b,
-          const c10::optional<at::Tensor>& scale_result,
+          const std::optional<at::Tensor>& bias,
+          std::optional<c10::ScalarType> out_dtype,
+          const std::optional<at::Tensor>& scale_a,
+          const std::optional<at::Tensor>& scale_b,
+          const std::optional<at::Tensor>& scale_result,
           bool use_fast_accum) {
   const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
   Tensor out = at::empty({0}, mat_a.options().dtype(out_dtype_));

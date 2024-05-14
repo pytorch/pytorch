@@ -38,6 +38,8 @@ Args: TypeAlias = Tuple[Any, ...]
 Kwargs: TypeAlias = Dict[str, Any]
 StateDict: TypeAlias = Dict[str, Any]
 TensorListList: TypeAlias = List[List[torch.Tensor]]
+DeviceDict = Dict[Optional[torch.device], torch.Tensor]
+
 
 GlobalOptimizerPreHook: TypeAlias = Callable[
     ["Optimizer", Args, Kwargs], Optional[Tuple[Args, Kwargs]]
