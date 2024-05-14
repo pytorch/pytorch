@@ -18,16 +18,17 @@ namespace {
 // Wraps a DataPtr with a copy-on-write DataPtr.
 at::DataPtr make_data_ptr(
     at::DataPtr const& data_ptr,
-    cow::COWDeleterContext& ctx) {
-  return at::DataPtr(data_ptr.get(), &ctx, cow::cow_deleter, data_ptr.device());
+    cow::COWDeleterContext& ctx,
+    DeleterFnPtr deleter_fn) {
+  return at::DataPtr(data_ptr.get(), &ctx, deleter_fn, data_ptr.device());
 }
 
 /// Copies a copy-on-write DataPtr.
-at::DataPtr copy_data_ptr(at::DataPtr const& data_ptr) {
-  auto* ctx = data_ptr.cast_context<cow::COWDeleterContext>(cow::cow_deleter);
+at::DataPtr copy_data_ptr(at::DataPtr const& data_ptr, DeleterFnPtr deleter_fn) {
+  auto* ctx = data_ptr.cast_context<cow::COWDeleterContext>(deleter_fn);
   TORCH_INTERNAL_ASSERT(ctx != nullptr);
   ctx->increment_refcount();
-  return make_data_ptr(data_ptr, *ctx);
+  return make_data_ptr(data_ptr, *ctx, deleter_fn);
 }
 
 } // namespace
@@ -46,6 +47,10 @@ bool has_simple_data_ptr(const c10::StorageImpl& storage) {
 
 bool is_cow_data_ptr(const c10::DataPtr& data_ptr) {
   return (void*)data_ptr.get_deleter() == (void*)&cow::cow_deleter;
+}
+
+bool is_cowsim_data_ptr(const c10::DataPtr& data_ptr) {
+  return (void*)data_ptr.get_deleter() == (void*)&cow::cowsim_deleter;
 }
 
 c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
@@ -85,14 +90,59 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
 
     // Save this for the result.
     new_data_ptr = make_data_ptr(
-        data_ptr, *new cow::COWDeleterContext(std::move(original_ctx)));
+        data_ptr, *new cow::COWDeleterContext(std::move(original_ctx)), cow::cow_deleter);
 
     // Update this storage to the new copy on write context.
-    storage.set_data_ptr_noswap(copy_data_ptr(*new_data_ptr));
+    storage.set_data_ptr_noswap(copy_data_ptr(*new_data_ptr, cow::cow_deleter));
   } else if (is_cow_data_ptr(data_ptr)) {
     // Case 2): there is already a copy on write context. Just return a
     // new storage impl.
-    new_data_ptr = copy_data_ptr(data_ptr);
+    new_data_ptr = copy_data_ptr(data_ptr, cow::cow_deleter);
+  } else if (is_cowsim_data_ptr(data_ptr)) {
+    TORCH_CHECK(
+      false,
+      "You cannot create a genuine lazy clone of a simulated COW storage");
+  } else {
+    // Case 3) There is a context and it's not copy-on-write. Nothing
+    // we can do here.
+    return nullptr;
+  }
+
+  TORCH_INTERNAL_ASSERT(new_data_ptr.has_value());
+
+  return make_storage_impl(
+      StorageImpl::use_byte_size_t(),
+      storage.sym_nbytes(),
+      *std::move(new_data_ptr),
+      storage.allocator(),
+      storage.resizable(),
+      storage.device_type());
+}
+
+c10::intrusive_ptr<StorageImpl> simulate_lazy_clone_storage(StorageImpl& storage) {
+  const at::DataPtr& data_ptr = storage.data_ptr();
+
+  std::optional<DataPtr> new_data_ptr; // must be set below
+
+  if (has_simple_data_ptr(storage)) {
+    // Case 1) We have a simple data pointer: wrap it.
+    std::unique_ptr<void, DeleterFnPtr> original_ctx =
+        storage._mutable_data_ptr_no_checks().move_context();
+
+    // Save this for the result.
+    new_data_ptr = make_data_ptr(
+        data_ptr, *new cow::COWSimDeleterContext(std::move(original_ctx)), cow::cowsim_deleter);
+
+    // Update this storage to the new copy on write context.
+    storage.set_data_ptr_noswap(copy_data_ptr(*new_data_ptr, cow::cowsim_deleter));
+  } else if (is_cowsim_data_ptr(data_ptr)) {
+    // Case 2): there is already a copy on write context. Just return a
+    // new storage impl.
+    new_data_ptr = copy_data_ptr(data_ptr, cow::cowsim_deleter);
+  } else if (is_cow_data_ptr(data_ptr)) {
+    TORCH_CHECK(
+      false,
+      "You cannot create a simulated lazy clone of a genuine COW storage");
   } else {
     // Case 3) There is a context and it's not copy-on-write. Nothing
     // we can do here.
@@ -147,6 +197,20 @@ C10_API void materialize_cow_storage(StorageImpl& storage) {
   // The refcount of the context was already decremented above. Release the
   // reference to the context so the refcount doesn't get decremented again
   old_data_ptr.release_context();
+}
+
+C10_API void check_cowsim_write(StorageImpl& storage) {
+  const at::DataPtr& data_ptr = storage._data_ptr_no_checks();
+  auto* ctx = data_ptr.cast_context<cow::COWSimDeleterContext>(cow::cowsim_deleter);
+  TORCH_INTERNAL_ASSERT(ctx != nullptr);
+  ctx->check_write(reinterpret_cast<std::uintptr_t>(&storage));
+}
+
+C10_API void check_cowsim_read(const StorageImpl& storage) {
+  const at::DataPtr& data_ptr = storage._data_ptr_no_checks();
+  auto* ctx = data_ptr.cast_context<cow::COWSimDeleterContext>(cow::cowsim_deleter);
+  TORCH_INTERNAL_ASSERT(ctx != nullptr);
+  ctx->check_read(reinterpret_cast<std::uintptr_t>(&storage));
 }
 
 } // namespace c10::impl::cow

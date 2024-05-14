@@ -5131,6 +5131,79 @@ else:
 
         self.assertTrue(torch._C._data_address(t) == orig_data_ptr)
         self.assertTrue(torch._C._data_address(clone) == orig_data_ptr)
+    
+
+    @skipXLA
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
+    def test_simulate_lazy_clone(self, device, dtype):
+        def init_tensors():
+            a = torch.tensor([[0, 1], [2, 3]], device=device, dtype=dtype)
+            a_view0 = a.view(a.size())
+            b = a._simulate_lazy_clone()
+            a_view1 = a.view(a.size())
+            b_view = b.view(b.size())
+            return [a, a_view0, a_view1], [b, b_view]
+
+        @contextlib.contextmanager
+        def assertNotWarns():
+            with warnings.catch_warnings(record=True) as w:
+                try:
+                    yield
+                finally:
+                    assert len(w) == 0
+
+        try:
+            warnings.filterwarnings('always')
+
+            # Write-then-access to different alias groups should raise warning
+            for a_ind, b_ind in product(range(3), range(2)):
+                a, b = init_tensors()
+                a[a_ind] += 1
+                with self.assertWarnsRegex(UserWarning, "divergent behavior"):
+                    b[b_ind] + 1
+
+                a, b = init_tensors()
+                a[a_ind] += 1
+                with self.assertWarnsRegex(UserWarning, "divergent behavior"):
+                    b[b_ind] += 1
+
+                a, b = init_tensors()
+                b[b_ind] += 1
+                with self.assertWarnsRegex(UserWarning, "divergent behavior"):
+                    a[a_ind] + 1
+
+                a, b = init_tensors()
+                b[b_ind] += 1
+                with self.assertWarnsRegex(UserWarning, "divergent behavior"):
+                    a[a_ind] += 1
+
+            # Write-then-access to the same alias group should not warn
+            for a0_ind, a1_ind in product(range(3), range(3)):
+                a, b = init_tensors()
+                with assertNotWarns():
+                    a[a0_ind] += 1
+                    a[a1_ind] + 1
+
+                a, b = init_tensors()
+                with assertNotWarns():
+                    a[a0_ind] += 1
+                    a[a1_ind] += 1
+
+            # Write-then-access to the same alias group should not warn
+            for b0_ind, b1_ind in product(range(2), range(2)):
+                a, b = init_tensors()
+                with assertNotWarns():
+                    b[b0_ind] += 1
+                    b[b1_ind] + 1
+
+                a, b = init_tensors()
+                with assertNotWarns():
+                    b[b0_ind] += 1
+                    b[b1_ind] += 1
+
+        finally:
+            warnings.filterwarnings('default')
+
 
     # See Note [lazy_clone_ tests with inductor enabled]
     @skipXLA

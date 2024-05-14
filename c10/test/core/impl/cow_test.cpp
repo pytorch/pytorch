@@ -84,6 +84,11 @@ MATCHER(is_copy_on_write, "") {
   return cow::is_cow_data_ptr(storage.data_ptr());
 }
 
+MATCHER(is_cowsim, "") {
+  const c10::StorageImpl& storage = std::ref(arg);
+  return cow::is_cowsim_data_ptr(storage.data_ptr());
+}
+
 TEST(lazy_clone_storage_test, no_context) {
   StorageImpl original_storage(
       {}, /*size_bytes=*/7, GetDefaultCPUAllocator(), /*resizable=*/false);
@@ -104,6 +109,24 @@ TEST(lazy_clone_storage_test, no_context) {
   ASSERT_THAT(*new_storage, is_copy_on_write());
   // But they share the same data!
   ASSERT_THAT(new_storage->data(), testing::Eq(original_storage.data()));
+}
+
+TEST(simulate_lazy_clone_test, basic) {
+  StorageImpl original_storage(
+      {}, /*size_bytes=*/7, GetDefaultCPUAllocator(), /*resizable=*/false);
+  ASSERT_THAT(original_storage, testing::Not(is_copy_on_write()));
+  ASSERT_THAT(original_storage, testing::Not(is_cowsim()));
+  ASSERT_TRUE(cow::has_simple_data_ptr(original_storage));
+
+  intrusive_ptr<StorageImpl> new_storage =
+      cow::simulate_lazy_clone_storage(original_storage);
+  ASSERT_THAT(new_storage.get(), testing::NotNull());
+
+  // The original storage was modified in-place to now hold a copy on
+  // write context.
+  ASSERT_THAT(original_storage, is_cowsim());
+  ASSERT_THAT(original_storage, testing::Not(is_copy_on_write()));
+  ASSERT_TRUE(!cow::has_simple_data_ptr(original_storage));
 }
 
 struct MyDeleterContext {
