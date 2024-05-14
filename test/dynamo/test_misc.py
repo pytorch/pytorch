@@ -26,13 +26,13 @@ from unittest.mock import patch
 
 import numpy as np
 import torch
-from torch import Tensor
 import torch._dynamo.testing
 
 import torch._inductor.test_case
 import torch.onnx.operators
 
 import torch.utils._pytree as pytree
+from torch import Tensor
 from torch._C import FileCheck
 from torch._dynamo import allow_in_graph, bytecode_analysis, bytecode_transformation
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
@@ -8519,9 +8519,11 @@ def ___make_guard_fn():
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
     def test_unbacked_auto_functionalize_op(self):
-        @torch.library.custom_op("mylib::mk_image", mutates_args=("decoder",), device_types=["cpu"])
+        @torch.library.custom_op(
+            "mylib::mk_image", mutates_args=("decoder",), device_types=["cpu"]
+        )
         def mk_image(decoder: Tensor) -> Tensor:
-            return torch.randn(2,3,4,5)
+            return torch.randn(2, 3, 4, 5)
 
         @torch.library.register_fake("mylib::mk_image")
         def _(decoder: Tensor) -> Tensor:
