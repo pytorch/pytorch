@@ -310,15 +310,22 @@ void NodeToONNX(
         if (old->hasDebugName() && !exist_in_env) {
           auto old_name = outputs[i]->debugName();
           auto new_name = old->debugNameBase();
-          const auto& debug_names = new_block->owningGraph()->debugNames();
-          auto exist_name = debug_names.find(new_name);
           Value* found_value;
-          bool exists = exist_name != debug_names.end();
-          if (exists) {
-            found_value = exist_name->second;
+          bool exists;
+          // In this scope, we fetch debug_names as a const reference and then
+          // construct an iterator exist_name based on it. This iterator will
+          // be corrupted if the underlying map of debug_names changes. This
+          // will happen as a side-effect of setDebugName. For these reasons,
+          // we make an explicit scope for exist_name and make sure that
+          // setDebugName is never called with this scope.
+          {
+            const auto& debug_names = new_block->owningGraph()->debugNames();
+            auto exist_name = debug_names.find(new_name);
+            exists = exist_name != debug_names.end();
+            if (exists) {
+              found_value = exist_name->second;
+            }
           }
-          // Note: calls to setDebugName will change debug_names and corrupt
-          // exist_name
           outputs[i]->setDebugName(new_name);
           if (exists) {
             found_value->setDebugName(new_name);
