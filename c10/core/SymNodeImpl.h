@@ -188,19 +188,19 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual std::string str() {
     TORCH_CHECK(false, "NYI");
   };
-  virtual c10::optional<int64_t> nested_int() {
+  virtual std::optional<int64_t> nested_int() {
     return c10::nullopt;
   }
-  virtual c10::optional<int64_t> nested_int_coeff() {
+  virtual std::optional<int64_t> nested_int_coeff() {
     return c10::nullopt;
   }
-  virtual c10::optional<int64_t> constant_int() {
+  virtual std::optional<int64_t> constant_int() {
     return c10::nullopt;
   }
-  virtual c10::optional<bool> constant_bool() {
+  virtual std::optional<bool> constant_bool() {
     return c10::nullopt;
   }
-  virtual c10::optional<int64_t> maybe_as_int() {
+  virtual std::optional<int64_t> maybe_as_int() {
     return c10::nullopt;
   }
   virtual bool is_constant() {

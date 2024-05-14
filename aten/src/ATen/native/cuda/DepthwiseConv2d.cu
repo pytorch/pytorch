@@ -521,7 +521,7 @@ const Tensor& conv_depthwise2d_cuda_out(
     const Tensor &input_,
     const Tensor &weight_,
     IntArrayRef kernel_size,
-    const c10::optional<Tensor> &bias_opt,
+    const std::optional<Tensor> &bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation,
@@ -556,7 +556,7 @@ Tensor conv_depthwise2d_cuda(
     const Tensor &input,
     const Tensor &weight,
     IntArrayRef kernel_size,
-    const c10::optional<Tensor> &bias,
+    const std::optional<Tensor> &bias,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation) {

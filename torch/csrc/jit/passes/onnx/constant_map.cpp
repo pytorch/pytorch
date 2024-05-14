@@ -32,7 +32,7 @@ bool ConstantValueMap::HasRank(const std::string& tensorName) {
       ConstantValueMap::getInstance().rankMap.end();
 }
 
-c10::optional<size_t> ConstantValueMap::GetRank(const std::string& tensorName) {
+std::optional<size_t> ConstantValueMap::GetRank(const std::string& tensorName) {
   if (!HasRank(tensorName)) {
     return c10::nullopt;
   }
@@ -51,7 +51,7 @@ bool ConstantValueMap::HasShape(const std::string& tensorName) {
       ConstantValueMap::getInstance().shapeMap.end();
 }
 
-c10::optional<c10::SymbolicShape> ConstantValueMap::GetShape(
+std::optional<c10::SymbolicShape> ConstantValueMap::GetShape(
     const std::string& tensorName) {
   if (!HasShape(tensorName)) {
     return c10::nullopt;
@@ -70,7 +70,7 @@ bool ConstantValueMap::HasValue(const std::string& tensorName) {
       ConstantValueMap::getInstance().tensorValueMap.end();
 }
 
-c10::optional<at::Tensor> ConstantValueMap::GetValue(
+std::optional<at::Tensor> ConstantValueMap::GetValue(
     const std::string& tensorName) {
   if (!HasValue(tensorName)) {
     return c10::nullopt;
@@ -94,7 +94,7 @@ std::vector<int64_t> ConstantValueMap::GetCompleteShapeInto1DInt64Vector(
   return shape_value;
 }
 
-c10::optional<std::vector<int64_t>> ConstantValueMap::GetShapeInto1DInt64Vector(
+std::optional<std::vector<int64_t>> ConstantValueMap::GetShapeInto1DInt64Vector(
     const std::string& value_name) {
   if (ConstantValueMap::HasShape(value_name)) {
     auto shape_size = ConstantValueMap::GetShape(value_name).value();
@@ -107,7 +107,7 @@ c10::optional<std::vector<int64_t>> ConstantValueMap::GetShapeInto1DInt64Vector(
   return c10::nullopt;
 }
 
-c10::optional<std::vector<int64_t>> ConstantValueMap::
+std::optional<std::vector<int64_t>> ConstantValueMap::
     GetShapeInto1DInt64VectorWithOneUnknown(const std::string& value_name) {
   if (ConstantValueMap::HasShape(value_name)) {
     auto shape_size = ConstantValueMap::GetShape(value_name).value();
@@ -163,7 +163,7 @@ bool ConstantValueMap::HasTypeReliable(const std::string& tensorName) {
       ConstantValueMap::getInstance().typeReliableMap.end();
 }
 
-c10::optional<bool> ConstantValueMap::GetTypeReliable(
+std::optional<bool> ConstantValueMap::GetTypeReliable(
     const std::string& tensorName) {
   if (!HasTypeReliable(tensorName)) {
     return c10::nullopt;
@@ -182,7 +182,7 @@ bool ConstantValueMap::HasUseInferredType(const std::string& tensorName) {
       ConstantValueMap::getInstance().useInferredTypeMap.end();
 }
 
-c10::optional<bool> ConstantValueMap::GetUseInferredType(
+std::optional<bool> ConstantValueMap::GetUseInferredType(
     const std::string& tensorName) {
   if (!HasUseInferredType(tensorName)) {
     return c10::nullopt;
@@ -201,7 +201,7 @@ bool ConstantValueMap::HasShapeValue(const std::string& tensorName) {
       ConstantValueMap::getInstance().shapeValueMap.end();
 }
 
-c10::optional<c10::SymbolicShape> ConstantValueMap::GetShapeValue(
+std::optional<c10::SymbolicShape> ConstantValueMap::GetShapeValue(
     const std::string& tensorName) {
   if (!HasShapeValue(tensorName)) {
     return c10::nullopt;
