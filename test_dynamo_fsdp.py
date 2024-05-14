@@ -44,8 +44,10 @@ from torch.distributed._composable.fsdp._fsdp_init import (
 )
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.distributed._tensor import init_device_mesh
-from llama_model_toy import ToyTransformer, ModelArgs
+# from llama_model_toy import ToyTransformer, ModelArgs
+from llama_model_toy_graph_break import ToyTransformerWithGraphBreak, ModelArgs
 # from llama_model import Transformer, ModelArgs
+# from llama_model_graph_break import TransformerWithGraphBreak, ModelArgs
 
 # from torchviz import make_dot
 
@@ -273,7 +275,7 @@ def checkpoint_wrapper(module, config):
         )
 
 
-test_case = "nested_fully_shard"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard" / "toy_transformer"
+test_case = "toy_transformer"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard" / "toy_transformer"
 balanced = True
 mixed_precision = False  # TODO(yf225): when True, fails accuracy test, needs debugging
 apply_fsdp = True
@@ -294,9 +296,9 @@ def init(activation_checkpoint):
     # nested_fully_shard + balanced -> works
     # nested_fully_shard + unbalanced -> works
     if balanced:
-        hidden_dim = 5120
+        hidden_dim = 512
     else:
-        hidden_dim = 5121
+        hidden_dim = 513
     if mixed_precision:
         mp_policy = MixedPrecisionPolicy(
             param_dtype=torch.bfloat16, reduce_dtype=torch.float32
@@ -339,19 +341,30 @@ def init(activation_checkpoint):
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
             fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
     elif test_case == "nested_fully_shard":
+        class TestSubmodule(nn.Module):
+            def __init__(self, hidden_dim):
+                super().__init__()
+                self.param = nn.Parameter(torch.randn(hidden_dim, hidden_dim, device="cuda"))
+
+            def forward(self, x):
+                ret = torch.matmul(x, self.param)
+                print(ret)
+                ret = torch.matmul(ret, self.param)
+                return ret
+
         class TestModule(nn.Module):
             def __init__(self, n_layers):
                 super().__init__()
                 self.layers = torch.nn.ModuleList()
                 for layer_id in range(n_layers):
-                    self.layers.append(MLP(hidden_dim))
+                    self.layers.append(TestSubmodule(hidden_dim))
 
             def forward(self, x):
                 for layer in self.layers:
                     x = layer(x)
                 return x
 
-        model = TestModule(n_layers=2)
+        model = TestModule(n_layers=1)
         assert apply_fsdp
         assert mesh is not None
         for layer_id, mod in enumerate(model.layers):
@@ -376,12 +389,14 @@ def init(activation_checkpoint):
         torch._inductor.config.raise_last_usage = True
         model_args = ModelArgs(
             dim=hidden_dim,
-            n_layers=3,
+            n_layers=1,
             n_heads=1,
             vocab_size=1024,
         )
-        transformer_class = ToyTransformer  # makes comm-induced peak memory issue more prominent
+        # transformer_class = ToyTransformer  # makes comm-induced peak memory issue more prominent
+        transformer_class = ToyTransformerWithGraphBreak
         # transformer_class = Transformer
+        # transformer_class = TransformerWithGraphBreak
         model = transformer_class(model_args)
         for layer_id, mod in enumerate(model.layers):
             if activation_checkpoint:
@@ -485,8 +500,15 @@ def run(model, optim, n_iter, hidden_dim):
 
 def main_compiled(n_iter, activation_checkpoint, backend):
     model, optim, hidden_dim = init(activation_checkpoint=activation_checkpoint)
+    # per-param FSDP does lazy init using 1st run, so run it once to init using eager mode
+    run(model, optim, 1, hidden_dim)
+    print("done eager 1st run for compiled!")
 
     def compiler_fn(gm):
+        if dist.get_rank() == 0:
+            # HACK: delay rank 0 by X seconds, so that rank 1 will always fail first.
+            import time
+            time.sleep(600)
         torch_log.warning("Compiling autograd?")
         return torch.compile(gm, backend=backend, fullgraph=False)
 
@@ -526,6 +548,9 @@ def main_compiled(n_iter, activation_checkpoint, backend):
 
 def main_eager(n_iter, activation_checkpoint):
     model, optim, hidden_dim = init(activation_checkpoint=activation_checkpoint)
+    # per-param FSDP does lazy init using 1st run, so run it once to init using eager mode
+    run(model, optim, 1, hidden_dim)
+    print("done eager 1st run for eager!")
 
     res = run(model, optim, n_iter, hidden_dim)
     for state in torch.distributed._composable_state._module_state_mapping.values():
@@ -577,8 +602,8 @@ if __name__ == "__main__":
 
     if dist.get_rank() == 0:
         start_record_memory_history()
-    ac_test_order = [True]
-    backends = ["inductor"]
+    ac_test_order = [False]
+    backends = ["aot_eager"]
 
     def test_eager(activation_checkpoint):
         losses_eager = execute_and_profile(
