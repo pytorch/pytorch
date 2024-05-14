@@ -9,10 +9,13 @@ import torch.nn
 from . import utils
 
 from .bytecode_transformation import (
+    cleaned_instructions,
+    clear_instruction_args,
     create_call_function,
     create_call_method,
     create_dup_top,
     create_instruction,
+    create_jump_absolute,
     create_load_attr,
     create_load_global,
     create_load_method,
@@ -37,6 +40,23 @@ from .variables.torch_function import TensorWithTFOverrideVariable
 class GraphOutputEntry:
     index: int
     variable: VariableTracker
+
+
+# Dummy function used to generate bytecode that
+# try/catches the compiled function CALL[_FUNCTION].
+# We don't expect compiled functions to raise exceptions,
+# So if an exception occurs, raise a wrapped exception
+# to notify that there's a dynamo bug.
+# Don't actually call this function!
+def _try_catch_call_compiled_fn(call):
+    try:
+        call
+    except Exception as e:
+        import torch
+
+        raise torch._dynamo.exc.InternalTorchDynamoError(
+            "Exception raised when running compiled function"
+        ) from e
 
 
 class PyCodegen:
@@ -392,7 +412,40 @@ class PyCodegen:
             else:
                 self.call_reconstruct(arg)
 
-        self.extend_output(create_call_function(len(graphargs), False))
+        # wrap the call in a try/except block to catch any errors from the compiled
+        # function and reraise them as a wrapped Dynamo exception
+        try_catch_insts = cleaned_instructions(_try_catch_call_compiled_fn.__code__)
+        clear_instruction_args(try_catch_insts)
+        for inst in try_catch_insts:
+            inst.starts_line = None
+
+        if "e" not in self.code_options["co_varnames"]:
+            self.code_options["co_varnames"] += ("e",)
+
+        if "torch" not in self.code_options["co_varnames"]:
+            self.code_options["co_varnames"] += ("torch",)
+
+        if "InternalTorchDynamoError" not in self.code_options["co_varnames"]:
+            self.code_options["co_varnames"] += ("InternalTorchDynamoError",)
+
+        jump_target = create_instruction("NOP")
+        call_and_jump_insts = create_call_function(len(graphargs), False)
+        call_and_jump_insts.append(create_jump_absolute(jump_target))
+
+        for i, inst in enumerate(try_catch_insts):
+            if inst.opname == "LOAD_FAST" and inst.argval == "call":
+                break
+
+        if inst.exn_tab_entry is not None:
+            inst.exn_tab_entry.start = call_and_jump_insts[0]
+            inst.exn_tab_entry.end = call_and_jump_insts[-2]
+            inst.exn_tab_entry.depth = 0
+            call_and_jump_insts[0].exn_tab_entry = inst.exn_tab_entry
+
+        self.extend_output(try_catch_insts[:i])
+        self.extend_output(call_and_jump_insts)
+        self.extend_output(try_catch_insts[i + 1 :])
+        self.append_output(jump_target)
 
     def load_import_from(self, module_name, object_name) -> None:
         self(AttrSource(self.tx.import_source(module_name), object_name))
