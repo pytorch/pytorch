@@ -3437,7 +3437,7 @@ static void linalg_lstsq_out_info(
     } else {
         auto [U, S, Vh] = at::_linalg_svd(input, false, true, "gesvd");
         rank = at::zeros({1}, at::kLong);
-       
+
         auto S_pinv = S.reciprocal();
         auto s1 = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);  // singular values are sorted in descending order
         S_pinv.masked_fill_(S < rcond * s1, 0);
