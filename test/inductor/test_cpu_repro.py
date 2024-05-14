@@ -2504,6 +2504,25 @@ class CPUReproTests(TestCase):
                 metrics.cpp_outer_loop_fused_inner_counts[0].with_local_buffer is True
             )
 
+    def test_local_buffer_wo_allocation(self):
+        def fn(x):
+            max = torch.nn.functional.softmax(x, dim=-1)
+            return x - max
+
+        x = torch.randn(4, 12, 1023, 1022)
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            _, code = run_and_get_cpp_code(
+                torch._dynamo.optimize("inductor")(fn),
+                x,
+            )
+            # <TODO> This check is bit hacky, we should have a better way to check.
+            # 2 for the import "empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu"
+            # 3 for the allocation of buffer (buf0, buf2, buf3)
+            assert code.count("empty_strided_cpu") == 5
+
     def test_argmin(self):
         def fn(x):
             return torch.argmin(x, -1)

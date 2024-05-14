@@ -414,8 +414,8 @@ class BaseSchedulerNode:
             return
 
         # Hacky check for if V.kernel using local buffer.
-        # If so, avoid allocation of this buffer since its usage has been
-        # replaced with local buffer.
+        # If so, early return to avoid allocation of this buffer
+        # since its usage has been replaced with local buffer.
         if (
             hasattr(V.kernel, "local_buffer")
             and V.kernel.local_buffer is not None
