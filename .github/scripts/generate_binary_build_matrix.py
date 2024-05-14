@@ -232,26 +232,21 @@ def generate_conda_matrix(os: str) -> List[Dict[str, str]]:
         for arch_version in arches:
             gpu_arch_type = arch_type(arch_version)
             gpu_arch_version = "" if arch_version == "cpu" else arch_version
-            for use_split_build in ["true", "false"]:
-                build_name = f"conda-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
-                    ".", "_"
-                )
-                if use_split_build == "true":
-                    build_name += "-experimental-split-build"
-                ret.append(
-                    {
-                        "python_version": python_version,
-                        "gpu_arch_type": gpu_arch_type,
-                        "gpu_arch_version": gpu_arch_version,
-                        "desired_cuda": translate_desired_cuda(
-                            gpu_arch_type, gpu_arch_version
-                        ),
-                        "container_image": CONDA_CONTAINER_IMAGES[arch_version],
-                        "package_type": "conda",
-                        "use_split_build": use_split_build,
-                        "build_name": build_name,
-                    }
-                )
+            ret.append(
+                {
+                    "python_version": python_version,
+                    "gpu_arch_type": gpu_arch_type,
+                    "gpu_arch_version": gpu_arch_version,
+                    "desired_cuda": translate_desired_cuda(
+                        gpu_arch_type, gpu_arch_version
+                    ),
+                    "container_image": CONDA_CONTAINER_IMAGES[arch_version],
+                    "package_type": "conda",
+                    "build_name": f"conda-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
+                        ".", "_"
+                    ),
+                }
+            )
     return ret
 
 
@@ -307,7 +302,6 @@ def generate_libtorch_matrix(
                     "build_name": f"libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{abi_version}".replace(
                         ".", "_"
                     ),
-                    "use_split_build": "false",
                 }
             )
     return ret
@@ -354,12 +348,6 @@ def generate_wheels_matrix(
                 or arch_version == "cpu-s390x"
                 else arch_version
             )
-            for use_split_build in ["true", "false"]:
-                build_name = f"conda-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
-                    ".", "_"
-                )
-                if use_split_build == "true":
-                    build_name += "-experimental-split-build"
 
             # 12.1 linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
             if arch_version in ["12.4", "12.1", "11.8"] and os == "linux":
@@ -374,9 +362,10 @@ def generate_wheels_matrix(
                         "devtoolset": "",
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                         "package_type": package_type,
-                        "use_split_build": use_split_build,
                         "pytorch_extra_install_requirements": PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version],  # fmt: skip
-                        "build_name": build_name,
+                        "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(  # noqa: B950
+                            ".", "_"
+                        ),
                     }
                 )
             else:
@@ -393,8 +382,9 @@ def generate_wheels_matrix(
                         else "",
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                         "package_type": package_type,
-                        "use_split_build": use_split_build,
-                        "build_name": build_name,
+                        "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
+                            ".", "_"
+                        ),
                         "pytorch_extra_install_requirements":
                         PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.1"]  # fmt: skip
                         if os != "linux" else "",

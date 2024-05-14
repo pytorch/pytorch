@@ -60,7 +60,7 @@ if(UNIX AND NOT APPLE)
 endif()
 
 add_executable(torch_shm_manager manager.cpp)
-target_link_libraries(torch_shm_manager PRIVATE shm ${C10_LIB})
+target_link_libraries(torch_shm_manager PRIVATE shm c10)
 set_target_properties(torch_shm_manager PROPERTIES
   INSTALL_RPATH "${_rpath_portable_origin}/../lib")
 
