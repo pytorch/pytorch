@@ -4465,7 +4465,10 @@ class TestCudaOptims(TestCase):
 
         for optim_input in all_optim_inputs:
             kwargs = optim_input.kwargs
-            kwargs["lr"]=0.1
+            
+            # lr as a Tensor is not supported when capturable=False and foreach=True for torch.optim.adam
+            # and torch.optim.adamw
+            kwargs["lr"] = 0.1 
 
             for actually_do_graphs in (True, False):
                 params = [
@@ -4480,7 +4483,6 @@ class TestCudaOptims(TestCase):
                 ]
 
                 # Control (capturable=False)
-
                 kwargs["capturable"] = False
 
                 opt = optim_cls(params_control, **kwargs)
