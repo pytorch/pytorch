@@ -289,6 +289,9 @@ else
       fi
       WERROR=1 python setup.py bdist_wheel
     else
+      if [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
+        source .ci/pytorch/install_cache_xla.sh
+      fi
       python setup.py bdist_wheel
     fi
     pip_install_whl "$(echo dist/*.whl)"
