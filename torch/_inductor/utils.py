@@ -983,12 +983,12 @@ def use_cutlass_template(layout, m, n, k):
 
 def use_ck_template(layout, m, n, k):
     # config knobs check 1
-    if not use_max_autotune(): 
-        return False 
+    if not use_max_autotune():
+        return False
     # config knobs check 2
     if not _use_autotune_backend("CK"):
         return False
-    # platform check 
+    # platform check
     if not torch.version.hip:
         return False
     # tensors must be on GPU
@@ -997,7 +997,7 @@ def use_ck_template(layout, m, n, k):
     # hardware check, enable for CDNA3 only for now
     device_capability = torch.cuda.get_device_capability(layout.device)
     log.debug("Device capability %s", device_capability)
-    # https://llvm.org/docs/AMDGPUUsage.html#amd-gcn-gfx940-gfx942-cdna3 
+    # https://llvm.org/docs/AMDGPUUsage.html#amd-gcn-gfx940-gfx942-cdna3
     if device_capability != (9, 4):
         return False
     # supported input dtypes
@@ -1007,6 +1007,7 @@ def use_ck_template(layout, m, n, k):
     # if not is_big_gpu(layout.device.index or 0):
     #     return False
     from .virtualized import V
+
     # check if shape is static and gemm size is not 0
     gemm_size = V.graph.sizevars.size_hint(m * n * k, fallback=-1)
     if gemm_size <= 0:
