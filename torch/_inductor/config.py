@@ -242,6 +242,11 @@ max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP"
 ).upper()
 
+# Verbose cache entries for GEMM tunings that include configuration
+# details for Triton templates such as BLOCK_M, BLOCK_N, BLOCK_K,
+# num_stages, num_warps, etc.
+max_autotune_gemm_verbose_cache = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_VERBOSE_CACHE") == "1"
+
 # the value used as a fallback for the unbacked SymInts
 # that can appear in the input shapes (e.g., in autotuning)
 unbacked_symint_fallback = 8192
