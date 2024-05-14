@@ -1,6 +1,7 @@
 # Owner(s): ["module: optimizer", "module: LrScheduler" ]
 import math
 import pickle
+import tempfile
 import types
 import warnings
 from functools import partial
@@ -1707,6 +1708,54 @@ class TestLRScheduler(TestCase):
         )
         self._test_cycle_lr(scheduler, lr_targets, momentum_targets, 10)
 
+    def test_onecycle_lr_legacy_state_dict(self):
+        scheduler = OneCycleLR(
+            self.opt,
+            max_lr=25,
+            final_div_factor=2,
+            base_momentum=1,
+            max_momentum=22,
+            total_steps=10,
+            anneal_strategy="cos",
+        )
+        delattr(scheduler, "_anneal_func_type")
+        state_dict = scheduler.state_dict()
+        self.assertNotIn("anneal_func_type", state_dict)
+        state_dict["anneal_func"] = OneCycleLR._annealing_cos
+        scheduler.load_state_dict(state_dict)
+
+        def annealing_cos(start, end, pct):
+            cos_out = math.cos(math.pi * pct) + 1
+            return end + (start - end) / 2.0 * cos_out
+
+        lr_target = [
+            1,
+            13,
+            25,
+            annealing_cos(25, 0.5, 1 / 7.0),
+            annealing_cos(25, 0.5, 2 / 7.0),
+            annealing_cos(25, 0.5, 3 / 7.0),
+            annealing_cos(25, 0.5, 4 / 7.0),
+            annealing_cos(25, 0.5, 5 / 7.0),
+            annealing_cos(25, 0.5, 6 / 7.0),
+            0.5,
+        ]
+        momentum_target = [
+            22,
+            11.5,
+            1,
+            annealing_cos(1, 22, 1 / 7.0),
+            annealing_cos(1, 22, 2 / 7.0),
+            annealing_cos(1, 22, 3 / 7.0),
+            annealing_cos(1, 22, 4 / 7.0),
+            annealing_cos(1, 22, 5 / 7.0),
+            annealing_cos(1, 22, 6 / 7.0),
+            22,
+        ]
+        lr_targets = [lr_target, lr_target]
+        momentum_targets = [momentum_target, momentum_target]
+        self._test_cycle_lr(scheduler, lr_targets, momentum_targets, 10)
+
     def test_cycle_lr_with_adam(self):
         old_opt = self.opt
         self.opt = Adam(
@@ -2311,6 +2360,48 @@ class TestLRScheduler(TestCase):
         with warnings.catch_warnings():
             warnings.simplefilter("error", UserWarning)
             LRClass(self.opt)
+
+    @parametrize(
+        "LRClass",
+        [
+            partial(LambdaLR, lr_lambda=lambda e: e // 10),
+            partial(MultiplicativeLR, lr_lambda=lambda: 0.95),
+            partial(StepLR, step_size=30),
+            partial(MultiStepLR, milestones=[30, 80]),
+            ConstantLR,
+            LinearLR,
+            partial(ExponentialLR, gamma=0.9),
+            PolynomialLR,
+            partial(CosineAnnealingLR, T_max=10),
+            lambda opt, **kwargs: ChainedScheduler(
+                schedulers=[ConstantLR(opt), ConstantLR(opt)], **kwargs
+            ),
+            lambda opt, **kwargs: SequentialLR(
+                opt,
+                schedulers=[ConstantLR(opt), ConstantLR(opt)],
+                milestones=[2],
+                **kwargs,
+            ),
+            ReduceLROnPlateau,
+            partial(CyclicLR, base_lr=0.01, max_lr=0.1),
+            partial(OneCycleLR, max_lr=0.01, total_steps=10, anneal_strategy="linear"),
+            partial(CosineAnnealingWarmRestarts, T_0=20),
+        ],
+    )
+    @parametrize("weights_only", [True, False])
+    def test_lr_scheduler_state_dict_load(self, LRClass, weights_only):
+        scheduler = LRClass(self.opt)
+        state_dict = scheduler.state_dict()
+
+        with tempfile.TemporaryFile() as f:
+            torch.save(state_dict, f)
+            f.seek(0)
+            state_dict_loaded = torch.load(f, weights_only=weights_only)
+            self.assertEqual(state_dict, state_dict_loaded)
+            # Make sure state_dict can be loaded
+            scheduler2 = LRClass(self.opt)
+            scheduler2.load_state_dict(state_dict_loaded)
+            self.assertEqual(scheduler2.state_dict(), state_dict)
 
 
 instantiate_parametrized_tests(TestLRScheduler)

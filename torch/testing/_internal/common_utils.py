@@ -97,6 +97,11 @@ from torch.utils._import_utils import _check_module_exists
 import torch.utils._pytree as pytree
 
 from .composite_compliance import no_dispatch
+try:
+    import pytest
+    has_pytest = True
+except ImportError:
+    has_pytest = False
 
 
 # Class to keep track of test flags configurable by environment variables.
@@ -390,9 +395,8 @@ def compose_parametrize_fns(old_parametrize_fn, new_parametrize_fn):
                 redundant_params = set(old_param_kwargs.keys()).intersection(new_param_kwargs.keys())
                 if redundant_params:
                     raise RuntimeError('Parametrization over the same parameter by multiple parametrization '
-                                       'decorators is not supported. For test "{}", the following parameters '
-                                       'are handled multiple times: {}'.format(
-                                           test.__name__, redundant_params))
+                                       f'decorators is not supported. For test "{test.__name__}", the following parameters '
+                                       f'are handled multiple times: {redundant_params}')
                 full_param_kwargs = {**old_param_kwargs, **new_param_kwargs}
                 merged_test_name = '{}{}{}'.format(new_test_name,
                                                    '_' if old_test_name != '' and new_test_name != '' else '',
@@ -1231,7 +1235,9 @@ TEST_MPS = torch.backends.mps.is_available()
 TEST_XPU = torch.xpu.is_available()
 TEST_CUDA = torch.cuda.is_available()
 custom_device_mod = getattr(torch, torch._C._get_privateuse1_backend_name(), None)
-TEST_PRIVATEUSE1 = True if (hasattr(custom_device_mod, "is_available") and custom_device_mod.is_available()) else False
+custom_device_is_available = hasattr(custom_device_mod, "is_available") and custom_device_mod.is_available()
+TEST_PRIVATEUSE1 = True if custom_device_is_available else False
+TEST_PRIVATEUSE1_DEVICE_TYPE = torch._C._get_privateuse1_backend_name()
 TEST_NUMBA = _check_module_exists('numba')
 TEST_TRANSFORMERS = _check_module_exists('transformers')
 TEST_DILL = _check_module_exists('dill')
@@ -1289,8 +1295,9 @@ TEST_CUDA_GRAPH = TEST_CUDA and (not TEST_SKIP_CUDAGRAPH) and (  # noqa: F821
 
 if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
     num_procs = int(os.getenv("NUM_PARALLEL_PROCS", "2"))
-    # other libraries take up about 11% of space per process
-    torch.cuda.set_per_process_memory_fraction(round(1 / num_procs - .11, 2))
+    gb_available = torch.cuda.mem_get_info()[1] / 2 ** 30
+    # other libraries take up about a little under 1 GB of space per process
+    torch.cuda.set_per_process_memory_fraction(round((gb_available - num_procs * .85) / gb_available / num_procs, 2))
 
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "Requires CUDA")
 
@@ -1384,6 +1391,15 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
 
     return decorator
 
+def serialTest(condition=True):
+    """
+    Decorator for running tests serially.  Requires pytest
+    """
+    def decorator(fn):
+        if has_pytest and condition:
+            return pytest.mark.serial(fn)
+        return fn
+    return decorator
 
 def unMarkDynamoStrictTest(cls=None):
     def decorator(cls):
@@ -1619,6 +1635,19 @@ def setLinalgBackendsToDefaultFinally(fn):
     return _fn
 
 
+# Reverts the blas backend back to default to make sure potential failures in one
+# test do not affect other tests
+def setBlasBackendsToDefaultFinally(fn):
+    @wraps(fn)
+    def _fn(*args, **kwargs):
+        _preferred_backend = torch.backends.cuda.preferred_blas_library()
+        try:
+            fn(*args, **kwargs)
+        finally:
+            torch.backends.cuda.preferred_blas_library(_preferred_backend)
+    return _fn
+
+
 # Context manager for setting deterministic flag and automatically
 # resetting it to its original value
 class DeterministicGuard:
@@ -1819,15 +1848,7 @@ def skipIfNotRegistered(op_name, message):
         @skipIfNotRegistered('MyOp', 'MyOp is not linked!')
             This will check if 'MyOp' is in the caffe2.python.core
     """
-    if not BUILD_WITH_CAFFE2:
-        return unittest.skip("Pytorch is compiled without Caffe2")
-    try:
-        from caffe2.python import core
-        skipper = unittest.skipIf(op_name not in core._REGISTERED_OPERATORS,
-                                  message)
-    except ImportError:
-        skipper = unittest.skip("Cannot import `caffe2.python.core`")
-    return skipper
+    return unittest.skip("Pytorch is compiled without Caffe2")
 
 def _decide_skip_caffe2(expect_caffe2, reason):
     def skip_dec(func):
@@ -2161,30 +2182,20 @@ class CudaMemoryLeakCheck:
                 #   statistics or a leak too small to trigger the allocation of an
                 #   additional block of memory by the CUDA driver
                 msg = ("CUDA caching allocator reports a memory leak not "
-                       "verified by the driver API in {}! "
-                       "Caching allocator allocated memory was {} and is now reported as {} "
-                       "on device {}. "
-                       "CUDA driver allocated memory was {} and is now {}.").format(
-                    self.name,
-                    self.caching_allocator_befores[i],
-                    caching_allocator_mem_allocated,
-                    i,
-                    self.driver_befores[i],
-                    driver_mem_allocated)
+                       f"verified by the driver API in {self.name}! "
+                       f"Caching allocator allocated memory was {self.caching_allocator_befores[i]} "
+                       f"and is now reported as {caching_allocator_mem_allocated} "
+                       f"on device {i}. "
+                       f"CUDA driver allocated memory was {self.driver_befores[i]} and is now {driver_mem_allocated}.")
                 warnings.warn(msg)
             elif caching_allocator_discrepancy and driver_discrepancy:
                 # A caching allocator discrepancy validated by the driver API is a
                 #   failure (except on ROCm, see below)
-                msg = ("CUDA driver API confirmed a leak in {}! "
-                       "Caching allocator allocated memory was {} and is now reported as {} "
-                       "on device {}. "
-                       "CUDA driver allocated memory was {} and is now {}.").format(
-                    self.name,
-                    self.caching_allocator_befores[i],
-                    caching_allocator_mem_allocated,
-                    i,
-                    self.driver_befores[i],
-                    driver_mem_allocated)
+                msg = (f"CUDA driver API confirmed a leak in {self.name}! "
+                       f"Caching allocator allocated memory was {self.caching_allocator_befores[i]} "
+                       f"and is now reported as {caching_allocator_mem_allocated} "
+                       f"on device {i}. "
+                       f"CUDA driver allocated memory was {self.driver_befores[i]} and is now {driver_mem_allocated}.")
 
                 raise RuntimeError(msg)
 
@@ -2663,10 +2674,14 @@ class TestCase(expecttest.TestCase):
                         # The path isn't strictly correct but it's arguably better than nothing.
                         return os.path.split(abs_test_path)[1]
 
-                    test_filename = _get_rel_test_path(inspect.getfile(type(self)))
+                    # NB: In Python 3.8, the getfile() call will return a path relative
+                    # to the working directory, so convert that to absolute.
+                    abs_test_path = os.path.abspath(inspect.getfile(type(self)))
+                    test_filename = _get_rel_test_path(abs_test_path)
+                    class_name = type(self).__name__
                     repro_str = f"""
 To execute this test, run the following from the base repo dir:
-    {env_var_prefix} python {test_filename} -k {method_name}
+    {env_var_prefix} python {test_filename} -k {class_name}.{method_name}
 
 This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                     self.wrap_with_policy(

@@ -25,9 +25,10 @@ from torch.testing._internal.common_nn import (
     nllloss_reference, nlllossNd_reference, smoothl1loss_reference, softmarginloss_reference, get_reduction)
 from torch.testing._internal.common_utils import (
     freeze_rng_state, set_single_threaded_if_parallel_tbb, skipIfMps, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS,
-    skipIfTorchDynamo)
+    skipIfTorchDynamo, TEST_WITH_TORCHINDUCTOR)
 from types import ModuleType
 from typing import List, Tuple, Type, Set, Dict
+import operator
 
 # List of all namespaces containing modules to test.
 MODULE_NAMESPACES: List[ModuleType] = [
@@ -126,7 +127,7 @@ class modules(_TestParametrizer):
                     def test_wrapper(*args, **kwargs):
                         return test(*args, **kwargs)
 
-                    if self.skip_if_dynamo and not torch.testing._internal.common_utils.TEST_WITH_TORCHINDUCTOR:
+                    if self.skip_if_dynamo and not TEST_WITH_TORCHINDUCTOR:
                         test_wrapper = skipIfTorchDynamo("Policy: we don't run ModuleInfo tests w/ Dynamo")(test_wrapper)
 
                     decorator_fn = partial(module_info.get_decorators, generic_cls.__name__,
@@ -3374,7 +3375,7 @@ module_db: List[ModuleInfo] = [
                        unittest.expectedFailure,
                        'TestModule',
                        'test_memory_format',
-                       active_if=lambda p: p['training'],
+                       active_if=operator.itemgetter('training'),
                    ),)
                ),
     ModuleInfo(torch.nn.AdaptiveAvgPool3d,
@@ -3413,7 +3414,7 @@ module_db: List[ModuleInfo] = [
                        unittest.expectedFailure,
                        'TestModule',
                        'test_memory_format',
-                       active_if=lambda p: p['training'],
+                       active_if=operator.itemgetter('training'),
                        device_type='cuda',
                    ),
                    # error: input types 'tensor<f32>' and 'tensor<15x10xf16>' are not broadcast compatible
@@ -3440,13 +3441,13 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(
                        unittest.expectedFailure, 'TestEagerFusionModuleInfo',
                        'test_aot_autograd_symbolic_module_exhaustive',
-                       active_if=lambda p: p['training']
+                       active_if=operator.itemgetter('training')
                    ),
                    # torch._subclasses.fake_tensor.DataDependentOutputException: aten._local_scalar_dense.default
                    DecorateInfo(
                        unittest.expectedFailure, 'TestEagerFusionModuleInfo',
                        'test_aot_autograd_module_exhaustive',
-                       active_if=lambda p: p['training']
+                       active_if=operator.itemgetter('training')
                    ))
                ),
     ModuleInfo(torch.nn.BatchNorm2d,
@@ -3461,14 +3462,19 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(
                        unittest.expectedFailure, 'TestEagerFusionModuleInfo',
                        'test_aot_autograd_symbolic_module_exhaustive',
-                       active_if=lambda p: p['training']
+                       active_if=operator.itemgetter('training')
                    ),
                    # torch._subclasses.fake_tensor.DataDependentOutputException: aten._local_scalar_dense.default
                    DecorateInfo(
                        unittest.expectedFailure, 'TestEagerFusionModuleInfo',
                        'test_aot_autograd_module_exhaustive',
-                       active_if=lambda p: p['training']
-                   ),)
+                       active_if=operator.itemgetter('training')
+                   ),
+                   # test fails if run alone in inductor https://github.com/pytorch/pytorch/issues/125967
+                   DecorateInfo(
+                       unittest.skip("Skipped https://github.com/pytorch/pytorch/issues/125967"),
+                       'TestModule', 'test_memory_format', device_type='cuda',
+                       active_if=(TEST_WITH_TORCHINDUCTOR)),)
                ),
     ModuleInfo(torch.nn.BatchNorm3d,
                train_and_eval_differ=True,
@@ -3481,13 +3487,13 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(
                        unittest.expectedFailure, 'TestEagerFusionModuleInfo',
                        'test_aot_autograd_symbolic_module_exhaustive',
-                       active_if=lambda p: p['training']
+                       active_if=operator.itemgetter('training')
                    ),
                    # torch._subclasses.fake_tensor.DataDependentOutputException: aten._local_scalar_dense.default
                    DecorateInfo(
                        unittest.expectedFailure, 'TestEagerFusionModuleInfo',
                        'test_aot_autograd_module_exhaustive',
-                       active_if=lambda p: p['training']
+                       active_if=operator.itemgetter('training')
                    ),)
                ),
     ModuleInfo(torch.nn.CELU,
@@ -3870,7 +3876,7 @@ module_db: List[ModuleInfo] = [
                        unittest.expectedFailure,
                        'TestModule',
                        'test_memory_format',
-                       active_if=lambda p: p['training'],
+                       active_if=operator.itemgetter('training'),
                        device_type='mps',
                    ),)
                ),
@@ -4013,16 +4019,8 @@ module_db: List[ModuleInfo] = [
                decorators=(
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_memory_format'),
-                   # Expect failures for tests that rely on torch.half implementation on CPU
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_forward", dtypes=[torch.float16], device_type='cpu'),
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_if_train_and_eval_modes_differ",
-                                dtypes=[torch.float16], device_type='cpu'),
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_save_load", dtypes=[torch.float16],
-                                device_type='cpu'),
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors", dtypes=[torch.float16],
-                                device_type='cpu'),
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_multiple_device_transfer", dtypes=[torch.float16],
-                                device_type='cuda'),
+                   DecorateInfo(toleranceOverride({torch.float16: tol(atol=3e-2, rtol=1e-3)}), "TestModule",
+                                "test_forward", dtypes=[torch.float16], device_type='cpu'),
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity", dtypes=[torch.float16],
                                 device_type='cuda'),),
                ),
@@ -4078,7 +4076,7 @@ module_db: List[ModuleInfo] = [
                        unittest.expectedFailure,
                        'TestModule',
                        'test_memory_format',
-                       active_if=lambda p: p['training'],
+                       active_if=operator.itemgetter('training'),
                        device_type='mps',
                    ),),
                supports_gradgrad=False),
@@ -4201,7 +4199,7 @@ module_db: List[ModuleInfo] = [
                        unittest.expectedFailure,
                        'TestModule',
                        'test_memory_format',
-                       active_if=lambda p: p['training'],
+                       active_if=operator.itemgetter('training'),
                        device_type='mps',
                    ),)
                ),
@@ -4243,7 +4241,7 @@ module_db: List[ModuleInfo] = [
                        unittest.expectedFailure,
                        'TestModule',
                        'test_memory_format',
-                       active_if=lambda p: p['training'],
+                       active_if=operator.itemgetter('training'),
                        device_type='mps',
                    ),)
                ),
@@ -4306,7 +4304,7 @@ module_db: List[ModuleInfo] = [
                        unittest.expectedFailure,
                        'TestModule',
                        'test_memory_format',
-                       active_if=lambda p: p['training'],
+                       active_if=operator.itemgetter('training'),
                        device_type='mps',
                    ),)
                ),
@@ -4319,7 +4317,7 @@ module_db: List[ModuleInfo] = [
                        unittest.expectedFailure,
                        'TestModule',
                        'test_memory_format',
-                       active_if=lambda p: p['training'],
+                       active_if=operator.itemgetter('training'),
                        device_type='mps',
                    ),)
                ),

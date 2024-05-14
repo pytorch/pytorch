@@ -12,7 +12,9 @@ from torch._dynamo.testing import rand_strided, reduce_to_scalar_loss
 from torch._dynamo.utils import maybe_cprofile
 from torch._inductor import config, ir, metrics
 from torch._inductor.fx_passes import pad_mm as pad_mm_pass
-from torch._inductor.utils import do_bench, run_and_get_code
+from torch._inductor.runtime.runtime_utils import do_bench
+from torch._inductor.utils import run_and_get_code
+from torch.testing._internal.common_utils import serialTest
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
@@ -434,6 +436,7 @@ class PaddingTest(TestCaseBase):
         )
         self.do_profiling(f1, f2)
 
+    @serialTest()
     def test_nobias_LinearAndSoftmax_codegen(self):
         self.test_LinearAndSoftmax_codegen(bias=False)
 

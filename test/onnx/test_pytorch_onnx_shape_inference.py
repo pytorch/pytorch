@@ -32,6 +32,7 @@ def as_graphcontext(graph: torch.Graph) -> jit_utils.GraphContext:
         original_node=None,  # type: ignore[arg-type]
         params_dict={},
         env={},
+        values_in_env=set(),
     )
 
 

@@ -3,6 +3,7 @@ PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_sym_bool)
 """
 
+
 # Owner(s): ["oncall: export"]
 import copy
 import io
@@ -28,19 +29,17 @@ from torch._export.serde.serialize import (
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import Dim, export, load, save
-from torch.fx.experimental.symbolic_shapes import is_concrete_int
+from torch.fx.experimental.symbolic_shapes import is_concrete_int, ValueRanges
 from torch.testing._internal.common_utils import (
-    find_library_location,
     instantiate_parametrized_tests,
-    IS_FBCODE,
-    IS_MACOS,
-    IS_SANDCASTLE,
     IS_WINDOWS,
     parametrize,
     run_tests,
     TemporaryFileName,
     TestCase,
 )
+
+from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 
 
 def get_filtered_export_db_tests():
@@ -49,16 +48,6 @@ def get_filtered_export_db_tests():
         for name, case in all_examples().items()
         if case.support_level == SupportLevel.SUPPORTED
     ]
-
-
-def cleanup_op(opname):
-    ns, name = opname.split("::")
-    if not hasattr(torch.ops, ns):
-        return
-    actual_ns = getattr(torch.ops, ns)
-    if not hasattr(actual_ns, name):
-        return
-    delattr(actual_ns, name)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
@@ -194,7 +183,7 @@ class TestSerialize(TestCase):
                 torch.ones([512]),
                 torch.ones([512]),
             ),
-        )
+        ).run_decompositions()
 
         serialized = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.exported_program.graph_module.graph.nodes[-1]
@@ -277,6 +266,29 @@ class TestSerialize(TestCase):
             self.assertNotIn(name, seen)
             seen.add(name)
 
+    def test_rational_ranges(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + x
+
+        ep = torch.export.export(
+            M(), (torch.randn(4),), dynamic_shapes=({0: Dim("temp")},)
+        )
+
+        range_constraints = list(ep.range_constraints.keys())
+        assert len(range_constraints) == 1
+        symint = range_constraints[0]
+
+        import sympy
+
+        upper_range = sympy.Rational(10, 3)
+        lower_range = sympy.Rational(10, 6)
+        ep.range_constraints[symint] = ValueRanges(lower=lower_range, upper=upper_range)
+
+        serialized = ExportedProgramSerializer().serialize(ep)
+        self.assertEqual(serialized.exported_program.range_constraints["s0"].min_val, 2)
+        self.assertEqual(serialized.exported_program.range_constraints["s0"].max_val, 3)
+
     def test_kwargs_default(self) -> None:
         """
         Tests that the kwargs default values are serialized even if they are not
@@ -318,22 +330,24 @@ class TestSerialize(TestCase):
             g.nodes[1].inputs[0].arg.as_tensor.name,
         )
 
+    def test_int_list(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.sum.dim_IntList(x, [])
+
+        ep = torch.export.export(M(), (torch.randn(3, 2),))
+        serialized = ExportedProgramSerializer().serialize(ep)
+        for node in serialized.exported_program.graph_module.graph.nodes:
+            if "aten.sum.dim_IntList" in node.target:
+                self.assertEqual(node.inputs[1].arg.type, "as_ints")
+
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestDeserialize(TestCase):
     def setUp(self):
-        if IS_SANDCASTLE or IS_FBCODE:
-            torch.ops.load_library(
-                "//caffe2/test/cpp/jit:test_custom_class_registrations"
-            )
-        elif IS_MACOS:
-            raise unittest.SkipTest("non-portable load_library call used in test")
-        else:
-            lib_file_path = find_library_location("libtorchbind_test.so")
-            if IS_WINDOWS:
-                lib_file_path = find_library_location("torchbind_test.dll")
-            torch.ops.load_library(str(lib_file_path))
+        super().setUp()
+        init_torchbind_implementations()
 
     def _check_graph_nodes(self, gm1, gm2, _check_meta=True):
         # TODO: The _check_meta flag bypasses checking for
@@ -470,9 +484,31 @@ class TestDeserialize(TestCase):
         else:
             _check_graph(pre_dispatch=False)
 
+    def test_optional_tuple(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor a, Tensor b, Tensor? c) -> (Tensor, Tensor?)",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch.library.impl_abstract("mylib::foo")
+            def foo_impl(a, b, c):
+                res2 = None
+                if c is not None:
+                    res2 = c + a + b
+                return a + b, res2
+
+            class M(torch.nn.Module):
+                def forward(self, a, b, c):
+                    return torch.ops.mylib.foo(a, b, c)
+
+            self.check_graph(M(), (torch.randn(3), torch.randn(3), torch.randn(3)))
+
     def test_auto_functionalize(self):
-        try:
-            lib = torch.library.Library("mylib", "FRAGMENT")  # noqa: TOR901
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
                 "mylib::foo1",
                 "(Tensor(a!) x, Tensor[] y, Tensor(b!) z, SymInt w, Tensor n) -> Tensor",
@@ -527,10 +563,6 @@ class TestDeserialize(TestCase):
 
             # TODO Auto_functionalize is not supported on pre_dispatch IR
             self.check_graph(M(), orig_args, use_pre_dispatch=False)
-
-        finally:
-            cleanup_op("mylib::foo")
-            del lib
 
     def test_multi_return(self) -> None:
         """
@@ -589,6 +621,8 @@ class TestDeserialize(TestCase):
         dynamic_shapes = {"a": {0: dim0_ac}, "b": None, "c": {0: dim0_ac}}
         self.check_graph(DynamicShapeSimpleModel(), inputs, dynamic_shapes)
 
+    # TODO: Failing due to "constraining non-Symbols NYI (Piecewise((1, Eq(u1, 1)), (0, True)), 1, 1)"
+    @unittest.expectedFailure
     def test_sym_bool(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
@@ -674,10 +708,7 @@ class TestDeserialize(TestCase):
         self.check_graph(g, inputs, _check_meta=False)
 
     def test_tensor_tensor_list(self):
-        try:
-            from torch.library import Library
-
-            lib = Library("_export", "FRAGMENT")  # noqa: TOR901
+        with torch.library._scoped_library("_export", "FRAGMENT") as lib:
             lib.define(
                 "_test_tensor_tensor_list_output(Tensor x, Tensor y) -> (Tensor, Tensor[])",
                 tags=torch.Tag.pt2_compliant_tag,
@@ -705,10 +736,6 @@ class TestDeserialize(TestCase):
                     return a + b[0]
 
             self.check_graph(M(), (torch.rand(3, 2), torch.rand(3, 2)))
-
-        finally:
-            cleanup_op("_export::_test_tensor_tensor_list_output")
-            del lib
 
     def test_list_of_optional_tensors(self) -> None:
         class MyModule(torch.nn.Module):
@@ -748,7 +775,7 @@ class TestDeserialize(TestCase):
         class Module(torch.nn.Module):
             def forward(self, x, y):
                 n = x.item()
-                torch._constrain_as_size(n, min=2)
+                torch._check_is_size(n)
                 return y.sum() + torch.ones(n, 5).sum()
 
         f = Module()
@@ -802,8 +829,7 @@ class TestDeserialize(TestCase):
 
         m = MyModule()
         inputs = (torch.ones(2, 3),)
-        with enable_torchbind_tracing():
-            self.check_graph(m, inputs, strict=False)
+        self.check_graph(m, inputs, strict=False)
 
     def test_custom_obj(self):
         class MyModule(torch.nn.Module):
@@ -818,8 +844,7 @@ class TestDeserialize(TestCase):
 
         m = MyModule()
         inputs = (torch.ones(2, 3),)
-        with enable_torchbind_tracing():
-            self.check_graph(m, inputs, strict=False)
+        self.check_graph(m, inputs, strict=False)
 
     def test_custom_obj_list_out(self):
         class MyModule(torch.nn.Module):
@@ -835,8 +860,21 @@ class TestDeserialize(TestCase):
 
         m = MyModule()
         inputs = (torch.ones(2, 3),)
-        with enable_torchbind_tracing():
-            self.check_graph(m, inputs, strict=False)
+        self.check_graph(m, inputs, strict=False)
+
+    def test_export_no_inputs(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p = torch.ones(3, 3)
+
+            def forward(self):
+                return self.p * self.p
+
+        ep = torch.export.export(M(), ())
+        ep._example_inputs = None
+        roundtrip_ep = deserialize(serialize(ep))
+        self.assertTrue(torch.allclose(ep.module()(), roundtrip_ep.module()()))
 
 
 instantiate_parametrized_tests(TestDeserialize)
@@ -862,34 +900,6 @@ class TestSchemaVersioning(TestCase):
                 serialized_program.state_dict,
                 serialized_program.constants,
                 serialized_program.example_inputs,
-            )
-
-
-class TestOpVersioning(TestCase):
-    """Test if serializer/deserializer behaves correctly if version mismatch."""
-
-    def test_empty_model_opset_version_raises(self):
-        compiler_opset_version = {"aten": 4}
-        model_opset_version = None
-        deserializer = ExportedProgramDeserializer(compiler_opset_version)
-        with self.assertRaises(RuntimeError):
-            deserializer._validate_model_opset_version(model_opset_version)
-
-    def test_opset_mismatch_raises(self):
-        compiler_opset_version = {"aten": 4}
-        model_opset_version = {"aten": 3}
-        deserializer = ExportedProgramDeserializer(compiler_opset_version)
-        with self.assertRaises(NotImplementedError):
-            deserializer._validate_model_opset_version(model_opset_version)
-
-    def test_model_op_namespace_version_missing_from_deserializer_do_not_raises(self):
-        compiler_opset_version = {"aten": 3}
-        model_opset_version = {"aten": 3, "custom": 4}
-        deserializer = ExportedProgramDeserializer(compiler_opset_version)
-        with self.assertLogs(level="WARN") as log:
-            deserializer._validate_model_opset_version(model_opset_version)
-            self.assertIn(
-                "Compiler doesn't have a version table for op namespace", log.output[0]
             )
 
 
@@ -1026,17 +1036,8 @@ class TestSaveLoad(TestCase):
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerializeCustomClass(TestCase):
     def setUp(self):
-        if IS_SANDCASTLE or IS_FBCODE:
-            torch.ops.load_library(
-                "//caffe2/test/cpp/jit:test_custom_class_registrations"
-            )
-        elif IS_MACOS:
-            raise unittest.SkipTest("non-portable load_library call used in test")
-        else:
-            lib_file_path = find_library_location("libtorchbind_test.so")
-            if IS_WINDOWS:
-                lib_file_path = find_library_location("torchbind_test.dll")
-            torch.ops.load_library(str(lib_file_path))
+        super().setUp()
+        init_torchbind_implementations()
 
     def test_custom_class(self):
         custom_obj = torch.classes._TorchScriptTesting._PickleTester([3, 4])

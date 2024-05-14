@@ -28,12 +28,13 @@
   - caffe2/python/onnx/**
   approved_by:
   - BowenBao
-  - abock
   - justinchuby
+  - liqunfu
   - shubhambhokare1
   - thiagocrepaldi
   - titaiwangms
   - wschin
+  - xadupre
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -381,6 +382,7 @@
   - test/inductor/test_mkldnn_pattern_matcher.py
   - test/inductor/test_cpu_repo.py
   - test/inductor/test_cpu_cpp_wrapper.py
+  - aten/src/ATen/cpu/**
   - aten/src/ATen/native/quantized/cpu/**
   - test/quantization/core/test_quantized_op.py
   - torch/ao/quantization/quantizer/x86_inductor_quantizer.py

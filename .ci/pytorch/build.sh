@@ -44,11 +44,6 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   fi
 fi
 
-if [[ ${BUILD_ENVIRONMENT} == *"caffe2"* ]]; then
-  echo "Caffe2 build is ON"
-  export BUILD_CAFFE2=ON
-fi
-
 if [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
   export ATEN_THREADING=TBB
   export USE_TBB=1
@@ -81,7 +76,22 @@ if ! which conda; then
     export USE_MKLDNN=0
   fi
 else
-  export CMAKE_PREFIX_PATH=/opt/conda
+  # CMAKE_PREFIX_PATH precedences
+  # 1. $CONDA_PREFIX, if defined. This follows the pytorch official build instructions.
+  # 2. /opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}, if ANACONDA_PYTHON_VERSION defined.
+  #    This is for CI, which defines ANACONDA_PYTHON_VERSION but not CONDA_PREFIX.
+  # 3. $(conda info --base). The fallback value of pytorch official build
+  #    instructions actually refers to this.
+  #    Commonly this is /opt/conda/
+  if [[ -v CONDA_PREFIX ]]; then
+    export CMAKE_PREFIX_PATH=${CONDA_PREFIX}
+  elif [[ -v ANACONDA_PYTHON_VERSION ]]; then
+    export CMAKE_PREFIX_PATH="/opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}"
+  else
+    # already checked by `! which conda`
+    CMAKE_PREFIX_PATH="$(conda info --base)"
+    export CMAKE_PREFIX_PATH
+  fi
 
   # Workaround required for MKL library linkage
   # https://github.com/pytorch/pytorch/issues/119557
@@ -223,19 +233,23 @@ if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* ]]
   export BUILD_STATIC_RUNTIME_BENCHMARK=ON
 fi
 
-# Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
-WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
-cleanup_workspace() {
-  echo "sudo may print the following warning message that can be ignored. The chown command will still run."
-  echo "    sudo: setrlimit(RLIMIT_STACK): Operation not permitted"
-  echo "For more details refer to https://github.com/sudo-project/sudo/issues/42"
-  sudo chown -R "$WORKSPACE_ORIGINAL_OWNER_ID" /var/lib/jenkins/workspace
-}
-# Disable shellcheck SC2064 as we want to parse the original owner immediately.
-# shellcheck disable=SC2064
-trap_add cleanup_workspace EXIT
-sudo chown -R jenkins /var/lib/jenkins/workspace
-git config --global --add safe.directory /var/lib/jenkins/workspace
+# Do not change workspace permissions for ROCm CI jobs
+# as it can leave workspace with bad permissions for cancelled jobs
+if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+  # Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
+  WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
+  cleanup_workspace() {
+    echo "sudo may print the following warning message that can be ignored. The chown command will still run."
+    echo "    sudo: setrlimit(RLIMIT_STACK): Operation not permitted"
+    echo "For more details refer to https://github.com/sudo-project/sudo/issues/42"
+    sudo chown -R "$WORKSPACE_ORIGINAL_OWNER_ID" /var/lib/jenkins/workspace
+  }
+  # Disable shellcheck SC2064 as we want to parse the original owner immediately.
+  # shellcheck disable=SC2064
+  trap_add cleanup_workspace EXIT
+  sudo chown -R jenkins /var/lib/jenkins/workspace
+  git config --global --add safe.directory /var/lib/jenkins/workspace
+fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
   set -e
@@ -372,4 +386,8 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; 
   python tools/stats/export_test_times.py
 fi
 
-print_sccache_stats
+# snadampal: skipping it till sccache support added for aarch64
+# https://github.com/pytorch/pytorch/issues/121559
+if [[ "$BUILD_ENVIRONMENT" != *aarch64* ]]; then
+  print_sccache_stats
+fi

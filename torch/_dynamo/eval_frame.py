@@ -22,7 +22,18 @@ import warnings
 import weakref
 from enum import Enum
 from os.path import dirname, join
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 from unittest.mock import patch
 
 import torch
@@ -30,7 +41,6 @@ import torch.fx
 import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch import _guards
-from torch._subclasses import fake_tensor
 from torch._utils_internal import log_export_usage
 from torch.export.dynamic_shapes import _process_dynamic_shapes
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
@@ -57,7 +67,6 @@ from . import config, convert_frame, external_utils, trace_rules, utils
 from .code_context import code_context
 from .exc import CondOpArgsMismatchError, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
-from .types import CacheEntry, DynamoCallback
 from .utils import common_constant_types, compile_times
 
 log = logging.getLogger(__name__)
@@ -69,6 +78,10 @@ null_context = contextlib.nullcontext
 
 
 import sympy
+
+if TYPE_CHECKING:
+    from torch._subclasses import fake_tensor
+    from .types import CacheEntry, DynamoCallback
 
 
 # See https://github.com/python/typing/pull/240
@@ -335,6 +348,22 @@ class _TorchDynamoContext:
             new_mod.get_compiler_config = get_compiler_config
 
             return new_mod
+
+        if inspect.isclass(fn):
+            # User has wrapped the class with compile/disable decorator. Apply
+            # disable to init/call method.
+            cls_obj = fn
+            if isinstance(self, DisableContext):
+                # Disable on init is useful for reconstruction of bytecodes where we
+                # want to prevent Dynamo from tracing into the init function. Check
+                # test_reconstruction in test_model_output.py.
+                cls_obj.__init__ = self(cls_obj.__init__)
+            cls_obj.__call__ = self(cls_obj.__call__)
+            if issubclass(cls_obj, torch.nn.Module):
+                # NN module variable tracker directly inlines the _call_impl. Disable it.
+                cls_obj._call_impl = self(cls_obj._call_impl)
+            return cls_obj
+
         assert callable(fn)
 
         try:
@@ -384,7 +413,11 @@ class _TorchDynamoContext:
             cleanups = [enter() for enter in self.enter_exit_hooks]
             prior = set_eval_frame(callback)
             try:
-                return fn(*args, **kwargs)
+                # Ensure that if an assertion occurs after graph pushes
+                # something onto the DynamicLayerStack then we pop it off (the
+                # constructed graph code isn't guarded with try/finally).
+                with torch._C._functorch._PreserveDynamicLayerStack():
+                    return fn(*args, **kwargs)
             finally:
                 set_eval_frame(prior)
                 for cleanup in cleanups:
@@ -750,7 +783,12 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         if "tensor_dict" in self.current_node.meta:
             arg.node.meta["tensor_dict"] = self.current_node.meta["tensor_dict"]
         if "example_value" in self.current_node.meta:
+            # NB: intentionally do not use set_example_value
             arg.node.meta["example_value"] = self.current_node.meta["example_value"]
+        if "unbacked_bindings" in self.current_node.meta:
+            arg.node.meta["unbacked_bindings"] = self.current_node.meta[
+                "unbacked_bindings"
+            ]
         return arg
 
     def output(self, target, args, kwargs):
@@ -774,8 +812,13 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         if "val" in self.current_node.meta:
             result_proxy.node.meta["val"] = self.current_node.meta["val"]
         if "example_value" in self.current_node.meta:
+            # NB: intentionally do not use set_example_value
             result_proxy.node.meta["example_value"] = self.current_node.meta[
                 "example_value"
+            ]
+        if "unbacked_bindings" in self.current_node.meta:
+            result_proxy.node.meta["unbacked_bindings"] = self.current_node.meta[
+                "unbacked_bindings"
             ]
         if self.current_node.op != "output":
             result_proxy.node._rename(
@@ -1162,7 +1205,18 @@ def export(
                     else fake_mode
                 )
 
-                with ambient_fake_mode, enable_python_dispatcher():
+                # We reran fake tensor propagation, but we didn't do
+                # anything with the resulting unbacked SymInts.  Drop them
+                # from the pending list.
+                # NB: this is wrong if graph_captured_result has
+                # data-dependent output size!
+                ignore_fresh_unbacked = null_context()
+                if shape_env := ambient_fake_mode.shape_env:
+                    ignore_fresh_unbacked = shape_env.ignore_fresh_unbacked_symbols()
+
+                with (
+                    ambient_fake_mode
+                ), enable_python_dispatcher(), ignore_fresh_unbacked:
                     params_and_buffers = {
                         **named_parameters,
                         **named_buffers,

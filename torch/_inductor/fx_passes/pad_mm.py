@@ -2,6 +2,7 @@ import functools
 from typing import List, Optional, Union
 
 import torch
+import torch._inductor.runtime.runtime_utils
 from torch import Tensor
 from torch._inductor import utils
 from torch._subclasses.fake_tensor import FakeTensor
@@ -183,6 +184,15 @@ def is_mm_compute_bound(M: int, K: int, N: int, dtype: torch.dtype) -> bool:
         return False
     arithmetic_intensity = (M * N * K) / denominator
 
+    # we have experienced some large perf hits in this case, even in bandwidth bound regimes
+    if (
+        dtype is torch.bfloat16
+        and K > M
+        and K > N
+        and torch.cuda.get_device_capability() < (9, 0)
+    ):  # doesnt repro on h100s:
+        return True
+
     # Fails with AMD
     try:
         machine_balance = (
@@ -241,7 +251,7 @@ def should_pad_bench(
         return False
 
     do_bench = functools.partial(
-        utils.do_bench,
+        torch._inductor.runtime.runtime_utils.do_bench_gpu,
         warmup=5,
     )
 

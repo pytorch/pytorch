@@ -22,6 +22,7 @@ from ..utils import (
     identity,
     is_tensor_base_attr_getter,
     proxy_args_kwargs,
+    set_example_value,
 )
 from .base import VariableTracker
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
@@ -356,14 +357,19 @@ class AutogradFunctionVariable(VariableTracker):
             and torch.is_grad_enabled()
             and config.capture_autograd_function
         ):
-            # Note - this is the same check used in autograd/function.py, except inverted.
-            # If we want to support functorch transforms here, we will need to enable this.
-            if (
-                self.fn_cls.setup_context
-                != torch.autograd.function._SingleLevelFunction.setup_context
-            ):
-                unimplemented(
-                    "NYI - autograd.Function with custom setup_context method"
+            from torch._functorch.autograd_function import (
+                autograd_function_forward_rewritten,
+            )
+            from torch.autograd.function import _is_setup_context_defined
+
+            forward_fn = self.fn_cls.forward
+
+            is_setup_ctx_defined = _is_setup_context_defined(self.fn_cls.setup_context)
+            if is_setup_ctx_defined:
+                # If setup_context is defined, we generate a new forward function which includes
+                # the original forward and setup_context function, and trace the new forward function.
+                forward_fn = autograd_function_forward_rewritten(
+                    self.fn_cls.forward, self.fn_cls.setup_context
                 )
 
             vjp_fn = self.fn_cls.vjp  # type: ignore[attr-defined]
@@ -382,12 +388,25 @@ class AutogradFunctionVariable(VariableTracker):
                     tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
                 )
 
-            return AutogradFunctionApplyVariable(
-                self.fn_cls.forward,
+            val = AutogradFunctionApplyVariable(
+                forward_fn,
                 self.fn_cls.backward,
                 source,
                 source=AttrSource(source, member="apply"),
             ).call_function(tx, args, kwargs)
+            # Inside of AutogradFunctionApplyVariable.call_function, we use sourceless variable wrapping
+            # the forward function, as we don't want to generate guards for new_forward.__closure__
+            # if forward is rewritten by autograd_function_forward_rewritten.
+            # But we still need to generate correct guards for the original forward and setup_context
+            # functions, so we have to add guards manually.
+            if self.source:
+                fwd_src = AttrSource(self.source, "forward")
+                install_guard(fwd_src.make_guard(GuardBuilder.FUNCTION_MATCH))
+                if is_setup_ctx_defined:
+                    setup_ctx_src = AttrSource(self.source, "setup_context")
+                    install_guard(setup_ctx_src.make_guard(GuardBuilder.FUNCTION_MATCH))
+
+            return val
 
         if self.source:
             source = AttrSource(self.source, "forward")
@@ -411,6 +430,16 @@ class AutogradFunctionVariable(VariableTracker):
             unimplemented(
                 f"non-function or method in subclass of torch.autograd.Function: {fn}"
             )
+
+    def call_backward(self, tx, args, kwargs):
+        fn = self.fn_cls.backward
+        self.source = AttrSource(self.source, "backward")
+        assert type(args[0].value) is torch._dynamo.external_utils.FakeBackwardCFunction
+        assert isinstance(fn, types.FunctionType)
+
+        return variables.UserFunctionVariable(fn, source=self.source).call_function(
+            tx, args, kwargs
+        )
 
     def call_function(self, tx, args, kwargs):
         return AutogradFunctionVariable(self.fn_cls)
@@ -441,8 +470,35 @@ class AutogradFunctionVariable(VariableTracker):
             else:
                 return self.call_apply(tx, args, kwargs)
 
+        elif name == "backward":
+            return self.call_backward(tx, args, kwargs)
         else:
-            unimplemented(f"Unsupported method: {name}")
+            from .. import trace_rules
+
+            source = AttrSource(self.source, name) if self.source is not None else None
+            try:
+                obj = inspect.getattr_static(self.fn_cls, name)
+            except AttributeError:
+                obj = None
+
+            if isinstance(obj, staticmethod):
+                func = obj.__get__(self.fn_cls)
+                if source is not None:
+                    return (
+                        trace_rules.lookup(func)
+                        .create_with_source(func, source=source)
+                        .call_function(tx, args, kwargs)
+                    )
+                else:
+                    return trace_rules.lookup(func)(func).call_function(
+                        tx, args, kwargs
+                    )
+            elif isinstance(obj, classmethod):
+                return variables.UserMethodVariable(
+                    obj.__func__, self, source=source
+                ).call_function(tx, args, kwargs)
+            else:
+                unimplemented(f"Unsupported method: {name}")
 
 
 @dataclasses.dataclass
@@ -501,7 +557,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             ),
             {},
         )
-        proxy.node.meta["example_value"] = out.value
+        set_example_value(proxy.node, out.value)
 
         return out
 
@@ -592,13 +648,13 @@ class GetAttrVariable(VariableTracker):
 
     def const_getattr(self, tx, name):
         if not isinstance(self.obj, variables.NNModuleVariable):
-            raise NotImplementedError()
+            raise NotImplementedError
         step1 = tx.output.get_submodule(self.obj.module_key)
         if self.name not in step1.__dict__:
-            raise NotImplementedError()
+            raise NotImplementedError
         step2 = inspect.getattr_static(step1, self.name)
         if name not in step2.__dict__:
-            raise NotImplementedError()
+            raise NotImplementedError
         return inspect.getattr_static(step2, name)
 
     def reconstruct(self, codegen):

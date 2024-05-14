@@ -15,6 +15,7 @@ from typing import Callable, DefaultDict, Dict, List
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
+from torch._guards import detect_fake_mode
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
@@ -31,6 +32,7 @@ from .functional_utils import (
     has_metadata_mutation,
     has_same_metadata,
     to_fun,
+    was_inductor_storage_resized,
 )
 from .schemas import (
     FunctionalTensorMetadataEq,
@@ -83,7 +85,16 @@ def coerce_tangent(x):
     if is_traceable_wrapper_subclass(out) and hasattr(
         out, "__coerce_tangent_metadata__"
     ):
-        return out.__coerce_tangent_metadata__()
+        out = out.__coerce_tangent_metadata__()
+    # It's possible to have a subclass that advertises as contiguous,
+    # but has noncontiguous inner tensors.
+    # Force these to be conntiguous too
+    if is_traceable_wrapper_subclass(out):
+        for attr in out.__tensor_flatten__()[0]:  # type: ignore[attr-defined]
+            elem = getattr(out, attr)
+            if not elem.is_contiguous():
+                elem_contig = elem.contiguous()
+                setattr(out, attr, elem_contig)
     return out
 
 
@@ -149,6 +160,12 @@ def run_functionalized_fw_and_collect_metadata(
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
             flat_f_outs = f(*flat_f_args)
+            # We didn't do any tracing, so we don't need to process the
+            # unbacked symbols, they will just disappear into the ether.
+            # Also, prevent memoization from applying.
+            if (fake_mode := detect_fake_mode()) and (shape_env := fake_mode.shape_env):
+                shape_env.pending_fresh_unbacked_symbols.clear()
+                fake_mode.epoch += 1
 
         if prior_autocast_states != _get_autocast_states():
             raise RuntimeError(
@@ -197,6 +214,7 @@ def run_functionalized_fw_and_collect_metadata(
                 mutates_data
                 and are_all_mutations_under_no_grad_or_inference_mode(f_arg)
             )
+            mutation_inductor_storage_resize = was_inductor_storage_resized(f_arg)
 
             if mutates_storage_metadata:
                 mutates_data = False
@@ -211,6 +229,7 @@ def run_functionalized_fw_and_collect_metadata(
                     mutations_hidden_from_autograd=mutations_hidden_from_autograd,
                     mutates_storage_metadata=mutates_storage_metadata,
                     mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
+                    mutation_inductor_storage_resize=mutation_inductor_storage_resize,
                     requires_grad=requires_grad,
                     keep_input_mutations=keep_input_mutations,
                 )

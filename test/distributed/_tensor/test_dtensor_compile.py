@@ -60,7 +60,7 @@ class SimpleModel(nn.Module):
 
 
 def extract_graph(fx_g, _, graph_cell):
-    graph_cell[0] = fx_g
+    graph_cell[0] = fx_g.code
     return fx_g
 
 
@@ -293,6 +293,78 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         self.assertEqual(res, ref)
         self.assertEqual(cnt.frame_count, 2)
 
+    def test_dtensor_partial_placement_redistribute_unbalanced_correct_strides(self):
+        # Partial -> Shard on an unbalanced tensor results in:
+        # - A contiguous DTensor
+        # - where the inner _local_tensor is noncontiguous
+        placement = Shard(1)
+
+        def fn(x):
+            out = x.redistribute(mesh, [placement])
+            return out
+
+        # Temporarily ignore setUp(), and use rank3 graphs during tracing
+        dist.destroy_process_group()
+        fake_store = FakeStore()
+        dist.init_process_group("fake", store=fake_store, rank=3, world_size=2)
+        mesh = DeviceMesh(self.device_type, [1, 3])
+
+        x = torch.randn(10, 257, 160, requires_grad=True)
+        x_dt = DTensor.from_local(
+            x,
+            mesh,
+            [_Partial()],
+            run_check=False,
+            shape=(10, 257, 160),
+            stride=(41120, 160, 1),
+        )
+
+        # tmp_dt has an inner, non-contiguous tensor, and is an autograd non-leaf
+        tmp_dt = fn(x_dt)
+        fake_mode = torch._subclasses.FakeTensorMode()
+        tmp_dt_fake = fake_mode.from_tensor(tmp_dt)
+        self.assertEqual(tmp_dt.shape, tmp_dt_fake.shape)
+        self.assertEqual(tmp_dt.stride(), tmp_dt_fake.stride())
+        self.assertEqual(tmp_dt._local_tensor.shape, tmp_dt_fake._local_tensor.shape)
+        self.assertEqual(
+            tmp_dt._local_tensor.stride(), tmp_dt_fake._local_tensor.stride()
+        )
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    def test_dtensor_contiguous_dtensor_noncontiguous_local_as_tangent(self):
+        # Partial -> Shard on an unbalanced tensor results in:
+        # - A contiguous DTensor
+        # - where the inner _local_tensor is noncontiguous
+        # When this tensor is a fwd graph output,
+        # AOTAutograd needs to make sure we trace the backward
+        # with a contiguous tangent
+        placement = Shard(1)
+
+        def fn(x):
+            out = x.redistribute(mesh, [placement])
+            return out
+
+        # Temporarily ignore setUp(), and use rank3 graphs during tracing
+        dist.destroy_process_group()
+        fake_store = FakeStore()
+        dist.init_process_group("fake", store=fake_store, rank=3, world_size=2)
+        mesh = DeviceMesh(self.device_type, [1, 3])
+
+        x = torch.randn(10, 257, 160, requires_grad=True)
+        x_dt = DTensor.from_local(
+            x,
+            mesh,
+            [_Partial()],
+            run_check=False,
+            shape=(10, 257, 160),
+            stride=(41120, 160, 1),
+        )
+
+        out_dt = torch.compile(fn)(x_dt)
+        # If we don't properly contiguify our traced tangents,
+        # this fails with an inductor stride assert
+        out_dt.to_local().sum().backward()
+
     def test_dynamo_to_local_kwargs(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -408,6 +480,32 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x_dt)
         self.assertEqual(ref, res)
+
+    def test_graph_input_is_async(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fn(x):
+            return x.sin().sin()
+
+        opt_fn = torch.compile(fn, backend=aot_eager_graph, fullgraph=True)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        x_dt = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
+        x2 = x_dt.redistribute(mesh, [Replicate()], async_op=True)
+        x2 = x2.to_local()
+        out = opt_fn(x2)
+        # The important part: we get a wait_tensor() in the graph.
+        # At runtime, the input to the graph is an AsyncCollectiveTensor,
+        # and inside the graph we need to issue a wait() to synchronize.
+        self.assertExpectedInline(
+            str(fw_graph_cell[0]).strip(),
+            """\
+def forward(self, primals_1):
+    wait_tensor = torch.ops._c10d_functional.wait_tensor.default(primals_1)
+    sin = torch.ops.aten.sin.default(wait_tensor)
+    sin_1 = torch.ops.aten.sin.default(sin);  sin = None
+    return [sin_1, primals_1, wait_tensor]""",
+        )
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_dtensor_partial_placement_graph_output(self):
