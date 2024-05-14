@@ -24,7 +24,9 @@ void run_cudnn_SDP_fprop(
     Tensor& softmaxstats,
     Tensor& o,
     Tensor& dropoutseed,
-    Tensor& dropoutoffset) {
+    Tensor& dropoutoffset,
+    bool return_debugmask,
+    Tensor& debugmask) {
   TORCH_CHECK(
       false, "PyTorch was not compiled with cuDNN Flash Attention enabled!");
 }
@@ -525,7 +527,9 @@ void run_cudnn_SDP_fprop(
     Tensor& softmaxstats,
     Tensor& o,
     Tensor& dropoutseed,
-    Tensor& dropoutoffset) {
+    Tensor& dropoutoffset,
+    bool return_debugmask,
+    Tensor& debugmask) {
   cudnnHandle_t handle = getCudnnHandle();
   o = at::empty_strided(
       {b, h, s_q, d}, {s_q * h * d, d, h * d, 1}, q.options());

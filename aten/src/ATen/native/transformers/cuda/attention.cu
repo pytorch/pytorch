@@ -741,8 +741,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
     const Tensor& value,
     double dropout_p,
     bool is_causal,
-    bool training,
-    std::optional<double> scale) {
+    bool return_debug_mask,
+    c10::optional<double> scale) {
   // Used for tracking usage statistics
   C10_LOG_API_USAGE_ONCE("torch.sdpa.flash_attention_cudnn");
   // Query (Batch x Num_heads x Q_seq_len  x Dim_per_head)
@@ -764,6 +764,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   auto cudnn_seed = at::zeros({1}, query.options().dtype(kLong));
   auto cudnn_offset = at::zeros({1}, query.options().dtype(kLong));
   const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
+  Tensor debugmask;
+  bool compute_logsumexp =
+      (query.requires_grad() || key.requires_grad() ||
+       value.requires_grad());
 
   run_cudnn_SDP_fprop(batch_size/*int64_t b*/,
                       num_heads/*int64_t h*/,
@@ -771,7 +775,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
                       max_seqlen_batch_k/*int64_t s_kv*/,
                       head_dim/*int64_t d*/,
                       softmax_scale/*float scaling_factor*/,
-                      training/* bool */,
+                      compute_logsumexp/* bool */,
                       is_causal/* bool */,
                       dropout_p/*double dropout_probability*/,
                       query/* Tensor q*/,
@@ -780,9 +784,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
                       log_sumexp/*Tensor softmaxstats*/,
                       attention/*Tensor o*/,
                       cudnn_seed/*Tensor dropoutseed*/,
-                      cudnn_offset/*Tensor dropoutoffset*/);
+                      cudnn_offset/*Tensor dropoutoffset*/,
+                      return_debug_mask,
+                      debugmask);
 
-  return std::make_tuple(attention, log_sumexp, Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_k, cudnn_seed, cudnn_offset, Tensor());
+  return std::make_tuple(attention, log_sumexp, Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_k, cudnn_seed, cudnn_offset, debugmask);
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attention_cuda(
