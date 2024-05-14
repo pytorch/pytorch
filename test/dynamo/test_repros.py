@@ -4934,6 +4934,22 @@ def forward(self, primals_1, primals_2):
         opt_ladder = torch.compile(ladder, fullgraph=True, backend="eager")
         self.assertEqual(opt_ladder(data), ladder(data))
 
+    def test_issue126128(self):
+        def fn():
+            x = torch.randn(1, 10)
+            y = torch.randn(10, 1)
+            return torch.mm(x, y).sum()
+
+        def fn2():
+            x = torch.randn(10, 100)
+            y = torch.randn(100, 10)
+            return torch.mm(x, y).sum()
+
+        with torch._inductor.utils.fresh_inductor_cache():
+            torch.compile(fn)()
+
+        torch.compile(fn2)()
+
 
 instantiate_parametrized_tests(ReproTests)
 
