@@ -142,7 +142,24 @@ class TestSelectAlgorithm(TestCase):
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @parametrize("bias", (True, False))
-    @parametrize("epilogue", ("relu", "gelu", "silu"))
+    @parametrize(
+        "epilogue",
+        (
+            "relu",
+            "gelu",
+            "silu",
+            "sigmoid",
+            "tanh",
+            "hardswish",
+            "hardsigmoid",
+            "leaky_relu",
+            "hardtanh",
+            "add",
+            "sub",
+            "mul",
+            "div",
+        ),
+    )
     @dtypes(torch.float)
     def test_linear_with_pointwise(self, bias, epilogue, dtype):
         batch_size = 384
@@ -150,7 +167,7 @@ class TestSelectAlgorithm(TestCase):
         out_features = 384
 
         class M(torch.nn.Module):
-            def __init__(self, bias, epilogue):
+            def __init__(self, bias, epilogue, other):
                 super().__init__()
                 self.linear = torch.nn.Linear(in_features, out_features, bias)
                 if epilogue == "relu":
@@ -159,13 +176,34 @@ class TestSelectAlgorithm(TestCase):
                     self.epilogue = torch.nn.GELU()
                 elif epilogue == "silu":
                     self.epilogue = torch.nn.SiLU()
+                elif epilogue == "sigmoid":
+                    self.epilogue = torch.nn.Sigmoid()
+                elif epilogue == "tanh":
+                    self.epilogue = torch.nn.Tanh()
+                elif epilogue == "hardswish":
+                    self.epilogue = torch.nn.Hardswish()
+                elif epilogue == "hardsigmoid":
+                    self.epilogue = torch.nn.Hardsigmoid()
+                elif epilogue == "leaky_relu":
+                    self.epilogue = torch.nn.LeakyReLU()
+                elif epilogue == "hardtanh":
+                    self.epilogue = torch.nn.Hardtanh()
+                elif epilogue == "add":
+                    self.epilogue = lambda x: x + other
+                elif epilogue == "sub":
+                    self.epilogue = lambda x: x - other
+                elif epilogue == "mul":
+                    self.epilogue = lambda x: x * other
+                elif epilogue == "div":
+                    self.epilogue = lambda x: x / other
 
             def forward(self, x):
                 return self.epilogue(self.linear(x))
 
         counters.clear()
-        mod = M(bias=bias, epilogue=epilogue).to(dtype=dtype).eval()
         v = torch.randn(batch_size, in_features).to(dtype=dtype)
+        u = torch.randn(batch_size, out_features).to(dtype=dtype)
+        mod = M(bias=bias, epilogue=epilogue, other=u).to(dtype=dtype).eval()
         self.common(mod, (v,))
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
