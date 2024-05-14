@@ -17,7 +17,9 @@ import threading
 import time
 import typing
 import unittest
+import unittest.mock
 import weakref
+from pathlib import Path
 from typing import Tuple
 from unittest.mock import patch
 
@@ -40,6 +42,9 @@ from torch._inductor.fx_passes import pad_mm
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     add_scheduler_init_hook,
+    aoti_compile_with_persistent_cache,
+    aoti_eager_cache_dir,
+    load_aoti_eager_cache,
     run_and_get_code,
     run_and_get_triton_code,
 )
@@ -760,6 +765,102 @@ class CommonTemplate:
                 torch.tensor([False, False, True, True]),
             ),
         )
+
+    @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    def test_eager_aoti_cache_hit(self):
+        ns = "aten"
+        op_name = "abs"
+        dispatch_key = "CPU"
+        device = "cpu"
+        if self.device.lower() == "cuda":
+            dispatch_key = "CUDA"
+            device = "cuda"
+
+        input_tensor = torch.randn(128, dtype=torch.float, device=device)
+        kernel_lib_path = aoti_compile_with_persistent_cache(
+            ns,
+            op_name,
+            device,
+            False,
+            getattr(torch.ops.aten, op_name),
+            (input_tensor,),
+            {},
+        )
+        self.assertTrue(Path(kernel_lib_path).exists())
+
+        from unittest import mock
+
+        # Patch the aoti_compile_with_persistent_cache as None to ensure no new kernel is generated
+        with mock.patch(
+            "torch._inductor.utils.aoti_compile_with_persistent_cache", None
+        ):
+            qualified_op_name = f"{ns}::{op_name}"
+            _, overload_names = torch._C._jit_get_operation(qualified_op_name)
+
+            with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
+                # Get ref result from eager
+                ref_value = getattr(torch.ops.aten, op_name)(input_tensor)
+
+                for overload_name in overload_names:
+                    try:
+                        reg_op_name = qualified_op_name
+                        schema = torch._C._get_schema(qualified_op_name, overload_name)
+                        if schema.overload_name:
+                            reg_op_name = f"{qualified_op_name}.{schema.overload_name}"
+                        torch_compile_op_lib_impl._impl_with_aoti_compile(  # noqa: F821
+                            reg_op_name, dispatch_key
+                        )
+                    except Exception as e:
+                        continue
+
+                # Invoke the pre-compiled kernel and get result.
+                res_value = getattr(torch.ops.aten, op_name)(input_tensor)
+
+                self.assertEqual(ref_value, res_value)
+
+    @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    def test_aoti_compile_with_persistent_cache(self):
+        def fn(a):
+            return torch.abs(a)
+
+        ns = "aten"
+        op_name = "abs"
+
+        device = "cpu"
+        if self.device.lower() == "cuda":
+            device = "cuda"
+
+        input_tensor = torch.randn(128, dtype=torch.float, device=device)
+        kernel_lib_path = aoti_compile_with_persistent_cache(
+            ns,
+            op_name,
+            input_tensor.device.type,
+            False,
+            fn,
+            args=(input_tensor,),
+            kwargs={},
+        )
+        self.assertTrue(len(kernel_lib_path) > 0)
+
+        device_kernel_cache = aoti_eager_cache_dir(ns, device)
+        kernel_conf = device_kernel_cache / f"{op_name}.json"
+        self.assertTrue(kernel_conf.exists())
+
+        json_data = load_aoti_eager_cache("aten", "abs", input_tensor.device.type)
+        self.assertTrue(json_data is not None)
+        self.assertTrue(isinstance(json_data, list))
+        self.assertTrue(len(json_data) > 0)
+
+        op_info = json_data[0]
+        self.assertTrue(isinstance(op_info, dict))
+        self.assertTrue("meta_info" in op_info)
+        self.assertTrue("kernel_path" in op_info)
+        kernel_libs_abs_path = []
+        for item in json_data:
+            kernel_path = device_kernel_cache / item["kernel_path"]
+            kernel_libs_abs_path.append(kernel_path.as_posix())
+
+        self.assertTrue(kernel_lib_path in kernel_libs_abs_path)
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_torch_compile_override_registration(self):
