@@ -3760,28 +3760,26 @@ def _upsample_linear_backward(
     ]
     xs_f32, xs, xp1s = list(zip(*values))
 
-    # Using functions here to help inductor do fusions easier.
+    # Using lists here to keep the coefficients and multiply at the
+    # end to help inductor do fusions easier.
     # This results in (a * (b * (c * x)) instead of (a * (b * c)) * x
     # in the generated code and therefore inductor does not try to
     # create temporaries for (b * c).
-    coeff_fns = [lambda x: x]
+    coeff_lists: List[List[Any]] = [[]]
     for i in range(n_dims):
         xscale = (xs_f32[i] - xs[i]).clamp(0.0, 1.0).to(dtype)
-        new_coeff_fns: List[Any] = [None] * (2 * len(coeff_fns))
-        new_coeff_fns[::2] = [
-            lambda x: torch.mul(coeff_fn(x), (1 - xscale)) for coeff_fn in coeff_fns
-        ]
-        new_coeff_fns[1::2] = [
-            lambda x: torch.mul(coeff_fn(x), xscale) for coeff_fn in coeff_fns
-        ]
-        coeff_fns = new_coeff_fns
+        new_coeffs: List[Any] = [None] * (2 * len(coeff_lists))
+        new_coeffs[::2] = [coeff_list + [1 - xscale] for coeff_list in coeff_lists]
+        new_coeffs[1::2] = [coeff_list + [xscale] for coeff_list in coeff_lists]
+        coeff_lists = new_coeffs
 
     result = grad_output.new_zeros(input_size)
-    for coeff_fn, a in zip(coeff_fns, product(*[[0, 1]] * n_dims)):
+    for coeff_list, a in zip(coeff_lists, product(*[[0, 1]] * n_dims)):
         idx = [None, None] + [xs[k] if a[k] == 0 else xp1s[k] for k in range(n_dims)]
-        result = aten._unsafe_index_put(
-            result, idx, coeff_fn(grad_output), accumulate=True
-        )
+        coeff = grad_output
+        for c in reversed(coeff_list):
+            coeff = torch.mul(coeff, c)
+        result = aten._unsafe_index_put(result, idx, coeff, accumulate=True)
 
     # convert output to correct memory format, if necessary
     memory_format = utils.suggest_memory_format(grad_output)
