@@ -323,7 +323,6 @@ def optim_inputs_func_adadelta(device, dtype=None):
         OptimizerInput(
             params=None, kwargs={"rho": 0.95, "weight_decay": 0.9}, desc="rho"
         ),
-        
     ] + (cuda_supported_configs if "cuda" in str(device) else [])
 
 
@@ -541,7 +540,6 @@ def optim_inputs_func_adamax(device, dtype=None):
             kwargs={"weight_decay": 0.1, "maximize": True},
             desc="maximize, weight_decay",
         ),
-        
     ] + (cuda_supported_configs if "cuda" in str(device) else [])
 
 
