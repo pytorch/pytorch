@@ -523,8 +523,8 @@ test_single_dynamo_benchmark() {
 }
 
 test_inductor_micro_benchmark() {
-  TEST_REPORTS_DIR=$(pwd)/test/test-micro-reports
-  python benchmarks/gpt_fast/benchmark.py
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  python benchmarks/gpt_fast/benchmark.py --output "${TEST_REPORTS_DIR}/gpt_fast_benchmark.csv"
 }
 
 test_dynamo_benchmark() {
