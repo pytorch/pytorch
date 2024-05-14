@@ -58,7 +58,7 @@ using ExtraFilesMap = std::unordered_map<std::string, std::string>;
 TORCH_API mobile::Module parse_and_initialize_mobile_module(
     void* data,
     size_t size, // of `data`, in bytes.
-    c10::optional<at::Device> device = c10::nullopt,
+    std::optional<at::Device> device = c10::nullopt,
     ExtraFilesMap* extra_files = nullptr,
     bool should_copy_tensor_memory = false);
 
@@ -74,7 +74,7 @@ TORCH_API mobile::Module parse_and_initialize_mobile_module(
 TORCH_API mobile::Module parse_and_initialize_mobile_module(
     std::shared_ptr<char> data,
     size_t size, // of `data`, in bytes.
-    c10::optional<at::Device> device = c10::nullopt,
+    std::optional<at::Device> device = c10::nullopt,
     ExtraFilesMap* extra_files = nullptr);
 
 // Parse a mobile::Module from raw bytes, also returning JIT-related metadata.
@@ -87,7 +87,7 @@ TORCH_API mobile::Module parse_and_initialize_mobile_module_for_jit(
     size_t size, // of `data`, in bytes.
     ExtraFilesMap& jit_sources,
     std::vector<IValue>& jit_constants,
-    c10::optional<at::Device> device = c10::nullopt,
+    std::optional<at::Device> device = c10::nullopt,
     ExtraFilesMap* extra_files = nullptr);
 
 // Load a mobile::Module from a filepath.
@@ -100,7 +100,7 @@ TORCH_API mobile::Module parse_and_initialize_mobile_module_for_jit(
 // directly.
 TORCH_API mobile::Module load_mobile_module_from_file(
     const std::string& filename,
-    c10::optional<at::Device> device = c10::nullopt,
+    std::optional<at::Device> device = c10::nullopt,
     ExtraFilesMap* extra_files = nullptr);
 
 TORCH_API uint64_t get_bytecode_version(std::istream& in);
@@ -114,18 +114,18 @@ TORCH_API mobile::ModuleInfo get_module_info_from_flatbuffer(
 // its entirity to a buffer
 TORCH_API mobile::Module load_mobile_module_from_stream_with_copy(
     std::istream& in,
-    c10::optional<at::Device> device = c10::nullopt,
+    std::optional<at::Device> device = c10::nullopt,
     ExtraFilesMap* extra_files = nullptr);
 
 TORCH_API mobile::Module parse_flatbuffer_no_object(
     std::shared_ptr<char> data,
     size_t size,
-    c10::optional<at::Device> device);
+    std::optional<at::Device> device);
 
 TORCH_API mobile::Module parse_and_initialize_mobile_module(
     void* data,
     size_t,
-    c10::optional<at::Device>,
+    std::optional<at::Device>,
     ExtraFilesMap* extra_files,
     bool should_copy_tensor_memory);
 
