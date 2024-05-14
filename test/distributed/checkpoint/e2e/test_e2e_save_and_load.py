@@ -384,7 +384,10 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     def test_overwrite(self):
         t1, t2 = torch.randn(10), torch.randn(10)
         DCP.save({"random": t1}, checkpoint_id=self.temp_dir)
-        DCP.save({"random": t2}, checkpoint_id=self.temp_dir)
+        DCP.save(
+            {"random": t2},
+            storage_writer=DCP.FileSystemWriter(self.temp_dir, overwrite=True),
+        )
 
         sd = {"random": torch.zeros(10)}
         DCP.load(sd, checkpoint_id=self.temp_dir)

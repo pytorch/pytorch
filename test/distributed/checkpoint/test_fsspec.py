@@ -183,8 +183,13 @@ class TestFSSpecWithDist(ShardedTensorTestBase):
     @with_temp_dir
     def test_overwrite(self):
         t1, t2 = torch.randn(10), torch.randn(10)
-        dcp.save({"random": t1}, checkpoint_id=self.temp_dir)
-        dcp.save({"random": t2}, checkpoint_id=self.temp_dir)
+
+        dcp.save(
+            {"random": t1}, storage_writer=FsspecWriter(self.temp_dir, overwrite=False)
+        )
+        dcp.save(
+            {"random": t2}, storage_writer=FsspecWriter(self.temp_dir, overwrite=True)
+        )
 
         sd = {"random": torch.zeros(10)}
         dcp.load(sd, checkpoint_id=self.temp_dir)
