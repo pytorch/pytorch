@@ -3,6 +3,7 @@ from __future__ import annotations
 import collections
 import contextlib
 import dataclasses
+import dis
 import functools
 import itertools
 import logging
@@ -92,6 +93,41 @@ log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
+
+
+def define_global_constexpr_vars(kernel):
+    unqualified_ids = {
+        inst.argval for inst in dis.Bytecode(kernel.fn) if inst.opname == "LOAD_GLOBAL"
+    }
+    symbols_included = []
+    global_constexprs = IndentedBuffer()
+    annotations = kernel.fn.__globals__.get("__annotations__", {})
+
+    def handle_symbol(symbol_name, symbol):
+        if (
+            hasattr(symbol, "__module__")
+            and symbol.__module__.startswith("triton")
+            and hasattr(symbol, "__class__")
+            and hasattr(symbol.__class__, "__name__")
+            and symbol.__class__.__name__ == "constexpr"
+        ):
+            global_constexprs.writeline(
+                f"{symbol_name} = tl.constexpr({symbol.value!r})"
+            )
+            symbols_included.append(symbol_name)
+            return True
+
+    for symbol_name in unqualified_ids:
+        if symbol_name in kernel.fn.__globals__:
+            symbol = kernel.fn.__globals__[symbol_name]
+            # constants defined (symbol_name = tl.constexpr(value))
+            if not handle_symbol(symbol_name, symbol) and symbol_name in annotations:
+                # constants defined (symbol_name: tl.constexpr = value)
+                hint = annotations[symbol_name]
+                explicit_symbol = hint(symbol)
+                handle_symbol(symbol_name, explicit_symbol)
+
+    return symbols_included, global_constexprs
 
 
 @lru_cache(None)
@@ -1681,7 +1717,15 @@ class TritonKernel(Kernel):
                 cse_var = self.cse.varname_map[var.name]
                 mask_vars.update(cse_var.mask_vars)
             elif symbol_is_type(
-                var, (SymT.UNBACKED_INT, SymT.SIZE, SymT.PRECOMPUTED_SIZE, SymT.INDEX)
+                var,
+                (
+                    SymT.UNBACKED_INT,
+                    SymT.SIZE,
+                    SymT.PRECOMPUTED_SIZE,
+                    SymT.INDEX,
+                    SymT.FLOAT,
+                    SymT.UNBACKED_FLOAT,
+                ),
             ):
                 pass
             else:
@@ -1844,7 +1888,8 @@ class TritonKernel(Kernel):
             mask = (
                 f"{next(iter(mask_vars))}"
                 if len(mask_vars) == 1
-                else f"({' & '.join(str(v) for v in mask_vars)})"
+                # sorted for deterministic order
+                else f"({' & '.join(sorted(map(str, mask_vars)))})"
             )
         return mask
 
@@ -2754,6 +2799,7 @@ class TritonKernel(Kernel):
             "autotune_local_cache": config.autotune_local_cache,
             "autotune_pointwise": config.triton.autotune_pointwise,
             "autotune_remote_cache": config.autotune_remote_cache,
+            "force_disable_caches": config.force_disable_caches,
             "dynamic_scale_rblock": config.dynamic_scale_rblock,
             "max_autotune": config.max_autotune,
             "max_autotune_pointwise": config.max_autotune_pointwise,
