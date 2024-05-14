@@ -48,7 +48,6 @@ from torch._dynamo.testing import (
     same,
     skipIfNotPy311,
     unsupported,
-    xfailIfPy311,
 )
 from torch._dynamo.utils import CompileProfiler, counters, ifdynstaticdefault
 from torch._inductor.utils import run_and_get_code
@@ -9740,7 +9739,6 @@ fn
             lambda mod: mod.fc,
         )
 
-    @xfailIfPy311
     def test_sequential_module_free(self):
         self._test_compile_model_free(
             lambda: (

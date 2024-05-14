@@ -132,7 +132,10 @@ THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame) {
 #else
 #define THP_EVAL_API_FRAME_OBJECT PyFrameObject
 
-#define THP_PyFrame_FastToLocalsWithError PyFrame_FastToLocalsWithError
+static int
+THP_PyFrame_FastToLocalsWithError(THP_EVAL_API_FRAME_OBJECT *frame, int *free_vars_copied) {
+  return PyFrame_FastToLocalsWithError(frame);
+}
 #endif
 
 PyObject* guard_error_hook = NULL;
@@ -272,7 +275,8 @@ inline static PyObject* eval_custom_code_impl(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     PyCodeObject* code,
-    int throw_flag) {
+    int throw_flag,
+    int free_vars_copied) {
 
   DEBUG_NULL_CHECK(tstate);
   DEBUG_NULL_CHECK(frame);
@@ -318,6 +322,13 @@ inline static PyObject* eval_custom_code_impl(
   // localsplus are XINCREF'd by default eval frame, so all values must be valid.
   for (int i = 0; i < code->co_nlocalsplus; i++) {
     fastlocals_new[i] = NULL;
+  }
+
+  // for 3.11+, if free_vars_copied is true, we do not need to
+  // run the first COPY_FREE_VARS since THP_PyFrame_FastToLocalsWithError
+  // already did the equivalent action.
+  if (free_vars_copied && _Py_OPCODE(_PyCode_CODE(shadow->f_code)[0]) == COPY_FREE_VARS) {
+    shadow->prev_instr = _PyCode_CODE(shadow->f_code);
   }
 
   #else
@@ -437,13 +448,15 @@ inline static PyObject* eval_custom_code(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     PyCodeObject* code,
-    int throw_flag) {
+    int throw_flag,
+    int free_vars_copied) {
   _PytorchRecordFunctionState* rf = _pytorch_record_function_enter("Torch-Compiled Region");
   PyObject* result = eval_custom_code_impl(
     tstate,
     frame,
     code,
-    throw_flag
+    throw_flag,
+    free_vars_copied
   );
   _pytorch_record_function_exit(rf);
   return result;
@@ -525,7 +538,8 @@ static PyObject* _custom_eval_frame(
   }
 
   // TODO(jansel): investigate directly using the "fast" representation
-  if (THP_PyFrame_FastToLocalsWithError(frame) < 0) {
+  int free_vars_copied = 0;
+  if (THP_PyFrame_FastToLocalsWithError(frame, &free_vars_copied) < 0) {
     DEBUG_TRACE("error %s", get_frame_name(frame));
     return NULL;
   }
@@ -548,7 +562,7 @@ static PyObject* _custom_eval_frame(
     PyCodeObject* cached_code = (PyCodeObject*)maybe_cached_code;
     // used cached version
     DEBUG_TRACE("cache hit %s", get_frame_name(frame));
-    return eval_custom_code(tstate, frame, cached_code, throw_flag);
+    return eval_custom_code(tstate, frame, cached_code, throw_flag, free_vars_copied);
   }
   DEBUG_CHECK(PyDict_CheckExact(frame->f_locals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
@@ -571,7 +585,7 @@ static PyObject* _custom_eval_frame(
     DEBUG_TRACE("cache hit %s", get_frame_name(frame));
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
-    return eval_custom_code(tstate, frame, cached_code, throw_flag);
+    return eval_custom_code(tstate, frame, cached_code, throw_flag, free_vars_copied);
   }
   // cache miss
   CacheEntry* cache_entry = extract_cache_entry(extra);
@@ -602,7 +616,7 @@ static PyObject* _custom_eval_frame(
     // will be cleaned up when set_extra_state is called.
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
-    return eval_custom_code(tstate, frame, CacheEntry_get_code(new_cache_entry), throw_flag);
+    return eval_custom_code(tstate, frame, CacheEntry_get_code(new_cache_entry), throw_flag, free_vars_copied);
   } else {
     DEBUG_TRACE("create skip %s", get_frame_name(frame));
     Py_DECREF(result);

@@ -66,8 +66,10 @@ THP_PyFrame_OpAlreadyRan(_PyInterpreterFrame *frame, int opcode, int oparg)
 }
 
 // https://github.com/python/cpython/blob/a7715ccfba5b86ab09f86ec56ac3755c93b46b48/Objects/frameobject.c#L1182
+// free_vars_copied argument added in order to let caller know that the COPY_FREE_VARS
+// codepath occurred.
 int
-THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame *frame) {
+THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame *frame, int *free_vars_copied) {
     /* Merge fast locals into f->f_locals */
     PyObject *locals = NULL;
     PyObject **fast = NULL;
@@ -100,6 +102,8 @@ THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame *frame) {
         }
         // COPY_FREE_VARS doesn't have inline CACHEs, either:
         frame->prev_instr = _PyCode_CODE(frame->f_code);
+
+        *free_vars_copied = 1;
     }
     for (int i = 0; i < co->co_nlocalsplus; i++) {
         _PyLocals_Kind kind = _PyLocals_GetKind(co->co_localspluskinds, i);
