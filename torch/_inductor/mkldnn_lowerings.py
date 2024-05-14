@@ -32,12 +32,6 @@ def register_onednn_fusion_ops():
             has_out_variant=False,
             kernel_creator=ir.LinearUnary.create,
         )
-        aten_mkldnn_linear_binary = ExternKernelChoice(
-            torch.ops.mkldnn._linear_pointwise.binary,
-            "mkldnn::_linear_pointwise",
-            has_out_variant=False,
-            kernel_creator=ir.LinearBinary.create,
-        )
         cpu_needs_realized_inputs = [
             torch.ops.mkldnn._convolution_pointwise,
             torch.ops.mkldnn._convolution_pointwise_,
