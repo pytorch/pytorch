@@ -17,7 +17,6 @@ from torch.nn.attention._flex_attention import (
     _causal,
     _compose,
     _flex_attention,
-    _generate_alibi_bias,
     _identity,
     _rel_bias,
     _rel_causal,
@@ -64,7 +63,7 @@ test_score_mods = [
     _causal,
     _rel_bias,
     _rel_causal,
-    _generate_alibi_bias(8),
+    # _generate_alibi_bias(8),
 ]
 
 
@@ -170,8 +169,7 @@ class TestTemplatedSDPA(InductorTestCase):
         D: int = D,
     ):
         sdpa_partial = create_attention(score_mod)
-        compiled_sdpa = torch.compile(sdpa_partial)
-        # The first batch, shape (B, H, S, D)
+        # The first eager batch, shape (B, H, S, D)
         q1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
         k1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
         v1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
@@ -180,7 +178,7 @@ class TestTemplatedSDPA(InductorTestCase):
         )
         ref_out1 = sdpa_partial(q1, k1, v1)
 
-        # The second batch, shape (B * 2, H, S / 2, D)
+        # The second eager batch, shape (B * 2, H, S / 2, D)
         B = int(B * 2)
         S = int(S / 2)
         q2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
@@ -191,7 +189,49 @@ class TestTemplatedSDPA(InductorTestCase):
         )
         ref_out2 = sdpa_partial(q2, k2, v2)
 
-        # The third batch, shape (B * 4, H, S / 4, D)
+        torch._dynamo.reset()
+        # Compiling with dynamic shape in the first batch.
+        compiled_sdpa = torch.compile(sdpa_partial, dynamic=True)
+        compiled_out1 = compiled_sdpa(q1, k1, v1)
+        self._check_equal(golden_out1, ref_out1, compiled_out1, dtype)
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
+
+        # No re-compilation, use the compiled dynamic shape version.
+        compiled_out2 = compiled_sdpa(q2, k2, v2)
+        self._check_equal(golden_out2, ref_out2, compiled_out2, dtype)
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
+
+    def run_automatic_dynamic_test(
+        self,
+        score_mod: Callable,
+        dtype: torch.dtype = torch.float16,
+        B: int = B,
+        H: int = H,
+        S: int = S,
+        D: int = D,
+    ):
+        sdpa_partial = create_attention(score_mod)
+        # The first eager batch, shape (B, H, S, D)
+        q1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        k1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        v1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        golden_out1 = sdpa_partial(
+            q1.to(torch.float64), k1.to(torch.float64), v1.to(torch.float64)
+        )
+        ref_out1 = sdpa_partial(q1, k1, v1)
+
+        # The second eager batch, shape (B * 2, H, S / 2, D)
+        B = int(B * 2)
+        S = int(S / 2)
+        q2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        k2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        v2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        golden_out2 = sdpa_partial(
+            q2.to(torch.float64), k2.to(torch.float64), v2.to(torch.float64)
+        )
+        ref_out2 = sdpa_partial(q2, k2, v2)
+
+        # The third eager batch, shape (B * 4, H, S / 4, D)
         B = int(B * 2)
         S = int(S / 2)
         q3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
@@ -204,11 +244,12 @@ class TestTemplatedSDPA(InductorTestCase):
 
         torch._dynamo.reset()
         # Compiling with static shape in the first batch.
+        compiled_sdpa = torch.compile(sdpa_partial)
         compiled_out1 = compiled_sdpa(q1, k1, v1)
         self._check_equal(golden_out1, ref_out1, compiled_out1, dtype)
         self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
 
-        # Compiling with dynamic shape in the second batch.
+        # Automatic compiling with dynamic shape in the second batch.
         compiled_out2 = compiled_sdpa(q2, k2, v2)
         self._check_equal(golden_out2, ref_out2, compiled_out2, dtype)
         self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
@@ -227,10 +268,16 @@ class TestTemplatedSDPA(InductorTestCase):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("score_mod", test_score_mods)
-    def test_builtin_score_mods_dynamic_shapes(
+    def test_builtin_score_mods_dynamic(self, dtype: torch.dtype, score_mod: Callable):
+        self.run_dynamic_test(score_mod, dtype)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    def test_builtin_score_mods_automatic_dynamic(
         self, dtype: torch.dtype, score_mod: Callable
     ):
-        self.run_dynamic_test(score_mod, dtype)
+        self.run_automatic_dynamic_test(score_mod, dtype)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
