@@ -1,10 +1,14 @@
+import base64
 import collections
+import cProfile
 import dis
 import functools
 import itertools
 import logging
 import os
+import pstats
 import random
+import subprocess
 import sys
 import threading
 import time
@@ -12,7 +16,10 @@ import traceback
 import types
 import typing
 import weakref
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
+
+from torch._utils_internal import maybe_upload_prof_stats_to_manifold
 
 from torch.fx._lazy_graph_module import (  # type: ignore[attr-defined]
     _use_lazy_graph_module,
@@ -87,7 +94,6 @@ from .utils import (
     is_namedtuple,
     istype,
     LazyString,
-    maybe_cprofile,
     orig_code_map,
     record_compilation_metrics,
     reset_graph_break_dup_checker,
@@ -286,6 +292,83 @@ FRAME_COUNTER = 0
 FRAME_COMPILE_COUNTER: typing.Counter[int] = collections.Counter()
 
 
+def maybe_cprofile(func):
+    if config.cprofile:
+        return cprofile_wrapper(func)
+    return func
+
+
+def cprofile_wrapper(func):
+    @functools.wraps(func)
+    def profile_wrapper(*args, **kwargs):
+        trace_id = CompileContext.current_trace_id()
+        assert trace_id, "Trace id is None"
+        profile_path = Path(
+            f"/tmp/{func.__name__}_{str(trace_id).replace('/','_')}.profile"
+        )
+        prof = cProfile.Profile()
+        prof.enable()
+        start_ts = time.time()
+        retval = prof.runcall(func, *args, **kwargs)
+        profile_latency = time.time() - start_ts
+        prof.disable()
+        log.info(
+            "### Cprofile for %s trace id [%s] took %.3f seconds ###",
+            func.__name__,
+            trace_id,
+            profile_latency,
+        )
+        ps = pstats.Stats(prof)
+        try:
+            prof.dump_stats(profile_path)
+        except PermissionError:
+            log.info("Cannot write to %s", str(profile_path))
+        svg_path = profile_path.with_suffix(".svg")
+        try:
+            gprof2dot_process = subprocess.Popen(
+                [
+                    "gprof2dot",
+                    "-f",
+                    "pstats",
+                    "--node-label=total-time-percentage",
+                    "--node-label=self-time-percentage",
+                    "--node-label=total-time",
+                    str(profile_path),
+                ],
+                stdout=subprocess.PIPE,
+            )
+            subprocess.check_call(
+                ["dot", "-Tsvg", "-o", str(svg_path)],
+                stdin=gprof2dot_process.stdout,
+            )
+            log.info("Generated SVG from profile at %s", str(svg_path))
+        except FileNotFoundError:
+            log.info(
+                "Failed to generate SVG from profile -- dumping stats instead."
+                "Try installing gprof2dot and dot for a better visualization"
+            )
+            ps.sort_stats(pstats.SortKey.TIME).print_stats(20)
+            ps.sort_stats(pstats.SortKey.CUMULATIVE).print_stats(20)
+
+        maybe_upload_prof_stats_to_manifold(str(profile_path))  # fb-only
+
+        torch._logging.trace_structured(
+            "artifact",
+            lambda: {
+                "name": "dynamo_cprofile_prof",
+                "type": "prof",
+                "encoding": "base64",
+            },
+            payload_fn=lambda: base64.encodebytes(
+                open(profile_path, "rb").read()
+            ).decode("ascii"),
+        )
+
+        return retval
+
+    return profile_wrapper
+
+
 def convert_frame_assert(
     compiler_fn: CompilerFn,
     one_graph: bool = True,
@@ -428,7 +511,6 @@ def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
 
 @compile_time_strobelight_meta(phase_name="_compile")
 @_use_lazy_graph_module(config.use_lazy_graph_module)
-@maybe_cprofile
 def _compile(
     code: types.CodeType,
     globals: Dict[str, object],
@@ -512,6 +594,7 @@ def _compile(
             instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
     @dynamo_timed(phase_name="entire_frame_compile")
+    @maybe_cprofile
     def compile_inner(
         code: types.CodeType,
         one_graph: bool,
