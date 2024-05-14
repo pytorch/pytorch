@@ -24,7 +24,7 @@ class TryMergeExplainer:
     org: str
     project: str
     ignore_current: bool
-    comment_id: str
+    comment_id: int
 
     has_trunk_label: bool
     has_ciflow_label: bool
@@ -37,7 +37,7 @@ class TryMergeExplainer:
         org: str,
         project: str,
         ignore_current: bool,
-        comment_id: str,
+        comment_id: int,
     ):
         self.force = force
         self.labels = labels
