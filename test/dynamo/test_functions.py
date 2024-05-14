@@ -1170,6 +1170,19 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             y = a - b
         return x, y
 
+    def test_set_isdisjoint(self):
+        x = {"apple", "banana", "cherry"}
+        y = {"google", "microsoft", "apple"}
+
+        def fn(a):
+            if x.isdisjoint(y):
+                return a + 1
+            else:
+                return a - 1
+
+        test = make_test(fn)
+        test(self)
+
     @make_test
     def test_tuple_iadd(a, b):
         output = (a, b)

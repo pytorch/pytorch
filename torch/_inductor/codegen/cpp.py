@@ -3333,11 +3333,9 @@ class CppKernelProxy(CppKernel):
             else torch.float
         )
 
-        for node in nodes:
+        def fn(node, *index_vars):
             node.decide_inplace_update()
             node.mark_run()
-
-        def fn(node, *index_vars):
             if isinstance(V.kernel, NullKernelHandler):
                 return node._body(*index_vars)
             else:

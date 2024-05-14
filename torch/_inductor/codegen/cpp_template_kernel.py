@@ -166,7 +166,8 @@ class CppTemplateKernel(Kernel):
         buf = ir.Buffer(name, ir.FixedLayout(torch.device("cpu"), dtype, sizes))
         self.local_buffers[name] = buf
         ctype = f"{DTYPE_TO_CPP[dtype]}"
-        return f"auto {name} = std::make_unique<{ctype}[]>({cexpr_index(buf.get_numel())});"
+        numel = f"{cexpr_index(buf.get_numel())}"
+        return f"auto _{name} = std::make_unique<{ctype}[]>({numel}); auto {name} = _{name}.get();"
 
     def store_output(
         self,

@@ -1717,7 +1717,14 @@ class Kernel(CodeGen):
         replacements = {
             x: self.args.size(x)
             for x in sorted_symbols
-            if symbol_is_type(x, (SymT.UNBACKED_INT, SymT.SIZE, SymT.PRECOMPUTED_SIZE))
+            if symbol_is_type(
+                x,
+                (
+                    SymT.UNBACKED_INT,
+                    SymT.SIZE,
+                    SymT.PRECOMPUTED_SIZE,
+                ),
+            )
         }
         return sympy_subs(index, replacements)
 
