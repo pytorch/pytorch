@@ -1185,8 +1185,10 @@ class BuiltinVariable(VariableTracker):
                         obj.source.make_guard(GuardBuilder.TUPLE_ITERATOR_LEN)
                     )
                 else:
-                    if getattr(obj, "source", False) and isinstance(
-                        obj, ConstDictVariable
+                    if (
+                        getattr(obj, "source", False)
+                        and isinstance(obj, ConstDictVariable)
+                        and not istype(obj, SetVariable)
                     ):
                         tx.output.guard_on_key_order.add(obj.source.name())
 

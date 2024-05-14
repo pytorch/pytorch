@@ -6,8 +6,10 @@ from .optimizer import (
     _capturable_doc,
     _default_to_fused_or_foreach,
     _differentiable_doc,
+    _disable_dynamo_if_unsupported,
     _dispatch_sqrt,
     _foreach_doc,
+    _get_capturable_supported_devices,
     _get_scalar_dtype,
     _get_value,
     _stack_if_compiling,
@@ -258,76 +260,6 @@ NAdam.__doc__ = (
 )
 
 
-def nadam(
-    params: List[Tensor],
-    grads: List[Tensor],
-    exp_avgs: List[Tensor],
-    exp_avg_sqs: List[Tensor],
-    mu_products: List[Tensor],
-    state_steps: List[Tensor],
-    # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
-    # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    decoupled_weight_decay: bool = False,
-    foreach: Optional[bool] = None,
-    capturable: bool = False,
-    differentiable: bool = False,
-    has_complex: bool = False,
-    *,
-    beta1: float,
-    beta2: float,
-    lr: float,
-    weight_decay: float,
-    momentum_decay: float,
-    eps: float,
-):
-    r"""Functional API that performs NAdam algorithm computation.
-
-    See :class:`~torch.optim.NAdam` for details.
-    """
-
-    if not all(isinstance(t, torch.Tensor) for t in state_steps):
-        raise RuntimeError(
-            "API has changed, `state_steps` argument must contain a list of singleton tensors"
-        )
-
-    if not all(isinstance(t, torch.Tensor) for t in mu_products):
-        raise RuntimeError(
-            "API has changed, `mu_products` argument must contain a list of singleton tensors"
-        )
-
-    if foreach is None:
-        _, foreach = _default_to_fused_or_foreach(
-            params, differentiable, use_fused=False
-        )
-
-    if foreach and torch.jit.is_scripting():
-        raise RuntimeError("torch.jit.script not supported with foreach optimizers")
-
-    if foreach and not torch.jit.is_scripting():
-        func = _multi_tensor_nadam
-    else:
-        func = _single_tensor_nadam
-
-    func(
-        params,
-        grads,
-        exp_avgs,
-        exp_avg_sqs,
-        mu_products,
-        state_steps,
-        beta1=beta1,
-        beta2=beta2,
-        lr=lr,
-        weight_decay=weight_decay,
-        momentum_decay=momentum_decay,
-        decoupled_weight_decay=decoupled_weight_decay,
-        eps=eps,
-        capturable=capturable,
-        differentiable=differentiable,
-        has_complex=has_complex,
-    )
-
-
 def _single_tensor_nadam(
     params: List[Tensor],
     grads: List[Tensor],
@@ -362,9 +294,14 @@ def _single_tensor_nadam(
 
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
         if not torch._utils.is_compiling() and capturable:
-            assert (param.is_cuda and mu_product.is_cuda and step_t.is_cuda) or (
-                param.is_xla and mu_product.is_xla and step_t.is_xla
-            ), "If capturable=True, params, mu_products, and state_steps must be CUDA or XLA tensors."
+            capturable_supported_devices = _get_capturable_supported_devices()
+            assert (
+                param.device.type == mu_product.device.type == step_t.device.type
+                and param.device.type in capturable_supported_devices
+            ), (
+                f"If capturable=True, params, mu_products and state_steps must be "
+                f"on supported devices: {capturable_supported_devices}."
+            )
 
         # update step
         step_t += 1
@@ -442,10 +379,14 @@ def _multi_tensor_nadam(
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch._utils.is_compiling() and capturable:
+        capturable_supported_devices = _get_capturable_supported_devices(
+            supports_xla=False
+        )
         assert all(
-            p.is_cuda and mp.is_cuda and step.is_cuda
+            p.device.type == mp.device.type == step.device.type
+            and p.device.type in capturable_supported_devices
             for p, mp, step in zip(params, mu_products, state_steps)
-        ), "If capturable=True, params, mu_products, and state_steps must be CUDA tensors."
+        ), f"If capturable=True, params, mu_products, and state_steps must be on supported devices: {capturable_supported_devices}."
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, exp_avgs, exp_avg_sqs, mu_products, state_steps]
@@ -598,3 +539,74 @@ def _multi_tensor_nadam(
             torch._foreach_addcdiv_(
                 grouped_params, grouped_exp_avgs, exp_avg_sq_sqrt, step_size_expavg
             )
+
+
+@_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_nadam)
+def nadam(
+    params: List[Tensor],
+    grads: List[Tensor],
+    exp_avgs: List[Tensor],
+    exp_avg_sqs: List[Tensor],
+    mu_products: List[Tensor],
+    state_steps: List[Tensor],
+    # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
+    # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
+    decoupled_weight_decay: bool = False,
+    foreach: Optional[bool] = None,
+    capturable: bool = False,
+    differentiable: bool = False,
+    has_complex: bool = False,
+    *,
+    beta1: float,
+    beta2: float,
+    lr: float,
+    weight_decay: float,
+    momentum_decay: float,
+    eps: float,
+):
+    r"""Functional API that performs NAdam algorithm computation.
+
+    See :class:`~torch.optim.NAdam` for details.
+    """
+
+    if not all(isinstance(t, torch.Tensor) for t in state_steps):
+        raise RuntimeError(
+            "API has changed, `state_steps` argument must contain a list of singleton tensors"
+        )
+
+    if not all(isinstance(t, torch.Tensor) for t in mu_products):
+        raise RuntimeError(
+            "API has changed, `mu_products` argument must contain a list of singleton tensors"
+        )
+
+    if foreach is None:
+        _, foreach = _default_to_fused_or_foreach(
+            params, differentiable, use_fused=False
+        )
+
+    if foreach and torch.jit.is_scripting():
+        raise RuntimeError("torch.jit.script not supported with foreach optimizers")
+
+    if foreach and not torch.jit.is_scripting():
+        func = _multi_tensor_nadam
+    else:
+        func = _single_tensor_nadam
+
+    func(
+        params,
+        grads,
+        exp_avgs,
+        exp_avg_sqs,
+        mu_products,
+        state_steps,
+        beta1=beta1,
+        beta2=beta2,
+        lr=lr,
+        weight_decay=weight_decay,
+        momentum_decay=momentum_decay,
+        decoupled_weight_decay=decoupled_weight_decay,
+        eps=eps,
+        capturable=capturable,
+        differentiable=differentiable,
+        has_complex=has_complex,
+    )
