@@ -14656,7 +14656,7 @@
   dispatch:
     CUDA: _fbgemm_jagged_to_padded_dense_backward
 
-- func: _fbgemm_dense_to_jagged_forward(Tensor dense, Tensor[] offsets, SymInt? total_L) -> Tensor
+- func: _fbgemm_dense_to_jagged_forward(Tensor dense, Tensor[] offsets, SymInt? total_L=None) -> Tensor
   variants: function
   dispatch:
     CUDA: _fbgemm_dense_to_jagged_forward_symint
