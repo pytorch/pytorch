@@ -32,7 +32,7 @@ inline std::vector<int64_t> _reverse_repeat_vector(
 }
 
 inline std::vector<int64_t> _list_with_default(
-    torch::ArrayRef<c10::optional<int64_t>> out_size,
+    torch::ArrayRef<std::optional<int64_t>> out_size,
     torch::IntArrayRef defaults) {
   TORCH_CHECK(
       defaults.size() > out_size.size(),
