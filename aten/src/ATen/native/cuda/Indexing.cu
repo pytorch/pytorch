@@ -426,7 +426,7 @@ int64_t largestIndex(const Tensor &self) {
   return result;
 }
 
-void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Tensor>>& indices, const Tensor & value, bool accumulate, bool unsafe) {
+void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Tensor>>& indices, const Tensor & value, bool accumulate, bool unsafe) {
   TORCH_CHECK(!indices.empty() || is_expandable_to(value.sizes(), self.sizes()), "shape mismatch: value tensor of shape ", value.sizes(),
              " cannot be broadcast to indexing result of shape ", self.sizes());
   if (indices.size() > (size_t)self.dim()) {
@@ -561,7 +561,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
 
 REGISTER_CUDA_DISPATCH(index_put_with_sort_stub, &index_put_with_sort_kernel);
 
-void index_put_with_sort_quantized(Tensor & self, const c10::List<c10::optional<Tensor>>& indices, const Tensor & value, double scale, int zero_point, bool unsafe) {
+void index_put_with_sort_quantized(Tensor & self, const c10::List<std::optional<Tensor>>& indices, const Tensor & value, double scale, int zero_point, bool unsafe) {
   if (indices.size() > (size_t)self.dim()) {
     TORCH_CHECK_INDEX(false, "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   }
@@ -861,7 +861,7 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
   TORCH_CHECK(index.dim() <= MAX_TENSORINFO_DIMS, "tensor has too many (>", MAX_TENSORINFO_DIMS, ") dims");
 
   if (globalContext().deterministicAlgorithms()){
-    torch::List<c10::optional<Tensor>> indices;
+    torch::List<std::optional<Tensor>> indices;
     indices.reserve(dim + 1);
     for (const auto i: c10::irange(dim)) {
       indices.emplace_back();

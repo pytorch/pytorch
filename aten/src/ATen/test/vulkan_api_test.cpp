@@ -177,8 +177,8 @@ static void gen_all_subsets(
 static void slice_test(
     const std::vector<int64_t>& size,
     int64_t dim,
-    c10::optional<int64_t> start,
-    c10::optional<int64_t> end,
+    std::optional<int64_t> start,
+    std::optional<int64_t> end,
     int64_t step) {
   // Arrange
   const auto in_cpu = at::rand(size, at::device(at::kCPU).dtype(at::kFloat));
@@ -212,7 +212,7 @@ static void slice_tests(const std::unordered_map<int64_t, std::vector<int64_t>>&
   }
 }
 
-static void clone_test(const std::vector<int64_t>& size, c10::optional<at::MemoryFormat> optional_memory_format) {
+static void clone_test(const std::vector<int64_t>& size, std::optional<at::MemoryFormat> optional_memory_format) {
   // Arrange
   const auto in_cpu = at::rand(size, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_vulkan = in_cpu.vulkan();
@@ -249,7 +249,7 @@ inline std::vector<c10::IValue> callOpByName(
     const char* func_name,
     const char* overload_name,
     Args... args) {
-  const c10::optional<c10::OperatorHandle> op_handle =
+  const std::optional<c10::OperatorHandle> op_handle =
       c10::Dispatcher::singleton().findSchema({func_name, overload_name});
   assert(op_handle.has_value());
   return callOpByHandle(op_handle.value(), std::forward<Args>(args)...);
@@ -7120,7 +7120,7 @@ TEST_F(VulkanAPITest, zeros) {
 
 TEST_F(VulkanAPITest, clone_success) {
   // Arrange
-  std::multimap<c10::optional<c10::MemoryFormat>, std::vector<int64_t>> mem2sizes {
+  std::multimap<std::optional<c10::MemoryFormat>, std::vector<int64_t>> mem2sizes {
     {c10::MemoryFormat::Preserve, {2, 3, 5, 161}},    // 4D tensors with MemoryFormat::Preserve
     {c10::MemoryFormat::Contiguous, {2, 3, 5, 161}},  // 4D tensors with MemoryFormat::Contiguous
     {{}, {2, 3, 5, 161}},                             // 4D tensors with null
