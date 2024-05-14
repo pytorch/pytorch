@@ -16,7 +16,6 @@ from torch.distributed._tensor.placement_types import (
     Replicate,
     Shard,
 )
-from torch.distributed.distributed_c10d import ReduceOp
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorOpTestBase,
@@ -257,7 +256,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         with self.assertRaisesRegex(RuntimeError, "supported"):
             self._run_sharded_elementwise_ops(
                 device_mesh=device_mesh,
-                placements=[_Partial(ReduceOp.SUM)],
+                placements=[_Partial("sum")],
                 input_size=(8, 5),
                 op=torch.nn.functional.dropout,
             )

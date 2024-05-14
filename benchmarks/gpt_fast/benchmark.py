@@ -27,26 +27,39 @@ class Experiment:
     module: type
     mode: Optional[str]
     quantizer: type
-    target: float
+    token_per_sec: float
+    memory_bandwidth: float
 
 
+# token_per_sec and memory_bandwidth target numbers are for A100-40GB, which are different from the typical A100-80GB.
 all_experiments = {
     "llama-7b-fp16": Experiment(
-        "Llama-2-7b-chat-hf", LLaMA, "bfloat16", LLaMAWeightOnlyInt8QuantHandler, 104
+        "Llama-2-7b-chat-hf",
+        LLaMA,
+        "bfloat16",
+        LLaMAWeightOnlyInt8QuantHandler,
+        94,
+        1253,
     ),
     "llama-7b-int8": Experiment(
-        "Llama-2-7b-chat-hf", LLaMA, "int8", LLaMAWeightOnlyInt8QuantHandler, 155
+        "Llama-2-7b-chat-hf",
+        LLaMA,
+        "int8",
+        LLaMAWeightOnlyInt8QuantHandler,
+        144,
+        957,
     ),
-    "mixtral-int8": Experiment(
+    "mixtral-int8": Experiment(  # We reduced the original number of layers from 32 to 16 to adapt CI memory limitation.
         "Mixtral-8x7B-v0.1",
         MixtralMoE,
         "int8",
         MixtralMoEWeightOnlyInt8QuantHandler,
-        97,
+        175,
+        4129,
     ),
 }
 
-output_filename = "gpt_fast_benchmark.csv"
+DEFAULT_OUTPUT_FILE = "gpt_fast_benchmark.csv"
 
 
 def device_sync(device):
@@ -173,6 +186,19 @@ def _load_model(x: Experiment, device="cuda", precision=torch.bfloat16):
     return model.eval()
 
 
+def _get_model_size(model):
+    model_size = 0
+    for name, child in model.named_children():
+        if not isinstance(child, torch.nn.Embedding):
+            model_size += sum(
+                [
+                    p.numel() * p.dtype.itemsize
+                    for p in itertools.chain(child.parameters(), child.buffers())
+                ]
+            )
+    return model_size
+
+
 def run_experiment(
     x: Experiment,
     num_samples: int = 5,
@@ -181,7 +207,7 @@ def run_experiment(
     temperature: float = 0.8,
 ) -> None:
     device = "cuda"
-    print("Loading model ...")
+    print(f"Loading model {x.name}")
     t0 = time.time()
     model = _load_model(x)
     device_sync(device=device)  # MKG
@@ -193,12 +219,9 @@ def run_experiment(
     prompt_length = prompt.size(0)
 
     torch.manual_seed(1234)
-    model_size = sum(
-        p.numel() * p.dtype.itemsize
-        for p in itertools.chain(model.parameters(), model.buffers())
-    )
+    model_size = _get_model_size(model)
 
-    aggregate_metrics = {"tokens_per_sec": []}
+    aggregate_metrics = {"tokens_per_sec": [], "memory_bandwidth": []}
     start = -1
 
     for i in range(start, num_samples):
@@ -218,16 +241,21 @@ def run_experiment(
         tokens_generated = y.size(0) - prompt_length
         tokens_sec = tokens_generated / t
         aggregate_metrics["tokens_per_sec"].append(tokens_sec)
+        aggregate_metrics["memory_bandwidth"].append(model_size * tokens_sec / 1e9)
 
     token_per_sec = torch.mean(torch.tensor(aggregate_metrics["tokens_per_sec"])).item()
-    print(f"Average tokens/sec: {token_per_sec:.2f}")
+    memory_bandwidth = torch.mean(
+        torch.tensor(aggregate_metrics["memory_bandwidth"])
+    ).item()
+    print(f"Average tokens/sec: {token_per_sec:.2f} tokens/sec")
+    print(f"Average bandwidth achieved: {memory_bandwidth:.02f} GB/s")
     print(f"Memory used: {torch.cuda.max_memory_reserved() / 1e9:.02f} GB")
-    return token_per_sec
+    return token_per_sec, memory_bandwidth
 
 
-def output_csv(filename, headers, row):
-    if os.path.exists(filename):
-        with open(filename) as fd:
+def output_csv(output_file, headers, row):
+    if os.path.exists(output_file):
+        with open(output_file) as fd:
             lines = list(csv.reader(fd)) or [[]]
             if headers and len(headers) > len(lines[0]):
                 # if prior results failed the header might not be filled in yet
@@ -236,14 +264,17 @@ def output_csv(filename, headers, row):
                 headers = lines[0]
     else:
         lines = [headers]
+
+    if output_file != DEFAULT_OUTPUT_FILE:
+        os.makedirs(os.path.dirname(output_file), exist_ok=True)
     lines.append([(f"{x:.6f}" if isinstance(x, float) else x) for x in row])
-    with open(filename, "w") as fd:
+    with open(output_file, "w") as fd:
         writer = csv.writer(fd, lineterminator="\n")
         for line in lines:
             writer.writerow(list(line) + ["0"] * (len(headers) - len(line)))
 
 
-def main(experiments=None):
+def main(experiments=None, output_file=DEFAULT_OUTPUT_FILE):
     results = []
 
     if experiments is None:
@@ -252,15 +283,35 @@ def main(experiments=None):
         experiments = {k: v for k, v in all_experiments.items() if k in experiments}
 
     for x in experiments.values():
-        actual = run_experiment(x)
-        percentage = f"{actual / x.target * 100:.2f}%"
-        results.append((x, actual, percentage))
+        actual_token_per_sec, actual_memory_bandwidth = run_experiment(x)
+        token_per_sec_pct = f"{actual_token_per_sec / x.token_per_sec * 100:.2f}%"
+        bandwidth_pct = f"{actual_memory_bandwidth / x.memory_bandwidth * 100:.2f}%"
+        results.append(
+            (
+                x.name,
+                x.mode,
+                x.token_per_sec,
+                f"{actual_token_per_sec:.2f}",
+                token_per_sec_pct,
+                x.memory_bandwidth,
+                f"{actual_memory_bandwidth:.2f}",
+                bandwidth_pct,
+            )
+        )
 
-    headers = ["name", "mode", "target", "actual", "percentage"]
-    rows = [[x[0].name, x[0].mode, x[0].target, x[1], x[2]] for x in results]
+    headers = [
+        "name",
+        "mode",
+        "token_per_sec[target]",
+        "token_per_sec[actual]",
+        "token_per_sec[pct]",
+        "memory_bandwidth[target]",
+        "memory_bandwidth[actual]",
+        "memory_bandwidth[pct]",
+    ]
 
-    for row in rows:
-        output_csv(output_filename, headers, row)
+    for row in results:
+        output_csv(output_file, headers, row)
 
 
 if __name__ == "__main__":
@@ -271,6 +322,11 @@ if __name__ == "__main__":
         default=None,
         help="Experiment names to run (default: all)",
     )
+    parser.add_argument(
+        "--output",
+        default=DEFAULT_OUTPUT_FILE,
+        help="Set the output CSV file to save the benchmark results",
+    )
     args = parser.parse_args()
 
-    main(experiments=args.experiments)
+    main(experiments=args.experiments, output_file=args.output)
