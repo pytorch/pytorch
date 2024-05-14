@@ -2023,7 +2023,7 @@ void _qavg_pool_nhwc_kernel(
     int padH,
     int padD,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   T* idata = static_cast<T*>(qx.data_ptr());
   T* odata = static_cast<T*>(qy.data_ptr());
   int strideC = 1;
@@ -2135,7 +2135,7 @@ void qavg_pool2d_nhwc_kernel(
     int padW,
     int padH,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "avg_pool2d_nhwc", [&]() {
     _qavg_pool_nhwc_kernel<scalar_t>(
       qx,
@@ -2183,7 +2183,7 @@ void qavg_pool3d_nhwc_kernel(
     int padH,
     int padD,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "avg_pool3d_nhwc", [&]() {
     _qavg_pool_nhwc_kernel<scalar_t>(
       qx,
@@ -2288,8 +2288,8 @@ void qupsample_bilinear2d_nhwc_kernel(
     int64_t nbatch,
     int64_t channels,
     bool align_corners,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   AT_DISPATCH_QINT_TYPES(input.scalar_type(), "upsample_bilinear2d_nhwc", [&]() {
     auto* idata = static_cast<scalar_t*>(input.data_ptr());
     auto* odata = static_cast<scalar_t*>(output.data_ptr());
@@ -2940,7 +2940,7 @@ void qmean_inner_dim_kernel(
     const Tensor& self,
     OptionalIntArrayRef opt_dim,
     bool keepdim,
-    c10::optional<ScalarType> opt_dtype,
+    std::optional<ScalarType> opt_dtype,
     Tensor& result) {
   // 'opt_dtype' should be none or equal to that of input
   ScalarType dtype = self.scalar_type();
@@ -2989,7 +2989,7 @@ void qmean_inner_dim_kernel(
 void qstd_inner_dim_kernel(
     const Tensor& self,
     OptionalIntArrayRef dim,
-    const c10::optional<Scalar>& correction_opt,
+    const std::optional<Scalar>& correction_opt,
     bool keepdim,
     Tensor& result) {
   ScalarType dtype = self.scalar_type();

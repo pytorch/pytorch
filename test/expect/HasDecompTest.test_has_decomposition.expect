@@ -931,8 +931,6 @@ aten::min.dim_min
 aten::min.unary_out
 aten::miopen_batch_norm
 aten::miopen_batch_norm.out
-aten::miopen_batch_norm_backward
-aten::miopen_batch_norm_backward.out
 aten::miopen_convolution
 aten::miopen_convolution.out
 aten::miopen_convolution_add_relu
