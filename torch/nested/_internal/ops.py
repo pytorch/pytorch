@@ -1171,7 +1171,10 @@ def _nested_get_jagged_dummy(func, *args, **kwargs):
     return _nt_view_dummy()
 
 
-with torch.library._scoped_library("aten", "IMPL") as aten:
-    aten.impl("_nested_get_jagged_dummy", _nested_get_jagged_dummy, "CPU")
-    aten.impl("_nested_get_jagged_dummy", _nested_get_jagged_dummy, "CUDA")
-    aten.impl("_nested_get_jagged_dummy", _nested_get_jagged_dummy, "Meta")
+@torch.library.impl(
+    "aten::_nested_get_jagged_dummy", ["default", "NestedTensorCPU", "NestedTensorCUDA"]
+)
+def aten_nested_get_jagged_dummy(x):
+    from torch.nested._internal.nested_tensor import _nt_view_dummy
+
+    return _nt_view_dummy()

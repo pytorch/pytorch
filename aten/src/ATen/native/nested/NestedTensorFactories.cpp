@@ -112,11 +112,11 @@ Tensor _to_copy_nested(
        (options.layout() == c10::kStrided));
 
   Tensor r;
-  r = at::empty_like(self, dtype, layout, device, pin_out, memory_format);
+  auto empty_op_layout = (layout.has_value() && layout.value() == Layout::Jagged) ? Layout::Strided : layout;
+  r = at::empty_like(self, dtype, empty_op_layout, device, pin_out, memory_format);
   get_nested_tensor_impl(r)->get_buffer().copy_(
       get_nested_tensor_impl(self)->get_buffer(), non_blocking);
-
-  if (self.layout() != layout.value() && layout.value() == Layout::Jagged) {
+  if (layout.has_value() && self.layout() != layout.value() && layout.value() == Layout::Jagged) {
     Tensor dummy = at::_nested_get_jagged_dummy(r);
     return at::_nested_strided_to_jagged(r, dummy);
   }
