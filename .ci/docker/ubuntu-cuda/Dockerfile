@@ -152,7 +152,6 @@ RUN rm install_cusparselt.sh
 RUN if [ -h /usr/local/cuda-11.6/cuda-11.6 ]; then rm /usr/local/cuda-11.6/cuda-11.6; fi
 RUN if [ -h /usr/local/cuda-11.7/cuda-11.7 ]; then rm /usr/local/cuda-11.7/cuda-11.7; fi
 RUN if [ -h /usr/local/cuda-12.1/cuda-12.1 ]; then rm /usr/local/cuda-12.1/cuda-12.1; fi
-RUN if [ -h /usr/local/cuda-12.1/cuda-12.4 ]; then rm /usr/local/cuda-12.1/cuda-12.4; fi
 
 USER jenkins
 CMD ["bash"]

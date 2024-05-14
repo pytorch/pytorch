@@ -84,27 +84,13 @@ fi
 # CMake 3.18 is needed to support CUDA17 language variant
 CMAKE_VERSION=3.18.5
 
-_UCX_COMMIT=7bb2722ff2187a0cad557ae4a6afa090569f83fb
-_UCC_COMMIT=1522ccff5e107451d747b1085b3f84714a6c2eea
+_UCX_COMMIT=00bcc6bb18fc282eb160623b4c0d300147f579af
+_UCC_COMMIT=7cb07a76ccedad7e56ceb136b865eb9319c258ea
 
 # It's annoying to rename jobs every time you want to rewrite a
 # configuration, so we hardcode everything here rather than do it
 # from scratch
 case "$image" in
-  pytorch-linux-focal-cuda12.4-cudnn8-py3-gcc9)
-    CUDA_VERSION=12.4.0
-    CUDNN_VERSION=8
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
-    TRITON=yes
-    ;;
   pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9)
     CUDA_VERSION=12.1.1
     CUDNN_VERSION=8
@@ -118,21 +104,6 @@ case "$image" in
     UCC_COMMIT=${_UCC_COMMIT}
     CONDA_CMAKE=yes
     TRITON=yes
-    ;;
-  pytorch-linux-focal-cuda12.4-cudnn8-py3-gcc9-inductor-benchmarks)
-    CUDA_VERSION=12.4.0
-    CUDNN_VERSION=8
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
-    TRITON=yes
-    INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9-inductor-benchmarks)
     CUDA_VERSION=12.1.1
@@ -151,20 +122,6 @@ case "$image" in
     ;;
   pytorch-linux-focal-cuda11.8-cudnn8-py3-gcc9)
     CUDA_VERSION=11.8.0
-    CUDNN_VERSION=8
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
-    TRITON=yes
-    ;;
-  pytorch-linux-focal-cuda12.4-cudnn8-py3-gcc9)
-    CUDA_VERSION=12.4.0
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
