@@ -1,12 +1,12 @@
 import logging
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 from ...ir import Buffer, ChoiceCaller, IRNode, Layout, PrimitiveInfoType, TensorBox
 from ...utils import sympy_product
 from ...virtualized import V
 from ..common import IndentedBuffer, Kernel, OpOverrides
 
-from ..cpp_utils import CppPrinter, DTYPE_TO_CPP
+from ..cpp_utils import CppPrinter
 
 from .rocm_benchmark_request import ROCmBenchmarkRequest
 from .rocm_template_buffer import ROCmTemplateBuffer
