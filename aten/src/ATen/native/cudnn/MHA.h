@@ -20,7 +20,9 @@ void run_cudnn_SDP_fprop(
     Tensor& softmaxstats,
     Tensor& o,
     Tensor& dropoutseed,
-    Tensor& dropoutoffset);
+    Tensor& dropoutoffset,
+    bool return_debugmask,
+    Tensor& debugmask);
 
 void run_cudnn_SDP_bprop(
     int64_t b,
