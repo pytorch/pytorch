@@ -479,7 +479,7 @@ void returnFutureWithOutput(
 
 inline void ProcessGroupGloo::AsyncWork::recordAsyncWorkProfilingInfo(
     const char* profilingTitle,
-    const c10::optional<std::vector<at::Tensor>>& inputTensors) {
+    const std::optional<std::vector<at::Tensor>>& inputTensors) {
   auto recordingFunction =
       std::make_shared<at::RecordFunction>(at::RecordScope::USER_SCOPE);
   if (recordingFunction->isActive()) {
@@ -511,7 +511,7 @@ ProcessGroupGloo::AsyncWork::AsyncWork(
     OpType opType,
     uint64_t seq,
     const char* profilingTitle,
-    const c10::optional<std::vector<at::Tensor>>& inputTensors)
+    const std::optional<std::vector<at::Tensor>>& inputTensors)
     // Profiler: Pass nullptr as profilingTitle to parent constructor to
     // replace default profiler implementation with async version that reports
     // correct timestamps for work that is asynchronously executed.
@@ -547,7 +547,7 @@ ProcessGroupGloo::SendWork::SendWork(
           -1,
           OpType::SEND,
           "gloo:send",
-          c10::optional<std::vector<at::Tensor>>({tensor})),
+          std::optional<std::vector<at::Tensor>>({tensor})),
       tensor_(tensor),
       buffer_(std::move(buffer)),
       seq_(seq) {}
@@ -588,7 +588,7 @@ ProcessGroupGloo::RecvWork::RecvWork(
           -1,
           opType,
           profilingTitle,
-          c10::optional<std::vector<at::Tensor>>({tensor})),
+          std::optional<std::vector<at::Tensor>>({tensor})),
       tensor_(tensor),
       buffer_(std::move(buffer)),
       srcRank_(-1),
@@ -2424,7 +2424,7 @@ class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
             OpType::SCATTER,
             seq,
             "gloo:scatter",
-            !inputs.empty() ? c10::optional<std::vector<at::Tensor>>(inputs[0])
+            !inputs.empty() ? std::optional<std::vector<at::Tensor>>(inputs[0])
                             : c10::nullopt),
         context(context),
         outputs(outputs),
@@ -2620,7 +2620,7 @@ class AsyncAlltoallWork : public ProcessGroupGloo::AsyncWork {
             OpType::ALLTOALL,
             seq,
             "gloo:all_to_all",
-            c10::optional<std::vector<at::Tensor>>({inputTensor})),
+            std::optional<std::vector<at::Tensor>>({inputTensor})),
         context(context),
         outputTensor(outputTensor),
         inputTensor(inputTensor),

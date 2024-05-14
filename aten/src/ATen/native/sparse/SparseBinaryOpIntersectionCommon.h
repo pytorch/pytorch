@@ -133,8 +133,8 @@ void _sparse_binary_op_intersection_kernel_impl(
     const Tensor& x_,
     const Tensor& y_,
     const std::vector<int64_t>& broadcasted_shape,
-    const c10::optional<Tensor>& x_hash_opt_ = c10::nullopt,
-    const c10::optional<Tensor>& y_hash_opt_ = c10::nullopt,
+    const std::optional<Tensor>& x_hash_opt_ = c10::nullopt,
+    const std::optional<Tensor>& y_hash_opt_ = c10::nullopt,
     const bool accumulate_matches = true,
     const bool distributive_with_sum = true
 ) {
@@ -148,7 +148,7 @@ void _sparse_binary_op_intersection_kernel_impl(
       " to output ", res.scalar_type());
 
   using KernelLauncher = KernelLauncher<kernel_t>;
-  using OptTensor = c10::optional<Tensor>;
+  using OptTensor = std::optional<Tensor>;
 
   // If the op and sum are not distributive, coalesce is required.
   const auto coalesce_if_not_distributive = [distributive_with_sum](const Tensor& t, const OptTensor& t_hash_opt) -> auto {
@@ -423,8 +423,8 @@ void _sparse_binary_op_intersection_kernel_out(
     Tensor& res,
     const Tensor& x,
     const Tensor& y,
-    const c10::optional<Tensor>& x_hash_opt = c10::nullopt,
-    const c10::optional<Tensor>& y_hash_opt = c10::nullopt,
+    const std::optional<Tensor>& x_hash_opt = c10::nullopt,
+    const std::optional<Tensor>& y_hash_opt = c10::nullopt,
     // If op distributes with the sum, the arguments are processed as is,
     // without the calls to coalesce().
     const bool distributive_with_sum = true
@@ -439,7 +439,7 @@ void _sparse_binary_op_intersection_kernel_out(
       x._indices().scalar_type() == y._indices().scalar_type(),
       NAME, "(): expects inputs' indices to be of the same dtype (i.e. long or int)");
 
-  const auto check_hash_validity = [](const Tensor& t, const c10::optional<Tensor>& t_hash_opt) {
+  const auto check_hash_validity = [](const Tensor& t, const std::optional<Tensor>& t_hash_opt) {
     if (!t_hash_opt.has_value()) {
       return;
     }

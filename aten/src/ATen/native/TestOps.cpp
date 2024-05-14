@@ -49,7 +49,7 @@ Tensor _test_optional_intlist(
 /// Else, return a new tensor containing the elementwise sums.
 Tensor _test_optional_floatlist(
     const Tensor& values,
-    c10::optional<ArrayRef<double>> addends) {
+    std::optional<ArrayRef<double>> addends) {
   if (!addends) {
     return values;
   }
