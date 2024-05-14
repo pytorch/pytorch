@@ -446,6 +446,7 @@ class TestPublicBindings(TestCase):
 
     # AttributeError: module 'torch.distributed' has no attribute '_shard'
     @unittest.skipIf(IS_WINDOWS or IS_JETSON, "Distributed Attribute Error")
+    @skipIfTorchDynamo("Broken and not relevant for now")
     def test_correct_module_names(self):
         '''
         An API is considered public, if  its  `__module__` starts with `torch.`
