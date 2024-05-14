@@ -46,7 +46,7 @@ from ..utils import (
     sympy_subs,
 )
 
-from ..virtualized import ops, OpsValue, V
+from ..virtualized import NullKernelHandler, ops, OpsValue, V
 from .common import (
     BracesBuffer,
     CppWrapperKernelArgs,
@@ -3148,27 +3148,11 @@ class CppKernelProxy(CppKernel):
                 body: ir.LoopBody = node._body
                 _legalize_lowp_fp(body)
 
-    def codegen_nodes(self, nodes: List[SchedulerNode]):
-        # Legalize BF16 node by adding to_dtype explicitly
-        self.legalize_lowp_fp_dtype(nodes)
-        self.data_type_propagation(nodes)
-
-        assert len(nodes) >= 1
-        first_node = nodes[0]
-        vec_dtype = (
-            first_node._lowp_fp_type  # type: ignore[attr-defined]
-            if all(
-                hasattr(_node, "_lowp_fp_type")
-                and _node._lowp_fp_type == first_node._lowp_fp_type  # type: ignore[attr-defined]
-                for _node in nodes
-            )
-            else torch.float
-        )
-
+    def codegen_functions(self, fn_list, var_sizes_list, vec_dtype=torch.float):
+        # TODO(jgong5): remove vec_dtype arg with alternative tiling factors for various dtypes
+        assert len(fn_list) == len(var_sizes_list)
         kernel_group = self.kernel_group
-        _, (group, reduction_group) = max(
-            nodes, key=lambda x: int(x.is_reduction())
-        ).group
+        group, reduction_group = max(var_sizes_list, key=lambda sizes: len(sizes[1]))
 
         self.set_ranges(group, reduction_group)
 
@@ -3184,22 +3168,22 @@ class CppKernelProxy(CppKernel):
         def run(kernel):
             vars, reduction_vars = kernel.set_ranges(group, reduction_group)
             in_suffix = False
-            for node in nodes:
-                if node.group[1] in [
+            for fn, var_sizes in zip(fn_list, var_sizes_list):
+                if var_sizes in [
                     (group, reduction_group),
                     (group + reduction_group, ()),
                 ]:
                     assert not in_suffix
-                    node.run(vars, reduction_vars)
+                    fn(vars, reduction_vars)
                 else:
                     in_suffix = True
-                    assert node.group[1] == (
+                    assert var_sizes == (
                         group,
                         (),
-                    ), f"unexpected group: {node.group[1]} != {group}, {reduction_group}"
+                    ), f"unexpected group: {var_sizes} != {group}, {reduction_group}"
                     # we can fuse in some extra pointwise into the suffix
                     with kernel.write_to_suffix():
-                        node.run(vars, ())
+                        fn(vars, ())
 
         scalar_kernel = codegen_kernel(CppKernel)
         V.graph.removed_buffers |= scalar_kernel.removed_buffers
@@ -3211,8 +3195,8 @@ class CppKernelProxy(CppKernel):
 
         def select_tiling_indices(tiling_factor):
             all_index = []
-            for node in nodes:
-                rw = dependencies.extract_read_writes(node._body, *node._sizes)
+            for fn, var_sizes in zip(fn_list, var_sizes_list):
+                rw = dependencies.extract_read_writes(fn, *var_sizes)
                 all_index += [dep.index for dep in itertools.chain(rw.reads, rw.writes)]
             contig_vars = set()
             contig_vars_list = []
@@ -3326,6 +3310,41 @@ class CppKernelProxy(CppKernel):
                 inner_main_loop.set_kernel(tile2d_kernel)
                 inner_tail_loop.set_kernel(vec_kernel)
 
+    def codegen_loop_bodies(self, loop_bodies, var_sizes_list):
+        # TODO(jgong5): support lowp legalization
+        for body in loop_bodies:
+            DataTypePropagation.propagate_loopbody(body)
+        self.codegen_functions(loop_bodies, var_sizes_list)
+
+    def codegen_nodes(self, nodes: List[SchedulerNode]):
+        # Legalize BF16 node by adding to_dtype explicitly
+        self.legalize_lowp_fp_dtype(nodes)
+        self.data_type_propagation(nodes)
+
+        assert len(nodes) >= 1
+        first_node = nodes[0]
+        vec_dtype = (
+            first_node._lowp_fp_type  # type: ignore[attr-defined]
+            if all(
+                hasattr(_node, "_lowp_fp_type")
+                and _node._lowp_fp_type == first_node._lowp_fp_type  # type: ignore[attr-defined]
+                for _node in nodes
+            )
+            else torch.float
+        )
+
+        def fn(node, *index_vars):
+            node.decide_inplace_update()
+            node.mark_run()
+            if isinstance(V.kernel, NullKernelHandler):
+                return node._body(*index_vars)
+            else:
+                return node.codegen(index_vars)
+
+        fn_list = [functools.partial(fn, node) for node in nodes]
+        var_sizes_list = [node.group[1] for node in nodes]
+        self.codegen_functions(fn_list, var_sizes_list, vec_dtype)
+
     def codegen_loops(self, code, worksharing):
         self.codegen_loops_impl(self.loop_nest, code, worksharing)
 
@@ -3390,6 +3409,9 @@ class CppScheduling(BaseScheduling):
     def fuse(self, node1, node2):
         if node1.is_foreach() or node2.is_foreach():
             return ForeachKernelSchedulerNode.fuse(node1, node2)
+        elif node1.is_template():
+            assert not node2.is_template()
+            return FusedSchedulerNode.fuse(node1, node2)
         else:
             if (
                 self._why_fuse_nodes(node1, node2)
@@ -3588,7 +3610,9 @@ class CppScheduling(BaseScheduling):
 
     def can_fuse_vertical_outer_loop(self, node1, node2):
         return (
-            node1.get_names() & node2.ancestors
+            not node1.is_template()
+            and not node2.is_template()
+            and node1.get_names() & node2.ancestors
             and not (
                 self._can_fuse_horizontal_impl(node1, node2)
                 and not node1.is_reduction()
@@ -3604,9 +3628,11 @@ class CppScheduling(BaseScheduling):
             return 0
 
     def can_fuse_vertical(self, node1, node2):
-        # TODO(jgong5): support vertical fusion for template nodes
-        if node1.is_template() or node2.is_template():
+        if node2.is_template():
+            # TODO(jgong5): support pre-op fusion with template
             return False
+        if node1.is_template():
+            return not node2.is_reduction()
         return (
             self._can_fuse_horizontal_impl(node1, node2) and not node1.is_reduction()
         ) or self.can_fuse_vertical_outer_loop(node1, node2)
@@ -3689,6 +3715,7 @@ class CppScheduling(BaseScheduling):
         kernel, render = ctb.make_kernel_render(ctb, epilogue_nodes=epilogue_ir_nodes)
         with kernel:
             for node in [template_node, *epilogue_nodes]:
+                node.decide_inplace_update()
                 node.mark_run()
             src_code = render()
 
