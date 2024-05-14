@@ -78,7 +78,14 @@ class TestSelectAlgorithm(TestCase):
         mod = M(bias=bias).to(dtype=dtype).eval()
         B = (2, batch_size) if input_3d else (batch_size,)
         v = torch.randn(*B, in_features).to(dtype=dtype)
-        self.common(mod, (v,))
+        # For bfloat16 and half, we have to relax the tolerance
+        # due to the difference associave orders in different
+        # kernel implementations
+        atol, rtol = 1e-4, 1e-4
+        if dtype == torch.half or dtype == torch.bfloat16:
+            atol, rtol = 1e-2, 1e-2
+        with patch.object(select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(
             counters["inductor"]["select_algorithm_autotune"],
             1 if out_features != 1 else 0,

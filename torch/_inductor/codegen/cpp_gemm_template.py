@@ -265,25 +265,39 @@ class CppPackedGemmTemplate(CppTemplate):
                     new_inputs[1] = W.to_dense()
             return new_inputs, layout_or_out
 
-        def transpose_weight(inputs, layout_or_out):
+        def normalize_shapes(inputs, layout_or_out):
             if not trans_w:
                 return inputs, layout_or_out
 
             new_inputs = list(inputs)
+            X = inputs[0]
             W = inputs[1]
+            B = inputs[2] if len(inputs) > 2 else None
             if isinstance(W, ir.IRNode):
-                if not isinstance(W, ir.TensorBox):
-                    W = ir.TensorBox(W)
-                new_inputs[1] = L.permute(W, [1, 0])
-                return new_inputs, layout_or_out
+                if trans_w:
+                    if not isinstance(W, ir.TensorBox):
+                        W = ir.TensorBox(W)
+                    W = L.permute(W, [1, 0])
             else:
-                assert isinstance(W, torch.Tensor)
-                new_inputs[1] = W.transpose(0, 1)
+                if trans_w:
+                    assert isinstance(W, torch.Tensor)
+                    W = W.transpose(0, 1)
+            if B is not None:
+                if isinstance(B, ir.IRNode):
+                    if not isinstance(B, ir.TensorBox):
+                        B = ir.TensorBox(B)
+                    B = L.expand(B, (X.get_size()[0], B.get_size()[-1]))
+                else:
+                    assert isinstance(B, torch.Tensor)
+                    B = B.expand(X.shape[0], B.shape[-1])
+            new_inputs[1] = W
+            if B is not None:
+                new_inputs[2] = B
             return new_inputs, layout_or_out
 
         # TODO(jgong5): decide proper number of threads per problem size
         num_threads = parallel_num_threads()
-        new_inputs, _ = transpose_weight(
+        new_inputs, _ = normalize_shapes(
             *maybe_to_dense(*reorder_and_filter(input_nodes, layout))
         )
         m, n, k, *_ = mm_args(new_inputs[0], new_inputs[1])
@@ -343,7 +357,7 @@ class CppPackedGemmTemplate(CppTemplate):
 
         def preprocessor(inputs, layout):
             return pack_weight(
-                *transpose_weight(*maybe_to_dense(*reorder_and_filter(inputs, layout)))
+                *normalize_shapes(*maybe_to_dense(*reorder_and_filter(inputs, layout)))
             )
 
         def postprocessor(output):
@@ -359,7 +373,7 @@ class CppPackedGemmTemplate(CppTemplate):
                 W = V.graph.constants[W_node.get_name()]
                 new_input_nodes[1] = W
                 new_input_nodes, _ = pack_weight(
-                    *transpose_weight(*maybe_to_dense(new_input_nodes, layout))
+                    *normalize_shapes(*maybe_to_dense(new_input_nodes, layout))
                 )
                 W_packed = new_input_nodes[1]
                 W_packed_constant = V.graph.add_tensor_constant(W_packed)

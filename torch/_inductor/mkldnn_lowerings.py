@@ -13,6 +13,7 @@ from .lowering import (
     permute,
     register_lowering,
     to_dtype,
+    view,
 )
 from .select_algorithm import (
     autotune_select_algorithm,
@@ -152,6 +153,10 @@ def register_onednn_fusion_ops():
             algorithm,
             layout=None,
         ):
+            x_size = x.get_size()
+            if len(x_size) > 2:
+                # GEMM template needs 2D input, normalize input shape here
+                x = view(x, [-1, x_size[-1]])
             choices: List[ChoiceCaller] = []
             if len(choices) == 0 or use_aten_gemm_kernels():
                 choices.append(
@@ -175,7 +180,11 @@ def register_onednn_fusion_ops():
             if use_max_autotune():
                 transposed_w = permute(w, [1, 0])
                 *_, layout, x, transposed_w = mm_args(x, transposed_w, layout=layout)
-                if use_cpp_packed_gemm_template(layout, x, transposed_w):
+                # TODO(jgong5): support epilogue fusion
+                if (
+                    use_cpp_packed_gemm_template(layout, x, transposed_w)
+                    and attr == "none"
+                ):
                     if b is None:
                         CppPackedGemmTemplate.add_choices(
                             choices,
@@ -195,13 +204,16 @@ def register_onednn_fusion_ops():
             input_gen_fns = {
                 1: lambda x: V.graph.constants[x.get_name()],
             }
-            return autotune_select_algorithm(
+            result = autotune_select_algorithm(
                 "linear_unary",
                 choices,
                 [x, w] if b is None else [x, w, b],
                 layout,
                 input_gen_fns=input_gen_fns,
             )
+            if len(x_size) > 2:
+                result = view(result, (*x_size[:-1], result.get_size()[-1]))
+            return result
 
         @register_lowering(torch.ops.mkldnn._linear_pointwise.binary)
         def linear_binary(
