@@ -643,6 +643,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return x.type(dtype)
 
     @make_test
+    def test_is_any_autocast_enabled(x):
+        if torch._C._is_any_autocast_enabled():
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
     def test_list_compare_polyfill(x):
         for a, b, c in [
             [(1, 2, 3), (1, 2, 3), 7.77],
