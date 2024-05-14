@@ -71,8 +71,7 @@ class ReferenceAnalysis:
     @staticmethod
     def mod(x, y):
         ret = abs(x) % abs(y)
-        if x < 0:
-            ret *= -1
+        ret *= x // abs(x)
         return ret
 
     @staticmethod

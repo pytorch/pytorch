@@ -8332,6 +8332,18 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 3)
 
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_unbacked_modulus(self):
+        @torch.compile(fullgraph=True)
+        def f(x, w):
+            y = x.item()
+            torch._check(y % 4 == 0)
+            return x * w
+
+        f(torch.tensor(20), torch.randn(3))
+
     def test_tracing_nested_py_tree(self):
         import torch.utils._pytree as pytree
 
