@@ -3004,11 +3004,6 @@ class NativeCachingAllocator : public CUDAAllocator {
       da->emptyCache();
   }
 
-  void synchronizeEvents() {
-    for (auto& da : device_allocator)
-      da->synchronizeEvents();
-  }
-
   void* getBaseAllocation(void* ptr, size_t* outSize) override {
     Block* block = get_allocated_block(ptr);
     if (!block) {
@@ -3073,7 +3068,7 @@ class NativeCachingAllocator : public CUDAAllocator {
   std::shared_ptr<AllocatorState> getCheckpointState(
       c10::DeviceIndex device,
       MempoolId_t id) override {
-    synchronizeEvents();
+    device_allocator[device]->synchronizeEvents();
     return device_allocator[device]->getCheckpointState(id);
   }
 
