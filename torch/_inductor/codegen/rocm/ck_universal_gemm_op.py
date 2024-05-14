@@ -77,7 +77,19 @@ class CKGemmOperation:
 
     def key_name(self):
         # TBD; must be unique per instance. Intended to use as dict key
-        return f"{'_'.join(['K' + field_name.replace('_', '').lower() + 'V' + ('x'.join(map(str, iter(field_value))) if isinstance(field_value, tuple) else str(field_value).replace(':', '')) for field_name, field_value in self.dict_items()])}"
+        return "_".join(
+            [
+                "K"
+                + field_name.replace("_", "").lower()
+                + "V"
+                + (
+                    "x".join(map(str, iter(field_value)))
+                    if isinstance(field_value, tuple)
+                    else str(field_value).replace(":", "")
+                )
+                for field_name, field_value in self.dict_items()
+            ]
+        )
 
     def dict_items(self):
         return asdict(self).items()

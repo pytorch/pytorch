@@ -12,8 +12,6 @@ from torch._inductor.codegen.rocm.ck_universal_gemm_op import CKGemmOperation
 log = logging.getLogger(__name__)
 
 
-
-
 def parse_instances(str_instances: List[str]) -> List[CKGemmOperation]:
     """
     Parse the lines containing Universal Gemm template instances into `CKGemmOperation` instances
@@ -234,7 +232,6 @@ def gen_ops_preselected() -> List[CKGemmOperation]:
             8,
         ),
         c_shuffle_block_transfer_scalar_per_vector_n_per_block=8,
-
     )
     ck_gemm_f16_rcr_memory_friendly = partial(
         ck_gemm_f16_rcr,
