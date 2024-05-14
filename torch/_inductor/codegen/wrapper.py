@@ -1189,9 +1189,16 @@ class WrapperCodeGen(CodeGen):
         compile_wrapper = IndentedBuffer()
         compile_wrapper.writeline(f"async_compile.triton({original_name!r}, '''")
 
-        from .triton import gen_common_triton_imports, TritonKernel
+        from .triton import (
+            define_global_constexpr_vars,
+            gen_common_triton_imports,
+            TritonKernel,
+        )
 
         compile_wrapper.splice(gen_common_triton_imports())
+        # constexpr vars captured by the kernel must be defined w/ annotations
+        constexpr_global_symbol_names, buffer = define_global_constexpr_vars(kernel)
+        compile_wrapper.splice(buffer.getvalue())
 
         inductor_meta = {
             "kernel_name": name,
@@ -1224,7 +1231,8 @@ class WrapperCodeGen(CodeGen):
         # Also include any possible kernel being called indirectly
         from triton import JITFunction
 
-        symbols_included = {original_name}
+        # global constexpr vars handled above
+        symbols_included = {original_name, *constexpr_global_symbol_names}
 
         def traverse(cur_kernel):
             # here we extract the unqualified names (i.e., not attributes and
