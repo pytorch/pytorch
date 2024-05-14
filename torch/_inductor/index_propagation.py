@@ -131,6 +131,7 @@ class SymPyOps:
         result_type = torch.promote_types(x.dtype, y.dtype)
         if not is_integer_dtype(result_type):
             return NotImplemented
+
         x_expr = sympy.sympify(x.expr)
         y_expr = sympy.sympify(y.expr)
         # In these cases, remainder in Python == remainder in C++, so this transformation
@@ -299,8 +300,14 @@ class IndexPropagation:
         self, index: Union[Any, IndexPropVar], size: Any, check: bool = True
     ) -> Any:
         if isinstance(index, IndexPropVar) and index.is_symbolic:
+            # If we find something we can convert into a direct indexing we do so
+            # We still need to (perhaps) wrap the expression and add bound checks
+            # We want to do this "constant folding", as we don't allow to fuse
+            # kernels into indirect indexing
+
             expr = sympy.sympify(index.value.expr)
 
+            # TODO Perhaps move this logic to the simplify indexing pass
             def wrap_expr(expr):
                 # Positive, negative, mixed
                 if self.statically_true(0 <= expr):
@@ -310,14 +317,14 @@ class IndexPropagation:
                 else:
                     return Where(expr < 0, expr + size, expr)
 
-            # Trivial case
-            if not generate_assert(check):
-                return wrap_expr(expr)
-
-            # It is often 's easier for us to prove that 0 <= expr, than to prove -size <= expr
-            # when dynamic shapes are on
-            if (
+            # nb. Sometimes it's easier to prove 0 <= expr than the weaker -size <= expr
+            # nb. Need to prove bounds before wrapping, as Where is not supported within maybe_evaluate_static (easy fix tho)
+            can_prove_bounds = (
                 self.statically_true(0 <= expr) or self.statically_true(-size <= expr)
-            ) and self.statically_true(expr < size):
-                return wrap_expr(expr)
+            ) and self.statically_true(expr < size)
+            expr = wrap_expr(expr)
+            if generate_assert(check) and not can_prove_bounds:
+                wrapped_idx = self.materialize_expr(expr, index.value.dtype)
+                self.fallback("check_bounds", (wrapped_idx, size), {})
+            return expr
         return self.fallback("indirect_indexing", (index, size, check), {}).value
