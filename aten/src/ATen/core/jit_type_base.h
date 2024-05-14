@@ -75,7 +75,7 @@ struct SharedType;
 // Use this to customize how a Type is printed using `annotation_str()`. If
 // c10::nullopt is returned, `annotation_str()` falls through to its default
 // implementation.
-using TypePrinter = std::function<c10::optional<std::string>(const Type&)>;
+using TypePrinter = std::function<std::optional<std::string>(const Type&)>;
 
 namespace detail {
 template <typename T>
@@ -688,7 +688,7 @@ using NamedTypePtr = std::shared_ptr<NamedType>;
 using ConstNamedTypePtr = std::shared_ptr<const NamedType>;
 
 struct TORCH_API NamedType : public SharedType {
-  NamedType(TypeKind tk, c10::optional<QualifiedName> name)
+  NamedType(TypeKind tk, std::optional<QualifiedName> name)
       : SharedType(tk), name_(std::move(name)) {
     TORCH_INTERNAL_ASSERT(
         tk == TypeKind::TupleType || tk == TypeKind::FunctionType ||
@@ -700,12 +700,12 @@ struct TORCH_API NamedType : public SharedType {
 
   // Fully qualified name of type
   // Looks like: "foo.bar.Baz".
-  const c10::optional<QualifiedName>& name() const {
+  const std::optional<QualifiedName>& name() const {
     return name_;
   }
 
  private:
-  c10::optional<QualifiedName> name_;
+  std::optional<QualifiedName> name_;
 };
 
 } // namespace c10

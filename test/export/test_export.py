@@ -3301,6 +3301,23 @@ def forward(self, x):
         test_inp = torch.ones(8, 4)
         self.assertTrue(torch.allclose(ep.module()(test_inp), Foo().forward(test_inp)))
 
+    @testing.expectedFailureRetraceability
+    def test_runtime_assert_with_size(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                a = x.item()
+                torch._check_is_size(a)
+                torch._check(a <= y.size(0))
+                return y[:a]
+
+        ep = export(
+            M(),
+            (torch.tensor(5), torch.ones(10)),
+            dynamic_shapes={"x": None, "y": {0: torch.export.Dim("t")}},
+        )
+        inp = (torch.tensor(6), torch.randn(13))
+        self.assertTrue(torch.allclose(ep.module()(*inp), M()(*inp)))
+
     def test_issue_113041(self):
         class TestModule(torch.nn.Module):
             def __init__(self):

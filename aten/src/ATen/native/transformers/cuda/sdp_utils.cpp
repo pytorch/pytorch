@@ -491,6 +491,18 @@ bool check_runtime_enabled_cudnn(sdp_params const& params, bool debug) {
   return true;
 }
 
+bool check_runtime_disabled_cudnn(sdp_params const& params, bool debug) {
+  // We check the global context to see if user has explicitly turned of cudnn
+  // sdp kernels
+  if (!at::globalContext().userEnabledCuDNNSDP()) {
+    if (debug) {
+      TORCH_WARN("CuDNN attention has been runtime disabled.");
+    }
+    return false;
+  }
+  return true;
+}
+
 bool check_cudnn_requires_grad(sdp_params const& params, bool debug) {
   // Check that the input is causal
   if (input_requires_grad(params)) {
@@ -511,6 +523,7 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
   constexpr auto general_constraints =
       array_of<bool (*)(sdp_params const&, bool)>(
           check_runtime_enabled_cudnn,
+          check_runtime_disabled_cudnn,
           check_cudnn_hardware_support,
           check_all_tensors_on_device,
           check_cudnn_tensor_shapes,

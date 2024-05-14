@@ -248,7 +248,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
         OpType opType,
         uint64_t seq,
         const char* profilingTitle = nullptr,
-        const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt,
+        const std::optional<std::vector<at::Tensor>>& inputs = c10::nullopt,
         bool desyncDebug = false,
         bool enableTiming = false,
         DebugLevel distDebugLevel = DebugLevel::Off);
@@ -305,7 +305,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // and False otherwise.
     // In case of timeout, set exception on the WorkNCCL object.
     bool checkTimeout(
-        c10::optional<std::chrono::milliseconds> timeout = c10::nullopt);
+        std::optional<std::chrono::milliseconds> timeout = c10::nullopt);
 
     std::vector<at::Tensor> result() override;
 
@@ -399,7 +399,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     bool timingEnabled_;
     // unique id used to tell the trace buffer that this
     // work has completed
-    c10::optional<uint64_t> trace_id_;
+    std::optional<uint64_t> trace_id_;
     DebugLevel distDebugLevel_;
     friend class ProcessGroupNCCL;
   };
@@ -621,16 +621,16 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Helper function for iteratively aborting communicators in the provided map
   void abortCommsFromMap(
       std::unordered_map<std::string, std::shared_ptr<NCCLComm>>& ncclCommsMap,
-      c10::optional<std::string> abortReason);
+      std::optional<std::string> abortReason);
 
   c10::intrusive_ptr<intra_node_comm::IntraNodeComm> initIntraNodeComm();
 
   // Provides an API to abort the ProcessGroup (similar to ncclCommAbort)
   // instead of relying on ProcessGroupNCCL destructor.
   // return true if abort is successful, otherwise false
-  bool abort(c10::optional<std::string> abortReason = c10::nullopt);
+  bool abort(std::optional<std::string> abortReason = c10::nullopt);
 
-  void shutdown(c10::optional<std::string> reason = c10::nullopt);
+  void shutdown(std::optional<std::string> reason = c10::nullopt);
 
   void eagerConnectSingleDevice(at::Device device) override;
 
@@ -1092,7 +1092,7 @@ TORCH_API std::string dump_nccl_trace();
 // Gets a mutable reference to a global optional function.  Heartbeat Monitor
 // will use this function to dump traces, if available. Inside fbcode, we store
 // a function here that uses an internal tool for process tracing
-TORCH_API c10::optional<
+TORCH_API std::optional<
     std::function<void(std::function<void(const std::string&)>)>>&
 get_cpp_trace_dumper();
 
