@@ -457,7 +457,6 @@ filegroup(
     name = "caffe2_core_srcs",
     srcs = [
         "caffe2/core/common.cc",
-        "caffe2/core/types.cc",
     ],
 )
 
