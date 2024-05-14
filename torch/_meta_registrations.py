@@ -6326,8 +6326,25 @@ def meta__fbgemm_jagged_to_padded_dense_backward(grad_output: Tensor, offsets: L
     # only one jagged dim is supported for now
     assert len(offsets) == 1
 
-    output_shape = (total_L, *grad_output.shape[1:])
+    output_shape = (total_L, *grad_output.shape[2:])
     return grad_output.new_empty(output_shape)
+
+
+@register_meta(aten._fbgemm_dense_to_jagged_forward.default)
+def meta__fbgemm_dense_to_jagged_forward(padded: Tensor, offsets: List[Tensor], total_L: Optional[int]=None):
+    # only one jagged dim is supported for now
+    assert len(offsets) == 1
+
+    if not total_L:
+        assert isinstance(padded, torch._subclasses.FakeTensor)
+        shape_env = padded.fake_mode.shape_env
+        assert shape_env is not None
+        total_L = shape_env.create_unbacked_symint()
+        torch.fx.experimental.symbolic_shapes._constrain_range_for_size(
+            total_L, min=1, max=None
+        )
+
+    return meta__fbgemm_jagged_to_padded_dense_backward(padded, [offsets], total_L)
 
 
 def _create_unary_float_meta_func(func):
