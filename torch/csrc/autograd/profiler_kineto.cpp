@@ -206,7 +206,7 @@ struct AddTensorboardFields : public MetadataBase {
     result->visit_if_base<PyExtraFieldsBase>([&, this](const auto& i) -> void {
       this->addMetadata("Python id", std::to_string(i.id_));
 
-      c10::optional<std::string> parent_id;
+      std::optional<std::string> parent_id;
       std::shared_ptr<Result> parent = result->parent_.lock();
       while (parent && !parent_id.has_value()) {
         parent->visit_if_base<PyExtraFieldsBase>(

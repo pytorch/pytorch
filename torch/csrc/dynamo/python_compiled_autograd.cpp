@@ -203,12 +203,12 @@ struct CacheNode {
     return pyinput;
   }
 
-  std::vector<c10::optional<SymInt>> unwrap_dynamic_inputs(
+  std::vector<std::optional<SymInt>> unwrap_dynamic_inputs(
       PyObject* pyresult) const {
     TORCH_INTERNAL_ASSERT(PyList_CheckExact(pyresult));
     size_t idx = 0;
     size_t result_len = PyList_GET_SIZE(pyresult);
-    std::vector<c10::optional<SymInt>> result;
+    std::vector<std::optional<SymInt>> result;
     result.reserve(expected_sizes.size());
     for (const auto& i : expected_sizes) {
       if (i.dyn_type == SizeInput::DYNAMIC) {
