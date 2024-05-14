@@ -9,6 +9,7 @@ from .optimizer import (
     _differentiable_doc,
     _disable_dynamo_if_unsupported,
     _foreach_doc,
+    _get_capturable_supported_devices,
     _get_scalar_dtype,
     _maximize_doc,
     _use_grad_for_differentiable,
@@ -254,9 +255,14 @@ def _single_tensor_adadelta(
 ):
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch._utils.is_compiling() and capturable:
+        capturable_supported_devices = _get_capturable_supported_devices(
+            supports_xla=False
+        )
         assert all(
-            p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)
-        ), "If capturable=True, params and state_steps must be CUDA tensors."
+            p.device.type == step.device.type
+            and p.device.type in capturable_supported_devices
+            for p, step in zip(params, state_steps)
+        ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
 
     for param, grad, square_avg, acc_delta, step in zip(
         params, grads, square_avgs, acc_deltas, state_steps
@@ -305,9 +311,14 @@ def _multi_tensor_adadelta(
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch._utils.is_compiling() and capturable:
+        capturable_supported_devices = _get_capturable_supported_devices(
+            supports_xla=False
+        )
         assert all(
-            p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)
-        ), "If capturable=True, params and state_steps must be CUDA tensors."
+            p.device.type == step.device.type
+            and p.device.type in capturable_supported_devices
+            for p, step in zip(params, state_steps)
+        ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
 
     if len(params) == 0:
         return

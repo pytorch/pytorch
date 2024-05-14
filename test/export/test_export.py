@@ -180,7 +180,7 @@ class TestDynamismExpression(TestCase):
         res = gm(*inp)
         self.assertTrue(torchdynamo.utils.same(ref, res))
 
-    def test_export_constraints_error(self):
+    def test_export_constraints_error_not_in_range(self):
         class InvalidInputConflictWithInputConstraints(torch.nn.Module):
             def forward(self, x):
                 return x + 1
@@ -194,6 +194,7 @@ class TestDynamismExpression(TestCase):
                 dynamic_shapes={"x": {0: dim_x}},
             )
 
+    def test_export_constraints_error(self):
         class ConflictingConstraints(torch.nn.Module):
             def forward(self, x):
                 b = x.item()
@@ -2432,7 +2433,7 @@ def forward(self, x):
 
         # This is because we insert sym_constrain_range in the graph now
         if is_non_strict_test(self._testMethodName):
-            error_msg = "Invalid value range"
+            error_msg = r"Invalid value range for -1 between"
         else:
             error_msg = "is outside of inline constraint"
         with self.assertRaisesRegex(RuntimeError, error_msg):
@@ -3299,6 +3300,23 @@ def forward(self, x):
 
         test_inp = torch.ones(8, 4)
         self.assertTrue(torch.allclose(ep.module()(test_inp), Foo().forward(test_inp)))
+
+    @testing.expectedFailureRetraceability
+    def test_runtime_assert_with_size(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                a = x.item()
+                torch._check_is_size(a)
+                torch._check(a <= y.size(0))
+                return y[:a]
+
+        ep = export(
+            M(),
+            (torch.tensor(5), torch.ones(10)),
+            dynamic_shapes={"x": None, "y": {0: torch.export.Dim("t")}},
+        )
+        inp = (torch.tensor(6), torch.randn(13))
+        self.assertTrue(torch.allclose(ep.module()(*inp), M()(*inp)))
 
     def test_issue_113041(self):
         class TestModule(torch.nn.Module):
