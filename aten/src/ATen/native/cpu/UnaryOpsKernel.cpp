@@ -496,9 +496,9 @@ inline Vectorized<c10::complex<scalar_t>> _nan_to_num_replace(
 
 static void nan_to_num_kernel(
     TensorIteratorBase& iter,
-    c10::optional<double> nan,
-    c10::optional<double> pos_inf,
-    c10::optional<double> neg_inf) {
+    std::optional<double> nan,
+    std::optional<double> pos_inf,
+    std::optional<double> neg_inf) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "nan_to_num", [&]() {
     using value_t = c10::scalar_value_type<scalar_t>::type;
     value_t nan_replacement = static_cast<value_t>(nan.value_or(0.));
