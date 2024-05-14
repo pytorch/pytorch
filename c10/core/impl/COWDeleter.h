@@ -58,6 +58,8 @@ class C10_API COWDeleterContext {
 
 using COWSimAccessorID = std::uintptr_t;
 
+enum class AccessType { READ, WRITE };
+
 class C10_API COWSimDeleterContext : public COWDeleterContext {
  public:
   explicit COWSimDeleterContext(std::unique_ptr<void, DeleterFnPtr> data);
@@ -66,7 +68,7 @@ class C10_API COWSimDeleterContext : public COWDeleterContext {
   void check_read(COWSimAccessorID reader);
 
  private:
-  void raise_warning(char* access_type_str);
+  void raise_warning(AccessType access_type);
 
   bool has_first_writer_ = false;
   bool has_raised_;

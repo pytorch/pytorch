@@ -24,7 +24,9 @@ at::DataPtr make_data_ptr(
 }
 
 /// Copies a copy-on-write DataPtr.
-at::DataPtr copy_data_ptr(at::DataPtr const& data_ptr, DeleterFnPtr deleter_fn) {
+at::DataPtr copy_data_ptr(
+    at::DataPtr const& data_ptr,
+    DeleterFnPtr deleter_fn) {
   auto* ctx = data_ptr.cast_context<cow::COWDeleterContext>(deleter_fn);
   TORCH_INTERNAL_ASSERT(ctx != nullptr);
   ctx->increment_refcount();
@@ -90,7 +92,9 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
 
     // Save this for the result.
     new_data_ptr = make_data_ptr(
-        data_ptr, *new cow::COWDeleterContext(std::move(original_ctx)), cow::cow_deleter);
+        data_ptr,
+        *new cow::COWDeleterContext(std::move(original_ctx)),
+        cow::cow_deleter);
 
     // Update this storage to the new copy on write context.
     storage.set_data_ptr_noswap(copy_data_ptr(*new_data_ptr, cow::cow_deleter));
@@ -100,8 +104,8 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
     new_data_ptr = copy_data_ptr(data_ptr, cow::cow_deleter);
   } else if (is_cowsim_data_ptr(data_ptr)) {
     TORCH_CHECK(
-      false,
-      "You cannot create a genuine lazy clone of a simulated COW storage");
+        false,
+        "You cannot create a genuine lazy clone of a simulated COW storage");
   } else {
     // Case 3) There is a context and it's not copy-on-write. Nothing
     // we can do here.
@@ -119,7 +123,8 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
       storage.device_type());
 }
 
-c10::intrusive_ptr<StorageImpl> simulate_lazy_clone_storage(StorageImpl& storage) {
+c10::intrusive_ptr<StorageImpl> simulate_lazy_clone_storage(
+    StorageImpl& storage) {
   const at::DataPtr& data_ptr = storage.data_ptr();
 
   std::optional<DataPtr> new_data_ptr; // must be set below
@@ -131,18 +136,21 @@ c10::intrusive_ptr<StorageImpl> simulate_lazy_clone_storage(StorageImpl& storage
 
     // Save this for the result.
     new_data_ptr = make_data_ptr(
-        data_ptr, *new cow::COWSimDeleterContext(std::move(original_ctx)), cow::cowsim_deleter);
+        data_ptr,
+        *new cow::COWSimDeleterContext(std::move(original_ctx)),
+        cow::cowsim_deleter);
 
     // Update this storage to the new copy on write context.
-    storage.set_data_ptr_noswap(copy_data_ptr(*new_data_ptr, cow::cowsim_deleter));
+    storage.set_data_ptr_noswap(
+        copy_data_ptr(*new_data_ptr, cow::cowsim_deleter));
   } else if (is_cowsim_data_ptr(data_ptr)) {
     // Case 2): there is already a copy on write context. Just return a
     // new storage impl.
     new_data_ptr = copy_data_ptr(data_ptr, cow::cowsim_deleter);
   } else if (is_cow_data_ptr(data_ptr)) {
     TORCH_CHECK(
-      false,
-      "You cannot create a simulated lazy clone of a genuine COW storage");
+        false,
+        "You cannot create a simulated lazy clone of a genuine COW storage");
   } else {
     // Case 3) There is a context and it's not copy-on-write. Nothing
     // we can do here.
@@ -201,14 +209,16 @@ C10_API void materialize_cow_storage(StorageImpl& storage) {
 
 C10_API void check_cowsim_write(StorageImpl& storage) {
   const at::DataPtr& data_ptr = storage._data_ptr_no_checks();
-  auto* ctx = data_ptr.cast_context<cow::COWSimDeleterContext>(cow::cowsim_deleter);
+  auto* ctx =
+      data_ptr.cast_context<cow::COWSimDeleterContext>(cow::cowsim_deleter);
   TORCH_INTERNAL_ASSERT(ctx != nullptr);
   ctx->check_write(reinterpret_cast<std::uintptr_t>(&storage));
 }
 
 C10_API void check_cowsim_read(const StorageImpl& storage) {
   const at::DataPtr& data_ptr = storage._data_ptr_no_checks();
-  auto* ctx = data_ptr.cast_context<cow::COWSimDeleterContext>(cow::cowsim_deleter);
+  auto* ctx =
+      data_ptr.cast_context<cow::COWSimDeleterContext>(cow::cowsim_deleter);
   TORCH_INTERNAL_ASSERT(ctx != nullptr);
   ctx->check_read(reinterpret_cast<std::uintptr_t>(&storage));
 }

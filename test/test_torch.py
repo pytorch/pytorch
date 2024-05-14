@@ -5131,7 +5131,6 @@ else:
 
         self.assertTrue(torch._C._data_address(t) == orig_data_ptr)
         self.assertTrue(torch._C._data_address(clone) == orig_data_ptr)
-    
 
     @skipXLA
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
@@ -5203,7 +5202,6 @@ else:
 
         finally:
             warnings.filterwarnings('default')
-
 
     # See Note [lazy_clone_ tests with inductor enabled]
     @skipXLA

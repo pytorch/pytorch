@@ -1,7 +1,7 @@
 #include <c10/core/impl/COWDeleter.h>
 #include <c10/util/Exception.h>
-#include <mutex>
 #include <iostream>
+#include <mutex>
 
 namespace c10::impl {
 
@@ -53,10 +53,12 @@ cow::COWSimDeleterContext::COWSimDeleterContext(
       has_first_writer_(false),
       has_raised_(false) {}
 
-void cow::COWSimDeleterContext::raise_warning(char* access_type_str) {
+void cow::COWSimDeleterContext::raise_warning(cow::AccessType access_type) {
   if (!has_raised_) {
     // TODO: Improve this message
-    TORCH_WARN("Detected divergent behavior on ", access_type_str);
+    TORCH_WARN(
+        "Detected divergent behavior on ",
+        (access_type == cow::AccessType::READ) ? "read" : "write");
     has_raised_ = true;
   }
 }
@@ -66,13 +68,13 @@ void cow::COWSimDeleterContext::check_write(cow::COWSimAccessorID writer) {
     has_first_writer_ = true;
     first_writer_ = writer;
   } else if (writer != first_writer_) {
-    raise_warning("write");
+    raise_warning(cow::AccessType::WRITE);
   }
 }
 
 void cow::COWSimDeleterContext::check_read(cow::COWSimAccessorID reader) {
   if (has_first_writer_ && reader != first_writer_) {
-    raise_warning("read");
+    raise_warning(cow::AccessType::READ);
   }
 }
 
