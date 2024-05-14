@@ -298,6 +298,7 @@ class TestPublicBindings(TestCase):
             "torch._inductor.codegen.cuda.cuda_kernel",
             "torch.onnx._internal.fx._pass",
             "torch.onnx._internal.fx.analysis",
+            "torch.onnx._internal.fx.analysis.unsupported_nodes",
             "torch.onnx._internal.fx.decomposition_skip",
             "torch.onnx._internal.fx.diagnostics",
             "torch.onnx._internal.fx.fx_onnx_interpreter",
@@ -305,6 +306,13 @@ class TestPublicBindings(TestCase):
             "torch.onnx._internal.fx.onnxfunction_dispatcher",
             "torch.onnx._internal.fx.op_validation",
             "torch.onnx._internal.fx.passes",
+            "torch.onnx._internal.fx.passes._utils",
+            "torch.onnx._internal.fx.passes.decomp",
+            "torch.onnx._internal.fx.passes.functionalization",
+            "torch.onnx._internal.fx.passes.modularization",
+            "torch.onnx._internal.fx.passes.readability",
+            "torch.onnx._internal.fx.passes.type_promotion",
+            "torch.onnx._internal.fx.passes.virtualization",
             "torch.onnx._internal.fx.type_utils",
             "torch.testing._internal.common_distributed",
             "torch.testing._internal.common_fsdp",
@@ -371,6 +379,12 @@ class TestPublicBindings(TestCase):
             "torch.distributed.examples.memory_tracker_example",
             "torch.testing._internal.distributed.rpc.fb.thrift_rpc_agent_test_fixture",
             "torch.utils._cxx_pytree",
+            "torch.utils.tensorboard._convert_np",
+            "torch.utils.tensorboard._embedding",
+            "torch.utils.tensorboard._onnx_graph",
+            "torch.utils.tensorboard._proto_graph",
+            "torch.utils.tensorboard._pytorch_graph",
+            "torch.utils.tensorboard._utils",
         }
 
         # No new entries should be added to this list.
@@ -408,6 +422,12 @@ class TestPublicBindings(TestCase):
             "torch.distributed.tensor.parallel",
             "torch.distributed.utils",
             "torch.utils.tensorboard",
+            "torch.utils.tensorboard.summary",
+            "torch.utils.tensorboard.writer",
+            "torch.ao.quantization.experimental.fake_quantize",
+            "torch.ao.quantization.experimental.linear",
+            "torch.ao.quantization.experimental.observer",
+            "torch.ao.quantization.experimental.qconfig",
         }
 
         errors = []
