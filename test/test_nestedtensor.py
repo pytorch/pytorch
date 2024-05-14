@@ -3070,6 +3070,7 @@ class TestNestedTensorSubclass(TestCase):
             torch.ops.aten.is_non_overlapping_and_dense.default,
             torch.ops.aten.sym_size.default,
             torch.ops.aten.dim.default,
+            torch.ops.aten.numel.default,
             torch.ops.aten.sym_numel.default,
             torch.ops.aten.sym_stride.default,
             torch.ops.aten.sym_storage_offset.default,
