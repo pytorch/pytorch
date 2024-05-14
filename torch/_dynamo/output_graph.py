@@ -1069,6 +1069,7 @@ class OutputGraph:
                         TensorWithTFOverrideVariable,
                     ),
                 )
+                and not (isinstance(v, SymNodeVariable) and v.python_type() is float)
                 for v in stack_values
             )
             and all(isinstance(x, TensorVariable) for x in stack_values)

@@ -2833,7 +2833,7 @@ def main() -> None:
     parser.add_argument(
         "--update-aoti-c-shim",
         action="store_true",
-        help="Update AOTInductor C shim after changing torchgen/aoti/fallback_ops.py. "
+        help="Update AOTInductor C shim after adding an entry to inductor_fallback_ops in torchgen/aoti/fallback_ops.py. "
         "WARNING: Do not use this unless you are sure what you are doing!!!",
     )
 
