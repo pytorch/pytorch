@@ -30,7 +30,7 @@ std::function<::c10::Backtrace()>& GetFetchStackTrace() {
     return get_lazy_backtrace(/*frames_to_skip=*/1);
   };
   return func;
-};
+}
 } // namespace
 
 void SetStackTraceFetcher(std::function<::c10::Backtrace()> fetcher) {
@@ -134,19 +134,19 @@ APIUsageLoggerType* GetAPIUsageLogger() {
   static APIUsageLoggerType func =
       IsAPIUsageDebugMode() ? &APIUsageDebug : [](const string&) {};
   return &func;
-};
+}
 
 APIUsageMetadataLoggerType* GetAPIUsageMetadataLogger() {
   static APIUsageMetadataLoggerType func =
       [](const std::string&,
          const std::map<std::string, std::string>& metadata_map) {};
   return &func;
-};
+}
 
 DDPUsageLoggerType* GetDDPUsageLogger() {
   static DDPUsageLoggerType func = [](const DDPLoggingData&) {};
   return &func;
-};
+}
 } // namespace
 
 void SetAPIUsageLogger(std::function<void(const std::string&)> logger) {
