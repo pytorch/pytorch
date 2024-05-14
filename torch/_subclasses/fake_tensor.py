@@ -748,6 +748,7 @@ class TensorMetadata:
     layout: torch.layout
     memory_format: Optional[torch.memory_format]
     storage_offset: int
+    storage_bytes: Optional[int]
     requires_grad: bool
     is_quantized: bool
     is_conj: bool
@@ -775,6 +776,8 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
         layout=t.layout,
         memory_format=memory_format,
         storage_offset=t.storage_offset(),
+        # Only set storage_bytes for tensors that have storage (not sparse)
+        storage_bytes=t.untyped_storage().nbytes() if not t.is_sparse else None,
         requires_grad=t.requires_grad,
         is_quantized=t.is_quantized,
         is_conj=t.is_conj(),
@@ -1122,6 +1125,9 @@ class FakeTensorMode(TorchDispatchMode):
         if func in self.lift_fns:
             raise _BypassDispatchCache("lift")
 
+        if func.name() == "inductor::resize_storage_bytes_":
+            raise _BypassDispatchCache("inductor::resize_storage_bytes_")
+
         if not torch._library.utils.is_builtin(func):
             raise _BypassDispatchCache("non-builtin")
 
@@ -1154,6 +1160,17 @@ class FakeTensorMode(TorchDispatchMode):
                     raise _BypassDispatchCache("constant attribute")
                 if arg.is_sparse:
                     raise _BypassDispatchCache("sparse tensor")
+                if arg.layout in [
+                    torch.sparse_csr,
+                    torch.sparse_csc,
+                    torch.sparse_bsr,
+                    torch.sparse_bsc,
+                ]:
+                    # Does this subsume arg.is_sparse?
+                    raise _BypassDispatchCache("sparse tensor layout")
+                # sparse tensors don't have storage, so check is after
+                if isinstance(arg.untyped_storage().nbytes(), torch.SymInt):
+                    raise _BypassDispatchCache("symbolic nbytes")
                 if is_sparse_compressed(arg):
                     raise _BypassDispatchCache("sparse compressed tensor")
                 result.append(extract_tensor_metadata(arg))
@@ -1287,6 +1304,8 @@ class FakeTensorMode(TorchDispatchMode):
                 empty.set_(
                     storage, metadata.storage_offset, metadata.shape, metadata.stride
                 )
+        if metadata.storage_bytes == 0:
+            empty.untyped_storage().resize_(0)
 
         return FakeTensor(self, empty, metadata.device)
 
