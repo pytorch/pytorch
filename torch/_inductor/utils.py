@@ -8,6 +8,7 @@ import functools
 import inspect
 import io
 import itertools
+import json
 import logging
 import math
 import operator
@@ -21,6 +22,7 @@ import time
 import unittest
 from datetime import datetime
 from io import StringIO
+from pathlib import Path
 from typing import (
     Any,
     Callable,
@@ -32,6 +34,7 @@ from typing import (
     Optional,
     Protocol,
     Set,
+    Tuple,
     TypeVar,
     Union,
     ValuesView,
@@ -42,6 +45,8 @@ import sympy
 from typing_extensions import Concatenate, ParamSpec
 
 import torch
+import torch._export
+import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import detect_fake_mode
 from torch.autograd import DeviceType
@@ -51,7 +56,7 @@ from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularInd
 from torch.utils._sympy.symbol import make_symbol, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from . import config
-from .runtime.runtime_utils import ceildiv as runtime_ceildiv
+from .runtime.runtime_utils import cache_dir, ceildiv as runtime_ceildiv
 
 log = logging.getLogger(__name__)
 
@@ -1544,3 +1549,140 @@ def maybe_get_suppress_shape_guards_ctx():
         return contextlib.nullcontext()
 
     return shape_env.suppress_guards()
+
+
+def aoti_eager_cache_dir(namespace: str, device: str):
+    return Path(cache_dir()) / "aoti_eager" / namespace / device
+
+
+def aoti_eager_op_conf_lock(op_func_name_with_overload: str):
+    from filelock import FileLock
+
+    # Avoid circular import
+    from torch._inductor.codecache import get_lock_dir, LOCK_TIMEOUT
+
+    op_conf_lock_file = f"{op_func_name_with_overload}.lock"
+    lock_dir = get_lock_dir()
+    return FileLock(os.path.join(lock_dir, op_conf_lock_file), timeout=LOCK_TIMEOUT)
+
+
+def load_aoti_eager_cache(ns: str, op_func_name_with_overload: str, device_type: str):
+    device_kernel_cache = aoti_eager_cache_dir(ns, device_type)
+    op_conf = device_kernel_cache / f"{op_func_name_with_overload}.json"
+    if not op_conf.exists():
+        return []
+
+    with aoti_eager_op_conf_lock(op_func_name_with_overload):
+        with open(op_conf) as f:
+            json_data = json.load(f)
+            for item in json_data:
+                # Get absolution path for kernel library
+                kernel_lib_abs_path = device_kernel_cache / item["kernel_path"]
+                item["kernel_path"] = kernel_lib_abs_path.as_posix()
+
+                # Check if the kernel library exists
+                if not kernel_lib_abs_path.exists():
+                    return []
+
+                for metadata in item["meta_info"]:
+                    assert not metadata[
+                        "is_dynamic"
+                    ], "Only support static shape for now"
+                    if metadata["device_type"] == "cpu":
+                        metadata["device_index"] = -1
+                    metadata["dtype"] = getattr(torch, metadata["dtype"].split(".")[-1])
+
+            return json_data
+
+
+def aoti_compile_with_persistent_cache(
+    ns: str,
+    op_func_name_with_overload: str,
+    device_type: str,
+    dynamic: bool,
+    f: Callable[..., Any],
+    args: Tuple[Any],
+    kwargs: Dict[str, Any],
+    *,
+    dynamic_shapes: Optional[Dict[str, Any]] = None,
+    options: Optional[Dict[str, Any]] = None,
+    remove_runtime_assertions: bool = False,
+    disable_constraint_solver: bool = False,
+):
+    """
+    Compile the given function with persistent cache for AOTI eager mode.
+    """
+    flattened_inputs = pytree.arg_tree_leaves(*args, **kwargs)
+    assert all(
+        isinstance(input, torch.Tensor) for input in flattened_inputs
+    ), "Only support tensor for now"
+    assert not dynamic, "Only support static shape for now"
+
+    persistent_cache = aoti_eager_cache_dir(ns, device_type)
+    persistent_cache.mkdir(parents=True, exist_ok=True)
+    persistent_cache_lib = persistent_cache / "lib"
+    persistent_cache_lib.mkdir(parents=True, exist_ok=True)
+
+    with mock.patch.dict(
+        os.environ,
+        {"TORCHINDUCTOR_CACHE_DIR": persistent_cache_lib.absolute().as_posix()},
+    ):
+        try:
+            kernel_lib_path = torch._export.aot_compile(
+                f,
+                args,
+                kwargs,
+                dynamic_shapes=dynamic_shapes,
+                options=options,
+                remove_runtime_assertions=remove_runtime_assertions,
+                disable_constraint_solver=disable_constraint_solver,
+            )
+
+            kernel_metadata_items = []
+            for input_tensor in flattened_inputs:
+                # TODO(Eikan): To add dynamic support
+                metadata: Dict[str, Any] = {}
+                metadata["is_dynamic"] = dynamic
+                metadata["device_type"] = f"{input_tensor.device.type}"
+                if is_cpu_device([input_tensor]):
+                    metadata["device_index"] = -1
+                else:
+                    metadata["device_index"] = input_tensor.device.index
+                metadata["dtype"] = f"{input_tensor.dtype}"
+                metadata["sizes"] = list(input_tensor.size())
+                metadata["strides"] = list(input_tensor.stride())
+                kernel_metadata_items.append(metadata)
+
+            kernel_meta_info: Dict[str, Any] = {}
+            kernel_meta_info["meta_info"] = kernel_metadata_items
+            kernel_meta_info["kernel_path"] = (
+                Path(kernel_lib_path).relative_to(persistent_cache).as_posix()
+            )
+
+            json_data = []
+            update_json = True
+            op_conf = persistent_cache / f"{op_func_name_with_overload}.json"
+            mode = "r" if op_conf.exists() else "w"
+            with aoti_eager_op_conf_lock(op_func_name_with_overload):
+                with open(op_conf, mode) as op_conf_file:
+                    try:
+                        json_data = json.load(op_conf_file)
+                    except Exception as e:
+                        json_data = []
+
+                    assert isinstance(json_data, list)
+                    for item in json_data:
+                        assert isinstance(item, dict)
+                        # Same kernel meta info already exists in the json file
+                        if item["meta_info"] == kernel_metadata_items:
+                            update_json = False
+                            break
+
+                if update_json:
+                    json_data.append(kernel_meta_info)
+                    with open(op_conf, "w") as op_conf_file:
+                        json.dump(json_data, op_conf_file, indent=4)
+
+            return kernel_lib_path
+        except Exception as e:
+            return ""
