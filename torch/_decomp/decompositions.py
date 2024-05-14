@@ -3717,8 +3717,8 @@ def _unsafe_masked_index(x, mask, indices, fill):
     return aten._unsafe_index(x, indices).masked_fill(~mask, fill)
 
 
-@register_decomposition([aten._unsafe_masked_index_add])
-def _unsafe_masked_index_add(x, mask, indices, values):
+@register_decomposition([aten._unsafe_masked_index_put_accumulate])
+def _unsafe_masked_index_put_accumulate(x, mask, indices, values):
     for index in indices:
         if index is not None:
             torch._check(

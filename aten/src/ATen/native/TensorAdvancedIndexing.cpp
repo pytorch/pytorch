@@ -705,7 +705,7 @@ Tensor _unsafe_masked_index(const Tensor& self, const Tensor& mask, const torch:
   return result.masked_fill(at::logical_not(mask), fill);
 }
 
-Tensor _unsafe_masked_index_add(const Tensor& self, const Tensor& mask, const torch::List<c10::optional<Tensor>>& indices, const Tensor& values) {
+Tensor _unsafe_masked_index_put_accumulate(const Tensor& self, const Tensor& mask, const torch::List<c10::optional<Tensor>>& indices, const Tensor& values) {
   // This is the backward of _unsafe_masked_index.
   // This function is not meant to be executed on eager mode.
 

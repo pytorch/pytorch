@@ -3154,8 +3154,8 @@ fallback__unsafe_masked_index = fallback_handler(
     aten._unsafe_masked_index.default, add_to_fallback_set=False
 )
 
-fallback__unsafe_masked_index_add = fallback_handler(
-    aten._unsafe_masked_index_add.default, add_to_fallback_set=False
+fallback__unsafe_masked_index_put_accumulate = fallback_handler(
+    aten._unsafe_masked_index_put_accumulate.default, add_to_fallback_set=False
 )
 
 
@@ -3175,11 +3175,11 @@ def _unsafe_masked_index(self, mask, indices, fill):
     )
 
 
-@register_lowering(aten._unsafe_masked_index_add, type_promotion_kind=None)
-def _unsafe_masked_index_add(x, mask, indices, values):
+@register_lowering(aten._unsafe_masked_index_put_accumulate, type_promotion_kind=None)
+def _unsafe_masked_index_put_accumulate(x, mask, indices, values):
     if torch.version.hip is not None:
         # Avoid a triton compiler failure
-        return fallback__unsafe_masked_index_add(x, mask, indices, values)
+        return fallback__unsafe_masked_index_put_accumulate(x, mask, indices, values)
 
     masked_value = where(mask, values, 0)
     shape = x.get_size()

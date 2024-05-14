@@ -378,7 +378,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "_unsafe_index",
     "_unsafe_index_put",
     "_unsafe_masked_index",
-    "_unsafe_masked_index_add",
+    "_unsafe_masked_index_put_accumulate",
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
