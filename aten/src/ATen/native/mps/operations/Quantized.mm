@@ -10,8 +10,6 @@
 #endif
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/OperationUtils.h>
-// For Metal3_1
-#include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <fmt/format.h>
 
 namespace at::native {
@@ -33,11 +31,11 @@ kernel void int4pack_mm(
     constant T                 * scalesAndZeros [[buffer(2)]],
     device   T                 * outputData     [[buffer(3)]],
     constant uint3             & sizes          [[buffer(4)]],
-    uint                         thread_index   [[thread_position_in_grid]]) {
+    uint2                        thread_index   [[thread_position_in_grid]]) {
     const uint lda = sizes.y;
     const uint ldc = sizes.z;
-    const uint m = thread_index / sizes.z; // 0..sizes.x-1
-    const uint n = thread_index % sizes.z; // 0..sizes.z-1
+    const uint m = thread_index.y; // 0..sizes.x-1
+    const uint n = thread_index.x; // 0..sizes.z-1
     const uint nb = n / 32;
     const uint ldb = min(32U,  sizes.z - nb * 32);
     const uint32_t k_block = (sizes.y + groupSize - 1) / groupSize;
@@ -56,7 +54,7 @@ kernel void int4pack_mm(
         rc += a_val * float(scale * T(b_val) + zero);
       }
     }
-    outputData[thread_index] = T(rc);
+    outputData[m * sizes.z + n] = T(rc);
 }
 
 #define INSTANTIATE_INT4MM(DTYPE, GSIZE)                                 \
@@ -68,7 +66,7 @@ kernel void int4pack_mm<DTYPE, GSIZE>(                                   \
     constant DTYPE             * scalesAndZeros [[buffer(2)]],           \
     device   DTYPE             * outputData     [[buffer(3)]],           \
     constant uint3             & sizes          [[buffer(4)]],           \
-    uint                         thread_index [[thread_position_in_grid]])
+    uint2                        thread_index [[thread_position_in_grid]])
 
 INSTANTIATE_INT4MM(float, 32);
 INSTANTIATE_INT4MM(half, 32);
@@ -115,31 +113,31 @@ Tensor _weight_int4pack_mm_mps(const Tensor& A, const Tensor& B, int64_t qGroupS
               ", 2]");
 
   auto C = at::empty({M, N}, A.options());
-  id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
   std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(M), static_cast<uint32_t>(K), static_cast<uint32_t>(N)};
   static bool firstCapture = false;
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
 #if _CAPTURE_KERNEL
-      auto& profiler = getMPSProfiler();
-      if (profiler.isCaptureEnabled()) {
-        profiler.startCapture(__func__, mpsStream);
+      if (getMPSProfiler().isCaptureEnabled()) {
+        getMPSProfiler().startCapture(fmt::format("int4pack_mm_{}x{}x{}", M, N, K), mpsStream);
       }
 #endif
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       const std::string kernel = fmt::format("int4pack_mm_{}_{}", qGroupSize, scalarToMetalTypeString(A));
       id<MTLComputePipelineState> quantizedPSO = lib.getPipelineStateForFunc(kernel);
+      const auto maxThreadsPerGroup = static_cast<decltype(M)>([quantizedPSO maxTotalThreadsPerThreadgroup]);
       [computeEncoder setComputePipelineState:quantizedPSO];
       mtl_setBuffer(computeEncoder, A, 0);
       mtl_setBuffer(computeEncoder, B, 1);
       mtl_setBuffer(computeEncoder, qScaleAndZeros, 2);
       mtl_setBuffer(computeEncoder, C, 3);
       [computeEncoder setBytes:sizes.data() length:sizeof(uint32_t) * sizes.size() atIndex:4];
-      mtl_dispatch1DJob(computeEncoder, quantizedPSO, C.numel());
+      [computeEncoder dispatchThreads:MTLSizeMake(N, M, 1)
+                threadsPerThreadgroup:MTLSizeMake(std::min(maxThreadsPerGroup, M), 1, 1)];
 #if _CAPTURE_KERNEL
-      if (profiler.isCapturing()) {
-        profiler.stopCapture(mpsStream);
+      if (getMPSProfiler().isCapturing()) {
+        getMPSProfiler().stopCapture(mpsStream);
       }
 #endif
     }
