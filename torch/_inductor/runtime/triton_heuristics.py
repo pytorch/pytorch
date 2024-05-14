@@ -1086,17 +1086,18 @@ def cached_autotune(
                 )
 
         best_config = None
-        if cache_filename is not None and os.path.exists(cache_filename):
-            with open(cache_filename) as fd:
-                best_config = json.loads(fd.read())
-        elif remote_cache is not None and remote_cache_key is not None:
-            best_config = remote_cache.get(remote_cache_key)
+        if not inductor_meta.get("force_disable_caches", False):
+            if cache_filename is not None and os.path.exists(cache_filename):
+                with open(cache_filename) as fd:
+                    best_config = json.loads(fd.read())
+            elif remote_cache is not None and remote_cache_key is not None:
+                best_config = remote_cache.get(remote_cache_key)
 
-        best_config = load_cached_autotuning(
-            best_config, configs_hash, configs, inductor_meta
-        )
-        if best_config:
-            configs = [best_config]
+            best_config = load_cached_autotuning(
+                best_config, configs_hash, configs, inductor_meta
+            )
+            if best_config:
+                configs = [best_config]
 
         def save_cache_hook(cfg, time_taken_ns, found_by_coordesc=False):
             data = {
