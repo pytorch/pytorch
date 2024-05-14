@@ -56,11 +56,11 @@ InputInfo = Union[RecvInfo, RootArgPlaceholder]
 
 
 def _make_tensor_from_meta(
-    example: FakeTensor,
+    example: Union[torch.Tensor, FakeTensor],
     device: torch.device,
 ) -> torch.Tensor:
     """
-    Create a real tensor from a fake tensor.
+    Create a real tensor from a tensor.
     """
     return torch.empty(
         example.size(),
@@ -143,7 +143,7 @@ class PipelineStageBase(ABC):
         self.log_prefix = f"[Stage {self.stage_index}]"
 
         # Forward infra
-        self.args_recv_info: Dict[int, Tuple[InputInfo]] = {}
+        self.args_recv_info: Dict[int, Tuple[InputInfo, ...]] = {}
         self.set_requires_grad: Dict[int, bool] = {}
         self.act_send_info: Dict[int, List] = {}
 
@@ -212,7 +212,7 @@ class PipelineStageBase(ABC):
 
     def _get_recv_ops(
         self,
-        recv_infos: Tuple[InputInfo],
+        recv_infos: Tuple[InputInfo, ...],
     ) -> List[dist.P2POp]:
         """
         Helper function shared by `get_fwd_recv_ops` and `get_bwd_recv_ops`.
@@ -240,7 +240,7 @@ class PipelineStageBase(ABC):
         Returns a list of ops that are needed to receive the input arguments
         for this stage.
         """
-        recv_infos: Tuple[InputInfo] = self.args_recv_info[self.fwd_chunk_id]
+        recv_infos: Tuple[InputInfo, ...] = self.args_recv_info[self.fwd_chunk_id]
 
         # In case there is backward pass, set requires_grad for receive buffers
         # before first forward
@@ -361,7 +361,7 @@ class PipelineStageBase(ABC):
 
     def _map_tensor_from_recv_info(
         self,
-        recv_infos: Tuple[InputInfo],
+        recv_infos: Tuple[InputInfo, ...],
     ):
         """
         Map tensors from recv infos to a list.
@@ -829,7 +829,7 @@ PLACEHOLDER_VAL = -1
 
 
 def create_empty_tensors(
-    tensor: Union[torch.Tensor, List[torch.tensor]], device: torch.device
+    tensor: Union[torch.Tensor, List[torch.Tensor]], device: torch.device
 ) -> List[torch.Tensor]:
     """
     Creates a list of empty tensors with the same properties (like shape and dtype) as the input tensor(s),
@@ -914,7 +914,7 @@ def get_stage_shapes(
     rank: int,
     world_size: int,
     device: torch.device,
-    microbatch: Optional[Union[torch.tensor, List[torch.tensor]]] = None,
+    microbatch: Optional[Union[torch.Tensor, List[torch.Tensor]]] = None,
 ):
     """
     Performs a dry run through all the pipeline stages (a rank can have multiple pipeline stages in the case of
@@ -937,7 +937,7 @@ def get_stage_shapes(
         "outputs": Shape of the outputs of the module
     """
 
-    stage_id_to_shapes: Dict[int, Dict[str, torch.Size]] = {}
+    stage_id_to_shapes: Dict[int, Dict[str, list[torch.Size]]] = {}
     for stage_id, model in zip(stage_ids, stage_modules):
         input_shape_metadata_tensor = create_metadata_tensor(device=device)
         # TODO: Assumes prev_stage == rank - 1 and next_stage == rank + 1
@@ -1004,9 +1004,9 @@ class ManualPipelineStage(PipelineStageBase):
         num_stages: int,
         device: torch.device,
         num_microbatches: int,
-        input_args: Union[torch.Tensor, List[torch.tensor]],
-        output_args: Optional[Union[torch.Tensor, List[torch.tensor]]] = None,
-        group: dist.ProcessGroup = None,
+        input_args: Union[torch.Tensor, List[torch.Tensor]],
+        output_args: Optional[Union[torch.Tensor, List[torch.Tensor]]] = None,
+        group: Optional[dist.ProcessGroup] = None,
     ):
         super().__init__(
             submodule, stage_index, num_stages, device, num_microbatches, group
@@ -1014,8 +1014,8 @@ class ManualPipelineStage(PipelineStageBase):
         self.submod.to(self.device)
         # When we materialize the model partition on cuda, we call reset_parameters() if it is available
         # logger.info(f"input args {input_args=}")
-        self.inputs: List[torch.tensor] = []
-        self.outputs: List[torch.tensor] = []
+        self.inputs: List[torch.Tensor] = []
+        self.outputs: List[torch.Tensor] = []
 
         self.inputs = create_empty_tensors(input_args, device)
 
@@ -1029,7 +1029,7 @@ class ManualPipelineStage(PipelineStageBase):
             self.outputs = create_empty_tensors(output_args, device)
 
         # these are the buffers used in backwards send/recv, they are allocated later
-        self.outputs_grad: List[torch.tensor] = []
+        self.outputs_grad: List[torch.Tensor] = []
 
         def stage_global_rank(peer_rank):
             return (
@@ -1047,7 +1047,7 @@ class ManualPipelineStage(PipelineStageBase):
             self.set_requires_grad[chunk_id] = False
             if not self.is_first:
                 # We assume that we always receive from stage - 1
-                self.args_recv_info[chunk_id] = tuple(
+                recv_infos = tuple(
                     [
                         RecvInfo(
                             f"recv_for_{self.stage_index}_from_{self.stage_index - 1}",
@@ -1057,6 +1057,8 @@ class ManualPipelineStage(PipelineStageBase):
                         for inp in self.inputs
                     ]
                 )
+
+                self.args_recv_info[chunk_id] = recv_infos
             else:
                 self.args_recv_info[chunk_id] = tuple(
                     [RootArgPlaceholder() for _ in self.inputs]
@@ -1073,12 +1075,10 @@ class ManualPipelineStage(PipelineStageBase):
                 self.act_send_info[idx] = []
 
         logger.debug(
-            f"""
-            finished pipeline stage init, {self.stage_index=}, {self.is_first=},
-            {self.is_last=}, {self.num_stages=},
-            inputs: {[inp.shape for inp in self.inputs]},
-            output: {[output.shape for output in self.outputs]}
-            """
+            f"finished pipeline stage init, {self.stage_index=}, {self.is_first=}, "  # noqa: G004
+            f"{self.is_last=}, {self.num_stages=}, "
+            f"inputs: {[inp.shape for inp in self.inputs]}, "
+            f"output: {[output.shape for output in self.outputs]}"
         )
 
     def _create_grad_recv_info(
@@ -1148,11 +1148,13 @@ def validate_stage_shapes(pipeline_stages: List[ManualPipelineStage]):
         # check that world_size and num_stages are consistent across all stages
         if stage.group_size != world_size:
             raise ValueError(
-                f"Stage id {stage_id} has world size ({stage.group_size}) which does not match world size ({world_size}) of other stages."
+                f"Stage id {stage_id} has world size ({stage.group_size}) \
+                which does not match world size ({world_size}) of other stages."
             )
         if stage.num_stages != num_stages:
             raise ValueError(
-                f"Stage id {stage_id} has num stages ({stage.num_stages}) which does not match num stages ({num_stages}) of other stages."
+                f"Stage id {stage_id} has num stages ({stage.num_stages}) \
+                which does not match num stages ({num_stages}) of other stages."
             )
 
         # TODO: once we pass in pg to stage, check the pg rank is same as stage rank
@@ -1189,15 +1191,13 @@ def validate_stage_shapes(pipeline_stages: List[ManualPipelineStage]):
         ]
 
         logger.debug(
-            f"""
-            Rank: {pg_rank}
-            Stage id: {stage_id}
-            Stage num stages: {stage.num_stages}
-            Stage rank: {rank}
-            Stage world size: {world_size}
-            Stage {virtual_id * world_size}-{(virtual_id + 1) * world_size - 1} input shapes: {stage_input_shapes}
-            Stage {virtual_id * world_size}-{(virtual_id + 1) * world_size - 1} output shapes: {stage_output_shapes}
-        """
+            f"Rank: {pg_rank}"  # noqa: G004
+            f"Stage id: {stage_id}"
+            f"Stage num stages: {stage.num_stages}"
+            f"Stage rank: {rank}"
+            f"Stage world size: {world_size}"
+            f"Stage {virtual_id * world_size}-{(virtual_id + 1) * world_size - 1} input shapes: {stage_input_shapes}"  # noqa: G003
+            f"Stage {virtual_id * world_size}-{(virtual_id + 1) * world_size - 1} output shapes: {stage_output_shapes}"  # noqa: G003
         )
 
         all_inputs.extend(stage_input_shapes)
@@ -1206,10 +1206,8 @@ def validate_stage_shapes(pipeline_stages: List[ManualPipelineStage]):
     # log only rank 0's view, they will all be equivalent
     if pg_rank == 0:
         logger.info(
-            f"""
-            all stage inputs: {all_inputs}
-            all stage outputs: {all_outputs}
-        """
+            f"all stage inputs: {all_inputs}"  # noqa: G004
+            f"all stage outputs: {all_outputs}"
         )
 
     # Check if the output for stage 0 matches the input at stage 1, and so forth
