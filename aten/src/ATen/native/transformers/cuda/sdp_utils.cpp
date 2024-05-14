@@ -526,10 +526,10 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
           check_cudnn_hardware_support,
           check_all_tensors_on_device,
           check_cudnn_tensor_shapes,
-          check_cudnn_layout,
+          // check_cudnn_layout,
           // check_is_causal,
           check_for_nested_inputs,
-          check_cudnn_requires_grad,
+          // check_cudnn_requires_grad,
           check_dtypes_low_precision);
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
@@ -669,7 +669,7 @@ SDPBackend select_sdp_backend(sdp_params const& kernel_params) {
 
   // Because TORCHCHECK checks if condition is true we negate debug so that
   // The statements will be printed when debug is true
-  bool print_debug = false;
+  bool print_debug = true;
   for (auto& backend : ordering) {
     switch (backend) {
       case SDPBackend::cudnn_attention:
