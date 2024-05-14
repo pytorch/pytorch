@@ -14,7 +14,7 @@ Storage DeprecatedTypeProperties::unsafeStorageFromTH(void * th_pointer, bool re
   return at::unsafeStorageFromTH(th_pointer, retain);
 }
 
-Tensor DeprecatedTypeProperties::copy(const Tensor & src, bool non_blocking, c10::optional<Device> to_device) const {
+Tensor DeprecatedTypeProperties::copy(const Tensor & src, bool non_blocking, std::optional<Device> to_device) const {
   if (to_device) {
     return src.to(src.options().dtype(scalarType()).device(to_device), non_blocking, /*copy=*/true);
   }

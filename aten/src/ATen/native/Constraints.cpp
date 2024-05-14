@@ -24,8 +24,8 @@ namespace at::native {
 
 void sym_constrain_range(
     const Scalar& size,
-    c10::optional<int64_t> min,
-    c10::optional<int64_t> max) {
+    std::optional<int64_t> min,
+    std::optional<int64_t> max) {
 
     int64_t min_val = min.has_value() ? min.value() : std::numeric_limits<int64_t>::min();
     int64_t max_val = max.has_value() ? max.value() : std::numeric_limits<int64_t>::max();
@@ -53,14 +53,14 @@ void sym_constrain_range(
 
 Tensor _functional_sym_constrain_range(
     const Scalar& size,
-    c10::optional<int64_t> min,
-    c10::optional<int64_t> max,
+    std::optional<int64_t> min,
+    std::optional<int64_t> max,
     const Tensor& dep_token) {
   sym_constrain_range(size, min, max);
   return dep_token.clone();
 }
 
-void sym_constrain_range_for_size(const Scalar& size, c10::optional<int64_t> min, c10::optional<int64_t> max) {
+void sym_constrain_range_for_size(const Scalar& size, std::optional<int64_t> min, c10::optional<int64_t> max) {
   int64_t min_val = min.has_value() ? min.value() : 0;
   if (max.has_value() && max.value() <= 2) {
     TORCH_CHECK(false, "Max value to constrain_range_for_size must be greater than 2. got: ", max.value());
@@ -70,19 +70,19 @@ void sym_constrain_range_for_size(const Scalar& size, c10::optional<int64_t> min
 
 Tensor _functional_sym_constrain_range_for_size(
   const Scalar& size,
-  c10::optional<int64_t> min,
-  c10::optional<int64_t> max,
+  std::optional<int64_t> min,
+  std::optional<int64_t> max,
   const Tensor& dep_token) {
   sym_constrain_range_for_size(size, min, max);
   return dep_token.clone();
 }
 
 Tensor _make_dep_token_cpu(
-    c10::optional<ScalarType> dtype_opt,
-    c10::optional<Layout> layout_opt,
-    c10::optional<Device> device_opt,
-    c10::optional<bool> pin_memory_opt,
-    c10::optional<c10::MemoryFormat> memory_format_opt) {
+    std::optional<ScalarType> dtype_opt,
+    std::optional<Layout> layout_opt,
+    std::optional<Device> device_opt,
+    std::optional<bool> pin_memory_opt,
+    std::optional<c10::MemoryFormat> memory_format_opt) {
   return at::empty(
       {}, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
 }
