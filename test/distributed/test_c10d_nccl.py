@@ -327,6 +327,26 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("type", [torch.float16, torch.float32, torch.float64])
+    @parametrize("size", [(10, 10), (1000, 1000)])
+    def test_nan_assert(self, type, size):
+        os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_nccl(store, self.opts())
+        device = self.rank_to_GPU[self.rank][0]
+        nan_tensor = torch.full(size, self.rank, dtype=type, device=device)
+        # randomly pick an nan element
+        i = random.randint(0, nan_tensor.size(0) - 1)
+        j = random.randint(0, nan_tensor.size(1) - 1)
+        nan_tensor[i, j] = float("nan")
+        with self.assertRaises(RuntimeError):
+            pg.allreduce(nan_tensor)
+        dist.destroy_process_group()
+        # reset env
+        os.environ["TORCH_NCCL_NAN_CHECK"] = "0"
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_destruct_before_terminate_pg(self):
         # Disable ASYNC_ERROR_HANDLING for this test to ensure we can programmatically
         # abort the process group.
@@ -1076,7 +1096,7 @@ class DistributedDataParallelTest(
                 False, gradient_as_bucket_view=gradient_as_bucket_view
             )
         except Exception as ex:
-            self.fail("Unexpected exception: %s" % ex)
+            self.fail(f"Unexpected exception: {ex}")
 
         # Test find_unused_parameters defaults to False
         try:
@@ -1084,7 +1104,7 @@ class DistributedDataParallelTest(
                 True, test_default=True, gradient_as_bucket_view=gradient_as_bucket_view
             )
         except Exception as ex:
-            self.fail("Unexpected exception: %s" % ex)
+            self.fail(f"Unexpected exception: {ex}")
 
     # TODO: Combine the following tests once https://github.com/pytorch/pytorch/issues/55967
     # is resolved.
