@@ -917,17 +917,17 @@ static at::Tensor linear_int8_with_onednn_weight(
     at::Tensor onednn_weight, // int8 tensor from MkldnnCPU
     at::Tensor weight_scales,
     at::Tensor weight_zero_points,
-    c10::optional<at::Tensor> bias, // plain tensor
+    std::optional<at::Tensor> bias, // plain tensor
     double output_scale,
     int64_t output_zero_point,
-    c10::optional<c10::ScalarType> output_dtype,
-    c10::optional<at::Tensor> other, // extra input for binary post-op
+    std::optional<c10::ScalarType> output_dtype,
+    std::optional<at::Tensor> other, // extra input for binary post-op
     double other_scale,
     int64_t other_zero_point,
     const c10::string_view& binary_post_op, // e.g. "none", "sum", "add"
     double binary_alpha,
     const c10::string_view& unary_post_op, // e.g. "none", "relu"
-    torch::List<c10::optional<at::Scalar>>& unary_post_op_args,
+    torch::List<std::optional<at::Scalar>>& unary_post_op_args,
     c10::string_view& unary_post_op_algorithm) {
   using ideep::tensor;
   const int64_t dim = input.dim();
@@ -989,7 +989,7 @@ static at::Tensor linear_int8_with_onednn_weight(
   auto output_size = input.sizes().vec();
   output_size[dim - 1] = N;
 
-  c10::optional<ideep::tensor> onednn_bias{c10::nullopt};
+  std::optional<ideep::tensor> onednn_bias{c10::nullopt};
   bool with_bias = bias.has_value();
   at::Tensor bias_val_float;
   if (with_bias) {
@@ -1194,15 +1194,15 @@ class QLinearOnednn final {
       Tensor onednn_weight, // int8 tensor from MkldnnCPU
       Tensor weight_scales,
       Tensor weight_zero_points,
-      c10::optional<Tensor> bias,
+      std::optional<Tensor> bias,
       double output_scale,
       int64_t output_zero_point,
-      c10::optional<c10::ScalarType> output_dtype,
+      std::optional<c10::ScalarType> output_dtype,
       c10::string_view post_op_name,
-      torch::List<c10::optional<at::Scalar>> post_op_args,
+      torch::List<std::optional<at::Scalar>> post_op_args,
       c10::string_view post_op_algorithm) {
 #if AT_MKLDNN_ENABLED()
-    static c10::optional<at::Tensor> other = c10::nullopt;
+    static std::optional<at::Tensor> other = c10::nullopt;
     static const c10::string_view binary_post_op = "none";
     return linear_int8_with_onednn_weight(
         act, act_scale, act_zero_point,
@@ -1223,17 +1223,17 @@ class QLinearOnednn final {
       Tensor onednn_weight, // int8 tensor from MkldnnCPU
       Tensor weight_scales,
       Tensor weight_zero_points,
-      c10::optional<Tensor> bias,
+      std::optional<Tensor> bias,
       double output_scale,
       int64_t output_zero_point,
-      c10::optional<c10::ScalarType> output_dtype,
+      std::optional<c10::ScalarType> output_dtype,
       c10::string_view post_op_name,
-      torch::List<c10::optional<at::Scalar>> post_op_args,
+      torch::List<std::optional<at::Scalar>> post_op_args,
       c10::string_view post_op_algorithm) {
 #if AT_MKLDNN_ENABLED()
     TORCH_CHECK(act_scale.numel() == 1 && act_zero_point.numel() == 1,
         "onednn int8 linear: act scale/zp size should be 1");
-    static c10::optional<at::Tensor> other = c10::nullopt;
+    static std::optional<at::Tensor> other = c10::nullopt;
     static const c10::string_view binary_post_op = "none";
     return linear_int8_with_onednn_weight(
         act, act_scale.item().toDouble(), act_zero_point.item().toLong(),
@@ -1254,17 +1254,17 @@ class QLinearOnednn final {
       Tensor onednn_weight, // int8 tensor from MkldnnCPU
       Tensor weight_scales,
       Tensor weight_zero_points,
-      c10::optional<Tensor> bias,
+      std::optional<Tensor> bias,
       double output_scale,
       int64_t output_zero_point,
-      c10::optional<c10::ScalarType> output_dtype,
-      c10::optional<at::Tensor> other, // extra input for binary post-op
+      std::optional<c10::ScalarType> output_dtype,
+      std::optional<at::Tensor> other, // extra input for binary post-op
       double other_scale,
       int64_t other_zero_point,
       c10::string_view binary_post_op, // e.g. "none", "sum", "add"
       double binary_alpha,
       c10::string_view unary_post_op, // e.g. "none", "relu"
-      torch::List<c10::optional<at::Scalar>> unary_post_op_args,
+      torch::List<std::optional<at::Scalar>> unary_post_op_args,
       c10::string_view unary_post_op_algorithm) {
 #if AT_MKLDNN_ENABLED()
     return linear_int8_with_onednn_weight(
@@ -1286,17 +1286,17 @@ class QLinearOnednn final {
       Tensor onednn_weight, // int8 tensor from MkldnnCPU
       Tensor weight_scales,
       Tensor weight_zero_points,
-      c10::optional<Tensor> bias,
+      std::optional<Tensor> bias,
       double output_scale,
       int64_t output_zero_point,
-      c10::optional<c10::ScalarType> output_dtype,
-      c10::optional<at::Tensor> other, // extra input for binary post-op
+      std::optional<c10::ScalarType> output_dtype,
+      std::optional<at::Tensor> other, // extra input for binary post-op
       double other_scale,
       int64_t other_zero_point,
       c10::string_view binary_post_op, // e.g. "none", "sum", "add"
       double binary_alpha,
       c10::string_view unary_post_op, // e.g. "none", "relu"
-      torch::List<c10::optional<at::Scalar>> unary_post_op_args,
+      torch::List<std::optional<at::Scalar>> unary_post_op_args,
       c10::string_view unary_post_op_algorithm) {
 #if AT_MKLDNN_ENABLED()
     TORCH_CHECK(act_scale.numel() == 1 && act_zero_point.numel() == 1,

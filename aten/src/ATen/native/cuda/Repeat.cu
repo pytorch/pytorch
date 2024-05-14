@@ -54,7 +54,7 @@ namespace at::native {
 
 Tensor repeat_interleave_cuda(
     const Tensor& repeat,
-    c10::optional<int64_t> output_size) {
+    std::optional<int64_t> output_size) {
   Tensor output;
   AT_DISPATCH_INDEX_TYPES(
       repeat.scalar_type(), "repeat_interleave_cuda", [&]() {
