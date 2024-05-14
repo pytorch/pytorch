@@ -175,6 +175,7 @@ def foreach_reduce(
         )
         post_reduce_stream = reduce_scatter_stream
         if all_reduce_group is not None:  # HSDP
+            # Accumulations must run in the reduce-scatter stream
             if not all_reduce_grads:
                 if partial_reduce_output is not None:
                     partial_reduce_output += reduce_output

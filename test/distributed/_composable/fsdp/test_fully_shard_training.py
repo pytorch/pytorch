@@ -672,7 +672,7 @@ class TestFullyShardGradientAccumulation(FSDPTest):
                 "mode": ["all", "root_only", "some_mlps"],
                 "reshard_after_backward": [False, True],
                 "offload_policy": [OffloadPolicy(), CPUOffloadPolicy()],
-                # For HSDP:
+                # For HSDP only:
                 # `True`: reduce-scatter only (no all-reduce) each microbatch
                 # until the last microbatch
                 # `False`: neither reduce-scatter nor all-reduce each
@@ -783,7 +783,7 @@ class TestFullyShardGradientAccumulation(FSDPTest):
             if reduce_scatter_only:
                 # Specially for HSDP if only reduce-scattering but not
                 # all-reducing until the last microbatch, expect one
-                # reduce-scatter per MLP plus root per microbatch
+                # reduce-scatter per MLP plus for the root per microbatch
                 expected_reduce_scatter_count = (num_mlps + 1) * num_microbatches
             self.assertEqual(reduce_scatter_count, expected_reduce_scatter_count)
             self.assertEqual(all_reduce_count, expected_all_reduce_count)
