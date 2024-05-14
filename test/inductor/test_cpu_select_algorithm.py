@@ -1,5 +1,7 @@
 # Owner(s): ["oncall: cpu inductor"]
 import functools
+
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -17,7 +19,17 @@ from torch.testing._internal.common_device_type import (
 
 from torch.testing._internal.common_utils import IS_MACOS, parametrize, TEST_MKL
 
-from .test_torchinductor import check_model
+try:
+    try:
+        from . import test_torchinductor
+    except ImportError:
+        import test_torchinductor
+except unittest.SkipTest:
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise
+
+check_model = test_torchinductor.check_model
 
 aten = torch.ops.aten
 

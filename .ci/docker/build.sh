@@ -226,7 +226,7 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    BASEKIT_VERSION=2024.0.0-49522
+    XPU_VERSION=0.5
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     TRITON=yes
@@ -403,7 +403,7 @@ docker build \
        --build-arg "DOCS=${DOCS}" \
        --build-arg "INDUCTOR_BENCHMARKS=${INDUCTOR_BENCHMARKS}" \
        --build-arg "EXECUTORCH=${EXECUTORCH}" \
-       --build-arg "BASEKIT_VERSION=${BASEKIT_VERSION}" \
+       --build-arg "XPU_VERSION=${XPU_VERSION}" \
        --build-arg "ACL=${ACL:-}" \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
        --build-arg "SKIP_LLVM_SRC_BUILD_INSTALL=${SKIP_LLVM_SRC_BUILD_INSTALL:-}" \

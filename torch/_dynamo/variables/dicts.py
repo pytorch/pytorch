@@ -9,7 +9,7 @@ from typing import Dict, List, Optional
 
 from torch._subclasses.fake_tensor import is_fake
 
-from .. import variables
+from .. import polyfill, variables
 from ..bytecode_transformation import (
     create_call_function,
     create_call_method,
@@ -17,7 +17,6 @@ from ..bytecode_transformation import (
     create_load_method,
 )
 from ..eval_frame import skip_code
-
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource
@@ -401,6 +400,12 @@ class SetVariable(ConstDictVariable):
             result = self.set_items.pop().vt
             super().call_method(tx, name, (result,), kwargs)
             return result
+        elif name == "isdisjoint":
+            assert not kwargs
+            assert len(args) == 1
+            return variables.UserFunctionVariable(
+                polyfill.set_isdisjoint
+            ).call_function(tx, [self, args[0]], {})
         return super().call_method(tx, name, args, kwargs)
 
     def getitem_const(self, arg: VariableTracker):
