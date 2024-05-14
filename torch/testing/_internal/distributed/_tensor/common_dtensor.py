@@ -295,26 +295,30 @@ class DTensorTestBase(MultiProcessTestCase):
     def world_size(self) -> int:
         return NUM_DEVICES
 
+    @property
+    def backend(self) -> str:
+        backend = "nccl" if self.device_type == "cuda" else "gloo"
+        return backend
+
     def build_device_mesh(self) -> DeviceMesh:
         return DeviceMesh(self.device_type, list(range(self.world_size)))
 
     def init_pg(self) -> None:
-        backend = "nccl" if self.device_type == "cuda" else "gloo"
-        if backend == "nccl" and torch.cuda.device_count() < self.world_size:
+        if "nccl" in self.backend and torch.cuda.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
-        if backend not in ["nccl", "gloo", "mpi", "cpu:gloo,cuda:nccl"]:
+        if self.backend not in ["nccl", "gloo", "mpi", "cpu:gloo,cuda:nccl"]:
             raise RuntimeError(f"Backend {self.backend} not supported!")
 
         dist.init_process_group(
-            backend=backend,
+            backend=self.backend,
             world_size=self.world_size,
             rank=self.rank,  # pyre-ignore[16]
             init_method=f"file://{self.file_name}",  # pyre-ignore[16]
         )
 
         # set device for nccl pg for collectives
-        if backend == "nccl":
+        if "nccl" in self.backend:
             torch.cuda.set_device(self.rank)
 
     def destroy_pg(self) -> None:

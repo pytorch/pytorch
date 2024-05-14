@@ -52,10 +52,6 @@ def _set_env_var(addr="localhost", port="25364", world_size=1, rank=0):
 
 
 class DeviceMeshTest(DTensorTestBase):
-    @property
-    def world_size(self):
-        return 4
-
     def test_init_process_group(self):
         device_type = _get_device_type(self.world_size)
         mesh_tensor = torch.arange(4).reshape(2, 2)
