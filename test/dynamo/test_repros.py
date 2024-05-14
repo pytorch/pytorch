@@ -962,7 +962,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         )
         # (dynamic shapes, static shapes)
         self.assertIn(cnt.frame_count, (5, 7))
-        self.assertIn(cnt.op_count, (106, 127))
+        self.assertIn(cnt.op_count, (104, 106, 127))
 
     def test_convert_boxes_to_pooler_format(self):
         boxes1 = [
@@ -989,7 +989,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertExpectedInline(cnt.op_count, """10""")
         else:
             self.assertExpectedInline(cnt.frame_count, """4""")
-            self.assertExpectedInline(cnt.op_count, """16""")
+            self.assertExpectedInline(cnt.op_count, """14""")
 
     def test_boxes_len(self):
         def fn(boxes):
@@ -1194,7 +1194,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertExpectedInline(cnt.op_count, """11""")
         else:
             self.assertExpectedInline(cnt.frame_count, """1""")
-            self.assertExpectedInline(cnt.op_count, """12""")
+            self.assertExpectedInline(cnt.op_count, """11""")
 
     def test_module_in_skipfiles(self):
         model = nn.Linear(10, 10)
@@ -4541,29 +4541,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             """\
 def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
     l_x_ = L_x_
-    size = l_x_.size()
-    getitem = size[0];  size = None
-    gt = getitem > 3;  getitem = None
     getitem_2 = l_x_[0]
     sum_1 = getitem_2.sum();  getitem_2 = None
     gt_1 = sum_1 > 0;  sum_1 = None
     _assert_async = torch._assert_async(gt_1, 'assertion error');  gt_1 = None
-    size_1 = l_x_.size()
-    getitem_3 = size_1[0];  size_1 = None
-    floordiv = getitem_3 // 2;  getitem_3 = None
-    mod = 1 % floordiv;  floordiv = None
-    ne = mod != 0;  mod = None
-    size_2 = l_x_.size()
-    getitem_5 = size_2[0];  size_2 = None
-    floordiv_1 = getitem_5 // 2;  getitem_5 = None
-    pow_1 = floordiv_1 ** 2;  floordiv_1 = None
-    mul = 32 * pow_1;  pow_1 = None
-    size_3 = l_x_.size()
-    getitem_7 = size_3[0];  size_3 = None
-    floordiv_2 = getitem_7 // 2;  getitem_7 = None
-    mul_1 = 16 * floordiv_2;  floordiv_2 = None
-    sub = mul - mul_1;  mul = mul_1 = None
-    ne_1 = sub != 0;  sub = None
     cos = l_x_.cos();  l_x_ = None
     return (cos,)""",
         )
