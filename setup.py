@@ -1,5 +1,5 @@
 # Welcome to the PyTorch setup.py.
-#
+# modification
 # Environment variables you are probably interested in:
 #
 #   DEBUG
@@ -87,6 +87,12 @@
 #   USE_SYSTEM_NCCL=0
 #     disables use of system-wide nccl (we will use our submoduled
 #     copy in third_party/nccl)
+#
+#   BUILD_CAFFE2_OPS=0
+#     disable Caffe2 operators build
+#
+#   BUILD_CAFFE2=0
+#     disable Caffe2 build
 #
 #   USE_IBVERBS
 #     toggle features related to distributed support
