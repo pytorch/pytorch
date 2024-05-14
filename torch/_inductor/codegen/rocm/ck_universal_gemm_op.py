@@ -65,7 +65,7 @@ class CKGemmOperation:
     )
     c_shuffle_block_transfer_scalar_per_vector_n_per_block: int
 
-    block_gemm_pipeline_scheduler: Optional[str]
+    block_gemm_pipeline_scheduler: str
     block_gemm_pipeline_version: Optional[str]
 
     a_compute_dtype: Optional[str]

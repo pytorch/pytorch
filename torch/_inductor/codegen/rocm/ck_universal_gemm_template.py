@@ -293,7 +293,7 @@ class CKGemmTemplate(CKTemplate):
             lambda T: T.get_layout(), [*self.input_nodes, self.output_node]
         )
         X_dtype, W_dtype, Y_dtype = map(
-            lambda m: self._TORCH_DTYPE_TO_CK(m.dtype), (X_meta, W_meta, Y_meta)
+            lambda m: self._TORCH_DTYPE_TO_CK[m.dtype], (X_meta, W_meta, Y_meta)
         )
         X_layout, W_layout, Y_layout = map(
             lambda m: torch_layout_to_ck_layout(m), (X_meta, W_meta, Y_meta)

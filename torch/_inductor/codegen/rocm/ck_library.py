@@ -82,7 +82,7 @@ def parse_instances(str_instances: List[str]) -> List[CKGemmOperation]:
                 break
         # pad with `None`s for the fields which are not defined in the instance
         new_instance = CKGemmOperation(
-            *template_args,
+            *template_args,  # type: ignore[arg-type]
             *((None,) * (len(fields(CKGemmOperation)) - len(template_args))),
         )
         # the last 2 template parameters are optional
@@ -131,14 +131,14 @@ def default_instances() -> List[CKGemmOperation]:
             a_block_transfer_src_vector_dim=2,
             a_block_transfer_src_scalar_per_vector=8,
             a_block_transfer_dst_scalar_per_vector_ak1=8,
-            a_block_lds_extra_m=0,
+            a_block_lds_extra_m=0,  # type: ignore[arg-type]
             b_block_transfer_thread_cluster_lengths_bk0_n_bk1=(8, 32, 1),
             b_block_transfer_thread_cluster_arrange_order=(0, 2, 1),
             b_block_transfer_src_access_order=(0, 2, 1),
             b_block_transfer_src_vector_dim=1,
             b_block_transfer_src_scalar_per_vector=8,
             b_block_transfer_dst_scalar_per_vector_bk1=2,
-            b_block_lds_extra_n=0,
+            b_block_lds_extra_n=0,  # type: ignore[arg-type]
             c_shuffle_m_xdl_per_wave_per_shuffle=1,
             c_shuffle_n_xdl_per_wave_per_shuffle=2,
             c_shuffle_block_transfer_cluster_lengths_m_block_m_per_block_n_block_n_per_block=(
