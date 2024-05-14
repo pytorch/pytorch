@@ -3524,6 +3524,7 @@ PyObject* torch_c_dynamo_guards_init() {
       GuardAccessor,
       std::unique_ptr<FuncKwDefaultsGuardAccessor>>(
       py_m, "FuncKwDefaultsGuardAccessor");
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
       FuncCodeGuardAccessor,
       GuardAccessor,
