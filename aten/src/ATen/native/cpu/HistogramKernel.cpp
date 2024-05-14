@@ -100,7 +100,7 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
 
     TensorAccessor<const input_t, 2> accessor_in = input.accessor<const input_t, 2>();
 
-    /* Constructs a c10::optional<TensorAccessor> containing an accessor iff
+    /* Constructs a c10::optional<TensorAccessor> containing an accessor if
      * the optional weight tensor has a value.
      */
     const auto accessor_wt = weight.has_value()
