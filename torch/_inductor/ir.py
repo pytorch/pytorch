@@ -3933,7 +3933,12 @@ def get_aten_cpp_kernel_name(kernel):
         if kernel._overloadname == "default"
         else kernel.__name__.replace(".", "_")
     )
-    return f"at::_ops::{opname}::call"
+    kernel_name = f"at::_ops::{opname}::call"
+    return (
+        V.graph.wrapper_code.get_c_shim_func_name(kernel_name)
+        if V.graph.wrapper_code and config.abi_compatible
+        else kernel_name
+    )
 
 
 @dataclasses.dataclass
@@ -4763,9 +4768,17 @@ class InplaceBernoulliFallback(ExternKernel):
 
     def codegen(self, wrapper):
         (x,) = (t.codegen_reference() for t in self.inputs)
-        wrapper.writeline(
-            f"{self.get_kernel_name()}({x}, {', '.join(map(repr, self.constant_args))}){wrapper.ending}"
-        )
+
+        if V.graph.cpp_wrapper and config.abi_compatible:
+            # Inductor doesn't really support aten Generator, so the Generator kwarg is always NULL here,
+            # which needs to be explicitly generated for cpp wrapper
+            wrapper.writeline(
+                f"{self.get_kernel_name()}({x}, {', '.join(map(repr, self.constant_args))}, NULL){wrapper.ending}"
+            )
+        else:
+            wrapper.writeline(
+                f"{self.get_kernel_name()}({x}, {', '.join(map(repr, self.constant_args))}){wrapper.ending}"
+            )
 
     def should_allocate(self):
         return False
@@ -4776,20 +4789,19 @@ class InplaceBernoulliFallback(ExternKernel):
     def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return set()
 
-    def __init__(self, x, *constant_args):
+    def __init__(self, op_overload, x, *constant_args):
         super().__init__(
             None,
             NoneLayout(x.get_device()),  # type: ignore[arg-type]
             self.unwrap_storage([x]),
             constant_args,
+            op_overload=op_overload,
         )
         self.name = V.graph.register_buffer(self)
         self.python_kernel_name = "aten.bernoulli_"
-        self.cpp_kernel_name = (
-            "aoti_torch_bernoulli_"
-            if config.abi_compatible
-            else "at::native::bernoulli_"
-        )
+        if not config.abi_compatible:
+            # TODO: this should be simplified once we switch to ABI-compatible only
+            self.cpp_kernel_name = "at::native::bernoulli_"
         mark_node_as_mutating(self, x)
 
 
