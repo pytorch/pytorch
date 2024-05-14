@@ -66,22 +66,22 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
     bool is_causal,
     const Tensor& philox_seed,
     const Tensor& philox_offset,
-    c10::optional<double> scale) {
+    std::optional<double> scale) {
 #if defined(USE_FLASH_ATTENTION)
   const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
   //  CUDA code assumes that dout is contiguous
   auto contiguous_grad_out = grad_out.contiguous();
   auto contiguous_out = out.contiguous();
 
-  c10::optional<at::Tensor> dq{c10::nullopt};
-  c10::optional<at::Tensor> dk{c10::nullopt};
-  c10::optional<at::Tensor> dv{c10::nullopt};
+  std::optional<at::Tensor> dq{c10::nullopt};
+  std::optional<at::Tensor> dk{c10::nullopt};
+  std::optional<at::Tensor> dv{c10::nullopt};
 
   //  The kernel computes irregardless we will drop for this functions return
   Tensor grad_softmax;
 
   // Currently unused args:
-  c10::optional<at::Tensor> alibi_slopes{c10::nullopt};
+  std::optional<at::Tensor> alibi_slopes{c10::nullopt};
 
   bool determinisitic{false};
   auto& ctx = at::globalContext();
@@ -167,7 +167,7 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_
     bool is_causal,
     const Tensor& philox_seed,
     const Tensor& philox_offset,
-    c10::optional<double> scale) {
+    std::optional<double> scale) {
     const int64_t batch_size = query.size(0);
     const int64_t num_heads = query.size(1);
     const int64_t head_dim = query.size(3);
@@ -205,14 +205,14 @@ _efficient_attention_backward(
     const at::Tensor& query,
     const at::Tensor& key,
     const at::Tensor& value,
-    const c10::optional<at::Tensor>& kernel_bias, // additive attention bias
+    const std::optional<at::Tensor>& kernel_bias, // additive attention bias
     const at::Tensor& out,
     // (Mode 1MHK only) [b+1]: cu_seqlens_q[b] contains the
     // position of the first query token for batch $b
-    const c10::optional<at::Tensor>& cu_seqlens_q_dummy,
+    const std::optional<at::Tensor>& cu_seqlens_q_dummy,
     // (Mode 1MHK only) [b+1]: cu_seqlens_k[b] contains the
     // position of the first key token for batch $b
-    const c10::optional<at::Tensor>& cu_seqlens_k_dummy,
+    const std::optional<at::Tensor>& cu_seqlens_k_dummy,
     // (Mode 1MHK only) Maximum sequence length across batches
     int64_t max_seqlen_q,
     // (Mode 1MHK only) Maximum sequence length across batches
@@ -223,9 +223,9 @@ _efficient_attention_backward(
     const at::Tensor& philox_offset, // offset into random number sequence
     int64_t custom_mask_type,
     const bool bias_requires_grad,
-    const c10::optional<double> scale,
-    c10::optional <int64_t> num_splits_key,
-    const c10::optional<int64_t> window_size) {
+    const std::optional<double> scale,
+    std::optional <int64_t> num_splits_key,
+    const std::optional<int64_t> window_size) {
   #if defined(USE_MEM_EFF_ATTENTION)
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
@@ -233,8 +233,8 @@ _efficient_attention_backward(
   // This path is used when we directly call _efficient_attention_forward
   // from python.
   // This is needed because SaveVariable automatically converts
-  // c10::optional to undefined tensor
-  c10::optional<Tensor> bias, cu_seqlens_q, cu_seqlens_k;
+  // std::optional to undefined tensor
+  std::optional<Tensor> bias, cu_seqlens_q, cu_seqlens_k;
   bias = kernel_bias.has_value() && !kernel_bias->defined() ? c10::nullopt : kernel_bias;
   cu_seqlens_q = cu_seqlens_q_dummy.has_value() && !cu_seqlens_q_dummy->defined() ? c10::nullopt : cu_seqlens_q_dummy;
   cu_seqlens_k = cu_seqlens_k_dummy.has_value() && !cu_seqlens_k_dummy->defined() ? c10::nullopt : cu_seqlens_k_dummy;
@@ -603,7 +603,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
     bool is_causal,
     const at::Tensor& philox_seed,
     const at::Tensor& philox_offset,
-    c10::optional<double> scale){
+    std::optional<double> scale){
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
   }
@@ -653,7 +653,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
     double dropout_p,
     std::array<bool, 4> grad_input_mask,
     bool causal,
-    c10::optional<double> scale) {
+    std::optional<double> scale) {
 
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
@@ -667,8 +667,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
   Tensor grad_q, grad_k, grad_v, grad_bias;
 
   // This is needed because SaveVariable automatically converts
-  // c10::optional to undefined tensor
-  c10::optional<Tensor> kernel_bias;
+  // std::optional to undefined tensor
+  std::optional<Tensor> kernel_bias;
   if (attn_bias.defined()) {
     kernel_bias = attn_bias;
   }
