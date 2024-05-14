@@ -51,8 +51,8 @@ cow::COWSimDeleterContext::COWSimDeleterContext(
     std::unique_ptr<void, DeleterFnPtr> data)
     : cow::COWDeleterContext(std::move(data)),
       has_first_writer_(false),
-      first_writer_(0),
-      has_raised_(false) {}
+      has_raised_(false),
+      first_writer_(0) {}
 
 void cow::COWSimDeleterContext::raise_warning(cow::AccessType access_type) {
   if (!has_raised_) {
