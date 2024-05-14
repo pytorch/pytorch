@@ -550,7 +550,7 @@ struct ExpandableSegment {
   CUdeviceptr ptr_{};
   size_t max_handles_{0};
   size_t segment_size_;
-  std::vector<c10::optional<CUmemGenericAllocationHandle>> handles_;
+  std::vector<std::optional<CUmemGenericAllocationHandle>> handles_;
   // devices on which this memory should be mapped in addition
   // to the device where the physical memory lives (device_).
   std::vector<c10::DeviceIndex> peers_;
