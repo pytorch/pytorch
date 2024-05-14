@@ -7,6 +7,7 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/mps/MPSStream.h>
 #include <c10/util/Logging.h>
+#include <ATen/mps/MPSPinnedMemory.h>
 
 namespace at::mps {
 
@@ -122,6 +123,14 @@ bool MPSHooks::queryEvent(uint32_t event_id) const {
 
 double MPSHooks::elapsedTimeOfEvents(uint32_t start_event_id, uint32_t end_event_id) const {
   return at::mps::getMPSEventPool()->elapsedTime(start_event_id, end_event_id);
+}
+
+bool MPSHooks::isPinnedPtr(const void* data) const {
+  return at::mps::_is_pinned_ptr(data);
+}
+
+Allocator* MPSHooks::getPinnedMemoryAllocator() const {
+  return at::mps::getIMPSAllocator(true);
 }
 
 using at::MPSHooksRegistry;

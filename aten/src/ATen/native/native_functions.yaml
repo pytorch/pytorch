@@ -4542,25 +4542,13 @@
     CPU: channel_shuffle_cpu
     CompositeImplicitAutograd: math_channel_shuffle
 
-- func: is_pinned(Tensor self, Device? device=None) -> bool
+- func: is_pinned(Tensor self) -> bool
   variants: method
-  dispatch:
-    NestedTensorCUDA, CUDA: is_pinned_cuda
-    MPS: is_pinned_mps
-    CompositeExplicitAutograd: is_pinned_default
 
 # TODO: add a copy kwarg that guarantees that the tensor is put into fresh
 # pinned memory
-- func: pin_memory(Tensor(a) self, Device? device=None) -> Tensor(a)
+- func: pin_memory(Tensor(a) self) -> Tensor(a)
   variants: method
-
-# Unlike pin_memory, this is guaranteed to give a new non-aliasing tensor
-- func: _pin_memory(Tensor self, Device? device=None) -> Tensor
-  dispatch:
-    CUDA: _pin_memory_cuda
-    MPS: _pin_memory_mps
-    NestedTensorCUDA, NestedTensorCPU: _pin_memory_nested
-  autogen: _pin_memory.out
 
 - func: pinverse(Tensor self, float rcond=1e-15) -> Tensor
   variants: function, method

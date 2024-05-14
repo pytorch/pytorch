@@ -25,6 +25,8 @@ C10_API std::optional<DeviceType> getAccelerator(bool checked) {
   DETECT_AND_ASSIGN_ACCELERATOR(CUDA)
   DETECT_AND_ASSIGN_ACCELERATOR(MTIA)
   DETECT_AND_ASSIGN_ACCELERATOR(XPU)
+  DETECT_AND_ASSIGN_ACCELERATOR(HIP)
+  DETECT_AND_ASSIGN_ACCELERATOR(MPS)
   if (checked) {
     TORCH_CHECK(
         device_type, "Cannot access accelerator device when none is available.")
