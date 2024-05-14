@@ -324,6 +324,7 @@ class CKGemmTemplate(CKTemplate):
             if config.rocm.use_preselected_instances and self._is_rcr_f16()
             else gen_ops_library()
         )
+        log.debug(f"unfiltered instances: %s", unfiltered_instances)
         filtered_instances = list(
             filter(lambda op: self.filter_op(op), unfiltered_instances)
         )

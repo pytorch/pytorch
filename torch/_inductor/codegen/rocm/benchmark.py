@@ -1,3 +1,4 @@
+import logging
 import sys
 
 import pandas
@@ -6,7 +7,6 @@ import torch
 from torch._dynamo import config as dynconfig
 from torch._inductor import config
 from torch._inductor.codegen.rocm.ck_template import CKTemplate
-import logging
 
 log = logging.getLogger(__name__)
 
@@ -57,9 +57,7 @@ def main(gemm_shape_csv, layout, dtype):
                     "compile_threads": 64,
                 }
             ):
-                with dynconfig.patch(
-                    {"cache_size_limit": len(problem_instances) + 1}
-                ):
+                with dynconfig.patch({"cache_size_limit": len(problem_instances) + 1}):
                     a, b, out = generate_inputs(M, N, K, tensor_options, layout)
                     Y_compiled = torch.compile(mm, dynamic=False)(a, b, out)
                     Y = mm(a, b, out)

@@ -79,6 +79,39 @@ class TestCKBackend(TestCase):
             Y = mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
 
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CK path setup")
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_max_autotune_precompile_preselected(self):
+        """
+        Make sure autotuning mm in subprocesses doesn't crash.
+        """
+
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        def mm(a, b):
+            return a @ b
+
+        tensor_options = {"device": "cuda", "dtype": torch.float16}
+
+        a = torch.randn(2240, 256, **tensor_options)
+        b = torch.randn(2048, 256, **tensor_options).transpose(0, 1)
+
+        assert "rocm" in dir(config)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": True,
+                "max_autotune_gemm_backends": "CK,Triton,ATen",
+                "compile_threads": 12,
+                "rocm.use_preselected_instances": True,
+            }
+        ):
+            Y_compiled = torch.compile(mm, dynamic=False)(a, b)
+            Y = mm(a, b)
+            torch.testing.assert_close(Y_compiled, Y)
+
 
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
