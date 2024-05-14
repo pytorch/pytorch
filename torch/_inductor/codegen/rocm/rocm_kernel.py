@@ -271,7 +271,7 @@ class ROCmTemplateCaller(ChoiceCaller):
 
     def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
-        return {"backend": "ROCm", "name": self.name, **self.info_kwargs}
+        return {"backend": "ROCm", "name": self.name, **self.info_kwargs}  # type: ignore[dict-item]
 
     def output_node(self) -> TensorBox:
         self.bmreq.update_workspace_size()

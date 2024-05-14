@@ -236,7 +236,7 @@ class CKGemmTemplate(CKTemplate):
             template_params=(",\n" + 12 * " ").join(template_params),
         ), self._template_from_string(template_type).render(operation_name=op.name())
 
-    def render(self, kernel: ROCmTemplateKernel, op: CKGemmOperation, **kwargs) -> str:
+    def render(self, kernel: ROCmTemplateKernel, op: CKGemmOperation, **kwargs) -> str:  # type: ignore[override]
         """
         The primary entry point for the code rendering process used in this template.
         """
@@ -266,7 +266,7 @@ class CKGemmTemplate(CKTemplate):
             globals=self.globals().getvalue(),
             instance_definition=instance_definition,
             kernel_definition=kernel.def_kernel(
-                inputs=[X, W, Bias],
+                inputs=[X, W, Bias],  # type: ignore[list-item]
                 outputs=[Y],
                 names_str="X, W, Bias, Y",
                 input_reorder=self.input_reorder,
