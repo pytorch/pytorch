@@ -136,7 +136,7 @@ class LoggingTensorHandler(logging.Handler):
         if self.tracebacks_list is not None:
             self.tracebacks_list.append(record.traceback)
 
-def log_input(name: str, var: object):
+def log_input(name: str, var: object) -> None:
     logger.info("input", (name,), {}, var)  # noqa: PLE1205
 
 class GatherTraceback(logging.Filter):
