@@ -435,3 +435,54 @@ custom_op_db = [
         supports_out=False,
     ),
 ]
+
+
+# ==============================================================
+# some mechanical test cases
+# ==============================================================
+
+lib = torch.library.Library("_torch_testing", "FRAGMENT")  # noqa: TOR901
+
+lib.define("source0(Tensor x) -> Tensor")
+
+@torch.library.register_fake("_torch_testing::source0", lib=lib)
+def _(x):
+    return x.clone()
+
+lib.define("source1(Tensor x) -> Tensor")
+
+def source1_fake(x):
+    return x.clone()
+
+torch.library.register_fake("_torch_testing::source1", source1_fake, lib=lib)
+
+lib.define("source2(Tensor x) -> Tensor")
+
+@torch.library.impl_abstract("_torch_testing::source2", lib=lib)
+def _(x):
+    return x.clone()
+
+lib.define("source3(Tensor x) -> Tensor")
+
+def source3_fake(x):
+    return x.clone()
+
+torch.library.impl_abstract("_torch_testing::source3", source3_fake, lib=lib)
+
+
+@torch.library.custom_op("_torch_testing::source4", mutates_args=())
+def source4(x: Tensor) -> Tensor:
+    return x.clone()
+
+@source4.register_fake
+def _(x):
+    return x.clone()
+
+@torch.library.custom_op("_torch_testing::source5", mutates_args=())
+def source5(x: Tensor) -> Tensor:
+    return x.clone()
+
+def source5_fake(x):
+    return x.clone()
+
+source5.register_fake(source5_fake)
