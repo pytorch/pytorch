@@ -34,6 +34,8 @@ from torch._dynamo.testing import (
     expectedFailureCodegenDynamic,
     rand_strided,
     same,
+    skipIfPy312,
+    xfailIfPy312,
 )
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
 from torch._inductor.fx_passes import pad_mm
@@ -2498,6 +2500,7 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    @skipIfPy312  # segfaults
     @config.patch(force_mixed_mm=True)
     def test_mixed_mm(self):
         def fn(a, b):
@@ -2512,6 +2515,8 @@ class CommonTemplate:
             check_lowp=True,
         )
 
+
+    @skipIfPy312  # segfaults
     @config.patch(force_mixed_mm=True)
     def test_mixed_mm2(self):
         def fn(a, b, scale, bias):
@@ -9128,6 +9133,7 @@ class CommonTemplate:
 
         self.common(fn, (inp, offsets), check_lowp=False)
 
+    @xfailIfPy312
     @requires_gpu()
     @config.patch(assume_aligned_inputs=False)
     def test_config_option_dont_assume_alignment(self):
