@@ -1285,7 +1285,6 @@ class Scheduler:
         self.available_buffer_names = {
             *V.graph.graph_inputs.keys(),
             *V.graph.constants.keys(),
-            *V.graph.torchbind_constants.keys(),
         }
 
         self.nodes = [self.create_scheduler_node(n) for n in nodes]

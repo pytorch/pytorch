@@ -259,7 +259,6 @@ CLOSURE_VARS = {
     "utils_device": torch.utils._device,
     "device": torch.device,
     "___from_numpy": from_numpy,
-    "___as_tensor": torch.as_tensor,
     "torch": torch,
     "inspect": inspect,
 }

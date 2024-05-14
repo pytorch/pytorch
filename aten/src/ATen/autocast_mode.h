@@ -895,7 +895,6 @@ copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
   _(bilinear)                \
   _(cross)                   \
   _(dot)                     \
-  _(vdot)                    \
   _(grid_sampler)            \
   _(index_put)               \
   _(tensordot)               \

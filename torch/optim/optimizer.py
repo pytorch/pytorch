@@ -213,16 +213,6 @@ def _get_scalar_dtype(is_fused=None):
     )
 
 
-def _get_capturable_supported_devices(supports_xla: bool = True) -> List[str]:
-    r"""Return the device type list that supports capturable optimizer."""
-    capturable_supported_devices = ["cuda"]
-    if not torch.jit.is_scripting():
-        capturable_supported_devices.append(torch._C._get_privateuse1_backend_name())
-    if supports_xla:
-        capturable_supported_devices.append("xla")
-    return capturable_supported_devices
-
-
 # Common doc strings among optimizers
 _foreach_doc = r"""foreach (bool, optional): whether foreach implementation of optimizer
             is used. If unspecified by the user (so foreach is None), we will try to use
@@ -232,7 +222,7 @@ _foreach_doc = r"""foreach (bool, optional): whether foreach implementation of o
             being a tensorlist vs just one tensor. If memory is prohibitive, batch fewer
             parameters through the optimizer at a time or switch this flag to False (default: None)"""
 
-_fused_doc = r"""fused (bool, optional): whether the fused implementation (CUDA only) is used.
+_fused_doc = r"""fused (bool, optional): whether the fused implementation is used.
             Currently, `torch.float64`, `torch.float32`, `torch.float16`, and `torch.bfloat16`
             are supported. (default: None)
 

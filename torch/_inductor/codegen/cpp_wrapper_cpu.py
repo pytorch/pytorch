@@ -1158,9 +1158,7 @@ class CppWrapperCpu(WrapperCodeGen):
                 # so just avoid wrapping integers.
                 # Name matching is to find tensor is hacky, but fixing all the
                 # ArrayRefTensor issues is not a priority for now.
-                if isinstance(piece, str) and piece.startswith(
-                    ("buf", "arg", "wrap_with_raii_handle_if_needed")
-                ):
+                if isinstance(piece, str) and piece.startswith(("buf", "arg")):
                     piece = f"convert_arrayref_tensor_to_tensor({piece})"
                 wrapped_args.append(piece)
 

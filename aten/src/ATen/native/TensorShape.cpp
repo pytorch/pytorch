@@ -3227,28 +3227,16 @@ static inferSqueezeGeometry(const Tensor &tensor, std::bitset<dim_bitset_size> d
 namespace {
 // Named type instead of a pair/tuple so that we can be sure to
 // construct the vectors in place and get NRVO.
-template <typename T>
 struct InferUnsqueezeGeometryResult {
-  SmallVector<T, kDimVectorStaticSize>sizes;
-  SmallVector<T, kDimVectorStaticSize> strides;
-  InferUnsqueezeGeometryResult(ArrayRef<T> tensor_sizes, ArrayRef<T> tensor_strides)
+  DimVector sizes;
+  DimVector strides;
+  InferUnsqueezeGeometryResult(IntArrayRef tensor_sizes, IntArrayRef tensor_strides)
       : sizes(tensor_sizes.begin(), tensor_sizes.end())
       , strides(tensor_strides.begin(), tensor_strides.end()) {}
 };
-
-InferUnsqueezeGeometryResult<c10::SymInt>
-inferUnsqueezeGeometry_symint(const Tensor& tensor, int64_t dim) {
-  InferUnsqueezeGeometryResult<c10::SymInt> result(tensor.sym_sizes(), tensor.sym_strides());
-  c10::SymInt new_stride = dim >= tensor.dim() ? 1 : result.sizes[dim] * result.strides[dim];
-  result.sizes.insert(result.sizes.begin() + dim, 1);
-  result.strides.insert(result.strides.begin() + dim, new_stride);
-
-  return result;
-}
-
-InferUnsqueezeGeometryResult<int64_t>
+InferUnsqueezeGeometryResult
 inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
-  InferUnsqueezeGeometryResult<int64_t> result(tensor.sizes(), tensor.strides());
+  InferUnsqueezeGeometryResult result(tensor.sizes(), tensor.strides());
   int64_t new_stride = dim >= tensor.dim() ? 1 : result.sizes[dim] * result.strides[dim];
   result.sizes.insert(result.sizes.begin() + dim, 1);
   result.strides.insert(result.strides.begin() + dim, new_stride);
@@ -3389,8 +3377,8 @@ Tensor _unsafe_view(const Tensor& self, IntArrayRef size) {
 
 Tensor unsqueeze(const Tensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim() + 1);
-  auto g = inferUnsqueezeGeometry_symint(self, dim);
-  return self.as_strided_symint(g.sizes, g.strides);
+  auto g = inferUnsqueezeGeometry(self, dim);
+  return self.as_strided(g.sizes, g.strides);
 }
 
 Tensor unsqueeze_sparse(Tensor const &self, int64_t dim) {

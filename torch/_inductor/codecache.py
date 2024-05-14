@@ -564,27 +564,23 @@ class FxGraphCachePickler(pickle.Pickler):
 
 
 @functools.lru_cache(None)
-def torch_key():
+def get_inductor_code_hash() -> bytes:
     """
-    Compute a key that contains relevant information about torch source files
+    Compute a hash of all inductor code modules. Used by the FxGraph cache
+    so any inductor code changes would result in new cache keys.
     """
-    if not config.is_fbcode():
-        inductor_root = os.path.dirname(__file__)
+    inductor_root = os.path.dirname(__file__)
 
-        contents: Dict[str, bytes] = {torch.__version__: b""}
-        for lib in pkgutil.iter_modules([inductor_root]):
-            spec = lib.module_finder.find_spec(lib.name, None)
-            assert spec is not None
-            module = spec.origin
-            assert module is not None
-            with open(module, "rb") as f:
-                contents[module] = f.read()
+    contents: Dict[str, bytes] = {}
+    for lib in pkgutil.iter_modules([inductor_root]):
+        spec = lib.module_finder.find_spec(lib.name, None)
+        assert spec is not None
+        module = spec.origin
+        assert module is not None
+        with open(module, "rb") as f:
+            contents[module] = f.read()
 
-        return hashlib.sha256(pickle.dumps(contents)).digest()
-
-    from libfb.py import parutil
-
-    return parutil.get_file_contents("torch/src_hash.txt").rstrip()
+    return hashlib.sha256(pickle.dumps(contents)).digest()
 
 
 @dataclasses.dataclass
@@ -649,9 +645,11 @@ class FxGraphHashDetails:
         )
 
         # Also hash on various system info (including the triton compiler version).
-        self.torch_version = torch_key()
+        self.torch_version = torch.__version__
         self.system_info = CacheBase.get_system()
 
+        # And the inductor configuration and code.
+        self.inductor_code_hash = get_inductor_code_hash()
         try:
             self.inductor_config = config.save_config()
         except (TypeError, AttributeError) as e:
@@ -935,13 +933,8 @@ class FxGraphCache:
 
         # HigherOrderOperators should be handled on a case-by-case basis.
         # Currently, we just skip caching if we have any.
-        # We also skip if there are any torchbind objects.
         for node in gm.graph.nodes:
             if isinstance(node.target, torch._ops.HigherOrderOperator):
-                raise BypassFxGraphCache
-            if node.op == "getattr" and isinstance(
-                getattr(gm, node.target), torch._C.ScriptObject
-            ):
                 raise BypassFxGraphCache
 
     @staticmethod
@@ -1035,7 +1028,6 @@ class CompiledFxGraph:
     mutated_inputs: Set[str]
     mutated_input_idxs: Set[int]
     constants: Dict[str, torch.Tensor]
-    torchbind_constants: Dict[str, torch._C.ScriptObject]
     output_strides: Optional[List[Optional[Tuple[int, ...]]]]
     disabled_cudagraphs_reason: Optional[str]
     metrics_deltas: metrics.CachedMetricsDeltas
@@ -1067,7 +1059,6 @@ class CompiledFxGraph:
         self.mutated_inputs = graph.mutated_inputs
         self.mutated_input_idxs = set(graph.mutated_input_idxs)
         self.constants = graph.constants
-        self.torchbind_constants = graph.torchbind_constants
         self.output_strides = output_strides
         self.disabled_cudagraphs_reason = disabled_cudagraphs_reason
         self.metrics_deltas = metrics_deltas
