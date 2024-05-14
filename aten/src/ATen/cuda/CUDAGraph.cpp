@@ -122,7 +122,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
     if(active_mempool) {
       mempool_id_ = active_mempool->id_;
     } else {
-      auto mempool = c10::cuda::MemPool({}, {}, false);
+      auto mempool = c10::cuda::MemPool({}, false);
       mempool_id_ = mempool.id_;
     }
   }

@@ -382,6 +382,7 @@ createCustomAllocator(
   std::shared_ptr<CUDAPluggableAllocator> allocator(
       new CUDAPluggableAllocator(std::move(alloc_fn), std::move(free_fn)));
   allocator->init(device_count);
+  current_custom_allocator = allocator;
   return allocator;
 }
 

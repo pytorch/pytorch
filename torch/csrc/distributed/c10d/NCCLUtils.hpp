@@ -424,24 +424,26 @@ class NCCLComm {
     // which are guaranteed to be with disjoint addr ranges. Thus, a ptr always
     // maps to a unique handle and should not be registered before the current
     // ptr is deregistered and freed.
-    TORCH_CHECK(
-        registeredSegmentHandles_.count(ptr) == 0,
-        "Segment with ptr ",
-        ptr,
-        " has already been registered on ncclComm_ ",
-        ncclComm_);
+    //TORCH_CHECK(
+    //    registeredSegmentHandles_.count(ptr) == 0,
+    //    "Segment with ptr ",
+    //    ptr,
+    //    " has already been registered on ncclComm_ ",
+    //    ncclComm_);
 
-    void* handle;
-    C10D_NCCL_CHECK(
-        ncclCommRegister(ncclComm_, ptr, size, &handle),
-        c10::str(
-            "Failed to register segment with ptr ",
-            ptr,
-            ", size ",
-            size,
-            " on ncclComm_ ",
-            ncclComm_));
-    registeredSegmentHandles_[ptr] = handle;
+    if (registeredSegmentHandles_.count(ptr) == 0) {
+      void* handle;
+      C10D_NCCL_CHECK(
+          ncclCommRegister(ncclComm_, ptr, size, &handle),
+          c10::str(
+              "Failed to register segment with ptr ",
+              ptr,
+              ", size ",
+              size,
+              " on ncclComm_ ",
+              ncclComm_));
+      registeredSegmentHandles_[ptr] = handle;
+    }
     return ncclSuccess;
 #else
     return ncclInvalidUsage;
@@ -451,13 +453,14 @@ class NCCLComm {
   ncclResult_t deregisterSegment(void* ptr) {
     std::unique_lock<std::mutex> lock(mutex_);
 #ifdef NCCL_HAS_COMM_REGISTER
-    TORCH_CHECK(
-        registeredSegmentHandles_.count(ptr) == 1,
-        "Segment with ptr ",
-        ptr,
-        " is not registered on ncclComm_ ",
-        ncclComm_);
+    //TORCH_CHECK(
+    //    registeredSegmentHandles_.count(ptr) == 1,
+    //    "Segment with ptr ",
+    //    ptr,
+    //    " is not registered on ncclComm_ ",
+    //    ncclComm_);
 
+    if (registeredSegmentHandles_.count(ptr) == 1) {
     void* handle = registeredSegmentHandles_[ptr];
     C10D_NCCL_CHECK(
         ncclCommDeregister(ncclComm_, handle),
@@ -469,6 +472,7 @@ class NCCLComm {
             " on ncclComm_ ",
             ncclComm_));
     registeredSegmentHandles_.erase(ptr);
+    }
     return ncclSuccess;
 #else
     return ncclInvalidUsage;

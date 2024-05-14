@@ -7,20 +7,20 @@
 
 namespace c10::cuda {
 
+// forward declare CUDAAllocator
+namespace CUDACachingAllocator {
+  class CUDAAllocator;
+}
+
 using CaptureId_t = unsigned long long;
 using MempoolId_t = std::pair<CaptureId_t, CaptureId_t>;
-using AllocFuncSignature = int(void**, size_t);
-using DeleteFuncSignature = int(void*);
-using AllocFuncType = std::function<AllocFuncSignature>;
-using DeleteFuncType = std::function<DeleteFuncSignature>;
 
 struct C10_CUDA_API MemPool {
-  MemPool(uint64_t alloc_fn=0, uint64_t delete_fn=0, bool is_user_created=true);
+  MemPool(CUDACachingAllocator::CUDAAllocator* allocator=nullptr, bool is_user_created=true);
 
-  MempoolId_t id_; 
-  AllocFuncType alloc_fn_;
-  DeleteFuncType delete_fn_;
+  MempoolId_t id_;
   bool is_user_created_;
+  CUDACachingAllocator::CUDAAllocator* allocator_;
   
   private:
     static std::atomic<CaptureId_t> uid_;
@@ -34,7 +34,6 @@ struct C10_CUDA_API MemPoolContext {
   ~MemPoolContext();
   
   static MemPool* getActiveMemPool();
-  static void setActiveMemPool(MemPool* mempool);
   
   private:
     MemPool* prev_mempool_;

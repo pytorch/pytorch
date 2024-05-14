@@ -178,13 +178,11 @@ static bool BlockComparatorSize(const Block* a, const Block* b);
 static bool BlockComparatorAddress(const Block* a, const Block* b);
 
 struct BlockPool {
-  BlockPool(bool small, PrivatePool* private_pool = nullptr, AllocFuncType allocator = {}, DeleteFuncType deleter = {})
+  BlockPool(bool small, PrivatePool* private_pool = nullptr)
       : blocks(BlockComparatorSize),
         unmapped(BlockComparatorAddress),
         is_small(small),
-        owner_PrivatePool(private_pool),
-        allocator(allocator),
-        deleter(deleter) {}
+        owner_PrivatePool(private_pool) {}
 
   // Do not insert a Block to blocks directly; use insert_into_blocks(),
   // instead.
@@ -194,8 +192,6 @@ struct BlockPool {
   const bool is_small;
   PrivatePool* owner_PrivatePool;
   int64_t get_free_blocks_call_count{0};
-  AllocFuncType allocator;
-  DeleteFuncType deleter;
 
   // Add a Block into blocks set with updating gc counter.
   std::pair<std::set<Block*, Comparison>::iterator, bool> insert_into_blocks(
@@ -724,9 +720,9 @@ class EventPool {
 
 // CUDA graphs helper
 struct PrivatePool {
-  PrivatePool(bool is_user_pool = false, AllocFuncType allocator = {}, DeleteFuncType deleter = {})
-      : large_blocks(/*small=*/false, this, allocator, deleter),
-        small_blocks(/*small=*/true, this, allocator, deleter),
+  PrivatePool(bool is_user_pool = false)
+      : large_blocks(/*small=*/false, this),
+        small_blocks(/*small=*/true, this),
         is_user_pool(is_user_pool) {}
   PrivatePool(const PrivatePool&) = delete;
   PrivatePool(PrivatePool&&) = delete;
@@ -1949,7 +1945,7 @@ class DeviceCachingAllocator {
     if (it == user_pools.end()) {
       // mempool does not reference an existing pool. Make a new pool for
       // this capture.
-      user_pools.emplace(mempool->id_, std::make_unique<PrivatePool>(true, mempool->alloc_fn_, mempool->delete_fn_));
+      user_pools.emplace(mempool->id_, std::make_unique<PrivatePool>(true));
     } else {
       it->second->use_count++;
     }
@@ -2591,10 +2587,10 @@ class DeviceCachingAllocator {
         auto sg = c10::make_scope_exit([&]() { lock.lock(); });
         lock.unlock();
       }
-      auto allocator = p.pool->allocator;
-      if (allocator) {
-        auto result = allocator(&ptr, size);
-        p.err = result == 0 ? cudaSuccess : cudaErrorMemoryAllocation; 
+      auto active_pool = MemPoolContext::getActiveMemPool();
+      if(active_pool && active_pool->allocator_) {
+        ptr = active_pool->allocator_->raw_alloc(size);
+        p.err = ptr ? cudaSuccess : cudaErrorMemoryAllocation; 
       } else {
         p.err = cudaMallocMaybeCapturing(&ptr, size);
       }
@@ -2773,16 +2769,15 @@ class DeviceCachingAllocator {
         block->device,
         context ? context : block->context_when_segment_allocated);
 
-    auto* pool = block->pool;
-    auto deleter = pool->deleter;
-    if(deleter) {
-      auto err = deleter((void*)block->ptr);
-      TORCH_INTERNAL_ASSERT(err == 0);
+    auto active_pool = MemPoolContext::getActiveMemPool();
+    if(active_pool && active_pool->allocator_) {
+      active_pool->allocator_->raw_delete((void*)block->ptr);
     } else {
       C10_CUDA_CHECK(cudaFree((void*)block->ptr));
     }
     total_allocated_memory -= block->size;
 
+    auto* pool = block->pool;
     if (pool->owner_PrivatePool) {
       // The cudaFreed block belonged to a CUDA graph's PrivatePool.
       TORCH_INTERNAL_ASSERT(pool->owner_PrivatePool->cudaMalloc_count > 0);

@@ -11,9 +11,8 @@ std::atomic<CaptureId_t> MemPool::uid_{1};
 // and I asked cuda devs to keep it that way, and they agreed.)
 std::atomic<CaptureId_t> MemPool::uuid_{1};
 
-MemPool::MemPool(uint64_t alloc_fn, uint64_t delete_fn, bool is_user_created)
-  : alloc_fn_(reinterpret_cast<AllocFuncSignature*>(alloc_fn)), 
-    delete_fn_(reinterpret_cast<DeleteFuncSignature*>(delete_fn)),
+MemPool::MemPool(CUDACachingAllocator::CUDAAllocator* allocator, bool is_user_created)
+  : allocator_(allocator),
     is_user_created_(is_user_created) {
   if (is_user_created_) {
     id_ = {0, uid_++};
@@ -36,10 +35,6 @@ MemPoolContext::~MemPoolContext() {
 
 MemPool* MemPoolContext::getActiveMemPool() {
   return active_mempool_;
-}
-
-void MemPoolContext::setActiveMemPool(MemPool* mempool) {
-  active_mempool_ = mempool;
 }
 
 }
