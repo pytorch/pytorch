@@ -1534,6 +1534,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
         self.assertEqual(
             sum(1 for e in expected_logs if e in logs.getvalue()), len(expected_logs)
         )
+        torch._logging.set_logs(compiled_autograd_verbose=False)
 
     def test_verbose_logs_cpp(self):
         script = """
@@ -1556,6 +1557,7 @@ def main():
         result = model(x).sum()
         with torch._dynamo.compiled_autograd.enable(compiler_fn):
             result.backward()
+    torch._logging.set_logs(compiled_autograd_verbose=False)
 
 main()
 """
@@ -1619,6 +1621,7 @@ main()
                 # unused, verbose level already snapshot with contextmanager
                 torch._logging.set_logs(compiled_autograd_verbose=True)
                 fn()
+                torch._logging.set_logs(compiled_autograd_verbose=False)
 
         unexpected_logs = [
             "SumBackward0 (NodeCall 1)",
