@@ -47,6 +47,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cpu-shared-with-deps-pre-cxx11
+      use_split_build: false
       build_environment: linux-binary-libtorch-pre-cxx11
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
