@@ -181,11 +181,7 @@ option(BUILD_BINARY "Build C++ binaries" OFF)
 option(BUILD_DOCS "Build Caffe2 documentation" OFF)
 option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_party" ON)
 option(BUILD_PYTHON "Build Python binaries" ON)
-option(BUILD_CAFFE2 "Master flag to build Caffe2" OFF)
 option(BUILD_LITE_INTERPRETER "Master flag to build Lite Interpreter" OFF)
-cmake_dependent_option(
-    BUILD_CAFFE2_OPS "Build Caffe2 operators" ON
-    "BUILD_CAFFE2" OFF)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 cmake_dependent_option(
     CAFFE2_LINK_LOCAL_PROTOBUF "If set, build protobuf inside libcaffe2.so." ON
@@ -635,7 +631,6 @@ if(INTERN_BUILD_MOBILE)
   endif()
   set(BUILD_PYTHON OFF)
   set(BUILD_FUNCTORCH OFF)
-  set(BUILD_CAFFE2_OPS OFF)
   set(USE_DISTRIBUTED OFF)
   set(NO_API ON)
   set(USE_FBGEMM OFF)
@@ -1206,13 +1201,6 @@ else()
   message(WARNING
       "Generated cmake files are only available when building "
       "shared libs.")
-endif()
-
-# ---[ Modules
-# If master flag for buildling Caffe2 is disabled, we also disable the
-# build for Caffe2 related operator modules.
-if(BUILD_CAFFE2)
-  add_subdirectory(modules)
 endif()
 
 # ---[ Binaries
