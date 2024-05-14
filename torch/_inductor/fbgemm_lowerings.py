@@ -2,13 +2,10 @@ from random import gauss, shuffle
 from typing import Callable, List, Optional, Tuple, Union
 
 import sympy
+
 import torch
 from .ir import Buffer, Pointwise, TensorBox
-from .lowering import (
-    fallback_handler,
-    is_integer_type,
-    register_lowering,
-)
+from .lowering import fallback_handler, is_integer_type, register_lowering
 from .runtime.runtime_utils import next_power_of_2
 from .virtualized import ops, V
 
@@ -82,7 +79,7 @@ def get_inverse_offsets(
         inverse_offsets.realize()
 
     # cache inverse_offsets for further reuse
-    offsets.inverse_offsets = inverse_offsets
+    offsets.inverse_offsets = inverse_offsets  # type: ignore[attr-defined]
 
     return inverse_offsets
 
@@ -115,9 +112,9 @@ def jagged_filtered_configs(
     from torch._inductor.kernel.mm_common import triton_config
 
     # pyre-fixme[6]: For 1st argument expected `Expr` but got `int`.
-    k = max(next_power_of_2(V.graph.sizevars.size_hint(k)), 16)
+    k = max(next_power_of_2(V.graph.sizevars.size_hint(k)), 16)  # type: ignore[arg-type]
     # pyre-fixme[6]: For 1st argument expected `Expr` but got `int`.
-    n = max(next_power_of_2(V.graph.sizevars.size_hint(n)), 16)
+    n = max(next_power_of_2(V.graph.sizevars.size_hint(n)), 16)  # type: ignore[arg-type]
     used = set()
     for block_k, block_n, num_stages, num_warps in configs:
         # shrink configs for small sizes
@@ -258,7 +255,6 @@ def register_jagged_ops():
             ranges=output_size,
         )
 
-
     def _dense_to_jagged_forward_impl(
         fallback_op,  # pyre-ignore[2]
         dense: TensorBox,
@@ -331,21 +327,19 @@ def register_jagged_ops():
             ranges=output_size,
         )
 
-
-    # # pyre-ignore[56]
-    # @register_lowering(torch.ops.fbgemm.dense_to_jagged_forward)
-    # def _dense_to_jagged_forward(
-    #     dense: TensorBox,
-    #     jagged_offsets: List[TensorBox],
-    #     jagged_len: Optional[int] = None,
-    # ) -> TensorBox:
-    #     return _dense_to_jagged_forward_impl(
-    #         fallback_op=torch.ops.fbgemm.dense_to_jagged_forward.default,
-    #         dense=dense,
-    #         jagged_offsets=jagged_offsets,
-    #         jagged_len=jagged_len,
-    #     )
-
+    # pyre-ignore[56]
+    @register_lowering(torch.ops.aten._fbgemm_dense_to_jagged_forward)
+    def _dense_to_jagged_forward(
+        dense: TensorBox,
+        jagged_offsets: List[TensorBox],
+        jagged_len: Optional[int] = None,
+    ) -> TensorBox:
+        return _dense_to_jagged_forward_impl(
+            fallback_op=torch.ops.aten._fbgemm_dense_to_jagged_forward.default,
+            dense=dense,
+            jagged_offsets=jagged_offsets,
+            jagged_len=jagged_len,
+        )
 
     # pyre-ignore[56]
     @register_lowering(torch.ops.aten._fbgemm_jagged_to_padded_dense_backward.default)
