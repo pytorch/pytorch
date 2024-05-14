@@ -4440,6 +4440,7 @@ class TestBlockStateAbsorption(TestCase):
         )
         self.assertEqual(rc, "False", "Triton was imported when importing torch!")
 
+
 class TestCudaOptims(TestCase):
     # These tests will be instantiate with instantiate_device_type_tests
     # to apply the new OptimizerInfo structure.
