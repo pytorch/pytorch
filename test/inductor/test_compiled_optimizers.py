@@ -46,7 +46,6 @@ from torch.optim.lr_scheduler import (
     OneCycleLR,
     PolynomialLR,
     ReduceLROnPlateau,
-    SequentialLR,
     StepLR,
 )
 
@@ -73,9 +72,11 @@ LR_SCHEDULER_TO_KWARGS = {
     StepLR: {"step_size": 1, "gamma": 100},
     MultiStepLR: {"milestones": [1, 2], "gamma": 100},
     ExponentialLR: {"gamma": 100},
-    SequentialLR: {"schedulers": None, "milestones": [1, 2]},
     CosineAnnealingLR: {"T_max": 7},
-    ChainedScheduler: {"schedulers": None},
+    # These schedulers have memory leaks in eager
+    # https://github.com/pytorch/pytorch/issues/126131
+    # SequentialLR: {"schedulers": None, "milestones": [1, 2]},
+    # ChainedScheduler: {"schedulers": None},
     CyclicLR: {"base_lr": 0.001, "max_lr": 0.02, "cycle_momentum": False},
     CosineAnnealingWarmRestarts: {"T_0": 1},
     OneCycleLR: {
