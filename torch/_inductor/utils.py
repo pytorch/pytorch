@@ -721,6 +721,8 @@ def fresh_inductor_cache(cache_entries=None):
     except Exception:
         log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
         raise
+    finally:
+        clear_inductor_caches()
 
 
 def argsort(seq) -> List[int]:
