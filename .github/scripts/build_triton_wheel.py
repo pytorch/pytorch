@@ -13,6 +13,7 @@ REPO_DIR = SCRIPT_DIR.parent.parent
 # TODO: Remove me once Triton version is again in sync for vanilla and ROCm
 ROCM_TRITION_VERSION = "2.3.0"
 
+
 def read_triton_pin(rocm_hash: bool = False) -> str:
     triton_file = "triton.txt" if not rocm_hash else "triton-rocm.txt"
     with open(REPO_DIR / ".ci" / "docker" / "ci_commit_pins" / triton_file) as f:
