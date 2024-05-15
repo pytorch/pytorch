@@ -1220,6 +1220,9 @@ endif()
 target_include_directories(torch_cpu PRIVATE ${ATen_CPU_INCLUDE})
 
 target_include_directories(torch_cpu PRIVATE
+  ${TORCH_ROOT}/third_party/nlohmann/single_include)
+
+target_include_directories(torch_cpu PRIVATE
   ${TORCH_SRC_DIR}/csrc)
 
 target_include_directories(torch_cpu PRIVATE
@@ -1227,8 +1230,6 @@ target_include_directories(torch_cpu PRIVATE
 
 target_include_directories(torch_cpu PRIVATE
   ${TORCH_ROOT}/third_party/kineto/libkineto/include)
-
-include_directories(${TORCH_ROOT}/third_party/nlohmann/single_include)
 
 if(USE_KINETO)
   target_include_directories(torch_cpu PRIVATE

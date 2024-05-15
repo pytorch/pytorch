@@ -184,6 +184,12 @@ new_local_repository(
     path = "third_party/tensorpipe",
 )
 
+new_local_repository(
+    name = "nlohmann",
+    build_file = "//third_party:nlohmann.BUILD",
+    path = "third_party/nlohmann",
+)
+
 http_archive(
     name = "mkl",
     build_file = "//third_party:mkl.BUILD",
