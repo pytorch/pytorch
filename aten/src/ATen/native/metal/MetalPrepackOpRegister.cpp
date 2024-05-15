@@ -9,13 +9,13 @@ namespace metal {
 
 c10::intrusive_ptr<Conv2dOpContext> unpack(
     Tensor&& weight,
-    c10::optional<Tensor>&& bias,
+    std::optional<Tensor>&& bias,
     std::vector<int64_t>&& stride,
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& dilation,
     int64_t groups,
-    const c10::optional<Scalar>& output_min,
-    const c10::optional<Scalar>& output_max) {
+    const std::optional<Scalar>& output_min,
+    const std::optional<Scalar>& output_max) {
   auto packedWeight = weight.contiguous(MemoryFormat::ChannelsLast);
   return c10::make_intrusive<Conv2dOpContext>(
       std::move(packedWeight),
@@ -30,9 +30,9 @@ c10::intrusive_ptr<Conv2dOpContext> unpack(
 
 c10::intrusive_ptr<LinearOpContext> unpack(
     Tensor&& weight,
-    c10::optional<Tensor>&& bias,
-    const c10::optional<Scalar>& output_min,
-    const c10::optional<Scalar>& output_max) {
+    std::optional<Tensor>&& bias,
+    const std::optional<Scalar>& output_min,
+    const std::optional<Scalar>& output_max) {
   TORCH_CHECK(weight.dim() == 2);
   // Don't need to do `weight.t()`
   auto packedWeight = weight.view({weight.size(0), weight.size(1), 1, 1})
@@ -96,13 +96,13 @@ TORCH_LIBRARY(metal_prepack, m) {
 
 c10::intrusive_ptr<Conv2dOpContext> conv2d_prepack(
     Tensor&& weight,
-    c10::optional<Tensor>&& bias,
+    std::optional<Tensor>&& bias,
     std::vector<int64_t>&& stride,
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& dilation,
     int64_t groups,
-    const c10::optional<Scalar>& output_min,
-    const c10::optional<Scalar>& output_max) {
+    const std::optional<Scalar>& output_min,
+    const std::optional<Scalar>& output_max) {
   TORCH_CHECK(weight.dim() == 4);
   return c10::make_intrusive<Conv2dOpContext>(
       std::move(weight),
@@ -117,9 +117,9 @@ c10::intrusive_ptr<Conv2dOpContext> conv2d_prepack(
 
 c10::intrusive_ptr<LinearOpContext> linear_prepack(
     Tensor&& weight,
-    c10::optional<Tensor>&& bias,
-    const c10::optional<Scalar>& output_min,
-    const c10::optional<Scalar>& output_max) {
+    std::optional<Tensor>&& bias,
+    const std::optional<Scalar>& output_min,
+    const std::optional<Scalar>& output_max) {
   return c10::make_intrusive<LinearOpContext>(
       std::move(weight), std::move(bias), output_min, output_max);
 }

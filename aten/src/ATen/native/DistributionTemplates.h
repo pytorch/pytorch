@@ -81,7 +81,7 @@ int64_t update_to(int64_t to) {
   }
 
 template<template<typename> class random_kernel, typename RNG>
-at::Tensor& random_impl(at::Tensor& self, c10::optional<Generator> generator) {
+at::Tensor& random_impl(at::Tensor& self, std::optional<Generator> generator) {
   CHECK_EMPTY_AND_RETURN(self);
   auto iter = at::TensorIterator::borrowing_nullary_op(self);
   random_kernel<RNG>()(iter, generator);
@@ -132,7 +132,7 @@ static void check_from_to_in_range(int64_t from, int64_t to_inc, caffe2::TypeMet
 }
 
 template<template<typename> class random_from_to_kernel, typename RNG>
-at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<int64_t> to_opt, c10::optional<Generator> generator) {
+at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, std::optional<int64_t> to_opt, c10::optional<Generator> generator) {
   uint64_t range = 0;
   auto iter = at::TensorIterator::borrowing_nullary_op(self);
   if (to_opt.has_value()) {
@@ -200,7 +200,7 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<in
   TORCH_CHECK(std >= 0.0, "normal expects std >= 0.0, but found std ", std);
 
 template<template<typename> class normal_kernel, typename RNG>
-Tensor& normal_impl_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
+Tensor& normal_impl_(Tensor& self, double mean, double std, std::optional<Generator> gen) {
   CHECK_NORMAL_STD(std);
   CHECK_EMPTY_AND_RETURN(self);
 
@@ -216,7 +216,7 @@ Tensor& normal_impl_(Tensor& self, double mean, double std, c10::optional<Genera
 }
 
 template<template<typename> class normal_kernel, typename RNG>
-Tensor& normal_out_impl(Tensor& output, const Tensor& mean, double std, c10::optional<Generator> gen) {
+Tensor& normal_out_impl(Tensor& output, const Tensor& mean, double std, std::optional<Generator> gen) {
   CHECK_NORMAL_STD(std);
   auto std_tensor = at::empty_like(output, MemoryFormat::Contiguous);
   auto shape = at::infer_size(mean.sizes(), std_tensor.sizes());
@@ -227,7 +227,7 @@ Tensor& normal_out_impl(Tensor& output, const Tensor& mean, double std, c10::opt
 }
 
 template<template<typename> class normal_kernel, typename RNG>
-Tensor& normal_out_impl(Tensor& output, double mean, const Tensor& std, c10::optional<Generator> gen) {
+Tensor& normal_out_impl(Tensor& output, double mean, const Tensor& std, std::optional<Generator> gen) {
   CHECK_NORMAL_TENSOR_STD(std);
   auto mean_tensor = at::full({}, mean, output.options());
   auto shape = at::infer_size(mean_tensor.sizes(), std.sizes());
@@ -242,7 +242,7 @@ Tensor& normal_out_impl(Tensor& output, double mean, const Tensor& std, c10::opt
 }
 
 template<template<typename> class normal_kernel, typename RNG>
-Tensor& normal_out_impl(Tensor& output, const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
+Tensor& normal_out_impl(Tensor& output, const Tensor& mean, const Tensor& std, std::optional<Generator> gen) {
   CHECK_NORMAL_TENSOR_STD(std);
   auto shape = at::infer_size(mean.sizes(), std.sizes());
   at::native::resize_output(output, shape);
@@ -256,7 +256,7 @@ Tensor& normal_out_impl(Tensor& output, const Tensor& mean, const Tensor& std, c
 }
 
 template<template<typename> class normal_kernel, typename RNG>
-Tensor normal_impl(const Tensor& mean, double std, c10::optional<Generator> gen) {
+Tensor normal_impl(const Tensor& mean, double std, std::optional<Generator> gen) {
   CHECK_NORMAL_STD(std);
   Tensor ret = at::empty_like(mean, MemoryFormat::Contiguous);
   normal_out_impl<normal_kernel, RNG>(ret, mean, std, gen);
@@ -264,7 +264,7 @@ Tensor normal_impl(const Tensor& mean, double std, c10::optional<Generator> gen)
 }
 
 template<template<typename> class normal_kernel, typename RNG>
-Tensor normal_impl(double mean, const Tensor& std, c10::optional<Generator> gen) {
+Tensor normal_impl(double mean, const Tensor& std, std::optional<Generator> gen) {
   CHECK_NORMAL_TENSOR_STD(std);
   Tensor ret = at::empty_like(std, MemoryFormat::Contiguous);
   normal_out_impl<normal_kernel, RNG>(ret, mean, std, gen);
@@ -272,7 +272,7 @@ Tensor normal_impl(double mean, const Tensor& std, c10::optional<Generator> gen)
 }
 
 template<template<typename> class normal_kernel, typename RNG>
-Tensor normal_impl(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
+Tensor normal_impl(const Tensor& mean, const Tensor& std, std::optional<Generator> gen) {
   CHECK_NORMAL_TENSOR_STD(std);
   auto shape = at::infer_size(mean.sizes(), std.sizes());
   Tensor ret = at::empty(shape, mean.options(), MemoryFormat::Contiguous);
@@ -283,7 +283,7 @@ Tensor normal_impl(const Tensor& mean, const Tensor& std, c10::optional<Generato
 // ==================================================== Uniform =======================================================
 
 template<template<typename> class uniform_kernel, typename RNG>
-at::Tensor& uniform_impl_(at::Tensor& self, double from, double to, c10::optional<Generator> generator) {
+at::Tensor& uniform_impl_(at::Tensor& self, double from, double to, std::optional<Generator> generator) {
   if (self.is_complex()) {
     CHECK_EMPTY_AND_RETURN(self);
     auto float_tensor = at::view_as_real(self);
@@ -313,7 +313,7 @@ at::Tensor& uniform_impl_(at::Tensor& self, double from, double to, c10::optiona
 // ================================================== LogNormal =======================================================
 
 template<template<typename> class log_normal_kernel, typename RNG>
-at::Tensor& log_normal_impl_(at::Tensor& self, double mean, double std, c10::optional<Generator> gen) {
+at::Tensor& log_normal_impl_(at::Tensor& self, double mean, double std, std::optional<Generator> gen) {
   TORCH_CHECK(std > 0.0, "log_normal_ expects std > 0.0, but found std=", std);
   CHECK_EMPTY_AND_RETURN(self);
   auto iter = TensorIterator::borrowing_nullary_op(self);
@@ -324,7 +324,7 @@ at::Tensor& log_normal_impl_(at::Tensor& self, double mean, double std, c10::opt
 // =================================================== Geometric ======================================================
 
 template<template<typename> class geometric_kernel, typename RNG>
-Tensor& geometric_impl_(Tensor& self, double p, c10::optional<Generator> gen) {
+Tensor& geometric_impl_(Tensor& self, double p, std::optional<Generator> gen) {
   TORCH_CHECK(0 < p && p < 1, "geometric_ expects p to be in (0, 1), but got p=", p);
   CHECK_EMPTY_AND_RETURN(self);
   auto iter = TensorIterator::borrowing_nullary_op(self);
@@ -335,7 +335,7 @@ Tensor& geometric_impl_(Tensor& self, double p, c10::optional<Generator> gen) {
 // ================================================== Exponential =====================================================
 
 template<template<typename> class exponential_kernel, typename RNG>
-Tensor& exponential_impl_(Tensor& self, double lambda, c10::optional<Generator> gen) {
+Tensor& exponential_impl_(Tensor& self, double lambda, std::optional<Generator> gen) {
   TORCH_CHECK(lambda > 0.0, "exponential_ expects lambda > 0.0, but found lambda=", lambda);
   CHECK_EMPTY_AND_RETURN(self);
   auto iter = TensorIterator::borrowing_nullary_op(self);
@@ -346,7 +346,7 @@ Tensor& exponential_impl_(Tensor& self, double lambda, c10::optional<Generator> 
 // ==================================================== Cauchy ========================================================
 
 template<template<typename> class cauchy_kernel, typename RNG>
-Tensor& cauchy_impl_(Tensor& self, double median, double sigma, c10::optional<Generator> gen) {
+Tensor& cauchy_impl_(Tensor& self, double median, double sigma, std::optional<Generator> gen) {
   // TODO: instead of variable name 'sigma', use 'gamma' or 'scale'
   // the variance, squared sigma, is undefined for cauchy distribution
   TORCH_CHECK(sigma > 0.0, "cauchy_ expects sigma > 0.0, but found sigma=", sigma);
@@ -360,7 +360,7 @@ Tensor& cauchy_impl_(Tensor& self, double median, double sigma, c10::optional<Ge
 // ==================================================== Bernoulli =====================================================
 
 template<template<typename> class bernoulli_tensor_kernel, typename RNG>
-Tensor& bernoulli_impl_(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
+Tensor& bernoulli_impl_(Tensor& self, const Tensor& p_, std::optional<Generator> gen) {
   CHECK_EMPTY_AND_RETURN(self);
   NoNamesGuard guard;
   at::assert_no_internal_overlap(self);
@@ -369,7 +369,7 @@ Tensor& bernoulli_impl_(Tensor& self, const Tensor& p_, c10::optional<Generator>
 }
 
 template<template<typename> class bernoulli_scalar_kernel, typename RNG>
-Tensor& bernoulli_impl_(Tensor& self, double p, c10::optional<Generator> gen) {
+Tensor& bernoulli_impl_(Tensor& self, double p, std::optional<Generator> gen) {
   TORCH_CHECK(0 <= p && p <= 1, "bernoulli_ expects p to be in [0, 1], but got p=", p);
   CHECK_EMPTY_AND_RETURN(self);
   at::assert_no_internal_overlap(self);
@@ -378,7 +378,7 @@ Tensor& bernoulli_impl_(Tensor& self, double p, c10::optional<Generator> gen) {
 }
 
 template<template<typename> class bernoulli_tensor_kernel, typename RNG>
-Tensor& bernoulli_out_impl(Tensor& result, const Tensor& self, c10::optional<Generator> gen) {
+Tensor& bernoulli_out_impl(Tensor& result, const Tensor& self, std::optional<Generator> gen) {
   // result.resize_as_(self) requires self to have same dtype as result, so we
   // use resize_ instead.
   // TODO: Fix resize_as_. See pytorch/pytorch#11665.
