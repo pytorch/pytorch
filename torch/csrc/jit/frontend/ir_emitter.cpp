@@ -168,7 +168,7 @@ struct CondValue {
   CondValue(
       Value* value,
       RefinementSet refinements,
-      c10::optional<bool> static_if)
+      std::optional<bool> static_if)
       : value_(value),
         refinements_(std::move(refinements)),
         static_if_(static_if) {}
@@ -186,14 +186,14 @@ struct CondValue {
   const RefinementSet& refinements() const {
     return refinements_;
   }
-  c10::optional<bool> staticIf() const {
+  std::optional<bool> staticIf() const {
     return static_if_;
   }
 
  private:
   Value* value_;
   RefinementSet refinements_;
-  c10::optional<bool>
+  std::optional<bool>
       static_if_; // certain expression cause us to emit a static if statement
                   // this value is present if this is the case.
                   // this is not equivalent to value_ being a constant
@@ -283,7 +283,7 @@ struct Environment {
   }
 
   // see if type error has been set for a variable
-  c10::optional<std::string> findVariableTypeError(const std::string& name) {
+  std::optional<std::string> findVariableTypeError(const std::string& name) {
     auto runner = this;
     while (runner->next) {
       runner = runner->next.get();
@@ -1200,7 +1200,7 @@ struct to_ir {
     }
     if (const auto union_type = lhs_value->type()->cast<UnionType>()) {
       std::vector<TypePtr> to_subtract{NoneType::get()};
-      c10::optional<TypePtr> remaining =
+      std::optional<TypePtr> remaining =
           union_type->subtractTypeSet(to_subtract);
       std::vector<Refinement> all_present;
       if (remaining) {
@@ -1228,7 +1228,7 @@ struct to_ir {
         CondValue v = emitCondExpr(Expr(expr.tree()->trees()[0]));
         Value* result = emitBuiltinCall(
             expr.range(), *graph, aten::__not__, {v.value()}, {});
-        c10::optional<bool> static_if;
+        std::optional<bool> static_if;
         if (v.staticIf()) {
           static_if = !*v.staticIf();
         }
@@ -1294,7 +1294,7 @@ struct to_ir {
           }
         }
         auto expr_out = emitToBool(expr.range(), emitExpr(expr));
-        c10::optional<bool> static_if = c10::nullopt;
+        std::optional<bool> static_if = c10::nullopt;
         auto kind = expr_out->node()->kind();
         if (kind == aten::is_scripting) {
           static_if = true;
@@ -1559,7 +1559,7 @@ struct to_ir {
           ? refined_type_hint->cast<ListType>()->getElementType()
           : nullptr;
 
-      c10::optional<TypePtr> unified_elem_type = unifyTypes(
+      std::optional<TypePtr> unified_elem_type = unifyTypes(
           list_value->type()->expect<ListType>()->getElementType(),
           out->type(),
           /*default_to_union=*/true,
@@ -1740,7 +1740,7 @@ struct to_ir {
           ? refined_type_hint->expect<DictType>()->getValueType()
           : nullptr;
 
-      c10::optional<TypePtr> unified_value_type = unifyTypes(
+      std::optional<TypePtr> unified_value_type = unifyTypes(
           first_generated_value_type,
           v->type(),
           /*default_to_union=*/true,
@@ -1832,7 +1832,7 @@ struct to_ir {
     // and the second expr in the false branch, if it's an AND the opposite
     auto get_const_expr = [&] { return graph->insertConstant(is_or, loc); };
 
-    c10::optional<CondValue> rhs;
+    std::optional<CondValue> rhs;
     auto get_continue_expr = [&] {
       rhs = emitCondExpr(second_expr);
       return rhs->value();
@@ -1842,8 +1842,8 @@ struct to_ir {
     // If this is an AND, eval second expression if first expr is True
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Value* new_result;
-    c10::optional<RefinementSet> refinements;
-    c10::optional<bool> static_if;
+    std::optional<RefinementSet> refinements;
+    std::optional<bool> static_if;
     if (is_or) {
       new_result = emitIfExpr(loc, lhs, get_const_expr, get_continue_expr);
       refinements = lhs.refinements().Or(rhs->refinements());
@@ -2320,8 +2320,8 @@ struct to_ir {
       const SourceRange& range,
       const std::function<void()>& emit_body,
       const SugaredValuePtr& iter_val,
-      c10::optional<List<Expr>> targets,
-      c10::optional<Expr> cond) {
+      std::optional<List<Expr>> targets,
+      std::optional<Expr> cond) {
     Value* max_trip_count_val = nullptr;
     if (iter_val != nullptr) {
       max_trip_count_val = iter_val->len(range, method);
@@ -2968,7 +2968,7 @@ struct to_ir {
     auto outputs = rhs_output->asTuple(
         rhs_loc,
         method,
-        starred_unpack ? c10::nullopt : c10::optional<size_t>{n_binders});
+        starred_unpack ? c10::nullopt : std::optional<size_t>{n_binders});
     if (outputs.size() < n_binders) {
       throw ErrorReport(tl)
           << "need " << (starred_unpack ? "at least " : "") << n_binders
@@ -3655,7 +3655,7 @@ struct to_ir {
         auto iterable_value = expr_sv->iter(loc, method);
 
         // range should have the same static length as the other iterable
-        c10::optional<int64_t> iter_static_len = iterable_value->staticLen();
+        std::optional<int64_t> iter_static_len = iterable_value->staticLen();
         SugaredValuePtr range_sv = std::make_shared<RangeValue>(
             loc, method, range_inputs, iter_static_len);
 
@@ -4454,7 +4454,7 @@ struct to_ir {
           ? refined_type_hint->cast<ListType>()->getElementType()
           : nullptr;
 
-      c10::optional<TypePtr> unified_elem_type = unifyTypeList(
+      std::optional<TypePtr> unified_elem_type = unifyTypeList(
           types, nowhere, /*default_to_union=*/true, elem_type_hint);
 
       if (!refined_type_hint &&
@@ -4885,7 +4885,7 @@ struct to_ir {
       return graph->insertConstant(dim, loc);
     };
     std::vector<int64_t> dims(subscript_exprs.size());
-    std::vector<c10::optional<Value*>> exprs(
+    std::vector<std::optional<Value*>> exprs(
         subscript_exprs.size(), c10::nullopt);
 
     auto handle_indexing = [&](const Expr& subscript_expr,
@@ -5352,7 +5352,7 @@ struct CompilationUnit::PropertyPair
 };
 
 CompilationUnit::PropertyPair CompilationUnit::define_property(
-    const c10::optional<c10::QualifiedName>& prefix,
+    const std::optional<c10::QualifiedName>& prefix,
     const Property& prop,
     const ResolverPtr& resolver,
     const Self* self,
@@ -5386,14 +5386,14 @@ CompilationUnit::PropertyPair CompilationUnit::define_property(
 }
 
 std::unique_ptr<Function> CompilationUnit::define(
-    const c10::optional<QualifiedName>& prefix,
+    const std::optional<QualifiedName>& prefix,
     const Def& def,
     const ResolverPtr& resolver,
     const Self* self,
     const std::unordered_map<std::string, Function*>& function_table,
     bool shouldMangle,
     CompilationUnit::FunctionType type,
-    c10::optional<size_t> operator_set_version) const {
+    std::optional<size_t> operator_set_version) const {
   TORCH_INTERNAL_ASSERT(resolver);
   auto _resolver = resolver;
   if (!self) {
@@ -5444,14 +5444,14 @@ std::unique_ptr<Function> CompilationUnit::define(
 }
 
 std::vector<Function*> CompilationUnit::define(
-    const c10::optional<c10::QualifiedName>& prefix,
+    const std::optional<c10::QualifiedName>& prefix,
     const std::vector<Property>& properties,
     const std::vector<ResolverPtr>& propResolvers,
     const std::vector<Def>& definitions,
     const std::vector<ResolverPtr>& defResolvers,
     const Self* self,
     bool shouldMangle,
-    c10::optional<size_t> operator_set_version) {
+    std::optional<size_t> operator_set_version) {
   TORCH_INTERNAL_ASSERT(definitions.size() == defResolvers.size());
   TORCH_INTERNAL_ASSERT(properties.size() == propResolvers.size());
   std::vector<Function*> functions;
@@ -5515,7 +5515,7 @@ std::vector<Function*> CompilationUnit::define(
 }
 
 void CompilationUnit::define_hooks(
-    const c10::optional<c10::QualifiedName>& prefix,
+    const std::optional<c10::QualifiedName>& prefix,
     const std::vector<Def>& hookDefs,
     const std::vector<ResolverPtr>& hookResolvers,
     const std::vector<Def>& preHookDefs,
@@ -5620,7 +5620,7 @@ void CompilationUnit::define_hooks(
 }
 
 std::vector<Function*> CompilationUnit::define(
-    const c10::optional<QualifiedName>& prefix,
+    const std::optional<QualifiedName>& prefix,
     const std::string& source,
     const ResolverPtr& resolver,
     const Self* self) {
