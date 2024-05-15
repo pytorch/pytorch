@@ -116,7 +116,7 @@ def _from_local_no_grad(
     global_size: torch.Size,
     global_stride: Tuple[int, ...],
 ) -> DTensor:
-        """
+    """
     This method is similar to ``DTensor.from_local()`` except that in eager mode
     it avoids some CPU overhead by avoiding default args and not being differentiable.
     """
