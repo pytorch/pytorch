@@ -643,7 +643,7 @@ class TestBottleneck(TestCase):
 
         p = subprocess.Popen(
             command,
-            stdout=subprocess.PIPE,  # noqa: P204
+            stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             shell=True,
         )
