@@ -610,7 +610,7 @@ def compute_unbacked_bindings(shape_env, example_value, old_example_value=None, 
                     if isinstance(example_value, torch.Tensor)
                     else ""
                 )
-        )
+            )
         # Why do we have to do some rebinding here?  If the original FX node
         # wasn't a binding site because you had a memo hit, but post
         # translation you aren't a memo hit anymore, there's now a new binding
