@@ -244,6 +244,10 @@ class Mod(sympy.Function):
         if less.is_Boolean and bool(less) and r.is_positive:
             return p
 
+        gcd = sympy.gcd(p, q)
+        if gcd == q:
+            return S.Zero
+
     def _eval_is_integer(self):
         p, q = self.args
         return fuzzy_and([p.is_integer, q.is_integer, fuzzy_not(q.is_zero)])  # type: ignore[attr-defined]
