@@ -83,6 +83,7 @@ constant_fold_functions = [
     torch._assert,
     torch._utils._get_device_index,
     torch._C._get_cublas_allow_tf32,
+    torch._C._is_any_autocast_enabled,
     torch.cuda.get_device_properties,
     torch.cuda.is_available,
     torch.distributed.is_available,

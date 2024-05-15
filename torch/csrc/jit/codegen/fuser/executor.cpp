@@ -26,7 +26,7 @@ namespace fuser {
 
 // Returns the "map size" for this run, which is the common size for all
 // intermediate tensors.
-static c10::optional<std::vector<int64_t>> getMapSize(
+static std::optional<std::vector<int64_t>> getMapSize(
     const KernelSpec& spec,
     at::TensorList args,
     at::IntArrayRef arg_subset) {
@@ -67,7 +67,7 @@ static c10::optional<std::vector<int64_t>> getMapSize(
 }
 
 // Tries to determine a map size for the instantiated kernel (see above)
-static c10::optional<std::vector<int64_t>> canRunKernel(
+static std::optional<std::vector<int64_t>> canRunKernel(
     const KernelSpec& spec,
     at::TensorList args) {
   // Short-circuits on size mismatch
@@ -78,7 +78,7 @@ static c10::optional<std::vector<int64_t>> canRunKernel(
       " arguments, but got ",
       args.size());
 
-  c10::optional<std::vector<int64_t>> map_size;
+  std::optional<std::vector<int64_t>> map_size;
   for (const auto& broadcast_group : spec.inputBroadcastGroups()) {
     if (!map_size) {
       map_size = getMapSize(spec, args, broadcast_group);
