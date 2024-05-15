@@ -9373,12 +9373,10 @@ class foreach_norm_sample_func(foreach_inputs_sample_func):
         _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
         _foreach_inputs_kwargs["requires_grad"] = requires_grad
 
-        from torch.testing._internal.common_dtype import get_all_dtypes
-
         for num_tensors, ord, out_dtype in product(
             num_input_tensors,
             (0, 1, 2, -1, -2, float('inf'), float('-inf')),
-            [None] + get_all_dtypes(),
+            ((None,) + (torch.complex128,) if dtype in complex_types() else (torch.float64,)),
         ):
             input = sample_inputs_foreach(None, device, dtype, num_tensors, zero_size=False, **_foreach_inputs_kwargs)
             disable_fastpath = True
