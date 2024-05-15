@@ -1508,15 +1508,13 @@ def main():
     else:
         torch_package_dir_name = "torch"
         package_dir = {}
-        package_data = (
-            {
-                "torch": torch_package_data,
-                "torchgen": torchgen_package_data,
-                "caffe2": [
-                    "python/serialized_test/data/operator_test/*.zip",
-                ],
-            },
-        )
+        package_data = {
+            "torch": torch_package_data,
+            "torchgen": torchgen_package_data,
+            "caffe2": [
+                "python/serialized_test/data/operator_test/*.zip",
+            ],
+        }
 
     setup(
         name=package_name,
