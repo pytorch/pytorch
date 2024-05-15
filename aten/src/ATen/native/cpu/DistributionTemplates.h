@@ -15,7 +15,6 @@
 #include <c10/util/irange.h>
 #endif
 
-
 namespace at {
 namespace native {
 namespace templates {
@@ -58,10 +57,10 @@ void random_full_64_bits_range_kernel(TensorIteratorBase& iter, RNG generator) {
 
 template<typename RNG>
 struct RandomFromToKernel {
-  void operator()(TensorIteratorBase& iter, uint64_t range, int64_t base, c10::optional<Generator> gen) {
+  void operator()(TensorIteratorBase& iter, uint64_t range, int64_t base, std::optional<Generator> gen) {
     random_from_to_kernel(iter, range, base, check_generator<RNG>(gen));
   }
-  void operator()(TensorIteratorBase& iter, c10::optional<Generator> gen) {
+  void operator()(TensorIteratorBase& iter, std::optional<Generator> gen) {
     random_full_64_bits_range_kernel(iter, check_generator<RNG>(gen));
   }
 };
@@ -79,7 +78,7 @@ void random_kernel(TensorIteratorBase& iter, RNG generator) {
 
 template<typename RNG>
 struct RandomKernel {
-  void operator()(TensorIteratorBase& iter, c10::optional<Generator> gen) {
+  void operator()(TensorIteratorBase& iter, std::optional<Generator> gen) {
     random_kernel(iter, check_generator<RNG>(gen));
   }
 };
@@ -149,6 +148,62 @@ static void normal_fill_16(scalar_t *data, const scalar_t mean, const scalar_t s
   }
 }
 
+#if defined(__VSX__)  || defined(CPU_CAPABILITY_VSX)
+static void normal_fill_16_VSX(float *data,const Vectorized<float> &two_pi,const Vectorized<float> &one,const Vectorized<float> &minus_two,const Vectorized<float> &mean,const Vectorized<float> &std) {
+  using Vec = Vectorized<float>;
+  Vec u1=one-Vec::loadu(data);
+  Vec u2=Vec::loadu(data+8);
+  Vec radius=(minus_two * u1.log());
+  radius=radius.sqrt();
+  Vec theta=two_pi * u2;
+  Vec output_vec=radius * theta.cos() * std + mean;
+  Vec output_vec2=radius * theta.sin() * std + mean;
+  output_vec.store(data);
+  output_vec2.store(data+8);
+}
+
+template <typename scalar_t, typename RNG>
+void normal_fill_VSX(const TensorBase &self, const scalar_t mean, const scalar_t std, RNG generator) {
+  float *data = self.data_ptr<float>();
+  auto size = self.numel();
+  std::lock_guard<std::mutex> lock(generator->mutex_);
+  for (const auto i : c10::irange(size)) {
+    at::uniform_real_distribution<scalar_t> uniform(0, 1);
+    data[i] = uniform(generator);
+  }
+
+  using Vec = Vectorized<float>;
+  const Vec two_pi = Vec(2.0f * c10::pi<double>);
+  const Vec one = Vec(1.0f);
+  const Vec minus_two = Vec(-2.0f);
+  const Vec var_vec  = Vec(std);
+  const Vec mean_vec = Vec(mean);
+
+  for (int64_t i = 0; i < size - 15; i += 16) {
+    if(Vec::size()==8) {
+      normal_fill_16_VSX(data + i, two_pi, one, minus_two, mean_vec, var_vec);
+    }
+    else{
+      normal_fill_16<scalar_t>(data + i, mean, std);
+    }
+  }
+  if (size % 16 != 0) {
+    // Recompute the last 16 values.
+    data = data + size - 16;
+    for (const auto i : c10::irange(16)) {
+      at::uniform_real_distribution<scalar_t> uniform(0, 1);
+      data[i] = uniform(generator);
+    }
+    if(Vec::size()==8){
+      normal_fill_16_VSX(data, two_pi, one, minus_two, mean_vec, var_vec);
+    }
+    else{
+      normal_fill_16<scalar_t>(data, mean, std);
+    }
+  }
+}
+#endif //VSX
+
 template <typename scalar_t, typename RNG>
 void normal_fill(const TensorBase &self, const scalar_t mean, const scalar_t std, RNG generator) {
   scalar_t *data = self.data_ptr<scalar_t>();
@@ -179,6 +234,8 @@ void normal_kernel(const TensorBase &self, double mean, double std, RNG generato
   if (self.scalar_type() == ScalarType::Float && size >= 16 && self.is_contiguous()) {
 #ifdef CPU_CAPABILITY_AVX2
     normal_fill_AVX2(self, static_cast<float>(mean), static_cast<float>(std), generator);
+#elif defined(__VSX__)  || defined(CPU_CAPABILITY_VSX)
+    normal_fill_VSX(self, static_cast<float>(mean), static_cast<float>(std), generator);
 #else
     normal_fill(self, static_cast<float>(mean), static_cast<float>(std), generator);
 #endif
@@ -200,7 +257,7 @@ void normal_kernel(const TensorBase &self, double mean, double std, RNG generato
 
 template<typename RNG>
 struct NormalKernel {
-  void operator()(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
+  void operator()(Tensor& self, double mean, double std, std::optional<Generator> gen) {
     normal_kernel(self, mean, std, check_generator<RNG>(gen));
   }
 };
@@ -222,7 +279,7 @@ void uniform_kernel(TensorIteratorBase& iter, double from_, double to_, RNG gene
 
 template<typename RNG>
 struct UniformKernel {
-  void operator()(TensorIteratorBase& iter, double from, double to, c10::optional<Generator> gen) {
+  void operator()(TensorIteratorBase& iter, double from, double to, std::optional<Generator> gen) {
     uniform_kernel(iter, from, to, check_generator<RNG>(gen));
   }
 };
@@ -242,7 +299,7 @@ void cauchy_kernel(TensorIteratorBase& iter, double median, double sigma, RNG ge
 
 template<typename RNG>
 struct CauchyKernel {
-  void operator()(TensorIteratorBase& iter, double median, double sigma, c10::optional<Generator> gen) {
+  void operator()(TensorIteratorBase& iter, double median, double sigma, std::optional<Generator> gen) {
     cauchy_kernel(iter, median, sigma, check_generator<RNG>(gen));
   }
 };
@@ -262,7 +319,7 @@ void log_normal_kernel(TensorIteratorBase& iter, double mean, double std, RNG ge
 
 template<typename RNG>
 struct LogNormalKernel {
-  void operator()(TensorIteratorBase& iter, double mean, double std, c10::optional<Generator> gen) {
+  void operator()(TensorIteratorBase& iter, double mean, double std, std::optional<Generator> gen) {
     log_normal_kernel(iter, mean, std, check_generator<RNG>(gen));
   }
 };
@@ -282,7 +339,7 @@ void geometric_kernel(TensorIteratorBase& iter, double p, RNG generator) {
 
 template<typename RNG>
 struct GeometricKernel {
-  void operator()(TensorIteratorBase& iter, double p, c10::optional<Generator> gen) {
+  void operator()(TensorIteratorBase& iter, double p, std::optional<Generator> gen) {
     geometric_kernel(iter, p, check_generator<RNG>(gen));
   }
 };
@@ -303,7 +360,7 @@ void exponential_kernel(TensorIteratorBase& iter, double lambda, RNG generator) 
 
 template<typename RNG>
 struct ExponentialKernel {
-  void operator()(TensorIteratorBase& iter, double lambda, c10::optional<Generator> gen) {
+  void operator()(TensorIteratorBase& iter, double lambda, std::optional<Generator> gen) {
     exponential_kernel(iter, lambda, check_generator<RNG>(gen));
   }
 };
@@ -321,7 +378,7 @@ void bernoulli_kernel(const TensorBase &self, const TensorBase &p_, RNG generato
     auto p = expand_inplace(self, p_cpu);
     auto iter = TensorIteratorConfig()
         .add_output(self)
-        .add_input(*p)
+        .add_const_input(*p)
         .check_all_same_dtype(false)
         .build();
     if (p->scalar_type() == kDouble) {
@@ -358,10 +415,10 @@ void bernoulli_kernel(const TensorBase &self, double p, RNG generator) {
 
 template<typename RNG>
 struct BernoulliKernel {
-  void operator()(const TensorBase &self, double p, c10::optional<Generator> gen) {
+  void operator()(const TensorBase &self, double p, std::optional<Generator> gen) {
     bernoulli_kernel(self, p, check_generator<RNG>(gen));
   }
-  void operator()(const TensorBase &self, const TensorBase &p_, c10::optional<Generator> gen) {
+  void operator()(const TensorBase &self, const TensorBase &p_, std::optional<Generator> gen) {
     bernoulli_kernel(self, p_, check_generator<RNG>(gen));
   }
 };

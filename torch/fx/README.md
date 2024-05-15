@@ -66,19 +66,19 @@ Here, we set up a simple Module that exercises different language features: fetc
 
 # Internal Structure
 
-## [Graph](https://pytorch.org/docs/master/fx.html#torch.fx.Graph) ##
+## [Graph](https://pytorch.org/docs/main/fx.html#torch.fx.Graph) ##
 The `fx.Graph` is a core data structure in FX that represents the operations and their dependencies in a structured format. It consists of a List of `fx.Node` representing individual operations and their inputs and outputs. The Graph enables simple manipulation and analysis of the model structure, which is essential for implementing various transformations and optimizations.
 
 ## Node
 An `fx.Node` is a datastructure that represent individual operations within an `fx.Graph`, it maps to callsites such as operators, methods and modules. Each `fx.Node` keeps track of its inputs, the previous and next nodes, the stacktrace so you can map back the node to a line of code in your python file and some optional metadata stored in a `meta` dict.
 
-## [GraphModule](https://pytorch.org/docs/master/fx.html#torch.fx.GraphModule) ##
+## [GraphModule](https://pytorch.org/docs/main/fx.html#torch.fx.GraphModule) ##
 The `fx.GraphModule` is a subclass of `nn.Module` that holds the transformed Graph, the original module's parameter attributes and its source code. It serves as the primary output of FX transformations and can be used like any other `nn.Module`. `fx.GraphModule` allows for the execution of the transformed model, as it generates a valid forward method based on the Graph's structure.
 
 
 # Tracing
 
-## [Symbolic Tracer](https://pytorch.org/docs/master/fx.html#torch.fx.Tracer) ##
+## [Symbolic Tracer](https://pytorch.org/docs/main/fx.html#torch.fx.Tracer) ##
 
 `Tracer` is the class that implements the symbolic tracing functionality of `torch.fx.symbolic_trace`. A call to `symbolic_trace(m)` is equivalent to `Tracer().trace(m)`. Tracer can be subclassed to override various behaviors of the tracing process. The different behaviors that can be overridden are described in the docstrings of the methods on the class.
 
@@ -103,7 +103,7 @@ During the call to `symbolic_trace`, the parameter `x` is transformed into a Pro
 
 If you're doing graph transforms, you can wrap your own Proxy method around a raw Node so that you can use the overloaded operators to add additional things to a Graph.
 
-## [TorchDynamo](https://pytorch.org/docs/master/compile/technical-overview.html) ##
+## [TorchDynamo](https://pytorch.org/docs/main/torch.compiler_deepdive.html) ##
 
 Tracing has limitations in that it can't deal with dynamic control flow and is limited to outputting a single graph at a time, so a better alternative is the new `torch.compile()` infrastructure where you can output multiple subgraphs in either an aten or torch IR using `torch.fx`. [This tutorial](https://colab.research.google.com/drive/1Zh-Uo3TcTH8yYJF-LLo5rjlHVMtqvMdf) gives more context on how this works.
 

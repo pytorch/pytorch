@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
 import math
+import threading
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
@@ -37,6 +38,7 @@ else:
         _find_pg_by_ranks_and_tag,
         _get_default_group,
         _get_group_tag,
+        get_process_group_ranks,
         get_rank,
         get_world_size,
         init_process_group,
@@ -56,7 +58,7 @@ else:
                 "DeviceMesh requires numpy >= 1.21 to be installed for type checking"
             )
 
-    class _MeshEnv:
+    class _MeshEnv(threading.local):
         def __init__(self) -> None:
             self.mesh_stack: List[DeviceMesh] = []
             self.child_to_parent_mapping: Dict[DeviceMesh, DeviceMesh] = {}
@@ -67,43 +69,26 @@ else:
             return self.mesh_stack[-1]
 
         def create_child_mesh(
-            self,
-            device_mesh: "DeviceMesh",
-            mesh_dim_names: Tuple[str],
+            self, device_mesh: "DeviceMesh", mesh_dim: int, mesh_dim_name: str
         ) -> "DeviceMesh":
             # swap the current dim to the last dim then reshape to flatten out other
             # dims, so we can just extract the list of ranks which contains cur_rank.
-            mesh_dims = [
-                not_none(device_mesh.mesh_dim_names).index(mesh_dim_name)
-                for mesh_dim_name in mesh_dim_names
-            ]
             cur_rank = device_mesh.get_rank()
-            mesh = device_mesh.mesh
-            all_mesh_dims = list(range(mesh.ndim))
-            for mesh_dim in mesh_dims:
-                # remove not pop b/c we want the value of the ind removed not it's position in the list
-                # because this list dynamically changes.
-                all_mesh_dims.remove(mesh_dim)
+            pg_ranks_by_dim = device_mesh.mesh.swapdims(-1, mesh_dim).reshape(
+                -1, device_mesh.mesh.size(mesh_dim)
+            )
 
-            mesh_sizes = [device_mesh.mesh.size(mesh_dim) for mesh_dim in mesh_dims]
-
-            pg_ranks_by_dim = device_mesh.mesh.permute(
-                *all_mesh_dims, *mesh_dims
-            ).reshape(-1, *mesh_sizes)
-
-            for mesh_nd in pg_ranks_by_dim:
-                if cur_rank in mesh_nd:
-                    sub_mesh = DeviceMesh(
-                        device_mesh.device_type,
-                        mesh_nd,
-                        mesh_dim_names=mesh_dim_names,
-                    )
+            for mesh_1d in pg_ranks_by_dim:
+                sub_mesh = DeviceMesh(
+                    device_mesh.device_type,
+                    mesh_1d,
+                    mesh_dim_names=(mesh_dim_name,),
+                    _init_backend=False,
+                )
+                if cur_rank in mesh_1d:
                     res_sub_mesh = sub_mesh
 
-            res_sub_mesh._dim_group_infos = [  # type: ignore[possibly-undefined]
-                device_mesh._dim_group_infos[mesh_dim] for mesh_dim in mesh_dims
-            ]
-
+            res_sub_mesh._dim_group_infos = [device_mesh._dim_group_infos[mesh_dim]]  # type: ignore[possibly-undefined]
             # Assign the current DeviceMesh as the parent of the child DeviceMesh.
             self.child_to_parent_mapping[res_sub_mesh] = device_mesh
             return res_sub_mesh
@@ -214,12 +199,13 @@ else:
             mesh: Union[torch.Tensor, "ArrayLike"],
             *,
             mesh_dim_names: Optional[Tuple[str, ...]] = None,
+            _init_backend: bool = True,
         ) -> None:
             self.device_type = device_type
             if isinstance(mesh, torch.Tensor) and mesh.device.type != "cpu":
                 raise ValueError(f"`mesh` must be a CPU tensor, got {mesh}")
             self.mesh = (
-                mesh.detach().cpu()
+                mesh.detach().to(dtype=torch.int)
                 if isinstance(mesh, torch.Tensor)
                 else torch.tensor(mesh, dtype=torch.int)
             )
@@ -228,17 +214,23 @@ else:
             # private field to pre-generate DeviceMesh's hash
             self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
             self._hash = hash((self._flatten_mesh_list, self.mesh.shape, id(self)))
-            self._parent_mesh = _mesh_resources.get_parent_mesh(self)
 
-            # Skip process group initialization if xla device.
+            # Skip process group initialization if xla device or init backend is False
             # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
             if device_type != "xla":
                 # always try to create default (world) pg, even if it is not initialized
                 # already. The world pg is used for device mesh identity (rank) on each
                 # process (we need to know if the current global rank is in the mesh or not).
-                self._get_or_create_default_group()
-                if not self._parent_mesh:
+                if _init_backend:
+                    self._get_or_create_default_group()
                     self._init_process_groups()
+
+                # calculate the coordinates of the current global rank on the mesh
+                rank_coords = (self.mesh == get_rank()).nonzero()
+                assert rank_coords.size(0) in (0, 1)
+                self._coordinate_on_dim: Optional[List[int]] = (
+                    rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
+                )
 
         def _get_or_create_default_group(self):
             default_initialized = is_initialized()
@@ -267,12 +259,6 @@ else:
                     )
                 device_handle.set_device(get_rank() % num_devices_per_host)
 
-            # calculate the coordinates of the current global rank on the mesh
-            rank_coords = (self.mesh == get_rank()).nonzero()
-            assert rank_coords.size(0) in (0, 1)
-            self._coordinate_on_dim: Optional[List[int]] = (
-                rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
-            )
             return _get_default_group()
 
         def _init_process_groups(self):
@@ -360,7 +346,7 @@ else:
                 and self._flatten_mesh_list == other._flatten_mesh_list
             )
 
-        def __getitem__(self, mesh_dim_names: Union[str, Tuple[str]]) -> "DeviceMesh":
+        def __getitem__(self, mesh_dim_name: str) -> "DeviceMesh":
             """
             Slice the current DeviceMesh based on the mesh_dim_name given to create a child
             DeviceMesh.
@@ -388,39 +374,16 @@ else:
                 >>> # of cross-host(dim 0), and within-host (dim 1).
                 >>> mesh = DeviceMesh(device_type="cuda", mesh=[[0, 1, 2, 3],[4, 5, 6, 7]])
             """
-            if not self.mesh_dim_names:
-                raise RuntimeError("Cannot slice a DeviceMesh without mesh_dim_names.")
+            if self.mesh.ndim == 1:
+                if self.mesh_dim_names and mesh_dim_name == self.mesh_dim_names[0]:
+                    return self
+                else:
+                    raise RuntimeError(
+                        f"Invalid mesh_dim_name {mesh_dim_name} specified."
+                    )
 
-            mesh_dim_names = (
-                (mesh_dim_names,) if isinstance(mesh_dim_names, str) else mesh_dim_names
-            )
-
-            error_msg = (
-                f"Invalid mesh_dim_name {mesh_dim_names} specified. "
-                f"Valid mesh_dim_names should be a contiguous subsequence of {self.mesh_dim_names}."
-            )
-
-            # When the dimension slicing out is equal to the mesh dimensions of the current DeviceMesh,
-            # we simply return self if the given slicing is valid.
-            if mesh_dim_names == self.mesh_dim_names:
-                return self
-            # Check if the user-provided slicing is a valid contiguous subsequence of the mesh_dim_names
-            # of the current DeviceMesh.
-            elif len(mesh_dim_names) < len(self.mesh_dim_names):
-                outermost_dim_name = mesh_dim_names[0]
-                if outermost_dim_name not in self.mesh_dim_names:
-                    raise ValueError(error_msg)
-                outermost_dim_idx = self.mesh_dim_names.index(outermost_dim_name)
-                for i, j in zip(
-                    mesh_dim_names,
-                    self.mesh_dim_names[outermost_dim_idx : len(mesh_dim_names)],
-                ):
-                    if i != j:
-                        raise ValueError(error_msg)
-            else:
-                raise ValueError(error_msg)
-
-            submesh = _mesh_resources.create_child_mesh(self, mesh_dim_names)
+            mesh_dim = _mesh_resources.get_mesh_dim_by_name(self, mesh_dim_name)
+            submesh = _mesh_resources.create_child_mesh(self, mesh_dim, mesh_dim_name)
             return submesh
 
         def get_group(
@@ -465,6 +428,23 @@ else:
                         )
                     )
                 return dim_groups
+
+        @staticmethod
+        def from_group(group: ProcessGroup, device_type: str) -> "DeviceMesh":
+            """
+            Contstructs a :class:`DeviceMesh` with ``device_type`` from an
+            existing :class:`ProcessGroup`.
+
+            The constructed device mesh is assumed to be 1D.
+            """
+            # Manually define `_dim_group_infos` instead of relying on the
+            # normal logic since we already have the PG
+            group_ranks = get_process_group_ranks(group)
+            mesh = DeviceMesh(device_type, group_ranks, _init_backend=False)
+            mesh._dim_group_infos = [
+                (_get_group_tag(group), group_ranks, group.group_name)
+            ]
+            return mesh
 
         def size(self, mesh_dim: Optional[int] = None) -> int:
             return self.mesh.numel() if mesh_dim is None else self.mesh.size(mesh_dim)
@@ -555,6 +535,7 @@ else:
 
         Args:
             device_type (str): The device type of the mesh. Currently supports: "cpu", "cuda/cuda-like".
+                Passing in a device type with a GPU index, such as "cuda:0", is not allowed.
             mesh_shape (Tuple[int]): A tuple defining the dimensions of the multi-dimensional array
                 describing the layout of devices.
             mesh_dim_names (Tuple[str], optional): A tuple of mesh dimension names to assign to each dimension
@@ -585,7 +566,17 @@ else:
                     f"Found len(mesh_dim_names): {len(mesh_dim_names)} and len(mesh_shape):{len(mesh_shape)}.",
                 )
 
-        mesh = torch.arange(math.prod(mesh_shape)).view(mesh_shape)
+        # assume valid device types are all letters
+        if device_type and not device_type.isalpha():
+            raise RuntimeError(
+                f"Device type with GPU index is not supported but got {device_type}. ",
+                "If you maintained a 'torch.device' object, it's recommended to pass in 'device.type'.",
+            )
+
+        # Always initialize the mesh's tensor on CPU, regardless of what the
+        # external device type has been set to be (e.g. meta)
+        with torch.device("cpu"):
+            mesh = torch.arange(math.prod(mesh_shape), dtype=torch.int).view(mesh_shape)
         device_mesh = DeviceMesh(
             device_type=device_type,
             mesh=mesh,

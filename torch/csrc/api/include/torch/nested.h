@@ -11,7 +11,7 @@ namespace nested {
 /// Nested tensor
 ///
 /// See
-/// https://pytorch.org/docs/master/nested.html#torch.nested.nested_tensor
+/// https://pytorch.org/docs/main/nested.html#torch.nested.nested_tensor
 ///
 /// ```
 // implemented on python object to allow torch.nested.nested_tensor to be
@@ -67,13 +67,13 @@ inline at::Tensor nested_tensor(
 /// As Nested Tensor
 ///
 /// See
-/// https://pytorch.org/docs/master/nested.html#torch.nested.as_nested_tensor
+/// https://pytorch.org/docs/main/nested.html#torch.nested.as_nested_tensor
 ///
 /// ```
 inline at::Tensor as_nested_tensor(
     at::TensorList list,
-    c10::optional<at::ScalarType> dtype = c10::nullopt,
-    c10::optional<at::Device> device = c10::nullopt) {
+    std::optional<at::ScalarType> dtype = c10::nullopt,
+    std::optional<at::Device> device = c10::nullopt) {
   return at::_nested_tensor_from_tensor_list(
       list, dtype, c10::nullopt, device, c10::nullopt);
 }
@@ -81,7 +81,7 @@ inline at::Tensor as_nested_tensor(
 /// Nested to padded tensor
 ///
 /// See
-/// https://pytorch.org/docs/master/nested.html#torch.nested.to_padded_tensor
+/// https://pytorch.org/docs/main/nested.html#torch.nested.to_padded_tensor
 ///
 /// ```
 inline at::Tensor to_padded_tensor(

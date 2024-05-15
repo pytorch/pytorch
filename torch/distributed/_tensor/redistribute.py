@@ -49,17 +49,15 @@ def _gen_transform_infos(
     dst_spec: DTensorSpec,
 ) -> List[_TransformInfo]:
     """
-    Generate the transform infos from the source placements to the target placements, to
-    transform from source to target placement it might have multipl steps, i.e. it might
-    decompose Si -> Sj into Si -> R -> Sj.
+    Generate the transform infos from the source placements to the target placements.
+
+    To transform from source to target placement it might have multiple steps, i.e. it
+    might decompose Si -> Sj into Si -> R -> Sj.
     This would detects if there're mis-aligned shardings between src/dst placements.
     i.e. (Shard(0), Shard(0)) -> (Replicate(), Shard(0)), in this case Shard(0) -> Shard(0)
     for mesh dimension 1 actually needs reshard, because in the first case it's a sub-sharding
     of an already tensor dimension 0, and in the second case, it's the first sharding on tensor
     dimension 0.
-
-    Note that we also currently handles sharding on different tensor dimensions, e.g.
-    Shard(0) -> Shard(1) in this pass
     """
     src_dim_counts: Dict[int, int] = {}
     dst_dim_counts: Dict[int, int] = {}
@@ -103,10 +101,10 @@ def _gen_transform_infos(
         if (
             isinstance(src, Shard)
             and isinstance(dst, Shard)
-            and (
-                src.dim != dst.dim or src_dim_counts[src.dim] != dst_dim_counts[dst.dim]
-            )
+            and (mesh_ndim > 1 or src_dim_counts[src.dim] != dst_dim_counts[dst.dim])
         ):
+            # for the case when mesh ndim > 1 or shard dim counts are different
+            # TODO: see if we can optimize the mesh_ndim > 1 case
             # decompose Shard(i) -> Shard(j) into Shard(i) -> Replicate() -> Shard(j)
             transform_infos.append(
                 _TransformInfo(
@@ -207,24 +205,18 @@ def redistribute_local_tensor(
                     local_tensor, device_mesh, i, my_coordinate[i]
                 )
             else:
-                # NOTE: we don't support this case efficiently yet, the fallback path we are going here is
-                # to decompose Shard(0) -> Shard(1) into Shard(0) -> Replicate -> Shard(1)
-                # TODO: enable this with all_to_all
                 assert (
                     current.is_shard()
                 ), f"Current placement should be shard but found {current}"
                 shard_spec = cast(Shard, current)
                 if shard_spec.dim != target_placement.dim:
-                    new_local_tensor = shard_spec._to_replicate_tensor(
-                        local_tensor, device_mesh, i, transform_info.logical_shape
+                    new_local_tensor = shard_spec._to_new_shard_dim(
+                        local_tensor,
+                        device_mesh,
+                        i,
+                        transform_info.logical_shape,
+                        target_placement.dim,
                     )
-                    shards, _ = target_placement._split_tensor(
-                        new_local_tensor,
-                        num_chunks,
-                        with_padding=False,
-                        contiguous=False,
-                    )
-                    new_local_tensor = shards[my_coordinate[i]]
         elif target.is_partial():
             if current.is_replicate():
                 partial_spec = cast(_Partial, target)
@@ -278,19 +270,24 @@ class Redistribute(torch.autograd.Function):
         current_spec = input._spec
         ctx.current_spec = current_spec
         ctx.async_op = async_op
-        target_spec = DTensorSpec(
-            device_mesh, placements, tensor_meta=input._spec.tensor_meta
-        )
 
-        local_tensor = input._local_tensor
-        output = redistribute_local_tensor(
-            local_tensor, current_spec, target_spec, async_op=async_op
-        )
+        if current_spec.placements != placements:
+            target_spec = DTensorSpec(
+                device_mesh, placements, tensor_meta=input._spec.tensor_meta
+            )
+
+            local_tensor = input._local_tensor
+            output = redistribute_local_tensor(
+                local_tensor, current_spec, target_spec, async_op=async_op
+            )
+        else:
+            # use the same local tensor if placements are the same.
+            output = input._local_tensor
 
         return dtensor.DTensor(
             output,
             device_mesh,
-            target_spec.placements,
+            placements,
             shape=input.shape,
             dtype=input.dtype,
             requires_grad=input.requires_grad,

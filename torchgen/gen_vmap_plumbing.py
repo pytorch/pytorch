@@ -245,7 +245,6 @@ template <typename batch_rule_t, batch_rule_t batch_rule>
 class ComputeBatchRulePlumbing:
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> Optional[str]:
-        opname = str(f.func.name)
         result = gen_vmap_plumbing(f)
         return result
 

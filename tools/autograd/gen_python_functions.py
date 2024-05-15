@@ -135,6 +135,7 @@ _SKIP_PYTHON_BINDINGS = [
     "_reshape_copy_out",
     "copy_sparse_to_sparse_",
     "copy_",
+    "_foreach_copy",
     "numpy_T",
     "matrix_H",
     "mT",
@@ -160,9 +161,12 @@ _SKIP_PYTHON_BINDINGS = [
     "fill.Tensor",  # only used by the functionalization pass
     "fill.Scalar",  # only used by the functionalization pass
     "lift.*",
-    "normal_functional",  # only used by the functionalization pas
+    "normal_functional",  # only used by the functionalization pass
     "nbytes",
     "itemsize",
+    "_batch_norm_with_update",
+    "_batch_norm_with_update_out",
+    "_batch_norm_no_update",
 ]
 
 SKIP_PYTHON_BINDINGS = [

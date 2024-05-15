@@ -5,9 +5,9 @@ import random
 
 import torch
 from torch import nn
-from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import same
 from torch._inductor import config
+from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.inductor_utils import HAS_CUDA
 

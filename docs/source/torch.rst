@@ -684,6 +684,7 @@ Utilities
     set_float32_matmul_precision
     get_float32_matmul_precision
     set_warn_always
+    get_device_module
     is_warn_always_enabled
     vmap
     _assert
@@ -742,7 +743,7 @@ Optimizations
 
     compile
 
-`torch.compile documentation <https://pytorch.org/docs/main/compile/index.html>`__
+`torch.compile documentation <https://pytorch.org/docs/main/torch.compiler.html>`__
 
 Operator Tags
 ------------------------------------

@@ -1104,7 +1104,6 @@
     "_add_relu",
     "_add_relu_",
     "_addmm_activation",
-    "_aminmax",
     "_amp_foreach_non_finite_check_and_unscale_",
     "_amp_update_scale_",
     "_assert_async",
@@ -1314,6 +1313,7 @@
     "_values_copy",
     "_weight_norm",
     "_weight_norm_interface",
+    "aminmax",
     "autocast",
     "broadcast_shapes",
     "candidate",
@@ -1519,7 +1519,6 @@
     "SharedQuantizationSpec",
     "Tuple",
     "fold_bn_weights_into_conv_node",
-    "get_aten_graph_module",
     "replace_pattern_with_filters"
   ],
   "torch.ao.quantization.quantize_fx": [

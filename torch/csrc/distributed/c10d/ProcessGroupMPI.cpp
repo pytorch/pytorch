@@ -3,7 +3,6 @@
 #ifdef USE_C10D_MPI
 
 #include <iostream>
-#include <limits>
 #include <map>
 
 #include <c10/core/DeviceGuard.h>
@@ -107,7 +106,8 @@ c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupMPI::WorkMPI::getFuture() {
   return future_;
 }
 
-void ProcessGroupMPI::WorkMPI::finishWorkMPIError(std::exception_ptr eptr) {
+void ProcessGroupMPI::WorkMPI::finishWorkMPIError(
+    const std::exception_ptr& eptr) {
   future_->setError(eptr);
   finish(eptr);
 }
@@ -121,7 +121,7 @@ ProcessGroupMPI::AsyncWork::AsyncWork(
     MPI_Request request,
     std::vector<at::Tensor> outputTensors,
     const char* profilingTitle,
-    const c10::optional<std::vector<at::Tensor>>& inputTensors)
+    const std::optional<std::vector<at::Tensor>>& inputTensors)
     : Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors),
       outputTensors_(std::move(outputTensors)),
       request_(request) {
@@ -132,7 +132,7 @@ ProcessGroupMPI::AsyncWork::~AsyncWork() {
   if (request_ != MPI_REQUEST_NULL) {
     std::cerr
         << "Attempted destruction of AsyncWork before work has completed, "
-        << "terminating the program." << std::endl;
+        << "terminating the program." << '\n';
     std::terminate();
   }
 }
@@ -210,7 +210,7 @@ std::vector<at::Tensor> ProcessGroupMPI::AsyncWork::result() {
 }
 
 void ProcessGroupMPI::AsyncWork::populateException() {
-  std::array<char, MPI_MAX_ERROR_STRING> buf;
+  std::array<char, MPI_MAX_ERROR_STRING> buf{};
   int len = buf.size();
   MPI_CHECK(MPI_Error_string(status_.MPI_ERROR, buf.data(), &len));
   exception_ =
@@ -267,8 +267,8 @@ c10::intrusive_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(
 
     // If no ranks are specified, assume we're creating the root group
     if (!ranks.empty()) {
-      MPI_Group worldGroup;
-      MPI_Group ranksGroup;
+      MPI_Group worldGroup{};
+      MPI_Group ranksGroup{};
       MPI_CHECK(MPI_Comm_group(MPI_COMM_WORLD, &worldGroup));
       MPI_CHECK(
           MPI_Group_incl(worldGroup, ranks.size(), ranks.data(), &ranksGroup));
@@ -379,11 +379,11 @@ void ProcessGroupMPI::runLoop() {
 c10::intrusive_ptr<Work> ProcessGroupMPI::enqueue(
     std::unique_ptr<WorkEntry> entry,
     const char* profilingTitle,
-    const c10::optional<std::vector<at::Tensor>>& inputTensors) {
+    const std::optional<std::vector<at::Tensor>>& inputTensors) {
   auto work =
       c10::make_intrusive<WorkMPI>(entry->dst, profilingTitle, inputTensors);
   std::unique_lock<std::mutex> lock(pgMutex_);
-  queue_.push_back(std::make_tuple(std::move(entry), work));
+  queue_.emplace_back(std::move(entry), work);
   lock.unlock();
   queueProduceCV_.notify_one();
   return work;
@@ -410,7 +410,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::broadcast(
   return enqueue(
       std::move(entry),
       "mpi:broadcast",
-      c10::optional<std::vector<at::Tensor>>(tensors));
+      std::optional<std::vector<at::Tensor>>(tensors));
 }
 
 c10::intrusive_ptr<Work> ProcessGroupMPI::allreduce(
@@ -436,7 +436,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::allreduce(
   return enqueue(
       std::move(entry),
       "mpi:all_reduce",
-      c10::optional<std::vector<at::Tensor>>(tensors));
+      std::optional<std::vector<at::Tensor>>(tensors));
 }
 
 c10::intrusive_ptr<Work> ProcessGroupMPI::allreduce_coalesced(
@@ -473,7 +473,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::reduce(
   return enqueue(
       std::move(entry),
       "mpi:reduce",
-      c10::optional<std::vector<at::Tensor>>(tensors));
+      std::optional<std::vector<at::Tensor>>(tensors));
 }
 
 c10::intrusive_ptr<Work> ProcessGroupMPI::allgather(
@@ -514,7 +514,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::allgather(
             pgComm_));
 
         for (const auto i : c10::irange(outputDataVec.size())) {
-          outputDataVec[i].copy_(flatOutputTensor[i]);
+          outputDataVec[i].copy_(flatOutputTensor[static_cast<int64_t>(i)]);
         }
       };
   auto entry = std::make_unique<WorkEntry>(
@@ -522,7 +522,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::allgather(
   return enqueue(
       std::move(entry),
       "mpi:all_gather",
-      c10::optional<std::vector<at::Tensor>>(inputTensors));
+      std::optional<std::vector<at::Tensor>>(inputTensors));
 }
 
 c10::intrusive_ptr<Work> ProcessGroupMPI::allgather_coalesced(
@@ -539,7 +539,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::gather(
   checkSingleTensor(inputTensors);
 
   if (rank_ != opts.rootRank) {
-    if (outputTensors.size() > 0) {
+    if (!outputTensors.empty()) {
       TORCH_CHECK(
           false,
           "Gather: number of output tensors should be 0 "
@@ -586,7 +586,8 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::gather(
           const std::vector<at::Tensor>& outputDataVec = entry->dst;
           // copy the flattened output tensors to the outputs
           for (const auto i : c10::irange(outputDataVec.size())) {
-            outputDataVec.at(i).copy_(flatOutputTensor[i]);
+            outputDataVec.at(i).copy_(
+                flatOutputTensor[static_cast<int64_t>(i)]);
           }
         }
       };
@@ -597,14 +598,14 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::gather(
     return enqueue(
         std::move(entry),
         "mpi:gather",
-        c10::optional<std::vector<at::Tensor>>(inputTensors));
+        std::optional<std::vector<at::Tensor>>(inputTensors));
   } else {
     auto entry =
         std::make_unique<WorkEntry>(&inputTensors, nullptr, std::move(runFunc));
     return enqueue(
         std::move(entry),
         "mpi:gather",
-        c10::optional<std::vector<at::Tensor>>(inputTensors));
+        std::optional<std::vector<at::Tensor>>(inputTensors));
   }
 }
 
@@ -615,7 +616,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::scatter(
   checkSingleTensor(outputTensors);
 
   if (rank_ != opts.rootRank) {
-    if (inputTensors.size() > 0) {
+    if (!inputTensors.empty()) {
       TORCH_CHECK(
           false,
           "Scatter: number of input tensors should be 0 "
@@ -647,7 +648,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::scatter(
 
           // copy the input tensors to the flatten large send buffer
           for (const auto i : c10::irange(inputDataVec.size())) {
-            flatInputTensor[i].copy_(inputDataVec.at(i));
+            flatInputTensor[static_cast<int64_t>(i)].copy_(inputDataVec.at(i));
           }
         }
 
@@ -670,8 +671,8 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::scatter(
     return enqueue(
         std::move(entry),
         "mpi:scatter",
-        inputTensors.size() > 0
-            ? c10::optional<std::vector<at::Tensor>>(inputTensors[0])
+        !inputTensors.empty()
+            ? std::optional<std::vector<at::Tensor>>(inputTensors[0])
             : c10::nullopt);
   } else {
     auto entry = std::make_unique<WorkEntry>(
@@ -679,8 +680,8 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::scatter(
     return enqueue(
         std::move(entry),
         "mpi:scatter",
-        inputTensors.size() > 0
-            ? c10::optional<std::vector<at::Tensor>>(inputTensors[0])
+        !inputTensors.empty()
+            ? std::optional<std::vector<at::Tensor>>(inputTensors[0])
             : c10::nullopt);
   }
 }
@@ -701,7 +702,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::alltoall_base(
   checkSingleTensorHelper(inputTensor);
   checkSingleTensorHelper(outputTensor);
 
-  if (outputSplitSizes.size() == 0 && inputSplitSizes.size() == 0) {
+  if (outputSplitSizes.empty() && inputSplitSizes.empty()) {
     // We can use alltoall
     TORCH_CHECK(
         outputTensor.numel() == inputTensor.numel() &&
@@ -733,7 +734,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::alltoall_base(
     return enqueue(
         std::move(entry),
         "mpi:all_to_all",
-        c10::optional<std::vector<at::Tensor>>(inputTensors));
+        std::optional<std::vector<at::Tensor>>(inputTensors));
   } else {
     // Need alltoallv
     c10d::checkSplitSizes(inputSplitSizes, inputTensor, size_);
@@ -771,7 +772,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::alltoall_base(
     return enqueue(
         std::move(entry),
         "mpi:all_to_all",
-        c10::optional<std::vector<at::Tensor>>(inputTensors));
+        std::optional<std::vector<at::Tensor>>(inputTensors));
   }
 }
 
@@ -793,16 +794,18 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::alltoall(
         std::vector<int> recv_offsets(size_);
         auto srcdata = entry->src;
         auto dstdata = entry->dst;
-        int64_t src_len = c10d::computeLengthsAndOffsets(
+        auto src_len = c10d::computeLengthsAndOffsets(
             srcdata, &send_lengths, &send_offsets);
-        int64_t dst_len = c10d::computeLengthsAndOffsets(
+        auto dst_len = c10d::computeLengthsAndOffsets(
             dstdata, &recv_lengths, &recv_offsets);
         std::vector<int64_t> send_lengthsL(
             send_lengths.begin(), send_lengths.end());
         std::vector<int64_t> recv_lengthsL(
             recv_lengths.begin(), recv_lengths.end());
-        at::Tensor srcFlatData = at::empty({src_len}, srcdata[0].options());
-        at::Tensor dstFlatData = at::empty({dst_len}, dstdata[0].options());
+        at::Tensor srcFlatData =
+            at::empty({static_cast<int64_t>(src_len)}, srcdata[0].options());
+        at::Tensor dstFlatData =
+            at::empty({static_cast<int64_t>(dst_len)}, dstdata[0].options());
         auto srcFlatDataSplits =
             srcFlatData.split_with_sizes(c10::IntArrayRef(send_lengthsL), 0);
         for (const auto i : c10::irange(size_)) {
@@ -832,7 +835,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::alltoall(
   return enqueue(
       std::move(entry),
       "mpi:all_to_all",
-      c10::optional<std::vector<at::Tensor>>(inputTensors));
+      std::optional<std::vector<at::Tensor>>(inputTensors));
 }
 
 c10::intrusive_ptr<Work> ProcessGroupMPI::send(
@@ -861,7 +864,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::send(
       request,
       std::vector<at::Tensor>(),
       "mpi:send",
-      c10::optional<std::vector<at::Tensor>>(tensors));
+      std::optional<std::vector<at::Tensor>>(tensors));
 }
 
 c10::intrusive_ptr<Work> ProcessGroupMPI::recv(
@@ -890,7 +893,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::recv(
       request,
       tensors,
       "mpi:recv",
-      c10::optional<std::vector<at::Tensor>>(tensors));
+      std::optional<std::vector<at::Tensor>>(tensors));
 }
 
 c10::intrusive_ptr<Work> ProcessGroupMPI::recvAnysource(
@@ -918,7 +921,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::recvAnysource(
       request,
       tensors,
       "mpi:recvAnySource",
-      c10::optional<std::vector<at::Tensor>>(tensors));
+      std::optional<std::vector<at::Tensor>>(tensors));
 }
 
 c10::intrusive_ptr<Work> ProcessGroupMPI::barrier(const BarrierOptions& opts) {

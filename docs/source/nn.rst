@@ -207,6 +207,7 @@ Normalization Layers
     nn.LazyInstanceNorm3d
     nn.LayerNorm
     nn.LocalResponseNorm
+    nn.RMSNorm
 
 Recurrent Layers
 ----------------
@@ -527,6 +528,18 @@ Lazy Modules Initialization
 
     nn.modules.lazy.LazyModuleMixin
 
+Aliases
+_______
+
+The following are aliases to their counterparts in ``torch.nn``:
+
+.. currentmodule:: torch
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    nn.modules.normalization.RMSNorm
 
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes
@@ -563,7 +576,6 @@ Lazy Modules Initialization
 .. py:module:: torch.nn.modules.upsampling
 .. py:module:: torch.nn.modules.utils
 .. py:module:: torch.nn.parallel.comm
-.. py:module:: torch.nn.parallel.data_parallel
 .. py:module:: torch.nn.parallel.distributed
 .. py:module:: torch.nn.parallel.parallel_apply
 .. py:module:: torch.nn.parallel.replicate
@@ -578,5 +590,3 @@ Lazy Modules Initialization
 .. py:module:: torch.nn.utils.parametrize
 .. py:module:: torch.nn.utils.prune
 .. py:module:: torch.nn.utils.rnn
-.. py:module:: torch.nn.utils.spectral_norm
-.. py:module:: torch.nn.utils.weight_norm

@@ -27,7 +27,7 @@
       if (torch::profiler::impl::softAssertRaises()) { \
         TORCH_INTERNAL_ASSERT(cond, __VA_ARGS__);      \
       } else {                                         \
-        TORCH_WARN(__VA_ARGS__);                       \
+        TORCH_WARN_ONCE(__VA_ARGS__);                  \
       }                                                \
       return false;                                    \
     }                                                  \
@@ -38,7 +38,7 @@ namespace torch {
 namespace profiler {
 namespace impl {
 TORCH_API bool softAssertRaises();
-TORCH_API void setSoftAssertRaises(c10::optional<bool> value);
+TORCH_API void setSoftAssertRaises(std::optional<bool> value);
 TORCH_API void logSoftAssert(
     const char* func,
     const char* file,

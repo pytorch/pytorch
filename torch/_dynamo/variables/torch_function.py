@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 
 import inspect
-from typing import Dict, List
+from typing import Dict, List, TYPE_CHECKING
 
 import torch.utils._pytree as pytree
 
@@ -10,11 +10,13 @@ from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GlobalSource
 from ..utils import has_torch_function, is_tensor_base_attr_getter
-from .base import VariableTracker
 from .constant import ConstantVariable
 from .lists import TupleVariable
 from .tensor import TensorSubclassVariable, TensorVariable
 from .user_defined import UserDefinedObjectVariable
+
+if TYPE_CHECKING:
+    from .base import VariableTracker
 
 
 # [Note: __torch_function__] This feature is a prototype and has some rough edges (contact mlazos with issues):
@@ -61,7 +63,7 @@ def _get_subclass_type_var(tx, var):
         if var.source:
             return VariableBuilder(tx, var.source)(var.python_type())
         else:
-            return SourcelessBuilder()(tx, var.python_type())
+            return SourcelessBuilder.create(tx, var.python_type())
 
 
 def _is_attr_overidden(tx, var, name):
@@ -88,8 +90,8 @@ def call_torch_function(
         torch_function_type,
         fn,
         types,
-        SourcelessBuilder()(tx, tuple(args)),
-        SourcelessBuilder()(tx, kwargs),
+        SourcelessBuilder.create(tx, tuple(args)),
+        SourcelessBuilder.create(tx, kwargs),
     )
     return tx.inline_user_function_return(torch_function_var, tf_args, {})
 
@@ -103,7 +105,7 @@ def build_torch_function_fn(tx, value, source):
             AttrSource(AttrSource(source, "__torch_function__"), "__func__"),
         )(value.__torch_function__.__func__)
     else:
-        return SourcelessBuilder()(tx, value.__torch_function__.__func__)
+        return SourcelessBuilder.create(tx, value.__torch_function__.__func__)
 
 
 def can_dispatch_torch_function(tx, args, kwargs):
@@ -195,7 +197,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
         import torch
         from .builder import SourcelessBuilder
 
-        if name in banned_attrs or not hasattr(torch.Tensor, name):
+        if name in banned_attrs:
             unimplemented(
                 f"Accessing {name} on a tensor subclass with a __torch_function__ override is not supported"
             )
@@ -206,14 +208,14 @@ class TensorWithTFOverrideVariable(TensorVariable):
                 " subclass with a __torch_function__ override is not supported"
             )
 
-        if tx.output.torch_function_enabled:
+        if tx.output.torch_function_enabled and hasattr(torch.Tensor, name):
             if self.source:
                 install_guard(
                     AttrSource(AttrSource(self.source, "__class__"), name).make_guard(
                         GuardBuilder.FUNCTION_MATCH
                     )
                 )
-            get_fn = SourcelessBuilder()(tx, getattr(torch.Tensor, name).__get__)
+            get_fn = SourcelessBuilder.create(tx, getattr(torch.Tensor, name).__get__)
 
             return self.call_torch_function(
                 tx,
@@ -264,7 +266,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
                     tx, AttrSource(AttrSource(self.source, "__class__"), name)
                 )(inspect.getattr_static(self.python_type(), name))
             else:
-                func_var = SourcelessBuilder()(tx, getattr(torch.Tensor, name))
+                func_var = SourcelessBuilder.create(tx, getattr(torch.Tensor, name))
             return dispatch_torch_function(tx, func_var, [self] + args, kwargs)
         else:
             return super().call_method(tx, name, args, kwargs)
