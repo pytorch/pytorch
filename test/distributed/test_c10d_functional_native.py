@@ -195,7 +195,7 @@ class TestWithNCCL(MultiProcessTestCase):
         assert torch.allclose(output, expect)
         assert output.eq(expect).all()
 
-        # Test inplace version of all_gather_into_tensor
+        # Test out-variant of all_gather_into_tensor
         output = torch.empty(expect.shape, device=self.device)
         output = torch.ops._c10d_functional.all_gather_into_tensor_out(
             input, self.world_size, "default", out=output,
