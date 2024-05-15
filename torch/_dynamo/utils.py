@@ -2642,3 +2642,11 @@ def get_locals_to_steal(maybe_gm):
 
 def set_locals_to_steal(gm, locals_to_steal):
     gm.meta["locals_to_steal"] = locals_to_steal
+
+
+class Lit:
+    def __init__(self, s):
+        self.s = s
+
+    def __repr__(self):
+        return self.s
