@@ -4,6 +4,7 @@ import unittest
 
 import torch
 import torch._dynamo
+from torch.export._trace import _convert_ts_to_export_experimental
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._export.wrappers import _mark_strict_experimental
 
@@ -47,9 +48,9 @@ def forward(self, b_submodule_buffer1, x):
     sin = torch.ops.aten.sin.default(x)
     strict_graph_0 = self.strict_graph_0
     strict_mode = torch.ops.higher_order.strict_mode(strict_graph_0, (sin, b_submodule_buffer1));  strict_graph_0 = sin = b_submodule_buffer1 = None
-    getitem = strict_mode[0];  strict_mode = None
+    getitem_2 = strict_mode[0];  strict_mode = None
     add = torch.ops.aten.add.Tensor(x, 3);  x = None
-    return (getitem, add)""",
+    return (getitem_2, add)""",
         )
 
         self.assertExpectedInline(
@@ -106,6 +107,31 @@ def forward(self, arg0_1, arg1_1):
         ):
             ep = torch.export.export(M(), inp, strict=False)
 
+    def test_torchscript_module_export(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.cos() + x.sin()
+
+        model_to_trace = M()
+        inps = (torch.randn(4, 4),)
+        traced_module_by_torchscript = torch.jit.trace(M(), example_inputs=inps)
+
+        exported_module = _convert_ts_to_export_experimental(traced_module_by_torchscript, inps)
+
+        self.assertTrue(torch.allclose(exported_module(*inps), model_to_trace(*inps)))
+
+    def test_torchscript_module_export_single_input(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.cos() + x.sin()
+
+        model_to_trace = M()
+        inps = torch.randn(4, 4)
+        traced_module_by_torchscript = torch.jit.trace(M(), example_inputs=inps)
+
+        exported_module = _convert_ts_to_export_experimental(traced_module_by_torchscript, inps)
+
+        self.assertTrue(torch.allclose(exported_module(inps), model_to_trace(inps)))
 
 if __name__ == "__main__":
     run_tests()

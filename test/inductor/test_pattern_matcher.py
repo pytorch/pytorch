@@ -6,6 +6,7 @@ import unittest
 import torch
 import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
+import torch.nn.functional as F
 from torch._dynamo.utils import count_calls, counters
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.fx_passes import joint_graph
@@ -28,6 +29,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.utils import _pytree as pytree
 
 
 class TestPatternMatcher(TestCase):
@@ -38,15 +40,22 @@ class TestPatternMatcher(TestCase):
         expected_matches,
         expected_nodes,
         additional_check=lambda code: None,
+        reference_in_float=False,
     ):
         counters.clear()
         torch.manual_seed(42)
-        expected = fn(*args)
+        if reference_in_float:
+            ref_inputs = pytree.tree_map_only(
+                torch.Tensor, lambda x: x.to(torch.float32), args
+            )
+        else:
+            ref_inputs = args
+        expected = fn(*ref_inputs)
         torch.manual_seed(42)
         actual, codes = run_and_get_code(torch.compile(fn), *args)
         if len(codes) == 1:
             codes = codes[0]
-        torch.testing.assert_close(actual, expected)
+        torch.testing.assert_close(actual, expected, check_dtype=not reference_in_float)
 
         self.assertEqual(
             counters["inductor"]["pattern_matcher_count"], expected_matches
@@ -520,7 +529,7 @@ class TestPatternMatcher(TestCase):
             torch.randn(16, 16, device="cuda"),
             torch.randn(16, 16, device="cuda"),
         ]
-        self.common(fn, args, 2, 5)
+        self.common(fn, args, 1, 4)
 
     def test_cat_addmm(self):
         def fn(a, b, c):
@@ -538,7 +547,7 @@ class TestPatternMatcher(TestCase):
             torch.randn(16, 16, device="cuda"),
             torch.randn(16, 16, device="cuda"),
         ]
-        self.common(fn, args, 2, 5)
+        self.common(fn, args, 1, 4)
 
     def test_cat_slice_cat_cuda(self):
         def fn(a, b):
@@ -839,7 +848,9 @@ class TestPatternMatcher(TestCase):
 
     def test_match_with_mutation(self):
         counter = 0
-        test_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+        test_pass = PatternMatcherPass(
+            prevent_match_across_mutations=True, pass_name="test"
+        )
 
         @register_graph_pattern(
             CallFunction(
@@ -892,7 +903,14 @@ class TestPatternMatcher(TestCase):
         ]
 
         with unittest.mock.patch(
-            "torch._inductor.fx_passes.pre_grad.pattern_matcher_passes", [test_pass]
+            "torch._inductor.fx_passes.pre_grad.config.pre_grad_fusion_options",
+            {"test": {}},
+        ), unittest.mock.patch(
+            "torch._inductor.fx_passes.pre_grad.PRE_GRAD_FUSIONS",
+            [],
+        ), unittest.mock.patch(
+            "torch._inductor.fx_passes.pre_grad.PRE_GRAD_PATTERNS",
+            {"test": test_pass},
         ):
             for fn in (fn0, fn1, fn2, fn3, fn4, fn5):
                 counter = 0
@@ -1160,6 +1178,46 @@ class TestPatternMatcher(TestCase):
         c.append(a)
         stable_topological_sort(graph)
         self.assertEqual(list(graph.nodes), [b, a, c])
+
+    def test_scaled_softmax(self):
+        def mul_softmax(a, b):
+            return F.softmax(a * b, dim=0)
+
+        def div_softmax(x, inv_scale):
+            return F.softmax(x / inv_scale, dim=0)
+
+        x = torch.randn(10, 10)
+        scale = 1e6
+        inv_scale = 1 / scale
+        self.common(mul_softmax, (x, scale), 1, 3)
+        self.common(mul_softmax, (scale, x), 1, 3)
+        self.common(div_softmax, (x, inv_scale), 1, 3)
+
+        scale = torch.randn(10) * 1e6
+        inv_scale = 1 / scale
+        self.common(mul_softmax, (x, scale), 1, 3)
+        self.common(mul_softmax, (scale, x), 1, 3)
+        self.common(div_softmax, (x, inv_scale), 1, 3)
+
+        scale = torch.randn(1, 10) * 1e6
+        inv_scale = 1 / scale
+        self.common(mul_softmax, (x, scale), 1, 3)
+        self.common(mul_softmax, (scale, x), 1, 3)
+        self.common(div_softmax, (x, inv_scale), 1, 3)
+
+        # Test matching with type promotion
+        x = torch.randn(10, 10, dtype=torch.bfloat16)
+        scale = torch.randn(10, dtype=torch.bfloat16) * 1e6
+        inv_scale = 1 / scale
+        self.common(mul_softmax, (x, scale), 1, 4, reference_in_float=True)
+        self.common(mul_softmax, (scale, x), 1, 4, reference_in_float=True)
+        self.common(div_softmax, (x, inv_scale), 1, 4, reference_in_float=True)
+
+        # No match if scale changes in softmax dim
+        scale = torch.randn(10, 10)
+        self.common(mul_softmax, (x, scale), 0, 0)
+        self.common(mul_softmax, (scale, x), 0, 0)
+        self.common(div_softmax, (x, scale), 0, 0)
 
 
 if __name__ == "__main__":

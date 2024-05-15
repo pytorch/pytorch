@@ -179,7 +179,7 @@ def export(
         dynamic_shapes,
         strict=strict,
         preserve_module_call_signature=preserve_module_call_signature,
-        _is_torch_jit_trace=_is_torch_jit_trace,
+        pre_dispatch=True,
     )
 
 
