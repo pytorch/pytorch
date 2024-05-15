@@ -1,5 +1,4 @@
 # Welcome to the PyTorch setup.py.
-# modification
 # Environment variables you are probably interested in:
 #
 #   DEBUG
@@ -87,12 +86,6 @@
 #   USE_SYSTEM_NCCL=0
 #     disables use of system-wide nccl (we will use our submoduled
 #     copy in third_party/nccl)
-#
-#   BUILD_CAFFE2_OPS=0
-#     disable Caffe2 operators build
-#
-#   BUILD_CAFFE2=0
-#     disable Caffe2 build
 #
 #   USE_IBVERBS
 #     toggle features related to distributed support
@@ -262,14 +255,6 @@ if sys.version_info < python_min_version:
     )
     sys.exit(-1)
 
-BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
-BUILD_PYTORCH_USING_LIBTORCH_WHL = False
-
-# set up appropriate env variables
-if BUILD_LIBTORCH_WHL:
-    # functorch is not supported without python
-    os.environ["BUILD_FUNCTORCH"] = "OFF"
-
 import filecmp
 import glob
 import importlib
@@ -375,10 +360,6 @@ version = get_torch_version()
 report(f"Building wheel {package_name}-{version}")
 
 cmake = CMake()
-
-DEFAULT_PACKAGE_NAME = "libtorch" if BUILD_LIBTORCH_WHL else "torch"
-
-package_name = os.getenv("TORCH_PACKAGE_NAME", DEFAULT_PACKAGE_NAME)
 
 
 def get_submodule_folders():
