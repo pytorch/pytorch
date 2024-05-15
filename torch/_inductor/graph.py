@@ -67,6 +67,7 @@ from .ir import (
     Reduction,
     StorageBox,
     TensorBox,
+    TorchBindObject,
 )
 from .lowering import (
     constrain_to_fx_strides,
@@ -88,7 +89,7 @@ from .utils import (
     maybe_get_suppress_shape_guards_ctx,
     should_assume_input_aligned,
 )
-from .virtualized import V
+from .virtualized import NullHandler, V
 
 if TYPE_CHECKING:
     from torch._higher_order_ops.effects import _EffectType
@@ -358,6 +359,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.constants: Dict[str, torch.Tensor] = (
             const_module.constants if const_module else {}
         )
+        self.torchbind_constants: Dict[str, torch._C.ScriptObject] = {}
         self.constant_reprs: Dict[str, str] = {}
         self.removed_buffers: Set[str] = set()
         self.removed_inplace_buffers: Set[str] = set()
@@ -992,6 +994,11 @@ class GraphLowering(torch.fx.Interpreter):
         if isinstance(value, torch.fx.GraphModule):
             return ir.Subgraph(name=target, graph_module=value)
 
+        if isinstance(value, torch._C.ScriptObject):
+            self.torchbind_constants[target] = value
+            self.constant_reprs[target] = ""
+            return TorchBindObject(target, value)
+
         if (
             config.aot_inductor.use_runtime_constant_folding
             or config.always_keep_tensor_constants
@@ -1313,7 +1320,10 @@ class GraphLowering(torch.fx.Interpreter):
                                 ir.get_stride_order(n.meta["val"].stride()),
                                 allow_padding=True,
                             )
-                        if user.target in need_fixed_channels_last_layout:
+                        if (
+                            user.target in need_fixed_channels_last_layout
+                            and n is user.args[0]
+                        ):
                             result = ir.ExternKernel.require_stride_order(
                                 result,
                                 ir.get_stride_order(
@@ -1529,7 +1539,11 @@ class GraphLowering(torch.fx.Interpreter):
         if "cuda" in self.device_types:
             # first pass
             self.cpp_wrapper = False
-            compiled = self.compile_to_module().call
+            # Although triton.store_cubin was set in compile_fx, the backward pass didn't pick
+            # that up. In theory it should work by only setting triton.store_cubin to True here,
+            # but that will cause a problem when use_runtime_constant_folding is set.
+            with config.patch({"triton.store_cubin": True}):
+                compiled = self.compile_to_module().call
 
             def materialize(x):
                 if isinstance(x, (torch.SymInt, torch.SymFloat)):
@@ -1543,7 +1557,10 @@ class GraphLowering(torch.fx.Interpreter):
                     ), "Unknown type when creating real inputs" + str(type(x))
                     return x
 
-            if tracing_context := torch._guards.TracingContext.try_get():
+            tracing_context = torch._guards.TracingContext.try_get()
+            if tracing_context is not None and not isinstance(
+                V.real_inputs, NullHandler
+            ):
                 if tracing_context.output_strides:
                     tracing_context.output_strides.clear()
 
@@ -1556,7 +1573,17 @@ class GraphLowering(torch.fx.Interpreter):
                     materialize(x) for x in itertools.chain(params_flat, V.real_inputs)
                 ]
             else:
-                real_inputs = [materialize(x) for x in V.real_inputs]
+                # In the backward pass, V.real_inputs is not set.
+                # Generating random inputs based on self.example_inputs sometimes can be problematic,
+                # e.g. illegal memory access. A comprehensive fix is to autotune in a separate process.
+                real_inputs = [
+                    materialize(x)
+                    for x in (
+                        self.example_inputs
+                        if isinstance(V.real_inputs, NullHandler)
+                        else V.real_inputs
+                    )
+                ]
 
             if self.mutated_inputs:
                 from .compile_fx import clone_preserve_strides
@@ -1578,7 +1605,6 @@ class GraphLowering(torch.fx.Interpreter):
                     real_inputs[idx] = clone_preserve_strides(real_inputs[idx])
 
             with torch.utils._python_dispatch._disable_current_modes():
-                assert self.example_inputs is not None
                 compiled(real_inputs)
             del real_inputs
 
@@ -1652,7 +1678,10 @@ class GraphLowering(torch.fx.Interpreter):
         linemap = [(line_no, node.stack_trace) for line_no, node in linemap]
         key, path = PyCodeCache.write(code)
         mod = PyCodeCache.load_by_key_path(
-            key, path, linemap=linemap, attrs=self.constants
+            key,
+            path,
+            linemap=linemap,
+            attrs={**self.constants, **self.torchbind_constants},
         )
         self.cache_key = key
         self.cache_path = path

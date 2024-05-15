@@ -104,7 +104,7 @@ static void upsample_nearest1d_out_cuda_template(
     const Tensor& output,
     const Tensor& input_,
     IntArrayRef output_size,
-    c10::optional<double> scales) {
+    std::optional<double> scales) {
   TensorArg input_arg{input_, "input_", 1}, output_arg{output, "output", 2};
   checkAllSameGPU("upsample_nearest1d_out_cuda", {input_arg, output_arg});
 
@@ -149,7 +149,7 @@ static void upsample_nearest1d_backward_out_cuda_template(
     const Tensor& grad_output_,
     IntArrayRef output_size,
     IntArrayRef input_size,
-    c10::optional<double> scales) {
+    std::optional<double> scales) {
   TensorArg grad_input_arg{grad_input, "grad_input", 1},
       grad_output_arg{grad_output_, "grad_output_", 2};
   checkAllSameGPU(
@@ -198,7 +198,7 @@ static void upsample_nearest1d_backward_out_cuda_template(
 TORCH_IMPL_FUNC(upsample_nearest1d_out_cuda) (
     const Tensor& input,
     IntArrayRef output_size,
-    c10::optional<double> scales,
+    std::optional<double> scales,
     const Tensor& output
 ) {
   upsample_nearest1d_out_cuda_template<nearest_neighbor_compute_source_index>(
@@ -208,7 +208,7 @@ TORCH_IMPL_FUNC(upsample_nearest1d_out_cuda) (
 TORCH_IMPL_FUNC(_upsample_nearest_exact1d_out_cuda) (
     const Tensor& input,
     IntArrayRef output_size,
-    c10::optional<double> scales,
+    std::optional<double> scales,
     const Tensor& output
 ) {
   upsample_nearest1d_out_cuda_template<nearest_neighbor_exact_compute_source_index>(output, input, output_size, scales);
@@ -218,7 +218,7 @@ TORCH_IMPL_FUNC(upsample_nearest1d_backward_out_cuda) (
     const Tensor& grad_output,
     IntArrayRef output_size,
     IntArrayRef input_size,
-    c10::optional<double> scales,
+    std::optional<double> scales,
     const Tensor& grad_input
 ) {
   upsample_nearest1d_backward_out_cuda_template<nearest_neighbor_bw_compute_source_index>(
@@ -229,7 +229,7 @@ TORCH_IMPL_FUNC(_upsample_nearest_exact1d_backward_out_cuda) (
     const Tensor& grad_output,
     IntArrayRef output_size,
     IntArrayRef input_size,
-    c10::optional<double> scales,
+    std::optional<double> scales,
     const Tensor& grad_input
 ) {
   upsample_nearest1d_backward_out_cuda_template<nearest_neighbor_exact_bw_compute_source_index>(

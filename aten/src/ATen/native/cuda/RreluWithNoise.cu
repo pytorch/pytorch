@@ -74,7 +74,7 @@ inline void _rrelu_with_noise_cuda_train(
     const Tensor& noise_,
     const Scalar& lower_,
     const Scalar& upper_,
-    c10::optional<Generator> generator) {
+    std::optional<Generator> generator) {
   auto input = input_.contiguous();
   auto noise = noise_.contiguous();
   Tensor tmp_output = output.contiguous();
@@ -142,7 +142,7 @@ Tensor& rrelu_with_noise_out_cuda(const Tensor& self,
     const Scalar& lower,
     const Scalar& upper,
     bool training,
-    c10::optional<Generator> generator,
+    std::optional<Generator> generator,
     Tensor& output) {
   at::native::resize_output(output, self.sizes());
 
@@ -176,7 +176,7 @@ Tensor rrelu_with_noise_cuda(
     const Scalar& lower,
     const Scalar& upper,
     bool training,
-    c10::optional<Generator> generator) {
+    std::optional<Generator> generator) {
   Tensor output = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   return at::native::rrelu_with_noise_out_cuda(self, noise, lower, upper, training, generator, output);
 }
@@ -187,7 +187,7 @@ Tensor& rrelu_with_noise_cuda_(
     const Scalar& lower,
     const Scalar& upper,
     bool training,
-    c10::optional<Generator> generator) {
+    std::optional<Generator> generator) {
   return at::native::rrelu_with_noise_out_cuda(
       self, noise, lower, upper, training, generator, self);
 }
