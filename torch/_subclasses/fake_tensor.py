@@ -215,8 +215,8 @@ class FakeTensorConverter:
     meta_converter: MetaConverter
     constant_storage_mapping: Dict[StorageWeakRef, List[ReferenceType]]
 
-    def __init__(self):
-        self.meta_converter = MetaConverter()
+    def __init__(self, *, copy_data=False):
+        self.meta_converter = MetaConverter(copy_data=copy_data)
 
         # map from to storage to corresponding constant tensors
         self.constant_storage_mapping = {}
@@ -294,8 +294,6 @@ class FakeTensorConverter:
             assert not make_constant
 
         def mk_fake_tensor(make_meta_t):
-            from torch._dynamo.utils import clone_input
-
             # NB: don't use in_kernel_invocation_manager. to
             # ensure FakeTensor can internally do constant computation
             # as necessary.  Invocation manager is "more correct" as
@@ -311,18 +309,6 @@ class FakeTensorConverter:
                     # TODO: callback might be used in recursive contexts, in
                     # which case using t is wrong!  BUG!
                     constant=t if make_constant else None,
-                    # TODO: This won't preserve aliasing relationships, so if
-                    # there is mutation you won't see it reflect elsewhere.
-                    # This is fine because propagate_real_tensors isn't
-                    # intended to give you exact results and some inaccuracy
-                    # is OK, although if its use case expands we would want to
-                    # do something similar to meta converter, but poking in
-                    # real tensors at the storage cloning phase
-                    real_tensor=(
-                        (t if make_constant else clone_input(t))
-                        if fake_mode.propagate_real_tensors
-                        else None
-                    ),
                 )
 
         out = self.meta_converter(
@@ -870,22 +856,25 @@ class FakeTensorMode(TorchDispatchMode):
     ):
         log.debug("create_mode 0x%x", id(self))
         self.allow_fallback_kernels = allow_fallback_kernels
-        self.fake_tensor_converter = FakeTensorConverter()
+
+        import torch._dynamo.config
+        import torch._functorch.config
+
+        self.propagate_real_tensors = (
+            torch._functorch.config.fake_tensor_propagate_real_tensors
+        )
+        self.fake_tensor_converter = FakeTensorConverter(
+            copy_data=self.propagate_real_tensors
+        )
+
         if static_shapes is not None:
             self.static_shapes = static_shapes
         else:
             self.static_shapes = shape_env is None
 
-        import torch._dynamo.config
-        import torch._functorch.config
-
         # This is temporarily patched to True in Dynamo to grandfather in some
         # places where we unconditionally allow scalar outputs, TO BE REMOVED
         self.allow_scalar_outputs = False
-
-        self.propagate_real_tensors = (
-            torch._functorch.config.fake_tensor_propagate_real_tensors
-        )
 
         self._allow_unsafe_data_ptr_access = (
             torch._functorch.config.fake_tensor_allow_unsafe_data_ptr_access
@@ -1552,7 +1541,7 @@ class FakeTensorMode(TorchDispatchMode):
                 func,
                 flat_arg_fake_tensors,
                 flat_args,
-                self.shape_env.unbacked_var_to_val,
+                self.shape_env.unbacked_var_to_val if self.shape_env else None,
             )
 
         def maybe_propagate_real_tensors(fake_out):
