@@ -43,9 +43,9 @@ from torch.testing._internal.common_utils import (
     find_library_location,
     IS_FBCODE,
     IS_MACOS,
-    IS_SANDCASTLE,
     IS_WINDOWS,
     run_tests,
+    skipIfSandcastleOr,
     TEST_TRANSFORMERS,
     TestCase as TorchTestCase,
 )
@@ -5313,12 +5313,11 @@ def forward(self, x):
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+@skipIfSandcastleOr(IS_MACOS, "non-portable load_library call used in test")
 class TestExportCustomClass(TorchTestCase):
     def setUp(self):
         if IS_FBCODE:
             lib_file_path = "//caffe2/test/cpp/jit:test_custom_class_registrations"
-        elif IS_SANDCASTLE or IS_MACOS:
-            raise unittest.SkipTest("non-portable load_library call used in test")
         elif IS_WINDOWS:
             lib_file_path = find_library_location("torchbind_test.dll")
         else:

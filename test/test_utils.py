@@ -31,7 +31,7 @@ from torch.utils._traceback import report_compile_source_on_error, format_traceb
 import torch.utils.cpp_extension
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
-from torch.testing._internal.common_utils import load_tests, IS_FBCODE, IS_SANDCASTLE, IS_WINDOWS  # type: ignore[attr-defined]
+from torch.testing._internal.common_utils import load_tests, skipIfSandcastle, IS_FBCODE, IS_WINDOWS  # type: ignore[attr-defined]
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -839,7 +839,7 @@ class TestAssert(TestCase):
             ms(torch.tensor([False], dtype=torch.bool))
 
 
-@unittest.skipIf(IS_SANDCASTLE, "cpp_extension is OSS only")
+@skipIfSandcastle("cpp_extension is OSS only")
 class TestStandaloneCPPJIT(TestCase):
     def test_load_standalone(self):
         build_dir = tempfile.mkdtemp()

@@ -3,7 +3,6 @@
 import io
 import os
 import sys
-import unittest
 from typing import Any
 
 import torch
@@ -16,7 +15,7 @@ sys.path.append(pytorch_test_dir)
 from typing import Dict, Iterable, List, Optional, Tuple
 
 import torch.testing._internal.jit_utils
-from torch.testing._internal.common_utils import IS_SANDCASTLE, skipIfTorchDynamo
+from torch.testing._internal.common_utils import skipIfSandcastle, skipIfTorchDynamo
 from torch.testing._internal.jit_utils import JitTestCase, make_global
 
 if __name__ == "__main__":
@@ -543,7 +542,7 @@ class TestClassType(JitTestCase):
             sc = torch.jit.script(fun)
 
     @skipIfTorchDynamo("Test does not work with TorchDynamo")
-    @unittest.skipIf(IS_SANDCASTLE, "Importing like this doesn't work in fbcode")
+    @skipIfSandcastle("Importing like this doesn't work in fbcode")
     def test_imported_classes(self):
         import jit._imported_class_test.bar
         import jit._imported_class_test.foo

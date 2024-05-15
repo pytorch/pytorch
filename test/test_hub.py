@@ -1,6 +1,5 @@
 # Owner(s): ["module: hub"]
 
-import unittest
 from unittest.mock import patch
 import os
 import tempfile
@@ -8,7 +7,7 @@ import warnings
 
 import torch
 import torch.hub as hub
-from torch.testing._internal.common_utils import retry, IS_SANDCASTLE, TestCase
+from torch.testing._internal.common_utils import retry, skipIfSandcastle, TestCase
 
 
 def sum_of_state_dict(state_dict):
@@ -22,7 +21,7 @@ SUM_OF_HUB_EXAMPLE = 431080
 TORCHHUB_EXAMPLE_RELEASE_URL = 'https://github.com/ailzhang/torchhub_example/releases/download/0.1/mnist_init_ones'
 
 
-@unittest.skipIf(IS_SANDCASTLE, 'Sandcastle cannot ping external')
+@skipIfSandcastle('Sandcastle cannot ping external')
 class TestHub(TestCase):
 
     def setUp(self):

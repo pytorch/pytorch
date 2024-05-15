@@ -33,7 +33,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, run_tests, IS_JETSON,
     IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
-    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
+    IS_FBCODE, IS_REMOTE_GPU, skipIfSandcastle, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
     TEST_WITH_CROSSREF, skipIfTorchDynamo, skipRocmIfTorchInductor, set_default_dtype,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
@@ -8559,7 +8559,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     # NB: we must not be built with CUDA; if we are built with CUDA but no CUDA
     # is available, we get a different error.
-    @unittest.skipIf(torch.backends.cuda.is_built() or IS_SANDCASTLE, "CUDA is built, can't test CUDA not built error")
+    @unittest.skipIf(torch.backends.cuda.is_built(), "CUDA is built, can't test CUDA not built error")
+    @skipIfSandcastle("Can't test CUDA not built error on sandcastle")
     def test_cuda_not_built(self):
         msg = "Torch not compiled with CUDA enabled"
         self.assertRaisesRegex(AssertionError, msg, lambda: torch.cuda.current_device())
