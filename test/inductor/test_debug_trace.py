@@ -9,6 +9,8 @@ import unittest
 
 import torch
 from torch._inductor import config, test_operators
+from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.utils._triton import has_triton
 
 try:
     try:
@@ -167,6 +169,29 @@ buf2.node.kernel = extern_kernels.mm""",
         )
         # intentionally only cleanup on success so debugging test is easier
         shutil.rmtree(filename)
+
+    @unittest.skipIf(not TEST_CUDA or not has_triton(), "requires cuda")
+    def test_debug_multi_tempalte(self):
+        class ToyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l = torch.nn.Linear(100, 100)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(self.l(x))
+
+        # no failure
+
+        from torch._inductor.utils import fresh_inductor_cache
+
+        with self.assertLogs(
+            logging.getLogger("torch._inductor.debug"), level=logging.WARNING
+        ), fresh_inductor_cache():
+            m = ToyModel().to(device="cuda:0")
+            m = torch.compile(m, mode="max-autotune")
+            input_tensor = torch.randn(100).to(device="cuda:0")
+            m(input_tensor)
 
 
 if __name__ == "__main__":
