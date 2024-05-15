@@ -21,7 +21,6 @@ from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
-from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS, BUILD_WITH_CAFFE2, IS_SANDCASTLE
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNoQNNPACK, skipIfNoONEDNN
@@ -32,7 +31,7 @@ from torch.testing._internal.common_quantized import (
     qengine_is_onednn,
 )
 from torch.ao.quantization import PerChannelMinMaxObserver
-from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_CUDNN_VERSION, TEST_CUDA
+from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_CUDA
 from torch.testing._internal.optests import opcheck
 import torch.backends.xnnpack
 
@@ -906,7 +905,9 @@ class TestQuantizedOps(TestCase):
     """Tests the correctness of the cudnn add and add_relu op
     (Similar to test_qadd_relu_different_qparams, will probably merge in the future)"""
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
+    @unittest.skip("Local only - currently the test_qadd_relu_cudnn op is bulid "
+                   "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
+                   "after it is built by default")
     def test_qadd_relu_cudnn(self):
         dtype = torch.qint8
         add_relu = torch.ops.quantized.add_relu
@@ -939,7 +940,9 @@ class TestQuantizedOps(TestCase):
 
     """Tests the correctness of the cudnn add and add_relu op for nhwc format"""
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
+    @unittest.skip("Local only - currently the test_qadd_relu_cudnn_nhwc op is bulid "
+                   "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
+                   "after it is built by default")
     def test_qadd_relu_cudnn_nhwc(self):
         dtype = torch.qint8
         add_relu = torch.ops.quantized.add_relu
@@ -1376,7 +1379,7 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(a_ref, a_hat.dequantize(),
                          msg="ops.quantized.max_pool1d results are off")
 
-    # TODO: merge this test with test_max_pool2d
+    # TODO: merge this test with test_max_pool2d when USE_EXPERIMENTAL_CUDNN_V8_API flag is enabled in CI
     """Tests 2D cudnn max pool operation on quantized tensors."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=1, max_side=10),
@@ -1391,7 +1394,9 @@ class TestQuantizedOps(TestCase):
            padding=st.integers(0, 2),
            ceil_mode=st.booleans())
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skipIf(TEST_CUDNN_VERSION <= 90100, "cuDNN maxpool2d mishandles -128 before v90100")
+    @unittest.skip("Local only - currently the qconv2d_cudnn op is bulid "
+                   "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
+                   "after it is built by default")
     def test_max_pool2d_cudnn(self, X, kernel, stride, dilation, padding, ceil_mode):
         X, (scale, zero_point, torch_type) = X
         assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
@@ -4045,7 +4050,9 @@ class TestQuantizedLinear(TestCase):
            use_channelwise=st.sampled_from([False]))  # channelwise currently not supported for qlinear cudnn
     @skipIfNoFBGEMM
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
+    @unittest.skip("Local only - currently the qlinear_cudnn op is bulid "
+                   "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
+                   "after it is built by default")
     # TODO: check with yang regarding CUDNN flags
     def test_qlinear_cudnn(self, batch_size, input_channels, output_channels, use_bias,
                            use_relu, use_multi_dim_input, use_channelwise):
@@ -4302,7 +4309,7 @@ class TestQuantizedLinear(TestCase):
                 if post_op in ("none", "relu", "gelu"):
                     qy_cpu = qlinear_op(
                         qx_cpu, x_scale, x_zp, qw_packed, w_scales, w_zps,
-                        b, 1.0 / used_y_scale, used_y_zp, output_dtype,
+                        b, used_y_scale, used_y_zp, output_dtype,
                         post_op, unary_post_op_args, post_op_algo
                     )
                     if post_op == "relu":
@@ -4323,7 +4330,7 @@ class TestQuantizedLinear(TestCase):
                         accum = accum.bfloat16()
                     qy_cpu = qlinear_op(
                         qx_cpu, x_scale, x_zp, qw_packed, w_scales, w_zps,
-                        b, 1.0 / used_y_scale, used_y_zp, output_dtype,
+                        b, used_y_scale, used_y_zp, output_dtype,
                         accum, x2_scale, x2_zp, "sum", binary_alpha,
                         unary_post_op, unary_post_op_args, post_op_algo
                     )
@@ -4341,7 +4348,7 @@ class TestQuantizedLinear(TestCase):
                     binary_alpha = 1.0  # we only support alpha=1.0 now
                     qy_cpu = qlinear_op(
                         qx_cpu, x_scale, x_zp, qw_packed, w_scales, w_zps,
-                        b, 1.0 / used_y_scale, used_y_zp, output_dtype,
+                        b, used_y_scale, used_y_zp, output_dtype,
                         x2, 1.0, 0, "add", binary_alpha,
                         unary_post_op, unary_post_op_args, post_op_algo
                     )
@@ -5420,7 +5427,9 @@ class TestQuantizedConv(TestCase):
            use_channelwise=st.sampled_from([False]))
     @skipIfNoFBGEMM
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
+    @unittest.skip("Local only - currently the qconv2d_cudnn op is bulid "
+                   "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
+                   "after it is built by default")
     def test_qconv2d_cudnn(
             self,
             batch_size,
@@ -5501,7 +5510,9 @@ class TestQuantizedConv(TestCase):
            use_channelwise=st.sampled_from([False]))
     @skipIfNoFBGEMM
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
+    @unittest.skip("Local only - currently the qconv2d_cudnn op is bulid "
+                   "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
+                   "after it is built by default")
     def test_qconv2d_relu_cudnn(
             self,
             batch_size,
@@ -6234,7 +6245,9 @@ class TestQuantizedConv(TestCase):
            use_channelwise=st.sampled_from([False]))
     @skipIfNoFBGEMM
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
+    @unittest.skip("Local only - currently the qconv1d_cudnn op is bulid "
+                   "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
+                   "after it is built by default")
     def test_qconv1d_cudnn(
         self,
         batch_size,
@@ -6306,7 +6319,9 @@ class TestQuantizedConv(TestCase):
            use_channelwise=st.sampled_from([False]))
     @skipIfNoFBGEMM
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
+    @unittest.skip("Local only - currently the qconv1d_cudnn op is bulid "
+                   "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
+                   "after it is built by default")
     def test_qconv1d_relu_cudnn(
         self,
         batch_size,
@@ -6781,7 +6796,7 @@ class TestQuantizedConv(TestCase):
                 pads,
                 dilations,
                 groups,
-                1.0 / Y_scale,  # Kernel expects pass in reciprocal of scale in fake quant
+                Y_scale,
                 Y_zero_point,
                 qconv_output_dtype,
                 post_op.binary_attr,
@@ -6803,7 +6818,7 @@ class TestQuantizedConv(TestCase):
                 pads,
                 dilations,
                 groups,
-                1.0 / Y_scale,  # Kernel expects pass in reciprocal of scale in fake quant
+                Y_scale,
                 Y_zero_point,
                 qconv_output_dtype,
                 post_op.unary_attr,

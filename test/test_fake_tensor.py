@@ -216,8 +216,6 @@ class FakeTensorTest(TestCase):
                 FileCheck().check("CPU").check("AutocastCPU").run(torch._C._dispatch_key_set(y))
                 FileCheck().check_not("ADInplaceOrView").check_not("Autograd").run(torch._C._dispatch_key_set(y))
 
-    # TODO: functorch support for propagate real tensors
-    @expectedFailurePropagateRealTensors
     def test_batch_tensor(self):
         x = torch.rand((3, 4, 5))
         b = _add_batch_dim(x, 0, 0)
@@ -804,6 +802,19 @@ class FakeTensorTest(TestCase):
         with FakeTensorMode():
             ep = torch.export.export(MyNumpyModel(), args=(torch.randn(1000),))
             self.assertTrue(isinstance(ep, torch.export.ExportedProgram))
+
+    def test_unsqueeze_copy(self):
+        shape_env = ShapeEnv()
+        t1 = torch.ones(2, 2, 768)
+        with FakeTensorMode(shape_env=shape_env) as fake_mode:
+            t = fake_mode.from_tensor(
+                t1,
+                symbolic_context=StatelessSymbolicContext(
+                    dynamic_sizes=[DimDynamic.DYNAMIC, DimDynamic.STATIC, DimDynamic.STATIC],
+                )
+            )
+
+        self.assertEqual(t.shape[0], torch.ops.aten.unsqueeze_copy(t, 1).shape[0])
 
     def test_alias_call(self):
         fwAD = torch.autograd.forward_ad

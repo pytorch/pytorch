@@ -225,7 +225,7 @@ std::shared_ptr<FusedKernel> compileKernel(
 
   // Creates chunk and flattened input descriptions
   std::vector<PartitionDesc> chunk_desc;
-  std::vector<std::pair<const Value*, const c10::optional<TensorDesc>>>
+  std::vector<std::pair<const Value*, const std::optional<TensorDesc>>>
       flat_inputs;
   {
     size_t input_index = 0;

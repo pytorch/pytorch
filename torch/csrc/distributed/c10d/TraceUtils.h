@@ -417,18 +417,18 @@ struct NCCLTraceBuffer {
     // timestamp when the entry was created, likely close to the time the work
     // was 'enqueued'- not necessarily started
     c10::time_t time_created_;
-    c10::optional<float> duration_;
+    std::optional<float> duration_;
 
     // timestamp when our CPU threads discovered that the kernel started.
     // will always be _after_ it actually started, and can be very late
     // if the watchdog thread got stuck on CUDA APIs.
-    c10::optional<c10::time_t> time_discovered_started_;
+    std::optional<c10::time_t> time_discovered_started_;
 
     // timestamp when our CPU threads discovered that the kernel completed.
     // will always be _after_ it actually complated, and can be the same time
     // as the discovery of the start if the watchdog thread is stuck on CUDA
     // APIs
-    c10::optional<c10::time_t> time_discovered_completed_;
+    std::optional<c10::time_t> time_discovered_completed_;
 
     // size information for input/output tensors
     c10::SmallVector<int, 4> input_dims_;
@@ -448,7 +448,7 @@ struct NCCLTraceBuffer {
   std::map<std::tuple<std::string, std::string>, std::vector<uint64_t>>
       pg_name_to_ranks_ = {};
 
-  c10::optional<size_t> record(
+  std::optional<size_t> record(
       size_t pg_id,
       const std::tuple<std::string, std::string>& pg_name,
       size_t seq_id,
@@ -551,7 +551,7 @@ struct NCCLTraceBuffer {
   never hang. (timing must also be enabled for compute_duration - see
   TORCH_NCCL_ENABLE_TIMING).
   */
-  void retire_id(c10::optional<size_t> id, bool compute_duration = true) {
+  void retire_id(std::optional<size_t> id, bool compute_duration = true) {
     if (!enabled_ || !id) {
       return;
     }
@@ -559,7 +559,7 @@ struct NCCLTraceBuffer {
     bool can_compute_duration = false;
     Event* startEvent = nullptr;
     Event* endEvent = nullptr;
-    c10::optional<float> duration = c10::nullopt;
+    std::optional<float> duration = c10::nullopt;
 
     std::unique_lock<std::mutex> guard(mutex_);
 
@@ -601,7 +601,7 @@ struct NCCLTraceBuffer {
   }
 
   std::string dump(
-      const c10::optional<std::unordered_map<
+      const std::optional<std::unordered_map<
           std::string,
           std::unordered_map<std::string, std::string>>>& ncclDumpMap) {
     auto result = dump_entries();
