@@ -3418,27 +3418,34 @@ class ComputedBuffer(Buffer):
             ):
                 reordering_reindex[i] = reads_buf.iter_reordering_reindex  # type: ignore[has-type]
 
-        def simplify_and_reorder(x_vars, support_vars, sizes, reordering_reindex=None):
+        def simplify_and_reorder(
+            x_vars, support_vars, sizes, reordering_reindex=None, simplify_loops=True
+        ):
             sizes, reindex0, reindex1 = self._apply_loop_reordering(
                 x_vars, support_vars, sizes, memory_addrs, reordering_reindex
             )
             # for NHWC: reindex0([0,1,2,3]) = [0,2,3,1], reindex1([0,1,2,3]) = [0,3,2,1]
             x_vars = reindex0(x_vars)
-            sizes, reindex2, prune = V.graph.sizevars._simplify_loops(
-                x_vars,
-                sizes,
-                index_prevent_reordering(index_formulas, x_vars, sizes),
-            )
-            x_vars = prune(x_vars)
-            # sizes, reindex1, prune = _simplify_loops(x_vars, sizes, index_formulas)
-            # x_vars = prune(x_vars)
-            # sizes, reindex2 = self._apply_loop_reordering(x_vars, sizes, memory_addrs)
-            reindex = fuse_reindexing(reindex1, reindex2)
+
+            if simplify_loops:
+                sizes, reindex2, prune = V.graph.sizevars._simplify_loops(
+                    x_vars,
+                    sizes,
+                    index_prevent_reordering(index_formulas, x_vars, sizes),
+                )
+                x_vars = prune(x_vars)
+                reindex = fuse_reindexing(reindex1, reindex2)
+            else:
+                reindex = reindex1
             return sizes, reindex, reindex1
 
         support_vars = index_vars + reduce_vars
         iter_ranges, iter_reindex, iter_reordering_reindex = simplify_and_reorder(
-            index_vars, support_vars, index_size, reordering_reindex
+            index_vars,
+            support_vars,
+            index_size,
+            reordering_reindex,
+            not config.loop_ordering_after_fusion,
         )
         reduce_ranges, reduce_reindex, _ = simplify_and_reorder(
             reduce_vars, support_vars, reduce_size

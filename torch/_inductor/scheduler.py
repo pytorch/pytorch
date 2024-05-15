@@ -200,6 +200,9 @@ class BaseSchedulerNode:
             self.read_writes.writes,
         )
 
+    def reorder_loops_by_dep_pair(self, self_dep, other_dep):
+        return
+
     def update_mutated_names(self, renames: Dict[str, str]):
         self.set_read_writes(self.read_writes.rename(renames))
 
@@ -722,6 +725,58 @@ class SchedulerNode(BaseSchedulerNode):
         self, extra_indexing_constraints: Tuple[Dict[Any, Any], List[Any]]
     ):
         self._compute_attrs(extra_indexing_constraints=extra_indexing_constraints)
+
+    def decide_new_loop_order(self, self_dep, other_dep):
+        """
+        Decide new order by analyzing self_dep and other_dep.
+
+        Example input:
+            self_dep=MemoryDep('buf1', c0, {c0: 2097152}) other_dep=MemoryDep('buf1', c0 + 1024*c1, {c0: 1024, c1: 2048})
+        as an example.
+        """
+        # TODO: only a very simple rule so far, but can be improved
+        self_sizes = self._sizes[0]
+        if len(self_sizes) == 2:
+            if len(self_dep.size) != len(other_dep.size):
+                return [1, 0]
+
+        return None
+
+    def apply_new_loop_order(self, new_order):
+        assert len(self._sizes) == len(new_order)
+        reorder_fn = ir.same_reorder(new_order)
+
+        iter_size, reduce_size = self._sizes
+        new_iter_size = reorder_fn(iter_size)
+
+        self._sizes = (new_iter_size, reduce_size)
+
+        (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
+            *self._sizes, prefix="t"
+        )
+
+        inverse_order = {b: a for a, b in enumerate(new_order)}
+        inverse_order = [inverse_order[i] for i in range(len(new_order))]
+
+        old_body = self._body
+
+        def new_body(*indices):
+            index = list(itertools.chain(*indices))
+            assert len(index) == len(iter_size) + len(reduce_size)
+            iter_idx = index[: len(iter_size)]
+            reduce_idx = index[len(iter_size) :]
+            iter_idx = [iter_idx[i] for i in inverse_order]
+            return old_body(iter_idx, reduce_idx)
+
+        self._body = ir.LoopBody(new_body, (iter_vars, reduce_vars), var_ranges)
+        self.set_read_writes(
+            dependencies.extract_read_writes(self._body, *self._sizes, normalize=True)
+        )
+
+    def reorder_loops_by_dep_pair(self, self_dep, other_dep):
+        new_order = self.decide_new_loop_order(self_dep, other_dep)
+        if new_order:
+            self.apply_new_loop_order(new_order)
 
     def debug_str_extra(self) -> str:
         name = self.get_name()
@@ -2143,6 +2198,47 @@ class Scheduler:
 
         return str(reasons)
 
+    def has_shared_data_after_reordering_loop(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ):
+        """
+        Right now just greedily reorder the loop of node1 to be compatible with node2,
+        but ideally we should have some heuristics to reorder the loop for node2
+        to be compatibile with node1 if that's more efficient.
+        """
+        if not config.loop_ordering_after_fusion:
+            return False
+
+        node1_buffer_names = node1.read_writes.buffer_names()
+        node2_buffer_names = node2.read_writes.buffer_names()
+        # Fast path: no common buffers.
+        common_buffer_names = node1_buffer_names & node2_buffer_names
+        if not common_buffer_names:
+            return False
+
+        node1_name2dep = {dep.name: dep for dep in node1.read_writes.reads_and_writes()}
+        node2_name2dep = {dep.name: dep for dep in node2.read_writes.reads_and_writes()}
+
+        # Find the commons buffers that has different loop orders
+        candidates = []
+        for buffer_name in common_buffer_names:
+            lhs_dep = node1_name2dep[buffer_name]
+            rhs_dep = node2_name2dep[buffer_name]
+            if (
+                lhs_dep.normalize_with_stride_order()
+                == rhs_dep.normalize_with_stride_order()
+            ):
+                candidates.append((lhs_dep.get_numel(), lhs_dep, rhs_dep))
+
+        if len(candidates) == 0:
+            return False
+
+        # Pick the largest buffer to guide the loop reordering
+        numel, lhs_dep, rhs_dep = sorted(candidates, reverse=True)[0]
+        node1.reorder_loops_by_dep_pair(lhs_dep, rhs_dep)
+
+        return self.score_fusion_memory(node1, node2) > 0
+
     def can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
         """
         Determine if it is possible to combine node1 and node2 into a
@@ -2209,6 +2305,11 @@ class Scheduler:
         del device2
 
         no_shared_data = self.score_fusion_memory(node1, node2) == 0
+        if no_shared_data:
+            no_shared_data = not self.has_shared_data_after_reordering_loop(
+                node1, node2
+            )
+
         if no_shared_data and (
             not config.aggressive_fusion or node1.is_reduction() or node2.is_reduction()
         ):
