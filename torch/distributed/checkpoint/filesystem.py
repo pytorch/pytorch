@@ -56,7 +56,7 @@ from torch.distributed.checkpoint.storage import (
 from torch.distributed.checkpoint.utils import _create_file_view
 from torch.futures import Future
 
-__all__ = ["FileSystemWriter", "FileSystemReader"]
+__all__ = ["FileSystemWriter", "FileSystemReader", "FileSystem", "FileSystemBase"]
 
 
 @dataclass
