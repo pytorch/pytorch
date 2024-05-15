@@ -631,7 +631,13 @@ class TestExport(TestCase):
         self.assertEqual(actual_result, expected_result)
 
     # TODO(yidi)
-    @unittest.expectedFailure
+    # Expected failure for test cases that calls run_decomposition().
+    # The top-level cond node has pre-existing metadata,
+    # which overrides the metadata for operators in subgraph due to interpreter.run(),
+    # where cond is a single node in the interpreter.run(). And we preserve metadata
+    # by copying current node's metadata for all nodes created during interpreting.
+    @testing.expectedFailurePreDispatchRunDecomp
+    @testing.expectedFailureRetraceability
     def test_export_cond_preserve_torch_fn_for_subgraphs(self):
         class MySubModule(torch.nn.Module):
             def foo(self, x):
@@ -3301,6 +3307,23 @@ def forward(self, x):
         test_inp = torch.ones(8, 4)
         self.assertTrue(torch.allclose(ep.module()(test_inp), Foo().forward(test_inp)))
 
+    @testing.expectedFailureRetraceability
+    def test_runtime_assert_with_size(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                a = x.item()
+                torch._check_is_size(a)
+                torch._check(a <= y.size(0))
+                return y[:a]
+
+        ep = export(
+            M(),
+            (torch.tensor(5), torch.ones(10)),
+            dynamic_shapes={"x": None, "y": {0: torch.export.Dim("t")}},
+        )
+        inp = (torch.tensor(6), torch.randn(13))
+        self.assertTrue(torch.allclose(ep.module()(*inp), M()(*inp)))
+
     def test_issue_113041(self):
         class TestModule(torch.nn.Module):
             def __init__(self):
@@ -4872,6 +4895,31 @@ def forward(self, x, y):
         # unflatten
         unflattened = unflatten(ep)
         self.assertTrue(torch.allclose(m1(*inps), unflattened(*inps)))
+
+    @testing.expectedFailureRetraceability
+    def test_unused_aliases(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # param
+                self.alpha = torch.nn.Parameter(torch.randn(4))
+                self.beta = self.alpha
+                self.gamma = self.alpha
+
+            def forward(self, x):
+                return x + self.gamma
+
+        inps = (torch.randn(4),)
+        ep = export(Foo(), inps)
+        # placeholder nodes will be deduplicated in strict-mode,
+        # but check that all params still appear in state dict
+        for param in ["alpha", "beta", "gamma"]:
+            self.assertTrue(param in ep.state_dict)
+
+        # check that they also appear in unflattened state dict
+        unep = unflatten(ep)
+        for param in ["alpha", "beta", "gamma"]:
+            self.assertTrue(param in unep.state_dict())
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
