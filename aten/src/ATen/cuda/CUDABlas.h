@@ -82,7 +82,6 @@ void gemm_internal<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half));
 template <>
 void gemm_internal<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16));
 
-#if (!defined(USE_ROCM) && !defined(_MSC_VER)) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
 enum GEMMAndBiasActivationEpilogue {
   None,
   RELU,
@@ -143,7 +142,6 @@ void scaled_gemm(
     ScalarType result_dtype,
     void* amax_ptr,
     bool use_fast_accum);
-#endif
 
 #define CUDABLAS_BGEMM_ARGTYPES(Dtype)                                                        \
   char transa, char transb, int64_t m, int64_t n, int64_t k, at::opmath_type<Dtype> alpha,    \
@@ -190,18 +188,10 @@ void bgemm_internal<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half));
 template <>
 void bgemm_internal<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16));
 
-#if defined(USE_ROCM) && ROCM_VERSION <= 50500
-// ROCm 5.6 hipblas matches the const Dtype *A API, but prior hipblas does not.
-#define CUDABLAS_TRSM_ARGTYPES(Dtype)                                  \
-  hipblasHandle_t handle, hipblasSideMode_t side, hipblasFillMode_t uplo, \
-      hipblasOperation_t trans, hipblasDiagType_t diag, int m, int n,    \
-      const Dtype *alpha,       Dtype *A, int lda, Dtype *B, int ldb
-#else
 #define CUDABLAS_TRSM_ARGTYPES(Dtype)                                  \
   cublasHandle_t handle, cublasSideMode_t side, cublasFillMode_t uplo, \
       cublasOperation_t trans, cublasDiagType_t diag, int m, int n,    \
       const Dtype *alpha, const Dtype *A, int lda, Dtype *B, int ldb
-#endif
 
 template <typename Dtype>
 inline void trsm(CUDABLAS_TRSM_ARGTYPES(Dtype)) {

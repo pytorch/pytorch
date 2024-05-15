@@ -9,9 +9,6 @@ def is_fbcode():
     return not hasattr(torch.version, "git_version")
 
 
-if is_fbcode():
-    from triton.fb import build_paths
-
 # add some debug printouts
 debug = False
 
@@ -27,11 +24,17 @@ verbose_progress = False
 # use fx aot graph codegen cache
 fx_graph_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
 
+# use fx aot graph codegen cache
+fx_graph_remote_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE") == "1"
+
 # enable autotune local cache
 autotune_local_cache = True
 
 # enable autotune remote cache
 autotune_remote_cache = os.environ.get("TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE") == "1"
+
+# Force disabled all inductor level caching -- This will override any other caching flag
+force_disable_caches = os.environ.get("TORCHINDUCTOR_FORCE_DISABLE_CACHES") == "1"
 
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
@@ -314,15 +317,13 @@ debug_fusion = os.environ.get("TORCHINDUCTOR_DEBUG_FUSION") == "1"
 benchmark_fusion = os.environ.get("TORCHINDUCTOR_BENCHMARK_FUSION") == "1"
 enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", "")
 
-benchmark_multi_templates = (
-    os.environ.get(
-        "TORCHINDUCTOR_BENCHMARK_MULTI_TEMPLATES", "0" if is_fbcode() else "1"
-    )
-    == "1"
+# For Triton Templates, select fastest of best template + epilogue vs best template + separate epilogue kernel
+benchmark_epilogue_fusion = (
+    os.environ.get("TORCHINDUCTOR_BENCHMARK_EPILOGUE_FUSION", "1") == "1"
 )
 
 # Take how many of the top triton kernels to benchmark epilogue
-max_epilogue_benchmarked_choices = 3
+max_epilogue_benchmarked_choices = 1
 
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
@@ -354,6 +355,9 @@ always_keep_tensor_constants = False
 
 # assert that indirect indexing does not read / write out of bounds
 assert_indirect_indexing = True
+
+# compute CSE bounds on variables that do not appear in the FX graph
+compute_all_bounds = False
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
@@ -756,9 +760,7 @@ class cuda:
     # The default path only works under PyTorch local development environment.
     cutlass_dir = os.environ.get(
         "TORCHINDUCTOR_CUTLASS_DIR",
-        build_paths.cutlass()
-        if is_fbcode() and not torch.version.hip
-        else os.path.abspath(
+        os.path.abspath(
             os.path.join(os.path.dirname(torch.__file__), "../third_party/cutlass/")
         ),
     )

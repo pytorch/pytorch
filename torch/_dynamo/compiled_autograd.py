@@ -111,12 +111,12 @@ class AutogradCompilerInstance:
         backward_idx: int,
     ):
         assert self.hooks_proxy is not None
-        backward_fn = self.hooks_proxy[backward_idx]  # type: ignore[index]
+        backward_c_function = self.hooks_proxy[backward_idx]  # type: ignore[index]
         proxies = self.fx_tracer.create_proxy(
             kind="call_function",
             target=call_backward,
             args=(
-                backward_fn,
+                backward_c_function,
                 self.to_proxy(saved_tensors),
                 *self.to_proxy(inputs),
             ),
@@ -249,7 +249,7 @@ class AutogradCompilerInstance:
 
     def bind_tensors_to_proxies(self, tensors, proxies):
         if isinstance(proxies, torch.fx.Proxy):
-            proxies = [proxies[i] for i in range(len(tensors))]  # type: ignore[index]
+            proxies = [proxies[i] for i in range(len(tensors))]
         assert len(tensors) == len(proxies)
         track_tensor_tree(tensors, proxies, constant=None, tracer=self.fx_tracer)
 
