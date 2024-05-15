@@ -430,21 +430,39 @@ else:
                 return dim_groups
 
         @staticmethod
-        def from_group(group: ProcessGroup, device_type: str) -> "DeviceMesh":
+        def from_group(
+            group: ProcessGroup,
+            device_type: str,
+            mesh_shape: Optional[Tuple[int, ...]] = None,
+            *,
+            mesh_dim_names: Optional[Tuple[str, ...]] = None,
+        ) -> "DeviceMesh":
             """
             Contstructs a :class:`DeviceMesh` with ``device_type`` from an
             existing :class:`ProcessGroup`.
 
-            The constructed device mesh is assumed to be 1D.
+            The constructed device mesh is assumed to be 1D if ``mesh_shape``
+            is not specified. Otherwise, ``mesh_shape`` is used.
             """
-            # Manually define `_dim_group_infos` instead of relying on the
-            # normal logic since we already have the PG
             group_ranks = get_process_group_ranks(group)
-            mesh = DeviceMesh(device_type, group_ranks, _init_backend=False)
-            mesh._dim_group_infos = [
-                (_get_group_tag(group), group_ranks, group.group_name)
-            ]
-            return mesh
+            if mesh_shape is not None:
+                mesh = torch.tensor(group_ranks, device="cpu", dtype=torch.int).view(
+                    mesh_shape
+                )
+            else:
+                mesh = group_ranks
+            device_mesh = DeviceMesh(
+                device_type, mesh, mesh_dim_names=mesh_dim_names, _init_backend=False
+            )
+            if device_mesh.ndim > 1:
+                # Initialize subgroups for the user
+                device_mesh._init_process_groups()
+            else:
+                # Reuse the existing process group
+                device_mesh._dim_group_infos = [
+                    (_get_group_tag(group), group_ranks, group.group_name)
+                ]
+            return device_mesh
 
         def size(self, mesh_dim: Optional[int] = None) -> int:
             return self.mesh.numel() if mesh_dim is None else self.mesh.size(mesh_dim)
