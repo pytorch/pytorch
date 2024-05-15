@@ -4601,15 +4601,15 @@ def sample_inputs_linear(self, device, dtype, requires_grad, **kwargs):
             itertools.product([True, False], features_options, batch_options):
         input_tensor = create_tensor(batch_shape + [in_feat])
         weight = create_tensor([out_feat, in_feat])
-        1d_weight = create_tensor([in_feat])
+        weight_1d = create_tensor([in_feat])
         if not has_bias:
             yield SampleInput(input_tensor, weight)
-            yield SampleInput(input_tensor, 1d_weight)
+            yield SampleInput(input_tensor, weight_1d)
             continue
 
         bias = create_tensor([out_feat])
         yield SampleInput(input_tensor, weight, bias)
-        yield SampleInput(input_tensor, 1d_weight, bias)
+        yield SampleInput(input_tensor, weight_1d, bias)
 
 
 
