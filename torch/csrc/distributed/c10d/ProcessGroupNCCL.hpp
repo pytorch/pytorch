@@ -1085,6 +1085,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::string logPrefix_;
 
   c10::intrusive_ptr<intra_node_comm::IntraNodeComm> intraNodeComm_;
+
+  // Number of devices on this node.
+  int localDeviceCount_{0};
 };
 
 TORCH_API std::string dump_nccl_trace();
