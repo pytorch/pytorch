@@ -39,6 +39,7 @@ from torch._inductor.debug import save_args_for_compile_fx_inner
 from torch._inductor.utils import (
     BoxedBool,
     count_tangents,
+    fresh_inductor_cache,
     should_assume_input_aligned,
     tensor_is_aligned,
 )
@@ -157,6 +158,7 @@ def _unlift_graph(mod, gm, graph_signature):
         )
 
     placeholder_nodes = gm.graph.find_nodes(op="placeholder")
+    placeholder_node_list = {}
     lifted_inputs = []
 
     # In AOTI, module parameters and buffers are not lifted as graph inputs.
@@ -166,6 +168,7 @@ def _unlift_graph(mod, gm, graph_signature):
     # support training.
     for node in placeholder_nodes:
         node_name = node.name
+        placeholder_node_list[node_name] = node
         if node_name in graph_signature.inputs_to_parameters:
             parameter_name = graph_signature.inputs_to_parameters[node_name]
             lifted_inputs.append(parameter_name)
@@ -189,6 +192,46 @@ def _unlift_graph(mod, gm, graph_signature):
         else:
             mutated_outputs.append(None)
 
+    mutated_out_inputs = {}
+    # Single output case where output is an alias of input.
+    #
+    # Take clamp.out as an example:
+    #   aten::clamp.out(Tensor self, Scalar? min=None, Scalar? max=None, *, Tensor(a!) out) -> Tensor(a!)
+    # The input graph is as follows, while arg0_1 is self and arg1_1 is out:
+    #   opcode         name       target                  args                       kwargs
+    #   -------------  ---------  ----------------------  -------------------------  --------
+    #   placeholder    arg0_1     arg0_1                  ()                         {}
+    #   placeholder    arg1_1     arg1_1                  ()                         {}
+    #   call_function  clamp_min  aten.clamp_min.default  (arg0_1, 0.05)             {}
+    #   call_function  clamp_max  aten.clamp_max.default  (clamp_min, 0.05)          {}
+    #   output         output     output                  ((clamp_max, clamp_max),)  {}
+    # But the graph above does not align with the semantics of aten::clamp.out, which is an inplace operation.
+    # The correct graph should be:
+    #   opcode         name       target                  args                       kwargs
+    #   -------------  ---------  ----------------------  -------------------------  --------
+    #   placeholder    arg0_1     arg0_1                  ()                         {}
+    #   placeholder    arg1_1     arg1_1                  ()                         {}
+    #   call_function  clamp_min  aten.clamp_min.default  (arg0_1, 0.05)             {}
+    #   call_function  clamp_max  aten.clamp_max.default  (clamp_min, 0.05)          {}
+    #   call_function  copy_      aten.copy_.default      (arg1_1, clamp_max)        {}
+    #   output         output     output                  (copy_,)                   {}
+    # To get the expected graph, we need to find the output node and the corresponding input node,
+    # and replace the output node with a copy_ node. By now, the check is only for single output case.
+    # The multiple output case is not supported yet.
+    is_output_alias_of_input = len(graph_signature.user_outputs) == 1
+    is_output_alias_of_input = is_output_alias_of_input and all(
+        mutated_output is None for mutated_output in mutated_outputs
+    )
+    is_output_alias_of_input = is_output_alias_of_input and all(
+        output.name in graph_signature.user_inputs_to_mutate for output in outputs
+    )
+    if is_output_alias_of_input:
+        for out_node in outputs:
+            if out_node.name in graph_signature.user_inputs_to_mutate:
+                input_node = graph_signature.user_inputs_to_mutate[out_node.name]
+                assert input_node in placeholder_node_list
+                mutated_out_inputs[out_node] = placeholder_node_list[input_node]
+
     unlifted_gm = _unlift(
         gm,
         lifted_inputs,
@@ -197,7 +240,9 @@ def _unlift_graph(mod, gm, graph_signature):
         None,
         state_dict,
         {},
+        mutated_out_inputs=mutated_out_inputs,
     )
+
     return unlifted_gm
 
 
@@ -414,6 +459,15 @@ def get_patched_config_dict(config_patches=None) -> Dict[str, Any]:
         return config.get_config_copy()
 
 
+@functools.wraps
+def with_fresh_cache_if_config(f):
+    if config.force_disable_caches:
+        with fresh_inductor_cache():
+            return f
+    else:
+        return f
+
+
 @DebugContext.wrap
 @torch.utils._python_dispatch._disable_current_modes()
 @time_and_log(attr="compilation time (in seconds)")
@@ -422,6 +476,7 @@ def get_patched_config_dict(config_patches=None) -> Dict[str, Any]:
 # compile_fx return and we may want to use the _LazyGraphModule for compiling
 # the backward graph as well.
 @_use_lazy_graph_module(dynamo_config.use_lazy_graph_module)
+@with_fresh_cache_if_config
 @dynamo_utils.dynamo_timed(phase_name="inductor_compile")
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
@@ -494,7 +549,11 @@ def compile_fx_inner(
     start = time.time()
 
     fx_graph_remote_cache = should_use_remote_fx_graph_cache()
-    if (config.fx_graph_cache or fx_graph_remote_cache) and not aot_mode:
+    if (
+        not config.force_disable_caches
+        and (config.fx_graph_cache or fx_graph_remote_cache)
+        and not aot_mode
+    ):
         compiled_graph = FxGraphCache.load(
             fx_codegen_and_compile,
             gm,
@@ -1413,7 +1472,6 @@ def compile_fx(
 
     @compile_time_strobelight_meta(phase_name="bw_compiler")
     @dynamo_utils.dynamo_timed
-    @dynamo_utils.maybe_cprofile
     def bw_compiler(model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
         user_visible_outputs = {}
 
@@ -1454,7 +1512,7 @@ def compile_fx(
                 example_inputs_,
                 trace_joint=False,
                 decompositions=decompositions,
-                keep_inference_input_mutations=config.aot_inductor.keep_inference_input_mutations,
+                keep_inference_input_mutations=False,
             )
         unlifted_gm = _unlift_graph(model_, gm, graph_signature)
         if "dynamo_flat_name_to_original_fqn" in model_.meta:
