@@ -1302,7 +1302,7 @@ TEST(RecordFunctionTest, OperatorNameOverload) {
   at::addGlobalCallback(at::RecordFunctionCallback(
                             [](const at::RecordFunction& fn)
                                 -> std::unique_ptr<at::ObserverContext> {
-                              c10::optional<c10::OperatorName> op_name =
+                              std::optional<c10::OperatorName> op_name =
                                   fn.operator_name();
                               if (op_name.has_value()) {
                                 operator_names.insert(c10::toString(*op_name));

@@ -682,8 +682,8 @@ TORCH_API void handle_view_on_rebase(
 struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
  private:
   /// Information about the views
-  c10::optional<ViewInfo> backward_info_;
-  c10::optional<ViewInfo> forward_info_;
+  std::optional<ViewInfo> backward_info_;
+  std::optional<ViewInfo> forward_info_;
 
   // Optimization to reduce the number of ViewInfo we create.
   // In the (very common) case where backward_info_ == forward_info_, we only
@@ -766,8 +766,8 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
 
   DifferentiableViewMeta(
       at::TensorImpl* self_impl,
-      c10::optional<ViewInfo> backward_info,
-      c10::optional<ViewInfo> forward_info,
+      std::optional<ViewInfo> backward_info,
+      std::optional<ViewInfo> forward_info,
       bool shared_view_info,
       CreationMeta creation_meta = CreationMeta::DEFAULT);
 };
@@ -796,8 +796,8 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
 // Differentiable view. Track history with DifferentiableViewMeta.
 inline Variable make_variable_differentiable_view(
     const at::Tensor& data,
-    c10::optional<ViewInfo> backward_info,
-    c10::optional<ViewInfo> forward_info,
+    std::optional<ViewInfo> backward_info,
+    std::optional<ViewInfo> forward_info,
     bool shared_view_info,
     CreationMeta creation_meta,
     bool allow_tensor_metadata_change = true) {
@@ -927,8 +927,8 @@ struct VariableHooks final : at::impl::VariableHooksInterface {
   void _backward(
       const at::Tensor& self,
       at::TensorList inputs,
-      const c10::optional<at::Tensor>& gradient,
-      c10::optional<bool> keep_graph,
+      const std::optional<at::Tensor>& gradient,
+      std::optional<bool> keep_graph,
       bool create_graph) const override;
   void requires_grad_(const at::TensorBase& self, bool _requires_grad)
       const override;
