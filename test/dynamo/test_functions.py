@@ -1174,6 +1174,15 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x - 1
 
     @make_test
+    def test_set_update_list_with_duplicated_items(x):
+        list1 = ["apple", "banana", "apple"]
+        list2 = ["orange", "banana"]
+        if len({*list1, *list2}) == 3:
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
     def test_set_contains(a, b):
         vals = set(["a", "b", "c"])
         if "a" in vals:
