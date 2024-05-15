@@ -195,7 +195,7 @@ class profile:
         self,
         enabled=True,
         *,
-        use_cuda=False,
+        use_cuda=False,  # Deprecated
         use_device=None,
         record_shapes=False,
         with_flops=False,
