@@ -10,6 +10,8 @@ from torch.distributed._tensor.api import distribute_module, distribute_tensor, 
 from torch.distributed._tensor.ops.utils import normalize_to_torch_size
 from torch.distributed._tensor.placement_types import Placement, Replicate, Shard
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
+from torch.optim.optimizer import _foreach_supported_types
+
 
 # All public APIs from dtensor package
 __all__ = [
@@ -21,6 +23,12 @@ __all__ = [
     "Shard",
     "Replicate",
 ]
+
+
+# Append DTensor to the list of supported types for foreach implementation of optimizer
+# so that we will try to use foreach over the for-loop implementation on CUDA.
+if DTensor not in _foreach_supported_types:
+    _foreach_supported_types.append(DTensor)
 
 
 def _dtensor_init_helper(
