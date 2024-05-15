@@ -214,6 +214,8 @@ def track_tensor(tensor, proxy, *, constant, tracer):
     set_proxy_slot(tensor, tracer, _ProxyTensor(proxy, constant))
 
 def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
+    _set_unbacked_bindings(inner_res, proxy_res)
+
     def wrap_with_proxy(e, proxy, constant):
         if isinstance(e, torch.Tensor):
             track_tensor(e, proxy, tracer=tracer, constant=constant)
@@ -520,21 +522,6 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
             constant = func(*const_args, **const_kwargs)
     else:
         constant = None
-
-    from .symbolic_shapes import compute_unbacked_bindings
-    # Can't use detect_fake_mode here,
-    #
-    # python test/distributed/_tensor/test_dtensor_compile.py -k
-    # test_tp_compile_fullgraph_is_seq_parallel_False
-    #
-    # will fail.  Very strange, it probably isn't right for them to be using
-    # two fake modes there...
-    fake_mode = torch._C._get_dispatch_mode(
-        torch._C._TorchDispatchModeKey.FAKE
-    )
-    if fake_mode and fake_mode.shape_env:
-        if symbol_to_path := compute_unbacked_bindings(fake_mode.shape_env, out):
-            proxy_out.node.meta["unbacked_bindings"] = symbol_to_path
 
     track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
     return out
@@ -1310,3 +1297,22 @@ def get_isolated_graphmodule(func, args, kwargs, tracing_mode="real"):
     with disable_proxy_modes_tracing():
         gm = make_fx(wrapped, tracing_mode=tracing_mode)(all_args)
     return gm
+
+
+def _set_unbacked_bindings(out, out_proxy):
+    """A helper function for setting up unbacked_bindings on the destination FX graph."""
+    from .symbolic_shapes import compute_unbacked_bindings
+
+    # Can't use detect_fake_mode here,
+    #
+    # python test/distributed/_tensor/test_dtensor_compile.py -k
+    # test_tp_compile_fullgraph_is_seq_parallel_False
+    #
+    # will fail.  Very strange, it probably isn't right for them to be using
+    # two fake modes there...
+    fake_mode = torch._C._get_dispatch_mode(
+        torch._C._TorchDispatchModeKey.FAKE
+    )
+    if fake_mode and fake_mode.shape_env:
+        if symbol_to_path := compute_unbacked_bindings(fake_mode.shape_env, out):
+            out_proxy.node.meta["unbacked_bindings"] = symbol_to_path
