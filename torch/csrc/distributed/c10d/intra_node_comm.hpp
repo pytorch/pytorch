@@ -33,7 +33,7 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
       c10::intrusive_ptr<c10d::Store> store,
       size_t rank,
       size_t worldSize,
-      c10::optional<size_t> bufferSize = c10::nullopt);
+      std::optional<size_t> bufferSize = c10::nullopt);
 
   ~IntraNodeComm() override;
 
@@ -61,7 +61,7 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
   /**
    * Perform a barrier among the specified ranks.
    */
-  void barrier(c10::optional<std::vector<int64_t>> ranks = c10::nullopt);
+  void barrier(std::optional<std::vector<int64_t>> ranks = c10::nullopt);
 
   /**
    * Puts the given tensor into the p2p buffer of the current rank at the
