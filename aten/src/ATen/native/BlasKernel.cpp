@@ -265,7 +265,7 @@ static inline double reduce(float16x8_t x[F16_REGISTERS_PER_ITERATION]) {
 
 }
 
-static inline f16_fma(float16_t a, float16_t b, float16_t c) {
+static inline float16x8_t f16_fma(float16x8_t a, float16x8_t b, float16x8_t c) {
 #ifdef __ARM_FEATURE_FMA
   return vfmaq_f16(a, b, c);
 #else
@@ -334,7 +334,7 @@ static inline float reduce(float32x4_t x) {
         return vgetq_lane_f32(vpaddq_f32(sum, sum), 0);
 }
 
-static inline f32_fma(float a, float b, float c) {
+static inline float32x4_t f32_fma(float32x4_t a, float32x4_t b, float32x4_t c) {
 #ifdef __ARM_FEATURE_FMA
   return vfmaq_f32(a, b, c);
 #else
