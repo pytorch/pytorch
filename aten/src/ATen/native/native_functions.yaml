@@ -1750,6 +1750,7 @@
 - func: copy(Tensor self, Tensor src, bool non_blocking=False) -> Tensor
   variants: function
   dispatch:
+    Meta: copy_meta
     CompositeExplicitAutogradNonFunctional: copy
   tags: core
 
@@ -3760,18 +3761,6 @@
 
 # This function should be deprecated in favor of differential_analytic_matrix_function in FunctionsManual.cpp
 - func: matrix_exp_backward(Tensor self, Tensor grad) -> Tensor
-
-# DEPRECATED: Use torch.aminmax instead
-- func: _aminmax(Tensor self) -> (Tensor, Tensor)
-  dispatch:
-    CPU, CUDA: _aminmax_all
-  autogen: _aminmax.out
-
-# DEPRECATED: Use torch.aminmax instead
-- func: _aminmax.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor, Tensor)
-  dispatch:
-    CPU, CUDA: _aminmax
-  autogen: _aminmax.dim_out
 
 - func: aminmax(Tensor self, *, int? dim=None, bool keepdim=False) -> (Tensor min, Tensor max)
   device_check: NoCheck   # TensorIterator
@@ -11357,7 +11346,13 @@
   dispatch:
     CPU: foreach_tensor_copy_list_kernel_slow_
     CUDA: foreach_tensor_copy_list_kernel_cuda_
-  autogen: _foreach_copy, _foreach_copy.out
+  autogen: _foreach_copy.out
+
+- func: _foreach_copy(Tensor[] self, Tensor[] src, bool non_blocking=False) -> Tensor[] self_out
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _foreach_copy
 
 - func: bucketize.Tensor(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
   dispatch:
@@ -14726,7 +14721,7 @@
     CUDA: _flash_attention_backward
 
 # Returns output, logsumexp if compute_logsumexp
-- func: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? bias, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int? max_seqlen_q, int? max_seqlen_k, float dropout_p, int custom_mask_type, bool compute_log_sumexp=False, *, float? scale=None, Tensor? causal_diagonal=None, Tensor? seqlen_k=None, int? window_size=None) -> (Tensor output, Tensor logsumexp, Tensor philox_seed, Tensor philox_offset, SymInt max_seqlen_batch_q, SymInt max_seqlen_batch_k)
+- func: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? bias, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, SymInt? max_seqlen_q, SymInt? max_seqlen_k, float dropout_p, int custom_mask_type, bool compute_log_sumexp=False, *, float? scale=None, Tensor? causal_diagonal=None, Tensor? seqlen_k=None, int? window_size=None) -> (Tensor output, Tensor logsumexp, Tensor philox_seed, Tensor philox_offset, SymInt max_seqlen_batch_q, SymInt max_seqlen_batch_k)
   variants: function
   dispatch:
     CUDA: _efficient_attention_forward
