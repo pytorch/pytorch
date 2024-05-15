@@ -10689,6 +10689,7 @@ class TestAdvancedIndexing(TestCaseMPS):
                 torch.Size((6, 2)),
                 torch.Size((3, 2, 2)),
                 torch.Size((5, 5, 5)),
+                torch.Size((20000, 10000)),
             ]
 
             def gen_nontrivial_input(shape, dtype, device):
