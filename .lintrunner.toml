@@ -1058,6 +1058,7 @@ exclude_patterns = [
     'test/test_functional_autograd_benchmark.py',
     'test/test_functional_optim.py',
     'test/test_functionalization_of_rng_ops.py',
+    'test/test_datapipe.py',
     'test/test_futures.py',
     'test/test_fx.py',
     'test/test_fx_experimental.py',
