@@ -111,6 +111,9 @@ output_filename = None
 
 MAX_DOWNLOAD_ATTEMPTS = 5
 
+# Enable FX graph caching
+torch._inductor.config.fx_graph_cache = True
+
 
 class CI(NamedTuple):
     backend: str  # aot_eager or inductor

@@ -15,9 +15,6 @@ from torch._dynamo.utils import clone_inputs
 
 log = logging.getLogger(__name__)
 
-# Enable FX graph caching
-torch._inductor.config.fx_graph_cache = True
-
 
 def pip_install(package):
     subprocess.check_call([sys.executable, "-m", "pip", "install", package])
