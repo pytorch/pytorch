@@ -46,10 +46,10 @@ void initCommMethods(PyObject* module) {
           "_scatter",
           [](at::Tensor& tensor,
              std::vector<int64_t>& devices,
-             c10::optional<std::vector<int64_t>> chunk_sizes,
+             std::optional<std::vector<int64_t>> chunk_sizes,
              int64_t dim,
-             c10::optional<py::object> py_streams) {
-            c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>
+             std::optional<py::object> py_streams) {
+            std::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>
                 streams;
             if (py_streams) {
               py::handle handle = *py_streams;
@@ -69,8 +69,8 @@ void initCommMethods(PyObject* module) {
           [](at::Tensor& tensor,
              std::vector<at::Tensor>& out_tensors,
              int64_t dim,
-             c10::optional<py::object> py_streams) {
-            c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>
+             std::optional<py::object> py_streams) {
+            std::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>
                 streams;
             if (py_streams) {
               py::handle handle = *py_streams;
@@ -88,7 +88,7 @@ void initCommMethods(PyObject* module) {
           "_gather",
           [](std::vector<at::Tensor>& tensors,
              int64_t dim,
-             c10::optional<int32_t> destination_index) {
+             std::optional<int32_t> destination_index) {
             return gather(tensors, dim, destination_index);
           },
           py::arg("tensors"),

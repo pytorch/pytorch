@@ -5,7 +5,6 @@
 #include <cmath>
 #include <cstdlib>
 #include <limits>
-#include <memory>
 #include <omp.h>
 
 // WARNING: be extra careful when including more ATen/c10 header files here!
@@ -152,6 +151,28 @@ inline at::vec::Vectorized<float> vec_shuffle_down(at::vec::Vectorized<float> x,
 }
 #endif
 
+#ifdef CPU_CAPABILITY_AVX512
+inline at::vec::Vectorized<float> vec_shuffle_down(at::vec::Vectorized<float> x, size_t n) {
+  using vec_t = at::vec::Vectorized<float>;
+#define SHUFFLE_MASK(z, y, x, w) ((z << 6) | (y << 4) | (x << 2) | w)
+  switch (n) {
+    case 1:
+      return vec_t(_mm512_permute_ps(x, SHUFFLE_MASK(1, 1, 3, 3)));
+    case 2:
+      return vec_t(_mm512_permute_ps(x, SHUFFLE_MASK(2, 2, 2, 2)));
+    case 4:
+      return vec_t(_mm512_permutexvar_ps(
+          _mm512_set_epi32(
+              12, 12, 12, 12, 12, 12, 12, 12, 4, 4, 4, 4, 4, 4, 4, 4),
+          x));
+    case 8:
+      return vec_t(_mm512_permutexvar_ps(
+          _mm512_set_epi32(8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8), x));
+  }
+  TORCH_CHECK(false, "Unhandled vec_shuffle_down value ", n);
+}
+#endif
+
 template <typename scalar_t>
 Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> acc) {
   using Vec = at::vec::Vectorized<scalar_t>;
@@ -271,101 +292,4 @@ atomic_add(volatile T *addr, T offset) {
                 "std::atomic issue");
   std::atomic<T> *atomic_addr = (std::atomic<T> *)addr;
   atomic_addr->fetch_add(offset, std::memory_order_relaxed);
-}
-
-std::tuple<int64_t, int64_t, int64_t> mm_get_thread_blocking(
-    int64_t M,
-    int64_t N,
-    int64_t K,
-    int64_t M0,
-    int64_t N0,
-    int64_t K0,
-    int num_threads) {
-  auto get_factors = [](int64_t number) {
-    int count = 0;
-    for (int64_t i = std::sqrt(number); i > 0; --i) {
-      if (number % i == 0) {
-        count += 2;
-      }
-    }
-    auto factors = std::make_unique<int64_t[]>(count);
-    int index = 0;
-    for (int64_t i = std::sqrt(number); i > 0; --i) {
-      if (number % i == 0) {
-        factors[index++] = number / i;
-        factors[index++] = i;
-      }
-    }
-    return std::make_tuple(std::move(factors), count);
-  };
-
-  auto get_blocking = [](int64_t num_threads,
-                         int64_t factor,
-                         int64_t m_blocks,
-                         int64_t n_blocks,
-                         int64_t k_blocks) {
-    int64_t thread_block_n = (n_blocks + factor - 1) / factor;
-    int64_t cofactor = num_threads / factor;
-    int64_t thread_block_m = (m_blocks + cofactor - 1) / cofactor;
-    return std::make_tuple(thread_block_m, thread_block_n, k_blocks);
-  };
-
-  int64_t m_blocks = (M + M0 - 1) / M0;
-  int64_t n_blocks = (N + N0 - 1) / N0;
-  int64_t k_blocks = (K + K0 - 1) / K0;
-
-  auto [factors, count] = get_factors(num_threads);
-  assert(count > 0);
-
-  for (int i = 0; i < count; ++i) {
-    int64_t factor = factors[i];
-    if (n_blocks % factor == 0 &&
-        m_blocks % (num_threads / factor) == 0) {
-      return get_blocking(
-          num_threads, factor, m_blocks, n_blocks, k_blocks);
-    }
-  }
-
-  for (int i = 0; i < count; ++i) {
-    int64_t factor = factors[i];
-    if (n_blocks % factor == 0) {
-      return get_blocking(
-          num_threads, factor, m_blocks, n_blocks, k_blocks);
-    }
-    int64_t cofactor = num_threads / factor;
-    if (m_blocks % cofactor == 0) {
-      return get_blocking(
-          num_threads, factor, m_blocks, n_blocks, k_blocks);
-    }
-  }
-
-  assert(false && "Should not reach here.");
-  // Dummy return to avoid compiler warning
-  return std::make_tuple(0, 0, 0);
-}
-
-inline void mm_get_thread_blocks(
-    int thread_id,
-    int64_t M_blocks,
-    int64_t N_blocks,
-    int64_t K_blocks,
-    int64_t Mt_blocks,
-    int64_t Nt_blocks,
-    int64_t Kt_blocks,
-    int64_t& m_block_start,
-    int64_t& m_block_end,
-    int64_t& n_block_start,
-    int64_t& n_block_end,
-    int64_t& k_block_start,
-    int64_t& k_block_end) {
-  int64_t num_Kt = (K_blocks + Kt_blocks - 1) / Kt_blocks;
-  k_block_start = (thread_id % num_Kt) * Kt_blocks;
-  k_block_end = std::min(k_block_start + Kt_blocks, K_blocks);
-  thread_id /= num_Kt;
-  int64_t num_Nt = (N_blocks + Nt_blocks - 1) / Nt_blocks;
-  n_block_start = (thread_id % num_Nt) * Nt_blocks;
-  n_block_end = std::min(n_block_start + Nt_blocks, N_blocks);
-  thread_id /= num_Nt;
-  m_block_start = std::min(thread_id * Mt_blocks, M_blocks);
-  m_block_end = std::min(m_block_start + Mt_blocks, M_blocks);
 }
