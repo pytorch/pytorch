@@ -26,11 +26,11 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_JETSON,
     IS_REMOTE_GPU,
-    IS_SANDCASTLE,
     NoTest,
     run_tests,
     serialTest,
     skipCUDANonDefaultStreamIf,
+    skipIfSandcastle,
     TEST_CUDA,
     TestCase,
 )
@@ -1120,7 +1120,8 @@ class TestCudaMultiGPU(TestCase):
         self.assertTrue(b.grad.sum().item() == 4 * size)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    @unittest.skipIf(IS_SANDCASTLE or IS_REMOTE_GPU, "Does not work on Sandcastle")
+    @skipIfSandcastle("Does not work on sandcastle")
+    @unittest.skipIf(IS_REMOTE_GPU, "Does not work with remote GPU")
     def test_cuda_init_race(self):
         # See https://github.com/pytorch/pytorch/issues/16559
         import subprocess
