@@ -280,6 +280,7 @@ else
     # XLA test build fails when WERROR=1
     # set only when building other architectures
     # or building non-XLA tests.
+
     if [[ "$BUILD_ENVIRONMENT" != *rocm*  &&
           "$BUILD_ENVIRONMENT" != *xla* ]]; then
       if [[ "$BUILD_ENVIRONMENT" != *py3.8* ]]; then
@@ -287,11 +288,24 @@ else
         # Which should be backward compatible with Numpy-1.X
         python -mpip install --pre numpy==2.0.0rc1
       fi
-      WERROR=1 python setup.py bdist_wheel
+      if [[ "$USE_SPLIT_BUILD" != "false" ]]; then
+        WERROR=1 BUILD_LIBTORCH_WHL=1 python setup.py install
+        WERROR=1 BUILD_PYTHON_ONLY=1 python setup.py install
+      else
+        WERROR=1 python setup.py bdist_wheel
+      fi
     else
-      python setup.py bdist_wheel
+      if [[ "$USE_SPLIT_BUILD" != "false" ]]; then
+        BUILD_LIBTORCH_WHL=1 python setup.py install
+        BUILD_PYTHON_ONLY=1 python setup.py install
+      else
+        python setup.py bdist_wheel
+      fi
     fi
-    pip_install_whl "$(echo dist/*.whl)"
+
+    if [[ "$USE_SPLIT_BUILD" == "false" ]]; then
+      pip_install_whl "$(echo dist/*.whl)"
+    fi
 
     # TODO: I'm not sure why, but somehow we lose verbose commands
     set -x
