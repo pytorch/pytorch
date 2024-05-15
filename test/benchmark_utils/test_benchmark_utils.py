@@ -15,9 +15,9 @@ import numpy as np
 import torch
 import torch.utils.benchmark as benchmark_utils
 from torch.testing._internal.common_utils import (
-    IS_SANDCASTLE,
     IS_WINDOWS,
     run_tests,
+    skipIfSandcastle,
     slowTest,
     TEST_WITH_ASAN,
     TestCase,
@@ -189,7 +189,7 @@ class TestBenchmarkUtils(TestCase):
         self.assertIsInstance(sample, float)
 
     @slowTest
-    @unittest.skipIf(IS_SANDCASTLE, "C++ timing is OSS only.")
+    @skipIfSandcastle("C++ timing is OSS only.")
     @unittest.skipIf(True, "Failing on clang, see 74398")
     def test_timer_tiny_fast_snippet(self):
         timer = benchmark_utils.Timer(
@@ -201,7 +201,7 @@ class TestBenchmarkUtils(TestCase):
         self.assertIsInstance(median, float)
 
     @slowTest
-    @unittest.skipIf(IS_SANDCASTLE, "C++ timing is OSS only.")
+    @skipIfSandcastle("C++ timing is OSS only.")
     @unittest.skipIf(True, "Failing on clang, see 74398")
     def test_cpp_timer(self):
         timer = benchmark_utils.Timer(
@@ -495,7 +495,7 @@ class TestBenchmarkUtils(TestCase):
 
     @slowTest
     @unittest.skipIf(IS_WINDOWS, "Valgrind is not supported on Windows.")
-    @unittest.skipIf(IS_SANDCASTLE, "Valgrind is OSS only.")
+    @skipIfSandcastle("Valgrind is OSS only.")
     @unittest.skipIf(TEST_WITH_ASAN, "fails on asan")
     def test_collect_callgrind(self):
         with self.assertRaisesRegex(
@@ -577,7 +577,7 @@ class TestBenchmarkUtils(TestCase):
 
     @slowTest
     @unittest.skipIf(IS_WINDOWS, "Valgrind is not supported on Windows.")
-    @unittest.skipIf(IS_SANDCASTLE, "Valgrind is OSS only.")
+    @skipIfSandcastle("Valgrind is OSS only.")
     @unittest.skipIf(True, "Failing on clang, see 74398")
     def test_collect_cpp_callgrind(self):
         timer = benchmark_utils.Timer(

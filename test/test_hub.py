@@ -2,7 +2,6 @@
 
 import os
 import tempfile
-import unittest
 import warnings
 import zipfile
 from unittest.mock import patch
@@ -10,9 +9,9 @@ from unittest.mock import patch
 import torch
 import torch.hub as hub
 from torch.testing._internal.common_utils import (
-    IS_SANDCASTLE,
     retry,
     run_tests,
+    skipIfSandcastle,
     TestCase,
 )
 
@@ -30,7 +29,7 @@ TORCHHUB_EXAMPLE_RELEASE_URL = (
 )
 
 
-@unittest.skipIf(IS_SANDCASTLE, "Sandcastle cannot ping external")
+@skipIfSandcastle("Sandcastle cannot ping external")
 class TestHub(TestCase):
     def setUp(self):
         super().setUp()
