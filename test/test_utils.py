@@ -31,9 +31,9 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_FBCODE,
-    IS_SANDCASTLE,
     IS_WINDOWS,
     load_tests,
+    skipIfSandcastle,
 )
 from torch.utils._device import set_device
 from torch.utils._pytree import tree_all_only, tree_any
@@ -947,7 +947,7 @@ class TestAssert(TestCase):
             ms(torch.tensor([False], dtype=torch.bool))
 
 
-@unittest.skipIf(IS_SANDCASTLE, "cpp_extension is OSS only")
+@skipIfSandcastle("cpp_extension is OSS only")
 class TestStandaloneCPPJIT(TestCase):
     def test_load_standalone(self):
         build_dir = tempfile.mkdtemp()

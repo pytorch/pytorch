@@ -28,9 +28,9 @@ from torch import Tensor
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_utils import (
     enable_profiling_mode_for_profiling_tests,
-    IS_SANDCASTLE,
     skipIfCompiledWithoutNumpy,
     skipIfCrossRef,
+    skipIfSandcastle,
     skipIfTorchDynamo,
     suppress_warnings,
     TemporaryFileName,
@@ -949,7 +949,7 @@ class TestTracer(JitTestCase):
     def test_ge_unoptimized(self):
         self.run_ge_tests(False, False)
 
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser support for Sandcastle")
+    @skipIfSandcastle("NYI: fuser support for Sandcastle")
     @enable_cpu_fuser
     def test_ge_optimized(self):
         with enable_profiling_mode_for_profiling_tests():

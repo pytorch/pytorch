@@ -6,7 +6,7 @@ from unittest import skipIf
 
 import torch
 from torch.package import PackageExporter, PackageImporter, sys_importer
-from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE, run_tests
+from torch.testing._internal.common_utils import run_tests, skipIfMeta
 
 
 try:
@@ -32,10 +32,7 @@ except ImportError:
 class ModelTest(PackageTestCase):
     """End-to-end tests packaging an entire model."""
 
-    @skipIf(
-        IS_FBCODE or IS_SANDCASTLE,
-        "Tests that use temporary files are disabled in fbcode",
-    )
+    @skipIfMeta("Tests that use temporary files are disabled in fbcode")
     def test_resnet(self):
         resnet = resnet18()
 
