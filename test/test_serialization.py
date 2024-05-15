@@ -4241,7 +4241,7 @@ class TestSubclassSerialization(TestCase):
         Tests import semantic for tensor subclass and the {add/get/clear}_safe_globals APIs
         '''
         # Needed to prevent UnboundLocalError: local variable 'TwoTensor' referenced before assignment
-        # global TwoTensor
+        global TwoTensor
         t = TwoTensor(torch.randn(2, 3), torch.randn(2, 3))
         p = torch.nn.Parameter(t)
         sd = OrderedDict([('t', t), ('p', p)])
