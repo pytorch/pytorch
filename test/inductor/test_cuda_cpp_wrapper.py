@@ -97,7 +97,6 @@ if TEST_WITH_ROCM:
 
 if config.abi_compatible:
     xfail_list = [
-        "test_bernoulli1_cuda",  # cpp fallback op naming issue
         "test_profiler_mark_wrapper_call_cuda",
         "test_scaled_dot_product_attention_cuda_dynamic_shapes",
     ]
