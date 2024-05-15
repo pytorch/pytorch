@@ -27,7 +27,7 @@ class TensorpipeDeviceTypeConverter {
   // cannot include the TensorPipe headers because it's a private dependency.
   // Thus we bend over backwards and entrust this method with appending that
   // object to the `tensors` field of the tensorpipe::Message object we pass.
-  virtual c10::optional<std::vector<char>> prepareTensorForSending(
+  virtual std::optional<std::vector<char>> prepareTensorForSending(
       const c10::Storage& storage,
       const std::vector<c10::Stream>& streams,
       tensorpipe::Message& message) const = 0;
