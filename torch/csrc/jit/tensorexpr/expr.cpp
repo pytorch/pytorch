@@ -415,7 +415,7 @@ Buf::Buf(
     std::vector<ExprPtr> dims,
     Dtype dtype,
     ExprPtr initializer,
-    c10::optional<std::vector<ExprPtr>> strides,
+    std::optional<std::vector<ExprPtr>> strides,
     ExprPtr qscale,
     ExprPtr qzero)
     : ExprNodeBase(dtype, kPrimitive),
@@ -452,11 +452,11 @@ BufHandle Buf::make(
     const std::string& name_hint,
     const std::vector<ExprHandle>& dims,
     Dtype dtype,
-    c10::optional<ExprHandle> initializer,
-    c10::optional<std::vector<ExprHandle>> strides,
-    c10::optional<ExprHandle> qscale,
-    c10::optional<ExprHandle> qzero) {
-  c10::optional<std::vector<ExprPtr>> opt_strides;
+    std::optional<ExprHandle> initializer,
+    std::optional<std::vector<ExprHandle>> strides,
+    std::optional<ExprHandle> qscale,
+    std::optional<ExprHandle> qzero) {
+  std::optional<std::vector<ExprPtr>> opt_strides;
   if (strides) {
     opt_strides = ExprHandleVectorToExprVector(*strides);
   }

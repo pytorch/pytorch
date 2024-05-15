@@ -77,7 +77,7 @@ Node* EncapsulateInplaceIndexPutForONNX(Node* index_put_node) {
 
 } // namespace
 
-c10::optional<Node*> EncapsulatePatternIntoSubblock(Node* n) {
+std::optional<Node*> EncapsulatePatternIntoSubblock(Node* n) {
   switch (n->kind()) {
     case aten::index_put_:
     case aten::index_put: {
