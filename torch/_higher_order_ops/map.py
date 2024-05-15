@@ -233,14 +233,7 @@ def trace_map(proxy_mode, func_overload, f, xs, pos_args):
     pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
     body_graph = reenter_make_fx(body_graph, pre_dispatch)(*example_input, *pos_args)
 
-    next_name = None
-    i = 0
-    while not next_name:
-        candidate = f"body_graph_{i}"
-        if hasattr(proxy_mode.tracer.root, candidate):
-            i += 1
-        else:
-            next_name = candidate
+    next_name = proxy_mode.tracer.get_fresh_qualname("body_graph_")
 
     proxy_mode.tracer.root.register_module(next_name, body_graph)
 
