@@ -54,7 +54,7 @@ def _try_catch_call_compiled_fn(call, end):
     except Exception as e:
         import torch
 
-        raise torch._dynamo.exc.InternalTorchDynamoError(
+        raise torch._dynamo.exc.TorchDynamoException(
             "Exception raised when running compiled function"
         ) from e
     end
@@ -426,8 +426,8 @@ class PyCodegen:
         if "torch" not in self.code_options["co_varnames"]:
             self.code_options["co_varnames"] += ("torch",)
 
-        if "InternalTorchDynamoError" not in self.code_options["co_varnames"]:
-            self.code_options["co_varnames"] += ("InternalTorchDynamoError",)
+        if "TorchDynamoException" not in self.code_options["co_varnames"]:
+            self.code_options["co_varnames"] += ("TorchDynamoException",)
 
         jump_target = create_instruction("NOP")
         call_and_jump_insts = create_call_function(len(graphargs), False)

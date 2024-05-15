@@ -16,6 +16,21 @@ __all__ = [
     "set_multithreading_enabled",
 ]
 
+orig_set_grad_enabled = torch._C._set_grad_enabled
+counter = 0
+
+
+def _set_grad_enabled(value):
+    global counter
+    print("set grad enabled to", value, counter)
+    if counter == 50:
+        breakpoint()
+    counter += 1
+    return orig_set_grad_enabled(value)
+
+
+torch._C._set_grad_enabled = _set_grad_enabled
+
 
 class no_grad(_NoParamDecoratorContextManager):
     r"""Context-manager that disables gradient calculation.

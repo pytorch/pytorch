@@ -10659,6 +10659,20 @@ fn
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(res, fn(x, d))
 
+    def test_exception_in_compiled_fn_is_wrapped(self):
+        def backend(gm, _):
+            def output(*args):
+                raise RuntimeError("test")
+
+            return output
+
+        def f(x):
+            return x + 1
+
+        opt_f = torch.compile(f, backend=backend)
+        with self.assertRaises(torch._dynamo.exc.TorchDynamoException):
+            opt_f(torch.randn(3, 3))
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
