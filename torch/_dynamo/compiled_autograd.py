@@ -1,6 +1,6 @@
 import contextlib
 import functools
-from typing import List, Optional
+from typing import List, Optional, TYPE_CHECKING
 
 import torch
 from torch._dynamo.external_utils import call_backward, call_hook
@@ -21,9 +21,11 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
-from torch.fx.proxy import Proxy
 from torch.fx.traceback import preserve_node_meta, set_stack_trace
 from torch.utils._traceback import CapturedTraceback
+
+if TYPE_CHECKING:
+    from torch.fx.proxy import Proxy
 
 compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
 verbose_log = getArtifactLogger(__name__, "compiled_autograd_verbose")
@@ -109,12 +111,12 @@ class AutogradCompilerInstance:
         backward_idx: int,
     ):
         assert self.hooks_proxy is not None
-        backward_fn = self.hooks_proxy[backward_idx]  # type: ignore[index]
+        backward_c_function = self.hooks_proxy[backward_idx]  # type: ignore[index]
         proxies = self.fx_tracer.create_proxy(
             kind="call_function",
             target=call_backward,
             args=(
-                backward_fn,
+                backward_c_function,
                 self.to_proxy(saved_tensors),
                 *self.to_proxy(inputs),
             ),

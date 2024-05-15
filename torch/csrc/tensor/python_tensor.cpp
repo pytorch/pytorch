@@ -242,8 +242,9 @@ static void set_type(
   // This field is lazily initialized from backend and scalar_type
   type_obj.backend = static_cast<int>(backend);
   type_obj.scalar_type = static_cast<int>(scalarType);
-  type_obj.layout = torch::getTHPLayout(layout_from_backend(backend));
-  type_obj.dtype = torch::getTHPDtype(scalarType);
+  type_obj.layout =
+      (THPLayout*)Py_NewRef(torch::getTHPLayout(layout_from_backend(backend)));
+  type_obj.dtype = (THPDtype*)Py_NewRef(torch::getTHPDtype(scalarType));
   type_obj.is_cuda =
       (backend == at::Backend::CUDA || backend == at::Backend::SparseCUDA);
   type_obj.is_xpu =
@@ -313,8 +314,8 @@ static void set_default_storage_type(Backend backend, ScalarType dtype) {
 }
 
 static void set_default_tensor_type(
-    c10::optional<Backend> backend,
-    c10::optional<ScalarType> dtype) {
+    std::optional<Backend> backend,
+    std::optional<ScalarType> dtype) {
   if (backend.has_value()) {
     TORCH_CHECK_TYPE(
         *backend != Backend::Undefined, "default type cannot be undefined");

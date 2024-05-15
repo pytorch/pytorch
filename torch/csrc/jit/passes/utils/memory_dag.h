@@ -62,9 +62,9 @@ struct Element {
   // We memoize the results of `getMemoryLocations` to speed up queries.
   // A nullopt means that this cache is not yet populated. Since `MemoryDAG` is
   // immutable, this cache should never need to be invalidated.
-  mutable c10::optional<MemoryLocations> cachedMemoryLocations_;
+  mutable std::optional<MemoryLocations> cachedMemoryLocations_;
 
-  mutable c10::optional<MemoryLocations> cachedAllContainedMemoryLocations_;
+  mutable std::optional<MemoryLocations> cachedAllContainedMemoryLocations_;
 };
 
 // class MemoryDAG
