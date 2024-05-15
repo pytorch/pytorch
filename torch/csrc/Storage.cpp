@@ -236,7 +236,7 @@ static void THPStorage_subclass_dealloc(PyObject* self) {
   if (type->tp_del) {
     PyObject_GC_Track(self);
     type->tp_del(self);
-    if (self->ob_refcnt > 0) {
+    if (Py_REFCNT(self) > 0) {
       // Resurrected (see above comment about resurrection from `__del__`)
       return;
     }
@@ -355,7 +355,7 @@ static PyObject* THPStorage_pynew(
     } else if (device.type() == at::DeviceType::PrivateUse1) {
       at::globalContext().lazyInitPrivateUse1();
       allocator = c10::GetAllocator(device.type());
-    } else if (device.type() == at::DeviceType::ORT) {
+    } else if (device.type() == at::DeviceType::MAIA) {
       allocator = c10::GetAllocator(device.type());
     } else {
       // NOLINTEND(bugprone-branch-clone)

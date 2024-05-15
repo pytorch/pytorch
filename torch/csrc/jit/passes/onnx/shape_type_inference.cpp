@@ -1548,26 +1548,19 @@ bool IsListConstructIntType(const Value* v) {
   return false;
 }
 
-bool AllGraphInputsStatic(const Graph* g) {
-  for (auto n : g->inputs()) {
-    if (TensorTypePtr input_type = n->type()->cast<TensorType>()) {
-      if (input_type->dim()) {
-        auto shape = input_type->symbolic_sizes();
-        if (!ConstantValueMap::HasShape(n->debugName())) {
-          UpdateShapeConstantValueMap(n, shape);
-        }
-      }
-    }
+// Check if all graph inputs are static and allow a cached value to return.
+// Since this traverses all inputs of the graph (including weights), it can be
+// costly for large graphs. Since this is called for each node in an export,
+// and the inputs remain unchanged, we can cut down export time by caching.
+bool AllGraphInputsStaticWithCaching(const Graph* g) {
+  auto maybe_is_static = ConstantValueMap::GetAllGraphInputsStatic();
+  if (maybe_is_static.has_value()) {
+    return maybe_is_static.value();
+  } else {
+    bool ret = AllGraphInputsStatic(g);
+    ConstantValueMap::SetAllGraphInputsStatic(ret);
+    return ret;
   }
-  for (auto n : g->inputs()) {
-    // Some inputs can be non-Tensor type, e.g.,
-    // __torch__.torch.classes.quantized.LinearPackedParamsBase
-    // so we only need check Tensor type here.
-    if (n->type()->cast<TensorType>() && !n->isCompleteTensor()) {
-      return false;
-    }
-  }
-  return true;
 }
 
 void ProcessConstantValueMap(Node* n, int opset_version) {
@@ -1581,7 +1574,7 @@ void ProcessConstantValueMap(Node* n, int opset_version) {
   // shapes
   UpdateReliable(n);
 
-  auto static_input_shape = AllGraphInputsStatic(n->owningGraph());
+  auto static_input_shape = AllGraphInputsStaticWithCaching(n->owningGraph());
   for (auto i : c10::irange(n->outputs().size())) {
     if (TensorTypePtr output_type = n->output(i)->type()->cast<TensorType>()) {
       if (output_type->dim().has_value()) {
@@ -1914,6 +1907,28 @@ void ONNXShapeTypeInference(
 static std::unordered_map<std::string, std::unordered_set<int64_t>>
     non_required_shape_inference_idx_map = {{"onnx::LSTM", {4}}};
 
+bool AllGraphInputsStatic(const Graph* g) {
+  for (auto n : g->inputs()) {
+    if (TensorTypePtr input_type = n->type()->cast<TensorType>()) {
+      if (input_type->dim()) {
+        auto shape = input_type->symbolic_sizes();
+        if (!ConstantValueMap::HasShape(n->debugName())) {
+          UpdateShapeConstantValueMap(n, shape);
+        }
+      }
+    }
+  }
+  for (auto n : g->inputs()) {
+    // Some inputs can be non-Tensor type, e.g.,
+    // __torch__.torch.classes.quantized.LinearPackedParamsBase
+    // so we only need check Tensor type here.
+    if (n->type()->cast<TensorType>() && !n->isCompleteTensor()) {
+      return false;
+    }
+  }
+  return true;
+}
+
 std::pair<bool, bool> AreInputsReliableOrStatic(Node* n) {
   auto reliable = true;
   auto complete = true;
@@ -2054,11 +2069,16 @@ void ONNXShapeTypeInference(
           clone_node->output(i)->debugName();
     }
     // Make inferred_shape_data use name from temporal ONNX graph
-    // instead of original PyTorch graph
-    for (const auto& gs_data : original_shape_data) {
-      const auto onnx_output_name = torch_to_onnx_input.find(gs_data.first);
-      if (onnx_output_name != torch_to_onnx_input.end()) {
-        inferred_shape_data[onnx_output_name->second] = gs_data.second;
+    // instead of original PyTorch graph. Only copy what we need,
+    // which are the inputs of n.
+    for (auto input : n->inputs()) {
+      const auto maybe_shape = original_shape_data.find(input->debugName());
+      if (maybe_shape != original_shape_data.end()) {
+        const auto onnx_output_name =
+            torch_to_onnx_input.find(input->debugName());
+        if (onnx_output_name != torch_to_onnx_input.end()) {
+          inferred_shape_data[onnx_output_name->second] = maybe_shape->second;
+        }
       }
     }
     // Use scalar_type_analysis without low precision cast

@@ -56,8 +56,15 @@ def list_cmp(op: Callable[[Any, Any], bool], left: Sequence[Any], right: Sequenc
     return op(len(left), len(right))
 
 
+def set_isdisjoint(set1, set2):
+    for x in set1:
+        if x in set2:
+            return False
+    return True
+
+
 def dropwhile(predicate, iterable):
-    # dropwhile(lambda x: x<5, [1,4,6,4,1]) → 6 4 1
+    # dropwhile(lambda x: x<5, [1,4,6,4,1]) -> 6 4 1
     iterable = iter(iterable)
     for x in iterable:
         if not predicate(x):

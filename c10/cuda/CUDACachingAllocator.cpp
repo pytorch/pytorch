@@ -8,7 +8,6 @@
 #include <c10/util/CallOnce.h>
 #include <c10/util/ScopeExit.h>
 #include <c10/util/UniqueVoidPtr.h>
-#include <c10/util/env.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
@@ -779,12 +778,9 @@ struct MempoolIdHash {
 };
 
 cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
-#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
   if (at::cuda::currentStreamCaptureStatusMayInitCtx() ==
       at::cuda::CaptureStatus::None) {
-#endif
     return C10_CUDA_ERROR_HANDLED(cudaMalloc(p, size));
-#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
   } else {
     // It's ok to capture cudaMallocs, as long as we never cudaFree those
     // addresses before replay.
@@ -793,7 +789,6 @@ cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
     at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
     return C10_CUDA_ERROR_HANDLED(cudaMalloc(p, size));
   }
-#endif
 }
 
 } // anonymous namespace
@@ -2184,7 +2179,6 @@ class DeviceCachingAllocator {
   }
 
   BlockPool& get_pool(size_t size, cudaStream_t stream) {
-#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
     // captures_underway is a conservative guess that the current stream may be
     // capturing. It's only non-empty if some thread has begun and not yet ended
     // a capture, so it's usually 0, and we can short-circuit
@@ -2202,7 +2196,6 @@ class DeviceCachingAllocator {
         }
       }
     }
-#endif
     if (size <= kSmallSize) {
       return small_blocks;
     } else {
@@ -2832,7 +2825,7 @@ class DeviceCachingAllocator {
 // errors, since the caching allocator foils cuda-memcheck.
 bool forceUncachedAllocator() {
   static bool force_uncached =
-      c10::utils::has_env("PYTORCH_NO_CUDA_MEMORY_CACHING");
+      getenv("PYTORCH_NO_CUDA_MEMORY_CACHING") != nullptr;
   return force_uncached;
 }
 
@@ -3364,9 +3357,9 @@ struct BackendStaticInitializer {
   // version checks, to CUDAAllocatorConfig's runtime doublecheck. If this
   // works, maybe we should move all of CUDAAllocatorConfig here?
   CUDAAllocator* parseEnvForBackend() {
-    const auto val = c10::utils::get_env("PYTORCH_CUDA_ALLOC_CONF");
-    if (val.has_value()) {
-      const std::string& config = val.value();
+    const char* val = getenv("PYTORCH_CUDA_ALLOC_CONF");
+    if (val != nullptr) {
+      const std::string config(val);
 
       std::regex exp("[\\s,]+");
       std::sregex_token_iterator it(config.begin(), config.end(), exp, -1);

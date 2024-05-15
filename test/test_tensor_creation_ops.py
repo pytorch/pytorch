@@ -945,7 +945,7 @@ class TestTensorCreation(TestCase):
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half))
     def test_vstack_row_stack(self, device, dtype):
-        ops = ((torch.vstack, np.vstack), (torch.row_stack, np.row_stack))
+        ops = ((torch.vstack, np.vstack), (torch.row_stack, np.vstack))
         for torch_op, np_op in ops:
             self._test_special_stacks(0, 2, torch_op, np_op, device, dtype)
             for i in range(5):
