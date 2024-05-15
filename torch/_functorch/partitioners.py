@@ -1074,7 +1074,7 @@ def min_cut_rematerialization_partition(
 
         # Heuristic to bias towards nodes closer to the backwards pass
         # Complete guess about current value
-        mem_sz = int(mem_sz * (1.1 ** max(min(node.dist_from_bw, 100), 1)))
+        mem_sz = int(mem_sz * (1.01 ** max(min(node.dist_from_bw, 100), 1)))
         if is_materialized(node):
             return mem_sz
         else:
