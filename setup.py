@@ -88,12 +88,6 @@
 #     disables use of system-wide nccl (we will use our submoduled
 #     copy in third_party/nccl)
 #
-#   BUILD_CAFFE2_OPS=0
-#     disable Caffe2 operators build
-#
-#   BUILD_CAFFE2=0
-#     disable Caffe2 build
-#
 #   USE_IBVERBS
 #     toggle features related to distributed support
 #
@@ -1317,6 +1311,7 @@ def main():
         "include/torch/csrc/onnx/*.h",
         "include/torch/csrc/profiler/*.h",
         "include/torch/csrc/profiler/orchestration/*.h",
+        "include/torch/csrc/profiler/standalone/*.h",
         "include/torch/csrc/profiler/stubs/*.h",
         "include/torch/csrc/profiler/unwind/*.h",
         "include/torch/csrc/profiler/python/*.h",
