@@ -4501,7 +4501,8 @@ class TestNestedTensorSubclass(TestCase):
     @onlyCUDA
     @dtypes(torch.float32, torch.double, torch.half)
     @parametrize("nt_dim", [2, 3, 4])
-    def test_to_padded_tensor(self, device, dtype, nt_dim):
+    @parametrize("requires_grad", [False, True])
+    def test_to_padded_tensor(self, device, dtype, nt_dim, requires_grad):
         if nt_dim == 2:
             post_seq_len_shape = ()
         elif nt_dim == 3:
@@ -4509,15 +4510,14 @@ class TestNestedTensorSubclass(TestCase):
         elif nt_dim == 4:
             post_seq_len_shape = (9, 10)
 
-        nt = torch.nested.nested_tensor([
-            torch.randn(2, *post_seq_len_shape, device=device, dtype=dtype),
-            torch.randn(3, *post_seq_len_shape, device=device, dtype=dtype),
-            torch.randn(4, *post_seq_len_shape, device=device, dtype=dtype),
-            torch.randn(5, *post_seq_len_shape, device=device, dtype=dtype),
-            torch.randn(6, *post_seq_len_shape, device=device, dtype=dtype),
-            torch.randn(7, *post_seq_len_shape, device=device, dtype=dtype),
-            torch.randn(8, *post_seq_len_shape, device=device, dtype=dtype),
-        ], layout=torch.jagged)
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
+                for n in range(2, 9)
+            ],
+            layout=torch.jagged,
+            requires_grad=requires_grad,
+        )
 
         PADDING_VAL = 4.2
         expected_padded = nt._values.new_full((7, 8, *post_seq_len_shape), PADDING_VAL)
@@ -4531,6 +4531,18 @@ class TestNestedTensorSubclass(TestCase):
         nt2 = torch.nested.nested_tensor_from_padded(padded, nt.offsets())
         self.assertEqual(nt, nt2)
 
+        if requires_grad:
+            # ensure gradients flow through conversions
+            nt2.backward(torch.ones_like(nt2))
+            self.assertEqual(nt.grad, torch.ones_like(nt))
+
+    # blows up due to test parametrization otherwise
+    @torch._dynamo.utils.disable_cache_limit()
+    @decorateIf(
+        unittest.expectedFailure,
+        # backward pass causes CUDA illegal memory access error; need to investigate
+        lambda params: not params["requires_grad"]
+    )
     @skipIfTorchDynamo("SDPA test compiles internally")
     @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
@@ -4538,7 +4550,8 @@ class TestNestedTensorSubclass(TestCase):
     @onlyCUDA
     @dtypes(torch.float32, torch.double, torch.half)
     @parametrize("nt_dim", [2, 3, 4])
-    def test_to_padded_tensor_compile(self, device, dtype, nt_dim):
+    @parametrize("requires_grad", [False, True])
+    def test_to_padded_tensor_compile(self, device, dtype, nt_dim, requires_grad):
         if nt_dim == 2:
             post_seq_len_shape = ()
         elif nt_dim == 3:
@@ -4546,15 +4559,14 @@ class TestNestedTensorSubclass(TestCase):
         elif nt_dim == 4:
             post_seq_len_shape = (9, 10)
 
-        nt = torch.nested.nested_tensor([
-            torch.randn(2, *post_seq_len_shape, device=device, dtype=dtype),
-            torch.randn(3, *post_seq_len_shape, device=device, dtype=dtype),
-            torch.randn(4, *post_seq_len_shape, device=device, dtype=dtype),
-            torch.randn(5, *post_seq_len_shape, device=device, dtype=dtype),
-            torch.randn(6, *post_seq_len_shape, device=device, dtype=dtype),
-            torch.randn(7, *post_seq_len_shape, device=device, dtype=dtype),
-            torch.randn(8, *post_seq_len_shape, device=device, dtype=dtype),
-        ], layout=torch.jagged)
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
+                for n in range(2, 9)
+            ],
+            layout=torch.jagged,
+            requires_grad=requires_grad,
+        )
 
         def f(x):
             return x.sin() + 1
@@ -4570,9 +4582,20 @@ class TestNestedTensorSubclass(TestCase):
             return torch.nested.nested_tensor_from_padded(
                 padded, nt.offsets(), sum_S=nt.values().shape[0])
 
-        output = g(nt)
         expected_output = f(nt)
-        self.assertEqual(output, expected_output, rtol=1e-3, atol=1e-3)
+        if requires_grad:
+            expected_output.backward(torch.ones_like(expected_output))
+            expected_grad = nt.grad.clone().detach()
+            nt.grad = None
+
+        compiled_output = g(nt)
+        if requires_grad:
+            compiled_output.backward(torch.ones_like(compiled_output))
+            compiled_grad = nt.grad.clone().detach()
+            nt.grad = None
+
+        self.assertEqual(compiled_output, expected_output, rtol=1e-3, atol=1e-3)
+        self.assertEqual(compiled_grad, expected_grad)
 
         # TODO: Verify that computation fusion happens
 
