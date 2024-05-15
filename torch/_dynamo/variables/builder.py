@@ -1527,7 +1527,7 @@ class VariableBuilder:
         # ints, this won't make codegen perf worse.  Modest cost to compile
         # time.
 
-        wrapped_value = torch.tensor(value)
+        wrapped_value = torch.tensor(value, dtype=torch.float64)
         # TODO: Switch RandomValueSource over to use this, this is more
         # accurate
         assert not isinstance(self.get_source(), RandomValueSource)
@@ -1593,47 +1593,10 @@ class VariableBuilder:
             example_strong_ref=wrapped_value,
         )
 
-        # OK, now the crazy sauce.  We want to generate a SymNodeVariable to
-        # do the rest of our tracing, doing the equivalent of an item() call.
-        # But we don't /actually/ want to do an item() call, because that will
-        # give us an unbacked SymFloat, but this is really a backed SymFloat.
+        r = unspec_var.call_method(self.tx, "item", [], {})
+        self.tx.output.tracked_fakes.append(TrackedFake(r.sym_num, self.source, None))
 
-        item_proxy = self.tx.output.create_proxy(
-            "call_method",
-            "item",
-            (proxy,),
-            {},
-        )
-        # Do NOT do conventional fake tensor prop
-
-        shape_env = self.tx.output.shape_env
-        item_symbol = shape_env.create_unspecified_symbol(
-            value,
-            # Interesting!  Normally if you do compute on a Variable (the
-            # compute in this case being an item() call), you end up with a
-            # new variable that doesn't have source, but in this case, we can
-            # still put a source on it.
-            source=self.source,
-            # If we put in a Tensor input, definitely dynamic (if you wanted
-            # it to be static, gotta bail out earlier)
-            dynamic_dim=DimDynamic.DYNAMIC,
-        )
-        item_example_value = shape_env.create_symfloatnode(
-            item_symbol, hint=value, source=self.source
-        )
-        set_example_value(item_proxy.node, item_example_value)
-
-        self.tx.output.tracked_fakes.append(
-            TrackedFake(item_example_value, self.source, None)
-        )
-
-        item_unspec_var = SymNodeVariable(
-            item_proxy,
-            item_example_value,
-            source=self.get_source(),  # Interesting as above!
-        )
-
-        return item_unspec_var
+        return r
 
     def wrap_unspecialized_primitive(self, value):
         if self.name in self.tx.output.unspec_variable_map:

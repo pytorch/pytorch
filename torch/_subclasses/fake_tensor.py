@@ -320,6 +320,45 @@ class FakeTensorConverter:
         )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
+        # TODO: extend this for smaller dtypes too.  Some care will have to be
+        # taken though, because smaller dtypes will compute differently but
+        # Python sympy compute is always done at arbitrary precision.
+        value = None
+        if (
+            t.dim() == 0
+            and t.device.type == "cpu"
+            and t.dtype in [torch.int64, torch.float64]
+            and source is not None
+            and shape_env is not None
+        ):
+            from torch._dynamo.source import CallMethodItemSource, FloatTensorSource
+            from torch.fx.experimental.symbolic_shapes import DimDynamic
+
+            value = t.item()
+            # Peephole strip out unnecessary torch.as_tensor(x).item()
+            if isinstance(source, FloatTensorSource):
+                item_source = source.base
+            else:
+                item_source = CallMethodItemSource(source)
+            symbol = shape_env.create_unspecified_symbol(
+                value,
+                source=item_source,
+                dynamic_dim=DimDynamic.DYNAMIC,
+            )
+            # NB: reusing item_memo here ensures that we invalidate on
+            # mutation
+            if t.dtype == torch.int64:
+                out.item_memo = shape_env.create_symintnode(
+                    symbol,
+                    hint=value,
+                    source=item_source,
+                )
+            elif t.dtype == torch.float64:
+                out.item_memo = shape_env.create_symfloatnode(
+                    symbol,
+                    hint=value,
+                    source=item_source,
+                )
         if make_constant:
             self.add_constant_storage_mapping(out)
         # NB: meta_converter set the memo

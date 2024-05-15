@@ -685,11 +685,6 @@ class TensorVariable(VariableTracker):
     def method_data_ptr(self, *args, **kwargs):
         unimplemented("Tensor.data_ptr")
 
-    def method_item(self, *args, **kwargs):
-        if not config.capture_scalar_outputs:
-            self._warn_capture_scalar_outputs()
-            unimplemented("Tensor.item")
-
     @staticmethod
     @functools.lru_cache(None)
     def _warn_capture_scalar_outputs():
