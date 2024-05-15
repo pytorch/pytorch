@@ -519,6 +519,7 @@ BatchNormBackend _select_batch_norm_backend(
       && weight.defined() && bias.defined()
       && ((running_mean.defined() && running_var.defined())
         || (!running_mean.defined() && !running_var.defined() && training))
+      && (input.dim() >= 3)
       && detail::getCUDAHooks().compiledWithMIOpen()
       && cudnn_enabled
       && input.suggest_memory_format() != MemoryFormat::ChannelsLast

@@ -54,6 +54,16 @@ def constant3(a, b):
     return a - b + (1.0 + 2)
 
 
+_variable = 0
+
+
+def update_global(x):
+    global _variable
+    _variable += 1
+    # Check that updated global variable value is picked up
+    return x * _variable
+
+
 def func_with_default(a, b, some_default_arg=True):
     if some_default_arg:
         return a - b
@@ -682,6 +692,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x - 1
 
     @make_test
+    def test_tensor_is_complex(x):
+        if x.is_complex():
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
     def test_get_privateuse1_name(x):
         if torch._C._get_privateuse1_backend_name() == "privateuseone":
             return x + 1
@@ -1152,6 +1169,19 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         else:
             y = a - b
         return x, y
+
+    def test_set_isdisjoint(self):
+        x = {"apple", "banana", "cherry"}
+        y = {"google", "microsoft", "apple"}
+
+        def fn(a):
+            if x.isdisjoint(y):
+                return a + 1
+            else:
+                return a - 1
+
+        test = make_test(fn)
+        test(self)
 
     @make_test
     def test_tuple_iadd(a, b):
@@ -1792,13 +1822,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_lambda0_keywords_y_ : torch.Tensor):
+    def forward(self, L_lambda0_keywords_y_: "f32[2, 2]"):
         l_lambda0_keywords_y_ = L_lambda0_keywords_y_
 
-        mul = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
-        mul_1 = l_lambda0_keywords_y_ * l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
+        mul: "f32[2, 2]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
+        mul_1: "f32[2, 2]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
 
-        mul_2 = torch.mul(mul, mul_1);  mul = mul_1 = None
+        mul_2: "f32[2, 2]" = torch.mul(mul, mul_1);  mul = mul_1 = None
         return (mul_2,)
 """,
             )
@@ -1807,13 +1837,13 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s0 : torch.SymInt, L_lambda0_keywords_y_ : torch.Tensor):
+    def forward(self, s0: "Sym(s0)", L_lambda0_keywords_y_: "f32[s0, s0]"):
         l_lambda0_keywords_y_ = L_lambda0_keywords_y_
 
-        mul = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
-        mul_1 = l_lambda0_keywords_y_ * l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
+        mul: "f32[s0, s0]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
+        mul_1: "f32[s0, s0]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
 
-        mul_2 = torch.mul(mul, mul_1);  mul = mul_1 = None
+        mul_2: "f32[s0, s0]" = torch.mul(mul, mul_1);  mul = mul_1 = None
         return (mul_2,)
 """,
             )
@@ -1839,14 +1869,14 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_lambda0_keywords_y_ : torch.Tensor):
+    def forward(self, L_lambda0_keywords_y_: "f32[2, 2]"):
         l_lambda0_keywords_y_ = L_lambda0_keywords_y_
 
-        mul = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
+        mul: "f32[2, 2]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
 
-        add = l_lambda0_keywords_y_ + l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
+        add: "f32[2, 2]" = l_lambda0_keywords_y_ + l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
 
-        mul_1 = torch.mul(mul, add);  mul = add = None
+        mul_1: "f32[2, 2]" = torch.mul(mul, add);  mul = add = None
         return (mul_1,)
 """,
             )
@@ -1855,14 +1885,14 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s0 : torch.SymInt, L_lambda0_keywords_y_ : torch.Tensor):
+    def forward(self, s0: "Sym(s0)", L_lambda0_keywords_y_: "f32[s0, s0]"):
         l_lambda0_keywords_y_ = L_lambda0_keywords_y_
 
-        mul = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
+        mul: "f32[s0, s0]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
 
-        add = l_lambda0_keywords_y_ + l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
+        add: "f32[s0, s0]" = l_lambda0_keywords_y_ + l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
 
-        mul_1 = torch.mul(mul, add);  mul = add = None
+        mul_1: "f32[s0, s0]" = torch.mul(mul, add);  mul = add = None
         return (mul_1,)
 """,
             )
@@ -1890,14 +1920,14 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_lambda0_keywords_y_ : torch.Tensor):
+    def forward(self, L_lambda0_keywords_y_: "f32[2, 2]"):
         l_lambda0_keywords_y_ = L_lambda0_keywords_y_
 
-        mul = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
+        mul: "f32[2, 2]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
 
-        add = l_lambda0_keywords_y_ + l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
+        add: "f32[2, 2]" = l_lambda0_keywords_y_ + l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
 
-        mul_1 = torch.mul(mul, add);  mul = add = None
+        mul_1: "f32[2, 2]" = torch.mul(mul, add);  mul = add = None
         return (mul_1,)
 """,
             )
@@ -1906,14 +1936,14 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s0 : torch.SymInt, L_lambda0_keywords_y_ : torch.Tensor):
+    def forward(self, s0: "Sym(s0)", L_lambda0_keywords_y_: "f32[s0, s0]"):
         l_lambda0_keywords_y_ = L_lambda0_keywords_y_
 
-        mul = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
+        mul: "f32[s0, s0]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
 
-        add = l_lambda0_keywords_y_ + l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
+        add: "f32[s0, s0]" = l_lambda0_keywords_y_ + l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
 
-        mul_1 = torch.mul(mul, add);  mul = add = None
+        mul_1: "f32[s0, s0]" = torch.mul(mul, add);  mul = add = None
         return (mul_1,)
 """,
             )
@@ -1938,14 +1968,14 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_ : torch.Tensor):
+    def forward(self, L_x_: "f32[2, 2]"):
         l_x_ = L_x_
 
-        mul = l_x_ * 4
-        mul_1 = mul * l_x_;  mul = None
-        mul_2 = 20 * l_x_;  l_x_ = None
+        mul: "f32[2, 2]" = l_x_ * 4
+        mul_1: "f32[2, 2]" = mul * l_x_;  mul = None
+        mul_2: "f32[2, 2]" = 20 * l_x_;  l_x_ = None
 
-        mul_3 = torch.mul(mul_1, mul_2);  mul_1 = mul_2 = None
+        mul_3: "f32[2, 2]" = torch.mul(mul_1, mul_2);  mul_1 = mul_2 = None
         return (mul_3,)
 """,
             )
@@ -1954,14 +1984,14 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s0 : torch.SymInt, L_x_ : torch.Tensor):
+    def forward(self, s0: "Sym(s0)", L_x_: "f32[s0, s0]"):
         l_x_ = L_x_
 
-        mul = l_x_ * 4
-        mul_1 = mul * l_x_;  mul = None
-        mul_2 = 20 * l_x_;  l_x_ = None
+        mul: "f32[s0, s0]" = l_x_ * 4
+        mul_1: "f32[s0, s0]" = mul * l_x_;  mul = None
+        mul_2: "f32[s0, s0]" = 20 * l_x_;  l_x_ = None
 
-        mul_3 = torch.mul(mul_1, mul_2);  mul_1 = mul_2 = None
+        mul_3: "f32[s0, s0]" = torch.mul(mul_1, mul_2);  mul_1 = mul_2 = None
         return (mul_3,)
 """,
             )

@@ -24,11 +24,17 @@ verbose_progress = False
 # use fx aot graph codegen cache
 fx_graph_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
 
+# use fx aot graph codegen cache
+fx_graph_remote_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE") == "1"
+
 # enable autotune local cache
 autotune_local_cache = True
 
 # enable autotune remote cache
 autotune_remote_cache = os.environ.get("TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE") == "1"
+
+# Force disabled all inductor level caching -- This will override any other caching flag
+force_disable_caches = os.environ.get("TORCHINDUCTOR_FORCE_DISABLE_CACHES") == "1"
 
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
@@ -227,12 +233,13 @@ force_same_precision = (
     True if is_fbcode() else os.environ.get("TORCHINDUCTOR_FORCE_SAME_PRECISION") == "1"
 )
 # Specify candidate backends for gemm autotune.
-# Possible choices are combinations of: ATen, Triton, CUTLASS.
+# Possible choices are combinations of: ATen, Triton, CUTLASS, CPP.
 # ATen: default Pytorch ATen kernels.
 # Triton: Triton templates defined in torch inductor.
 # CUTLASS: Cutlass templates and kernels.
+# CPP: CPP templates and kernels for CPU.
 max_autotune_gemm_backends = os.environ.get(
-    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON"
+    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP"
 ).upper()
 
 # the value used as a fallback for the unbacked SymInts
@@ -246,6 +253,15 @@ save_args = os.environ.get("TORCHINDUCTOR_SAVE_ARGS") == "1"
 
 # We will disable creating subprocess for autotuning if this is False
 autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
+
+# The following three timeouts are applicable if autotune_in_subproc is True:
+
+# Max time that a a valid benchmark result may take during autotuning
+max_autotune_subproc_result_timeout_seconds = 60.0
+# Additional time we allow subprocesses to terminate gracefully after the timeout until we send a SIGTERM
+max_autotune_subproc_graceful_timeout_seconds = 1.0
+# Additional time that we grant after a SIGTERM until we do a hard SIGKILL of subprocesses
+max_autotune_subproc_terminate_timeout_seconds = 2.0
 
 # If autotuning in subprocess, whether to use multiple devices
 autotune_multi_device = os.environ.get("TORCHINDUCTOR_AUTOTUNE_MULTI_DEVICE") == "1"
@@ -342,6 +358,9 @@ always_keep_tensor_constants = False
 
 # assert that indirect indexing does not read / write out of bounds
 assert_indirect_indexing = True
+
+# compute CSE bounds on variables that do not appear in the FX graph
+compute_all_bounds = False
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
@@ -501,7 +520,7 @@ decompose_mem_bound_mm: bool = False
 # assume_aligned_inputs means that we assume that inputs will be aligned; we generate
 # code using this assumption, and clone tensors before use if they aren't aligned.
 # In the common case, most inputs will be aligned.
-assume_aligned_inputs: bool = True
+assume_aligned_inputs: bool = False
 
 
 # config specific to codegen/cpp.py
@@ -593,6 +612,9 @@ class triton:
 
     # TODO - need to debug why this prevents cleanup
     cudagraph_trees_history_recording = False
+
+    # Enable cudagraph support for mutated inputs from prior cudagraph pool
+    cudagraph_support_input_mutation = False
 
     # synchronize after cudagraph invocation
     force_cudagraph_sync = False
@@ -762,10 +784,26 @@ class cuda:
     # Minimum value of M*N*K to consider the CUTLASS backend for GEMM ops.
     cutlass_backend_min_gemm_size: int = 1
 
-    # If set to True, it will ensure that only GEMM ops capable of
-    # epilogue fusion via CUTLASS Epilogue Visitor Trees ( EVT )
-    # are enabled for the CUTLASS backend.
-    cutlass_only_evt_capable_ops: bool = False
+    # enable generation of inline standalone runner in CUDA CPP generated code
+    # which allows to compile the generated code into a standalone executable.
+    generate_test_runner: bool = (
+        os.environ.get("INDUCTOR_CUDA_BACKEND_GENERATE_TEST_RUNNER_CODE", "1") == "1"
+    )
+
+    # Keep only Cutlass op configs which contain this regular expression pattern
+    # Set this to "warpspecialized_cooperative_epi_tma" to enable only SM90 TMA Cutlass Kernels for large GEMMs
+    cutlass_op_allowlist_regex: Optional[str] = None
+
+    # Note: Names of Cutlass ops names can be obtained by calling
+    # op.configuration_name() on a Cutlass op instance, for example those
+    # returned from cutlass_utils.gen_ops() or the op argument passed to
+    # CUTLASSGemmTemplate.render(...)
+
+    # Filter Cutlass configs which contain this regular expression pattern
+    # Set this to "pingpong" to avoid numerical issues
+    # caused by the op ordering of the "pingpong" memory access
+    # pattern used by some Cutlass Kernels.
+    cutlass_op_denylist_regex: Optional[str] = "pingpong"
 
 
 # create a directory containing lots of debug information

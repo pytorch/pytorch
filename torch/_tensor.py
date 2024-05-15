@@ -101,7 +101,7 @@ class Tensor(torch._C.TensorBase):
             if (
                 self.is_sparse
                 or self.device.type
-                in ["lazy", "xla", "mtia", "mps", "ort", "meta", "ipu"]
+                in ["lazy", "xla", "mtia", "mps", "maia", "meta", "ipu"]
                 or (
                     not torch._C._has_storage(self)
                     and self.device.type == torch._C._get_privateuse1_backend_name()
@@ -249,7 +249,7 @@ class Tensor(torch._C.TensorBase):
         # See Note [Don't serialize hooks]
         torch.utils.hooks.warn_if_has_hooks(self)
         backward_hooks: Dict[Any, Any] = OrderedDict()
-        # Note: Numpy array is chosen to be the rebuild component for XLA, MTIA, ORT Tensors.
+        # Note: Numpy array is chosen to be the rebuild component for XLA, MTIA, MAIA Tensors.
         # We considered a few options:
         # 1. CPU tensor can't be used here.
         #    Otherwise in torch.load CPU storage is reconstructed with randomly
@@ -259,7 +259,7 @@ class Tensor(torch._C.TensorBase):
         # 2. Python list is not a good fit due to performance reason.
         #    `tolist()` converts every single element in the tensor into python objects
         #    and serialize them one by one.
-        if self.device.type in ["xla", "mtia", "ort"] or (
+        if self.device.type in ["xla", "mtia", "maia"] or (
             not torch._C._has_storage(self)
             and self.device.type == torch._C._get_privateuse1_backend_name()
         ):
@@ -403,18 +403,7 @@ class Tensor(torch._C.TensorBase):
             )
             return (torch._utils._rebuild_wrapper_subclass, arg_wrapper_subclass)
         else:
-            v3_dtypes = [
-                torch.float8_e5m2,
-                torch.float8_e4m3fn,
-                torch.float8_e5m2fnuz,
-                torch.float8_e4m3fnuz,
-                torch.bits8,
-                torch.bits16,
-                torch.bits1x8,
-                torch.bits2x4,
-                torch.bits4x2,
-                torch.complex32,
-            ]
+            v3_dtypes = torch.storage._new_dtypes()
             if self.dtype in v3_dtypes:
                 rebuild_func = torch._utils._rebuild_tensor_v3
                 storage = self.untyped_storage()
@@ -1143,16 +1132,14 @@ class Tensor(torch._C.TensorBase):
         # hasattr(cpu_tensor, "__cuda_array_interface__") is False.
         if not self.is_cuda:
             raise AttributeError(
-                "Can't get __cuda_array_interface__ on non-CUDA tensor type: %s "
+                f"Can't get __cuda_array_interface__ on non-CUDA tensor type: {self.type()} "
                 "If CUDA data is required use tensor.cuda() to copy tensor to device memory."
-                % self.type()
             )
 
         if self.is_sparse:
             raise AttributeError(
-                "Can't get __cuda_array_interface__ on sparse type: %s "
+                f"Can't get __cuda_array_interface__ on sparse type: {self.type()} "
                 "Use Tensor.to_dense() to convert to a dense tensor first."
-                % self.type()
             )
 
         # RuntimeError, matching tensor.__array__() behavior.
