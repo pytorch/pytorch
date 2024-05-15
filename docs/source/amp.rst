@@ -46,6 +46,8 @@ Autocasting
 
     is_autocast_available
 
+.. py:module:: torch.amp.autocast_mode
+
 .. currentmodule:: torch
 
 .. autoclass:: autocast
