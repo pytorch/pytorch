@@ -6199,13 +6199,13 @@
     CompositeExplicitAutogradNonFunctional: _nested_get_values_copy
   autogen: _nested_get_values_copy.out
 
-- func: _nested_strided_to_jagged(Tensor(a) self, Tensor dummy) -> Tensor(a)
+- func: _nested_strided_to_jagged(Tensor(a) self) -> Tensor(a)
   variants: function
   device_check: NoCheck
   dispatch:
     NestedTensorCPU, NestedTensorCUDA: _nested_strided_to_jagged
 
-- func: _nested_strided_to_jagged_copy(Tensor self, Tensor dummy) -> Tensor
+- func: _nested_strided_to_jagged_copy(Tensor self) -> Tensor
   variants: function
   device_check: NoCheck
   tags: view_copy

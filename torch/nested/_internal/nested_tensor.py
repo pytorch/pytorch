@@ -131,6 +131,9 @@ class NestedTensor(torch.Tensor):
     def lengths(self):
         return self._lengths
 
+    def data_ptr(self) -> int:
+        return self._values.data_ptr()
+
     @property
     def _max_seqlen(self):
         if "max_seqlen" not in self._metadata_cache:

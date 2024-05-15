@@ -326,7 +326,7 @@ Tensor FunctionalInverses::_nested_get_values_inverse(const Tensor& base, const 
   }
 }
 
-Tensor FunctionalInverses::_nested_strided_to_jagged_inverse(const at::Tensor & base, const at::Tensor & mutated_view, at::functionalization::InverseReturnMode inverse_return_mode, const at::Tensor & dummy) {
+Tensor FunctionalInverses::_nested_strided_to_jagged_inverse(const at::Tensor & base, const at::Tensor & mutated_view, at::functionalization::InverseReturnMode inverse_return_mode) {
   // Mutated view is a jagged NT
   auto cpp_nt = at::_nested_jagged_to_strided(mutated_view);
 
@@ -339,8 +339,7 @@ Tensor FunctionalInverses::_nested_strided_to_jagged_inverse(const at::Tensor & 
 
 Tensor FunctionalInverses::_nested_jagged_to_strided_inverse(const at::Tensor & base, const at::Tensor & mutated_view, at::functionalization::InverseReturnMode inverse_return_mode) {
   // Mutated view is a strided NT
-  auto dummy = at::_nested_get_jagged_dummy(mutated_view);
-  auto python_nt = at::_nested_strided_to_jagged(mutated_view, dummy);
+  auto python_nt = at::_nested_strided_to_jagged(mutated_view);
 
   if (inverse_return_mode != InverseReturnMode::NeverView) {
     return python_nt;

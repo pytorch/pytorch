@@ -867,7 +867,7 @@ std::tuple<Tensor, Tensor> _nested_compute_contiguous_strides_offsets(const Tens
       construct_offsets(nested_size));
 }
 
-Tensor _nested_strided_to_jagged(const Tensor& self, const Tensor& dummy) {
+Tensor _nested_strided_to_jagged(const Tensor& self) {
   auto self_ptr = get_nested_tensor_impl(self);
 
   // All jagged NT can be converted into strided NTs, but the opposite is not True
@@ -898,19 +898,29 @@ Tensor _nested_strided_to_jagged(const Tensor& self, const Tensor& dummy) {
   bool lengths_needed = false;
   for (int64_t i = 0; i < ragged_offsets.size(0); ++i) {
     jagged_offsets[i] = ragged_offsets[i] / post_ragged_stride;
+    jagged_lengths[i] = ragged_sizes[i][ragged_idx-1];
     if (i > 0) {
       auto offsets_diff = (ragged_offsets[i] - ragged_offsets[i-1]) / post_ragged_stride;
-      jagged_lengths[i-1] = ragged_sizes[i][ragged_idx];
-      if ((offsets_diff != ragged_sizes[i][ragged_idx]).item().toBool()) {
+      if ((offsets_diff != ragged_sizes[i][ragged_idx-1]).item().toBool()) {
         lengths_needed = true;
       }
     }
   }
-  jagged_offsets[-1] = jagged_offsets[-2] + ragged_sizes[-1][ragged_idx];
-  jagged_lengths[-1] = ragged_sizes[-1][ragged_idx];
-  c10::optional<at::Tensor> jagged_lengths_arg = lengths_needed ? c10::optional(jagged_lengths) : c10::nullopt;
+  jagged_offsets[-1] = jagged_offsets[-2] + ragged_sizes[-1][ragged_idx-1];
 
-  return at::_nested_view_from_jagged(self_ptr->get_buffer(), jagged_offsets, dummy, jagged_lengths_arg, ragged_idx);
+  c10::optional<at::Tensor> jagged_lengths_arg = lengths_needed ? c10::optional(jagged_lengths) : c10::nullopt;
+  std::vector<int64_t> njt_sizes(self_ptr->dim()-1);
+  int njt_sizes_it = 0;
+  for (int64_t i = 0; i < self_ptr->dim(); ++i) {
+    if (i != ragged_idx) {
+      njt_sizes[njt_sizes_it] = self_ptr->size(i);
+      ++njt_sizes_it;
+    }
+  }
+  njt_sizes[0] = -1;
+  auto njt_buffer = self_ptr->get_buffer().view(c10::IntArrayRef(njt_sizes));
+  Tensor dummy = at::_nested_get_jagged_dummy(self);
+  return at::_nested_view_from_jagged(njt_buffer, jagged_offsets, dummy, jagged_lengths_arg, ragged_idx);
 }
 
 // See Note [Special size rule for nested tensor]

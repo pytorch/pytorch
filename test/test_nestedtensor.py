@@ -511,6 +511,7 @@ class TestNestedTensor(TestCase):
     @parametrize("layout", [torch.strided, torch.jagged], name_fn=layout_name)
     def test_to(self, layout):
         import torch.nested._internal.ops
+
         ntensors = 4
         nt = random_nt_from_dims((7, None, 10), torch.device('cpu'), torch.float32, layout=layout)
 
@@ -565,7 +566,7 @@ class TestNestedTensor(TestCase):
         # Jagged <-> strided
         new_layout = torch.jagged if layout == torch.strided else torch.strided
         new_layout_nt = torch.ops.aten._to_copy(nt, layout=new_layout)
-        self.assertIs(new_layout_nt.layout, torch.strided)
+        self.assertIs(new_layout_nt.layout, new_layout)
         self.assertEqual(new_layout_nt.device, nt.device)
         self.assertEqual(new_layout_nt.size(2), nt.size(2))
         self.assertEqual(new_layout_nt.unbind(), nt.unbind())
