@@ -325,7 +325,8 @@ class FakeTensorConverter:
         # Python sympy compute is always done at arbitrary precision.
         value = None
         if (
-            t.dim() == 0
+            not isinstance(t, FakeTensor)
+            and t.dim() == 0
             and t.device.type == "cpu"
             and t.dtype in [torch.int64, torch.float64]
             and source is not None

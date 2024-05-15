@@ -82,6 +82,7 @@ from ..utils import (
     is_utils_checkpoint,
     istype,
     odict_values,
+    proxy_args_kwargs,
     set_example_value,
     tensor_always_has_static_shape,
     tuple_iterator,
@@ -1593,7 +1594,15 @@ class VariableBuilder:
             example_strong_ref=wrapped_value,
         )
 
-        r = unspec_var.call_method(self.tx, "item", [], {})
+        # Directly do item to bypass capture_scalar_outputs
+        r = wrap_fx_proxy(
+            self.tx,
+            self.tx.output.create_proxy(
+                "call_method",
+                "item",
+                *proxy_args_kwargs([unspec_var], {}),
+            ),
+        )
         self.tx.output.tracked_fakes.append(TrackedFake(r.sym_num, self.source, None))
 
         return r
