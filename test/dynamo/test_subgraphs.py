@@ -439,7 +439,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             x = x / (a + b)
             return x
 
-        self._common(fn, 1, 6)
+        self._common(fn, 1, 5)  # item gets DCE'd
 
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", False)
     def test_graph_break_on_item(self):
