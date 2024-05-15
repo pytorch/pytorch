@@ -37,7 +37,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
-    TEST_WITH_SLOW,
     TEST_WITH_SLOW_GRADCHECK,
 )
 
@@ -76,9 +75,11 @@ HAVE_TEST_SELECTION_TOOLS = True
 sys.path.remove(str(REPO_ROOT))
 
 TEST_CONFIG = os.getenv("TEST_CONFIG", "")
+BUILD_ENVIRONMENT = os.getenv("BUILD_ENVIRONMENT", "")
 RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
 DISTRIBUTED_TEST_PREFIX = "distributed"
 INDUCTOR_TEST_PREFIX = "inductor"
+IS_SLOW = "slow" in TEST_CONFIG or "slow" in BUILD_ENVIRONMENT
 
 
 # Note [ROCm parallel CI testing]
@@ -494,7 +495,7 @@ def run_test(
         None
         if not options.enable_timeout
         else THRESHOLD * 6
-        if TEST_WITH_SLOW
+        if IS_SLOW
         else THRESHOLD * 3
         if should_retry
         and isinstance(test_module, ShardedTest)
@@ -1180,18 +1181,25 @@ def parse_args():
         and (
             TEST_WITH_CROSSREF
             or TEST_WITH_ASAN
-            or (
-                strtobool(os.environ.get("TD_DISTRIBUTED", "False"))
-                and TEST_CONFIG == "distributed"
-                and TEST_CUDA
-            )
+            or (TEST_CONFIG == "distributed" and TEST_CUDA)
             or (IS_WINDOWS and not TEST_CUDA)
             or TEST_CONFIG == "nogpu_AVX512"
             or TEST_CONFIG == "nogpu_NO_AVX2"
+            or (
+                "sm86" not in BUILD_ENVIRONMENT
+                and TEST_CONFIG == "default"
+                and TEST_CUDA
+            )
+            or (not TEST_CUDA and TEST_CONFIG == "default")
         )
         and get_pr_number() is not None
         and not strtobool(os.environ.get("NO_TD", "False"))
-        and not TEST_WITH_SLOW,
+        and not IS_SLOW
+        and not TEST_WITH_ROCM
+        and not IS_MACOS
+        and "onnx" not in BUILD_ENVIRONMENT
+        and "debug" not in BUILD_ENVIRONMENT
+        and "parallelnative" not in BUILD_ENVIRONMENT,
     )
     parser.add_argument(
         "additional_unittest_args",

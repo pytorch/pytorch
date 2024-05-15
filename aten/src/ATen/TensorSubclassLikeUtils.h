@@ -61,7 +61,7 @@ inline bool areAnyTensorSubclassLike(TensorList tensors) {
 }
 
 inline bool areAnyOptionalTensorSubclassLike(
-    const c10::List<c10::optional<Tensor>>& tensors) {
+    const c10::List<std::optional<Tensor>>& tensors) {
   if (c10::impl::dispatch_mode_enabled())
     return true;
   return std::any_of(
