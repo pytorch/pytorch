@@ -3718,6 +3718,13 @@ class CUDATemplateBuffer(TemplateBuffer):
         return self.workspace_size if self.workspace_size is not None else 0
 
 
+class CppTemplateBuffer(TemplateBuffer):
+    def __init__(self, layout, inputs, make_kernel_render, template, choice):
+        super().__init__(layout, inputs, make_kernel_render)
+        self.template = template
+        self.choice = choice
+
+
 @dataclasses.dataclass
 class InputsKernel(Buffer):
     inputs: List[Buffer]
@@ -3756,6 +3763,8 @@ class InputsKernel(Buffer):
             # into TensorBox / StorageBox pair as a result of the
             # cls.copy_input call; so we should unwrap recursively
             return cls.unwrap_storage_for_input(x)
+        if isinstance(x, TorchBindObject):
+            return x
         assert isinstance(x, (Buffer, ReinterpretView)), x
         return x
 
@@ -3933,14 +3942,7 @@ def get_aten_cpp_kernel_name(kernel):
         if kernel._overloadname == "default"
         else kernel.__name__.replace(".", "_")
     )
-    kernel_name = f"at::_ops::{opname}::call"
-    return (
-        V.graph.wrapper_code.get_c_shim_func_name(  # type: ignore[attr-defined]
-            kernel_name
-        )
-        if V.graph.wrapper_code and V.graph.cpp_wrapper and config.abi_compatible
-        else kernel_name
-    )
+    return f"at::_ops::{opname}::call"
 
 
 @dataclasses.dataclass
@@ -4078,7 +4080,15 @@ class ExternKernel(InputsKernel):
         raise NotImplementedError
 
     def get_kernel_name(self):
-        return self.cpp_kernel_name if V.graph.cpp_wrapper else self.python_kernel_name
+        return (
+            (
+                V.graph.wrapper_code.get_c_shim_func_name(self.cpp_kernel_name)  # type: ignore[attr-defined]
+                if config.abi_compatible
+                else self.cpp_kernel_name
+            )
+            if V.graph.cpp_wrapper
+            else self.python_kernel_name
+        )
 
     @staticmethod
     def copy_input(x):
@@ -4142,7 +4152,7 @@ class ExternKernel(InputsKernel):
         # Rerun fake tensor propagation, because Inductor may have changed the
         # strides of inputs and we need to determine accurately what the
         # output stride will be.
-        example_args = []
+        example_args: List[Union[torch.Tensor, torch._C.ScriptObject]] = []
 
         # We need to retain the constant values of fake tensors that we originally
         # propagated the graph with, because for some operators running without a
@@ -4150,6 +4160,8 @@ class ExternKernel(InputsKernel):
         for x in tensor_args:
             if x.get_name() in V.graph.constants:
                 example_args.append(V.graph.constants[x.get_name()])
+            elif x.get_name() in V.graph.torchbind_constants:
+                example_args.append(V.graph.torchbind_constants[x.get_name()])
             else:
                 example_args.append(ir_node_to_tensor(x, guard_shape=True))
 
@@ -4277,6 +4289,8 @@ class ExternKernel(InputsKernel):
         if isinstance(x, StorageBox):
             # TODO(jansel): impose layout preference on realized buffer
             x.realize()
+            return x
+        if isinstance(x, TorchBindObject):
             return x
         return cls.copy_input(x)
 
@@ -5404,13 +5418,14 @@ class FallbackKernel(ExternKernelAlloc):
     @staticmethod
     def find_device(tensor_args, example_output):
         if tensor_args:
-            return tensor_args[0].get_device()
+            devices = [arg.get_device() for arg in tensor_args if arg.get_device()]
+            return devices[0]
         if isinstance(example_output, torch.Tensor):
             return example_output.device
         if isinstance(example_output, (list, tuple)):
-            devices = {FallbackKernel.find_device(None, x) for x in example_output}
+            device_set = {FallbackKernel.find_device(None, x) for x in example_output}
             # Remove None
-            devices = [device for device in devices if device]
+            devices = [device for device in device_set if device]
             if len(devices) == 1:
                 return devices[0]
             for device in devices:
@@ -6233,7 +6248,7 @@ class MKLPackedLinear(ExternKernelAlloc):
         )
 
     @classmethod
-    def create(cls, x, packed_w, orig_w, batch_size):
+    def create(cls, x, packed_w, orig_w, B, batch_size):
         x = cls.require_stride1(cls.realize_input(x))
         orig_w = cls.require_stride1(cls.realize_input(orig_w))
         *m, _ = x.get_size()
@@ -6241,7 +6256,11 @@ class MKLPackedLinear(ExternKernelAlloc):
         output_size = list(m) + [oc]
         output_stride = make_contiguous_strides_for(output_size)
         inputs = [x, packed_w, orig_w]
-        constant_args = [None, batch_size]
+        constant_args = [batch_size]
+        if B is not None:
+            inputs += [B]
+        else:
+            constant_args.insert(0, None)
 
         return MKLPackedLinear(
             layout=FixedLayout(
@@ -7596,7 +7615,7 @@ class EffectfulKernel(FallbackKernel):
         unbacked_bindings=None,
     ):
         super().__init__(
-            NoneLayout(layout.device),
+            layout,
             kernel,
             tensor_args,
             nontensor_args,
@@ -7625,6 +7644,21 @@ class EffectfulKernel(FallbackKernel):
 
     def has_side_effects(self):
         return True
+
+
+@dataclasses.dataclass
+class TorchBindObject(IRNode):
+    name: str
+    value: torch._C.ScriptObject
+
+    def get_name(self):
+        return self.name
+
+    def get_device(self):
+        return None  # is there a device??
+
+    def codegen_reference(self, writer=None):
+        return self.name
 
 
 class InterpreterShim(torch.fx.Interpreter):

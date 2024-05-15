@@ -31,7 +31,7 @@ TEST(TestException, TestAssertion) {
 
   bool is_jit_exception = false;
   std::string message;
-  c10::optional<std::string> exception_class;
+  std::optional<std::string> exception_class;
   try {
     cu_ptr->run_method("foo");
   } catch (JITException& e) {
@@ -140,7 +140,7 @@ TEST(TestException, TestCustomException) {
       (torch::jit::GraphFunction*)&cu->get_function("foo");
   std::cerr << "Graph is\n" << *gf->graph() << std::endl;
   bool is_jit_exception = false;
-  c10::optional<std::string> exception_class;
+  std::optional<std::string> exception_class;
   std::string message;
   try {
     cu->run_method("foo");
