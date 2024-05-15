@@ -7,6 +7,7 @@ import pickle
 import queue
 import threading
 import uuid
+import warnings
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -446,7 +447,7 @@ class _FileSystemWriter(StorageWriter):
         sync_files: bool = True,
         thread_count: int = 1,
         per_thread_copy_ahead: int = 10_000_000,
-        overwrite: bool = False,
+        overwrite: bool = True,
         *args: Any,
         **kwargs: Any,
     ) -> None:
@@ -459,7 +460,7 @@ class _FileSystemWriter(StorageWriter):
             sync_files : force files to be synced to permanent storage. Default to True.
             thread_count: Number of IO threads to use to write. Default to 1.
             per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving then. Default 10Mb.
-            overwrite: Whether to allow overwriting existing checkpoints. Defaults to False.
+            overwrite: Whether to allow overwriting existing checkpoints. Defaults to True.
 
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
         """
@@ -483,8 +484,15 @@ class _FileSystemWriter(StorageWriter):
 
     def prepare_local_plan(self, plan: SavePlan) -> SavePlan:
         self.fs.mkdir(self.path)
-        if not self.overwrite and self.fs.exists(self.metadata_path):
-            raise RuntimeError(f"Checkpoint already exists and {self.overwrite=}.")
+        if self.fs.exists(self.metadata_path):
+            if self.overwrite:
+                warnings.warn(
+                    f"Detected an existing checkpoint in {self.metadata_path}, overwriting since {self.overwrite=}."
+                    " Past version 2.5 of PyTorch, `overwrite` will default to False. Set this variable to True to"
+                    " maintain this functionality or False to raise when an existing checkpoint is found."
+                )
+            else:
+                raise RuntimeError(f"Checkpoint already exists and {self.overwrite=}.")
 
         return plan
 
@@ -718,7 +726,7 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
         thread_count: int = 1,
         per_thread_copy_ahead: int = 10_000_000,
         cache_staged_state_dict: bool = False,
-        overwrite: bool = False,
+        overwrite: bool = True,
     ) -> None:
         """
         Initialize the writer pointing to `path`.
@@ -732,7 +740,7 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
             cache_staged_state_dict: Whether to cache the staged state_dict. This option decreases staging latency
                 at the cost of increases memory usage. Additionally, if this parameter is set to True, it's the expectation
                 that the stager is maintained and re-used for multiple dcp.async_save calls. Default to False.
-            overwrite: Whether to allow overwriting existing checkpoints. Defaults to False.
+            overwrite: Whether to allow overwriting existing checkpoints. Defaults to True.
 
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
         """
