@@ -528,7 +528,7 @@ void OSSProxyExecutor::call_function(
         break;
       }
       case DynamicArgType::ListOptionalTensorType: {
-        std::vector<c10::optional<at::Tensor>> optional_tensor_list;
+        std::vector<std::optional<at::Tensor>> optional_tensor_list;
         auto& serialized_arg_val = dynamic_args[i].serialized_arg_val;
 
         for (const auto& arg : serialized_arg_val) {
