@@ -1077,7 +1077,7 @@ def to_padded_tensor_default(func, *args, **kwargs):
     # TODO: Handle the rest of output_size
     output_size = new_kwargs["output_size"]
     if output_size is not None:
-        max_seq_len = output_size[inp._ragged_dim]
+        max_seq_len = output_size[inp._ragged_idx]
     else:
         max_seq_len = inp._max_seqlen
 
