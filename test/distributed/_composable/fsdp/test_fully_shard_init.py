@@ -24,6 +24,10 @@ from torch.distributed._tensor import (
     Shard,
 )
 from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.fsdp._init_utils import (
+    _init_inter_node_process_group,
+    _init_intra_node_process_group,
+)
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
@@ -739,14 +743,21 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
 
         # Use the global PG as the parent group (in practice, this could be a
         # subgroup of the global PG)
-        global_pg = dist.distributed_c10d._get_default_group()
+        dp_group = dist.distributed_c10d._get_default_group()
+        dp_shard_group = _init_intra_node_process_group(shard_mesh_dim_size)
+        dp_replicate_group = _init_inter_node_process_group(
+            dp_group, replicate_mesh_dim_size
+        )
+        mesh_tensor = torch.tensor(
+            dist.get_process_group_ranks(dp_group), dtype=torch.int
+        ).view(replicate_mesh_dim_size, shard_mesh_dim_size)
 
         # Check the `from_group()` API for correctness
         mesh = DeviceMesh.from_group(
-            global_pg,
+            [dp_replicate_group, dp_shard_group],
             "cuda",
             mesh_dim_names=mesh_dim_names,
-            mesh_shape=(replicate_mesh_dim_size, shard_mesh_dim_size),
+            mesh=mesh_tensor,
         )
         self.assertEqual(mesh.mesh, ref_mesh.mesh)
         self.assertEqual(mesh._coordinate_on_dim, ref_mesh._coordinate_on_dim)

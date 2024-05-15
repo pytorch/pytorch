@@ -1,6 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
-import math
 import os
 
 import torch
@@ -18,13 +17,10 @@ from torch.distributed.distributed_c10d import (
     _get_default_group,
     _world,
     get_global_rank,
-    get_process_group_ranks,
-    get_rank,
     get_world_size,
     init_process_group,
     is_initialized,
     is_nccl_available,
-    new_group,
     ProcessGroup,
 )
 from torch.testing._internal.common_utils import run_tests
@@ -185,14 +181,21 @@ class DeviceMeshTest(DTensorTestBase):
         )
 
     @with_comms
-    def test_from_group_with_invalid_mesh_shape(self):
+    def test_from_group_with_invalid_mesh(self):
         global_pg = _get_default_group()
         global_pg_size = global_pg.size()
         assert global_pg_size == 4, "Test assumes global world size of 4"
-        invalid_mesh_shape = (global_pg.size(), 2)  # extra dim of size 2
-        regex = r"Mesh shape \(4, 2\) is invalid for group with ranks \[0, 1, 2, 3\]"
+        invalid_mesh = [[0, 1], [2, 3]]  # 2D mesh when we need 1D
+        regex = r"Invalid mesh \[\[0, 1\], \[2, 3\]\] for ProcessGroup with ranks \[0, 1, 2, 3\]"
         with self.assertRaisesRegex(ValueError, regex):
-            DeviceMesh.from_group(global_pg, "cuda", invalid_mesh_shape)
+            DeviceMesh.from_group(global_pg, "cuda", invalid_mesh)
+
+        device_mesh = init_device_mesh(self.device_type, (2, 2))
+        groups = device_mesh.get_group()
+        invalid_mesh = (0, 1, 2, 3)  # 1D mesh when we need 2D
+        regex = r"Expects mesh with ndim equal to number of ProcessGroups but got mesh \[0, 1, 2, 3\] and 2 ProcessGroups"
+        with self.assertRaisesRegex(ValueError, regex):
+            DeviceMesh.from_group(groups, self.device_type, invalid_mesh)
 
     def test_raises_invalid_device_type(self):
         with self.assertRaisesRegex(
@@ -291,44 +294,25 @@ class DeviceMeshTestNDim(DTensorTestBase):
         # - (2, 2, 2) ("dp_replicate", "dp_shard", "tp") mesh
         mesh_shape = (2, 2, 2)
         mesh_dim_names = ("dp_replicate", "dp_shard", "tp")
-
-        # Construct the "dp" PG (including both "dp_replicate" and "dp_shard")
-        inner_mesh_size = math.prod(mesh_shape[2:])
-        dp_mesh_size = math.prod(mesh_shape[:2])
-        local_rank_in_inner_mesh = get_rank() % inner_mesh_size
-        dp_group = None
-        for inner_mesh_idx in range(inner_mesh_size):
-            ranks_for_dp_group = [
-                inner_mesh_idx + (i * inner_mesh_size) for i in range(dp_mesh_size)
-            ]
-            group = new_group(ranks=ranks_for_dp_group, backend=self.backend)
-            if local_rank_in_inner_mesh == inner_mesh_idx:
-                dp_group = group
-        assert dp_group is not None
-
-        dp_mesh = DeviceMesh.from_group(
-            dp_group,
-            self.device_type,
-            mesh_shape[:2],
-            mesh_dim_names=mesh_dim_names[:2],
-        )
-
-        # Check the constructed DP mesh's mesh tensor and per-dim ranks
-        dp_ranks = get_process_group_ranks(dp_group)
-        expected_dp_mesh = torch.tensor(dp_ranks, device="cpu", dtype=torch.int).view(
-            mesh_shape[:2]
-        )
-        self.assertEqual(dp_mesh.mesh, expected_dp_mesh)
         ref_mesh = init_device_mesh(
             self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
         )
+
+        dp_shard_group = ref_mesh["dp_shard"].get_group()
+        dp_replicate_group = ref_mesh["dp_replicate"].get_group()
+
+        dp_mesh = DeviceMesh.from_group(
+            [dp_replicate_group, dp_shard_group],
+            self.device_type,
+            mesh=ref_mesh.mesh[:, :, ref_mesh.get_local_rank(2)],
+            mesh_dim_names=mesh_dim_names[:2],
+        )
+
         ref_mesh_dp_dim_group_infos = ref_mesh._dim_group_infos[:2]
         for (_, ref_ranks, _), (_, ranks, _) in zip(
             ref_mesh_dp_dim_group_infos, dp_mesh._dim_group_infos
         ):
             self.assertEqual(ref_ranks, ranks)
-
-        # Check slicing out 1D submeshes
         self.assertEqual(dp_mesh["dp_replicate"], ref_mesh["dp_replicate"])
         self.assertEqual(dp_mesh["dp_shard"], ref_mesh["dp_shard"])
 

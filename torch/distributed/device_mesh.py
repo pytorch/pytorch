@@ -207,7 +207,7 @@ else:
             self.mesh = (
                 mesh.detach().to(dtype=torch.int)
                 if isinstance(mesh, torch.Tensor)
-                else torch.tensor(mesh, dtype=torch.int)
+                else torch.tensor(mesh, device="cpu", dtype=torch.int)
             )
             self.mesh_dim_names = mesh_dim_names
 
@@ -431,9 +431,9 @@ else:
 
         @staticmethod
         def from_group(
-            group: ProcessGroup,
+            group: Union[ProcessGroup, List[ProcessGroup]],
             device_type: str,
-            mesh_shape: Optional[Tuple[int, ...]] = None,
+            mesh: Optional[Union[torch.Tensor, "ArrayLike"]] = None,
             *,
             mesh_dim_names: Optional[Tuple[str, ...]] = None,
         ) -> "DeviceMesh":
@@ -442,30 +442,54 @@ else:
             existing :class:`ProcessGroup`.
 
             The constructed device mesh is assumed to be 1D if ``mesh_shape``
-            is not specified. Otherwise, ``mesh_shape`` is used.
+            is not specified. Otherwise, ``mesh_shape`` is used to construct a
+            ``len(mesh_shape)`` dimensional :class:`DeviceMesh`.
             """
-            group_ranks = get_process_group_ranks(group)
-            if mesh_shape is not None:
-                if math.prod(mesh_shape) != len(group_ranks):
+            if isinstance(group, ProcessGroup):
+                group_ranks = get_process_group_ranks(group)
+                if (
+                    isinstance(mesh, torch.Tensor) and mesh.tolist() != group_ranks
+                ) or (mesh is not None and mesh != group_ranks):
                     raise ValueError(
-                        f"Mesh shape {mesh_shape} is invalid for group with ranks {group_ranks}"
+                        f"Invalid mesh {str(mesh)} for ProcessGroup with ranks {group_ranks}"
                     )
-                mesh: Union[torch.Tensor, List[int]] = torch.tensor(
-                    group_ranks, device="cpu", dtype=torch.int
-                ).view(mesh_shape)
-            else:
-                mesh = group_ranks
-            device_mesh = DeviceMesh(
-                device_type, mesh, mesh_dim_names=mesh_dim_names, _init_backend=False
-            )
-            if device_mesh.ndim > 1:
-                # Initialize subgroups for the user
-                device_mesh._init_process_groups()
-            else:
-                # Reuse the existing process group
+                mesh = torch.tensor(group_ranks, device="cpu", dtype=torch.int)
+                device_mesh = DeviceMesh(
+                    device_type,
+                    mesh,
+                    mesh_dim_names=mesh_dim_names,
+                    _init_backend=False,
+                )
                 device_mesh._dim_group_infos = [
                     (_get_group_tag(group), group_ranks, group.group_name)
                 ]
+                return device_mesh
+            groups = list(group)
+            if len(groups) == 0:
+                raise ValueError("Expects at least one ProcessGroup to be passed")
+            if mesh is None:
+                raise ValueError("Must pass mesh if passing multiple ProcessGroups")
+            mesh = (
+                mesh.detach().to(dtype=torch.int, device="cpu")
+                if isinstance(mesh, torch.Tensor)
+                else torch.tensor(mesh, device="cpu", dtype=torch.int)
+            )
+            if mesh.ndim != len(groups):
+                raise ValueError(
+                    "Expects mesh with ndim equal to number of ProcessGroups but got "
+                    f"mesh {mesh.tolist()} and {len(groups)} ProcessGroups"
+                )
+            device_mesh = DeviceMesh(
+                device_type, mesh, mesh_dim_names=mesh_dim_names, _init_backend=False
+            )
+            device_mesh._dim_group_infos = [
+                (
+                    _get_group_tag(group),
+                    get_process_group_ranks(group),
+                    group.group_name,
+                )
+                for group in groups
+            ]
             return device_mesh
 
         def size(self, mesh_dim: Optional[int] = None) -> int:
