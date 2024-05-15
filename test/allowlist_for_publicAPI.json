@@ -2030,6 +2030,7 @@
     "PropagateUnbackedSymInts",
     "ShapeEnvSettings",
     "log_lru_cache_stats",
+    "PendingUnbackedSymbolNotFound",
     "lru_cache"
   ],
   "torch.fx.experimental.unification.match": [
