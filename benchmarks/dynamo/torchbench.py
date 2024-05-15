@@ -14,12 +14,14 @@ import torch
 import yaml
 
 try:
-    from .common import BenchmarkRunner, main
+    from .common import BenchmarkRunner, import_if_hpu, main
 except ImportError:
-    from common import BenchmarkRunner, main
+    from common import BenchmarkRunner, import_if_hpu, main
 
 from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
 from torch._dynamo.utils import clone_inputs
+
+import_if_hpu()
 
 # We are primarily interested in tf32 datatype
 torch.backends.cuda.matmul.allow_tf32 = True
