@@ -1500,7 +1500,7 @@ def main():
         entry_points=entry_points,
         install_requires=install_requires,
         extras_require=extras_require,
-        # package_dir=package_dir,
+        package_dir=package_dir,
         package_data=package_data,
         include_package_data=True,
         url="https://pytorch.org/",
