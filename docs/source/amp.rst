@@ -8,6 +8,7 @@ Automatic Mixed Precision package - torch.amp
 .. This does not add anything to the rendered page
 .. py:module:: torch.cpu.amp
 .. py:module:: torch.cuda.amp
+.. py:module:: torch.amp.autocast_mode
 
 .. automodule:: torch.amp
 .. currentmodule:: torch.amp
@@ -45,8 +46,6 @@ Autocasting
     :nosignatures:
 
     is_autocast_available
-
-.. py:module:: torch.amp.autocast_mode
 
 .. currentmodule:: torch
 
@@ -398,7 +397,6 @@ regardless of whether autocast is enabled.
 
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes
-.. py:module:: torch.amp.autocast_mode
 .. py:module:: torch.cpu.amp.autocast_mode
 .. py:module:: torch.cuda.amp.autocast_mode
 .. py:module:: torch.cuda.amp.common
