@@ -51,6 +51,8 @@ def should_decompose_torch_op(fn):
         hasattr(fn, "__module__") and fn.__module__ == "torch.nn.functional"
     )
 
+    not_supported_fn = [torch.nn.functional.gaussian_nll_loss]
+
     # only decompoization torch ops for forward
     in_compiled_backward = compiled_autograd.compiled_autograd_enabled
 
@@ -58,6 +60,7 @@ def should_decompose_torch_op(fn):
         torch._dynamo.config.use_single_step_graph
         and is_nn_functional
         and not in_compiled_backward
+        and fn not in not_supported_fn
     )
 
 

@@ -2707,7 +2707,9 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.nn.functional.elu",
         "torch.nn.functional.embedding_bag",
         "torch.nn.functional.embedding",
-        "torch.nn.functional.feature_alpha_dropout",
+        # temp fix to enable test/inductor/test_torchinductor_opinfo.py
+        # TestInductorOpInfoCPU.test_comprehensive_nn_functional_feature_alpha_dropout_without_train_cpu_int64
+        # "torch.nn.functional.feature_alpha_dropout",
         "torch.nn.functional.fold",
         "torch.nn.functional.fractional_max_pool2d_with_indices",
         "torch.nn.functional.fractional_max_pool2d",
