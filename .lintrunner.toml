@@ -1137,7 +1137,6 @@ exclude_patterns = [
     'test/test_transformers.py',
     'test/test_type_promotion.py',
     'test/test_unary_ufuncs.py',
-    'test/test_utils.py',
     'test/test_vulkan.py',
     'test/test_xnnpack_integration.py',
     'test/torch_np/numpy_test/**/*.py',
