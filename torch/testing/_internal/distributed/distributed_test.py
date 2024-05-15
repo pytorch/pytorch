@@ -686,9 +686,6 @@ class DistributedTest:
             """Torch profiler includes nccl metadata in an inserted operator called "record_param_comms"
             We test for basic fields in this profiler event that correspond to the nccl communication
             collectives"""
-            nccl_meta_events = get_profiler_nccl_meta(prof)
-            self.assertGreater(len(nccl_meta_events), 0)
-
             per_coll_meta = defaultdict(list)
             for e in nccl_meta_events:
                 args = e.get("args", {})

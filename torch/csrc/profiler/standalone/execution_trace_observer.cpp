@@ -45,7 +45,6 @@ constexpr auto kETOutSplit = "out_split_size";
 constexpr auto kETGlobalRankStart = "global_rank_start";
 constexpr auto kETGlobalRankStride = "global_rank_stride";
 constexpr auto kETGroupSize = "pg_size";
-constexpr auto kETGroupRanks = "pg_ranks";
 constexpr auto kETProcessGroupName = "pg_name";
 constexpr auto kETProcessGroupDesc = "pg_desc";
 #endif // USE_DISTRIBUTED
@@ -564,8 +563,6 @@ inline std::string getCommsNodeAttrs(const RecordFunction& fn) {
   addAttr(kProcessGroupDesc, kETProcessGroupDesc, "string");
 
   addAttr(kGroupSize, kETGroupSize, "uint64");
-  // TODO do we need group ranks?
-  // addAttr(kGroupRanks, kETGroupRanks, "string");
 
 #endif // USE_DISTRIBUTED
 
