@@ -53,7 +53,7 @@ __all__ = [
 ]
 _global_optimizer_pre_hooks: Dict[int, GlobalOptimizerPreHook] = OrderedDict()
 _global_optimizer_post_hooks: Dict[int, GlobalOptimizerPostHook] = OrderedDict()
-_foreach_supported_types = [torch.Tensor, torch.nn.parameter.Parameter]
+_foreach_supported_types = {torch.Tensor, torch.nn.parameter.Parameter}
 
 
 class _RequiredParameter:

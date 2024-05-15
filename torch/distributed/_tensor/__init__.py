@@ -27,8 +27,7 @@ __all__ = [
 
 # Append DTensor to the list of supported types for foreach implementation of optimizer
 # so that we will try to use foreach over the for-loop implementation on CUDA.
-if DTensor not in _foreach_supported_types:
-    _foreach_supported_types.append(DTensor)
+_foreach_supported_types.add(DTensor)
 
 
 def _dtensor_init_helper(
