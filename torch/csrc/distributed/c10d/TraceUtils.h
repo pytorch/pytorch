@@ -14,6 +14,7 @@
 #include <sys/types.h>
 
 #include <cstdlib>
+#include <fstream>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -455,10 +456,11 @@ struct NCCLTraceBuffer {
     // timestamp when the entry was created, likely close to the time the work
     // was 'enqueued'- not necessarily started
     c10::time_t time_created_;
-    std::optional<float> duration_;
 
     // Is this a P2P event?
     bool isP2P_;
+
+    std::optional<float> duration_;
 
     // timestamp when our CPU threads discovered that the kernel started.
     // will always be _after_ it actually started, and can be very late

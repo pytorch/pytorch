@@ -3686,7 +3686,9 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 self.assertEqual(
                     t["entries"][p2p_op_idx]["output_sizes"], [input_sizes]
                 )
+                # duration doesn't get tagged onto individual ops yet, nor is their state updated
                 self.assertEqual(t["entries"][p2p_op_idx]["state"], "scheduled")
+                self.assertTrue("duration_ms" not in t["entries"][p2p_op_idx])
 
             # the coalesced op has no metadata but indicates that coalescing was used,
             # and accurately reflects the timing and state info for the whole group
