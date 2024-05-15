@@ -885,17 +885,6 @@ class _BaseGroupedSchedulerNode(BaseSchedulerNode):
     def get_names(self) -> Set[str]:
         return set.union(*[x.get_names() for x in self.snodes])
 
-    def debug_str_extra(self) -> str:
-        lines = [
-            f"{self.get_name()}.snodes[{i}] =\n{node.debug_str()}"
-            for i, node in enumerate(self.snodes)
-        ]
-        device = self.snodes[0].node.get_device()
-        if ir.is_triton(device):
-            lines.extend(debug_triton_code(self))
-
-        return textwrap.indent("\n".join(lines).rstrip(), "    ")
-
     @cache_on_self
     def used_buffer_names(self) -> Set[str]:
         return set.union(*[x.used_buffer_names() for x in self.snodes])
@@ -1032,6 +1021,17 @@ class FusedSchedulerNode(_BaseGroupedSchedulerNode):
         for node in reversed(self.snodes):
             node.set_last_usage(future_used_buffers, mutation_real_name)
             future_used_buffers.update(node.last_usage)  # type: ignore[arg-type]
+
+    def debug_str_extra(self) -> str:
+        lines = [
+            f"{self.get_name()}.snodes[{i}] =\n{node.debug_str()}"
+            for i, node in enumerate(self.snodes)
+        ]
+        device = self.snodes[0].node.get_device()
+        if ir.is_triton(device):
+            lines.extend(debug_triton_code(self))
+
+        return textwrap.indent("\n".join(lines).rstrip(), "    ")
 
 
 class GroupedSchedulerNode(_BaseGroupedSchedulerNode):
