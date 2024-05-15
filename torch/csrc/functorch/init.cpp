@@ -375,7 +375,7 @@ static int64_t currentLevel() {
   return current_level;
 }
 
-static c10::optional<int64_t> maybe_current_level() {
+static std::optional<int64_t> maybe_current_level() {
   auto maybe_layer = maybeCurrentDynamicLayer();
   if (maybe_layer.has_value()) {
     int current_level = maybe_layer->layerId();
@@ -438,7 +438,7 @@ struct PreserveDynamicLayerStack {
 
 } // anonymous namespace
 
-static std::tuple<Tensor, c10::optional<int64_t>> unwrapBatched(
+static std::tuple<Tensor, std::optional<int64_t>> unwrapBatched(
     const Tensor& tensor,
     int64_t level) {
   auto* batched = maybeGetBatchedImpl(tensor);
@@ -534,7 +534,7 @@ void initFuncTorchBindings(PyObject* module) {
     return maybe_get_level(tensor) != -1;
   });
   m.def(
-      "get_interpreter_stack", []() -> c10::optional<std::vector<Interpreter>> {
+      "get_interpreter_stack", []() -> std::optional<std::vector<Interpreter>> {
         const auto& stack = getDynamicLayerStack();
         if (stack.empty()) {
           return c10::nullopt;
@@ -545,7 +545,7 @@ void initFuncTorchBindings(PyObject* module) {
         }
         return result;
       });
-  m.def("peek_interpreter_stack", []() -> c10::optional<Interpreter> {
+  m.def("peek_interpreter_stack", []() -> std::optional<Interpreter> {
     const auto& stack = getDynamicLayerStack();
     if (stack.empty()) {
       return c10::nullopt;

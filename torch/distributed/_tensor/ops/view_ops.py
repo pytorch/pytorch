@@ -16,7 +16,6 @@ from typing import (
 import torch
 
 from torch import Tensor
-from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.distributed._tensor.api import Shard
 from torch.distributed._tensor.op_schema import (
     OpSchema,
@@ -35,7 +34,6 @@ from torch.distributed._tensor.ops.utils import (
 
 from torch.distributed._tensor.placement_types import DTensorSpec, Placement, Replicate
 from torch.distributed.device_mesh import DeviceMesh
-from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
 
 aten = torch.ops.aten
 
@@ -484,16 +482,14 @@ dim_maps: Dict[Callable[..., torch.Tensor], Callable[..., DimMap]] = {
 
 
 def propagate_shape_and_sharding(
-    in_shard: Sequence[Placement],
+    input_src_placements: Sequence[Placement],
     local_in_shape: Shape,
     rule: DimMap,
     mesh_sizes: Shape,
-) -> Tuple[Shape, Optional[Sequence[Placement]], torch.Tensor]:
+) -> Tuple[Sequence[Placement], Sequence[Placement]]:
     """
-    Determine output sharding and tensor shape based on given global tensor shape and input sharding.
-
-    Takes as input the global shape of the tensor, and the input sharding,
-    and produce corresponding output sharding and shape of the output tensor.
+    Determine input target sharding and output sharding based on
+    given global tensor shape and input source sharding.
 
     Sharding propagation follows mapped dimensions:
     - An output dimension that maps directly to an input dimension is sharded equally
@@ -502,16 +498,13 @@ def propagate_shape_and_sharding(
     - An output dimension that is a split of the input dimension can only be sharded
       if the leftmost split size is divisible by the mesh dimension
     """
-    assert len(in_shard) == len(mesh_sizes)
-    sharded_in_dims: Set[int] = {s.dim for s in in_shard if isinstance(s, Shard)}
+    assert len(input_src_placements) == len(mesh_sizes)
     # for each input dim, for each mesh dim, provides a list of possible shardable dimensions
-    shardable_dims: torch.Tensor = torch.ones(
-        (len(local_in_shape), len(mesh_sizes)), dtype=torch.bool
-    )
+    mesh_ndim = len(mesh_sizes)
+    shardable_dims: Dict[int, List[bool]] = {}
 
     # in case an input dimension disappears (e.g. collapsing, reduction)
     # we cannot shard in that dimension (we need a replication fall-back rule)
-
     seen_input_dims: Set[int] = set()
 
     def collect_used_inputs(cmd: DimSpec) -> None:
@@ -523,28 +516,19 @@ def propagate_shape_and_sharding(
     for cmd in rule:
         collect_used_inputs(cmd)
     for dim in range(len(local_in_shape)):
-        shardable_dims[dim, :] = dim in seen_input_dims
+        shardable_dims[dim] = [dim in seen_input_dims] * mesh_ndim
 
-    def get_dim_size(cmd: DimSpec) -> Tuple[int, Optional[InputDim]]:
+    def get_in_dim_to_shard(cmd: DimSpec) -> Optional[InputDim]:
         if isinstance(cmd, InputDim):
-            seen_input_dims.add(cmd.input_dim)
-            return (
-                local_in_shape[cmd.input_dim],
-                cmd if cmd.input_dim in sharded_in_dims else None,
-            )
+            return cmd
         elif isinstance(cmd, Flatten):
             for dim in cmd.input_dims[1:]:
                 if isinstance(dim, InputDim):
-                    shardable_dims[dim.input_dim, :] = False
+                    shardable_dims[dim.input_dim] = [False] * mesh_ndim
             dim0 = cmd.input_dims[0]
-            return (
-                prod(get_dim_size(a)[0] for a in cmd.input_dims),
-                dim0
-                if isinstance(dim0, InputDim) and dim0.input_dim in sharded_in_dims
-                else None,
-            )
+            return dim0 if isinstance(dim0, InputDim) else None
         elif isinstance(cmd, Split):
-            _, in_dim = get_dim_size(cmd.input_dim)
+            in_dim = get_in_dim_to_shard(cmd.input_dim)
             out_size = cmd.group_shape[cmd.split_id]
             if cmd.split_id == 0 and in_dim is not None:
                 # we need to check that the input dimension is divisible
@@ -557,14 +541,13 @@ def propagate_shape_and_sharding(
                 # but we will allow it if that's the input and it's compatible
 
                 # 1. is this dimension shardable on each individual mesh dim?
-                for mesh_dim, mesh_dim_size in enumerate(mesh_sizes):
-                    shardable_dims[in_dim.input_dim, mesh_dim] = (
-                        out_size % mesh_dim_size == 0
-                    )
+                shardable_dims[in_dim.input_dim] = [
+                    out_size % mesh_dim_size == 0 for mesh_dim_size in mesh_sizes
+                ]
 
                 # 2. here we special case things like [Shard(0), Shard(0)]
                 submesh_size = 1
-                for size, shard in zip(mesh_sizes, in_shard):
+                for size, shard in zip(mesh_sizes, input_src_placements):
                     if isinstance(shard, Shard) and shard.dim == in_dim:
                         submesh_size *= size
                 assert (
@@ -572,41 +555,34 @@ def propagate_shape_and_sharding(
                 ), f"Resulting dimension size {out_size} is not divisible by its mesh dimension {submesh_size}."
 
             # we will only shard our first component of the split
-            return out_size, in_dim if cmd.split_id == 0 else None
-        elif isinstance(cmd, Singleton):
-            return 1, None
-        elif isinstance(cmd, Broadcast):
-            return cmd.dim_size, None
-        elif isinstance(cmd, NewDim):
-            return cmd.size, None
+            return in_dim if cmd.split_id == 0 else None
         elif isinstance(cmd, Repeat):
-            size, in_dim = get_dim_size(cmd.input_dim)
+            in_dim = get_in_dim_to_shard(cmd.input_dim)
             if in_dim is not None:
-                shardable_dims[in_dim.input_dim, :] = False
-            return size * cmd.times, None
+                shardable_dims[in_dim.input_dim] = [False] * mesh_ndim
+            return None
         else:
-            raise RuntimeError(f"cmd not found: {cmd}, in rule: {rule}")
+            return None
 
-    dim_map = {}
-    out_shape = []
+    # for each output dim, find the corresponding input dim in terms of sharding prop
+    shard_dim_map = {}
     for dim, cmd in enumerate(rule):
-        out_size, in_dim = get_dim_size(cmd)
-        out_shape.append(out_size)
+        in_dim = get_in_dim_to_shard(cmd)
         if in_dim is not None:
-            dim_map[in_dim.input_dim] = dim
+            shard_dim_map[in_dim.input_dim] = dim
 
-    needs_reshard = any(
-        isinstance(placement, Shard) and not shardable_dims[placement.dim][mesh_dim]
-        for mesh_dim, placement in enumerate(in_shard)
-    )
+    input_tgt_placements = [
+        Replicate()
+        if isinstance(p, Shard) and not shardable_dims[p.dim][mesh_dim]
+        else p
+        for mesh_dim, p in enumerate(input_src_placements)
+    ]
+    output_placements = [
+        Shard(shard_dim_map[p.dim]) if isinstance(p, Shard) else p
+        for p in input_tgt_placements
+    ]
 
-    output_placements = (
-        None
-        if needs_reshard
-        else [Shard(dim_map[s.dim]) if isinstance(s, Shard) else s for s in in_shard]
-    )
-
-    return (tuple(out_shape), output_placements, shardable_dims)
+    return input_tgt_placements, output_placements
 
 
 def register_op_strategy_map(
@@ -627,59 +603,31 @@ def register_op_strategy_map(
         for input_placement_strategy in input_strategy.strategies:
             input_src_spec = input_placement_strategy.output_spec
 
-            with disable_proxy_modes_tracing(), unset_fake_temporarily():
-                (
-                    _global_out_shape,
-                    shard_out,
-                    shardable_dims,
-                ) = propagate_shape_and_sharding(
-                    input_src_spec.placements,
-                    tuple(global_in_shape),
-                    rules,
-                    mesh.shape,
-                )
+            input_tgt_placements, output_placements = propagate_shape_and_sharding(
+                input_src_spec.placements,
+                tuple(global_in_shape),
+                rules,
+                mesh.shape,
+            )
 
-            if shard_out is not None:
-                input_target_spec = input_src_spec
-                redistribute_costs = [[0.0] * mesh.ndim]
-            else:
-                # TODO: optimize this. we shouldn't simply blindly replicate
-                #       unshardable dims ...
-                # FIXME: this can be wrong for situations where we have
-                #        [Shard(0), Shard(0)]
-                input_target_placements = [
-                    p
-                    if not isinstance(p, Shard) or shardable_dims[p.dim][mesh_dim]
-                    else Replicate()
-                    for mesh_dim, p in enumerate(input_src_spec.placements)
-                ]
-                input_target_spec = DTensorSpec(
-                    placements=tuple(input_target_placements),
-                    mesh=input_src_spec.mesh,
-                    tensor_meta=input_src_spec.tensor_meta,
-                )
-                redistribute_costs = [
-                    generate_redistribute_costs(input_strategy, input_target_spec)
-                ]
+            # TODO: optimize this. we shouldn't simply blindly replicate
+            #       unshardable dims ...
+            # FIXME: this can be wrong for situations where we have
+            #        [Shard(0), Shard(0)]
+            input_tgt_spec = DTensorSpec(
+                placements=tuple(input_tgt_placements),
+                mesh=input_src_spec.mesh,
+                tensor_meta=input_src_spec.tensor_meta,
+            )
+            redistribute_costs = [
+                generate_redistribute_costs(input_strategy, input_tgt_spec)
+            ]
 
-                with disable_proxy_modes_tracing(), unset_fake_temporarily():
-                    (
-                        _global_out_shape,
-                        shard_out,
-                        shardable_dims,
-                    ) = propagate_shape_and_sharding(
-                        input_target_placements,
-                        tuple(global_in_shape),
-                        rules,
-                        mesh.shape,
-                    )
-
-            assert shard_out is not None
-            output_target_spec = DTensorSpec(mesh=mesh, placements=tuple(shard_out))
+            output_spec = DTensorSpec(mesh=mesh, placements=tuple(output_placements))
             output_strategy.strategies.append(
                 PlacementStrategy(
-                    output_specs=output_target_spec,
-                    input_specs=(input_target_spec,),
+                    output_specs=output_spec,
+                    input_specs=(input_tgt_spec,),
                     redistribute_cost=redistribute_costs,
                 )
             )

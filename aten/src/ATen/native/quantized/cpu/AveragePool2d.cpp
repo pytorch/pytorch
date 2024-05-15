@@ -47,7 +47,7 @@ static void avg_pool2d_out_frame(
     int padW,
     int padH,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   Tensor input_contig = input.contiguous();
   auto input_data = input_contig.data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
@@ -185,7 +185,7 @@ Tensor q_avg_pool2d(
     IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   auto [kW, kH] = get_kernel(kernel_size);
   auto [dW, dH] = get_stride(stride, kW, kH);
@@ -265,7 +265,7 @@ Tensor qnnpack_avg_pool2d(
     IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   auto [kW, kH] = get_kernel(kernel_size);
   auto [dW, dH] = get_stride(stride, kW, kH);
   auto [padW, padH] = get_padding(padding);
@@ -362,7 +362,7 @@ Tensor avg_pool2d_quantized_cpu(
     IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   Tensor output;
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
