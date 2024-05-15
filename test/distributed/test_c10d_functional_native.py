@@ -195,6 +195,15 @@ class TestWithNCCL(MultiProcessTestCase):
         assert torch.allclose(output, expect)
         assert output.eq(expect).all()
 
+        # Test inplace version of all_gather_into_tensor
+        output = torch.empty(expect.shape, device=self.device)
+        output = torch.ops._c10d_functional.all_gather_into_tensor_(
+            output, input, self.world_size, "default"
+        )
+        output = torch.ops._c10d_functional.wait_tensor(output)
+        assert torch.allclose(output, expect)
+        assert output.eq(expect).all()
+
         # Test Python API and AsyncCollectiveTensor
         output = all_gather_tensor(
             input,
