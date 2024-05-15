@@ -34,6 +34,7 @@ base_type_to_c_type = {
     BaseTy.Layout: "int32_t",  # Represent enum as int
     BaseTy.MemoryFormat: "int32_t",  # Represent enum as int
     BaseTy.ScalarType: "int32_t",  # Represent enum as int
+    BaseTy.Generator: "AtenGeneratorHandle",
 }
 
 base_type_to_aten_type = {
@@ -48,6 +49,7 @@ base_type_to_aten_type = {
     BaseTy.Layout: "c10::Layout",
     BaseTy.MemoryFormat: "c10::MemoryFormat",
     BaseTy.ScalarType: "c10::ScalarType",
+    BaseTy.Generator: "at::Generator",
 }
 
 base_type_to_callsite_expr = {
@@ -62,6 +64,7 @@ base_type_to_callsite_expr = {
     BaseTy.Layout: "static_cast<c10::Layout>",
     BaseTy.MemoryFormat: "static_cast<c10::MemoryFormat>",
     BaseTy.ScalarType: "static_cast<c10::ScalarType>",
+    BaseTy.Generator: "*generator_handle_to_generator_pointer",
 }
 
 
@@ -89,7 +92,7 @@ def convert_arg_type_and_name(typ: Type, name: str) -> Tuple[List[str], List[str
                 ],
             )
         else:
-            # TODO: BaseTy.Dimname, BaseTy.Generator, etc.
+            # TODO: BaseTy.Dimname, etc.
             raise NotImplementedError(f"TODO: add support for arg type {repr(typ)}")
     elif isinstance(typ, OptionalType):
         c_types, names, aten_types, callsite_exprs = convert_arg_type_and_name(
