@@ -44,8 +44,8 @@ Tensor qsoftmax_qnnpack(const Tensor& qx, const int64_t dim) {
    */
 
   const int64_t last_dim = qx.dim() - 1;
-  c10::optional<std::vector<int64_t>> permuted_dims = c10::nullopt;
-  c10::optional<at::Tensor> qx_contig = c10::nullopt;
+  std::optional<std::vector<int64_t>> permuted_dims = c10::nullopt;
+  std::optional<at::Tensor> qx_contig = c10::nullopt;
   const at::Tensor* qx_contig_ptr = nullptr;
 
   if (qx.stride(dim) == 1) {

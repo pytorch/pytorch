@@ -24,7 +24,7 @@ namespace at { namespace native {
 
 #if AT_MKLDNN_ENABLED()
 
-Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dtype, c10::optional<bool> masked_grad) {
+Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, std::optional<ScalarType> dtype, c10::optional<bool> masked_grad) {
   TORCH_CHECK(mkldnn_tensor.scalar_type() == ScalarType::Float ||
               mkldnn_tensor.scalar_type() == ScalarType::BFloat16 ||
               mkldnn_tensor.scalar_type() == ScalarType::Half ||
@@ -73,7 +73,7 @@ Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dt
   return cpu_tensor.contiguous().resize_(dims, c10::MemoryFormat::Contiguous);
 }
 
-Tensor dense_to_mkldnn(const Tensor& cpu_tensor, c10::optional<ScalarType> dtype) {
+Tensor dense_to_mkldnn(const Tensor& cpu_tensor, std::optional<ScalarType> dtype) {
   TORCH_CHECK(cpu_tensor.device().is_cpu(),
              "dense_to_mkldnn expects CPU tensor input");
   TORCH_CHECK(cpu_tensor.layout() == Layout::Strided,
@@ -256,7 +256,7 @@ static Tensor mkldnn_reorder_conv_weight(
 
 static Tensor mkldnn_reorder_linear_weight(
     const Tensor& self,
-    c10::optional<int64_t> batch_size_opt) {
+    std::optional<int64_t> batch_size_opt) {
   mkldnn_check_low_precision(self.scalar_type(), "mkldnn_reorder_linear_weight");
   auto out_features = self.size(0);
   auto in_features = self.size(1);
@@ -525,11 +525,11 @@ TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
 
 #else
 
-Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dtype, c10::optional<bool> masked_grad) {
+Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, std::optional<ScalarType> dtype, c10::optional<bool> masked_grad) {
   TORCH_CHECK(false, "MKL-DNN build is disabled");
 }
 
-Tensor dense_to_mkldnn(const Tensor& cpu_tensor, c10::optional<ScalarType> dtype) {
+Tensor dense_to_mkldnn(const Tensor& cpu_tensor, std::optional<ScalarType> dtype) {
   TORCH_CHECK(false, "MKL-DNN build is disabled");
 }
 
