@@ -446,6 +446,10 @@ else:
             """
             group_ranks = get_process_group_ranks(group)
             if mesh_shape is not None:
+                if math.prod(mesh_shape) != len(group_ranks):
+                    raise ValueError(
+                        f"Mesh shape {mesh_shape} is invalid for group with ranks {group_ranks}"
+                    )
                 mesh = torch.tensor(group_ranks, device="cpu", dtype=torch.int).view(
                     mesh_shape
                 )
