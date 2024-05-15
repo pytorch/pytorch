@@ -135,7 +135,6 @@ manual_torch_name_rule_map = {
     "torch.overrides.is_tensor_like": TorchInGraphFunctionVariable,
     "torch.jit.is_scripting": TorchInGraphFunctionVariable,
     "torch.jit.is_tracing": TorchInGraphFunctionVariable,
-    #"torch.jit._trace.FunctionModuleWrapper#forward": UserFunctionVariable,
     "torch.jit.annotate": TorchInGraphFunctionVariable,
     "torch.distributed.is_available": TorchInGraphFunctionVariable,
     "torch.distributed.is_initialized": TorchInGraphFunctionVariable,
