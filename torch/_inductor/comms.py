@@ -404,12 +404,12 @@ def enforce_comm_ordering_for_fsdp(
         if isinstance(snode.node, ir.FallbackKernel) and snode.node.op_overload is torch.ops.fsdp.all_gather_copy_in.default:
             # Find the "cast + copy_in + getitem + all_gather + all_gather_wait_tensor + copy_out" block
             collected_node_set = set()
-            torch_log.warning(f"before: len(collected_node_set): {len(collected_node_set)}, collected_node_set: {collected_node_set}")
+            # torch_log.warning(f"before: len(collected_node_set): {len(collected_node_set)}, collected_node_set: {collected_node_set}")
             _find_all_recursive_deps_of_node_up_to_the_graph_input(
                 snode,
                 collected_node_set,
             )
-            torch_log.warning(f"after collect dep: len(collected_node_set): {len(collected_node_set)}, collected_node_set: {collected_node_set}")
+            # torch_log.warning(f"after collect dep: len(collected_node_set): {len(collected_node_set)}, collected_node_set: {collected_node_set}")
             _find_all_recursive_users_of_node_down_to_the_target_node_type(
                 snode,
                 lambda sn: (
@@ -417,14 +417,14 @@ def enforce_comm_ordering_for_fsdp(
                 ),
                 collected_node_set,
             )
-            torch_log.warning(f"after collect users: len(collected_node_set): {len(collected_node_set)}, collected_node_set: {collected_node_set}")
+            # torch_log.warning(f"after collect users: len(collected_node_set): {len(collected_node_set)}, collected_node_set: {collected_node_set}")
 
             # sort nodes by original buffer order
             collected_nodes = sorted(list(collected_node_set), key=lambda x: int(x.get_name()[3:]))
-            torch_log.warning(f"collected_nodes: {collected_nodes}")
+            # torch_log.warning(f"collected_nodes: {collected_nodes}")
             copy_out_node = None
             for n in collected_nodes:
-                torch_log.warning(f"type(n.node): {type(n.node)}")
+                # torch_log.warning(f"type(n.node): {type(n.node)}")
                 if isinstance(n.node, ir.ExternKernel) and n.node.op_overload is torch.ops.fsdp.split_contiguous_view_as_strided.default:
                     copy_out_node = n
                     break
@@ -480,13 +480,13 @@ def enforce_comm_ordering_for_fsdp(
                     break
             assert wait_node is not None
             comm_group_node = _create_group_node(nodes_to_group)
-            torch_log.warning(f"Created RS comm group node for: {nodes_to_group}")
+            # torch_log.warning(f"Created RS comm group node for: {nodes_to_group}")
 
             # Group "reduce_scatter wait + related output node" into one GroupedSchedulerNode
             assert isinstance(wait_node.users[0].node.node, ir.MutationOutput)
             nodes_to_group = [wait_node, wait_node.users[0].node]
             wait_group_node = _create_group_node(nodes_to_group)
-            torch_log.warning(f"Created RS wait group node for: {nodes_to_group}")
+            # torch_log.warning(f"Created RS wait group node for: {nodes_to_group}")
 
             # Create mapping from RS copy-in node to comm node and RS wait node
             chunk_cat_node = comm_group_node.snodes[0]
