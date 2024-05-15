@@ -289,7 +289,51 @@ class TestTemplatedSDPA(InductorTestCase):
         self.run_test(natten_mask, dtype)
 
     @supported_platform
-    @expectedFailure
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    def test_subgraph_respect_decompostion(self, dtype):
+        from torch._decomp import core_aten_decompositions
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def score_mod_func(score, b, h, q, kv):
+            return score - q // (1 + kv)
+
+        make_tensor = functools.partial(
+            torch.randn,
+            (2, 2, 8, 4),
+            device="cuda",
+            dtype=torch.float64,
+            requires_grad=True,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+        # floor_div is not decomposed in decompostion_table is empty
+        gm = make_fx(_flex_attention, decomposition_table={})(
+            query, key, value, score_mod_func
+        )
+        self.assertExpectedInline(
+            gm.sdpa_score0.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
+    add = torch.ops.aten.add.Tensor(arg4_1, 1);  arg4_1 = None
+    floor_divide = torch.ops.aten.floor_divide.default(arg3_1, add);  arg3_1 = add = None
+    sub = torch.ops.aten.sub.Tensor(arg0_1, floor_divide);  arg0_1 = floor_divide = None
+    return sub""",
+        )
+
+        # floor_div is decomposed for core_aten_decompositions
+        gm = make_fx(_flex_attention, decomposition_table=core_aten_decompositions())(
+            query, key, value, score_mod_func
+        )
+        self.assertExpectedInline(
+            gm.sdpa_score0.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
+    add = torch.ops.aten.add.Tensor(arg4_1, 1);  arg4_1 = None
+    div = torch.ops.aten.div.Tensor_mode(arg3_1, add, rounding_mode = 'floor');  arg3_1 = add = None
+    sub = torch.ops.aten.sub.Tensor(arg0_1, div);  arg0_1 = div = None
+    return sub""",
+        )
+
+    @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_silu_on_score(self, dtype):
         def silu_score(score, b, h, q, kv):
@@ -341,7 +385,7 @@ class TestTemplatedSDPA(InductorTestCase):
         self.run_test(score_mod_scale, dtype)
 
     @supported_platform
-    @expectedFailure  # If we capture a tensor then we can perform a reduction on it.
+    @expectedFailure  # If we capture a tensor then we can perform a reduction on it, and that shouldn't be allowed
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_captured_reduction(self, dtype):
         scale = torch.randn((B, 8), device="cuda")
@@ -350,6 +394,62 @@ class TestTemplatedSDPA(InductorTestCase):
             return qk + scale[b].sum(dim=-1)
 
         self.run_test(score_mod_scale, dtype)
+
+    @supported_platform
+    def test_multiple_score_mod_calls(self):
+        query = torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+        keys = [
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+            for _ in range(2)
+        ]
+        values = [
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+            for _ in range(2)
+        ]
+
+        def scoremod_1(qk, b, h, q, kv):
+            return qk + (q - kv)
+
+        def scoremod_2(qk, b, h, q, kv):
+            return torch.where(q >= kv, qk, -float("inf"))
+
+        def f(q, k1, k2, v1, v2):
+            q2 = _flex_attention(q, k1, v1, score_mod=scoremod_1)
+            return _flex_attention(q2, k2, v2, score_mod=scoremod_2)
+
+        out = f(query, *keys, *values)
+        out2 = torch.compile(f)(query, *keys, *values)
+        tolerance = Tolerances(atol=2e-1, rtol=2e-1)
+        torch.testing.assert_close(out, out2, atol=tolerance.atol, rtol=tolerance.rtol)
+
+    @supported_platform
+    def test_multiple_score_mod_calls2(self):
+        query = torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+        keys = [
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+            for _ in range(3)
+        ]
+        values = [
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+            for _ in range(3)
+        ]
+
+        def scoremod_1(qk, b, h, q, kv):
+            return qk + (q - kv)
+
+        def scoremod_2(qk, b, h, q, kv):
+            return torch.where(q >= kv, qk, -float("inf"))
+
+        attention1 = functools.partial(_flex_attention, score_mod=scoremod_1)
+
+        def f(q, k1, k2, k3, v1, v2, v3):
+            q2 = attention1(q, k1, v1)
+            q3 = _flex_attention(q2, k2, v2, score_mod=scoremod_2)
+            return _flex_attention(q3, k3, v3, score_mod=scoremod_1)
+
+        out = f(query, *keys, *values)
+        out2 = torch.compile(f)(query, *keys, *values)
+        self.assertTrue((out - out2).abs().mean() < 1e-2)
 
     @supported_platform
     @skip("Triton bug ")  # https://github.com/pytorch/pytorch/issues/124571
