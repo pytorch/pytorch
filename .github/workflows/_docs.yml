@@ -147,6 +147,8 @@ jobs:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
         run: |
           set -ex
+
+          chmod +x ".github/scripts/install_sphinx_theme.sh"
           # Convert refs/tags/v1.12.0rc3 into 1.12
           if [[ "${GITHUB_REF}" =~ ^refs/tags/v([0-9]+\.[0-9]+)\.* ]]; then
             target="${BASH_REMATCH[1]}"
