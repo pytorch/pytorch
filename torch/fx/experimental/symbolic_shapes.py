@@ -2469,7 +2469,7 @@ class ShapeEnv:
 
         def maybe_transform_fake(fake: TrackedFake):
             inner_fake = fake.fake \
-                if isinstance(fake.fake, torch.SymInt) \
+                if isinstance(fake.fake, (torch.SymInt, torch.SymFloat)) \
                 else FakeTensorMeta.from_fake(fake.fake)
             # Even though TrackedFake accepts either a Union[SymInt, FakeTensor], here we give it a
             # FakeTensorMeta for two reasons:

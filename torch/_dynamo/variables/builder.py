@@ -2263,7 +2263,11 @@ def wrap_to_fake_tensor_and_record(
                 export=tx.export,
             )
         )
-        if source is not None and (sym_val := fake_e.item_memo) is not None:
+        if (
+            source is not None
+            and isinstance(fake_e, FakeTensor)
+            and (sym_val := fake_e.item_memo) is not None
+        ):
             tx.output.tracked_fakes.append(
                 TrackedFake(sym_val, CallMethodItemSource(source), symbolic_context)
             )
