@@ -948,8 +948,7 @@ void ProcessGroupNCCL::deregisterUserBuffers(
     TORCH_INTERNAL_ASSERT(
         segmentInfo.device == device.index(),
         "Mismatch between CUDA memory segment device and current device");
-    ncclComm->deregisterSegment(
-        reinterpret_cast<void*>(segmentInfo.address));
+    ncclComm->deregisterSegment(reinterpret_cast<void*>(segmentInfo.address));
   }
 }
 

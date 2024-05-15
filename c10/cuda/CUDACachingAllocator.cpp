@@ -1275,14 +1275,12 @@ class DeviceCachingAllocator {
         block->stream,
         block->device,
         block->context_when_allocated);
+
     // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-    bool inserted;
-    if (block->pool->owner_PrivatePool &&
-        block->pool->owner_PrivatePool->is_user_pool) {
-      inserted = active_user_pool_blocks.insert(block).second;
-    } else {
-      inserted = active_blocks.insert(block).second;
-    }
+    bool inserted = (block->pool->owner_PrivatePool &&
+                     block->pool->owner_PrivatePool->is_user_pool)
+        ? active_user_pool_blocks.insert(block).second
+        : active_blocks.insert(block).second;
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
 
     for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
