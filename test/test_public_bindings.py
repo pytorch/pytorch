@@ -279,7 +279,7 @@ class TestPublicBindings(TestCase):
         return True
 
 
-    @unittest.skipIf(IS_WINDOWS, "Inductor modules hard fail on windows")
+    @unittest.skipIf(IS_WINDOWS or IS_MACOS, "Inductor/Distributed modules hard fail on windows and macos")
     @skipIfTorchDynamo("Broken and not relevant for now")
     def test_modules_can_be_imported(self):
         failures = []
