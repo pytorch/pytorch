@@ -441,9 +441,9 @@ else:
             Contstructs a :class:`DeviceMesh` with ``device_type`` from an
             existing :class:`ProcessGroup`.
 
-            The constructed device mesh is assumed to be 1D if ``mesh_shape``
-            is not specified. Otherwise, ``mesh_shape`` is used to construct a
-            ``len(mesh_shape)`` dimensional :class:`DeviceMesh`.
+            The constructed device mesh has number of dimensions equal to the
+            number of groups passed. If more than one group is passed, then the
+            ``mesh`` argument is required.
             """
             if isinstance(group, ProcessGroup):
                 group_ranks = get_process_group_ranks(group)
