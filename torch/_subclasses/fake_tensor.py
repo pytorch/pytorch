@@ -214,9 +214,11 @@ class FakeTensorConverter:
 
     meta_converter: MetaConverter
     constant_storage_mapping: Dict[StorageWeakRef, List[ReferenceType]]
+    export: bool
 
-    def __init__(self, *, copy_data=False):
+    def __init__(self, *, copy_data=False, export=False):
         self.meta_converter = MetaConverter(copy_data=copy_data)
+        self.export = export
 
         # map from to storage to corresponding constant tensors
         self.constant_storage_mapping = {}
@@ -275,7 +277,6 @@ class FakeTensorConverter:
         *,
         source=None,
         symbolic_context=None,
-        export: bool = False,
     ):
         # see note [Tensor Fakification and Symbol Caching]
         if not symbolic_context and not source and shape_env:
@@ -321,12 +322,15 @@ class FakeTensorConverter:
         )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
+
+        from torch._dynamo.source import RandomValueSource
+
         # TODO: extend this for smaller dtypes too.  Some care will have to be
         # taken though, because smaller dtypes will compute differently but
         # Python sympy compute is always done at arbitrary precision.
         value = None
         if (
-            not export
+            not self.export
             and type(t) is torch.Tensor
             # TODO: It sure would be nice to test if something was a plain
             # tensor without having to enumerate all the cases
@@ -342,6 +346,24 @@ class FakeTensorConverter:
             and t.device.type == "cpu"
             and t.dtype in [torch.int64, torch.float64]
             and source is not None
+            # Impede setting up item() on things coming from random.  These
+            # are not "real" item() calls, instead UnspecializedPythonVariable
+            # is unsafely pretending an int is a tensor, which can sometimes
+            # implicitly cause an item call.  The problem is this is pretty
+            # unsound: there's no reason substituting an int with a Tensor is
+            # going to give the same results.  Today, you mostly get around
+            # this by typically not having capture_scalar_outputs on and graph
+            # breaking when someone tries to use the unspec variable in an
+            # int-y context.  But allowing it through here would break that.
+            # So don't.
+            #
+            # Once random values are setup to be represented as
+            # SymNodeVariable, this condition can be removed.  To check if
+            # you've done it right, this is a good test:
+            #
+            #   PYTORCH_TEST_WITH_DYNAMO=1 python test/test_reductions.py -k
+            #   TestReductionsCPU.test_dim_reduction_fns_fn_name_amax_cpu_bfloat16
+            and not isinstance(source, RandomValueSource)
             and shape_env is not None
         ):
             from torch._dynamo.source import CallMethodItemSource, FloatTensorSource
@@ -906,6 +928,7 @@ class FakeTensorMode(TorchDispatchMode):
         allow_non_fake_inputs=False,
         shape_env=None,
         static_shapes=None,
+        export=False,
     ):
         log.debug("create_mode 0x%x", id(self))
         self.allow_fallback_kernels = allow_fallback_kernels
@@ -917,7 +940,8 @@ class FakeTensorMode(TorchDispatchMode):
             torch._functorch.config.fake_tensor_propagate_real_tensors
         )
         self.fake_tensor_converter = FakeTensorConverter(
-            copy_data=self.propagate_real_tensors
+            copy_data=self.propagate_real_tensors,
+            export=export,
         )
 
         if static_shapes is not None:
@@ -1882,7 +1906,6 @@ class FakeTensorMode(TorchDispatchMode):
         static_shapes=None,
         source: Optional[Source] = None,
         symbolic_context=None,
-        export=False,
     ):
         shape_env: Optional[ShapeEnv] = self.shape_env
         if static_shapes is None:
@@ -1898,7 +1921,6 @@ class FakeTensorMode(TorchDispatchMode):
             shape_env=shape_env,
             source=source,
             symbolic_context=symbolic_context,
-            export=export,
         )
 
 

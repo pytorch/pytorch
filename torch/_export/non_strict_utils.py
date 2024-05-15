@@ -157,6 +157,7 @@ def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes):
         fake_mode = FakeTensorMode(
             shape_env=ShapeEnv(tracked_fakes=[], co_fields=co_fields),
             allow_non_fake_inputs=True,
+            export=True,
         )
     if fake_mode.shape_env is None or fake_mode.shape_env.tracked_fakes is None:
         raise ValueError(
