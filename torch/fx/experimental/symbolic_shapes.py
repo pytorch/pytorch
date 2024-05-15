@@ -83,6 +83,9 @@ log = logging.getLogger(__name__)
 class GuardOnDataDependentSymNode(RuntimeError):
     pass
 
+class PendingUnbackedSymbolNotFound(RuntimeError):
+    pass
+
 import sympy
 from sympy.printing.str import StrPrinter
 from sympy.printing.precedence import precedence, PRECEDENCE
@@ -602,15 +605,19 @@ def compute_unbacked_bindings(shape_env, example_value, old_example_value=None, 
             return r
 
         symbol_to_path = free_unbacked_symbols_with_path(example_value, ())
-        if not peek:
-            assert not pending, (
-                f"pending {pending} not in {example_value} " +
-                (
-                    repr((example_value.stride(), example_value.storage_offset()))
-                    if isinstance(example_value, torch.Tensor)
-                    else ""
-                )
+        if not peek and pending:
+            extra = (
+                repr((example_value.stride(), example_value.storage_offset()))
+                if isinstance(example_value, torch.Tensor)
+                else ""
             )
+            raise PendingUnbackedSymbolNotFound(
+                f"Pending unbacked symbols {pending} not in returned outputs {example_value} {extra}.\n"
+                "Did you accidentally call new_dynamic_size() or item() more times "
+                "than you needed to in your fake implementation?\n"
+                "For more help, see https://docs.google.com/document/d/1RWrH-3wLEpzR9kCS6gGBNen_-Fs-8PVbWWFE5AcgeWE/edit"
+            )
+
         # Why do we have to do some rebinding here?  If the original FX node
         # wasn't a binding site because you had a memo hit, but post
         # translation you aren't a memo hit anymore, there's now a new binding
