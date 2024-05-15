@@ -10372,62 +10372,52 @@ fn
         self.assertIs(c1[1], c2[0])
 
     def test_dynamo_cache_invalidate(self):
-        class Int1(int):
-            pass
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super(Mod, self).__init__()
+                self.fc = torch.nn.Linear(3, 3)
 
-        class Int2(int):
-            pass
+            def forward(self, out):
+                return self.fc(out)
 
-        class Int3(int):
-            pass
-
-        def fn(x, int_type):
-            if isinstance(int_type, int):
-                return x + 20
-            return x
+        def fn(x, mod):
+            return mod(x)
 
         opt_fn = torch.compile(fn, backend="eager")
 
+        m1 = Mod()
+        m2 = Mod()
+        m3 = Mod()
         inp = torch.randn(3, 3)
 
-        i1 = Int1(1)
-        i2 = Int2(1)
-        i3 = Int3(1)
-
-        # Dynamo will guard on the type id of Int1, Int2 and Int3. Later
-        # deleting those classes will delete the cache entries as well.
-        opt_fn(inp, i1)
-        opt_fn(inp, i2)
-        opt_fn(inp, i3)
+        # NOTE: assumes that each cache entry is guarded
+        # on unique Mod instance
+        opt_fn(inp, m1)
+        opt_fn(inp, m2)
+        opt_fn(inp, m3)
 
         c1 = _debug_get_cache_entry_list(fn.__code__)
         self.assertEqual(len(c1), 3)
 
         # move cache entry to front
-        opt_fn(inp, i2)
+        opt_fn(inp, m2)
         c2 = _debug_get_cache_entry_list(fn.__code__)
         self.assertIs(c1[1], c2[0])
 
         # delete center of cache
-        del i3
-        del Int3
-        gc.collect()  # required to delete the class
+        del m3
         c3 = _debug_get_cache_entry_list(fn.__code__)
         self.assertEqual(len(c3), 2)
         self.assertIs(c3[0], c2[0])
         self.assertIs(c3[1], c2[2])
 
         # delete end of cache
-        del i1
-        del Int1
-        gc.collect()  # required to delete the class
+        del m1
         c4 = _debug_get_cache_entry_list(fn.__code__)
         self.assertEqual(len(c4), 1)
         self.assertIs(c4[0], c3[0])
 
-        del i2
-        del Int2
-        gc.collect()  # required to delete the class
+        del m2
         c5 = _debug_get_cache_entry_list(fn.__code__)
         self.assertEqual(len(c5), 0)
 
