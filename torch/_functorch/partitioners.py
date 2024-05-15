@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 import copy
 import functools
 import heapq
@@ -9,7 +7,7 @@ import math
 import operator
 import os
 from collections import defaultdict
-from typing import List, Optional, Set, Tuple, Union
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 
@@ -364,6 +362,9 @@ def _prod(x):
     return s
 
 
+INT_INF = int(1e6)
+
+
 def _tensor_nbytes(numel, dtype):
     return numel * dtype.itemsize
 
@@ -372,10 +373,7 @@ def _size_of(node: fx.Node) -> int:
     if "val" in node.meta:
         val = node.meta["val"]
         if isinstance(val, py_sym_types):
-            if isinstance(val, torch.SymInt):
-                return 1
-            else:
-                return 999999
+            return 1
         # NB: The fallback values here are meaningless, maybe we should respect
         # torch._inductor.config.unbacked_symint_fallback (but this is a
         # layering violation)
@@ -389,24 +387,14 @@ def _size_of(node: fx.Node) -> int:
             return _tensor_nbytes(hint_int(val.numel(), fallback=4098), val.dtype)
 
         raise RuntimeError(f"Unknown metadata type {type(val)}")
-
-    # Only needed since we don't always trace with fake tensors.
-    if "tensor_meta" in node.meta:
-        metadata = node.meta["tensor_meta"]
-        # TODO: What is to_size_hint suppose to be?
-        numel = _prod(map(to_size_hint, metadata.shape))  # noqa: F821
-        dtype = metadata.dtype
-    else:
-        return 0
-
-    return _tensor_nbytes(numel, dtype)
+    raise RuntimeError("We should always have `val` metadata on the nodes")
 
 
 # Used for some investigative purposes
-def _count_ops(graph):
+def _count_ops(graph: fx.Graph):
     from collections import defaultdict
 
-    cnt = defaultdict(int)
+    cnt: Dict[str, int] = defaultdict(int)
     for node in graph.nodes:
         if node.op == "call_function":
             cnt[node.target.__name__] += 1
@@ -462,7 +450,7 @@ def reordering_to_mimic_autograd_engine(gm):
     """
 
     new_graph = fx.Graph()
-    env = {}
+    env: Dict[fx.Node, fx.Node] = {}
 
     # Add new placeholder nodes in the order specified by the inputs
     for node in gm.graph.find_nodes(op="placeholder"):
@@ -589,11 +577,15 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module, num_sym_nodes):
 
     run_and_save_rng = torch._prims.rng_prims.run_and_save_rng_state
     run_with_rng_state = torch._prims.rng_prims.run_with_rng_state
-
+    bw_tangent_start_node = None
     for node in bw_module.graph.find_nodes(op="placeholder"):
         if "tangent" in node.name:
             bw_tangent_start_node = node
             break
+    if bw_tangent_start_node is None:
+        raise RuntimeError(
+            "Couldn't find tangent node in graph inputs. This is unexpected, please file a bug if you see this"
+        )
 
     fw_rng_state_outputs = []
     for base_node, node_pair in recomputable_rng_ops_map.items():
@@ -680,12 +672,32 @@ def cleanup_recompute_tags(joint_module):
                     node.meta["recompute"] = 0
     return joint_module
 
-def get_saved_values(joint_graph, node_classifications, heuristics_on, dont_ban=set()):
-    orig_fw_outputs, required_fw_nodes, required_bw_nodes, unclaimed_nodes, inputs = node_classifications
-    fusible_ops, compute_intensive_ops, random_ops, view_ops, recomputable_ops = get_default_op_list()
 
-    BAN_IF_USED_FAR_APART, BAN_IF_LONG_FUSIBLE_CHAINS, BAN_IF_MATERIALIZED_BACKWARDS, BAN_IF_NOT_IN_ALLOWLIST, BAN_IF_REDUCTION = heuristics_on
+def get_saved_values(joint_graph, node_classifications, heuristics_on, dont_ban=None):
+    if dont_ban is None:
+        dont_ban = set()
+    (
+        orig_fw_outputs,
+        required_fw_nodes,
+        required_bw_nodes,
+        unclaimed_nodes,
+        inputs,
+    ) = node_classifications
+    (
+        fusible_ops,
+        compute_intensive_ops,
+        random_ops,
+        view_ops,
+        recomputable_ops,
+    ) = get_default_op_list()
 
+    (
+        BAN_IF_USED_FAR_APART,
+        BAN_IF_LONG_FUSIBLE_CHAINS,
+        BAN_IF_MATERIALIZED_BACKWARDS,
+        BAN_IF_NOT_IN_ALLOWLIST,
+        BAN_IF_REDUCTION,
+    ) = heuristics_on
 
     def is_fusible(a, b):
         # We can perform "memory fusion" into a cat, but cat cannot be a
@@ -693,11 +705,13 @@ def get_saved_values(joint_graph, node_classifications, heuristics_on, dont_ban=
         if get_aten_target(b) == aten.cat:
             return True
         return get_aten_target(a) in fusible_ops and get_aten_target(b) in fusible_ops
+
     try:
         import networkx as nx
     except ImportError as e:
-        raise RuntimeError("Need networkx installed to perform smart recomputation "
-                        "heuristics") from e
+        raise RuntimeError(
+            "Need networkx installed to perform smart recomputation " "heuristics"
+        ) from e
     if config.aggressive_recomputation:
         BAN_IF_MATERIALIZED_BACKWARDS = False
         BAN_IF_USED_FAR_APART = False
@@ -772,10 +786,21 @@ def get_saved_values(joint_graph, node_classifications, heuristics_on, dont_ban=
 
         return not all(is_fusible(node, user) for user in node.users)
 
-    def get_node_weight(node) -> int:
+    def get_node_weight(node) -> float:
         mem_sz = _size_of(node)
         if get_aten_target(node) in view_ops:
+            # We never choose to save views, since views are free to recompute.
+            # It makes it a bit simpler to analyze
+            # NB: If they're not free to recompute (e.g. nested tensors)... I
+            # think we should modify checks for view_ops to `is_view` and check
+            # that. Basically, with nested tensors, `aten.view` is not a "view
+            # op".
             return math.inf
+
+        if isinstance(node.meta["val"], py_sym_types):
+            # We never want to save symfloats
+            if not isinstance(node.meta["val"], torch.SymInt):
+                return INT_INF
 
         # Heuristic to bias towards nodes closer to the backwards pass
         # Complete guess about current value
@@ -875,27 +900,30 @@ def get_saved_values(joint_graph, node_classifications, heuristics_on, dont_ban=
         Finds the first unfusible node in the chain of nodes starting from
         `start_nodes` and returns its position.
         """
-        sorted_nodes = []
+        sorted_nodes: List[Tuple[int, fx.Node, bool]] = []
         for n in start_nodes:
-            heapq.heappush(sorted_nodes, (n.fw_order, n, True))
+            heapq.heappush(sorted_nodes, (n.meta["fw_order"], n, True))
 
         while len(sorted_nodes) > 0:
             _, node, node_is_fusible = heapq.heappop(sorted_nodes)
             if not node_is_fusible:
-                return node.fw_order
+                return node.meta["fw_order"]
             for user in node.users:
                 if user in required_fw_nodes:
-                    if user.fw_order > max_range:
+                    if user.meta["fw_order"] > max_range:
                         continue
                     heapq.heappush(
-                        sorted_nodes, (user.fw_order, user, is_fusible(node, user))
+                        sorted_nodes,
+                        (user.meta["fw_order"], user, is_fusible(node, user)),
                     )
         return max_range
 
     if BAN_IF_USED_FAR_APART:
         for used_node in required_fw_nodes:
             orders = [
-                user.fw_order for user in used_node.users if user in required_fw_nodes
+                user.meta["fw_order"]
+                for user in used_node.users
+                if user in required_fw_nodes
             ]
             fw_users = [user for user in used_node.users if user in required_fw_nodes]
             if len(orders) > 0:
@@ -903,7 +931,7 @@ def get_saved_values(joint_graph, node_classifications, heuristics_on, dont_ban=
                 for user in tuple(used_node.users):
                     if (
                         user in required_fw_nodes
-                        and user.fw_order > first_unfusible_use
+                        and user.meta["fw_order"] > first_unfusible_use
                         and is_fusible(used_node, user)
                     ):
                         if user in banned_nodes:
@@ -911,10 +939,10 @@ def get_saved_values(joint_graph, node_classifications, heuristics_on, dont_ban=
                         log.info(
                             "used above/below fusible %s:(%s) -> %s -> %s:(%s)",
                             used_node,
-                            used_node.fw_order,
+                            used_node.meta["fw_order"],
                             first_unfusible_use,
                             user,
-                            user.fw_order,
+                            user.meta["fw_order"],
                         )
                         ban_recomputation_if_allowed(user)
 
@@ -934,21 +962,21 @@ def get_saved_values(joint_graph, node_classifications, heuristics_on, dont_ban=
         for start_node in joint_graph.nodes:
             if start_node not in required_fw_nodes:
                 continue
-            fusible = [(start_node.fw_order, start_node)]
-            start_order = start_node.fw_order
+            fusible = [(start_node.meta["fw_order"], start_node)]
+            start_order = start_node.meta["fw_order"]
             while len(fusible) > 0:
                 _, cur = heapq.heappop(fusible)
                 if cur in visited:
                     continue
                 visited.add(cur)
                 # 100 is arbitrary choice to try and prevent degenerate cases
-                if cur.fw_order > start_order + 100 and len(fusible) == 0:
+                if cur.meta["fw_order"] > start_order + 100 and len(fusible) == 0:
                     log.info(
                         "too long %s %s %s %s",
                         cur,
                         start_node,
-                        cur.fw_order,
-                        start_node.fw_order,
+                        cur.meta["fw_order"],
+                        start_node.meta["fw_order"],
                     )
                     ban_recomputation_if_allowed(cur)
                     break
@@ -959,7 +987,7 @@ def get_saved_values(joint_graph, node_classifications, heuristics_on, dont_ban=
                         and is_fusible(cur, user)
                         and user not in banned_nodes
                     ):
-                        heapq.heappush(fusible, (user.fw_order, user))
+                        heapq.heappush(fusible, (user.meta["fw_order"], user))
 
     try:
         cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")
@@ -969,7 +997,7 @@ def get_saved_values(joint_graph, node_classifications, heuristics_on, dont_ban=
         raise
 
     reachable, non_reachable = partition
-    cutset = set()
+    cutset: Set[Tuple[str, str]] = set()
     for u, nbrs in ((n, nx_graph[n]) for n in reachable):
         cutset.update((u, v) for v in nbrs if v in non_reachable)
 
@@ -982,15 +1010,135 @@ def get_saved_values(joint_graph, node_classifications, heuristics_on, dont_ban=
     name_to_node = get_name_to_node(joint_graph)
     # To make this stuff deterministic
     node_idx = {node: idx for idx, node in enumerate(joint_graph.nodes)}
-    saved_values = sorted((name_to_node[node] for node in cut_nodes), key=lambda x: node_idx[x])
+    saved_values = sorted(
+        (name_to_node[node] for node in cut_nodes), key=lambda x: node_idx[x]
+    )
     return saved_values, banned_nodes
 
+
 def get_default_op_list():
-    default_recomputable_ops = [aten.add, aten.sub, aten.div, aten.atan2, aten.mul, aten.max, aten.min, aten.pow, aten.remainder, aten.fmod, aten.__and__, aten.__or__, aten.__xor__, aten.__lshift__, aten.__rshift__, aten.eq, aten.ne, aten.ge, aten.gt, aten.le, aten.lt, aten.abs, aten.bitwise_not, aten.ceil, aten.floor, aten.frac, aten.neg, aten.relu, aten.round, aten.silu, aten.trunc, aten.log, aten.log10, aten.log1p, aten.log2, aten.lgamma, aten.exp, aten.expm1, aten.erf, aten.erfc, aten.cos, aten.acos, aten.cosh, aten.sin, aten.asin, aten.sinh, aten.tan, aten.atan, aten.tanh, aten.atanh, aten.sqrt, aten.rsqrt, aten.reciprocal, aten.sigmoid, aten.softplus, aten.threshold, aten.threshold_backward, aten.clamp, aten.where, aten.lerp, aten.addcmul, aten.gelu, aten.gelu_backward, aten.sum, aten.mean, aten._grad_sum_to_size, aten.sum_to_size, aten.amax, aten.to, aten.type_as, operator.getitem, aten.squeeze, aten.unsqueeze, aten.rsub, aten._to_copy]  # noqa: E501,B950
+    default_recomputable_ops = [
+        aten.add,
+        aten.sub,
+        aten.div,
+        aten.atan2,
+        aten.mul,
+        aten.max,
+        aten.min,
+        aten.pow,
+        aten.remainder,
+        aten.fmod,
+        aten.__and__,
+        aten.__or__,
+        aten.__xor__,
+        aten.__lshift__,
+        aten.__rshift__,
+        aten.eq,
+        aten.ne,
+        aten.ge,
+        aten.gt,
+        aten.le,
+        aten.lt,
+        aten.abs,
+        aten.bitwise_not,
+        aten.ceil,
+        aten.floor,
+        aten.frac,
+        aten.neg,
+        aten.relu,
+        aten.round,
+        aten.silu,
+        aten.trunc,
+        aten.log,
+        aten.log10,
+        aten.log1p,
+        aten.log2,
+        aten.lgamma,
+        aten.exp,
+        aten.expm1,
+        aten.erf,
+        aten.erfc,
+        aten.cos,
+        aten.acos,
+        aten.cosh,
+        aten.sin,
+        aten.asin,
+        aten.sinh,
+        aten.tan,
+        aten.atan,
+        aten.tanh,
+        aten.atanh,
+        aten.sqrt,
+        aten.rsqrt,
+        aten.reciprocal,
+        aten.sigmoid,
+        aten.softplus,
+        aten.threshold,
+        aten.threshold_backward,
+        aten.clamp,
+        aten.where,
+        aten.lerp,
+        aten.addcmul,
+        aten.gelu,
+        aten.gelu_backward,
+        aten.sum,
+        aten.mean,
+        aten._grad_sum_to_size,
+        aten.sum_to_size,
+        aten.amax,
+        aten.to,
+        aten.type_as,
+        operator.getitem,
+        aten.squeeze,
+        aten.unsqueeze,
+        aten.rsub,
+        aten._to_copy,
+    ]  # noqa: E501,B950
     recomputable_view_ops = [aten.squeeze, aten.unsqueeze, aten.alias]
-    recomputable_view_ops += [aten.view, aten.slice, aten.t, prims.broadcast_in_dim, aten.expand, aten.as_strided, aten.permute]
+    recomputable_view_ops += [
+        aten.view,
+        aten.slice,
+        aten.t,
+        prims.broadcast_in_dim,
+        aten.expand,
+        aten.as_strided,
+        aten.permute,
+    ]
     view_ops = recomputable_view_ops
-    default_recomputable_ops += [prims.div, prims.convert_element_type, aten.clone, aten._to_copy, aten.full_like, prims.var, prims.sum, aten.var, aten.std, prims.broadcast_in_dim, aten.select, aten._unsafe_view, aten.view, aten.expand, aten.slice, aten.reshape, aten.broadcast_tensors, aten.scalar_tensor, aten.ones, aten.new_zeros, aten.lift_fresh_copy, aten.arange, aten.triu, aten.var_mean, aten.isinf, aten.any, aten.full, aten.as_strided, aten.zeros, aten.argmax, aten.maximum, prims.iota]  # noqa: E501,B950
+    default_recomputable_ops += [
+        prims.div,
+        prims.convert_element_type,
+        aten.clone,
+        aten._to_copy,
+        aten.full_like,
+        prims.var,
+        prims.sum,
+        aten.var,
+        aten.std,
+        prims.broadcast_in_dim,
+        aten.select,
+        aten._unsafe_view,
+        aten.view,
+        aten.expand,
+        aten.slice,
+        aten.reshape,
+        aten.broadcast_tensors,
+        aten.scalar_tensor,
+        aten.ones,
+        aten.new_zeros,
+        aten.lift_fresh_copy,
+        aten.arange,
+        aten.triu,
+        aten.var_mean,
+        aten.isinf,
+        aten.any,
+        aten.full,
+        aten.as_strided,
+        aten.zeros,
+        aten.argmax,
+        aten.maximum,
+        prims.iota,
+    ]  # noqa: E501,B950
     # Natalia said that we should allow recomputing indexing :)
     default_recomputable_ops += [aten.index, aten.gather]
     default_recomputable_ops += view_ops
@@ -1001,43 +1149,73 @@ def get_default_op_list():
         aten.zeros_like,
     ]
 
-    default_recomputable_ops += [
-        method_to_operator(m)
-        for m in magic_methods
-    ]
+    default_recomputable_ops += [method_to_operator(m) for m in magic_methods]
     recomputable_ops = set(default_recomputable_ops)
 
     random_ops = [aten.native_dropout, aten.rand_like, aten.randn_like]
-    compute_intensive_ops = [aten.mm, aten.convolution, aten.convolution_backward, aten.bmm, aten.addmm, aten._scaled_dot_product_flash_attention, aten._scaled_dot_product_efficient_attention, aten.upsample_bilinear2d]  # noqa: E501,B950
+    compute_intensive_ops = [
+        aten.mm,
+        aten.convolution,
+        aten.convolution_backward,
+        aten.bmm,
+        aten.addmm,
+        aten._scaled_dot_product_flash_attention,
+        aten._scaled_dot_product_efficient_attention,
+        aten.upsample_bilinear2d,
+    ]  # noqa: E501,B950
 
     fusible_ops = recomputable_ops | set(random_ops)
     return fusible_ops, compute_intensive_ops, random_ops, view_ops, recomputable_ops
 
-def get_name_to_node(graph):
+
+def get_name_to_node(graph: fx.Graph):
     name_to_node = {}
     for node in graph.nodes:
         name_to_node[node.name] = node
     return name_to_node
 
-    )
-def choose_saved_values_set(joint_graph, node_classifications, memory_budget=1):
+
+def choose_saved_values_set(
+    joint_graph: fx.Graph, node_classifications, memory_budget=1
+) -> Set[fx.Node]:
     BAN_IF_USED_FAR_APART = config.ban_recompute_used_far_apart
     BAN_IF_LONG_FUSIBLE_CHAINS = config.ban_recompute_long_fusible_chains
     BAN_IF_MATERIALIZED_BACKWARDS = config.ban_recompute_materialized_backward
     BAN_IF_NOT_IN_ALLOWLIST = config.ban_recompute_not_in_allowlist
     BAN_IF_REDUCTION = config.ban_recompute_reductions
 
-    orig_fw_outputs, required_fw_nodes, required_bw_nodes, unclaimed_nodes, inputs = node_classifications
+    (
+        orig_fw_outputs,
+        required_fw_nodes,
+        required_bw_nodes,
+        unclaimed_nodes,
+        inputs,
+    ) = node_classifications
 
     if memory_budget == 0:
         return inputs
 
-    runtime_optimized_saved_values, _ = get_saved_values(joint_graph, node_classifications, (BAN_IF_USED_FAR_APART, BAN_IF_LONG_FUSIBLE_CHAINS, BAN_IF_MATERIALIZED_BACKWARDS, BAN_IF_NOT_IN_ALLOWLIST, BAN_IF_REDUCTION))
+    runtime_optimized_saved_values, _ = get_saved_values(
+        joint_graph,
+        node_classifications,
+        (
+            BAN_IF_USED_FAR_APART,
+            BAN_IF_LONG_FUSIBLE_CHAINS,
+            BAN_IF_MATERIALIZED_BACKWARDS,
+            BAN_IF_NOT_IN_ALLOWLIST,
+            BAN_IF_REDUCTION,
+        ),
+    )
     return runtime_optimized_saved_values
 
+
 def min_cut_rematerialization_partition(
-    joint_module: fx.GraphModule, _joint_inputs, compiler="inductor", recomputable_ops=None,
-    *, num_fwd_outputs
+    joint_module: fx.GraphModule,
+    _joint_inputs,
+    compiler="inductor",
+    recomputable_ops=None,
+    *,
+    num_fwd_outputs,
 ) -> Tuple[fx.GraphModule, fx.GraphModule]:
     """
     Partitions the joint graph such that the backward recomputes the forward.
@@ -1085,42 +1263,69 @@ def min_cut_rematerialization_partition(
         name_to_node = get_name_to_node(joint_module.graph)
         required_bw_nodes = set()
         for node in joint_module.graph.nodes:
-            if node.op == 'placeholder' and "tangents" in node.target:
+            if node.op == "placeholder" and "tangents" in node.target:
                 required_bw_nodes.add(node)
             if node in required_bw_nodes:
                 for user in node.users:
                     required_bw_nodes.add(user)
 
         primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
-        fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
+        fwd_seed_offset_inputs = list(
+            filter(_is_fwd_seed_offset, joint_module.graph.nodes)
+        )
         inputs = primal_inputs + fwd_seed_offset_inputs
-        fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
-        required_bw_nodes.update(o for o in bwd_outputs if o is not None and o.op != 'output')
-        forward_only_graph = _extract_graph_with_inputs_outputs(joint_module.graph, inputs, fwd_outputs)
-        required_fw_nodes = {name_to_node[node.name] for node in forward_only_graph.nodes
-                             if node.op != 'output'}
-        unclaimed_nodes = {node for node in joint_module.graph.nodes
-                           if node not in required_fw_nodes and node not in required_bw_nodes}
-        return fwd_outputs, required_fw_nodes, required_bw_nodes, unclaimed_nodes, inputs
+        fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(
+            joint_module, num_fwd_outputs=num_fwd_outputs
+        )
+        required_bw_nodes.update(
+            o for o in bwd_outputs if o is not None and o.op != "output"
+        )
+        forward_only_graph = _extract_graph_with_inputs_outputs(
+            joint_module.graph, inputs, fwd_outputs
+        )
+        required_fw_nodes = {
+            name_to_node[node.name]
+            for node in forward_only_graph.nodes
+            if node.op != "output"
+        }
+        unclaimed_nodes = {
+            node
+            for node in joint_module.graph.nodes
+            if node not in required_fw_nodes and node not in required_bw_nodes
+        }
+        return (
+            fwd_outputs,
+            required_fw_nodes,
+            required_bw_nodes,
+            unclaimed_nodes,
+            inputs,
+        )
 
     node_classifications = classify_nodes(joint_module)
-    orig_fw_outputs, required_fw_nodes, required_bw_nodes, unclaimed_nodes, inputs = node_classifications
+    (
+        orig_fw_outputs,
+        required_fw_nodes,
+        required_bw_nodes,
+        unclaimed_nodes,
+        inputs,
+    ) = node_classifications
 
     # networkx blows up on graphs with no required backward nodes
     # Since there's nothing to partition anyway, and the default partitioner can "handle"
     # this case, send our graph over to the default partitioner.
     if len(required_bw_nodes) == 0:
-        return default_partition(joint_module, _joint_inputs, num_fwd_outputs=num_fwd_outputs)
-
+        return default_partition(
+            joint_module, _joint_inputs, num_fwd_outputs=num_fwd_outputs
+        )
 
     fw_order = 0
     for node in joint_module.graph.nodes:
         if node in required_fw_nodes:
-            node.fw_order = fw_order
+            node.meta["fw_order"] = fw_order
             fw_order += 1
 
     for node in reversed(joint_module.graph.nodes):
-        if node.op == 'output':
+        if node.op == "output":
             node.dist_from_bw = int(1e9)
         elif node not in required_fw_nodes:
             node.dist_from_bw = 0
@@ -1128,7 +1333,6 @@ def min_cut_rematerialization_partition(
             node.dist_from_bw = int(1e9)
             for user in node.users:
                 node.dist_from_bw = min(node.dist_from_bw, user.dist_from_bw + 1)
-
 
     if AOT_PARTITIONER_DEBUG:
         joint_module_ops = {
@@ -1140,14 +1344,16 @@ def min_cut_rematerialization_partition(
         print("Ops banned from rematerialization: ", ops_ignored)
         print()
 
-    memory_budget = config.memory_budget
+    memory_budget = 1
     for node in joint_graph.nodes:
         if isinstance(node.meta.get("memory_budget", None), float):
             memory_budget = node.meta["memory_budget"]
             break
     print("Memory Budget: ", memory_budget)
 
-    saved_values = choose_saved_values_set(joint_graph, node_classifications, memory_budget=memory_budget)
+    saved_values = choose_saved_values_set(
+        joint_graph, node_classifications, memory_budget=memory_budget
+    )
     # save_for_backward on tensors and stashes symints in autograd .ctx
     saved_sym_nodes = list(filter(is_sym_node, saved_values))
     saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
@@ -1184,7 +1390,7 @@ def min_cut_rematerialization_partition(
         }
         remat_nodes = fw_module_nodes & bw_module_nodes
 
-        counts = defaultdict(int)
+        counts: Dict[str, int] = defaultdict(int)
         for node in fw_module.graph.nodes:
             if node.name in remat_nodes and hasattr(node.target, "_overloadpacket"):
                 counts[str(node.target._overloadpacket)] += 1
@@ -1203,7 +1409,7 @@ def draw_graph(
     fname: str,
     figname: str = "fx_graph",
     clear_meta: bool = True,
-    prog: Union[str, List[str]] = None,
+    prog: Optional[Union[str, List[str]]] = None,
     parse_stack_trace: bool = False,
     dot_graph_shape: Optional[str] = None,
 ) -> None:
@@ -1229,13 +1435,3 @@ def draw_graph(
         write_method(fname)
     else:
         write_method(fname, prog=prog)
-
-
-def draw_joint_graph(
-    graph: torch.fx.GraphModule,
-    joint_inputs,
-    file_name: str = "full_graph.png",
-    dot_graph_shape: Optional[str] = None,
-):
-    draw_graph(graph, file_name, dot_graph_shape=dot_graph_shape)
-    return default_partition(graph, joint_inputs)
