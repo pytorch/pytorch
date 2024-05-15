@@ -1150,7 +1150,7 @@ class MetaConverter:
                                         device=t.device,
                                     )
                                     assert t.data is not None
-                                    _safe_copy(r.real_tensor, t.data)
+                                    _safe_copy(r.real_tensor, t.data)  # type: ignore[attr-defined]
                         return r
 
                     r = _to_fake_tensor(t)
@@ -1352,7 +1352,9 @@ class MetaConverter:
                         # You're normal and happy, install the fresh storage into the memo
                         self.set_storage_memo(s, r.untyped_storage())
                         if self.copy_data:
-                            r.untyped_storage().real_storage = r.real_tensor.untyped_storage()
+                            r.untyped_storage().real_storage = (
+                                r.real_tensor.untyped_storage()
+                            )
                     else:
                         # You're in crazy town; somehow you gave us a tensor
                         # that wasn't a view, but had nonzero storage offset,
