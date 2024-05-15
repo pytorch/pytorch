@@ -163,11 +163,11 @@ static inline hash_t Hash(const at::Generator& value) {
 // repeatedly hash a constant at runtime.
 static const int64_t kNullOpt = 0x8655d738f3678dda;
 
-// Hashing for c10::optional types contributes to hash
+// Hashing for std::optional types contributes to hash
 // for optionals with null value, important to distinguish
 // between <nullopt, non-nullopt> and <non-nullopt, nullopt> cases
 template <typename T>
-hash_t Hash(const c10::optional<T>& value) {
+hash_t Hash(const std::optional<T>& value) {
   if (value.has_value()) {
     return Hash(value.value());
   } else {
@@ -187,7 +187,7 @@ hash_t Hash(const std::vector<T>& values) {
 
 // Need a special case for optional<container>?
 template <typename T>
-hash_t Hash(const c10::optional<std::vector<T>>& value) {
+hash_t Hash(const std::optional<std::vector<T>>& value) {
   if (value.has_value()) {
     return ContainerHash(value.value());
   } else {
