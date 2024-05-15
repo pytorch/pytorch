@@ -69,8 +69,8 @@ def compile_time_strobelight_meta(phase_name):
     def compile_time_strobelight_meta_inner(function):
         @functools.wraps(function)
         def wrapper_function(*args, **kwargs):
-            if 'skip' in kwargs:
-                kwargs['skip'] = kwargs['skip'] + 1
+            if "skip" in kwargs:
+                kwargs["skip"] = kwargs["skip"] + 1
             return function(*args, **kwargs)
 
         return wrapper_function
