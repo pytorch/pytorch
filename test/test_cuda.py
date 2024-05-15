@@ -4703,7 +4703,7 @@ class TestCudaOptims(TestCase):
         [
             optim
             for optim in optim_db
-            if "foreach" in optim.supported_impls and "fused" in optim.supported_impls
+            if "foreach" in optim.supported_impls and "cuda" in optim.supports_fused_on
         ],
         dtypes=[torch.float32],
     )
