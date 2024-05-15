@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
 
-class _StreamBase(ABC):
+class StreamBase(ABC):
     r"""Base stream class abstraction for multi backends Stream to herit from"""
 
     @abstractmethod
@@ -29,7 +29,7 @@ class _StreamBase(ABC):
         raise NotImplementedError
 
 
-class _EventBase(ABC):
+class EventBase(ABC):
     r"""Base Event class abstraction for multi backends Event to herit from"""
 
     @abstractmethod

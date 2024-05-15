@@ -13,7 +13,7 @@ import torch.nn
 import torch.onnx.operators
 from torch._logging import warning_once
 
-from torch._streambase import _StreamBase
+from torch.streambase import StreamBase
 from ..._guards import TracingContext
 from .. import config, polyfill, variables
 from ..codegen import PyCodegen
@@ -230,7 +230,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             assert len(args) <= 1 and len(kwargs) == 0
             inf_mode = args[0].as_python_constant() if len(args) == 1 else True
             return InferenceModeVariable.create(tx, inf_mode)
-        elif inspect.isclass(self.value) and issubclass(self.value, _StreamBase):
+        elif inspect.isclass(self.value) and issubclass(self.value, StreamBase):
             from torch._dynamo.variables.builder import wrap_fx_proxy_cls
 
             return wrap_fx_proxy_cls(

@@ -29,7 +29,6 @@ from torch import SymInt
 from torch._guards import GuardSource, TracingContext
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
-from torch._streambase import _EventBase, _StreamBase
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
@@ -42,6 +41,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SymbolicContext,
 )
 from torch.fx.immutable_collections import immutable_dict, immutable_list
+from torch.streambase import EventBase, StreamBase
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import TensorWeakRef
 from .. import config, mutation_guard, replay_record, trace_rules
@@ -705,7 +705,7 @@ class VariableBuilder:
             stream_source = AttrSource(self.source, "stream")
             stream_var = VariableBuilder(self.tx, stream_source)(value.stream)
             return StreamContextVariable.create(self.tx, stream_var)
-        elif isinstance(value, _StreamBase):
+        elif isinstance(value, StreamBase):
             self.install_guards(GuardBuilder.ID_MATCH)
             stream_proxy = self.tx.output.create_proxy(
                 "call_function",
@@ -727,7 +727,7 @@ class VariableBuilder:
         elif isinstance(value, (torch._C._SDPAParams)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return SDPAParamsVariable.create(self.tx, value, self.source)
-        elif isinstance(value, _EventBase):
+        elif isinstance(value, EventBase):
             self.install_guards(GuardBuilder.ID_MATCH)
             return EventVariable(
                 None,
@@ -1299,9 +1299,11 @@ class VariableBuilder:
         self.install_guards(
             functools.partial(
                 guard_type,
-                value=value
-                if isinstance(source, NumpyTensorSource)
-                else TensorWeakRef(value),
+                value=(
+                    value
+                    if isinstance(source, NumpyTensorSource)
+                    else TensorWeakRef(value)
+                ),
             )
         )
 
@@ -1931,8 +1933,7 @@ def wrap_fx_proxy_cls(
         set_example_value(proxy.node, example_value)
         return SymNodeVariable(proxy, example_value, **options)
     elif (
-        inspect.isclass(proxy.node.target)
-        and issubclass(proxy.node.target, _StreamBase)
+        inspect.isclass(proxy.node.target) and issubclass(proxy.node.target, StreamBase)
     ) or proxy.node.target in [
         device_interface.current_stream
         for _, device_interface in get_registered_device_interfaces()
@@ -1940,7 +1941,7 @@ def wrap_fx_proxy_cls(
         set_example_value(proxy.node, example_value)
         return StreamVariable(proxy, example_value, example_value.device, **options)
     elif (
-        inspect.isclass(proxy.node.target) and issubclass(proxy.node.target, _EventBase)
+        inspect.isclass(proxy.node.target) and issubclass(proxy.node.target, EventBase)
     ) or proxy.node.target in [
         device_interface.Event
         for _, device_interface in get_registered_device_interfaces()
@@ -1952,7 +1953,7 @@ def wrap_fx_proxy_cls(
         return ConstantVariable(example_value, **options)
     elif (
         example_value is not None
-        and isinstance(example_value, _EventBase)
+        and isinstance(example_value, EventBase)
         and proxy.node.target == "record_event"
         and proxy.node.op == "call_method"
     ):
