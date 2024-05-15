@@ -93,7 +93,6 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_FBCODE,
     IS_MACOS,
-    IS_SANDCASTLE,
     IS_WINDOWS,
     run_tests,
     skipIfCrossRef,

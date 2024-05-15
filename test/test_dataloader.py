@@ -32,7 +32,6 @@ from torch.testing._internal.common_utils import (
     IS_JETSON,
     IS_LINUX,
     IS_MACOS,
-    IS_SANDCASTLE,
     IS_WINDOWS,
     load_tests,
     parametrize,
@@ -40,6 +39,7 @@ from torch.testing._internal.common_utils import (
     skipIfCppFakeTensor,
     skipIfNoDill,
     skipIfRocm,
+    skipIfSandcastle,
     skipIfXpu,
     slowTest,
     TEST_CUDA,
@@ -1348,7 +1348,7 @@ class TestDataLoader(TestCase):
         def _create_dataloader(is_train: bool) -> DataLoader[list[torch.Tensor]]:
             pass
 
-    @unittest.skipIf(IS_SANDCASTLE, "subprocess doesn't work in FB internal CI")
+    @skipIfSandcastle("subprocess doesn't work in FB internal CI")
     @unittest.skipIf(IS_WINDOWS, "No 'resource' module on Windows")
     def test_fd_limit_exceeded(self):
         # See NOTE [ DataLoader on Linux and open files limit ]
@@ -3338,7 +3338,7 @@ class TestDataLoaderPersistentWorkers(TestDataLoader):
         super().setUp()
         self.persistent_workers = True
 
-    @unittest.skipIf(IS_SANDCASTLE, "subprocess doesn't work in FB internal CI")
+    @skipIfSandcastle("subprocess doesn't work in FB internal CI")
     @unittest.skipIf(IS_WINDOWS, "No 'resource' module on Windows")
     def test_fd_limit_exceeded(self):
         # See NOTE [ DataLoader on Linux and open files limit ]
@@ -3504,7 +3504,7 @@ except RuntimeError as e:
                 # and can cache values safely
                 dataset.start = i
 
-    @unittest.skipIf(IS_SANDCASTLE, "subprocess doesn't work in FB internal CI")
+    @skipIfSandcastle("subprocess doesn't work in FB internal CI")
     @unittest.skipIf(IS_WINDOWS, "Needs fork")
     def test_early_exit(self):
         import subprocess
