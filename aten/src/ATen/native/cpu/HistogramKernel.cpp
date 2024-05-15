@@ -100,7 +100,7 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
 
     TensorAccessor<const input_t, 2> accessor_in = input.accessor<const input_t, 2>();
 
-    /* Constructs a c10::optional<TensorAccessor> containing an accessor iff
+    /* Constructs a c10::optional<TensorAccessor> containing an accessor if
      * the optional weight tensor has a value.
      */
     const auto accessor_wt = weight.has_value()
@@ -292,10 +292,10 @@ void infer_bin_edges_from_input(const Tensor& input, const int64_t N,
 
     TORCH_INTERNAL_ASSERT(min.is_contiguous() && max.is_contiguous());
 
-    const scalar_t *min_data = min.data_ptr<scalar_t>();
+    const scalar_t *min_data = min.const_data_ptr<scalar_t>();
     std::copy(min_data, min_data + N, leftmost_edges.begin());
 
-    const scalar_t *max_data = max.data_ptr<scalar_t>();
+    const scalar_t *max_data = max.const_data_ptr<scalar_t>();
     std::copy(max_data, max_data + N, rightmost_edges.begin());
 }
 

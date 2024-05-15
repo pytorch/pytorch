@@ -1,6 +1,5 @@
 tracking_issue: 24422
 ciflow_tracking_issue: 64124
-TD_rollout_issue: 123120
 ciflow_push_tags:
 - ciflow/binaries
 - ciflow/binaries_conda
@@ -8,6 +7,8 @@ ciflow_push_tags:
 - ciflow/binaries_wheel
 - ciflow/inductor
 - ciflow/inductor-perf-compare
+- ciflow/inductor-micro-benchmark
+- ciflow/linux-aarch64
 - ciflow/mps
 - ciflow/nightly
 - ciflow/periodic
@@ -24,3 +25,4 @@ retryable_workflows:
 - linux-binary
 - windows-binary
 labeler_config: labeler.yml
+label_to_label_config: label_to_label.yml

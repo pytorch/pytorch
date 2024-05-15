@@ -28,7 +28,7 @@ namespace {
 int64_t padded_tensor_numel(const Tensor& sizes) {
   const auto sizes_num_rows = sizes.sizes()[0];
   const auto sizes_row_length = sizes.sizes()[1];
-  const auto* sizes_data = sizes.data_ptr<int64_t>();
+  const auto* sizes_data = sizes.const_data_ptr<int64_t>();
   int64_t numel = 0;
   for (const auto row_num : c10::irange(sizes_num_rows)) {
     const auto* row_ptr = sizes_data + row_num * sizes_row_length;

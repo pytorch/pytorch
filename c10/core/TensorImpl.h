@@ -1204,11 +1204,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return device_opt_.has_value() && device_opt_->type() == kMPS;
   }
 
-  bool is_ort() const {
+  bool is_maia() const {
     if (C10_UNLIKELY(device_policy_)) {
-      return device_custom().is_ort();
+      return device_custom().is_maia();
     }
-    return device_opt_.has_value() && device_opt_->type() == kORT;
+    return device_opt_.has_value() && device_opt_->type() == kMAIA;
   }
 
   bool is_nested() const {
@@ -2443,18 +2443,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // sizes/strides
   bool has_symbolic_sizes_strides() const {
     return has_symbolic_sizes_strides_;
-  }
-
-  // if this returns true, then it is guaranteed that this tensor does NOT have
-  // symbolic sizes/strides. This is different from the above, because it's
-  // possible that has_symbolic_sizes_strides() returns false, but we do
-  // not have symbolic sizes/strides. This exists for the case of
-  // Nested Tensor python subclass, where the sizes are implemented in python
-  // (TODO: clean this up and just implement sizes in nested tensor without a
-  // python implementation)
-  bool does_not_have_symbolic_sizes_strides() const {
-    return !has_symbolic_sizes_strides() &&
-        !matches_policy(SizesStridesPolicy::CustomStrides);
   }
 
  private:

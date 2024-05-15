@@ -19,8 +19,9 @@ from torch.testing._internal.common_utils import (
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
 
 
-TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
+# define TEST_ROCM before changing TEST_CUDA
 TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
+TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
 
 
 def remove_build_path():
@@ -35,7 +36,7 @@ def remove_build_path():
 # Since we use a fake MTIA device backend to test generic Stream/Event, device backends are mutual exclusive to each other.
 # The test will be skipped if any of the following conditions are met:
 @unittest.skipIf(
-    IS_ARM64 or not IS_LINUX or TEST_CUDA or TEST_PRIVATEUSE1,
+    IS_ARM64 or not IS_LINUX or TEST_CUDA or TEST_PRIVATEUSE1 or TEST_ROCM,
     "Only on linux platform and mutual exclusive to other backends",
 )
 @torch.testing._internal.common_utils.markDynamoStrictTest

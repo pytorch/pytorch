@@ -17,34 +17,21 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, SM80OrLater
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing._internal.common_utils import (
-    find_library_location,
-    IS_FBCODE,
-    IS_MACOS,
-    IS_SANDCASTLE,
     IS_WINDOWS,
     run_tests,
     TEST_CUDA,
     TEST_WITH_ROCM,
     TestCase,
 )
+
+from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 from torch.utils.hooks import RemovableHandle
 
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestWithEffects(TestCase):
     def setUp(self):
-        if IS_MACOS:
-            raise unittest.SkipTest("non-portable load_library call used in test")
-        elif IS_SANDCASTLE or IS_FBCODE:
-            torch.ops.load_library(
-                "//caffe2/test/cpp/jit:test_custom_class_registrations"
-            )
-        elif IS_WINDOWS:
-            lib_file_path = find_library_location("torchbind_test.dll")
-            torch.ops.load_library(str(lib_file_path))
-        else:
-            lib_file_path = find_library_location("libtorchbind_test.so")
-            torch.ops.load_library(str(lib_file_path))
+        init_torchbind_implementations()
 
     def test_print(self):
         class M(torch.nn.Module):
@@ -110,8 +97,8 @@ def forward(self, arg1_1):
             str(gm.code).strip(),
             """\
 def forward(self, arg0_1, arg1_1):
-    _tensor_constant0 = self._tensor_constant0
-    with_effects = torch._higher_order_ops.effects.with_effects(arg0_1, torch.ops._TorchScriptTesting.takes_foo.default, _tensor_constant0, arg1_1);  arg0_1 = _tensor_constant0 = None
+    _torchbind_obj0 = self._torchbind_obj0
+    with_effects = torch._higher_order_ops.effects.with_effects(arg0_1, torch.ops._TorchScriptTesting.takes_foo.default, _torchbind_obj0, arg1_1);  arg0_1 = _torchbind_obj0 = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
     add = torch.ops.aten.add.Tensor(arg1_1, getitem_1);  arg1_1 = getitem_1 = None
