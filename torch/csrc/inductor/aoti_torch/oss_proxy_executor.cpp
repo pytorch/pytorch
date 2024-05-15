@@ -106,8 +106,6 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
   TORCH_CHECK(serialized_arg.size() == 1);
   std::string serialized_arg_type = serialized_arg.begin().key();
   auto& serialized_arg_val = serialized_arg.begin().value();
-  std::cout << "Serialized arg type: " << serialized_arg_type
-            << "  serialized_arg_val: " << serialized_arg_val << std::endl;
 
   switch (schema_arg_type->kind()) {
     case c10::TypeKind::TensorType: {
@@ -357,12 +355,9 @@ void OSSProxyExecutor::get_input_info_from_serialized(
   for (const auto& named_argument : serialized_node["inputs"]) {
     const auto& arg = named_argument["arg"];
     auto& schema_arg = schema_args[index];
-    std::cout << "arg: " << arg << "   schema arg: " << schema_arg << std::endl;
-
     prefill_stack_with_static_arguments(
         index++, schema_arg.real_type(), arg, op_kernel);
   }
-  std::cout << "finish get inputs";
 }
 
 // Populates op_kernel.outputs_
@@ -381,9 +376,6 @@ void OSSProxyExecutor::get_output_info_from_serialized(
     TORCH_CHECK(serialized_output.size() == 1);
     std::string serialized_output_type = serialized_output.begin().key();
     auto& serialized_output_val = serialized_output.begin().value();
-    std::cout << "Serialized output type: " << serialized_output_type
-              << "  serialized_output_val: " << serialized_output_val
-              << std::endl;
 
     auto& schema_return = schema_returns[output_index];
     at::TypePtr schema_return_type = schema_return.real_type();
@@ -452,10 +444,7 @@ OSSProxyExecutor::OSSProxyExecutor(const std::string& json_path, bool is_cpu) {
   json_file >> json_obj;
 
   // Access data
-  std::cout << json_obj["nodes"] << std::endl;
   for (auto const& serialized_extern_node : json_obj["nodes"]) {
-    std::cout << serialized_extern_node["name"] << std::endl;
-    std::cout << serialized_extern_node["node"] << std::endl;
     auto const& serialized_node = serialized_extern_node["node"];
 
     const std::string& target = serialized_node["target"];
@@ -475,8 +464,6 @@ OSSProxyExecutor::OSSProxyExecutor(const std::string& json_path, bool is_cpu) {
       overloadName = target.substr(pos + 1, target.length() - pos);
     }
 
-    std::cout << "Operator " << opName << "." << overloadName << std::endl;
-
     c10::OperatorHandle op_handle =
         c10::Dispatcher::singleton().findSchemaOrThrow(
             opName.c_str(), overloadName.c_str());
@@ -488,11 +475,9 @@ OSSProxyExecutor::OSSProxyExecutor(const std::string& json_path, bool is_cpu) {
     OpKernel op_kernel(target, op_handle);
     get_input_info_from_serialized(schema_args, serialized_node, op_kernel);
     get_output_info_from_serialized(schema_returns, serialized_node, op_kernel);
-    std::cout << "finish get output";
 
     op_kernels_.emplace_back(std::move(op_kernel));
   }
-  std::cout << "Finished parsing " << std::endl;
 }
 
 void OSSProxyExecutor::call_function(
@@ -505,8 +490,6 @@ void OSSProxyExecutor::call_function(
       extern_node_index < static_cast<int>(op_kernels_.size()),
       "Invalid extern node index");
   OpKernel& op_kernel = op_kernels_[extern_node_index];
-
-  std::cout << "Calling function " << op_kernel.target_ << std::endl;
 
   std::vector<c10::IValue> stack = op_kernel.stack_;
   auto& dynamic_args = op_kernel.dynamic_args_;
@@ -593,8 +576,6 @@ void OSSProxyExecutor::call_function(
   const c10::OperatorHandle& op = op_kernel.op_handle_;
   op.callBoxed(stack);
 
-  std::cout << op_kernel.target_ << " execution completed!" << std::endl;
-
   const c10::FunctionSchema& schema = op.schema();
   const auto& schema_returns = schema.returns();
 
@@ -631,7 +612,6 @@ void OSSProxyExecutor::call_function(
       tensor_id,
       ", expected num = ",
       num_tensors);
-  std::cout << "Returned " << tensor_id << " tensors" << std::endl;
 }
 
 } // namespace aot_inductor
