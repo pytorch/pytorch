@@ -1361,6 +1361,7 @@ def main():
         "include/torch/csrc/onnx/*.h",
         "include/torch/csrc/profiler/*.h",
         "include/torch/csrc/profiler/orchestration/*.h",
+        "include/torch/csrc/profiler/standalone/*.h",
         "include/torch/csrc/profiler/stubs/*.h",
         "include/torch/csrc/profiler/unwind/*.h",
         "include/torch/csrc/profiler/python/*.h",
@@ -1483,7 +1484,7 @@ def main():
             "caffe2": [
                 "python/serialized_test/data/operator_test/*.zip",
             ],
-        }
+        },
 
     setup(
         name=package_name,
@@ -1500,9 +1501,8 @@ def main():
         entry_points=entry_points,
         install_requires=install_requires,
         extras_require=extras_require,
-        package_dir=package_dir,
         package_data=package_data,
-        include_package_data=True,
+        package_dir=package_dir,
         url="https://pytorch.org/",
         download_url="https://github.com/pytorch/pytorch/tags",
         author="PyTorch Team",
