@@ -350,9 +350,6 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         nan_tensor[i, j] = float("nan")
         with self.assertRaises(RuntimeError):
             pg.allreduce(nan_tensor)
-        dist.destroy_process_group()
-        # reset env
-        os.environ["TORCH_NCCL_NAN_CHECK"] = "0"
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
