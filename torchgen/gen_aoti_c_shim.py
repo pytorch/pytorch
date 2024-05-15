@@ -16,6 +16,7 @@ from torchgen.model import (
     ListType,
     NativeFunction,
     NativeFunctionsGroup,
+    OperatorName,
     OptionalType,
     Type,
 )
@@ -209,7 +210,11 @@ def gen_returns(schema: FunctionSchema) -> Tuple[List[str], List[str]]:
 
     ret_pointer_can_be_null = False
     unambiguous_name = schema.name.unambiguous_name()
-    for name in ["_scaled_dot_product_flash_attention", "convolution_backward"]:
+    for name in [
+        "_scaled_dot_product_flash_attention",
+        "_scaled_dot_product_efficient_attention",
+        "convolution_backward",
+    ]:
         if name in unambiguous_name:
             ret_pointer_can_be_null = True
             break
@@ -302,15 +307,17 @@ def gen_static_dispatch_backend_call(
 
 def get_backend_index_for_aoti(
     func: NativeFunction,
-    func_group: Optional[NativeFunctionsGroup],
+    func_group_mapping: Dict[OperatorName, NativeFunctionsGroup],
     dispatch_key: DispatchKey,
     backend_indices: Dict[DispatchKey, BackendIndex],
 ) -> Optional[BackendIndex]:
     backend_index = None
     if backend_indices[dispatch_key].has_kernel(func) or (
         func.structured_delegate is not None
-        and func_group is not None
-        and backend_indices[dispatch_key].has_kernel(func_group)
+        and func.structured_delegate in func_group_mapping
+        and backend_indices[dispatch_key].has_kernel(
+            func_group_mapping[func.structured_delegate]
+        )
     ):
         backend_index = backend_indices[dispatch_key]
     elif backend_indices[DispatchKey.CompositeExplicitAutograd].has_kernel(func):
@@ -327,6 +334,22 @@ def get_backend_index_for_aoti(
     return backend_index
 
 
+def get_header_for_aoti(
+    func: NativeFunction,
+    func_group_mapping: Dict[OperatorName, NativeFunctionsGroup],
+    dispatch_key: DispatchKey,
+    backend_indices: Dict[DispatchKey, BackendIndex],
+) -> Optional[str]:
+    backend_index = get_backend_index_for_aoti(
+        func, func_group_mapping, dispatch_key, backend_indices
+    )
+    return (
+        None
+        if backend_index is None
+        else f"#include <ATen/ops/{func.root_name}_{backend_index.dispatch_key.lower()}_dispatch.h>"
+    )
+
+
 def get_fallback_op_name(func: NativeFunction) -> str:
     return (
         f"{func.namespace}.{func.func.name.name}.{func.func.name.overload_name}"
@@ -337,13 +360,13 @@ def get_fallback_op_name(func: NativeFunction) -> str:
 
 def gen_c_shim(
     func: NativeFunction,
-    func_group: Optional[NativeFunctionsGroup],
+    func_group_mapping: Dict[OperatorName, NativeFunctionsGroup],
     dispatch_key: DispatchKey,
     backend_indices: Dict[DispatchKey, BackendIndex],
     header: bool,
 ) -> Optional[str]:
     backend_index = get_backend_index_for_aoti(
-        func, func_group, dispatch_key, backend_indices
+        func, func_group_mapping, dispatch_key, backend_indices
     )
     if backend_index is None:
         return None
@@ -371,7 +394,7 @@ def gen_c_shim(
 
 @dataclass(frozen=True)
 class ShimGenerator:
-    func_group_mapping: Dict[str, Optional[NativeFunctionsGroup]]
+    func_group_mapping: Dict[OperatorName, NativeFunctionsGroup]
     dispatch_key: DispatchKey
     backend_indices: Dict[DispatchKey, BackendIndex]
     header: bool  # True to generate .h and False to generate .cpp
@@ -383,7 +406,7 @@ class ShimGenerator:
     ) -> Optional[str]:
         result = gen_c_shim(
             func,
-            self.func_group_mapping.get(get_fallback_op_name(func), None),
+            self.func_group_mapping,
             self.dispatch_key,
             self.backend_indices,
             self.header,
@@ -392,22 +415,20 @@ class ShimGenerator:
 
 
 def gen_aoti_c_shim(
-    native_functions: Sequence[Tuple[NativeFunction, Optional[NativeFunctionsGroup]]],
+    native_functions: Sequence[NativeFunction],
+    func_group_mapping: Dict[OperatorName, NativeFunctionsGroup],
     dispatch_key: DispatchKey,
     backend_indices: Dict[DispatchKey, BackendIndex],
     header: bool,
     includes: str = "",
 ) -> str:
-    func_group_mapping = {
-        get_fallback_op_name(func): func_group for func, func_group in native_functions
-    }
     body = "\n".join(
         list(
             mapMaybe(
                 ShimGenerator(
                     func_group_mapping, dispatch_key, backend_indices, header
                 ),
-                [func for func, _ in native_functions],
+                native_functions,
             )
         )
     )
