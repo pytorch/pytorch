@@ -2628,6 +2628,44 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(test_functions._variable, 1)
         self.assertEqual(res, 3 * torch.ones(10))
 
+    def test_monkeypatching_forward(self):
+        class FakeModule(torch.nn.Module):
+            def forward(self, x):
+                return torch.sin(x)
+
+        class MyModule(torch.nn.Module):
+            def __init__(self, x):
+                super().__init__()
+
+            def forward(self, x):
+                return torch.cos(x)
+
+        def helper():
+            torch._dynamo.reset()
+            mod = MyModule(3)
+
+            def fn(x):
+                return mod(x)
+
+            cnt = torch._dynamo.testing.CompileCounter()
+            opt_fn = torch._dynamo.optimize(cnt)(fn)
+            x = torch.randn(10)
+
+            opt_fn(x)
+            opt_fn(x)
+            self.assertEqual(cnt.frame_count, 1)
+
+            # Monkeypatch forward
+            mod.forward = types.MethodType(FakeModule.forward, mod)
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertEqual(ref, res)
+            self.assertEqual(cnt.frame_count, 2)
+
+        helper()
+        with torch._dynamo.config.patch(inline_inbuilt_nn_modules=True):
+            helper()
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

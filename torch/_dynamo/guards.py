@@ -1124,6 +1124,26 @@ class GuardBuilder(GuardBuilderBase):
         else:
             self._produce_guard_code(guard, [code])
 
+    def NOT_PRESENT_IN_GENERIC_DICT(self, guard: Guard, attr=None) -> None:
+        assert attr is not None
+        ref = self.arg_ref(guard)
+        val = self.get(guard.name)
+        assert isinstance(val, torch.nn.Module)
+
+        base_manager = self.get_guard_manager(guard)
+
+        mod_dict_source = f"{guard.name}.__dict__"
+        mod_generic_dict_manager = base_manager.get_generic_dict_manager(
+            source=mod_dict_source,
+            example_value=val.__dict__,
+            guard_manager_enum=GuardManagerType.GUARD_MANAGER,
+        )
+
+        code = f"not ___dict_contains({attr!r}, {ref}.__dict__)"
+        mod_generic_dict_manager.add_dict_contains_guard(
+            False, attr, get_verbose_code_parts(code, guard)
+        )
+
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
         t = type(self.get(guard.name))
