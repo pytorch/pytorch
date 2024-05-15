@@ -35,10 +35,7 @@ class IRParser {
       : L(std::make_shared<Source>(str)),
         g(graph),
         vmap(vmap),
-        type_parser(
-            L,
-            /*parse_complete_tensor_types*/ true,
-            /*allow_type_vars*/ true),
+        type_parser(L, /*parse_complete_tensor_types*/ true),
         parse_tensor_constants_(parse_tensor_constants) {}
 
   std::string parseVar();
@@ -172,7 +169,7 @@ void IRParser::parseOperatorOutputs(std::vector<VarWithType>* outs) {
 ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
   auto token = L.cur();
   std::string str;
-  std::pair<TypePtr, c10::optional<c10::AliasInfo>> type_alias;
+  std::pair<TypePtr, std::optional<c10::AliasInfo>> type_alias;
   ParsedLiteral r;
   switch (token.kind) {
     case TK_STRINGLITERAL:

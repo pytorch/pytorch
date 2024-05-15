@@ -335,7 +335,7 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
   Tensor output = wrap_buffer(out_buffer, out_sizemat);
   auto out_ptr = get_nested_tensor_impl(output);
 
-  const int64_t *out_offsets_ptr = out_ptr->get_storage_offsets().data_ptr<int64_t>();
+  const int64_t *out_offsets_ptr = out_ptr->get_storage_offsets().const_data_ptr<int64_t>();
 
 #ifndef USE_ROCM
 #ifndef _WIN32
