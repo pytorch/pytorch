@@ -275,6 +275,7 @@ class FakeTensorConverter:
         *,
         source=None,
         symbolic_context=None,
+        export: bool = False,
     ):
         # see note [Tensor Fakification and Symbol Caching]
         if not symbolic_context and not source and shape_env:
@@ -325,7 +326,9 @@ class FakeTensorConverter:
         # Python sympy compute is always done at arbitrary precision.
         value = None
         if (
-            not isinstance(t, FakeTensor)
+            not export
+            and type(t) is torch.Tensor
+            # TODO: Maybe also explicitly exclude more exotic types
             and t.dim() == 0
             and t.device.type == "cpu"
             and t.dtype in [torch.int64, torch.float64]
@@ -335,7 +338,8 @@ class FakeTensorConverter:
             from torch._dynamo.source import CallMethodItemSource, FloatTensorSource
             from torch.fx.experimental.symbolic_shapes import DimDynamic
 
-            value = t.item()
+            with no_dispatch():
+                value = t.item()
             # Peephole strip out unnecessary torch.as_tensor(x).item()
             if isinstance(source, FloatTensorSource):
                 item_source = source.base
@@ -1869,6 +1873,7 @@ class FakeTensorMode(TorchDispatchMode):
         static_shapes=None,
         source: Optional[Source] = None,
         symbolic_context=None,
+        export=False,
     ):
         shape_env: Optional[ShapeEnv] = self.shape_env
         if static_shapes is None:
@@ -1884,6 +1889,7 @@ class FakeTensorMode(TorchDispatchMode):
             shape_env=shape_env,
             source=source,
             symbolic_context=symbolic_context,
+            export=export,
         )
 
 

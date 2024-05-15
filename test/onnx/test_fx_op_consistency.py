@@ -1186,10 +1186,6 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         ),
     ),
     xfail(
-        "take",
-        reason=onnx_test_common.reason_dynamo_does_not_support("data-dependent"),
-    ),
-    xfail(
         "tensor_split",
         reason=onnx_test_common.reason_dynamo_does_not_support("data-dependent"),
     ),

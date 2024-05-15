@@ -52,6 +52,7 @@ from ..guards import GuardBuilder, install_guard, make_dupe_guard
 from ..side_effects import SideEffects
 from ..source import (
     AttrSource,
+    CallMethodItemSource,
     ConstantSource,
     ConstDictKeySource,
     ConvertIntSource,
@@ -2259,8 +2260,13 @@ def wrap_to_fake_tensor_and_record(
                 e,
                 source=source,
                 symbolic_context=symbolic_context,
+                export=tx.export,
             )
         )
+        if source is not None and (sym_val := fake_e.item_memo) is not None:
+            tx.output.tracked_fakes.append(
+                TrackedFake(sym_val, CallMethodItemSource(source), symbolic_context)
+            )
 
         if is_traceable_wrapper_subclass(fake_e):
             attrs, _ = fake_e.__tensor_flatten__()

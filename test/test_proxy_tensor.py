@@ -1423,6 +1423,7 @@ def forward(self, x_1, y_1):
             return r.view(12, -1, 192)
         make_fx(f, tracing_mode="symbolic")(torch.tensor(24))
 
+    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     def test_view_divisibility_unbacked_relatively_prime(self):
         # See https://github.com/pytorch/pytorch/issues/123651
         def f(x):
@@ -1432,7 +1433,7 @@ def forward(self, x_1, y_1):
             # be chosen such that 448 / 447 < 2 (which it is.)
             torch._check(i0 <= 448)
             return torch.zeros(256 * i0).view(-1, 447)
-        make_fx(f, tracing_mode="symbolic")(torch.tensor(256 * 447))
+        make_fx(f, tracing_mode="symbolic")(torch.tensor(256 * 447, device="cuda"))
 
     def test_unbacked_unify_guard(self):
         def f(x, y):
@@ -1451,6 +1452,7 @@ def forward(self, x_1, y_1):
     add = torch.ops.aten.add.Tensor(y_1, 2);  y_1 = None
     return add""")  # noqa: B950
 
+    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     @unittest.expectedFailure
     def test_unbacked_unify_guard_transitivity(self):
         def f(x1, x2, y):
@@ -1463,7 +1465,11 @@ def forward(self, x_1, y_1):
             else:
                 return y + 2
 
-        gm = make_fx(f, tracing_mode="symbolic")(torch.tensor(10), torch.tensor(10), torch.randn(10))
+        gm = make_fx(f, tracing_mode="symbolic")(
+            torch.tensor(10, device="cuda"),
+            torch.tensor(10, device="cuda"),
+            torch.randn(10, device="cuda")
+        )
         insert_deferred_runtime_asserts(gm, gm.shape_env, "test")
         gm.recompile()
         r = str(gm.code).strip()
@@ -1471,6 +1477,7 @@ def forward(self, x_1, y_1):
         #     r, """"""  # noqa: B950
         # )
 
+    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     def test_unbacked_unify_dependency_violation(self):
         def f(x1, x2, x3, y):
             z1 = x1.item()
@@ -1484,14 +1491,25 @@ def forward(self, x_1, y_1):
             else:
                 return y + 3
 
-        # NB:
+        # NB: inputs are done as CUDA to ensure they aren't queried to be
+        # backed
 
-        gm = make_fx(f, tracing_mode="symbolic")(torch.tensor(10), torch.tensor(5), torch.tensor(5), torch.randn(1))
+        gm = make_fx(f, tracing_mode="symbolic")(
+            torch.tensor(10, device="cuda"), torch.tensor(5, device="cuda"),
+            torch.tensor(5, device="cuda"), torch.randn(1, device="cuda")
+        )
         insert_deferred_runtime_asserts(gm, gm.shape_env, "test")
         gm.recompile()
-        self.assertEqual(gm(torch.tensor(12), torch.tensor(6), torch.tensor(6), torch.tensor([1.0])), torch.tensor([2.0]))
+        self.assertEqual(gm(
+            torch.tensor(12, device="cuda"), torch.tensor(6, device="cuda"),
+            torch.tensor(6, device="cuda"), torch.tensor([1.0], device="cuda")),
+            torch.tensor([2.0], device="cuda")
+        )
         with self.assertRaises(RuntimeError):
-            gm(torch.tensor(20), torch.tensor(10), torch.tensor(10), torch.tensor([1.0]))
+            gm(
+                torch.tensor(20, device="cuda"), torch.tensor(10, device="cuda"),
+                torch.tensor(10, device="cuda"), torch.tensor([1.0], device="cuda")
+            )
 
 
     def test_split_unbacked_sizes(self):
