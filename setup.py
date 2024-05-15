@@ -236,7 +236,6 @@ if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
     )
     sys.exit(-1)
 
-import os
 import platform
 
 
@@ -1432,6 +1431,7 @@ def main():
             [
                 "lib/libtorch_python*",
                 "lib/*shm*",
+                "lib/libtorch_global_deps*",
             ]
         )
     else:
