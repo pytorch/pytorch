@@ -38,7 +38,7 @@ namespace torch {
 namespace profiler {
 namespace impl {
 TORCH_API bool softAssertRaises();
-TORCH_API void setSoftAssertRaises(c10::optional<bool> value);
+TORCH_API void setSoftAssertRaises(std::optional<bool> value);
 TORCH_API void logSoftAssert(
     const char* func,
     const char* file,

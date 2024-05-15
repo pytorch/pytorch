@@ -3756,6 +3756,8 @@ class InputsKernel(Buffer):
             # into TensorBox / StorageBox pair as a result of the
             # cls.copy_input call; so we should unwrap recursively
             return cls.unwrap_storage_for_input(x)
+        if isinstance(x, TorchBindObject):
+            return x
         assert isinstance(x, (Buffer, ReinterpretView)), x
         return x
 
@@ -4085,7 +4087,7 @@ class ExternKernel(InputsKernel):
         # Rerun fake tensor propagation, because Inductor may have changed the
         # strides of inputs and we need to determine accurately what the
         # output stride will be.
-        example_args = []
+        example_args: List[Union[torch.Tensor, torch._C.ScriptObject]] = []
 
         # We need to retain the constant values of fake tensors that we originally
         # propagated the graph with, because for some operators running without a
@@ -4093,6 +4095,8 @@ class ExternKernel(InputsKernel):
         for x in tensor_args:
             if x.get_name() in V.graph.constants:
                 example_args.append(V.graph.constants[x.get_name()])
+            elif x.get_name() in V.graph.torchbind_constants:
+                example_args.append(V.graph.torchbind_constants[x.get_name()])
             else:
                 example_args.append(ir_node_to_tensor(x, guard_shape=True))
 
@@ -4220,6 +4224,8 @@ class ExternKernel(InputsKernel):
         if isinstance(x, StorageBox):
             # TODO(jansel): impose layout preference on realized buffer
             x.realize()
+            return x
+        if isinstance(x, TorchBindObject):
             return x
         return cls.copy_input(x)
 
@@ -5400,13 +5406,14 @@ class FallbackKernel(ExternKernelAlloc):
     @staticmethod
     def find_device(tensor_args, example_output):
         if tensor_args:
-            return tensor_args[0].get_device()
+            devices = [arg.get_device() for arg in tensor_args if arg.get_device()]
+            return devices[0]
         if isinstance(example_output, torch.Tensor):
             return example_output.device
         if isinstance(example_output, (list, tuple)):
-            devices = {FallbackKernel.find_device(None, x) for x in example_output}
+            device_set = {FallbackKernel.find_device(None, x) for x in example_output}
             # Remove None
-            devices = [device for device in devices if device]
+            devices = [device for device in device_set if device]
             if len(devices) == 1:
                 return devices[0]
             for device in devices:
@@ -7629,7 +7636,7 @@ class EffectfulKernel(FallbackKernel):
         unbacked_bindings=None,
     ):
         super().__init__(
-            NoneLayout(layout.device),
+            layout,
             kernel,
             tensor_args,
             nontensor_args,
@@ -7658,6 +7665,21 @@ class EffectfulKernel(FallbackKernel):
 
     def has_side_effects(self):
         return True
+
+
+@dataclasses.dataclass
+class TorchBindObject(IRNode):
+    name: str
+    value: torch._C.ScriptObject
+
+    def get_name(self):
+        return self.name
+
+    def get_device(self):
+        return None  # is there a device??
+
+    def codegen_reference(self, writer=None):
+        return self.name
 
 
 class InterpreterShim(torch.fx.Interpreter):
