@@ -466,7 +466,7 @@ def _export_to_torch_ir(
     return gm_torch_level
 
 
-def _export_non_strict(
+def _export_to_aten_ir(
     mod: torch.nn.Module,
     fake_args,
     fake_kwargs,
@@ -887,280 +887,207 @@ def _log_export_wrapper(fn):
     return wrapper
 
 
-@_log_export_wrapper
-@_disable_prexisiting_fake_mode
-def _export(
+def _export_non_strict(
     mod: torch.nn.Module,
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
-    *,
-    strict: bool = True,
     preserve_module_call_signature: Tuple[str, ...] = (),
     pre_dispatch: bool = False,
+    forward_arg_names: List[str] = [],
+    original_state_dict: Optional[Dict[str, torch.Tensor]] = None,
+    orig_in_spec: Optional[Dict[str, torch.Tensor]] = None,
     _disable_forced_specializations: Optional[bool] = False,
-) -> ExportedProgram:
-    """
-    Traces either an nn.Module's forward function or just a callable with PyTorch
-    operations inside and produce a ExportedProgram.
+):
+    out_spec = None
 
-    Args:
-        f: the `nn.Module` to trace.
+    module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
 
-        args: example positional inputs.
+    def strip_root(x):
+        if isinstance(x, str) and x.startswith("_export_root"):
+            stripped = x[len("_export_root") :]
+            return stripped[1:] if stripped.startswith(".") else stripped
+        return x
 
-        kwargs: optional example keyword inputs.
+    def fixup_key(x):
+        return "L__self__" + strip_root(x)
 
-        dynamic_shapes:
-         An optional argument where the type should either be:
-         1) a dict from argument names of ``f`` to their dynamic shape specifications,
-         2) a tuple that specifies dynamic shape specifications for each input in original order.
-         If you are specifying dynamism on keyword args, you will need to pass them in the order that
-         is defined in the original function signature.
+    def _tuplify_outputs(aot_export):
+        def _aot_export_non_strict(mod, args, kwargs=None, **flags):
+            kwargs = kwargs or {}
 
-         The dynamic shape of a tensor argument can be specified as either
-         (1) a dict from dynamic dimension indices to :func:`Dim` types, where it is
-         not required to include static dimension indices in this dict, but when they are,
-         they should be mapped to None; or (2) a tuple / list of :func:`Dim` types or None,
-         where the :func:`Dim` types correspond to dynamic dimensions, and static dimensions
-         are denoted by None. Arguments that are dicts or tuples / lists of tensors are
-         recursively specified by using mappings or sequences of contained specifications.
+            class Wrapper(torch.nn.Module):
+                def __init__(self, mod):
+                    super().__init__()
+                    self._export_root = mod
 
-        preserve_module_call_signature: A list of submodule paths for which the original
-            calling conventions are preserved as metadata.
+                def forward(self, *args, **kwargs):
+                    nonlocal out_spec
+                    if isinstance(self._export_root, torch.fx.GraphModule):
+                        with torch.fx.traceback.preserve_node_meta():
+                            tree_out = torch.fx.Interpreter(self._export_root).run(
+                                *args, **kwargs
+                            )
+                    else:
+                        tree_out = self._export_root(*args, **kwargs)
+                    flat_outs, out_spec = pytree.tree_flatten(tree_out)
+                    return tuple(flat_outs)
 
-        _disable_forced_specializations:
-         By default, some inferred dynamic shapes guards/constraints that are not expressible with the current
-         dynamic shapes language will lead to specialization to the concrete input values provided.
-         If _disable_forced_specializations is set to True, we will not specialize, and will not perform runtime
-         checks on such produced guards. Instead, we allow the user to specify arbitrary shapes,
-         and fail during runtime if the inputs are invalid. Constraints expressible with the language
-         (e.g. ranges, linear derived dims) will still be enforced.
+            wrapped_mod = Wrapper(mod)
+            # Patch export_root to the signatures so that wrapper module correctly populates the
+            # in/out spec
+            new_preserved_call_signatures = [
+                "_export_root." + i for i in preserve_module_call_signature
+            ]
+            with _wrap_submodules(
+                wrapped_mod, new_preserved_call_signatures, module_call_specs
+            ):
+                gm, sig = aot_export(wrapped_mod, args, kwargs=kwargs, **flags)
 
-    Returns:
-        An ExportedProgram containing the traced method.
-    """
-    if not isinstance(args, tuple):
-        raise UserError(
-            UserErrorType.INVALID_INPUT,
-            f"Expecting `args` to be a tuple of example positional inputs, got {type(args)}",
-        )
+            sig.parameters = pytree.tree_map(strip_root, sig.parameters)
+            sig.buffers = pytree.tree_map(strip_root, sig.buffers)
+            sig.inputs_to_buffers = pytree.tree_map(strip_root, sig.inputs_to_buffers)
+            sig.inputs_to_parameters = pytree.tree_map(
+                strip_root, sig.inputs_to_parameters
+            )
+            sig.buffers_to_mutate = pytree.tree_map(strip_root, sig.buffers_to_mutate)
+            for node in gm.graph.nodes:
+                if "nn_module_stack" in node.meta:
+                    nn_module_stack = node.meta["nn_module_stack"]
+                    node.meta["nn_module_stack"] = {
+                        fixup_key(key): val
+                        for key, val in pytree.tree_map(
+                            strip_root, nn_module_stack
+                        ).items()
+                    }
 
-    if _disable_forced_specializations and strict:
-        raise UserError(
-            UserErrorType.INVALID_INPUT,
-            "_disable_forced_specializations can be only be specified in non-strict mode.",
-        )
+            return gm, sig
 
-    global _EXPORT_FLAGS, _EXPORT_MODULE_HIERARCHY
-    _EXPORT_MODULE_HIERARCHY = _get_module_hierarchy(mod)
+        return _aot_export_non_strict
 
-    flags = set()
-    flags.add("strict" if strict else "non_strict")
-    flags.add("pre_dispatch" if pre_dispatch else "aot_dispatch")
-    log_export_usage(event="export.enter", flags=flags)
-    _EXPORT_FLAGS = flags
+    (
+        fake_mode,
+        fake_args,
+        fake_kwargs,
+        equalities_inputs,
+        original_signature,
+    ) = make_fake_inputs(mod, args, kwargs, dynamic_shapes)
 
-    kwargs = kwargs or {}
-    if isinstance(dynamic_shapes, torch.export.ShapesCollection):
-        dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)
+    fake_params_buffers = make_fake_params_buffers(fake_mode, _get_params_buffers(mod))
 
-    flat_args, orig_in_spec = pytree.tree_flatten((args, kwargs))
-    original_state_dict = mod.state_dict(keep_vars=True)
-    forward_arg_names = _get_forward_arg_names(mod, args, kwargs)
-
-    if not strict:
-        out_spec = None
-
-        module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
-
-        def strip_root(x):
-            if isinstance(x, str) and x.startswith("_export_root"):
-                stripped = x[len("_export_root") :]
-                return stripped[1:] if stripped.startswith(".") else stripped
-            return x
-
-        def fixup_key(x):
-            return "L__self__" + strip_root(x)
-
-        def _tuplify_outputs(aot_export):
-            def _aot_export_non_strict(mod, args, kwargs=None, **flags):
-                kwargs = kwargs or {}
-
-                class Wrapper(torch.nn.Module):
-                    def __init__(self, mod):
-                        super().__init__()
-                        self._export_root = mod
-
-                    def forward(self, *args, **kwargs):
-                        nonlocal out_spec
-                        if isinstance(self._export_root, torch.fx.GraphModule):
-                            with torch.fx.traceback.preserve_node_meta():
-                                tree_out = torch.fx.Interpreter(self._export_root).run(
-                                    *args, **kwargs
-                                )
-                        else:
-                            tree_out = self._export_root(*args, **kwargs)
-                        flat_outs, out_spec = pytree.tree_flatten(tree_out)
-                        return tuple(flat_outs)
-
-                wrapped_mod = Wrapper(mod)
-                # Patch export_root to the signatures so that wrapper module correctly populates the
-                # in/out spec
-                new_preserved_call_signatures = [
-                    "_export_root." + i for i in preserve_module_call_signature
-                ]
-                with _wrap_submodules(
-                    wrapped_mod, new_preserved_call_signatures, module_call_specs
-                ):
-                    gm, sig = aot_export(wrapped_mod, args, kwargs=kwargs, **flags)
-
-                sig.parameters = pytree.tree_map(strip_root, sig.parameters)
-                sig.buffers = pytree.tree_map(strip_root, sig.buffers)
-                sig.inputs_to_buffers = pytree.tree_map(
-                    strip_root, sig.inputs_to_buffers
-                )
-                sig.inputs_to_parameters = pytree.tree_map(
-                    strip_root, sig.inputs_to_parameters
-                )
-                sig.buffers_to_mutate = pytree.tree_map(
-                    strip_root, sig.buffers_to_mutate
-                )
-                for node in gm.graph.nodes:
-                    if "nn_module_stack" in node.meta:
-                        nn_module_stack = node.meta["nn_module_stack"]
-                        node.meta["nn_module_stack"] = {
-                            fixup_key(key): val
-                            for key, val in pytree.tree_map(
-                                strip_root, nn_module_stack
-                            ).items()
-                        }
-
-                return gm, sig
-
-            return _aot_export_non_strict
-
-        (
-            fake_mode,
-            fake_args,
-            fake_kwargs,
-            equalities_inputs,
-            original_signature,
-        ) = make_fake_inputs(mod, args, kwargs, dynamic_shapes)
-
-        fake_params_buffers = make_fake_params_buffers(
-            fake_mode, _get_params_buffers(mod)
-        )
-
-        with fake_mode:
-            with _fakify_script_objects(mod, fake_args, fake_kwargs, fake_mode) as (
+    with fake_mode:
+        with _fakify_script_objects(mod, fake_args, fake_kwargs, fake_mode) as (
+            patched_mod,
+            new_fake_args,
+            new_fake_kwargs,
+            new_fake_constant_attrs,
+            map_fake_to_real,
+        ):
+            ep_non_strict = _export_to_aten_ir(
                 patched_mod,
                 new_fake_args,
                 new_fake_kwargs,
+                fake_params_buffers,
                 new_fake_constant_attrs,
-                map_fake_to_real,
-            ):
-                ep_non_strict = _export_non_strict(
-                    patched_mod,
-                    new_fake_args,
-                    new_fake_kwargs,
-                    fake_params_buffers,
-                    new_fake_constant_attrs,
-                    pre_dispatch=pre_dispatch,
-                    transform=_tuplify_outputs,
-                    should_insert_runtime_assertion=not strict,
-                )
-                # ep_non_strict.constants contains only fake script objects, we need to map them back
-                ep_non_strict.constants = {
-                    fqn: map_fake_to_real[obj]
-                    if isinstance(obj, FakeScriptObject)
-                    else obj
-                    for fqn, obj in ep_non_strict.constants.items()
-                }
-
-        ep_non_strict.gm.meta["inline_constraints"] = {
-            k: v
-            for k, v in fake_mode.shape_env.var_to_range.items()
-            if free_unbacked_symbols(k)
-        }
-        num_lifted = len(
-            [
-                spec
-                for spec in ep_non_strict.sig.input_specs
-                if spec.kind != InputKind.USER_INPUT
-            ]
-        )
-        try:
-            produce_guards_and_solve_constraints(
-                fake_mode,
-                ep_non_strict.gm,
-                equalities_inputs,
-                original_signature,
-                _disable_forced_specializations=_disable_forced_specializations,
+                pre_dispatch=pre_dispatch,
+                transform=_tuplify_outputs,
+                should_insert_runtime_assertion=True,
             )
-        except (ConstraintViolationError, ValueRangeError) as e:
-            raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: TRY200
+            # ep_non_strict.constants contains only fake script objects, we need to map them back
+            ep_non_strict.constants = {
+                fqn: map_fake_to_real[obj] if isinstance(obj, FakeScriptObject) else obj
+                for fqn, obj in ep_non_strict.constants.items()
+            }
 
-        combined_args = _combine_args(mod, args, kwargs)
-        range_constraints = make_constraints(
+    ep_non_strict.gm.meta["inline_constraints"] = {
+        k: v
+        for k, v in fake_mode.shape_env.var_to_range.items()
+        if free_unbacked_symbols(k)
+    }
+    num_lifted = len(
+        [
+            spec
+            for spec in ep_non_strict.sig.input_specs
+            if spec.kind != InputKind.USER_INPUT
+        ]
+    )
+    try:
+        produce_guards_and_solve_constraints(
             fake_mode,
             ep_non_strict.gm,
-            combined_args,
-            dynamic_shapes,
-            num_lifted,
+            equalities_inputs,
+            original_signature,
+            _disable_forced_specializations=_disable_forced_specializations,
         )
+    except (ConstraintViolationError, ValueRangeError) as e:
+        raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: TRY200
 
-        assert out_spec is not None
+    combined_args = _combine_args(mod, args, kwargs)
+    range_constraints = make_constraints(
+        fake_mode,
+        ep_non_strict.gm,
+        combined_args,
+        dynamic_shapes,
+        num_lifted,
+    )
 
-        gm = ep_non_strict.gm
+    assert out_spec is not None
 
-        gm.meta["forward_arg_names"] = forward_arg_names
-        module_call_signatures = {
-            strip_root(fqn): ModuleCallSignature(inputs=[], outputs=[], **specs)
-            for fqn, specs in module_call_specs.items()
-        }
+    gm = ep_non_strict.gm
 
-        if len(preserve_module_call_signature) > 0:
-            for node in gm.graph.nodes:
-                if node.target == torch.ops.higher_order._export_tracepoint:
-                    if "path" in node.kwargs:
-                        path = strip_root(node.kwargs["path"])
-                        with gm.graph.inserting_before(node):
-                            new_node = gm.graph.create_node(
-                                "call_function",
-                                torch.ops.higher_order._export_tracepoint,
-                                args=node.args,
-                                kwargs={
-                                    "path": path,
-                                    "kind": node.kwargs["kind"],
-                                },
-                            )
-                            new_node.meta = node.meta
-                            node.replace_all_uses_with(new_node)
-                            gm.graph.erase_node(node)
+    gm.meta["forward_arg_names"] = forward_arg_names
+    module_call_signatures = {
+        strip_root(fqn): ModuleCallSignature(inputs=[], outputs=[], **specs)
+        for fqn, specs in module_call_specs.items()
+    }
 
-            res = CollectTracepointsPass(module_call_signatures, ep_non_strict.sig)(gm)
-            assert res is not None
-            gm = res.graph_module
+    if len(preserve_module_call_signature) > 0:
+        for node in gm.graph.nodes:
+            if node.target == torch.ops.higher_order._export_tracepoint:
+                if "path" in node.kwargs:
+                    path = strip_root(node.kwargs["path"])
+                    with gm.graph.inserting_before(node):
+                        new_node = gm.graph.create_node(
+                            "call_function",
+                            torch.ops.higher_order._export_tracepoint,
+                            args=node.args,
+                            kwargs={
+                                "path": path,
+                                "kind": node.kwargs["kind"],
+                            },
+                        )
+                        new_node.meta = node.meta
+                        node.replace_all_uses_with(new_node)
+                        gm.graph.erase_node(node)
 
-        _rewrite_non_persistent_buffers(mod, ep_non_strict.sig, ep_non_strict.constants)
-        _verify_nn_module_stack(gm)
-        _verify_stack_trace(gm)
-        _verify_placeholder_names(gm, ep_non_strict.sig)
-        exported_program = ExportedProgram(
-            root=gm,
-            graph=gm.graph,
-            graph_signature=ep_non_strict.sig,
-            state_dict=original_state_dict,
-            range_constraints=range_constraints,
-            module_call_graph=_make_module_call_graph(
-                _EXPORT_MODULE_HIERARCHY, orig_in_spec, out_spec, module_call_signatures
-            ),
-            example_inputs=(args, kwargs),
-            constants=ep_non_strict.constants,
-        )
-        return exported_program
+        res = CollectTracepointsPass(module_call_signatures, ep_non_strict.sig)(gm)
+        assert res is not None
+        gm = res.graph_module
 
+    _rewrite_non_persistent_buffers(mod, ep_non_strict.sig, ep_non_strict.constants)
+
+    return (
+        gm,
+        ep_non_strict.sig,
+        range_constraints,
+        out_spec,
+        module_call_signatures,
+        ep_non_strict.constants,
+    )
+
+
+def _export_strict(
+    mod: torch.nn.Module,
+    args: Tuple[Any, ...],
+    kwargs: Optional[Dict[str, Any]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
+    preserve_module_call_signature: Tuple[str, ...] = (),
+    pre_dispatch: bool = False,
+    forward_arg_names: List[str] = [],
+    original_state_dict: Optional[Dict[str, torch.Tensor]] = None,
+    orig_in_spec: Optional[Dict[str, torch.Tensor]] = None,
+    _disable_forced_specializations: Optional[bool] = False,
+):
     gm_torch_level = _export_to_torch_ir(
         mod,
         args,
@@ -1254,14 +1181,14 @@ def _export(
 
     # NOTE: graph module expects only positional args
     constant_attrs = _gather_constant_attrs(mod)
-    ep_non_strict = _export_non_strict(
+    ep_non_strict = _export_to_aten_ir(
         gm_torch_level,
         _convert_to_positional_args(orig_arg_names, fake_args, fake_kwargs),
         {},
         fake_params_buffers,
         constant_attrs,
         pre_dispatch=pre_dispatch,
-        should_insert_runtime_assertion=not strict,
+        should_insert_runtime_assertion=False,
     )
 
     gm = ep_non_strict.gm
@@ -1364,24 +1291,133 @@ def _export(
         gm = res.graph_module
 
     assert orig_out_spec is not None
+
+    return (
+        gm,
+        export_graph_signature,
+        range_constraints,
+        orig_out_spec,
+        module_call_signatures,
+        constants,
+    )
+
+
+@_log_export_wrapper
+@_disable_prexisiting_fake_mode
+def _export(
+    mod: torch.nn.Module,
+    args: Tuple[Any, ...],
+    kwargs: Optional[Dict[str, Any]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
+    *,
+    strict: bool = True,
+    preserve_module_call_signature: Tuple[str, ...] = (),
+    pre_dispatch: bool = False,
+    _disable_forced_specializations: Optional[bool] = False,
+) -> ExportedProgram:
+    """
+    Traces either an nn.Module's forward function or just a callable with PyTorch
+    operations inside and produce a ExportedProgram.
+
+    Args:
+        f: the `nn.Module` to trace.
+
+        args: example positional inputs.
+
+        kwargs: optional example keyword inputs.
+
+        dynamic_shapes:
+         An optional argument where the type should either be:
+         1) a dict from argument names of ``f`` to their dynamic shape specifications,
+         2) a tuple that specifies dynamic shape specifications for each input in original order.
+         If you are specifying dynamism on keyword args, you will need to pass them in the order that
+         is defined in the original function signature.
+
+         The dynamic shape of a tensor argument can be specified as either
+         (1) a dict from dynamic dimension indices to :func:`Dim` types, where it is
+         not required to include static dimension indices in this dict, but when they are,
+         they should be mapped to None; or (2) a tuple / list of :func:`Dim` types or None,
+         where the :func:`Dim` types correspond to dynamic dimensions, and static dimensions
+         are denoted by None. Arguments that are dicts or tuples / lists of tensors are
+         recursively specified by using mappings or sequences of contained specifications.
+
+        preserve_module_call_signature: A list of submodule paths for which the original
+            calling conventions are preserved as metadata.
+
+        _disable_forced_specializations:
+         By default, some inferred dynamic shapes guards/constraints that are not expressible with the current
+         dynamic shapes language will lead to specialization to the concrete input values provided.
+         If _disable_forced_specializations is set to True, we will not specialize, and will not perform runtime
+         checks on such produced guards. Instead, we allow the user to specify arbitrary shapes,
+         and fail during runtime if the inputs are invalid. Constraints expressible with the language
+         (e.g. ranges, linear derived dims) will still be enforced.
+
+    Returns:
+        An ExportedProgram containing the traced method.
+    """
+    if not isinstance(args, tuple):
+        raise UserError(
+            UserErrorType.INVALID_INPUT,
+            f"Expecting `args` to be a tuple of example positional inputs, got {type(args)}",
+        )
+
+    if _disable_forced_specializations and strict:
+        raise UserError(
+            UserErrorType.INVALID_INPUT,
+            "_disable_forced_specializations can be only be specified in non-strict mode.",
+        )
+
+    global _EXPORT_FLAGS, _EXPORT_MODULE_HIERARCHY
+    _EXPORT_MODULE_HIERARCHY = _get_module_hierarchy(mod)
+
+    flags = set()
+    flags.add("strict" if strict else "non_strict")
+    flags.add("pre_dispatch" if pre_dispatch else "aot_dispatch")
+    log_export_usage(event="export.enter", flags=flags)
+    _EXPORT_FLAGS = flags
+
+    kwargs = kwargs or {}
+    if isinstance(dynamic_shapes, torch.export.ShapesCollection):
+        dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)
+
+    flat_args, orig_in_spec = pytree.tree_flatten((args, kwargs))
+    original_state_dict = mod.state_dict(keep_vars=True)
+    forward_arg_names = _get_forward_arg_names(mod, args, kwargs)
+
+    export_f = _export_strict if strict else _export_non_strict
+    gm, graph_sig, rng_constraints, orig_out_spec, mod_call_sig, constants = export_f(
+        mod,
+        args,
+        kwargs,
+        dynamic_shapes=dynamic_shapes,
+        preserve_module_call_signature=preserve_module_call_signature,
+        pre_dispatch=pre_dispatch,
+        forward_arg_names=forward_arg_names,
+        original_state_dict=original_state_dict,
+        orig_in_spec=orig_in_spec,
+        _disable_forced_specializations=_disable_forced_specializations,
+    )
+
     _verify_nn_module_stack(gm)
     _verify_stack_trace(gm)
-    _verify_placeholder_names(gm, export_graph_signature)
+    _verify_placeholder_names(gm, graph_sig)
     exported_program = ExportedProgram(
         root=gm,
         graph=gm.graph,
-        graph_signature=export_graph_signature,
+        graph_signature=graph_sig,
         state_dict=original_state_dict,
-        range_constraints=range_constraints,
+        range_constraints=rng_constraints,
         module_call_graph=_make_module_call_graph(
             _EXPORT_MODULE_HIERARCHY,
             orig_in_spec,
             orig_out_spec,
-            module_call_signatures,
+            mod_call_sig,
         ),
         example_inputs=(args, kwargs),
         constants=constants,
     )
-    log.debug("Exported program from AOTAutograd:\n%s", exported_program)
+
+    if strict:
+        log.debug("Exported program from AOTAutograd:\n%s", exported_program)
 
     return exported_program
