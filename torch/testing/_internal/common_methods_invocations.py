@@ -9376,7 +9376,7 @@ class foreach_norm_sample_func(foreach_inputs_sample_func):
         for num_tensors, ord, out_dtype in product(
             num_input_tensors,
             (0, 1, 2, -1, -2, float('inf'), float('-inf')),
-            ((None,) + (torch.complex128,) if dtype in complex_types() else (torch.float64,)),
+            (None,) + (torch.complex128,) if dtype in complex_types() else (torch.float64,),
         ):
             input = sample_inputs_foreach(None, device, dtype, num_tensors, zero_size=False, **_foreach_inputs_kwargs)
             disable_fastpath = True
