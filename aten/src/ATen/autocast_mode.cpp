@@ -144,7 +144,7 @@ Tensor cached_cast(at::ScalarType to_type, const Tensor& arg, DeviceType device_
 Banned functions
 *******************************/
 
-static Tensor binary_cross_entropy_banned(const Tensor &, const Tensor &, const c10::optional<Tensor>&, int64_t) {
+static Tensor binary_cross_entropy_banned(const Tensor &, const Tensor &, const std::optional<Tensor>&, int64_t) {
   AT_ERROR("torch.nn.functional.binary_cross_entropy and torch.nn.BCELoss are unsafe to autocast.\n"
            "Many models use a sigmoid layer right before the binary cross entropy layer.\n"
            "In this case, combine the two layers using torch.nn.functional.binary_cross_entropy_with_logits\n"

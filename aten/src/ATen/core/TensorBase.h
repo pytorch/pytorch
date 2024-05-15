@@ -147,7 +147,7 @@ class TORCH_API TensorBase {
   const TensorBase& fill_(const c10::Scalar& scalar) const;
   const TensorBase& zero_() const;
 
-  TensorBase to(at::TensorOptions options={}, bool non_blocking=false, bool copy=false, c10::optional<at::MemoryFormat> memory_format=c10::nullopt) const;
+  TensorBase to(at::TensorOptions options={}, bool non_blocking=false, bool copy=false, std::optional<at::MemoryFormat> memory_format=c10::nullopt) const;
 
   bool is_complex() const {
     return at::isComplexType(this->scalar_type());
@@ -249,7 +249,7 @@ class TORCH_API TensorBase {
     return impl_->strides();
   }
   // See impl::get_opt_names in ATen/NamedTensor.h for docs.
-  c10::optional<DimnameList> opt_names() const {
+  std::optional<DimnameList> opt_names() const {
     return impl::get_opt_names(unsafeGetTensorImpl());
   }
   // See impl::get_names in ATen/NamedTensor.h for docs.
@@ -712,7 +712,7 @@ class TORCH_API TensorBase {
   /// // f requires grad, has no operation creating it
   /// @endcode
 
-  /// \fn void backward(const Tensor & gradient={}, c10::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, c10::optional<TensorList> inputs=c10::nullopt) const;
+  /// \fn void backward(const Tensor & gradient={}, std::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, c10::optional<TensorList> inputs=c10::nullopt) const;
   ///
   /// Computes the gradient of current tensor with respect to graph leaves.
   ///
@@ -1010,7 +1010,7 @@ struct ExclusivelyOwnedTraits<at::TensorBase> : public c10::ExclusivelyOwnedTens
 namespace at {
 
 inline c10::MaybeOwned<TensorBase> borrow_from_optional_tensor(
-    const c10::optional<TensorBase>& opt) {
+    const std::optional<TensorBase>& opt) {
   return opt.has_value()
     ? c10::MaybeOwned<TensorBase>::borrowed(*opt)
     : c10::MaybeOwned<TensorBase>::owned(std::in_place);
