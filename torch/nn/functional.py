@@ -5018,9 +5018,9 @@ greater than 0.0 is specified. The optional scale argument can only be specified
 
 .. warning::
 
-    This function always applies dropout according to the specified `dropout_p` argument.
-    To disable dropout during evaluation, be sure to pass a value of `0.0` when the module
-    that makes the function call is in evaluation mode.
+    This function always applies dropout according to the specified ``dropout_p`` argument.
+    To disable dropout during evaluation, be sure to pass a value of ``0.0`` when the module
+    that makes the function call is not in training mode.
 
     For example:
 
