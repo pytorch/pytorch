@@ -242,6 +242,7 @@ if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
     )
     sys.exit(-1)
 
+import os
 import platform
 
 BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
@@ -260,6 +261,19 @@ if sys.version_info < python_min_version:
         f"You are using Python {platform.python_version()}. Python >={python_min_version_str} is required."
     )
     sys.exit(-1)
+
+BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
+BUILD_PYTORCH_USING_LIBTORCH_WHL = False
+
+# set up appropriate env variables
+if BUILD_LIBTORCH_WHL:
+    # Set up environment variables for ONLY building libtorch.so and not libtorch_python.so
+
+    # functorch is not supported without python
+    os.environ["BUILD_FUNCTORCH"] = "OFF"
+    os.environ["BUILD_PYTHONLESS"] = "ON"
+else:
+    os.environ["BUILD_PYTHONLESS"] = "OFF"
 
 import filecmp
 import glob
@@ -366,6 +380,10 @@ version = get_torch_version()
 report(f"Building wheel {package_name}-{version}")
 
 cmake = CMake()
+
+<<<<<<< HEAD
+=======
+DEFAULT_PACKAGE_NAME = "libtorch" if BUILD_LIBTORCH_WHL else "torch"
 
 package_name = os.getenv("TORCH_PACKAGE_NAME", DEFAULT_PACKAGE_NAME)
 
@@ -1434,6 +1452,7 @@ def main():
         "utils/model_dump/code.js",
         "utils/model_dump/*.mjs",
     ]
+
     if BUILD_PYTORCH_USING_LIBTORCH_WHL:
         torch_package_data.extend(
             [
@@ -1450,7 +1469,6 @@ def main():
                 "lib/*.lib",
             ]
         )
-
     if get_cmake_cache_vars()["BUILD_CAFFE2"]:
         torch_package_data.extend(
             [
