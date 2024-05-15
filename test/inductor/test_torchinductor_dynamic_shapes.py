@@ -116,9 +116,7 @@ class TestInductorDynamic(TestCase):
         if not HAS_GPU:
             self.skipTest("Triton not available")
         torch._dynamo.reset()
-        # Weird syntax because this class is used with instantiate_device_type_tests and
-        # the type of the class at runtime will be, e.g., TestInductorDynamicCPU:
-        super(type(self), self).setUp()
+        TestCase.setUp(self)
         # this should be in setUpClass, but device-generic tests
         # don't work with setUpClass well (non-deterministically the wrong setUpClass is resolved),
         # so put it in test setUp, it's cheap
@@ -136,7 +134,7 @@ class TestInductorDynamic(TestCase):
 
     def tearDown(self):
         self._stack.close()
-        super(type(self), self).tearDown()
+        TestCase.tearDown(self)
         torch._dynamo.reset()
 
     def test_arange_dynamic(self, device):
