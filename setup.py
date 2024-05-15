@@ -230,10 +230,11 @@
 #   BUILD_LIBTORCH_WHL
 #      Builds libtorch.so and its dependencies as a wheel
 #
-#   BUILD_PYTORCH_USING_LIBTORCH_WHL
-#      Builds pytorch as a wheel using libtorch.so from a seperate wheel [not supported yet]
+#   BUILD_PYTHON_ONLY
+#      Builds pytorch as a wheel using libtorch.so from a seperate wheel
 
 import os
+import pkgutil
 import sys
 
 if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
@@ -245,14 +246,32 @@ if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
 import os
 import platform
 
+
+def _get_package_path(package_name):
+    loader = pkgutil.find_loader(package_name)
+    if loader:
+        # The package might be a namespace package, so get_data may fail
+        try:
+            file_path = loader.get_filename()
+            return os.path.dirname(file_path)
+        except AttributeError:
+            pass
+    return None
+
+
 BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
-BUILD_PYTORCH_USING_LIBTORCH_WHL = False
+BUILD_PYTORCH_USING_LIBTORCH_WHL = os.getenv("BUILD_PYTHON_ONLY", "0") == "1"
 
 # set up appropriate env variables
 if BUILD_LIBTORCH_WHL:
     # Set up environment variables for ONLY building libtorch.so and not libtorch_python.so
     # functorch is not supported without python
     os.environ["BUILD_FUNCTORCH"] = "OFF"
+
+
+if BUILD_PYTORCH_USING_LIBTORCH_WHL:
+    os.environ["BUILD_LIBTORCHLESS"] = "ON"
+    os.environ["LIBTORCH_LIB_PATH"] = f"{_get_package_path('libtorch')}/lib"
 
 python_min_version = (3, 8, 0)
 python_min_version_str = ".".join(map(str, python_min_version))
@@ -371,6 +390,7 @@ cmake_python_include_dir = sysconfig.get_path("include")
 ################################################################################
 # Version, create_version_file, and package_name
 ################################################################################
+
 
 DEFAULT_PACKAGE_NAME = "libtorch" if BUILD_LIBTORCH_WHL else "torch"
 
@@ -1212,6 +1232,9 @@ def main():
         "fsspec",
         'mkl>=2021.1.1,<=2021.4.0; platform_system == "Windows"',
     ]
+
+    if BUILD_PYTORCH_USING_LIBTORCH_WHL:
+        install_requires.append("libtorch")
 
     use_prioritized_text = str(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD", ""))
     if (
