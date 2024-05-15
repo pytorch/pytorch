@@ -8,6 +8,13 @@ from ._IR import (
     pipeline,
     SplitPoint,
 )
+from ._PipelineStage import PipelineStage
+from .PipelineSchedule import (
+    Schedule1F1B,
+    ScheduleGPipe,
+    ScheduleInterleaved1F1B,
+    ScheduleLoopedBFS,
+)
 
 __all__ = [
     "Pipe",
@@ -17,4 +24,9 @@ __all__ = [
     "pipeline",
     "ArgsChunkSpec",
     "KwargsChunkSpec",
+    "PipelineStage",
+    "Schedule1F1B",
+    "ScheduleGPipe",
+    "ScheduleInterleaved1F1B",
+    "ScheduleLoopedBFS",
 ]

@@ -65,6 +65,34 @@ def _unlift_inputs_as_getattr(
     return unlifted_name_to_node, input_name_to_node
 
 
+def _insert_copy_for_out_input_mutations(
+    gm: torch.fx.GraphModule,
+    out_inputs: Optional[Dict[torch.fx.Node, torch.fx.Node]],
+) -> None:
+    if not out_inputs:
+        return
+
+    output_nodes = gm.graph.find_nodes(op="output")
+    assert output_nodes is not None
+    assert len(output_nodes) == 1
+    return_node = output_nodes[0]
+    outputs = pytree.tree_flatten(return_node.args)[0]
+
+    # Only supports single out parameter now
+    assert len(out_inputs) == 1
+    for output_node, out_input_node in out_inputs.items():
+        # The output node is the alias of the out input node.
+        assert output_node in outputs
+        with gm.graph.inserting_before(return_node):
+            copy_res = gm.graph.call_function(
+                torch.ops.aten.copy_.default, (out_input_node, output_node)
+            )
+
+            new_output = gm.graph.output((copy_res,))
+            return_node.replace_all_uses_with(new_output)
+            gm.graph.erase_node(return_node)
+
+
 def _insert_copy_for_mutations(
     gm: torch.fx.GraphModule,
     mutated_outputs: List[Optional[str]],
@@ -153,6 +181,7 @@ def _unlift(
     state_dict: Dict[str, Any],
     constants: Dict[str, Any],
     forward_arg_names: Optional[List[str]] = None,
+    mutated_out_inputs: Optional[Dict[torch.fx.Node, torch.fx.Node]] = None,
 ):
     """
     Args:
@@ -174,6 +203,10 @@ def _unlift(
     )
     _insert_copy_for_mutations(
         gm, mutated_outputs, unlifted_name_to_node, input_name_to_node
+    )
+    _insert_copy_for_out_input_mutations(
+        gm,
+        mutated_out_inputs,
     )
     gm.graph._codegen = _get_codegen(in_spec, out_spec, forward_arg_names)
     gm.graph.lint()

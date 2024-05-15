@@ -24,7 +24,7 @@
 namespace at::meta {
 
 TORCH_META_FUNC(upsample_bilinear2d) (
-  const Tensor& input, IntArrayRef output_size, bool align_corners, c10::optional<double> scales_h, c10::optional<double> scales_w
+  const Tensor& input, IntArrayRef output_size, bool align_corners, std::optional<double> scales_h, c10::optional<double> scales_w
 ) {
   auto full_output_size = native::upsample_2d_common_check(input.sizes(), output_size);
 
@@ -42,8 +42,8 @@ TORCH_META_FUNC(upsample_bilinear2d_backward) (
   IntArrayRef output_size,
   IntArrayRef input_size,
   bool align_corners,
-  c10::optional<double> scales_h,
-  c10::optional<double> scales_w
+  std::optional<double> scales_h,
+  std::optional<double> scales_w
 ) {
   auto full_output_size = native::upsample_2d_common_check(input_size, output_size);
 
@@ -63,7 +63,7 @@ TORCH_META_FUNC(upsample_bilinear2d_backward) (
 }
 
 TORCH_META_FUNC(_upsample_bilinear2d_aa) (
-  const Tensor& input, IntArrayRef output_size, bool align_corners, c10::optional<double> scales_h, c10::optional<double> scales_w
+  const Tensor& input, IntArrayRef output_size, bool align_corners, std::optional<double> scales_h, c10::optional<double> scales_w
 ) {
   auto full_output_size = native::upsample_2d_common_check(input.sizes(), output_size);
 
@@ -81,8 +81,8 @@ TORCH_META_FUNC(_upsample_bilinear2d_aa_backward) (
   IntArrayRef output_size,
   IntArrayRef input_size,
   bool align_corners,
-  c10::optional<double> scales_h,
-  c10::optional<double> scales_w
+  std::optional<double> scales_h,
+  std::optional<double> scales_w
 ) {
   auto full_output_size = native::upsample_2d_common_check(input_size, output_size);
 
@@ -109,8 +109,8 @@ TORCH_IMPL_FUNC(upsample_bilinear2d_out_cpu) (
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
     const Tensor& output
 ) {
   upsample_bilinear2d_kernel(kCPU, output, input, align_corners, scales_h, scales_w);
@@ -121,8 +121,8 @@ TORCH_IMPL_FUNC(upsample_bilinear2d_backward_out_cpu) (
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
     const Tensor& grad_input
 ) {
   grad_input.zero_();
@@ -134,8 +134,8 @@ TORCH_IMPL_FUNC(_upsample_bilinear2d_aa_out_cpu) (
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
     const Tensor& output
 ) {
   _upsample_bilinear2d_aa_kernel(kCPU, output, input, align_corners, scales_h, scales_w);
@@ -146,8 +146,8 @@ TORCH_IMPL_FUNC(_upsample_bilinear2d_aa_backward_out_cpu) (
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
     const Tensor& grad_input
 ) {
   grad_input.zero_();
@@ -161,7 +161,7 @@ Tensor upsample_bilinear2d(
     const Tensor& input,
     at::OptionalIntArrayRef output_size,
     bool align_corners,
-    c10::optional<ArrayRef<double>> scale_factors) {
+    std::optional<ArrayRef<double>> scale_factors) {
   auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
   auto scale_h = get_scale_value(scale_factors, 0);
   auto scale_w = get_scale_value(scale_factors, 1);
@@ -172,7 +172,7 @@ Tensor _upsample_bilinear2d_aa(
     const Tensor& input,
     at::OptionalIntArrayRef output_size,
     bool align_corners,
-    c10::optional<ArrayRef<double>> scale_factors) {
+    std::optional<ArrayRef<double>> scale_factors) {
   auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
   auto scale_h = get_scale_value(scale_factors, 0);
   auto scale_w = get_scale_value(scale_factors, 1);
