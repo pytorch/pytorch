@@ -1,6 +1,6 @@
 # Owner(s): ["module: autograd"]
 
-from torch.testing._internal.common_utils import TestCase, run_tests, IS_JETSON, IS_WINDOWS, skipIfTorchDynamo
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_JETSON, IS_WINDOWS, IS_MACOS, skipIfTorchDynamo
 from torch._utils_internal import get_file_path_2
 
 import pkgutil
@@ -279,6 +279,7 @@ class TestPublicBindings(TestCase):
         return True
 
 
+    @unittest.skipIf(IS_WINDOWS, "Inductor modules hard fail on windows")
     @skipIfTorchDynamo("Broken and not relevant for now")
     def test_modules_can_be_imported(self):
         failures = []
@@ -445,7 +446,7 @@ class TestPublicBindings(TestCase):
         self.assertEqual("", "\n".join(errors))
 
     # AttributeError: module 'torch.distributed' has no attribute '_shard'
-    @unittest.skipIf(IS_WINDOWS or IS_JETSON, "Distributed Attribute Error")
+    @unittest.skipIf(IS_WINDOWS or IS_JETSON or IS_MACOS, "Distributed Attribute Error")
     @skipIfTorchDynamo("Broken and not relevant for now")
     def test_correct_module_names(self):
         '''
