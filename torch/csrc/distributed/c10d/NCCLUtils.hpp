@@ -182,7 +182,7 @@ int nccl_nonblocking_timeout();
 // thrown in the NCCL codebase.
 std::string getNcclErrorDetailStr(
     ncclResult_t error,
-    c10::optional<std::string> processGroupFailureReason = c10::nullopt);
+    std::optional<std::string> processGroupFailureReason = c10::nullopt);
 
 // Write NCCL debug info to local disk or any storage users define.
 // There are some constrains we set for the debug info writer:
@@ -339,13 +339,13 @@ class NCCLComm {
 
   ncclComm_t getNcclComm();
 
-  c10::optional<std::string> getNcclCommFailureReason() const {
+  std::optional<std::string> getNcclCommFailureReason() const {
     std::unique_lock<std::mutex> lock(mutex_);
     return commFailureReason_;
   }
 
   void ncclCommAbort(
-      c10::optional<std::string> commFailureReason = c10::nullopt) {
+      std::optional<std::string> commFailureReason = c10::nullopt) {
     std::unique_lock<std::mutex> lock(mutex_);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
     if (aborted_) {
@@ -491,7 +491,7 @@ class NCCLComm {
   int rank_;
   // Optional reason for communicator failure, provided by ProcessGroupNCCL for
   // better error messaging.
-  c10::optional<std::string> commFailureReason_;
+  std::optional<std::string> commFailureReason_;
   bool initialized_{false};
 #ifdef NCCL_HAS_COMM_REGISTER
   // Stores handlers for tensors registered by NCCL

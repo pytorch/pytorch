@@ -643,6 +643,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return x.type(dtype)
 
     @make_test
+    def test_is_any_autocast_enabled(x):
+        if torch._C._is_any_autocast_enabled():
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
     def test_list_compare_polyfill(x):
         for a, b, c in [
             [(1, 2, 3), (1, 2, 3), 7.77],
@@ -1170,6 +1177,19 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             y = a - b
         return x, y
 
+    def test_set_isdisjoint(self):
+        x = {"apple", "banana", "cherry"}
+        y = {"google", "microsoft", "apple"}
+
+        def fn(a):
+            if x.isdisjoint(y):
+                return a + 1
+            else:
+                return a - 1
+
+        test = make_test(fn)
+        test(self)
+
     @make_test
     def test_tuple_iadd(a, b):
         output = (a, b)
@@ -1316,6 +1336,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return a + b
         else:
             return a - b
+
+    @make_test
+    def test_torch_size_hasattr(x):
+        if hasattr(x.shape, "_fields"):
+            return x + 1
+        else:
+            return x - 1
 
     @make_test
     def test_is_quantized(a, b):
