@@ -231,7 +231,6 @@ def mps_ops_modifier(ops):
         '__radd__',
         '__rmul__',
         '__getitem__',
-        '_unsafe_masked_index',
         'abs',
         'add',
         'argwhere',
@@ -342,6 +341,7 @@ def mps_ops_modifier(ops):
     AFTER_MACOS_14_0_SUPPORTED_COMPLEX_OPS = {
         '__rdiv__',
         '_chunk_cat',
+        '_unsafe_masked_index',
         'acos',
         'acosh',
         'all',
@@ -881,7 +881,9 @@ def mps_ops_modifier(ops):
         'round': [torch.float16],
 
         # atomic operations not supported
-        '_unsafe_masked_index_put_accumulate': [torch.int8],
+        '_unsafe_masked_index_put_accumulate': [torch.bool, torch.float16, torch.int16, torch.int64, torch.uint8, torch.int8],
+        # atomic operation in backward pass
+        '_unsafe_masked_index': [torch.bool, torch.float16, torch.int16, torch.int64, torch.uint8, torch.int8],
     }
 
     if product_version < 14.0:
