@@ -7393,7 +7393,7 @@ class TestTorch(TestCase):
     def test_invalid_generator_raises(self):
         self.assertRaises(RuntimeError, lambda: torch.Generator('opengl'))
 
-    def test_pickle_generator(self):
+    def test_pickle_generator(self) -> None:
         devices = ['cpu']
         if torch.cuda.is_available():
             devices += ['cuda']
