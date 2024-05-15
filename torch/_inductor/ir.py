@@ -8117,6 +8117,17 @@ class _CollectiveKernel(FallbackKernel):
             packed.outputs = [packed]
             return packed
 
+    def codegen(self, wrapper):
+        super().codegen(wrapper)
+        # NOTE: It should always be safe to attempt to `del` the output of inplace-collective / wait_tensor right after the op,
+        # because downstream should depend on the input (instead of the output) of the op.
+        # This is important for being able to release collective output memory as soon as possible
+        # (by decreasing the collective output tensor's refcount whenever possible).
+        if isinstance(self.layout, NoneLayout):
+            from .codegen.wrapper import FreeIfNotReusedLine
+
+            wrapper.writeline(FreeIfNotReusedLine(wrapper, self))
+
 
 class _WaitKernel(_CollectiveKernel):
     def get_volatile_reads(self):
