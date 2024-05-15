@@ -1230,7 +1230,7 @@ def download_retry_decorator(download_fn):
                     )
                     time.sleep(wait)
                 else:
-                    raise RuntimeError(  # noqa: TRY200
+                    raise RuntimeError(  # noqa: B904
                         f"Failed to load model '{args}' with following error(s): {str(e)}."
                     )
 

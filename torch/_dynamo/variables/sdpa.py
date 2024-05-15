@@ -65,7 +65,7 @@ class SDPAParamsVariable(VariableTracker):
             getattr_static(torch._C._SDPAParams, name)
         except AttributeError:
             # Using raise from is too verbose here
-            raise Unsupported(  # noqa: TRY200
+            raise Unsupported(  # noqa: B904
                 f"Unsupported torch._C._SDPAParams attribute {name}"
             )
 
