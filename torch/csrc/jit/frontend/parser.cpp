@@ -210,7 +210,7 @@ struct ParserImpl {
     }
     return prefix;
   }
-  c10::optional<TreeRef> maybeParseAssignmentOp() {
+  std::optional<TreeRef> maybeParseAssignmentOp() {
     auto r = L.cur().range;
     switch (L.cur().kind) {
       case TK_PLUS_EQ:

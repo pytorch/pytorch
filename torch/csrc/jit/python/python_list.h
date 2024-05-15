@@ -175,7 +175,7 @@ class ScriptList final {
 
   // Remove and return the element at the specified index from the list. If no
   // index is passed, the last element is removed and returned.
-  IValue pop(c10::optional<size_type> idx = c10::nullopt) {
+  IValue pop(std::optional<size_type> idx = c10::nullopt) {
     IValue ret;
 
     if (idx) {
