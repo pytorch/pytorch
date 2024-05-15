@@ -1111,10 +1111,13 @@ def choose_saved_values_set(joint_graph, node_classifications, memory_budget=1):
     def get_mem_ratio(cur):
         return (cur - min_act_size) / (max_act_size - min_act_size)
 
-    if get_mem_ratio(estimate_activations_size(more_aggressive_saved_values)) < memory_budget :
+    if get_mem_ratio(estimate_activations_size(more_aggressive_saved_values)) < memory_budget:
         return more_aggressive_saved_values
 
     aggressive_recomputation_saved_values, banned_nodes = get_saved_values(joint_graph, node_classifications, (False, False, False, False, BAN_IF_REDUCTION))
+
+    if get_mem_ratio(estimate_activations_size(aggressive_recomputation_saved_values)) < memory_budget:
+        return aggressive_recomputation_saved_values
 
     from torch._inductor.fx_utils import get_node_storage
     input_storages = {get_node_storage(node) for node in inputs}
@@ -1154,7 +1157,6 @@ def choose_saved_values_set(joint_graph, node_classifications, memory_budget=1):
         print(f"actual ratio: {get_mem_ratio(estimate_activations_size(saved_values))}")
         print_budget_real_mem(estimate_activations_size(saved_values), "milp")
 
-        print(f"Below memory budget! Saving {saved_values}")
         return saved_values
 
     print_budget_real_mem(estimate_activations_size(inputs), "full checkpoint")
