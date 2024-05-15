@@ -339,6 +339,7 @@ def checkpoint(
     context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
     determinism_check: str = _DEFAULT_DETERMINISM_MODE,
     debug: bool = False,
+    memory_budget: float = None,
     **kwargs
 ):
     r"""Checkpoint a model or part of the model.

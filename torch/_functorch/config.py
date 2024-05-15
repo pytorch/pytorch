@@ -88,6 +88,7 @@ ban_recompute_not_in_allowlist = True
 # a fusion can be expensive.
 ban_recompute_reductions = True
 
+memory_budget = 0.1
 
 # Sets all of the ban_recompute heuristics to False except ban_recompute_reductions
 # Generally, this will probably result in some memory improvement, but at the
