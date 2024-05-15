@@ -11,7 +11,7 @@
 
 #ifdef USE_FBGEMM
 template <int kSpatialDim>
-std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeight<
+std::tuple<at::Tensor, std::optional<at::Tensor>> PackedConvWeight<
     kSpatialDim>::unpack() {
   auto* packed_weights_p = w.get();
   // output channels
@@ -90,19 +90,19 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeight<
         at::native::fbgemm_utils::TransposeConvTensorUnpackConversion<
             kSpatialDim>(unpacked_weights, groups);
   }
-  return std::tuple<at::Tensor, c10::optional<at::Tensor>>(
+  return std::tuple<at::Tensor, std::optional<at::Tensor>>(
       unpacked_weights, bias);
 }
 
-template std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeight<
+template std::tuple<at::Tensor, std::optional<at::Tensor>> PackedConvWeight<
     2>::unpack();
-template std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeight<
+template std::tuple<at::Tensor, std::optional<at::Tensor>> PackedConvWeight<
     3>::unpack();
 #endif // USE_FBGEMM
 
 #ifdef USE_PYTORCH_QNNPACK
 template <int kSpatialDim>
-std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightsQnnp<
+std::tuple<at::Tensor, std::optional<at::Tensor>> PackedConvWeightsQnnp<
     kSpatialDim>::unpack() {
   TORCH_CHECK(
       kSpatialDim == 2,
@@ -112,25 +112,25 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightsQnnp<
         orig_weight.defined(),
         "Cannot unpack weights. "
         "Call at::globalContext()::setReleaseOriginalWeights(false) before packing or loading to enable unpacking.");
-  return std::tuple<at::Tensor, c10::optional<at::Tensor>>(orig_weight, bias);
+  return std::tuple<at::Tensor, std::optional<at::Tensor>>(orig_weight, bias);
 }
 
-template std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightsQnnp<
+template std::tuple<at::Tensor, std::optional<at::Tensor>> PackedConvWeightsQnnp<
     2>::unpack();
-template std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightsQnnp<
+template std::tuple<at::Tensor, std::optional<at::Tensor>> PackedConvWeightsQnnp<
     3>::unpack();
 #endif // USE_PYTORCH_QNNPACK
 
 #if AT_MKLDNN_ENABLED()
 template <int kSpatialDim>
-std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightsOnednn<
+std::tuple<at::Tensor, std::optional<at::Tensor>> PackedConvWeightsOnednn<
     kSpatialDim>::unpack() {
-  return std::tuple<at::Tensor, c10::optional<at::Tensor>>(
+  return std::tuple<at::Tensor, std::optional<at::Tensor>>(
       orig_weight_.clone(), orig_bias_);
 }
 
-template std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightsOnednn<
+template std::tuple<at::Tensor, std::optional<at::Tensor>> PackedConvWeightsOnednn<
     2>::unpack();
-template std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightsOnednn<
+template std::tuple<at::Tensor, std::optional<at::Tensor>> PackedConvWeightsOnednn<
     3>::unpack();
 #endif // #if AT_MKLDNN_ENABLED()

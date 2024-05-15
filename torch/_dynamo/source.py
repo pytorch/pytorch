@@ -560,6 +560,17 @@ class NumpyTensorSource(ChainedSource):
         codegen.extend_output(create_call_function(1, True))
 
 
+# NB: We don't expect you to actually ever generate guards against this
+# source, it is ephemeral
+@dataclasses.dataclass(frozen=True)
+class FloatTensorSource(ChainedSource):
+    def name(self) -> str:
+        return f"___as_tensor({self.base.name()})"
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+
 # This is a synthetic source that is associated with the singleton
 # shape env guard we always register for all frames.  We get the actual
 # guard contents from the ambient ShapeEnv
@@ -617,3 +628,7 @@ def is_from_defaults(source: Source):
     if isinstance(source, ChainedSource):
         return is_from_defaults(source.base)
     return False
+
+
+def is_cell_contents(source: Source):
+    return isinstance(source, AttrSource) and source.member == "cell_contents"
