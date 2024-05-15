@@ -43,6 +43,8 @@ from torch.ao.quantization.quantizer.utils import (
     _get_module_name_filter,
     _is_annotated,
     _skip_annotate,
+    current_stage,
+    log,
 )
 from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
     get_bias_qspec,
@@ -108,6 +110,125 @@ quantizable_ops = default_quantizable_ops | {
 QUANT_ANNOTATION_KEY = "quantization_annotation"
 
 
+def _get_operator_type_filter(operator_type: Callable):
+    """Get the operator_type_filter function for a given operator type, the filter accepts
+    a node and checks if the node has certain module type
+
+    For example:
+        node: linear_op = call_function[...](...)  # linear_op.target if torch.ops.aten.linear.default
+
+
+    >> operator_type_filter = _get_operator_type_filter(torch.ops.aten.linear.default)
+    >> print(operator_type_filter(node))
+    True  # the node's target is `torch.ops.aten.linear.default`
+    """
+
+    def operator_type_filter(n: Node) -> bool:
+        result = n.target == operator_type
+        # log.warning(
+        #     f"!!for node: {n}, (name: {n.name}, target:{n.target}) n.target equal operator_type ({operator_type})? {result}"
+        # )
+        log.warning(
+            "!!for node: %s, (name: %s, target:%s) n.target equal operator_type (%s))? %s",
+            n,
+            n.name,
+            n.target,
+            operator_type,
+            result,
+        )
+        return result
+
+    return operator_type_filter
+
+
+def _x86_get_not_module_type_or_name_filter(
+    tp_list: List[torch._ops.OpOverloadPacket], module_name_list: List[str]
+) -> Callable[[Node], bool]:
+    # Check if the node is 1) belong to the `default_quantizable_ops` and 2) not be marked
+    # by `set_module_name_qconfig`, or `set_module_type_qconfig` `set_function_type_qconfig`.
+
+    operator_type_filters = [_get_operator_type_filter(tp) for tp in tp_list]
+    module_name_list_filters = [_get_module_name_filter(m) for m in module_name_list]
+
+    def not_module_type_or_name_filter(n: Node) -> bool:
+        # For global_config, only quantize the `default_quantizable_ops`
+        belong_to_default_quantizable_ops = n.target in default_quantizable_ops
+        # if n.target not in default_quantizable_ops:
+        #     result1 = False
+        # for f in module_name_list_filters:
+        #     log.warning(f"not module_name for node: {n}, (name: {n.name}, target:{n.target}), f:{f} f(n) is {f(n)}")
+
+        # for f in operator_type_filters:
+        #     log.warning(f"not module type: {n}, (name: {n.name}, target:{n.target}), f:{f} f(n) is {f(n)}")
+
+        not_module_type_or_module_name_node = not any(
+            f(n) for f in operator_type_filters + module_name_list_filters
+        )
+        final_result = (
+            belong_to_default_quantizable_ops and not_module_type_or_module_name_node
+        )
+
+        # rewrite it not use the f-string
+        log.warning(
+            (
+                "for node: %s, (name: %s, target:%s), node in default_quantizable_ops? %s;"
+                "node is not used by operator_type_filters or module_name_list_filters? %s"
+            ),
+            n,
+            n.name,
+            n.target,
+            belong_to_default_quantizable_ops,
+            not_module_type_or_module_name_node,
+        )
+        return final_result
+
+    return not_module_type_or_name_filter
+
+
+def _node_checker_for_module_name_qconfig(nodes, filter_fn):
+    skip_annotate = False
+    # 1) Skip annotate if any node is already annotated
+    if _is_annotated(nodes):
+        skip_annotate = True
+        return skip_annotate
+    # 2) Skip annotate if a) filter_fn is provided and b) any node fails the filter
+    # filter_fn result
+    # case 1,
+    # filter_fn     False, False, False
+    # not filter_fn True, True, True
+    # any           True
+    # ->            skip
+
+    # no node named as user specific
+
+    # case 2,
+    # filter_fn     True, False, False
+    # not filter_fn False, True, True
+    # any           True
+    # ->            skip
+
+    # some node are not user specific
+
+    # case 3,
+    # filter_fn     True
+    # not filter_fn False
+    # any           False
+    # ->            not skip
+    # all node are user specific
+    if current_stage.is_global and filter_fn is not None:
+        for node in nodes:
+            if filter_fn(node):
+                log.warning("not skip nodes %s", nodes)
+                return False
+    if filter_fn and any(not filter_fn(node) for node in nodes):
+        log.warning("skip nodes %s", nodes)
+        skip_annotate = True
+        return skip_annotate
+    # import pdb; pdb.set_trace()
+    log.warning("not skip nodes %s", nodes)
+    return skip_annotate
+
+
 def _map_module_function_to_aten_operator_type():
     module_function_to_aten_operator: Dict[Callable, torch._ops.OpOverloadPacket] = {}
     map_list = (
@@ -161,10 +282,12 @@ AnnotatorType: TypeAlias = Callable[
     Optional[List[List[Node]]],
 ]
 
+from collections import OrderedDict
+
 X86_ANNOTATORS_REGISTRY: Dict[str, Dict[str, AnnotatorType]] = {
-    "STATIC": {},
-    "DYNAMIC": {},
-    "STATIC_QAT_ONLY": {},
+    "STATIC": OrderedDict(),
+    "DYNAMIC": OrderedDict(),
+    "STATIC_QAT_ONLY": OrderedDict(),
 }
 
 AnnotatorsType: TypeAlias = Dict[str, AnnotatorType]
@@ -356,6 +479,7 @@ class X86InductorQuantizer(Quantizer):
             torch._ops.OpOverloadPacket, Optional[QuantizationConfig]
         ] = {}
         self.module_name_qconfig: Dict[str, Optional[QuantizationConfig]] = {}
+        self._module_type_qconfig = {}
 
     @classmethod
     def get_supported_quantization_configs(cls) -> List[QuantizationConfig]:
@@ -396,6 +520,7 @@ class X86InductorQuantizer(Quantizer):
         function_type: Callable,
         quantization_config: Optional[QuantizationConfig],
     ) -> "X86InductorQuantizer":
+        self._module_type_qconfig[function_type] = quantization_config
         if function_type in X86InductorQuantizer.module_function_to_aten_operator_type:
             self._set_aten_operator_qconfig(
                 X86InductorQuantizer.module_function_to_aten_operator_type[
@@ -414,6 +539,7 @@ class X86InductorQuantizer(Quantizer):
         module_type: torch.nn.Module,
         quantization_config: Optional[QuantizationConfig],
     ) -> "X86InductorQuantizer":
+        self._module_type_qconfig[module_type] = quantization_config
         if module_type in X86InductorQuantizer.module_function_to_aten_operator_type:
             self._set_aten_operator_qconfig(
                 X86InductorQuantizer.module_function_to_aten_operator_type[module_type],
@@ -571,7 +697,7 @@ class X86InductorQuantizer(Quantizer):
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
         """just handling global spec for now"""
         if self.global_config and self.global_config.input_activation.is_dynamic:  # type: ignore[union-attr]
-            model = self._annotate_for_dynamic_quantization_config(model)
+            model = self._annotate_for_static_quantization_config(model)
         else:
             model = self._annotate_for_static_quantization_config(model)
         return model
@@ -607,9 +733,24 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_quantization_by_module_name_qconfig(
         self, model: torch.fx.GraphModule
     ) -> torch.fx.GraphModule:
+        module_name_list = list(self.module_name_qconfig.keys())
+
         for module_name, qconfig in self.module_name_qconfig.items():
             self._annotate_by_single_config(
                 model, qconfig, _get_module_name_filter(module_name)
+            )
+        tp_list = list(self.operator_type_qconfig.keys())
+        for operator_type, qconfig in self.operator_type_qconfig.items():
+            self._annotate_by_single_config(
+                model, qconfig, _get_operator_type_filter(operator_type)
+            )
+        log.warning("start to handle global config")
+        if self.global_config:
+            current_stage.is_global = True
+            self._annotate_by_single_config(
+                model,
+                self.global_config,
+                _x86_get_not_module_type_or_name_filter(tp_list, module_name_list),
             )
         return model
 
@@ -635,10 +776,13 @@ class X86InductorQuantizer(Quantizer):
         """
 
         # Step1: Recipe of fusion patterns like conv/linear.
-        if self.module_name_qconfig:
-            self._annotate_quantization_by_module_name_qconfig(model)
-        if self.operator_type_qconfig or self.global_config:
-            self._annotate_static_quantization_by_op_type_and_global_config(model)
+
+        self._annotate_quantization_by_module_name_qconfig(model)
+
+        # if self.module_name_qconfig:
+        #     self._annotate_quantization_by_module_name_qconfig(model)
+        # if self.operator_type_qconfig or self.global_config:
+        #     self._annotate_static_quantization_by_op_type_and_global_config(model)
 
         # Step2: Recipe to propagate annotation for patterns beside conv/linear.
         # Go through all the nodes from start to end.
@@ -661,8 +805,8 @@ class X86InductorQuantizer(Quantizer):
     ) -> torch.fx.GraphModule:
         if self.module_name_qconfig:
             self._annotate_quantization_by_module_name_qconfig(model)
-        if self.operator_type_qconfig or self.global_config:
-            self._annotate_dynamic_quantization_by_op_type_and_global_config(model)
+        # if self.operator_type_qconfig or self.global_config:
+        #     self._annotate_dynamic_quantization_by_op_type_and_global_config(model)
         return model
 
     def _annotate_dynamic_quantization_by_op_type_and_global_config(
@@ -1261,69 +1405,6 @@ class X86InductorQuantizer(Quantizer):
                 self._annotate_output_share_observer_as_input(input_node, node)
         return
 
-    @register_annotator([STATIC_ANNOTATORS, DYNAMIC_ANNOTATORS])
-    def _annotate_linear(
-        self,
-        gm: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
-        filter_fn: Optional[Callable[[Node], bool]] = None,
-    ) -> None:
-        linear_partitions = get_source_partitions(
-            gm.graph, [torch.nn.Linear, torch.nn.functional.linear]
-        )
-        linear_partitions = list(
-            itertools.chain.from_iterable(linear_partitions.values())
-        )
-        for partition in linear_partitions:
-            if len(partition.output_nodes) > 1:
-                raise ValueError(
-                    "Linear partition cannot have more than one output node"
-                )
-            linear_node = partition.output_nodes[0]
-            if linear_node.op != "call_function" or linear_node.target not in (
-                torch.ops.aten.linear.default,
-            ):
-                raise ValueError(f"{linear_node} is not an aten linear operator")
-            # skip annotation if it is already annotated
-            if _skip_annotate([linear_node], filter_fn):
-                continue
-            self._annotate_linear_node_helper(linear_node, True, quantization_config)
-
-    @register_annotator(STATIC_ANNOTATORS)
-    def _annotate_linear_unary(
-        self,
-        gm: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
-        filter_fn: Optional[Callable[[Node], bool]] = None,
-    ) -> None:
-        postop_list = [
-            torch.nn.ReLU,
-            torch.nn.LeakyReLU,
-            torch.nn.Tanh,
-            torch.nn.GELU,
-        ]
-        fused_partitions: List[tuple] = []
-        for postop in postop_list:
-            fused_partitions = fused_partitions + find_sequential_partitions(
-                gm, [torch.nn.Linear, postop]
-            )
-        for fused_partition in fused_partitions:
-            linear_partition, unary_partition = fused_partition
-            linear_node, unary_node = self._get_output_nodes_of_partitions(
-                [linear_partition, unary_partition]
-            )
-            if linear_node.op != "call_function" or linear_node.target not in (
-                torch.ops.aten.linear.default,
-            ):
-                continue
-            if _skip_annotate([unary_node, linear_node], filter_fn):
-                continue
-            self._annotate_linear_node_helper(linear_node, False, quantization_config)
-            unary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
-                _annotated=True,
-                _is_output_of_quantized_pattern=True,
-            )
-
     @register_annotator(STATIC_ANNOTATORS)
     def _annotate_linear_binary_unary(
         self,
@@ -1406,6 +1487,70 @@ class X86InductorQuantizer(Quantizer):
                         _annotated=True,
                         _is_output_of_quantized_pattern=True,
                     )
+
+    @register_annotator(STATIC_ANNOTATORS)
+    def _annotate_linear_unary(
+        self,
+        gm: torch.fx.GraphModule,
+        quantization_config: QuantizationConfig,
+        filter_fn: Optional[Callable[[Node], bool]] = None,
+    ) -> None:
+        postop_list = [
+            torch.nn.ReLU,
+            torch.nn.LeakyReLU,
+            torch.nn.Tanh,
+            torch.nn.GELU,
+        ]
+        fused_partitions: List[tuple] = []
+        for postop in postop_list:
+            fused_partitions = fused_partitions + find_sequential_partitions(
+                gm, [torch.nn.Linear, postop]
+            )
+        for fused_partition in fused_partitions:
+            linear_partition, unary_partition = fused_partition
+            linear_node, unary_node = self._get_output_nodes_of_partitions(
+                [linear_partition, unary_partition]
+            )
+            if linear_node.op != "call_function" or linear_node.target not in (
+                torch.ops.aten.linear.default,
+            ):
+                continue
+            if _skip_annotate([unary_node, linear_node], filter_fn):
+                continue
+            self._annotate_linear_node_helper(linear_node, False, quantization_config)
+            unary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
+                _annotated=True,
+                _is_output_of_quantized_pattern=True,
+            )
+
+    @register_annotator([STATIC_ANNOTATORS, DYNAMIC_ANNOTATORS])
+    def _annotate_linear(
+        self,
+        gm: torch.fx.GraphModule,
+        quantization_config: QuantizationConfig,
+        filter_fn: Optional[Callable[[Node], bool]] = None,
+    ) -> None:
+        linear_partitions = get_source_partitions(
+            gm.graph, [torch.nn.Linear, torch.nn.functional.linear]
+        )
+        linear_partitions = list(
+            itertools.chain.from_iterable(linear_partitions.values())
+        )
+        for partition in linear_partitions:
+            log.warning("for partition: %s", partition)
+            if len(partition.output_nodes) > 1:
+                raise ValueError(
+                    "Linear partition cannot have more than one output node"
+                )
+            linear_node = partition.output_nodes[0]
+            if linear_node.op != "call_function" or linear_node.target not in (
+                torch.ops.aten.linear.default,
+            ):
+                raise ValueError(f"{linear_node} is not an aten linear operator")
+            # skip annotation if it is already annotated
+            if _skip_annotate([linear_node], filter_fn):
+                continue
+            self._annotate_linear_node_helper(linear_node, True, quantization_config)
 
     def validate(self, model: torch.fx.GraphModule) -> None:
         pass
