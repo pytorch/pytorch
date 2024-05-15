@@ -645,6 +645,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void registerUserBuffers(at::Device device, c10::cuda::MemPool& pool);
 
+  void deregisterUserBuffers(at::Device device, c10::cuda::MemPool& pool);
+
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store
   void broadcastUniqueNCCLID(

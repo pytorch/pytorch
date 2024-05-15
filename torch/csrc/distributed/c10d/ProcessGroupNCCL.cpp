@@ -934,6 +934,25 @@ void ProcessGroupNCCL::registerUserBuffers(
   }
 }
 
+void ProcessGroupNCCL::deregisterUserBuffers(
+    at::Device device,
+    c10::cuda::MemPool& pool) {
+  const auto key = getKeyFromDevice(device);
+  LOG(INFO) << logPrefix()
+            << "Performing user buffer deregistration on backend device "
+            << device << ", key " << key << ", i am " << this;
+  auto ncclComm = getNCCLComm(key, device, OpType::ALLREDUCE);
+  auto snapshot =
+      c10::cuda::CUDACachingAllocator::snapshot(device.index(), pool);
+  for (const auto& segmentInfo : snapshot.segments) {
+    TORCH_INTERNAL_ASSERT(
+        segmentInfo.device == device.index(),
+        "Mismatch between CUDA memory segment device and current device");
+    ncclComm->deregisterSegment(
+        reinterpret_cast<void*>(segmentInfo.address));
+  }
+}
+
 c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
     initIntraNodeComm() {
   using IntraNodeComm = intra_node_comm::IntraNodeComm;
