@@ -25,6 +25,21 @@ def eager(gm, fake_tensor_inputs):
 
 
 @register_backend
+def eager_noexcept(gm, fake_tensor_inputs):
+    # This backend is intended to check that dynamo-generated GraphModules
+    # do not cause errors.
+    def inner(*args):
+        try:
+            return gm(*args)
+        except Exception as e:
+            raise torch._dynamo.exc.TorchDynamoException(
+                "Unexpected exception when running generated GraphModule"
+            ) from e
+
+    return inner
+
+
+@register_backend
 def pre_dispatch_eager(gm, fake_tensor_inputs):
     from torch.fx.experimental.proxy_tensor import make_fx
 
