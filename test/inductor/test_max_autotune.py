@@ -250,13 +250,13 @@ class TestMaxAutotune(TestCase):
             def __init__(self, key, is_autotune=False):
                 pass
 
-            def get(self, filenames):
+            def get(self, filename):
                 nonlocal cache
                 nonlocal num_get
-                ret = {
-                    file: json.loads(cache[file]) for file in filenames if file in cache
-                }
-                num_get += len(ret)
+                if filename not in cache:
+                    return None
+                ret = json.loads(cache[filename])
+                num_get += 1
                 return ret
 
             def put(self, filename, data):
@@ -447,6 +447,22 @@ class TestMaxAutotune(TestCase):
         fn_c = torch.compile(mode="max-autotune-no-cudagraphs")(fn)
         self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
 
+    @skipIfRocm
+    @fresh_inductor_cache()
+    @config.patch(search_autotune_cache=True)
+    def test_search_autotune_cache(self):
+        def fn(a, b, c):
+            a = (a @ b) @ c
+            a, b, c = (t.to(torch.float16) for t in [a, b, c])
+            return (a @ b) @ c
+
+        fn_c = torch.compile()(fn)
+        inputs = [torch.rand([256, 256], device="cuda") for _ in range(3)]
+        from torch._dynamo.utils import counters
+
+        self.assertEqual(fn(*inputs), fn_c(*inputs), atol=1e-2, rtol=1e-2)
+        self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
+
     @config.patch(autotune_local_cache=False, autotune_remote_cache=False)
     def test_precompilations(self):
         def fn(a, b, c):
@@ -605,6 +621,82 @@ class TestMaxAutotune(TestCase):
     @config.patch(max_autotune=True)
     def test_empty_conv_input_with_1x1_kernel(self):
         self.test_empty_conv_input(kernel_size=1)
+
+    def test_non_contiguous_input_mm(self):
+        """
+        Make sure the triton template can work with non-contiguous inputs without crash.
+        Check https://github.com/pytorch/pytorch/issues/125437 for more details.
+        """
+        x = torch.empty_strided(
+            (50257, 32768), (1, 50304), dtype=torch.bfloat16, device="cuda"
+        )
+        y = torch.empty_strided(
+            (32768, 768), (768, 1), dtype=torch.bfloat16, device="cuda"
+        )
+
+        @torch.compile(mode="max-autotune")
+        def f(x, y):
+            return x @ y
+
+        ref = x @ y
+        act = f(x, y)
+        self.assertTrue(torch.allclose(ref, act, atol=4 * 1e-3, rtol=4 * 1e-3))
+
+    def test_non_contiguous_input_addmm(self):
+        b = torch.empty((768), dtype=torch.bfloat16, device="cuda")
+        x = torch.empty_strided(
+            (50257, 32768), (1, 50304), dtype=torch.bfloat16, device="cuda"
+        )
+        y = torch.empty_strided(
+            (32768, 768), (768, 1), dtype=torch.bfloat16, device="cuda"
+        )
+
+        @torch.compile(mode="max-autotune")
+        def f(x, y):
+            return torch.addmm(b, x, y)
+
+        ref = torch.addmm(b, x, y)
+        act = f(x, y)
+        self.assertTrue(torch.allclose(ref, act, atol=4 * 1e-3, rtol=4 * 1e-3))
+
+    def test_non_contiguous_input_bmm(self):
+        x = torch.empty_strided(
+            (1, 50257, 32768), (0, 1, 50304), dtype=torch.bfloat16, device="cuda"
+        )
+        y = torch.empty_strided(
+            (1, 32768, 768), (0, 768, 1), dtype=torch.bfloat16, device="cuda"
+        )
+
+        @torch.compile(mode="max-autotune")
+        def f(x, y):
+            return torch.bmm(x, y)
+
+        ref = torch.bmm(x, y)
+        act = f(x, y)
+        self.assertTrue(torch.allclose(ref, act, atol=4 * 1e-3, rtol=4 * 1e-3))
+
+    def test_non_contiguous_input_mm_plus_mm(self):
+        x1 = torch.empty_strided(
+            (50257, 32768), (1, 50304), dtype=torch.bfloat16, device="cuda"
+        )
+        y1 = torch.empty_strided(
+            (32768, 768), (768, 1), dtype=torch.bfloat16, device="cuda"
+        )
+
+        x2 = torch.empty_strided(
+            (50257, 32768), (1, 50304), dtype=torch.bfloat16, device="cuda"
+        )
+        y2 = torch.empty_strided(
+            (32768, 768), (768, 1), dtype=torch.bfloat16, device="cuda"
+        )
+
+        @torch.compile(mode="max-autotune")
+        def f(x1, y1, x2, y2):
+            return x1 @ y1 + x2 @ y2
+
+        ref = x1 @ y1 + x2 @ y2
+        act = f(x1, y1, x2, y2)
+        self.assertTrue(torch.allclose(ref, act, atol=4 * 1e-3, rtol=4 * 1e-3))
 
 
 class TestBenchmarkRequest(BenchmarkRequest):

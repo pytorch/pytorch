@@ -83,7 +83,8 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
     checkAllSameType(c, {input, weight});
   }
   checkAllSameType(c, {weight, bias, running_mean, running_var});
-  checkAllContiguous(c, {input, weight, bias, running_mean, running_var});
+  checkAllContiguous(c, {weight, bias, running_mean, running_var});
+  TORCH_CHECK(input->is_contiguous(input->suggest_memory_format()));
   checkDimRange(c, input, 2, 6 /* exclusive */);
   auto num_features = input->size(1);
   for (auto t : {weight, bias, running_mean, running_var}) {
