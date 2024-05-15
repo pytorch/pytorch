@@ -54,8 +54,8 @@ void compute_fused_params(
 template <bool ReluFused>
 Tensor q_batch_norm1d_impl(
     Tensor qx,
-    c10::optional<Tensor> mb_weight,
-    c10::optional<Tensor> mb_bias,
+    std::optional<Tensor> mb_weight,
+    std::optional<Tensor> mb_bias,
     Tensor mean,
     Tensor var,
     double eps,
@@ -162,8 +162,8 @@ Tensor q_batch_norm1d_impl(
 template <bool ReluFused>
 Tensor q_batch_norm2d_impl(
     Tensor qx,
-    c10::optional<Tensor> mb_weight,
-    c10::optional<Tensor> mb_bias,
+    std::optional<Tensor> mb_weight,
+    std::optional<Tensor> mb_bias,
     Tensor mean,
     Tensor var,
     double eps,
@@ -256,8 +256,8 @@ Tensor q_batch_norm2d_impl(
 template <bool ReluFused>
 Tensor q_batch_norm3d_impl(
     Tensor qx,
-    c10::optional<Tensor> mb_weight,
-    c10::optional<Tensor> mb_bias,
+    std::optional<Tensor> mb_weight,
+    std::optional<Tensor> mb_bias,
     Tensor mean,
     Tensor var,
     double eps,
@@ -353,8 +353,8 @@ Tensor q_batch_norm3d_impl(
 template <bool ReluFused>
 Tensor q_batch_norm_impl(
     Tensor qx,
-    c10::optional<Tensor> mb_weight,
-    c10::optional<Tensor> mb_bias,
+    std::optional<Tensor> mb_weight,
+    std::optional<Tensor> mb_bias,
     Tensor mean,
     Tensor var,
     double eps,
@@ -380,7 +380,7 @@ Tensor q_batch_norm_impl(
 } // namespace
 
 Tensor quantized_batch_norm(
-    const Tensor& qx, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
+    const Tensor& qx, const std::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
     const Tensor& mean /* optional */,
     const Tensor& var /* optional */,
     double eps,
