@@ -9,7 +9,7 @@ import operator
 import sys
 import textwrap
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -1111,42 +1111,23 @@ class AlgorithmSelectorCache(PersistentCache):
                     return choice.precompile()
 
             executor = ThreadPoolExecutor(max_workers=num_workers)
-            futures = executor.map(
-                lambda c: precompile_with_captured_stdout(c),
-                [c for c in choices if hasattr(c, "precompile")],
-                timeout=precompilation_timeout_seconds,
-            )
+
+            futures = {}
+            for c in choices:
+                if hasattr(c, "precompile"):
+                    future = executor.submit(precompile_with_captured_stdout, c)
+                    futures[future] = c
 
             @functools.lru_cache(None)
             @restore_stdout_stderr(initial_stdout, initial_stderr)
             def wait_on_futures():
                 counters["inductor"]["select_algorithm_precompile"] += 1
-                try:
-                    iterator = iter(futures)
-                    while True:
-                        try:
-                            next(iterator)
-                        except CUDACompileError:
-                            log.error(  # noqa: G201
-                                "CUDA Compilation error", exc_info=True
-                            )
-                except TimeoutError:
-                    log.warning(
-                        f"Precompilation timed out after {precompilation_timeout_seconds} seconds."  # noqa: G004
-                    )
-                except StopIteration:
-                    pass
-                except Exception as e:
-                    try:
-                        from triton.runtime.autotuner import OutOfResources
-
-                        if isinstance(e, OutOfResources):
-                            # This config is invalid due to requiring too many resources
-                            pass
-                        else:
-                            raise e
-                    except ImportError:
-                        raise e
+                for future in as_completed(
+                    futures,
+                    timeout=precompilation_timeout_seconds,
+                ):
+                    if e := future.exception():
+                        log.error("Exception %s for benchmark choice %s", e, futures[future])
 
                 executor.shutdown(wait=True)
 
@@ -1253,22 +1234,24 @@ class AlgorithmSelectorCache(PersistentCache):
             }
             example_inputs = list(unique_example_inputs.values())
             example_inputs_extern = [
-                unique_example_inputs[input_node.get_name()]
-                if unique_example_inputs[input_node.get_name()].is_mkldnn
-                else torch.as_strided(
-                    unique_example_inputs[input_node.get_name()],
-                    V.graph.sizevars.size_hints(
-                        input_node.get_size(),
-                        fallback=config.unbacked_symint_fallback,
-                    ),
-                    V.graph.sizevars.size_hints(
-                        input_node.get_stride(),
-                        fallback=config.unbacked_symint_fallback,
-                    ),
-                    V.graph.sizevars.size_hint(
-                        input_node.get_layout().offset,
-                        fallback=config.unbacked_symint_fallback,
-                    ),
+                (
+                    unique_example_inputs[input_node.get_name()]
+                    if unique_example_inputs[input_node.get_name()].is_mkldnn
+                    else torch.as_strided(
+                        unique_example_inputs[input_node.get_name()],
+                        V.graph.sizevars.size_hints(
+                            input_node.get_size(),
+                            fallback=config.unbacked_symint_fallback,
+                        ),
+                        V.graph.sizevars.size_hints(
+                            input_node.get_stride(),
+                            fallback=config.unbacked_symint_fallback,
+                        ),
+                        V.graph.sizevars.size_hint(
+                            input_node.get_layout().offset,
+                            fallback=config.unbacked_symint_fallback,
+                        ),
+                    )
                 )
                 for input_node in input_nodes
             ]
@@ -1493,9 +1476,9 @@ def autotune_select_algorithm(*args, **kwargs):
         _ALGORITHM_SELECTOR_CACHE = AlgorithmSelectorCache()
 
     if "return_multi_template" not in kwargs:
-        kwargs[
-            "return_multi_template"
-        ] = torch._inductor.config.benchmark_epilogue_fusion
+        kwargs["return_multi_template"] = (
+            torch._inductor.config.benchmark_epilogue_fusion
+        )
 
     return _ALGORITHM_SELECTOR_CACHE(*args, **kwargs)
 
