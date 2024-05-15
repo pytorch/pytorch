@@ -92,7 +92,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
             )
             state_dicts.append({name: sharded_tensor})
 
-        # allow meta params during `reset_sharded_param`
+        # check that we can load with some parameters still on meta device
         for sd in state_dicts:
             model.load_state_dict(sd, assign=True, strict=False)
 
@@ -100,8 +100,8 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
         inp = torch.rand((mlp_dim, mlp_dim), device="cuda")
         model(inp)
 
-        state_dicts = model.state_dict()
-        for name, dtensor in state_dicts.items():
+        state_dict = model.state_dict()
+        for name, dtensor in state_dict.items():
             self.assertEqual(dtensor.device.type, "cpu")
 
     @skip_if_lt_x_gpu(2)
