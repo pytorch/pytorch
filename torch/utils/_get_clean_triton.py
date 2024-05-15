@@ -55,7 +55,7 @@ def merge_params(original_params: List[str], new_params: List[str]) -> List[str]
 
 def add_launch_params(original: str, kernel_to_params: Dict[str, str]) -> str:
     # Regex to match the function call in the original string
-    pattern = r"(\w+)\.run\(([^)]*), grid=(.*\)), [^)]*\)"
+    pattern = r"(\w+)\.run\((.*), grid=(.*\)), [^)]*\)"
 
     def replace(match) -> str:
         # Extract parts from the regex match
