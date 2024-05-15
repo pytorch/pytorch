@@ -529,6 +529,9 @@ class SizeVariable(TupleVariable):
             assert isinstance(index, (int, torch.SymInt))
             return self.items[index]
 
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        return variables.ConstantVariable.create(hasattr(torch.Size, name))
+
 
 class NamedTupleVariable(TupleVariable):
     _nonvar_fields = {

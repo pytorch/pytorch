@@ -1338,6 +1338,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return a - b
 
     @make_test
+    def test_torch_size_hasattr(x):
+        if hasattr(x.shape, "_fields"):
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
     def test_is_quantized(a, b):
         if not a.is_quantized:
             return a + b
