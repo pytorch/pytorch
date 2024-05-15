@@ -450,9 +450,9 @@ else:
                     raise ValueError(
                         f"Mesh shape {mesh_shape} is invalid for group with ranks {group_ranks}"
                     )
-                mesh = torch.tensor(group_ranks, device="cpu", dtype=torch.int).view(
-                    mesh_shape
-                )
+                mesh: Union[torch.Tensor, List[int]] = torch.tensor(
+                    group_ranks, device="cpu", dtype=torch.int
+                ).view(mesh_shape)
             else:
                 mesh = group_ranks
             device_mesh = DeviceMesh(
