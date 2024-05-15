@@ -46,7 +46,6 @@ from torch.optim.lr_scheduler import (
     OneCycleLR,
     PolynomialLR,
     ReduceLROnPlateau,
-    SequentialLR,
     StepLR,
 )
 
@@ -73,9 +72,11 @@ LR_SCHEDULER_TO_KWARGS = {
     StepLR: {"step_size": 1, "gamma": 100},
     MultiStepLR: {"milestones": [1, 2], "gamma": 100},
     ExponentialLR: {"gamma": 100},
-    SequentialLR: {"schedulers": None, "milestones": [1, 2]},
     CosineAnnealingLR: {"T_max": 7},
-    ChainedScheduler: {"schedulers": None},
+    # These schedulers have memory leaks in eager
+    # https://github.com/pytorch/pytorch/issues/126131
+    # SequentialLR: {"schedulers": None, "milestones": [1, 2]},
+    # ChainedScheduler: {"schedulers": None},
     CyclicLR: {"base_lr": 0.001, "max_lr": 0.02, "cycle_momentum": False},
     CosineAnnealingWarmRestarts: {"T_0": 1},
     OneCycleLR: {
@@ -765,6 +766,25 @@ class CompiledOptimizerTests(TestCase):
         ret_val = compiled(x)
 
         self.assertEqual(ret_val, x)
+
+    # compile a large foreach op and verify
+    # that the time taken is within an expected range
+    @requires_cuda
+    def test_compile_time_smoketest(self):
+        import time
+
+        xs = [torch.ones(2, 2, device="cuda") for _ in range(100)]
+        ys = [torch.ones(2, 2, device="cuda") for _ in range(100)]
+
+        @torch.compile
+        def fn(xs, ys):
+            return torch._foreach_add(xs, ys)
+
+        start = time.perf_counter()
+        fn(xs, ys)
+        end = time.perf_counter()
+
+        self.assertLess(end - start, 90)
 
 
 for optim_cls, name, kwargs, scheduler_cls in COMPILED_OPT_KWARG_DB:
