@@ -888,8 +888,12 @@ class FakeTensorTest(TestCase):
             t = fake_mode.from_tensor(
                 t1,
                 symbolic_context=StatelessSymbolicContext(
-                    dynamic_sizes=[DimDynamic.DYNAMIC, DimDynamic.STATIC, DimDynamic.STATIC],
-                )
+                    dynamic_sizes=[
+                        DimDynamic.DYNAMIC,
+                        DimDynamic.STATIC,
+                        DimDynamic.STATIC,
+                    ],
+                ),
             )
 
         self.assertEqual(t.shape[0], torch.ops.aten.unsqueeze_copy(t, 1).shape[0])
