@@ -1360,7 +1360,6 @@ class FakeTensorPropTest(TestCase):
                 self.assertTrue(failed)
 
 
-    @expectedFailurePropagateRealTensors  # Propagate real tensors doesn't work with fake-on-fake
     def test_fake_tensor_prop_on_nn_module_with_optional_args(self):
         class OptionalArgumentInBetween(torch.nn.Module):
             def __init__(self):
@@ -1388,7 +1387,6 @@ class FakeTensorPropTest(TestCase):
             FakeTensorProp(graph_model, fake_mode).propagate(value, None, another_optional_value)
 
 
-    @expectedFailurePropagateRealTensors  # TODO: not sure about this one, kinda strange
     def test_unbacked_shape_realloc(self):
         def f(x):
             return x.nonzero()
