@@ -256,7 +256,7 @@ class TestAutocastCPU(TestCase):
     def test_cpu_autocast_deprecated_warning(self):
         with self.assertWarnsRegex(
             DeprecationWarning,
-            "torch.cpu.amp.autocast(args...) is deprecated. Please use torch.amp.autocast('cpu', args...) instead.",
+            "torch.cpu.amp.autocast\(args...\) is deprecated. Please use torch.amp.autocast\('cpu', args...\) instead.",
         ):
             with torch.cpu.amp.autocast():
                 _ = torch.ones(10)
