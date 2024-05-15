@@ -387,7 +387,7 @@ def _pre_forward(
         if handle and handle._offload_params and handle.flat_param._cpu_grad is None:
             handle.flat_param._cpu_grad = torch.zeros_like(
                 handle.flat_param._local_shard, device=torch.device("cpu")
-            ).pin_memory()
+            ).pin_memory(device=state.compute_device)
 
         should_cast_forward_inputs = (
             state._handle and not state._handle._force_full_precision
@@ -1390,7 +1390,9 @@ def _register_pre_backward_hooks(
     def _register_hook(t: torch.Tensor) -> torch.Tensor:
         if t.requires_grad:
             t.register_hook(
-                functools.partial(_pre_backward_hook, state, module, handle)
+                torch.utils.hooks.unserializable_hook(
+                    functools.partial(_pre_backward_hook, state, module, handle)
+                )
             )
             if handle:
                 handle._needs_pre_backward_unshard = True

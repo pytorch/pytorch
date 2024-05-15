@@ -6,7 +6,7 @@
 
 using std::vector;
 using std::tuple;
-using c10::optional;
+using std::optional;
 using c10::IValue;
 using c10::OperatorKernel;
 using c10::OperatorHandle;

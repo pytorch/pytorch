@@ -10,15 +10,13 @@
 #endif
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/OperationUtils.h>
-// For Metal3_1
-#include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <fmt/format.h>
 
 namespace at::native {
 
 using namespace mps;
 
-static const char* METAL_QUANTIZED = R"BINARY_QUANTIZED(
+static at::native::mps::MetalShaderLibrary lib(R"METAL_QUANTIZED(
 #include <metal_stdlib>
 using namespace metal;
 
@@ -33,11 +31,11 @@ kernel void int4pack_mm(
     constant T                 * scalesAndZeros [[buffer(2)]],
     device   T                 * outputData     [[buffer(3)]],
     constant uint3             & sizes          [[buffer(4)]],
-    uint                         thread_index   [[thread_position_in_grid]]) {
+    uint2                        thread_index   [[thread_position_in_grid]]) {
     const uint lda = sizes.y;
     const uint ldc = sizes.z;
-    const uint m = thread_index / sizes.z; // 0..sizes.x-1
-    const uint n = thread_index % sizes.z; // 0..sizes.z-1
+    const uint m = thread_index.y; // 0..sizes.x-1
+    const uint n = thread_index.x; // 0..sizes.z-1
     const uint nb = n / 32;
     const uint ldb = min(32U,  sizes.z - nb * 32);
     const uint32_t k_block = (sizes.y + groupSize - 1) / groupSize;
@@ -56,7 +54,7 @@ kernel void int4pack_mm(
         rc += a_val * float(scale * T(b_val) + zero);
       }
     }
-    outputData[thread_index] = T(rc);
+    outputData[m * sizes.z + n] = T(rc);
 }
 
 #define INSTANTIATE_INT4MM(DTYPE, GSIZE)                                 \
@@ -68,7 +66,7 @@ kernel void int4pack_mm<DTYPE, GSIZE>(                                   \
     constant DTYPE             * scalesAndZeros [[buffer(2)]],           \
     device   DTYPE             * outputData     [[buffer(3)]],           \
     constant uint3             & sizes          [[buffer(4)]],           \
-    uint                         thread_index [[thread_position_in_grid]])
+    uint2                        thread_index [[thread_position_in_grid]])
 
 INSTANTIATE_INT4MM(float, 32);
 INSTANTIATE_INT4MM(half, 32);
@@ -84,43 +82,7 @@ INSTANTIATE_INT4MM(bfloat, 64);
 INSTANTIATE_INT4MM(bfloat, 128);
 INSTANTIATE_INT4MM(bfloat, 256);
 #endif
-)BINARY_QUANTIZED";
-
-static id<MTLLibrary> compileQuantizedOpsLibrary(id<MTLDevice> device) {
-  static id<MTLLibrary> binaryLibrary = nil;
-  if (binaryLibrary) {
-    return binaryLibrary;
-  }
-
-  NSError* error = nil;
-  MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
-  [options setLanguageVersion:is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) ? MTLLanguageVersion3_1
-                                                                                      : MTLLanguageVersion2_3];
-  binaryLibrary = [device newLibraryWithSource:[NSString stringWithCString:METAL_QUANTIZED
-                                                                  encoding:NSASCIIStringEncoding]
-                                       options:options
-                                         error:&error];
-  TORCH_CHECK(binaryLibrary, "Failed to create metal quantized library, error: ", [[error description] UTF8String]);
-  return binaryLibrary;
-}
-
-static id<MTLComputePipelineState> quantizedPipelineState(id<MTLDevice> device, const std::string& kernel) {
-  static std::unordered_map<std::string, id<MTLComputePipelineState>> psoCache;
-  id<MTLComputePipelineState> pso = psoCache[kernel];
-  if (pso) {
-    return pso;
-  }
-
-  NSError* error = nil;
-  id<MTLLibrary> binaryLib = compileQuantizedOpsLibrary(device);
-  id<MTLFunction> binaryFunc = [binaryLib newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]];
-  TORCH_CHECK(binaryFunc, "Failed to create function state object for: ", kernel);
-  pso = [device newComputePipelineStateWithFunction:binaryFunc error:&error];
-  TORCH_CHECK(pso, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
-
-  psoCache[kernel] = pso;
-  return pso;
-}
+)METAL_QUANTIZED");
 
 Tensor _weight_int4pack_mm_mps(const Tensor& A, const Tensor& B, int64_t qGroupSize, const Tensor& qScaleAndZeros) {
   constexpr int64_t kNTileSize = 8;
@@ -151,31 +113,31 @@ Tensor _weight_int4pack_mm_mps(const Tensor& A, const Tensor& B, int64_t qGroupS
               ", 2]");
 
   auto C = at::empty({M, N}, A.options());
-  id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
   std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(M), static_cast<uint32_t>(K), static_cast<uint32_t>(N)};
   static bool firstCapture = false;
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
 #if _CAPTURE_KERNEL
-      auto& profiler = getMPSProfiler();
-      if (profiler.isCaptureEnabled()) {
-        profiler.startCapture(__func__, mpsStream);
+      if (getMPSProfiler().isCaptureEnabled()) {
+        getMPSProfiler().startCapture(fmt::format("int4pack_mm_{}x{}x{}", M, N, K), mpsStream);
       }
 #endif
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      const std::string kernel = fmt::format("int4pack_mm_{}_{}", qGroupSize, scalarToMetalTypeString(A.scalar_type()));
-      id<MTLComputePipelineState> quantizedPSO = quantizedPipelineState(device, kernel);
+      const std::string kernel = fmt::format("int4pack_mm_{}_{}", qGroupSize, scalarToMetalTypeString(A));
+      id<MTLComputePipelineState> quantizedPSO = lib.getPipelineStateForFunc(kernel);
+      const auto maxThreadsPerGroup = static_cast<decltype(M)>([quantizedPSO maxTotalThreadsPerThreadgroup]);
       [computeEncoder setComputePipelineState:quantizedPSO];
       mtl_setBuffer(computeEncoder, A, 0);
       mtl_setBuffer(computeEncoder, B, 1);
       mtl_setBuffer(computeEncoder, qScaleAndZeros, 2);
       mtl_setBuffer(computeEncoder, C, 3);
       [computeEncoder setBytes:sizes.data() length:sizeof(uint32_t) * sizes.size() atIndex:4];
-      mtl_dispatch1DJob(computeEncoder, quantizedPSO, C.numel());
+      [computeEncoder dispatchThreads:MTLSizeMake(N, M, 1)
+                threadsPerThreadgroup:MTLSizeMake(std::min(maxThreadsPerGroup, M), 1, 1)];
 #if _CAPTURE_KERNEL
-      if (profiler.isCapturing()) {
-        profiler.stopCapture(mpsStream);
+      if (getMPSProfiler().isCapturing()) {
+        getMPSProfiler().stopCapture(mpsStream);
       }
 #endif
     }
