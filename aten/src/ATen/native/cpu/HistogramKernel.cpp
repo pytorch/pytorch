@@ -78,7 +78,7 @@ enum BIN_SELECTION_ALGORITHM {
 };
 template<typename input_t, BIN_SELECTION_ALGORITHM algorithm>
 void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
-        const Tensor& input, const c10::optional<Tensor>& weight) {
+        const Tensor& input, const std::optional<Tensor>& weight) {
     TORCH_INTERNAL_ASSERT(input.dim() == 2);
 
     const int64_t N = input.size(0);
@@ -100,12 +100,12 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
 
     TensorAccessor<const input_t, 2> accessor_in = input.accessor<const input_t, 2>();
 
-    /* Constructs a c10::optional<TensorAccessor> containing an accessor iff
+    /* Constructs a std::optional<TensorAccessor> containing an accessor if
      * the optional weight tensor has a value.
      */
     const auto accessor_wt = weight.has_value()
-            ? c10::optional<TensorAccessor<const input_t, 1>>(weight.value().accessor<const input_t, 1>())
-            : c10::optional<TensorAccessor<const input_t, 1>>();
+            ? std::optional<TensorAccessor<const input_t, 1>>(weight.value().accessor<const input_t, 1>())
+            : std::optional<TensorAccessor<const input_t, 1>>();
 
     std::vector<input_t*> bin_seq(D);
     std::vector<int64_t> num_bin_edges(D);
@@ -208,7 +208,7 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
  * Initializes hist to 0, calls into the main algorithm, and normalizes output if necessary.
  */
 template<BIN_SELECTION_ALGORITHM bin_algorithm>
-void histogramdd_out_cpu_template(const Tensor& self, const c10::optional<Tensor>& weight, bool density,
+void histogramdd_out_cpu_template(const Tensor& self, const std::optional<Tensor>& weight, bool density,
         Tensor& hist, const TensorList& bin_edges) {
     hist.fill_(0);
 
@@ -219,8 +219,8 @@ void histogramdd_out_cpu_template(const Tensor& self, const c10::optional<Tensor
     const Tensor reshaped_input = self.reshape({M, N});
 
     const auto reshaped_weight = weight.has_value()
-            ? c10::optional<Tensor>(weight.value().reshape({M}))
-            : c10::optional<Tensor>();
+            ? std::optional<Tensor>(weight.value().reshape({M}))
+            : std::optional<Tensor>();
 
     std::vector<Tensor> bin_edges_contig(bin_edges.size());
     for (const auto dim : c10::irange(bin_edges_contig.size())) {
@@ -259,7 +259,7 @@ void histogramdd_out_cpu_template(const Tensor& self, const c10::optional<Tensor
  *
  * Refer to histogramdd_out_cpu_template for more details.
  */
-static void histogramdd_kernel_impl(const Tensor& self, const c10::optional<Tensor>& weight, bool density,
+static void histogramdd_kernel_impl(const Tensor& self, const std::optional<Tensor>& weight, bool density,
         Tensor& hist, const TensorList& bin_edges) {
     histogramdd_out_cpu_template<BINARY_SEARCH>(self, weight, density, hist, bin_edges);
 }
@@ -269,7 +269,7 @@ static void histogramdd_kernel_impl(const Tensor& self, const c10::optional<Tens
  *
  * Refer to histogramdd_out_cpu_template for more details.
  */
-static void histogramdd_linear_kernel_impl(const Tensor& self, const c10::optional<Tensor>& weight,
+static void histogramdd_linear_kernel_impl(const Tensor& self, const std::optional<Tensor>& weight,
         bool density, Tensor& hist, const TensorList& bin_edges, bool local_search) {
     if (local_search) {
         // histogramdd codepath: both hist and bin_edges are eventually returned as output,
