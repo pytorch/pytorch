@@ -373,7 +373,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._add_relu_",
         "torch._add_relu",
         "torch._addmm_activation",
-        "torch._aminmax",
         "torch._amp_foreach_non_finite_check_and_unscale_",
         "torch._amp_update_scale_",
         "torch._assert_async",
@@ -406,8 +405,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._construct_CUDA_Tensor_From_Storage_And_Metadata",
         "torch._C._construct_storage_from_data_pointer",
         "torch._C._conv_determine_backend_memory_format",
-        "torch._C._cpu._is_cpu_support_avx2",
-        "torch._C._cpu._is_cpu_support_avx512",
         "torch._C._cpu._is_cpu_support_vnni",
         "torch._C._crash_if_aten_asan",
         "torch._C._crash_if_csrc_asan",
@@ -2422,8 +2419,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.chain_matmul",
         "torch.compile",
         "torch.compiled_with_cxx11_abi",
-        "torch.cpu._is_cpu_support_avx2",
-        "torch.cpu._is_cpu_support_avx512",
         "torch.cpu._is_cpu_support_vnni",
         "torch.cpu.current_device",
         "torch.cpu.current_stream",
@@ -3299,6 +3294,13 @@ FBCODE_INLINE_FILES_IN_SKIPPED_DIRS_RE = re.compile(
     f".*({'|'.join(map(re.escape, FBCODE_INLINE_FILES_IN_SKIPPED_DIRS))})"
 )
 
+# torch.optim is a special case,
+# we usually want to inline it, but the directory
+# structure does not match the module structure
+# and we want to skip the functions in optim/lr_scheduler.py
+# this has precedence over all other rules in check_file
+FORCE_SKIP_FILES = {f"{_module_dir(torch)}optim/lr_scheduler.py"}
+
 
 def _recompile_re():
     global SKIP_DIRS_RE
@@ -3332,6 +3334,8 @@ def check_file(filename, is_inlined_call=False):
     """Should skip this file?"""
     if filename is None:
         return SkipResult(True, "filename is None")
+    if filename in FORCE_SKIP_FILES:
+        return SkipResult(True, "FORCE_SKIP_FILES")
     if any(filename.startswith(d) for d in get_legacy_mod_inlinelist()):
         return SkipResult(
             False,

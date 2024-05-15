@@ -39,29 +39,29 @@ inline AtenTensorHandle new_tensor_handle(at::Tensor&& tensor) {
 
 // utility functions to convert a pointer to an optional value
 template <class T>
-inline c10::optional<T> pointer_to_optional(T* ptr) {
+inline std::optional<T> pointer_to_optional(T* ptr) {
   return ptr ? c10::make_optional(*ptr) : c10::nullopt;
 }
 
 template <class T, class U, typename = std::enable_if_t<!std::is_same_v<T, U>>>
-inline c10::optional<T> pointer_to_optional(U* ptr) {
+inline std::optional<T> pointer_to_optional(U* ptr) {
   return ptr ? c10::make_optional<T>(T(*ptr)) : c10::nullopt;
 }
 
 template <>
-inline c10::optional<at::Tensor> pointer_to_optional(AtenTensorHandle* ptr) {
+inline std::optional<at::Tensor> pointer_to_optional(AtenTensorHandle* ptr) {
   return ptr ? c10::make_optional(*tensor_handle_to_tensor_pointer(*ptr))
              : c10::nullopt;
 }
 
 template <>
-inline c10::optional<at::Tensor> pointer_to_optional(
+inline std::optional<at::Tensor> pointer_to_optional(
     const AtenTensorHandle* ptr) {
   return ptr ? c10::make_optional(*tensor_handle_to_tensor_pointer(*ptr))
              : c10::nullopt;
 }
 
-inline c10::optional<c10::Device> pointer_to_optional_device(
+inline std::optional<c10::Device> pointer_to_optional_device(
     int32_t* device_type,
     int32_t device_index) {
   return device_type ? c10::make_optional(c10::Device(
@@ -74,7 +74,7 @@ inline c10::optional<c10::Device> pointer_to_optional_device(
 template <typename T>
 struct is_optional : std::false_type {};
 template <typename T>
-struct is_optional<c10::optional<T>> : std::true_type {};
+struct is_optional<std::optional<T>> : std::true_type {};
 
 template <class T>
 inline c10::ArrayRef<T> pointer_to_list(T* ptr, int64_t len) {
@@ -123,10 +123,10 @@ inline std::vector<at::Tensor> pointer_to_list(
 }
 
 template <>
-inline std::vector<c10::optional<at::Tensor>> pointer_to_list(
+inline std::vector<std::optional<at::Tensor>> pointer_to_list(
     const AtenTensorHandle** ptr,
     int64_t len) {
-  std::vector<c10::optional<at::Tensor>> result;
+  std::vector<std::optional<at::Tensor>> result;
   result.reserve(len);
   for (int64_t i = 0; i < len; i++) {
     result.emplace_back(pointer_to_optional<at::Tensor>(ptr[i]));
@@ -143,7 +143,7 @@ inline std::array<bool, N> pointer_to_list(const int32_t* ptr) {
 
 // Utility function to convert a pointer to an optional list of values
 template <class T, class U>
-inline c10::optional<c10::ArrayRef<T>> pointer_to_optional_list(
+inline std::optional<c10::ArrayRef<T>> pointer_to_optional_list(
     U** ptr,
     int64_t len) {
   return ptr
