@@ -34,7 +34,7 @@ std::tuple<Tensor, Tensor> _sparse_semi_structured_apply_typed(Tensor input, Ten
   if (input.stride(1) != 1) {
     input = input.contiguous();
   }
-  c10::optional<at::cuda::CUDAGuard> device_guard;
+  std::optional<at::cuda::CUDAGuard> device_guard;
   if (!kIsMeta) {
     device_guard.emplace(input.device());
   }

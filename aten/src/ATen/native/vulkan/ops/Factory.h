@@ -7,10 +7,10 @@ namespace ops {
 
 Tensor _empty_affine_quantized(
     const IntArrayRef sizes,
-    const c10::optional<ScalarType> dtype,
-    const c10::optional<c10::Layout> layout,
-    const c10::optional<Device> device,
-    const c10::optional<bool> pin_memory,
+    const std::optional<ScalarType> dtype,
+    const std::optional<c10::Layout> layout,
+    const std::optional<Device> device,
+    const std::optional<bool> pin_memory,
     const double scale,
     const int64_t zero_point,
     const optional<MemoryFormat> memory_format);
