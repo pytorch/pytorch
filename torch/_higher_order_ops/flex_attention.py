@@ -6,6 +6,7 @@ from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_mutation,
     autograd_not_implemented,
+    reenter_make_fx,
     UnsupportedAliasMutationException,
 )
 from torch._ops import HigherOrderOperator
@@ -178,12 +179,13 @@ def trace_flex_attention(
         torch.zeros((), dtype=query.dtype, requires_grad=query.requires_grad)
     ] + [torch.zeros((), dtype=torch.int) for _ in range(4)]
     with TransformGetItemToIndex():
-        score_graph = make_fx(score_mod)(*example_vals, *other_buffers)
-    proxy_mode.tracer.root.register_module("sdpa_score", score_graph)
+        score_graph = reenter_make_fx(score_mod)(*example_vals, *other_buffers)
+    qualname = proxy_mode.tracer.get_fresh_qualname("sdpa_score")
+    proxy_mode.tracer.root.register_module(qualname, score_graph)
     node_args = (query, key, value, score_graph, *other_buffers)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
     out_proxy = proxy_mode.tracer.create_proxy(
-        "call_function", flex_attention, proxy_args, {}, name="flex_attention"
+        "call_function", flex_attention, proxy_args, {}
     )
     return track_tensor_tree(
         example_out, out_proxy, constant=None, tracer=proxy_mode.tracer
