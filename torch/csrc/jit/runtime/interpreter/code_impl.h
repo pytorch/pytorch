@@ -111,8 +111,8 @@ struct CodeImpl {
   // It is also very useful for debugging interpreter problems to
   // keep this around.
   std::shared_ptr<Graph> graph_;
-  c10::optional<std::vector<GraphExecutor*>> grad_executors_;
-  c10::optional<std::vector<GraphExecutor*>> forward_executors_;
+  std::optional<std::vector<GraphExecutor*>> grad_executors_;
+  std::optional<std::vector<GraphExecutor*>> forward_executors_;
   PreprocessGraph preprocess_;
 
   // map from unique of nodes to register in register table
