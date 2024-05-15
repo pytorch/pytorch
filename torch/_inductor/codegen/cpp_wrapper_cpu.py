@@ -2024,7 +2024,7 @@ class CppWrapperCpu(WrapperCodeGen):
             if isinstance(output_args, str):
                 output_args = [output_args]
 
-        if config.is_fbcode() or (V.graph.aot_mode and config.abi_compatible):
+        if V.graph.aot_mode and config.abi_compatible:
             assert op_overload is not None
             assert raw_args is not None
             assert outputs is not None
@@ -2036,7 +2036,7 @@ class CppWrapperCpu(WrapperCodeGen):
                 output_args,
             )
         else:
-            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_oss(
+            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_jit(
                 buf_name,
                 python_kernel_name,
                 cpp_kernel_name,
@@ -2118,7 +2118,7 @@ if (custom_op_wrapper.get() == NULL) {
             lines += f"PyTuple_SetItem({py_args_var}, {idx}, {generate_py_arg_inner(raw_arg, arg_type)});\n"
         return lines
 
-    def generate_extern_kernel_alloc_and_find_schema_if_needed_oss(
+    def generate_extern_kernel_alloc_and_find_schema_if_needed_jit(
         self,
         buf_name: str,
         python_kernel_name: str,
@@ -2131,7 +2131,7 @@ if (custom_op_wrapper.get() == NULL) {
         raw_args=None,
         output_args: Optional[List[str]] = None,
     ):
-        if V.graph.aot_mode or not config.abi_compatible:
+        if not config.abi_compatible:
             # Will update this to use an OSS version ProxyExecutor
             if cpp_kernel_key not in self.extern_call_ops:
                 self.writeline(

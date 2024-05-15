@@ -478,7 +478,6 @@ else()
     # TODO: Delete this when https://github.com/pytorch/pytorch/issues/35026 is fixed
     set_source_files_properties(../torch/csrc/autograd/record_function_ops.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
   endif()
-  include_directories(${TORCH_ROOT}/third_party/nlohmann/single_include)
 endif()
 list(APPEND TORCH_SRCS ${LIBTORCH_CMAKE_SRCS})
 
@@ -1219,6 +1218,9 @@ if(USE_TBB)
 endif()
 
 target_include_directories(torch_cpu PRIVATE ${ATen_CPU_INCLUDE})
+
+target_include_directories(torch_cpu PRIVATE
+  ${TORCH_ROOT}/third_party/nlohmann/single_include)
 
 target_include_directories(torch_cpu PRIVATE
   ${TORCH_SRC_DIR}/csrc)
