@@ -37,7 +37,7 @@ def _node_metadata_hook(node: torch.fx.Node, stack_trace: str) -> None:
         node.meta["val"] = fake_res
 
     node.meta["stack_trace"] = stack_trace
-    node.meta["nn_module_stack"] = arg_meta["nn_module_stack"]
+    node.meta["nn_module_stack"] = arg_meta.get("nn_module_stack", {})
     node.meta["torch_fn"] = (
         f"{node.target.__name__}_0",
         f"{node.target.__class__.__name__}.{node.target.__name__}",

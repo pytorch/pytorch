@@ -9,6 +9,7 @@ import functools
 import inspect
 import itertools
 import logging
+import math
 import operator
 import re
 import sys
@@ -54,6 +55,7 @@ from ..source import (
     ConstantSource,
     ConstDictKeySource,
     ConvertIntSource,
+    FloatTensorSource,
     GetItemSource,
     GradSource,
     is_constant_source,
@@ -1152,8 +1154,7 @@ class VariableBuilder:
             )
 
     def wrap_literal(self, value):
-        unspec = not config.specialize_int
-        if unspec and type(value) is int:
+        if not config.specialize_int and type(value) is int:
             # unspecializing int by default, but still
             # specialize for the following conditions
             if not TracingContext.get().force_unspec_int_unbacked_size_like and (
@@ -1170,6 +1171,8 @@ class VariableBuilder:
                 return ConstantVariable.create(value=value, source=self.source)
             else:
                 return self.wrap_symint(value)
+        elif not config.specialize_float and type(value) is float:
+            return self.wrap_symfloat(value)
         else:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value)
@@ -1497,6 +1500,140 @@ class VariableBuilder:
             )
 
         return unspec_var
+
+    def wrap_symfloat(self, value):
+        # SymFloat wrapping is special.  We first wrap it in the same way we
+        # do an unspecialized primitive, and then we item() it into a
+        # SymFloat.  Removal of the item() call is left to a later FX pass,
+        # mostly because that pass is more easily done after we have lowered
+        # to ATen ops.  (Dynamo doesn't do decomposition right now).
+
+        if self.name in self.tx.output.unspec_variable_map:
+            return self.tx.output.unspec_variable_map[self.name]
+
+        # NB: we specialize on nan input, because our guard modeling in
+        # ShapeEnv cannot deal with nan
+        if (
+            torch._dynamo.config.specialize_float
+            or is_constant_source(self.get_source())
+            or math.isnan(value)
+        ):
+            self.install_guards(GuardBuilder.CONSTANT_MATCH)
+            return ConstantVariable.create(value=value, source=self.source)
+
+        # NB: At the point we've gotten here, we don't assume static by
+        # default.  Since we have a guard mechanism, there isn't really any
+        # downside to trying to be dynamic for float all the time.  Unlike
+        # ints, this won't make codegen perf worse.  Modest cost to compile
+        # time.
+
+        wrapped_value = torch.tensor(value)
+        # TODO: Switch RandomValueSource over to use this, this is more
+        # accurate
+        assert not isinstance(self.get_source(), RandomValueSource)
+        install_guard(self.get_source().make_guard(GuardBuilder.TYPE_MATCH))
+
+        # The FloatTensorSource here is just for pedantic correctness: if you
+        # guard against an UnspecializedPythonVariable, you need to guard
+        # against the tensor-ified version of the local, otherwise it's not a
+        # Tensor.  However, we never let the UnspecializedPythonVariable escape
+        # here, so there should never actually be any guards against this
+        # source.
+        options = {"source": FloatTensorSource(self.get_source()), "raw_value": value}
+
+        # TODO: Maybe the tensor-ification should be built into the source,
+        # rather than by special pattern match
+        proxy = self.tx.output.root_tracer.create_graph_input(
+            re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+            type(wrapped_value),
+            source=self.get_source(),
+        )
+
+        unspec_var = wrap_fx_proxy_cls(
+            UnspecializedPythonVariable,
+            tx=self.tx,
+            proxy=proxy,
+            example_value=wrapped_value,
+            **options,
+        )
+        assert isinstance(unspec_var, UnspecializedPythonVariable)
+        self.tx.output.unspec_variable_map[self.name] = unspec_var
+
+        if self.tx.export and not isinstance(self.get_source(), LocalSource):
+            raise AssertionError(
+                f"Dynamo attempts to add additional input during export: value={wrapped_value}, source={self.get_source()}"
+            )
+        fake_tensor_value = None
+        example_value = unspec_var.proxy.node.meta["example_value"]
+        assert is_fake(example_value)
+
+        fake_tensor_value = example_value
+        assert fake_tensor_value.fake_mode is self.tx.fake_mode, (
+            f"fake mode ({fake_tensor_value.fake_mode}) from fake tensor metadata doesn't match mode"
+            "({self.tx.fake_mode}) from InstructionTranslator"
+        )
+
+        # There's something a bit incoherent about pass_arg_as_tensor,
+        # specifically regarding sources.
+        #
+        # Specifically, suppose we have "x: float" local argument.  We
+        # eventually end up with an UnspecializedPythonVariable denoting
+        # torch.as_tensor(x)... but it's source is still L['x'] (which if you
+        # accessed it directly is a float!)  So you gotta be careful when
+        # setting up your guards, because it's still going to be a float at
+        # this point, the conversion happens only precisely at the point we're
+        # actually calling the FX graph.  This happens to be what we want for
+        # shape guard generation, but it's kind of unintuitive.
+        proxy.node.meta["grapharg"] = GraphArg(
+            self.get_source(),
+            wrapped_value,
+            pass_arg_as_tensor=True,
+            fake_tensor=fake_tensor_value,
+            is_tensor=False,
+            example_strong_ref=wrapped_value,
+        )
+
+        # OK, now the crazy sauce.  We want to generate a SymNodeVariable to
+        # do the rest of our tracing, doing the equivalent of an item() call.
+        # But we don't /actually/ want to do an item() call, because that will
+        # give us an unbacked SymFloat, but this is really a backed SymFloat.
+
+        item_proxy = self.tx.output.create_proxy(
+            "call_method",
+            "item",
+            (proxy,),
+            {},
+        )
+        # Do NOT do conventional fake tensor prop
+
+        shape_env = self.tx.output.shape_env
+        item_symbol = shape_env.create_unspecified_symbol(
+            value,
+            # Interesting!  Normally if you do compute on a Variable (the
+            # compute in this case being an item() call), you end up with a
+            # new variable that doesn't have source, but in this case, we can
+            # still put a source on it.
+            source=self.source,
+            # If we put in a Tensor input, definitely dynamic (if you wanted
+            # it to be static, gotta bail out earlier)
+            dynamic_dim=DimDynamic.DYNAMIC,
+        )
+        item_example_value = shape_env.create_symfloatnode(
+            item_symbol, hint=value, source=self.source
+        )
+        set_example_value(item_proxy.node, item_example_value)
+
+        self.tx.output.tracked_fakes.append(
+            TrackedFake(item_example_value, self.source, None)
+        )
+
+        item_unspec_var = SymNodeVariable(
+            item_proxy,
+            item_example_value,
+            source=self.get_source(),  # Interesting as above!
+        )
+
+        return item_unspec_var
 
     def wrap_unspecialized_primitive(self, value):
         if self.name in self.tx.output.unspec_variable_map:
