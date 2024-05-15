@@ -132,7 +132,7 @@ Tensor cos_nested(const Tensor& self) {
   return map_nt(self, at::cos);
 }
 
-Tensor _pin_memory_nested(const Tensor& self, c10::optional<Device> device) {
+Tensor _pin_memory_nested(const Tensor& self, std::optional<Device> device) {
   auto* nt_input = get_nested_tensor_impl(self);
   const auto& input_buffer = nt_input->get_unsafe_storage_as_tensor();
   return wrap_buffer(
