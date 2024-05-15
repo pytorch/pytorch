@@ -4,11 +4,11 @@ import unittest
 
 import torch
 import torch._dynamo
-from torch.export._trace import _convert_ts_to_export_experimental
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._export.wrappers import _mark_strict_experimental
 
 from torch._functorch.aot_autograd import aot_export_module
+from torch.export._trace import _convert_ts_to_export_experimental
 
 from torch.testing import FileCheck
 
@@ -116,7 +116,9 @@ def forward(self, arg0_1, arg1_1):
         inps = (torch.randn(4, 4),)
         traced_module_by_torchscript = torch.jit.trace(M(), example_inputs=inps)
 
-        exported_module = _convert_ts_to_export_experimental(traced_module_by_torchscript, inps)
+        exported_module = _convert_ts_to_export_experimental(
+            traced_module_by_torchscript, inps
+        )
 
         self.assertTrue(torch.allclose(exported_module(*inps), model_to_trace(*inps)))
 
@@ -129,9 +131,12 @@ def forward(self, arg0_1, arg1_1):
         inps = torch.randn(4, 4)
         traced_module_by_torchscript = torch.jit.trace(M(), example_inputs=inps)
 
-        exported_module = _convert_ts_to_export_experimental(traced_module_by_torchscript, inps)
+        exported_module = _convert_ts_to_export_experimental(
+            traced_module_by_torchscript, inps
+        )
 
         self.assertTrue(torch.allclose(exported_module(inps), model_to_trace(inps)))
+
 
 if __name__ == "__main__":
     run_tests()

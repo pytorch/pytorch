@@ -631,7 +631,7 @@ def _export_non_strict(
     constants = rewrite_script_object_meta(gm)
     constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
 
-    # FIXME(ycao): Skipping this because traced modules do not have signature yet
+    # FIXME: Skipping this because traced modules do not have signature yet
     if not _is_torch_jit_trace:
         # prettify names for placeholder nodes
         placeholder_naming_pass(
@@ -890,8 +890,7 @@ def _log_export_wrapper(fn):
     return wrapper
 
 
-def _convert_ts_to_export_experimental(traced_callable, args, kwargs={}):
-
+def _convert_ts_to_export_experimental(traced_callable, args, kwargs=None):
     def process_trace_inputs_for_export(example_inputs, example_kwarg_inputs):
         if not isinstance(example_inputs, tuple):
             example_inputs = (example_inputs,)
@@ -904,6 +903,7 @@ def _convert_ts_to_export_experimental(traced_callable, args, kwargs={}):
         def __init__(self, f):
             super().__init__()
             self.f = f
+
         def forward(self, *args, **kwargs):
             return self.f(*args, **kwargs)
 
@@ -911,18 +911,23 @@ def _convert_ts_to_export_experimental(traced_callable, args, kwargs={}):
 
     export_args, export_kwargs = process_trace_inputs_for_export(args, kwargs)
 
-
     if isinstance(traced_callable, TopLevelTracedModule):
-        return _export(traced_callable, export_args, export_kwargs, strict=False, _is_torch_jit_trace=True).module()
+        return _export(
+            traced_callable,
+            export_args,
+            export_kwargs,
+            strict=False,
+            _is_torch_jit_trace=True,
+        ).module()
 
     else:
         return _export(
-                _WrapperModule(traced_callable),
-                export_args,
-                export_kwargs,
-                strict=False,
-                _is_torch_jit_trace=True,
-            ).module()
+            _WrapperModule(traced_callable),
+            export_args,
+            export_kwargs,
+            strict=False,
+            _is_torch_jit_trace=True,
+        ).module()
 
 
 @_log_export_wrapper
@@ -1088,7 +1093,9 @@ def _export(
             fake_kwargs,
             equalities_inputs,
             original_signature,
-        ) = make_fake_inputs(mod, args, kwargs, dynamic_shapes, _is_torch_jit_trace=_is_torch_jit_trace)
+        ) = make_fake_inputs(
+            mod, args, kwargs, dynamic_shapes, _is_torch_jit_trace=_is_torch_jit_trace
+        )
 
         fake_params_buffers = make_fake_params_buffers(
             fake_mode, _get_params_buffers(mod)

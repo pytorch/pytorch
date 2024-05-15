@@ -110,7 +110,9 @@ def make_fake_params_buffers(
     return faked_params_buffers  # type: ignore[return-value]
 
 
-def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes, _is_torch_jit_trace=False):
+def make_fake_inputs(
+    nn_module, args, kwargs, dynamic_shapes, _is_torch_jit_trace=False
+):
     """
     Given an nn module, example inputs, and constraints, return a new fake mode,
     fake inputs created in that mode whose dynamic shape dimensions are constrained
@@ -168,7 +170,6 @@ def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes, _is_torch_jit_trac
             "If you constructed the module under a FakeTensorMode, "
             "please initialize it like: FakeTensorMode(shape_env=ShapeEnv(tracked_fakes=[]))"
         )
-
 
     with fake_mode:
         # FIXME(ycao) ScriptMethod doesn't have signature, I am using an empty one to unblock

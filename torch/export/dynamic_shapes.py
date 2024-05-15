@@ -861,7 +861,9 @@ def _process_dynamic_shapes(
 
         _tree_map(assoc_shape, combined_args, dynamic_shapes)
 
-    combined_args = _combine_args(f, args, kwargs, _is_torch_jit_trace=_is_torch_jit_trace)
+    combined_args = _combine_args(
+        f, args, kwargs, _is_torch_jit_trace=_is_torch_jit_trace
+    )
     if not isinstance(dynamic_shapes, dict):
         assert isinstance(dynamic_shapes, (tuple, list))
         combined_args = type(dynamic_shapes)(combined_args.values())  # type: ignore[assignment, misc]
