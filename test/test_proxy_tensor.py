@@ -1933,7 +1933,6 @@ make_fx_failures = {
     xfail('corrcoef'),
     xfail('quantile'),
     xfail('nanquantile'),
-    xfail('narrow'),
 
     # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
     xfail('sparse.sampled_addmm'),
@@ -1946,6 +1945,14 @@ make_fx_failures = {
 
     # AssertionError: Tensor-likes are not close!
     skip('empty_strided', '', device_type='cpu'),
+}
+
+only_real_tensor_failures = {
+    xfail('narrow'),
+}
+
+only_fake_tensor_failures = {
+    xfail('narrow'),
 }
 
 fake_tensor_failures = {
@@ -2097,12 +2104,13 @@ filtered_hop_db = [op for op in hop_db if op.name != "auto_functionalize"]
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "Cond requires dynamo")
 class TestProxyTensorOpInfo(TestCase):
     @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_exhaustive', make_fx_failures)
+    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_exhaustive', make_fx_failures.union(only_real_tensor_failures))
     def test_make_fx_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "real")
 
     @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive', make_fx_failures.union(fake_tensor_failures))
+    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive',
+             make_fx_failures.union(fake_tensor_failures, only_fake_tensor_failures))
     def test_make_fx_fake_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "fake")
 

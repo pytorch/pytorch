@@ -24,7 +24,7 @@ from weakref import ReferenceType
 import torch
 import torch._custom_op
 import torch._logging
-from torch._C._functorch import is_functorch_wrapped_tensor
+from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedtensor
 
 from torch._guards import Source
 from torch._ops import OpOverload
@@ -328,7 +328,16 @@ class FakeTensorConverter:
         if (
             not export
             and type(t) is torch.Tensor
-            # TODO: Maybe also explicitly exclude more exotic types
+            # TODO: It sure would be nice to test if something was a plain
+            # tensor without having to enumerate all the cases
+            and t.layout == torch.strided
+            and not (
+                t.is_sparse
+                or t.is_nested
+                or is_functorch_wrapped_tensor(t)
+                or is_legacy_batchedtensor(t)
+                or torch._is_functional_tensor(t)
+            )
             and t.dim() == 0
             and t.device.type == "cpu"
             and t.dtype in [torch.int64, torch.float64]
