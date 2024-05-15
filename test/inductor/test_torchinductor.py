@@ -32,6 +32,7 @@ from torch._dynamo.debug_utils import aot_graph_input_parser
 from torch._dynamo.testing import (
     CompileCounterWithBackend,
     expectedFailureCodegenDynamic,
+    expectedFailureScalar,
     rand_strided,
     same,
 )
@@ -8956,6 +8957,7 @@ class CommonTemplate:
     # To support this behavior, we need to allow const-propping tensors that store symint data.
     # For now, dynamo will explicitly graph break when it encounters user code with this behavior.
     @expectedFailureCodegenDynamic
+    @expectedFailureScalar
     def test_AllenaiLongformerBase_repro(self):
         def fn(query, scores, window_overlap):
             batch_size, seq_len, num_heads, _ = query.size()
@@ -8991,6 +8993,9 @@ class CommonTemplate:
             opt_fn = torch._dynamo.optimize("inductor")(fn)
             _, code = run_and_get_cpp_code(opt_fn, *args)
             print(code)
+            # When test the scalar version, i.e., ATEN_CPU_CAPABILITY=default,
+            # static_cast<int>(256) is not found, but static_cast<int64_t>(256).
+            # See https://github.com/pytorch/pytorch/issues/126262.
             FileCheck().check_count(
                 "static_cast<int>(256)",
                 1,
