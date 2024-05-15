@@ -94,7 +94,10 @@ def guard_to_detect_forward_monkeypatching(source, mod):
     if source:
         if "forward" in mod.__dict__ and callable(mod.__dict__["forward"]):
             # Monkeypatched forward method, add an ID_MATCH guard on forward function
-            forward_source = AttrSource(AttrSource(source, "forward"), "__func__")
+            fwd = mod.__dict__["forward"]
+            forward_source = AttrSource(source, "forward")
+            if type(fwd) is types.MethodType:
+                forward_source = AttrSource(forward_source, "__func__")
             install_guard(forward_source.make_guard(GuardBuilder.CLOSURE_MATCH))
         else:
             # Common case - check that the forward key is absent in mod __dict__
