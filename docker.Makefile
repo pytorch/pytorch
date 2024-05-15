@@ -12,7 +12,7 @@ CUDA_VERSION_SHORT       ?= 12.1
 CUDA_VERSION             ?= 12.1.1
 CUDNN_VERSION            ?= 8
 BASE_RUNTIME              = ubuntu:22.04
-BASE_DEVEL                = nvidia/cuda:$(CUDA_VERSION)-cudnn$(CUDNN_VERSION)-devel-ubuntu22.04
+BASE_DEVEL                = nvidia/cuda:$(CUDA_VERSION)-devel-ubuntu22.04
 CMAKE_VARS               ?=
 
 # The conda channel to use to install cudatoolkit
@@ -20,7 +20,7 @@ CUDA_CHANNEL              = nvidia
 # The conda channel to use to install pytorch / torchvision
 INSTALL_CHANNEL          ?= pytorch
 
-PYTHON_VERSION           ?= 3.10
+PYTHON_VERSION           ?= 3.11
 # Match versions that start with v followed by a number, to avoid matching with tags like ciflow
 PYTORCH_VERSION          ?= $(shell git describe --tags --always --match "v[1-9]*.*")
 # Can be either official / dev

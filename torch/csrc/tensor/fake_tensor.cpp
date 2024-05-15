@@ -7,6 +7,7 @@
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/pybind.h>
 
+#include <ATen/core/TensorBase.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 
 using namespace pybind11::literals;
@@ -114,80 +115,17 @@ struct Globals {
   Globals() = default;
 };
 
-const std::array<int, 4> DIM_ORDER_4{1, 3, 2, 0};
-const std::array<int, 5> DIM_ORDER_5{1, 4, 3, 2, 0};
-
-bool are_strides_like_channels_last(const at::Tensor& tensor) {
-  const auto& strides = tensor.sym_strides();
-  if (strides[1] == 0) {
-    return false;
-  }
-
-  const auto& shape = tensor.sym_sizes();
-
-  auto ndim = shape.size();
-  const int* dim_order = nullptr;
-  switch (ndim) {
-    case 4:
-      dim_order = DIM_ORDER_4.data();
-      break;
-    case 5:
-      dim_order = DIM_ORDER_5.data();
-      break;
-    default:
-      return false;
-  }
-
-  int64_t min = 0;
-  while (true) {
-    if (shape[*dim_order] == 0) {
-      return false;
-    }
-    if (strides[*dim_order] < min) {
-      return false;
-    }
-    if (*dim_order == 0 && min == strides[1]) {
-      return false;
-    }
-    min = strides[*dim_order].expect_int();
-    if (min > 1) {
-      min *= shape[*dim_order].expect_int();
-    }
-    if (*dim_order == 0) {
-      return true;
-    }
-    dim_order++;
-  }
-}
-
-c10::MemoryFormat suggest_memory_format(const at::Tensor& tensor) {
-  auto layout = tensor.layout();
-  if (layout != c10::Layout::Strided) {
-    return c10::MemoryFormat::Contiguous;
-  }
-
-  if (are_strides_like_channels_last(tensor)) {
-    // THPVariable_get_ndim
-    return tensor.dim() == 4 ? at::MemoryFormat::ChannelsLast
-                             : at::MemoryFormat::ChannelsLast3d;
-  }
-
-  return c10::MemoryFormat::Contiguous;
-}
-
 void serialize_stride(SerializeBuffer& result, const at::Tensor& tensor) {
   auto layout = tensor.layout();
   if (layout != c10::Layout::Strided) {
     return;
   }
 
-  // THPVariable_stride
   serialize(result, tensor.sym_strides());
 }
 
 bool is_sparse_any(const at::Tensor& tensor) {
   // return is_sparse_coo(tensor) || is_sparse_compressed(tensor);
-  // THPVariable_layout
   auto layout = tensor.layout();
   return layout == c10::Layout::Sparse || layout == c10::Layout::SparseCsr ||
       layout == c10::Layout::SparseCsc || layout == c10::Layout::SparseBsr ||
@@ -206,9 +144,8 @@ void serialize_memory_format(
   //  if is_sparse_any(t) or not t.is_contiguous(memory_format=memory_format):
   //      memory_format = None
 
-  auto memory_format = suggest_memory_format(tensor);
+  auto memory_format = tensor.suggest_memory_format();
 
-  // THPVariable_is_contiguous
   bool is_contiguous = tensor.is_contiguous(memory_format);
   if (!is_contiguous) {
     serialize(result, 0);
@@ -228,37 +165,37 @@ py::object extract_tensor_metadata(py::handle t_) {
 
   // t.dtype
   serialize(result, t.scalar_type());
-  // t.shape - THPVariable_get_shape
+  // t.shape
   serialize(result, t.sym_sizes());
   // t.stride() if t.layout == torch.strided else ()
   serialize_stride(result, t);
-  // t.device - THPVariable_device
+  // t.device
   serialize(result, t.device());
-  // t.layout - THPVariable_layout
+  // t.layout
   serialize(result, t.layout());
   // memory_format
   serialize_memory_format(result, t);
-  // t.storage_offset() - THPVariable_storage_offset
+  // t.storage_offset()
   serialize(result, t.sym_storage_offset());
-  // t.requires_grad - THPVariable_get_requires_grad
+  // t.requires_grad
   serialize(result, t.requires_grad());
-  // t.is_quantized - THPVariable_is_quantized
+  // t.is_quantized
   serialize(result, t.is_quantized());
-  // t.is_conj() - THPVariable_is_conj
+  // t.is_conj()
   serialize(result, t.is_conj());
-  // t.is_neg() - THPVariable_is_neg
+  // t.is_neg()
   serialize(result, t.is_neg());
-  // t.is_inference() - THPVariable_is_inference
+  // t.is_inference()
   serialize(result, t.is_inference());
-  // t.is_sparse - THPVariable_is_sparse
+  // t.is_sparse
   bool is_sparse = t.is_sparse();
   serialize(result, is_sparse);
   if (is_sparse) {
-    // t.is_coalesced() if t.is_sparse else None - THPVariable_is_coalesced
+    // t.is_coalesced() if t.is_sparse else None
     serialize(result, t.is_coalesced());
-    // t.dense_dim() if t.is_sparse else None - THPVariable_dense_dim
+    // t.dense_dim() if t.is_sparse else None
     serialize(result, t.dense_dim());
-    // t.sparse_dim() if t.is_sparse else None - THPVariable_sparse_dim
+    // t.sparse_dim() if t.is_sparse else None
     serialize(result, t.sparse_dim());
   }
 

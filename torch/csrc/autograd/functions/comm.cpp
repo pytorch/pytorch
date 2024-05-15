@@ -17,9 +17,9 @@ namespace torch {
 namespace autograd {
 Scatter::Scatter(
     std::vector<at::Device> devices,
-    c10::optional<std::vector<int64_t>> chunk_sizes,
+    std::optional<std::vector<int64_t>> chunk_sizes,
     int64_t dim,
-    c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>> streams,
+    std::optional<std::vector<c10::optional<at::cuda::CUDAStream>>> streams,
     bool unsqueeze_scalars)
     : devices_(std::move(devices)),
       chunk_sizes_(std::move(chunk_sizes)),
