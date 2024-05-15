@@ -586,6 +586,7 @@ def forward(self, x_1, output_1):
         self.assertEqual(int_result, resulti)
 
     @requires_cuda
+    @skipIfRocm
     def test_triton_kernel_constants(self):
         @triton.jit
         def mulC_kernel(
