@@ -52,10 +52,12 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
   const std::string& json_filename =
       model_so_path.substr(0, lastindex) + ".json";
 
-  proxy_executor_ = std::make_unique<torch::aot_inductor::OSSProxyExecutor>(
-      json_filename, device_str == "cpu");
-  proxy_executor_handle_ =
-      reinterpret_cast<AOTIProxyExecutorHandle>(proxy_executor_.get());
+  if (std::filesystem::exists(json_filename)) {
+    proxy_executor_ = std::make_unique<torch::aot_inductor::OSSProxyExecutor>(
+        json_filename, device_str == "cpu");
+    proxy_executor_handle_ =
+        reinterpret_cast<AOTIProxyExecutorHandle>(proxy_executor_.get());
+  }
 
   AOTI_RUNTIME_ERROR_CODE_CHECK(create_func_(
       &container_handle_,

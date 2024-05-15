@@ -3113,7 +3113,9 @@ CUDA_TEST_FAILURES = {
         is_skip=True
     ),
     "test_custom_op_with_concat_inputs": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_custom_op_with_reinterpret_view_inputs": fail_non_abi_compatible_cuda(is_skip=True),
+    "test_custom_op_with_reinterpret_view_inputs": fail_non_abi_compatible_cuda(
+        is_skip=True
+    ),
     "test_custom_op_with_multiple_outputs": fail_non_abi_compatible_cuda(is_skip=True),
 }
 

@@ -135,15 +135,12 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
     }
     case c10::TypeKind::FloatType: {
       TORCH_CHECK(serialized_arg_type == "as_float");
-      stack.emplace_back(serialized_arg_val);
+      stack.emplace_back(serialized_arg_val.get<double>());
       break;
     }
     case c10::TypeKind::BoolType: {
-      std::cout << "here";
       TORCH_CHECK(serialized_arg_type == "as_bool");
-      std::cout << "here2";
-      stack.emplace_back(serialized_arg_val.dump());
-      std::cout << "here3";
+      stack.emplace_back(serialized_arg_val.get<bool>());
       break;
     }
     case c10::TypeKind::NumberType: {
@@ -153,9 +150,9 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
         dynamic_args.emplace_back(
             index, DynamicArgType::IntType, 1, serialized_arg_val);
       } else if (serialized_arg_type == "as_float") {
-        stack.emplace_back(serialized_arg_val);
+        stack.emplace_back(serialized_arg_val.get<double>());
       } else if (serialized_arg_type == "as_bool") {
-        stack.emplace_back(serialized_arg_val);
+        stack.emplace_back(serialized_arg_val.get<bool>());
       } else {
         TORCH_CHECK(
             false,
@@ -166,35 +163,39 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
     }
     case c10::TypeKind::StringType: {
       TORCH_CHECK(serialized_arg_type == "as_string");
-      stack.emplace_back(serialized_arg_val);
+      stack.emplace_back(serialized_arg_val.get<std::string>());
       break;
     }
     case c10::TypeKind::ScalarTypeType: {
       TORCH_CHECK(serialized_arg_type == "as_scalar_type");
       c10::ScalarType scalar_type =
-          convertSerializedScalarType(serialized_arg_val);
+          convertSerializedScalarType(serialized_arg_val.get<int>());
       stack.emplace_back(scalar_type);
       break;
     }
     case c10::TypeKind::MemoryFormatType: {
       TORCH_CHECK(serialized_arg_type == "as_memory_format");
       c10::MemoryFormat memory_format =
-          convertSerializedMemoryFormat(serialized_arg_val);
+          convertSerializedMemoryFormat(serialized_arg_val.get<int>());
       stack.emplace_back(memory_format);
       break;
     }
     case c10::TypeKind::LayoutType: {
       TORCH_CHECK(serialized_arg_type == "as_layout");
-      c10::Layout layout = convertSerializedLayout(serialized_arg_val);
+      c10::Layout layout =
+          convertSerializedLayout(serialized_arg_val.get<int>());
       stack.emplace_back(layout);
       break;
     }
     case c10::TypeKind::DeviceObjType: {
       TORCH_CHECK(serialized_arg_type == "as_device");
 
-      c10::Device device(
-          serialized_arg_val["type"].dump() + ":" +
-          serialized_arg_val["index"].dump());
+      std::string device_string = serialized_arg_val["type"].get<std::string>();
+      if (!serialized_arg_val["index"].is_null()) {
+        device_string += ":" + serialized_arg_val["index"].get<std::string>();
+      }
+
+      c10::Device device(device_string);
 
       if (device != *device_) {
         VLOG(1) << "ProxyExecutor is using " << *device_ << " for "
@@ -237,14 +238,14 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
         TORCH_CHECK(serialized_arg_type == "as_floats");
         std::vector<double> ret;
         for (const auto& arg : serialized_arg_val) {
-          ret.push_back(arg);
+          ret.push_back(arg.get<double>());
         }
         stack.emplace_back(ret);
       } else if (schema_arg_type->isSubtypeOf(at::ListType::ofBools())) {
         TORCH_CHECK(serialized_arg_type == "as_bools");
         std::vector<bool> ret;
         for (const auto& arg : serialized_arg_val) {
-          ret.push_back(arg);
+          ret.push_back(arg.get<bool>());
         }
         stack.emplace_back(ret);
       } else if (schema_arg_type->isSubtypeOf(at::ListType::ofNumbers())) {
@@ -299,7 +300,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
         TORCH_CHECK(serialized_arg_type == "as_strings");
         std::vector<std::string> ret;
         for (const auto& arg : serialized_arg_val) {
-          ret.push_back(arg);
+          ret.push_back(arg.get<std::string>());
         }
         stack.emplace_back(ret);
       } else {
@@ -338,7 +339,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
         }
       } else {
         prefill_stack_with_static_arguments(
-            index, inner_type, serialized_arg_val, op_kernel);
+            index, inner_type, serialized_arg, op_kernel);
       }
       break;
     }
