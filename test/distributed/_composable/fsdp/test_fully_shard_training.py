@@ -903,11 +903,11 @@ class TestFullyShard2DTraining(FSDPTest):
         model = MLPStack(mlp_dim)
         ref_model = copy.deepcopy(model).cuda()
         replicate(ref_model, device_ids=[self.rank], process_group=dp_pg)
-        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=False)
         model.parallelize(
             tp_mesh, dp_mesh, use_activation_checkpointing, reshard_after_forward
         )
-        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=False)
 
         torch.manual_seed(42 + dp_pg.rank() + 1)
         device = torch.device("cuda")
@@ -935,6 +935,8 @@ class TestFullyShard2DTraining(FSDPTest):
                 # else construct new ones (requiring eager optim state init)
                 "reuse_model_optim": [False, True],
                 "optimizer_class": [torch.optim.Adam, torch.optim.AdamW],
+                # TODO: need to update `parallelize` before including foreach=True for testing
+                "foreach": [False],
             },
             self._test_train_parity_2d_transformer_checkpoint_resume,
         )
@@ -944,6 +946,7 @@ class TestFullyShard2DTraining(FSDPTest):
         use_seq_parallel: bool,
         reuse_model_optim: bool,
         optimizer_class: Type[torch.optim.Optimizer],
+        foreach: bool,
     ):
         def train_step(
             _model: nn.Module, _optim: torch.optim.Optimizer, _inp: torch.Tensor
@@ -969,7 +972,9 @@ class TestFullyShard2DTraining(FSDPTest):
         model_no_cp = parallelize(
             Transformer(model_args), global_mesh, use_seq_parallel
         )
-        optim_no_cp = optimizer_class(model_no_cp.parameters(), lr=1e-2)
+        optim_no_cp = optimizer_class(
+            model_no_cp.parameters(), lr=1e-2, foreach=foreach
+        )
 
         torch.manual_seed(42 + global_mesh["dp"].get_local_rank() + 1)
         inp = torch.randint(0, model_args.vocab_size, (3, 16), device="cuda")
@@ -980,7 +985,7 @@ class TestFullyShard2DTraining(FSDPTest):
         # model/optimizer, load checkpoint, and run another iteration
         torch.manual_seed(seed)
         model_cp = parallelize(Transformer(model_args), global_mesh, use_seq_parallel)
-        optim_cp = optimizer_class(model_cp.parameters(), lr=1e-2)
+        optim_cp = optimizer_class(model_cp.parameters(), lr=1e-2, foreach=foreach)
 
         loss_cp1 = train_step(model_cp, optim_cp, inp)
         self.assertEqual(loss_no_cp1, loss_cp1)
@@ -1009,7 +1014,7 @@ class TestFullyShard2DTraining(FSDPTest):
             model_cp = parallelize(
                 Transformer(model_args), global_mesh, use_seq_parallel
             )
-            optim_cp = optimizer_class(model_cp.parameters(), lr=1e-2)
+            optim_cp = optimizer_class(model_cp.parameters(), lr=1e-2, foreach=foreach)
         self.assertNotEqual(loss_no_cp2, train_step(model_cp, optim_cp, inp))
 
         sharded_sd = {
@@ -1049,6 +1054,7 @@ class TestFullyShardNDTraining(FSDPTest):
                 "reshard_after_forward": [False, True],
                 "use_activation_checkpointing": [False, True],
                 "mlp_dim": [3, 16, 17],
+                "foreach": [False],
             },
             functools.partial(self._test_2d_mlp_with_nd_mesh, global_mesh),
         )
@@ -1059,6 +1065,7 @@ class TestFullyShardNDTraining(FSDPTest):
         reshard_after_forward: bool,
         use_activation_checkpointing: bool,
         mlp_dim: int,
+        foreach: bool,
     ):
         global_mesh = self.init_global_mesh()
         pp_mesh, dp_mesh, tp_mesh = (
@@ -1072,11 +1079,11 @@ class TestFullyShardNDTraining(FSDPTest):
         model = MLPStack(mlp_dim)
         ref_model = copy.deepcopy(model).cuda()
         replicate(ref_model, device_ids=[self.rank], process_group=dp_pg)
-        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=foreach)
         model.parallelize(
             tp_mesh, dp_mesh, use_activation_checkpointing, reshard_after_forward
         )
-        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=foreach)
 
         torch.manual_seed(42 + dp_pg.rank() + 1)
         device = torch.device("cuda")
