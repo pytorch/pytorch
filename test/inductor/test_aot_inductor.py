@@ -856,6 +856,39 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Repro(), example_inputs)
 
+    def test_large_grid(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, primals_1, primals_2, primals_5):
+                view = torch.ops.aten.reshape.default(primals_5, [-1, 4, 128])
+                primals_5 = None
+                permute = torch.ops.aten.permute.default(view, [0, 2, 1])
+                clone = torch.ops.aten.clone.default(
+                    permute, memory_format=torch.contiguous_format
+                )
+                permute = None
+                view_1 = torch.ops.aten.reshape.default(clone, [-1, 4])
+                clone = None
+                permute_1 = torch.ops.aten.permute.default(primals_1, [1, 0])
+                primals_1 = None
+                addmm = torch.ops.aten.addmm.default(primals_2, view_1, permute_1)
+                primals_2 = None
+                return addmm
+
+        s0 = 727828
+        s1 = 512
+        example_inputs = (
+            torch.rand(2, 4, device=self.device),
+            torch.rand(2, device=self.device),
+            torch.rand(s0, s1, device=self.device),
+        )
+        self.check_model(Model(), example_inputs)
+
     def test_cond_simple(self):
         inputs = (
             torch.randn((10, 20), device=self.device),
@@ -2900,6 +2933,7 @@ CUDA_TEST_FAILURES = {
     # test_failures, xfail by default, set is_skip=True to skip
     "test_dup_unbacked_sym_decl": fail_abi_compatible_cuda(),
     "test_dup_unbacked_sym_decl_with_refinement": fail_abi_compatible_cuda(),
+    "test_large_grid": fail_cuda(),
     "test_normal_functional": fail_abi_compatible_cuda(),
     # There is a double-free issue which will be fixed in another PR
     # no ABI shim fn for torch.sort; remove this when adding one
