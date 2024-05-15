@@ -7,13 +7,15 @@ import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 torch.set_float32_matmul_precision("high")
 if HAS_CUDA:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
-
-_CUTLASS_DIR = os.path.join(os.path.dirname(__file__), "../../third_party/cutlass/")
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +29,7 @@ def _get_path_without_sccache() -> str:
     return ":".join(path_envs)
 
 
+@instantiate_parametrized_tests
 class TestCKBackend(TestCase):
     def setUp(self):
         # The new inductor cache refresh mechanism
@@ -49,7 +52,8 @@ class TestCKBackend(TestCase):
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CK path setup")
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_max_autotune_precompile(self):
+    @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
+    def test_max_autotune_precompile(self, max_autotune_gemm_backends):
         """
         Make sure autotuning mm in subprocesses doesn't crash.
         """
@@ -70,7 +74,7 @@ class TestCKBackend(TestCase):
             {
                 "max_autotune": True,
                 "autotune_in_subproc": True,
-                "max_autotune_gemm_backends": "CK,Triton,ATen",
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "compile_threads": 2,
                 "rocm.n_max_profiling_configs": 2,
             }
@@ -82,9 +86,10 @@ class TestCKBackend(TestCase):
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CK path setup")
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_max_autotune_precompile_preselected(self):
+    @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
+    def test_max_autotune_precompile_preselected(self, max_autotune_gemm_backends):
         """
-        Make sure autotuning mm in subprocesses doesn't crash.
+        End to end test for picking preselected ck instances
         """
 
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
@@ -103,7 +108,7 @@ class TestCKBackend(TestCase):
             {
                 "max_autotune": True,
                 "autotune_in_subproc": True,
-                "max_autotune_gemm_backends": "CK,Triton,ATen",
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "compile_threads": 12,
                 "rocm.use_preselected_instances": True,
             }
