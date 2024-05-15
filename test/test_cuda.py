@@ -3139,164 +3139,6 @@ exit(2)
                 self.assertNotEqual(p.data_ptr(), pg.data_ptr())
                 self.assertNotEqual(p.grad.data_ptr, pg.grad.data_ptr)
 
-    def _test_graphed_optimizer(
-        self, steps_warmup, steps_train, optimizer_ctor, kwargs
-    ):
-        for actually_do_graphs in (True, False):
-            params = [torch.randn((i + 5, i + 5), device="cuda") for i in range(2)] + [
-                torch.randn((), device="cuda")
-            ]
-            params_control = [p.clone().requires_grad_() for p in params]
-            params_graphed = [p.clone().requires_grad_() for p in params]
-
-            grads = [
-                [torch.randn_like(p) for p in params]
-                for _ in range(steps_warmup + steps_train)
-            ]
-
-            # Control (capturable=False)
-
-            opt = optimizer_ctor(params_control, capturable=False, **kwargs)
-
-            for i in range(steps_warmup + steps_train):
-                for j, p in enumerate(params_control):
-                    p.grad = grads[i][j]
-                opt.step()
-
-            # capturable=True
-
-            opt = optimizer_ctor(params_graphed, capturable=True, **kwargs)
-
-            for i in range(steps_warmup):
-                for j, p in enumerate(params_graphed):
-                    p.grad = grads[i][j]
-                opt.step()
-
-            if actually_do_graphs:
-                g = torch.cuda.CUDAGraph()
-                with torch.cuda.graph(g):
-                    opt.step()
-
-            for i in range(steps_train):
-                if actually_do_graphs:
-                    for j, p in enumerate(params_graphed):
-                        p.grad.copy_(grads[i + steps_warmup][j])
-                    g.replay()
-                else:
-                    # Passing capturable=True to the constructor and running without graphs should still be
-                    # numerically correct, even if it's not ideal for performance.
-                    for j, p in enumerate(params_graphed):
-                        p.grad = grads[i + steps_warmup][j]
-                    opt.step()
-
-            for p_control, p_graphed in zip(params_control, params_graphed):
-                self.assertEqual(p_control, p_graphed)
-
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
-    )
-    def test_graph_optims(self):
-        # Needs generalization if we want to extend this test to non-Adam-like optimizers.
-        cases = (
-            [
-                (
-                    optimizer_ctor,
-                    {
-                        "lr": 0.1,
-                        "betas": (0.8, 0.7),
-                        "foreach": foreach,
-                        "decoupled_weight_decay": decoupled_weight_decay,
-                        "weight_decay": weight_decay,
-                    },
-                )
-                for optimizer_ctor, foreach, decoupled_weight_decay, weight_decay in product(
-                    (
-                        torch.optim.NAdam,
-                        torch.optim.RAdam,
-                    ),
-                    (
-                        False,
-                        True,
-                    ),
-                    (
-                        False,
-                        True,
-                    ),
-                    (
-                        0.0,
-                        0.1,
-                    ),
-                )
-            ]
-            + [
-                (
-                    torch.optim.Rprop,
-                    {"lr": 0.1, "foreach": foreach, "maximize": maximize},
-                )
-                for foreach, maximize in product(
-                    (
-                        False,
-                        True,
-                    ),
-                    (
-                        False,
-                        True,
-                    ),
-                )
-            ]
-            + [
-                (
-                    optimizer_ctor,
-                    {
-                        "lr": 0.1,
-                        "betas": (0.8, 0.7),
-                        "foreach": foreach,
-                        "amsgrad": amsgrad,
-                    },
-                )
-                for optimizer_ctor, foreach, amsgrad in product(
-                    (torch.optim.Adam, torch.optim.AdamW),
-                    (False, True),
-                    (False, True),
-                )
-            ]
-            + [
-                (
-                    optimizer_ctor,
-                    {"lr": 0.1, "betas": (0.8, 0.7), "fused": True, "amsgrad": amsgrad},
-                )
-                for optimizer_ctor, amsgrad in product(
-                    (torch.optim.Adam, torch.optim.AdamW), (False, True)
-                )
-            ]
-            + [
-                (
-                    optimizer_ctor,
-                    {
-                        "lr": 0.1,
-                        "foreach": foreach,
-                        "maximize": maximize,
-                        "weight_decay": weight_decay,
-                    },
-                )
-                for optimizer_ctor, foreach, maximize, weight_decay in product(
-                    (
-                        torch.optim.Adamax,
-                        torch.optim.ASGD,
-                        torch.optim.Adadelta,
-                        torch.optim.RMSprop,
-                    ),
-                    (False, True),
-                    (False, True),
-                    (0, 0.1),
-                )
-            ]
-        )
-
-        for optimizer_ctor, kwargs in cases:
-            with self.subTest(optimizer_ctor=optimizer_ctor, kwargs=kwargs):
-                self._test_graphed_optimizer(3, 2, optimizer_ctor, kwargs)
-
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
@@ -4693,6 +4535,174 @@ class TestBlockStateAbsorption(TestCase):
 class TestCudaOptims(TestCase):
     # These tests will be instantiate with instantiate_device_type_tests
     # to apply the new OptimizerInfo structure.
+
+    def _test_graphed_optimizer(
+        self, steps_warmup, steps_train, optimizer_ctor, kwargs
+    ):
+        for actually_do_graphs in (True, False):
+            params = [torch.randn((i + 5, i + 5), device="cuda") for i in range(2)] + [
+                torch.randn((), device="cuda")
+            ]
+            params_control = [p.clone().requires_grad_() for p in params]
+            params_graphed = [p.clone().requires_grad_() for p in params]
+
+            grads = [
+                [torch.randn_like(p) for p in params]
+                for _ in range(steps_warmup + steps_train)
+            ]
+
+            # Control (capturable=False)
+
+            opt = optimizer_ctor(params_control, capturable=False, **kwargs)
+
+            for i in range(steps_warmup + steps_train):
+                for j, p in enumerate(params_control):
+                    p.grad = grads[i][j]
+                opt.step()
+
+            # capturable=True
+
+            opt = optimizer_ctor(params_graphed, capturable=True, **kwargs)
+
+            for i in range(steps_warmup):
+                for j, p in enumerate(params_graphed):
+                    p.grad = grads[i][j]
+                opt.step()
+
+            if actually_do_graphs:
+                g = torch.cuda.CUDAGraph()
+                with torch.cuda.graph(g):
+                    opt.step()
+
+            for i in range(steps_train):
+                if actually_do_graphs:
+                    for j, p in enumerate(params_graphed):
+                        p.grad.copy_(grads[i + steps_warmup][j])
+                    g.replay()
+                else:
+                    # Passing capturable=True to the constructor and running without graphs should still be
+                    # numerically correct, even if it's not ideal for performance.
+                    for j, p in enumerate(params_graphed):
+                        p.grad = grads[i + steps_warmup][j]
+                    opt.step()
+
+            for p_control, p_graphed in zip(params_control, params_graphed):
+                self.assertEqual(p_control, p_graphed)
+
+    @onlyCUDA
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @parametrize("foreach, fused", [(False, False), (True, False), (False, True)])
+    @optims(
+        [
+            optim
+            for optim in optim_db
+            if "foreach" in optim.supported_impls and "fused" in optim.supported_impls
+        ],
+        dtypes=[torch.float32],
+    )
+    def test_graph_optims(self, device, dtype, optim_info, foreach, fused):
+        # Needs generalization if we want to extend this test to non-Adam-like optimizers.
+        cases = (
+            [
+                (
+                    optimizer_ctor,
+                    {
+                        "lr": 0.1,
+                        "betas": (0.8, 0.7),
+                        "foreach": foreach,
+                        "decoupled_weight_decay": decoupled_weight_decay,
+                        "weight_decay": weight_decay,
+                    },
+                )
+                for optimizer_ctor, foreach, decoupled_weight_decay, weight_decay in product(
+                    (
+                        torch.optim.NAdam,
+                        torch.optim.RAdam,
+                    ),
+                    (
+                        False,
+                        True,
+                    ),
+                    (
+                        False,
+                        True,
+                    ),
+                    (
+                        0.0,
+                        0.1,
+                    ),
+                )
+            ]
+            + [
+                (
+                    torch.optim.Rprop,
+                    {"lr": 0.1, "foreach": foreach, "maximize": maximize},
+                )
+                for foreach, maximize in product(
+                    (
+                        False,
+                        True,
+                    ),
+                    (
+                        False,
+                        True,
+                    ),
+                )
+            ]
+            + [
+                (
+                    optimizer_ctor,
+                    {
+                        "lr": 0.1,
+                        "betas": (0.8, 0.7),
+                        "foreach": foreach,
+                        "amsgrad": amsgrad,
+                    },
+                )
+                for optimizer_ctor, foreach, amsgrad in product(
+                    (torch.optim.Adam, torch.optim.AdamW),
+                    (False, True),
+                    (False, True),
+                )
+            ]
+            + [
+                (
+                    optimizer_ctor,
+                    {"lr": 0.1, "betas": (0.8, 0.7), "fused": True, "amsgrad": amsgrad},
+                )
+                for optimizer_ctor, amsgrad in product(
+                    (torch.optim.Adam, torch.optim.AdamW), (False, True)
+                )
+            ]
+            + [
+                (
+                    optimizer_ctor,
+                    {
+                        "lr": 0.1,
+                        "foreach": foreach,
+                        "maximize": maximize,
+                        "weight_decay": weight_decay,
+                    },
+                )
+                for optimizer_ctor, foreach, maximize, weight_decay in product(
+                    (
+                        torch.optim.Adamax,
+                        torch.optim.ASGD,
+                        torch.optim.Adadelta,
+                        torch.optim.RMSprop,
+                    ),
+                    (False, True),
+                    (False, True),
+                    (0, 0.1),
+                )
+            ]
+        )
+
+        for optimizer_ctor, kwargs in cases:
+            with self.subTest(optimizer_ctor=optimizer_ctor, kwargs=kwargs):
+                self._test_graphed_optimizer(3, 2, optimizer_ctor, kwargs)
 
     @onlyCUDA
     @unittest.skipIf(
