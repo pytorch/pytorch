@@ -1120,7 +1120,7 @@ class CppWrapperCpu(WrapperCodeGen):
         )
 
     def get_c_shim_func_name(self, kernel):
-        if not config.abi_compatible:
+        if not config.abi_compatible or kernel.startswith("aoti_torch_"):
             return kernel
 
         assert "::" in kernel, "Cpp kernel name: " + kernel + " does not contain '::'"
