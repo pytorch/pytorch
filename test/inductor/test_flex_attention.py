@@ -126,6 +126,19 @@ D = 64
 
 
 class TestTemplatedSDPA(InductorTestCase):
+    def _check_equal(self, golden_out, ref_out, compiled_out, dtype):
+        compiled_error = (golden_out - compiled_out).abs().mean()
+        ref_error = (golden_out - ref_out).abs().mean()
+        # Note, it seems like we really are less accurate than the float32
+        # computation, likely due to the online softmax
+        if dtype == torch.float32:
+            fudge_factor = 10.0
+        else:
+            fudge_factor = 1.1
+        if compiled_error > ref_error * fudge_factor:
+            msg = f"Compiled error {compiled_error} is greater than ref error {ref_error} by more than {fudge_factor}X."
+            self.assertTrue(False, msg)
+
     def run_test(
         self,
         score_mod: Callable,
@@ -145,24 +158,134 @@ class TestTemplatedSDPA(InductorTestCase):
         )
         ref_out = sdpa_partial(q, k, v)
         compiled_out = compiled_sdpa(q, k, v)
+        self._check_equal(golden_out, ref_out, compiled_out, dtype)
 
-        compiled_error = (golden_out - compiled_out).abs().mean()
-        ref_error = (golden_out - ref_out).abs().mean()
-        # Note, it seems like we really are less accurate than the float32
-        # computation, likely due to the online softmax
-        if dtype == torch.float32:
-            fudge_factor = 10.0
-        else:
-            fudge_factor = 1.1
-        if compiled_error > ref_error * fudge_factor:
-            msg = f"Compiled error {compiled_error} is greater than ref error {ref_error} by more than {fudge_factor}X."
-            self.assertTrue(False, msg)
+    def run_dynamic_test(
+        self,
+        score_mod: Callable,
+        dtype: torch.dtype = torch.float16,
+        B: int = B,
+        H: int = H,
+        S: int = S,
+        D: int = D,
+    ):
+        sdpa_partial = create_attention(score_mod)
+        # The first eager batch, shape (B, H, S, D)
+        q1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        k1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        v1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        golden_out1 = sdpa_partial(
+            q1.to(torch.float64), k1.to(torch.float64), v1.to(torch.float64)
+        )
+        ref_out1 = sdpa_partial(q1, k1, v1)
+
+        # The second eager batch, shape (B * 2, H, S / 2, D)
+        B = int(B * 2)
+        S = int(S / 2)
+        q2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        k2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        v2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        golden_out2 = sdpa_partial(
+            q2.to(torch.float64), k2.to(torch.float64), v2.to(torch.float64)
+        )
+        ref_out2 = sdpa_partial(q2, k2, v2)
+
+        # Need to clear dynamo counters, since flex attention eager mode also uses dynamo tracing.
+        # We check dynamo counters["frames"]["ok"] to ensure there is no re-compilation.
+        torch._dynamo.reset()
+        # Compiling with dynamic shape in the first batch.
+        compiled_sdpa = torch.compile(sdpa_partial, dynamic=True)
+        compiled_out1 = compiled_sdpa(q1, k1, v1)
+        self._check_equal(golden_out1, ref_out1, compiled_out1, dtype)
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
+
+        # No re-compilation, use the compiled dynamic shape version.
+        compiled_out2 = compiled_sdpa(q2, k2, v2)
+        self._check_equal(golden_out2, ref_out2, compiled_out2, dtype)
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
+
+    def run_automatic_dynamic_test(
+        self,
+        score_mod: Callable,
+        dtype: torch.dtype = torch.float16,
+        B: int = B,
+        H: int = H,
+        S: int = S,
+        D: int = D,
+    ):
+        sdpa_partial = create_attention(score_mod)
+        # The first eager batch, shape (B, H, S, D)
+        q1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        k1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        v1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        golden_out1 = sdpa_partial(
+            q1.to(torch.float64), k1.to(torch.float64), v1.to(torch.float64)
+        )
+        ref_out1 = sdpa_partial(q1, k1, v1)
+
+        # The second eager batch, shape (B * 2, H, S / 2, D)
+        B = int(B * 2)
+        S = int(S / 2)
+        q2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        k2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        v2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        golden_out2 = sdpa_partial(
+            q2.to(torch.float64), k2.to(torch.float64), v2.to(torch.float64)
+        )
+        ref_out2 = sdpa_partial(q2, k2, v2)
+
+        # The third eager batch, shape (B * 4, H, S / 4, D)
+        B = int(B * 2)
+        S = int(S / 2)
+        q3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        k3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        v3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        golden_out3 = sdpa_partial(
+            q3.to(torch.float64), k3.to(torch.float64), v3.to(torch.float64)
+        )
+        ref_out3 = sdpa_partial(q3, k3, v3)
+
+        # Need to clear dynamo counters, since flex attention eager mode also uses dynamo tracing.
+        # We check dynamo counters["frames"]["ok"] to ensure:
+        # 1, the first batch is compiled with static shape
+        # 2, the second batch is compiled with dynamic shape
+        # 3, no re-compilation in the third batch
+        torch._dynamo.reset()
+        # The first batch.
+        compiled_sdpa = torch.compile(sdpa_partial)
+        compiled_out1 = compiled_sdpa(q1, k1, v1)
+        self._check_equal(golden_out1, ref_out1, compiled_out1, dtype)
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
+
+        # The second batch (automatic dynamic).
+        compiled_out2 = compiled_sdpa(q2, k2, v2)
+        self._check_equal(golden_out2, ref_out2, compiled_out2, dtype)
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
+
+        # The third batch (no re-compilation).
+        compiled_out3 = compiled_sdpa(q3, k3, v3)
+        self._check_equal(golden_out3, ref_out3, compiled_out3, dtype)
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods(self, dtype: torch.dtype, score_mod: Callable):
         self.run_test(score_mod, dtype)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    def test_builtin_score_mods_dynamic(self, dtype: torch.dtype, score_mod: Callable):
+        self.run_dynamic_test(score_mod, dtype)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    def test_builtin_score_mods_automatic_dynamic(
+        self, dtype: torch.dtype, score_mod: Callable
+    ):
+        self.run_automatic_dynamic_test(score_mod, dtype)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
@@ -289,7 +412,51 @@ class TestTemplatedSDPA(InductorTestCase):
         self.run_test(natten_mask, dtype)
 
     @supported_platform
-    @expectedFailure
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    def test_subgraph_respect_decompostion(self, dtype):
+        from torch._decomp import core_aten_decompositions
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def score_mod_func(score, b, h, q, kv):
+            return score - q // (1 + kv)
+
+        make_tensor = functools.partial(
+            torch.randn,
+            (2, 2, 8, 4),
+            device="cuda",
+            dtype=torch.float64,
+            requires_grad=True,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+        # floor_div is not decomposed in decompostion_table is empty
+        gm = make_fx(_flex_attention, decomposition_table={})(
+            query, key, value, score_mod_func
+        )
+        self.assertExpectedInline(
+            gm.sdpa_score0.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
+    add = torch.ops.aten.add.Tensor(arg4_1, 1);  arg4_1 = None
+    floor_divide = torch.ops.aten.floor_divide.default(arg3_1, add);  arg3_1 = add = None
+    sub = torch.ops.aten.sub.Tensor(arg0_1, floor_divide);  arg0_1 = floor_divide = None
+    return sub""",
+        )
+
+        # floor_div is decomposed for core_aten_decompositions
+        gm = make_fx(_flex_attention, decomposition_table=core_aten_decompositions())(
+            query, key, value, score_mod_func
+        )
+        self.assertExpectedInline(
+            gm.sdpa_score0.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
+    add = torch.ops.aten.add.Tensor(arg4_1, 1);  arg4_1 = None
+    div = torch.ops.aten.div.Tensor_mode(arg3_1, add, rounding_mode = 'floor');  arg3_1 = add = None
+    sub = torch.ops.aten.sub.Tensor(arg0_1, div);  arg0_1 = div = None
+    return sub""",
+        )
+
+    @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_silu_on_score(self, dtype):
         def silu_score(score, b, h, q, kv):
