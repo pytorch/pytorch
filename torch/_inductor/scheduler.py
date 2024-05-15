@@ -1474,7 +1474,6 @@ class Scheduler:
             for read_dep in node.read_writes.reads:
                 if (
                     read_dep.name in self.name_to_node
-                    and read_dep.name != node_name
                     and isinstance(read_dep, dependencies.MemoryDep)
                     and isinstance(write_dep, dependencies.MemoryDep)
                     and read_dep.index == write_dep.index
@@ -1544,10 +1543,7 @@ class Scheduler:
                     # this node must run after all prior readers
                     other_name = rename(other_node.get_name())
                     known_dep_node_names = dep_closure(node.get_name())
-                    if (
-                        other_name != alt_name
-                        and other_name not in known_dep_node_names
-                    ):
+                    if other_name not in known_dep_node_names:
                         # If this node already directly or indirectly depends on other_node,
                         # we don't need to insert an extra dep.
                         node.add_mutation_dep(WeakDep(other_name))
@@ -1704,8 +1700,6 @@ class Scheduler:
         for node in self.nodes:
             ancestors = set()
             for dep in node.unmet_dependencies:
-                if dep.name == node.get_name():
-                    continue
                 ancestors.add(dep.name)
                 ancestors |= name_to_ancestors[dep.name]
             name_to_ancestors[node.get_name()] = ancestors
