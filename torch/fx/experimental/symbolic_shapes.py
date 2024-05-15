@@ -493,7 +493,7 @@ class InnerTensorKey:
         return f".{self.inner_name}"
 
     def get(self, o: Any) -> Any:
-        """Call the method on object"""
+        """Get the inner tensor attribute"""
         return getattr(o, self.inner_name)
 
 
