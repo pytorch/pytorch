@@ -239,6 +239,7 @@ enum class FastSetupType : uint8_t {
   NONE,
   CONTIGUOUS,
   CHANNELS_LAST,
+  CHANNELS_LAST3D,
   NON_OVERLAPPING_DENSE
 };
 

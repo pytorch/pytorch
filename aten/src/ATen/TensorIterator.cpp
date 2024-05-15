@@ -1380,6 +1380,17 @@ bool TensorIteratorBase::fast_set_up(const TensorIteratorConfig& config) {
         }
         break;
       }
+    case FastSetupType::CHANNELS_LAST3D:
+      {
+        for (const auto i : c10::irange(num_outputs_)) {
+          auto& op = operands_[i];
+          if (!op.tensor_base().defined()) {
+            TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
+          }
+          set_output_raw_strided(i, shape_, {}, original_options(op).memory_format(MemoryFormat::ChannelsLast3d), names_);
+        }
+        break;
+      }
     case FastSetupType::NON_OVERLAPPING_DENSE:
       {
         // find the index of a defined tensor in operands_ start from input tensor
@@ -1439,11 +1450,13 @@ FastSetupType TensorIteratorBase::compute_fast_setup_type(const TensorIteratorCo
 
   bool is_contiguous = true;
   bool is_channels_last = true;
+  bool is_channels_last_3d = true;
   bool is_non_overlapping_and_dense = true;
   for (const auto& op : operands_) {
     if (op.tensor_base().defined() && !op.will_resize) {
       is_contiguous &= op.tensor_base().is_contiguous(at::MemoryFormat::Contiguous);
       is_channels_last &= op.tensor_base().is_contiguous(at::MemoryFormat::ChannelsLast);
+      is_channels_last_3d &= op.tensor_base().is_contiguous(at::MemoryFormat::ChannelsLast3d);
       is_non_overlapping_and_dense &= op.tensor_base().is_non_overlapping_and_dense();
     }
   }
@@ -1453,6 +1466,9 @@ FastSetupType TensorIteratorBase::compute_fast_setup_type(const TensorIteratorCo
   }
   if (is_channels_last) {
     return FastSetupType::CHANNELS_LAST;
+  }
+  if (is_channels_last_3d) {
+    return FastSetupType::CHANNELS_LAST3D;
   }
   if (is_non_overlapping_and_dense) {
     int64_t prev = -1;
