@@ -302,11 +302,11 @@ at::BlasBackend Context::blasPreferredBackend() {
       static const std::vector<std::string> archs = {
           "gfx90a", "gfx940", "gfx941", "gfx942",
 #if ROCM_VERSION >= 60300
-          "gfx1100", "gfx1101"
+          "gfx1100", "gfx1101", "gfx1200", "gfx1201"
 #endif
       };
       for (auto index: c10::irange(getNumGPUs())) {
-        if (!detail::getCUDAHooks().isGPUArch(index, archs)) {
+        if (!detail::getCUDAHooks().isGPUArch(static_cast<c10::DeviceIndex>(index), archs)) {
           TORCH_WARN_ONCE(
             "Attempting to use hipBLASLt on an unsupported architecture! "
             "Overriding blas backend to hipblas");

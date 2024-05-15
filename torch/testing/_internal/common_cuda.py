@@ -84,7 +84,8 @@ PLATFORM_SUPPORTS_BF16: bool = LazyVal(lambda: TEST_CUDA and SM80OrLater)
 def evaluate_platform_supports_fp8():
     if torch.cuda.is_available():
         if torch.version.hip:
-            return 'gfx94' in torch.cuda.get_device_properties(0).gcnArchName
+            gcnArchName = torch.cuda.get_device_properties(0).gcnArchName
+            return 'gfx94' in gcnArchName or 'gfx120' in gcnArchName
         else:
             return SM90OrLater or torch.cuda.get_device_capability() == (8, 9)
     return False

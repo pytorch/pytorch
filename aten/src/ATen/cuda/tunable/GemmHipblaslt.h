@@ -58,6 +58,16 @@ constexpr hipblasDatatype_t HipDataTypeFor<c10::Float8_e5m2fnuz>() {
   return HIP_R_8F_E5M2_FNUZ;
 }
 
+template <>
+constexpr hipblasDatatype_t HipBlasDataTypeFor<c10::Float8_e4m3fn>() {
+  return HIP_R_8F_E4M3;
+}
+
+template <>
+constexpr hipblasDatatype_t HipBlasDataTypeFor<c10::Float8_e5m2>() {
+  return HIP_R_8F_E5M2;
+}
+
 template <typename T>
 int GetBatchFromParams(const GemmParams<T>* params) {
   return 1;
