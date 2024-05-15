@@ -12,9 +12,8 @@ import torch.nn as nn
 from torch import _inductor as inductor
 from torch._dynamo import compiled_autograd
 from torch._dynamo.utils import counters
-from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA, HAS_GPU, GPU_TYPE
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 from torch.testing._internal.logging_utils import logs_to_string
 
 # note: these tests are not run on windows due to inductor_utils.HAS_CPU
@@ -488,9 +487,9 @@ main()
 
         self.check_output_and_recompiles(fn, count=1)
 
-    @unittest.skipIf(not HAS_GPU, "requires gpu")
+    @unittest.skipIf(not HAS_CUDA, "requires cuda")
     def test_issue106555(self):
-        DEVICE = torch.device(GPU_TYPE + ":0")
+        DEVICE = torch.device("cuda:0")
         NUM_FEATURES = 256
 
         def bias_sigmoid_mul(x1, x2, bias):
@@ -533,8 +532,7 @@ main()
                 x = x + self.module_with_jit_2(x.transpose(-2, -3)).transpose(-2, -3)
                 return x
 
-        device_interface = get_interface_for_device(GPU_TYPE)
-        device_interface.set_device(device=DEVICE)
+        torch.cuda.set_device(device=DEVICE)
         torch.manual_seed(1234567890)
         model = Model()
         model.train()
@@ -556,7 +554,6 @@ main()
                 gradient_checkpointing=True,
             )
             loss = torch.mean(torch.abs(target_tensor - output_tensor))
-            print("loss:", loss)
             loss.backward()
 
     def test_keep_graph_simple(self):
@@ -755,7 +752,7 @@ main()
 
         self.check_output_and_recompiles(fn, count=2)
 
-    @unittest.skipIf(not HAS_GPU, "requires gpu")
+    @unittest.skipIf(not HAS_CUDA, "requires cuda")
     def test_custom_fn_output_metadata(self):
         def my_compiler_fn(gm):
             for node in gm.graph.nodes:
@@ -783,7 +780,7 @@ main()
                     return gO
 
             x = torch.arange(
-                1, 10, requires_grad=True, dtype=torch.float16, device=GPU_TYPE
+                1, 10, requires_grad=True, dtype=torch.float16, device="cuda"
             )
             x_view = x.view(3, 3)
             out = MyFn.apply(x_view)
@@ -1761,7 +1758,7 @@ known_failing_tests = {
     "test_grad_nonleaf_register_hook",  # IndexError: list index out of range (NB: x.grad = y where both x and y are input tensors)
 }
 
-if not HAS_GPU:
+if not HAS_CUDA:
     # Found Tesla M60 which is too old to be supported by the triton GPU compiler
     known_failing_tests.add("test_type_conversions")
 
