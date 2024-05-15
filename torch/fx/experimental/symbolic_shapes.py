@@ -605,7 +605,7 @@ def compute_unbacked_bindings(shape_env, example_value, old_example_value=None, 
             return r
 
         symbol_to_path = free_unbacked_symbols_with_path(example_value, ())
-        if pending:
+        if not peek and pending:
             extra = (
                 repr((example_value.stride(), example_value.storage_offset()))
                 if isinstance(example_value, torch.Tensor)

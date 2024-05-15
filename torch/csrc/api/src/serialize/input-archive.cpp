@@ -93,20 +93,20 @@ void InputArchive::read(const std::string& key, InputArchive& archive) {
 
 void InputArchive::load_from(
     const std::string& filename,
-    c10::optional<torch::Device> device /*= c10::nullopt*/) {
+    std::optional<torch::Device> device /*= c10::nullopt*/) {
   module_ = torch::jit::load(filename, std::move(device));
 }
 
 void InputArchive::load_from(
     std::istream& stream,
-    c10::optional<torch::Device> device /*= c10::nullopt*/) {
+    std::optional<torch::Device> device /*= c10::nullopt*/) {
   module_ = torch::jit::load(stream, std::move(device));
 }
 
 void InputArchive::load_from(
     const char* data,
     size_t size,
-    c10::optional<torch::Device> device /*= c10::nullopt*/) {
+    std::optional<torch::Device> device /*= c10::nullopt*/) {
   using caffe2::serialize::ReadAdapterInterface;
   class OurAdapter : public ReadAdapterInterface {
    public:
@@ -136,7 +136,7 @@ void InputArchive::load_from(
 void InputArchive::load_from(
     const std::function<size_t(uint64_t, void*, size_t)>& read_func,
     const std::function<size_t(void)>& size_func,
-    c10::optional<torch::Device> device /*= c10::nullopt*/) {
+    std::optional<torch::Device> device /*= c10::nullopt*/) {
   using caffe2::serialize::ReadAdapterInterface;
   class OurAdapter : public ReadAdapterInterface {
    public:
