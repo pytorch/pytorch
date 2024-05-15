@@ -3286,6 +3286,15 @@ def _meta_foreach_inplace(*args, _scalar_op=None, **kwargs):
     return
 
 
+@register_meta([aten._foreach_pow_.Scalar])
+def meta__foreach_pow__scalar(self, exponent):
+    torch._check(
+        isinstance(exponent, float),
+        lambda: f"exponent must be a float but got {type(exponent)}",
+    )
+    return
+
+
 @register_meta([aten._foreach_pow.ScalarAndTensor])
 def meta__foreach_pow_scalar_and_tensor(self, exponent):
     # Only foreach_pow has a ScalarAndTensor method and needs special
