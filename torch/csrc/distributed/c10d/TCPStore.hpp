@@ -49,7 +49,7 @@ struct TCPStoreOptions {
 
   std::uint16_t port = kDefaultPort;
   bool isServer = false;
-  c10::optional<std::size_t> numWorkers = c10::nullopt;
+  std::optional<std::size_t> numWorkers = c10::nullopt;
   bool waitWorkers = true;
   std::chrono::milliseconds timeout = Store::kDefaultTimeout;
 
@@ -60,7 +60,7 @@ struct TCPStoreOptions {
   // If specified, and if isServer is true, the underlying TCPServer will take
   // over the bound socket associated to this fd. This option is useful to avoid
   // port assignment races in certain scenarios.
-  c10::optional<int> masterListenFd = c10::nullopt;
+  std::optional<int> masterListenFd = c10::nullopt;
 
   // A boolean value indicating whether to use the experimental libUV backend.
   bool useLibUV = false;
@@ -73,7 +73,7 @@ class TORCH_API TCPStore : public Store {
   [[deprecated("Use TCPStore(host, opts) instead.")]] explicit TCPStore(
       const std::string& masterAddr,
       std::uint16_t masterPort,
-      c10::optional<int> numWorkers = c10::nullopt,
+      std::optional<int> numWorkers = c10::nullopt,
       bool isServer = false,
       const std::chrono::milliseconds& timeout = kDefaultTimeout,
       bool waitWorkers = true);
@@ -152,7 +152,7 @@ class TORCH_API TCPStore : public Store {
   detail::SocketAddress addr_;
   std::shared_ptr<detail::TCPServer> server_;
   std::unique_ptr<detail::TCPClient> client_;
-  c10::optional<std::size_t> numWorkers_;
+  std::optional<std::size_t> numWorkers_;
 
   const std::string initKey_ = "init/";
   const std::string keyPrefix_ = "/";

@@ -15,8 +15,8 @@ using namespace at;
 
 static int test_int;
 
-Tensor empty_override(SymIntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout,
-                      c10::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> optional_memory_format) {
+Tensor empty_override(SymIntArrayRef size, std::optional<ScalarType> dtype, c10::optional<Layout> layout,
+                      std::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> optional_memory_format) {
   test_int = 1;
   auto tensor_impl = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
       Storage(
@@ -39,10 +39,10 @@ Tensor add_override(const Tensor & a, const Tensor & b , const Scalar& c) {
 Tensor empty_strided_override(
   IntArrayRef size,
   IntArrayRef stride,
-  c10::optional<c10::ScalarType> dtype,
-  c10::optional<c10::Layout> layout,
-  c10::optional<c10::Device> device,
-  c10::optional<bool> pin_memory) {
+  std::optional<c10::ScalarType> dtype,
+  std::optional<c10::Layout> layout,
+  std::optional<c10::Device> device,
+  std::optional<bool> pin_memory) {
 
   return empty_override(fromIntArrayRefSlow(size), dtype, layout, device, pin_memory, c10::nullopt);
 }

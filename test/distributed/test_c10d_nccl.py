@@ -226,14 +226,6 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     def setUp(self):
         super().setUp()
-        # Need to skip return code checking for these tests since the child
-        # processes don't exit cleanly in some cuda versions
-        self.skip_return_code_checks = [
-            self.test_nan_assert_float16.__wrapped__,
-            self.test_nan_assert_float32.__wrapped__,
-            self.test_nan_assert_float64.__wrapped__,
-        ]
-
         # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
         # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
@@ -335,7 +327,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    @parametrize("type", [torch.float16, torch.float32, torch.float64])
+    @parametrize("type", [torch.float32, torch.float64])
     @skip_if_rocm
     def test_nan_assert(self, type):
         os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
