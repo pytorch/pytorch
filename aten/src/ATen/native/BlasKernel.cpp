@@ -215,6 +215,34 @@ static inline float16_t reduce(float16x8_t x) {
         return reduce(vadd_f16(vget_low_f16(x), vget_high_f16(x)));
 }
 
+/*
+ * The below reduce overload and
+ * fp16_gemv_trans_fp16_arith_by_dot_products function is adapted from
+ * llama.cpp's ggml_vec_dot_f16 and surrounding utility functions, so
+ * here is the required copyright notice:
+ *
+ * MIT License
+ *
+ * Copyright (c) 2023-2024 The ggml authors
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
 #define F16_ELEMENTS_PER_ITERATION 32
 #define F16_ELEMENTS_PER_REGISTER 8
 #define F16_REGISTERS_PER_ITERATION (F16_ELEMENTS_PER_ITERATION / F16_ELEMENTS_PER_REGISTER)
@@ -237,14 +265,17 @@ static inline double reduce(float16x8_t x[F16_REGISTERS_PER_ITERATION]) {
 
 }
 
+static inline f16_fma(float16_t a, float16_t b, float16_t c) {
 #ifdef __ARM_FEATURE_FMA
-#define F16_FMA(a, b, c) vfmaq_f16((a), (b), (c))
+  return vfmaq_f16(a, b, c);
 #else
-#define F16_FMA(a, b, c) vaddq_f16((a), vmulq_f16((b), (c)))
+  return vaddq_f16(a, vmulq_f16(b, c));
 #endif
-// Rather than unrolling to process multiple rows (transposed columns?
-// my linear algebra is weak) of matrix A at once as done in
-// fp16_gemv_trans_fp16_arith, unroll along an individual dot product.
+}
+
+// Rather than unrolling to process multiple rows (transposed columns)
+// of matrix A at once as done in fp16_gemv_trans_fp16_arith, unroll
+// along an individual dot product.
 static void fp16_gemv_trans_fp16_arith_by_dot_products(const int m, const int n, const float16_t* a, const int lda, const float16_t *x, float16_t* y, int incy) {
   parallel_for(0, n, 1, [&](int begin, int end) {
   for (int i = begin; i < end; ++i) {
@@ -256,7 +287,7 @@ static void fp16_gemv_trans_fp16_arith_by_dot_products(const int m, const int n,
         for (int k = 0; k < F16_REGISTERS_PER_ITERATION; ++k) {
           ax[k] = vld1q_f16(x + j + k * F16_ELEMENTS_PER_REGISTER);
           ay[k] = vld1q_f16(a + lda * i + j + k * F16_ELEMENTS_PER_REGISTER);
-          sum[k] = F16_FMA(sum[k], ax[k], ay[k]);
+          sum[k] = f16_fma(sum[k], ax[k], ay[k]);
         }
       }
       // TODO: add a tail fixup so we don't have to have such a
@@ -280,13 +311,13 @@ static void fp16_gemv_trans_fp16_arith(const int m, const int n, const float16_t
       for (auto j = 0; j < m; j += 8) {
         float16x8_t xVec = vld1q_f16(x + j);
         float16x8_t a0Vec = vld1q_f16(row0 + j);
-        sum0Vec = F16_FMA(sum0Vec, a0Vec, xVec);
+        sum0Vec = f16_fma(sum0Vec, a0Vec, xVec);
         float16x8_t a1Vec = vld1q_f16(row1 + j);
-        sum1Vec = F16_FMA(sum1Vec, a1Vec, xVec);
+        sum1Vec = f16_fma(sum1Vec, a1Vec, xVec);
         float16x8_t a2Vec = vld1q_f16(row2 + j);
-        sum2Vec = F16_FMA(sum2Vec, a2Vec, xVec);
+        sum2Vec = f16_fma(sum2Vec, a2Vec, xVec);
         float16x8_t a3Vec = vld1q_f16(row3 + j);
-        sum3Vec = F16_FMA(sum3Vec, a3Vec, xVec);
+        sum3Vec = f16_fma(sum3Vec, a3Vec, xVec);
       }
       y[(i + 0) * incy] = reduce(sum0Vec);
       y[(i + 1) * incy] = reduce(sum1Vec);
@@ -295,13 +326,20 @@ static void fp16_gemv_trans_fp16_arith(const int m, const int n, const float16_t
     }
   });
 }
-#undef F16_FMA
 
 #endif
 
 static inline float reduce(float32x4_t x) {
         auto sum = vpaddq_f32(x, x);
         return vgetq_lane_f32(vpaddq_f32(sum, sum), 0);
+}
+
+static inline f32_fma(float a, float b, float c) {
+#ifdef __ARM_FEATURE_FMA
+  return vfmaq_f32(a, b, c);
+#else
+  return vaddq_f32(a, vmulq_f32(b, c));
+#endif
 }
 
 static void fp16_gemv_trans_fp32_arith(const int m, const int n, const float16_t* a, const int lda, const float16_t *x, float16_t* y, int incy) {
@@ -315,23 +353,17 @@ static void fp16_gemv_trans_fp32_arith(const int m, const int n, const float16_t
       const auto row1 = a + lda * (i + 1);
       const auto row2 = a + lda * (i + 2);
       const auto row3 = a + lda * (i + 3);
-#ifdef __ARM_FEATURE_FMA
-#define F32_FMA(a, b, c) vfmaq_f32((a), (b), (c))
-#else
-#define F32_FMA(a, b, c) vaddq_f32((a), vmulq_f32((b), (c)))
-#endif
       for (auto j = 0; j < m; j += 4) {
         float32x4_t xVec = vcvt_f32_f16(vld1_f16(x + j));
         float32x4_t a0Vec = vcvt_f32_f16(vld1_f16(row0 + j));
-        sum0Vec = F32_FMA(sum0Vec, a0Vec, xVec);
+        sum0Vec = f32_fma(sum0Vec, a0Vec, xVec);
         float32x4_t a1Vec = vcvt_f32_f16(vld1_f16(row1 + j));
-        sum1Vec = F32_FMA(sum1Vec, a1Vec, xVec);
+        sum1Vec = f32_fma(sum1Vec, a1Vec, xVec);
         float32x4_t a2Vec = vcvt_f32_f16(vld1_f16(row2 + j));
-        sum2Vec = F32_FMA(sum2Vec, a2Vec, xVec);
+        sum2Vec = f32_fma(sum2Vec, a2Vec, xVec);
         float32x4_t a3Vec = vcvt_f32_f16(vld1_f16(row3 + j));
-        sum3Vec = F32_FMA(sum3Vec, a3Vec, xVec);
+        sum3Vec = f32_fma(sum3Vec, a3Vec, xVec);
       }
-#undef F32_FMA
       y[(i + 0) * incy] = reduce(sum0Vec);
       y[(i + 1) * incy] = reduce(sum1Vec);
       y[(i + 2) * incy] = reduce(sum2Vec);
