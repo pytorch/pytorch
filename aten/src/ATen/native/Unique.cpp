@@ -484,7 +484,7 @@ unique_dim_consecutive_cpu(const Tensor& self, const int64_t dim, const bool ret
 }
 
 std::tuple<Tensor, Tensor, Tensor>
-unique_consecutive_cpu(const Tensor& self, const bool return_inverse, const bool return_counts, c10::optional<int64_t> dim) {
+unique_consecutive_cpu(const Tensor& self, const bool return_inverse, const bool return_counts, std::optional<int64_t> dim) {
   if (!dim.has_value() || (dim.value() == 0 && self.dim() == 1)) {
     return AT_DISPATCH_V2(self.scalar_type(), "unique", AT_WRAP([&] {
       return unique_consecutive_cpu_template<scalar_t>(self, return_inverse, return_counts);

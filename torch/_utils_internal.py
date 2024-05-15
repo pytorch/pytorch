@@ -189,3 +189,8 @@ USE_RTLD_GLOBAL_WITH_LIBTORCH = False
 # m.set_python_module("mylib.ops") call from C++ that associates
 # the C++ op with a python module.
 REQUIRES_SET_PYTHON_MODULE = False
+
+
+def maybe_upload_prof_stats_to_manifold(profile_path: str) -> None:
+    print("Uploading profile stats (fb-only otherwise no-op)")
+    pass

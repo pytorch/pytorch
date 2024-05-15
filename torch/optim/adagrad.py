@@ -13,6 +13,7 @@ from .optimizer import (
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
+    ParamsT,
 )
 
 __all__ = ["Adagrad", "adagrad"]
@@ -21,12 +22,12 @@ __all__ = ["Adagrad", "adagrad"]
 class Adagrad(Optimizer):
     def __init__(
         self,
-        params,
-        lr=1e-2,
-        lr_decay=0,
-        weight_decay=0,
-        initial_accumulator_value=0,
-        eps=1e-10,
+        params: ParamsT,
+        lr: float = 1e-2,
+        lr_decay: float = 0,
+        weight_decay: float = 0,
+        initial_accumulator_value: float = 0,
+        eps: float = 1e-10,
         foreach: Optional[bool] = None,
         *,
         maximize: bool = False,
@@ -120,10 +121,10 @@ class Adagrad(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            params_with_grad = []
-            grads = []
-            state_sums = []
-            state_steps = []
+            params_with_grad: List[Tensor] = []
+            grads: List[Tensor] = []
+            state_sums: List[Tensor] = []
+            state_steps: List[Tensor] = []
 
             has_sparse_grad, has_complex = self._init_group(
                 group, params_with_grad, grads, state_sums, state_steps
@@ -157,7 +158,7 @@ Adagrad.__doc__ = (
             &\textbf{input}      : \gamma \text{ (lr)}, \: \theta_0 \text{ (params)}, \: f(\theta)
                 \text{ (objective)}, \: \lambda \text{ (weight decay)},                          \\
             &\hspace{12mm}    \tau \text{ (initial accumulator value)}, \: \eta\text{ (lr decay)}\\
-            &\textbf{initialize} :  state\_sum_0 \leftarrow 0                             \\[-1.ex]
+            &\textbf{initialize} :  state\_sum_0 \leftarrow \tau                          \\[-1.ex]
             &\rule{110mm}{0.4pt}                                                                 \\
             &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
             &\hspace{5mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
@@ -182,6 +183,8 @@ Adagrad.__doc__ = (
         lr (float, optional): learning rate (default: 1e-2)
         lr_decay (float, optional): learning rate decay (default: 0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        initial_accumulator_value (float, optional): initial value of the
+            sum of squares of gradients (default: 0)
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-10)
         {_foreach_doc}
@@ -202,7 +205,7 @@ def adagrad(
     state_steps: List[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting these as kwargs for now as functional API is compiled by torch/distributed/optim
-    has_sparse_grad: bool = None,
+    has_sparse_grad: bool = False,
     foreach: Optional[bool] = None,
     differentiable: bool = False,
     has_complex: bool = False,
@@ -372,7 +375,7 @@ def _multi_tensor_adagrad(
             _view_as_real(device_params, device_grads, device_state_sums)
 
         if maximize:
-            device_grads = torch._foreach_neg(device_grads)
+            device_grads = torch._foreach_neg(device_grads)  # type: ignore[assignment]
 
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
@@ -390,7 +393,7 @@ def _multi_tensor_adagrad(
             if maximize:
                 torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
             else:
-                device_grads = torch._foreach_add(
+                device_grads = torch._foreach_add(  # type: ignore[assignment]
                     device_grads, device_params, alpha=weight_decay
                 )
 
@@ -408,6 +411,6 @@ def _multi_tensor_adagrad(
             torch._foreach_mul_(device_grads, minus_clr)
             numerator = device_grads
         else:
-            numerator = torch._foreach_mul(device_grads, minus_clr)
+            numerator = torch._foreach_mul(device_grads, minus_clr)  # type: ignore[assignment]
 
         torch._foreach_addcdiv_(device_params, numerator, std)

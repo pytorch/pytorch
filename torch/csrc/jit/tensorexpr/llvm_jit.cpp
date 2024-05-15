@@ -67,8 +67,8 @@ static llvm::SubtargetFeatures getHostSubtargetFeatures() {
 // Create a JTMB using the host's triple.  CPU and attrs default to the host
 // unless they are supplied.
 static llvm::orc::JITTargetMachineBuilder makeJTMBFromHost(
-    c10::optional<std::string> cpu,
-    c10::optional<std::string> attrs) {
+    std::optional<std::string> cpu,
+    std::optional<std::string> attrs) {
   llvm::orc::JITTargetMachineBuilder JTMB(
       (llvm::Triple(llvm::sys::getProcessTriple())));
   JTMB.setCPU(cpu.value_or(llvm::sys::getHostCPUName().str()));
@@ -85,8 +85,8 @@ static llvm::orc::JITTargetMachineBuilder makeJTMBFromHost(
 // Create a JTMB using a given triple.  Do not set cpu or attrs if not supplied.
 static llvm::orc::JITTargetMachineBuilder makeJTMBFromTriple(
     const std::string& triple,
-    c10::optional<std::string> cpu,
-    c10::optional<std::string> attrs) {
+    std::optional<std::string> cpu,
+    std::optional<std::string> attrs) {
   llvm::orc::JITTargetMachineBuilder JTMB((llvm::Triple(triple)));
   if (cpu) {
     JTMB.setCPU(*cpu);
@@ -100,9 +100,9 @@ static llvm::orc::JITTargetMachineBuilder makeJTMBFromTriple(
 }
 
 static llvm::orc::JITTargetMachineBuilder makeTargetMachineBuilder(
-    c10::optional<std::string> triple,
-    c10::optional<std::string> cpu,
-    c10::optional<std::string> attrs) {
+    std::optional<std::string> triple,
+    std::optional<std::string> cpu,
+    std::optional<std::string> attrs) {
   auto JTMB = triple ? makeJTMBFromTriple(*triple, cpu, attrs)
                      : makeJTMBFromHost(cpu, attrs);
 #if LLVM_VERSION_MAJOR >= 18
@@ -160,9 +160,9 @@ class TORCH_API PytorchLLVMJITImpl {
 
  public:
   PytorchLLVMJITImpl(
-      c10::optional<std::string> triple,
-      c10::optional<std::string> cpu,
-      c10::optional<std::string> attrs)
+      std::optional<std::string> triple,
+      std::optional<std::string> cpu,
+      std::optional<std::string> attrs)
       : TM(assertSuccess(makeTargetMachineBuilder(triple, cpu, attrs)
                              .createTargetMachine())),
         LLJ(assertSuccess(
@@ -241,9 +241,9 @@ class TORCH_API PytorchLLVMJITImpl {
 
  public:
   PytorchLLVMJITImpl(
-      c10::optional<std::string> triple,
-      c10::optional<std::string> cpu,
-      c10::optional<std::string> attrs)
+      std::optional<std::string> triple,
+      std::optional<std::string> cpu,
+      std::optional<std::string> attrs)
       : Resolver(createLegacyLookupResolver(
             ES,
             [this](const std::string& Name) -> JITSymbol {
@@ -320,9 +320,9 @@ class TORCH_API PytorchLLVMJITImpl {
 #endif
 
 PytorchLLVMJIT::PytorchLLVMJIT(
-    c10::optional<std::string> triple,
-    c10::optional<std::string> cpu,
-    c10::optional<std::string> attrs)
+    std::optional<std::string> triple,
+    std::optional<std::string> cpu,
+    std::optional<std::string> attrs)
     : impl_(std::make_unique<PytorchLLVMJITImpl>(triple, cpu, attrs)) {}
 
 PytorchLLVMJIT::~PytorchLLVMJIT() = default;
