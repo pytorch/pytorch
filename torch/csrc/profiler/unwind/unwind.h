@@ -25,7 +25,7 @@ struct Frame {
 TORCH_API std::vector<Frame> symbolize(const std::vector<void*>& frames);
 
 // returns path to the library, and the offset of the addr inside the library
-TORCH_API c10::optional<std::pair<std::string, uint64_t>> libraryFor(
+TORCH_API std::optional<std::pair<std::string, uint64_t>> libraryFor(
     void* addr);
 
 struct Stats {

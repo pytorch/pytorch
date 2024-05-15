@@ -1696,7 +1696,15 @@ class TritonKernel(Kernel):
                 cse_var = self.cse.varname_map[var.name]
                 mask_vars.update(cse_var.mask_vars)
             elif symbol_is_type(
-                var, (SymT.UNBACKED_INT, SymT.SIZE, SymT.PRECOMPUTED_SIZE, SymT.INDEX)
+                var,
+                (
+                    SymT.UNBACKED_INT,
+                    SymT.SIZE,
+                    SymT.PRECOMPUTED_SIZE,
+                    SymT.INDEX,
+                    SymT.FLOAT,
+                    SymT.UNBACKED_FLOAT,
+                ),
             ):
                 pass
             else:
@@ -1859,7 +1867,8 @@ class TritonKernel(Kernel):
             mask = (
                 f"{next(iter(mask_vars))}"
                 if len(mask_vars) == 1
-                else f"({' & '.join(str(v) for v in mask_vars)})"
+                # sorted for deterministic order
+                else f"({' & '.join(sorted(map(str, mask_vars)))})"
             )
         return mask
 
@@ -2770,6 +2779,7 @@ class TritonKernel(Kernel):
             "autotune_local_cache": config.autotune_local_cache,
             "autotune_pointwise": config.triton.autotune_pointwise,
             "autotune_remote_cache": config.autotune_remote_cache,
+            "force_disable_caches": config.force_disable_caches,
             "dynamic_scale_rblock": config.dynamic_scale_rblock,
             "max_autotune": config.max_autotune,
             "max_autotune_pointwise": config.max_autotune_pointwise,
