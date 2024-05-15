@@ -39,7 +39,7 @@ class _StorageBase:
 
     def type(self, dtype: _Optional[str] = None, non_blocking: bool = False) -> T: ...  # type: ignore[empty-body, misc, type-var] # noqa: E704
 
-    def cuda(self, device=None, non_blocking=False, **kwargs) -> T:  # type: ignore[type-var] # noqa: E704
+    def cuda(self, device=None, non_blocking=False) -> T:  # type: ignore[type-var] # noqa: E704
         """Returns a copy of this object in CUDA memory.
 
         If this object is already in CUDA memory and on the correct device, then
@@ -50,13 +50,11 @@ class _StorageBase:
             non_blocking (bool): If ``True`` and the source is in pinned memory,
                 the copy will be asynchronous with respect to the host. Otherwise,
                 the argument has no effect.
-            **kwargs: For compatibility, may contain the key ``async`` in place of
-                the ``non_blocking`` argument.
         """
         device2 = torch.device('cuda', device) if device else torch.device('cuda')
-        return self.to(device2, non_blocking, **kwargs)
+        return self.to(device=device2, non_blocking=non_blocking)
 
-    def hpu(self, device=None, non_blocking=False, **kwargs) -> T:  # type: ignore[type-var] # noqa: E704
+    def hpu(self, device=None, non_blocking=False) -> T:  # type: ignore[type-var] # noqa: E704
         """Returns a copy of this object in HPU memory.
 
         If this object is already in HPU memory and on the correct device, then
@@ -67,11 +65,9 @@ class _StorageBase:
             non_blocking (bool): If ``True`` and the source is in pinned memory,
                 the copy will be asynchronous with respect to the host. Otherwise,
                 the argument has no effect.
-            **kwargs: For compatibility, may contain the key ``async`` in place of
-                the ``non_blocking`` argument.
         """
         device2 = torch.device('hpu', device) if device else torch.device('hpu')
-        return self.to(device2, non_blocking, **kwargs)
+        return self.to(device=device2, non_blocking=non_blocking)
 
     def element_size(self) -> int: ...  # type: ignore[empty-body, type-var] # noqa: E704
 
@@ -186,8 +182,8 @@ class _StorageBase:
             storage = storage.clone()
         return storage
 
-    def to(self, device: torch.device, non_blocking: bool = False, **kwargs) -> T:  # type: ignore[type-var] # noqa: E704
-        return _to(self, device, non_blocking, **kwargs)
+    def to(self, *, device: torch.device, non_blocking: bool = False) -> T:  # type: ignore[type-var] # noqa: E704
+        return _to(self, device, non_blocking)
 
     def double(self):
         """Casts this storage to double type."""
@@ -846,25 +842,25 @@ class TypedStorage:
         else:
             return self._untyped_storage.type(dtype, non_blocking)
 
-    def cuda(self, device=None, non_blocking=False, **kwargs) -> T:  # type: ignore[misc, type-var]
+    def cuda(self, device=None, non_blocking=False) -> T:  # type: ignore[misc, type-var]
         _warn_typed_storage_removal()
         if self.dtype in [torch.quint8, torch.quint4x2, torch.quint2x4, torch.qint32, torch.qint8]:
             raise RuntimeError("Cannot create CUDA storage with quantized dtype")
-        cuda_storage: torch.UntypedStorage = self._untyped_storage.cuda(device, non_blocking, **kwargs)
+        cuda_storage: torch.UntypedStorage = self._untyped_storage.cuda(device, non_blocking)
         return self._new_wrapped_storage(cuda_storage)
 
-    def hpu(self, device=None, non_blocking=False, **kwargs) -> T:  # type: ignore[misc, type-var]
+    def hpu(self, device=None, non_blocking=False) -> T:  # type: ignore[misc, type-var]
         _warn_typed_storage_removal()
         if self.dtype in [torch.quint8, torch.quint4x2, torch.quint2x4, torch.qint32, torch.qint8]:
             raise RuntimeError("Cannot create HPU storage with quantized dtype")
-        hpu_storage: torch.UntypedStorage = self._untyped_storage.hpu(device, non_blocking, **kwargs)
+        hpu_storage: torch.UntypedStorage = self._untyped_storage.hpu(device, non_blocking)
         return self._new_wrapped_storage(hpu_storage)
 
-    def to(self, device: torch.device, non_blocking: bool = False, **kwargs) -> T:  # type: ignore[type-var]
+    def to(self, *, device: torch.device, non_blocking: bool = False) -> T:  # type: ignore[type-var]
         _warn_typed_storage_removal()
         if self.dtype in [torch.quint8, torch.quint4x2, torch.quint2x4, torch.qint32, torch.qint8]:
             raise RuntimeError(f"Cannot create {device.type.upper()} storage with quantized dtype")
-        to_storage: torch.UntypedStorage = self._untyped_storage.to(device, non_blocking, **kwargs)
+        to_storage: torch.UntypedStorage = self._untyped_storage.to(device=device, non_blocking=non_blocking)
         return self._new_wrapped_storage(to_storage)
 
     def element_size(self):

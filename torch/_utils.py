@@ -52,7 +52,7 @@ def _type(self, dtype=None, non_blocking=False, **kwargs):
     return dtype(self.size()).copy_(self, non_blocking)
 
 
-def _to(self, device, non_blocking=False, **kwargs):
+def _to(self, device, non_blocking=False):
     """Returns a copy of this object in device memory.
 
     If this object is already on the correct device, then no copy is performed
@@ -63,13 +63,10 @@ def _to(self, device, non_blocking=False, **kwargs):
         non_blocking (bool): If ``True`` and the source is in pinned memory,
             the copy will be asynchronous with respect to the host. Otherwise,
             the argument has no effect.
-        **kwargs: For compatibility, may contain the key ``async`` in place of
-            the ``non_blocking`` argument.
     """
     if self.device == device:
         return self
 
-    non_blocking = _get_async_or_non_blocking(device.type, non_blocking, kwargs)
     device_module = getattr(torch, device.type, None)
     assert (
         device_module is not None
