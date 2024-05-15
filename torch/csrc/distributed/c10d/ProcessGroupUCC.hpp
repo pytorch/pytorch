@@ -119,7 +119,7 @@ class TORCH_API ProcessGroupUCC : public Backend {
         OpType opType,
         uint64_t seq,
         const char* prof_title,
-        const c10::optional<std::vector<at::Tensor>>& inputs,
+        const std::optional<std::vector<at::Tensor>>& inputs,
         const c10::intrusive_ptr<ProcessGroupUCCLogger>& logger)
         : Work(-1, opType, prof_title, inputs), logger_(logger), seq_(seq) {}
     ~WorkUCC();
