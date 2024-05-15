@@ -207,6 +207,15 @@ class FSDPState(_State):
         if self._fsdp_param_group:
             self._fsdp_param_group.pre_backward(*unused)
 
+    def _pre_backward_compile_only(self, grad: torch.Tensor) -> torch.Tensor:
+        # NOTE: Under compile, we use `register_hook` to call pre_backward, to mimic `multi_grad_hook` "any" mode behavior.
+        # We only want to call pre_backward hook once per forward (note that there could be multiple forwards before backward),
+        # so doing this check here to early return if the hook is already called in this forward.
+        if self._training_state == TrainingState.PRE_BACKWARD:
+            return grad
+        self._pre_backward()
+        return grad
+
     def _root_post_backward_final_callback(self) -> None:
         with torch.profiler.record_function("FSDP::root_post_backward_callback"):
             for state in self._state_ctx.all_states:
@@ -235,7 +244,13 @@ class FSDPState(_State):
             t for t in flat_outputs if (torch.is_tensor(t) and t.requires_grad)
         )
         if tensors:
-            register_multi_grad_hook(tensors, self._pre_backward, mode="any")
+            # Invariant: if Compiled Autograd is used, regardless of whether forward is eager mode,
+            # we must use the Traceable FSDP codepath.
+            if not torch._dynamo.compiled_autograd.compiled_autograd_enabled:
+                register_multi_grad_hook(tensors, self._pre_backward, mode="any")
+            else:
+                for tensor in tensors:
+                    handle = tensor.register_hook(self._pre_backward_compile_only)
         return output
 
     def _register_root_post_backward_final_callback(self):
