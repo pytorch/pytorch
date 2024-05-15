@@ -91,10 +91,8 @@ SymbolizedTracebacks symbolize(
   for (const auto& e : to_symbolize) {
     if (e->python_) {
       if (cur_python != e->python_ && !cur_py_frames.empty()) {
-        if (cur_python) {
-          // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
-          cur_python->appendSymbolized(cur_py_frames, r);
-        }
+        // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
+        cur_python->appendSymbolized(cur_py_frames, r);
         cur_py_frames.clear();
       }
       cur_python = e->python_;
@@ -107,10 +105,8 @@ SymbolizedTracebacks symbolize(
     }
   }
   if (!cur_py_frames.empty()) {
-    if (cur_python) {
-      // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
-      cur_python->appendSymbolized(cur_py_frames, r);
-    }
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
+    cur_python->appendSymbolized(cur_py_frames, r);
     cur_py_frames.clear();
   }
   std::vector<std::vector<uint64_t>> python_frame_fragments =
@@ -174,12 +170,6 @@ SymbolizedTracebacks symbolize(
 
     for (; py_it != py_end; ++py_it) {
       append_python(*py_it);
-    }
-
-    // Gather all user defined frames
-    for (const auto& f : sc->user_defined_frames_) {
-      r.tracebacks.back().push_back(r.all_frames.size());
-      r.all_frames.emplace_back(f);
     }
   }
   return r;
