@@ -285,6 +285,7 @@ class DeviceMeshTestNDim(DTensorTestBase):
 
     @with_comms
     def test_from_group_with_mesh_shape(self):
+        """Tests ``from_group`` when passing ``mesh_shape`` as 2D."""
         # Consider two different logical views of the same mesh:
         # - (4, 2) ("dp", "tp") mesh
         # - (2, 2, 2) ("dp_replicate", "dp_shard", "tp") mesh
@@ -306,7 +307,10 @@ class DeviceMeshTestNDim(DTensorTestBase):
         assert dp_group is not None
 
         dp_mesh = DeviceMesh.from_group(
-            dp_group, self.device_type, mesh_shape[:2], mesh_dim_names=mesh_dim_names
+            dp_group,
+            self.device_type,
+            mesh_shape[:2],
+            mesh_dim_names=mesh_dim_names[:2],
         )
 
         # Check the constructed DP mesh's mesh tensor and per-dim ranks
@@ -315,12 +319,18 @@ class DeviceMeshTestNDim(DTensorTestBase):
             mesh_shape[:2]
         )
         self.assertEqual(dp_mesh.mesh, expected_dp_mesh)
-        ref_mesh = init_device_mesh(self.device_type, mesh_shape)
+        ref_mesh = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
         ref_mesh_dp_dim_group_infos = ref_mesh._dim_group_infos[:2]
         for (_, ref_ranks, _), (_, ranks, _) in zip(
             ref_mesh_dp_dim_group_infos, dp_mesh._dim_group_infos
         ):
             self.assertEqual(ref_ranks, ranks)
+
+        # Check slicing out 1D submeshes
+        self.assertEqual(dp_mesh["dp_replicate"], ref_mesh["dp_replicate"])
+        self.assertEqual(dp_mesh["dp_shard"], ref_mesh["dp_shard"])
 
 
 class InitDeviceMeshTest(DTensorTestBase):
