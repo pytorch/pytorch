@@ -28,7 +28,7 @@ getOperatorVersionMapForMobile();
 struct OperatorString {
   const std::string name;
   const std::string overload_name;
-  const c10::optional<int> num_specified_args;
+  const std::optional<int> num_specified_args;
 };
 
 struct ByteCodeFunctionWithOperator {
