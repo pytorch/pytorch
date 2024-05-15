@@ -24,7 +24,8 @@ class autocast(torch.amp.autocast_mode.autocast):
             self.fast_dtype = dtype
             return
         warnings.warn(
-            "torch.cpu.amp.autocast(args...) is deprecated. Please use torch.amp.autocast('cpu', args...) instead."
+            "torch.cpu.amp.autocast(args...) is deprecated. Please use torch.amp.autocast('cpu', args...) instead.",
+            DeprecationWarning,
         )
         super().__init__(
             "cpu", enabled=enabled, dtype=dtype, cache_enabled=cache_enabled
