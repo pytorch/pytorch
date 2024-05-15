@@ -891,6 +891,9 @@ def _log_export_wrapper(fn):
 
 
 def _convert_ts_to_export_experimental(traced_callable, args, kwargs=None):
+
+    torch._C._jit_set_texpr_fuser_enabled(False)
+
     def process_trace_inputs_for_export(example_inputs, example_kwarg_inputs):
         if not isinstance(example_inputs, tuple):
             example_inputs = (example_inputs,)
