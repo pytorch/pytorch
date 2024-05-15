@@ -2024,12 +2024,12 @@ class CppWrapperCpu(WrapperCodeGen):
             if isinstance(output_args, str):
                 output_args = [output_args]
 
-        if config.is_fbcode() or V.graph.aot_mode or not config.abi_compatible:
+        if config.is_fbcode() or (V.graph.aot_mode and config.abi_compatible):
             assert op_overload is not None
             assert raw_args is not None
             assert outputs is not None
 
-            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_fbcode(
+            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_with_proxy_executor(
                 cpp_kernel_key,
                 op_overload,
                 raw_args,
@@ -2199,7 +2199,7 @@ if (py_{buf_name}.get() == NULL) {{
             )
             self.writelines(scope_gil_acquire)
 
-    def generate_extern_kernel_alloc_and_find_schema_if_needed_fbcode(
+    def generate_extern_kernel_alloc_and_find_schema_if_needed_with_proxy_executor(
         self,
         cpp_kernel_key,
         op_overload,
