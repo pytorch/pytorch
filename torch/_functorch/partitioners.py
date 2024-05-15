@@ -1049,6 +1049,36 @@ def _optimize_runtime_with_given_memory(
         raise RuntimeError("Somehow scipy solving failed")
     return res.x
 
+from torch.utils._mode_utils import no_dispatch
+from triton.testing import do_bench
+
+RUNTIME_MODE = "analytical"
+def estimate_runtime(node):
+    def materialize_arg(x):
+        if isinstance(x, fx.Node) and isinstance(x.meta['val'], torch.Tensor):
+            return torch.randn_like(x.meta['val'])
+        return x
+
+    if RUNTIME_MODE == "placeholder":
+        return 1
+
+    if RUNTIME_MODE == "profile":
+        with no_dispatch():
+            args, kwargs = pytree.tree_map(materialize_arg, (node.args, node.kwargs))
+            ms = do_bench(lambda: node.target(*args, **kwargs))
+            return ms
+
+    if RUNTIME_MODE == "analytical":
+        # todo(chilli): Normalize this to also return ms
+        from torch.utils.flop_counter import FlopCounterMode
+        args, kwargs = pytree.tree_map(materialize_arg, (node.args, node.kwargs))
+        with FlopCounterMode(display=False) as mode:
+            node.target(*args, **kwargs)
+        counted_flops = mode.get_total_flops()
+        return max(counted_flops, 1)
+
+    return 1
+
 def choose_saved_values_set(joint_graph, node_classifications, memory_budget=1):
     BAN_IF_USED_FAR_APART = config.ban_recompute_used_far_apart
     BAN_IF_LONG_FUSIBLE_CHAINS = config.ban_recompute_long_fusible_chains
@@ -1103,7 +1133,7 @@ def choose_saved_values_set(joint_graph, node_classifications, memory_budget=1):
 
     all_recomputable_banned_nodes = sorted(list(recomputable_banned_nodes), key=_size_of, reverse=True)
     memories = [get_normalized_size(_size_of(i)) for i in all_recomputable_banned_nodes]
-    runtimes = [1 for idx, i in enumerate(all_recomputable_banned_nodes)]
+    runtimes = [estimate_runtime(node) for node in all_recomputable_banned_nodes]
     cur_memory_budget = memory_budget
     from torch.utils._mode_utils import no_dispatch
     with no_dispatch():
@@ -1115,15 +1145,17 @@ def choose_saved_values_set(joint_graph, node_classifications, memory_budget=1):
         # print([(i, get_normalized_size(_size_of(i))) for i in dont_ban])
         estimated_activations_saved = estimate_activations_size(set(all_recomputable_banned_nodes) - dont_ban) / (max_act_size - min_act_size)
         saved_values, banned_nodes = get_saved_values(joint_graph, node_classifications, (False, False, False, False, BAN_IF_REDUCTION), dont_ban)
+        # todo(chilli): Estimated doesn't align exaclty with actual - actual is usually less memory than estimated. i'm guessing (actually quite unsure about this) that's because estimated is just only including tensors we actually banned from recompute, but there may be other tensors that we choose to save.
         print(f"desired: {cur_memory_budget} ")
+        print(f"allow recomputing: {dont_ban}")
         print(f"estimated: {estimate_activations_size(set(all_recomputable_banned_nodes) - dont_ban)}")
+        print(f"estimated ratio: {(estimate_activations_size(set(all_recomputable_banned_nodes) - dont_ban))/(max_act_size - min_act_size)}")
         print(f"actual: {estimate_activations_size(saved_values) - min_act_size}")
         print(f"actual ratio: {get_mem_ratio(estimate_activations_size(saved_values))}")
         print_budget_real_mem(estimate_activations_size(saved_values), "milp")
 
-        if get_mem_ratio(estimate_activations_size(saved_values)) < memory_budget + 1e-2:
-            print(f"Below memory budget! Saving {saved_values}")
-            return saved_values
+        print(f"Below memory budget! Saving {saved_values}")
+        return saved_values
 
     print_budget_real_mem(estimate_activations_size(inputs), "full checkpoint")
     saved_values = inputs
@@ -1234,7 +1266,7 @@ def min_cut_rematerialization_partition(
         print("Ops banned from rematerialization: ", ops_ignored)
         print()
 
-    memory_budget = 1
+    memory_budget = config.memory_budget
     for node in joint_graph.nodes:
         if isinstance(node.meta.get("memory_budget", None), float):
             memory_budget = node.meta["memory_budget"]
