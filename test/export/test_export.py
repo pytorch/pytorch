@@ -631,7 +631,13 @@ class TestExport(TestCase):
         self.assertEqual(actual_result, expected_result)
 
     # TODO(yidi)
-    @unittest.expectedFailure
+    # Expected failure for test cases that calls run_decomposition().
+    # The top-level cond node has pre-existing metadata,
+    # which overrides the metadata for operators in subgraph due to interpreter.run(),
+    # where cond is a single node in the interpreter.run(). And we preserve metadata
+    # by copying current node's metadata for all nodes created during interpreting.
+    @testing.expectedFailurePreDispatchRunDecomp
+    @testing.expectedFailureRetraceability
     def test_export_cond_preserve_torch_fn_for_subgraphs(self):
         class MySubModule(torch.nn.Module):
             def foo(self, x):
@@ -2090,6 +2096,32 @@ class TestExport(TestCase):
             RuntimeError, "cannot mutate tensors with frozen storage"
         ):
             export(Module(), (torch.tensor(1, device="cpu"),))
+
+    def test_float_conversion(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return x.float()
+
+        ep = export(Module(), (torch.tensor(1, dtype=torch.float),))
+        ops = []
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+        self.assertGreater(len(ops), 0)
+        for op in ops:
+            self.assertIn(op, (torch.ops.aten._to_copy.default,))
+
+    def test_device_to_mutation_float(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                y = x.float()
+                y.add_(1)
+                return y, x
+
+        with self.assertRaisesRegex(
+            RuntimeError, "cannot mutate tensors with frozen storage"
+        ):
+            export(Module(), (torch.tensor(1, dtype=torch.float),))
 
     def test_module(self):
         class MyLinear(torch.nn.Module):
