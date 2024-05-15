@@ -1020,6 +1020,42 @@ def use_ck_template(layout, m, n, k):
     # TBD: investigate if backend needs to be disabled for small gemms similar to CUTLASS
     return True
 
+    
+def _use_template_for_cpu(layout):
+    return use_max_autotune() and layout.device.type == "cpu"
+
+
+def use_cpp_packed_gemm_template(layout, mat1, mat2):
+    from . import ir
+    from .codegen.cpp_micro_gemm import create_micro_gemm
+    from .kernel.mm_common import mm_args
+
+    if not _use_template_for_cpu(layout) or not _use_autotune_backend("CPP"):
+        return False
+
+    if not config.cpp.weight_prepack:
+        return False
+
+    layout_dtypes = [torch.float32]
+    m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2)
+    # TODO(jgong5): support dynamic shapes for n or k
+    if has_free_symbols((n, k)):
+        return False
+    if isinstance(mat2, ir.BaseView):
+        mat2 = mat2.unwrap_view()
+    micro_gemm = create_micro_gemm(
+        "micro_gemm", m, n, k, layout.dtype, num_threads=parallel_num_threads()
+    )
+    # TODO(jgong5): support n % n_block_size != 0
+    return (
+        layout.dtype in layout_dtypes
+        and micro_gemm is not None
+        and n % micro_gemm.register_blocking[1] == 0
+        and mat1.get_stride()[-1] == 1  # TODO(jgong5): support transposed input
+        and isinstance(mat2, ir.StorageBox)
+        and mat2.is_module_buffer()
+    )
+
 
 def use_aten_gemm_kernels():
     return not use_max_autotune() or _use_autotune_backend("ATEN")
@@ -1529,7 +1565,7 @@ def should_assume_input_aligned(example_input: torch.Tensor):
     # See Note: [Input Alignment handling in Inductor]
 
     # right now, we only care about alignment for cuda tensors.
-    if example_input.device.type != "cuda":
+    if not is_gpu(example_input.device.type):
         return False
     return config.assume_aligned_inputs or tensor_is_aligned(example_input)
 
