@@ -2,7 +2,6 @@ import atexit
 import collections
 import contextlib
 import copy
-import cProfile
 import dataclasses
 import datetime
 import dis
@@ -16,9 +15,7 @@ import logging
 import math
 import operator
 import os
-import pstats
 import re
-import subprocess
 import sys
 import textwrap
 import threading
@@ -28,7 +25,6 @@ import typing
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
-from pathlib import Path
 from types import MethodWrapperType
 from typing import (
     Any,
@@ -49,8 +45,6 @@ from typing import (
     Union,
     ValuesView,
 )
-
-from torch._utils_internal import maybe_upload_prof_stats_to_manifold
 
 from ..utils.hooks import RemovableHandle
 
@@ -133,63 +127,6 @@ def tabulate(rows, headers):
         return "\n".join(
             ", ".join(map(str, row)) for row in itertools.chain([headers], rows)
         )
-
-
-def maybe_cprofile(func):
-    if config.cprofile:
-        return cprofile_wrapper(func)
-    return func
-
-
-def cprofile_wrapper(func):
-    @wraps(func)
-    def profile_wrapper(*args, **kwargs):
-        global timer_counter
-        profile_cnt = next(timer_counter)
-        profile_path = Path("/tmp/" + func.__name__ + f"{profile_cnt}.profile")
-        prof = cProfile.Profile()
-        prof.enable()
-        start_ts = time.time()
-        retval = prof.runcall(func, *args, **kwargs)
-        profile_latency = time.time() - start_ts
-        prof.disable()
-        print(
-            f"### Cprofile for {func.__name__} iter {profile_cnt} took {profile_latency:.3f} seconds ###"
-        )
-        ps = pstats.Stats(prof)
-        prof.dump_stats(profile_path)
-        svg_path = profile_path.with_suffix(".svg")
-        try:
-            gprof2dot_process = subprocess.Popen(
-                [
-                    "gprof2dot",
-                    "-f",
-                    "pstats",
-                    "--node-label=total-time-percentage",
-                    "--node-label=self-time-percentage",
-                    "--node-label=total-time",
-                    str(profile_path),
-                ],
-                stdout=subprocess.PIPE,
-            )
-            subprocess.check_call(
-                ["dot", "-Tsvg", "-o", str(svg_path)],
-                stdin=gprof2dot_process.stdout,
-            )
-            print(f"Generated SVG from profile at {str(svg_path)}")
-        except FileNotFoundError:
-            print(
-                "Failed to generate SVG from profile -- dumping stats instead."
-                "Try installing gprof2dot and dot for a better visualization"
-            )
-            ps.sort_stats(pstats.SortKey.TIME).print_stats(20)
-            ps.sort_stats(pstats.SortKey.CUMULATIVE).print_stats(20)
-
-        maybe_upload_prof_stats_to_manifold(str(profile_path))  # fb-only
-
-        return retval
-
-    return profile_wrapper
 
 
 curr_frame = 0
