@@ -764,8 +764,8 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
         for (tag, ranks, group_name), (ref_tag, ref_ranks, ref_group_name) in zip(
             mesh._dim_group_infos, ref_mesh._dim_group_infos
         ):
-            # Since `from_group()` constructs new subgroups when passed a
-            # `mesh_shape`, the test and ref groups are not the same
+            # Since we manually constructed new subgroups, the test and ref
+            # groups are not the same
             self.assertEqual(ranks, ref_ranks)
         for mesh_dim_name in mesh_dim_names:
             child_mesh = mesh[mesh_dim_name]
