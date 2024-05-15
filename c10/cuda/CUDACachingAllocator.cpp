@@ -2361,31 +2361,31 @@ class DeviceCachingAllocator {
     // capturing. It's only non-empty if some thread has begun and not yet ended
     // a capture, so it's usually 0, and we can short-circuit
     // cudaStreamCaptureStatus (which does a TLS lookup).
-    auto active_pool = MemPoolContext::getActiveMemPool();
-    if (active_pool) {
-      if (C10_UNLIKELY(!captures_underway.empty())) {
-        for (auto& entry : captures_underway) {
-          if (entry.second(stream)) {
-            TORCH_INTERNAL_ASSERT(entry.first == active_pool->id_);
-            auto it1 = graph_pools.find(entry.first);
-            TORCH_INTERNAL_ASSERT(it1 != graph_pools.end());
-            if (size <= kSmallSize) {
-              return it1->second->small_blocks;
-            } else {
-              return it1->second->large_blocks;
-            }
+    if (C10_UNLIKELY(!captures_underway.empty())) {
+      for (auto& entry : captures_underway) {
+        if (entry.second(stream)) {
+          auto it1 = graph_pools.find(entry.first);
+          TORCH_INTERNAL_ASSERT(it1 != graph_pools.end());
+          if (size <= kSmallSize) {
+            return it1->second->small_blocks;
+          } else {
+            return it1->second->large_blocks;
           }
-        }
-      } else {
-        auto it1 = user_pools.find(active_pool->id_);
-        TORCH_INTERNAL_ASSERT(it1 != user_pools.end());
-        if (size <= kSmallSize) {
-          return it1->second->small_blocks;
-        } else {
-          return it1->second->large_blocks;
         }
       }
     }
+    // Route torch.cuda.MemPool() allocations to user_pools
+    auto active_pool = MemPoolContext::getActiveMemPool();
+    if (active_pool) {
+      auto it1 = user_pools.find(active_pool->id_);
+      TORCH_INTERNAL_ASSERT(it1 != user_pools.end());
+      if (size <= kSmallSize) {
+        return it1->second->small_blocks;
+      } else {
+        return it1->second->large_blocks;
+      }
+    }
+    // All other allocations to default pools
     if (size <= kSmallSize) {
       return small_blocks;
     } else {
