@@ -106,6 +106,7 @@ libtorch_profiler_sources = [
     "torch/csrc/profiler/standalone/execution_trace_observer.cpp",
     "torch/csrc/profiler/standalone/itt_observer.cpp",
     "torch/csrc/profiler/standalone/nvtx_observer.cpp",
+    "torch/csrc/profiler/standalone/privateuse1_observer.cpp",
     "torch/csrc/profiler/stubs/base.cpp",
     "torch/csrc/profiler/orchestration/vulkan.cpp",
     "torch/csrc/profiler/perf.cpp",
@@ -679,7 +680,6 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/UCCUtils.cpp",
     "torch/csrc/distributed/c10d/intra_node_comm.cpp",
     "torch/csrc/distributed/c10d/intra_node_comm.cu",
-    "torch/csrc/distributed/c10d/Utils.cu",
     "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
     "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
 ]
