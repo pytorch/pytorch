@@ -26,7 +26,7 @@ struct Frame {
   size_t base_pointer;
 
   // unique to every frame with prim::profile across all threads
-  c10::optional<size_t> id;
+  std::optional<size_t> id;
 
   // RecordFunction object associated with this frame
   std::unique_ptr<at::RecordFunction> record_function;
