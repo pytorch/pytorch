@@ -47,24 +47,24 @@ def main(gemm_shape_csv, layout, dtype):
     def mm(a, b, out):
         return torch.mm(a, b, out=out)
 
-    with torch.no_grad():
-        for M, K, N in problem_instances:
-            with config.patch(
-                {
-                    "max_autotune": True,
-                    "autotune_in_subproc": True,
-                    "max_autotune_gemm_backends": "CK,Triton,ATen",
-                    "compile_threads": 64,
-                }
-            ):
-                with dynconfig.patch({"cache_size_limit": len(problem_instances) + 1}):
-                    a, b, out = generate_inputs(M, N, K, tensor_options, layout)
-                    Y_compiled = torch.compile(mm, dynamic=False)(a, b, out)
-                    Y = mm(a, b, out)
-                    try:
-                        torch.testing.assert_close(Y_compiled, Y)
-                    except AssertionError as e:
-                        log.error(e)
+    for M, K, N in problem_instances:
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": True,
+                "max_autotune_gemm_backends": "CK,Triton,ATen",
+                "compile_threads": 64,
+            }
+        ), dynconfig.patch(
+            {"cache_size_limit": len(problem_instances) + 1}
+        ), torch.no_grad():
+            a, b, out = generate_inputs(M, N, K, tensor_options, layout)
+            Y_compiled = torch.compile(mm, dynamic=False)(a, b, out)
+            Y = mm(a, b, out)
+            try:
+                torch.testing.assert_close(Y_compiled, Y)
+            except AssertionError as e:
+                log.error(e)
 
 
 if __name__ == "__main__":
