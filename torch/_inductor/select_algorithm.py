@@ -1070,6 +1070,7 @@ class AlgorithmSelectorCache(PersistentCache):
             ):
                 return no_op
 
+            # check local and global cache before precompiling
             timings = self.lookup(
                 choices,
                 name,
