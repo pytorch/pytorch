@@ -84,7 +84,10 @@ try:
     import torchvision
 
     USE_TORCHVISION = True
-except ImportError:
+except (ImportError, RuntimeError):
+    # Sometimes one can get:
+    #   RuntimeError: operator torchvision::nms does not exist
+    # when importing torchvision
     warnings.warn(
         "Couldn't import torchvision. Some of our tests use it, try "
         "to install it with commands from pytorch.org, post-fixed with "
