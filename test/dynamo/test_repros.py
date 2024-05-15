@@ -4915,6 +4915,40 @@ def forward(self, primals_1, primals_2):
         opt_ladder = torch.compile(ladder, fullgraph=True, backend="eager")
         self.assertEqual(opt_ladder(data), ladder(data))
 
+    @unittest.expectedFailure
+    def test_trace_functional_tensor_with_error(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch._subclasses.functional_tensor import (
+            FunctionalTensor,
+            FunctionalTensorMode,
+        )
+
+        def f(a, tmp):
+            a_view = a.view(-1)
+            with torch.no_grad():
+                a.set_(tmp)
+                a_view.mul_(2)
+            return a + tmp
+
+        fake_mode = FakeTensorMode()
+        with FunctionalTensorMode():
+            inp = torch.ones(3, 3, requires_grad=True)
+            inp = fake_mode.from_tensor(inp, static_shapes=True)
+            inp = FunctionalTensor.to_functional(inp)
+
+            tmp = torch.ones(3, 3, requires_grad=True)
+            tmp = fake_mode.from_tensor(tmp, static_shapes=True)
+            tmp = FunctionalTensor.to_functional(tmp)
+
+            opt_f = torch.compile(f, backend="eager")
+            with self.assertRaisesRegex(
+                RuntimeError, "cannot mutate tensors with frozen storage"
+            ):
+                opt_f(inp, tmp)
+
+        # grad state may not be properly reset after the error
+        self.assertTrue(torch.is_grad_enabled())
+
 
 instantiate_parametrized_tests(ReproTests)
 

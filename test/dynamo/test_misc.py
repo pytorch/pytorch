@@ -32,6 +32,7 @@ import torch._inductor.test_case
 import torch.onnx.operators
 
 import torch.utils._pytree as pytree
+from torch import Tensor
 from torch._C import FileCheck
 from torch._dynamo import allow_in_graph, bytecode_analysis, bytecode_transformation
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
@@ -8509,6 +8510,28 @@ def ___make_guard_fn():
             return torch.split(values, sizes)
 
         f(torch.tensor([2, 3, 4]), torch.randn(9))
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_unbacked_auto_functionalize_op(self):
+        @torch.library.custom_op(
+            "mylib::mk_image", mutates_args=("decoder",), device_types=["cpu"]
+        )
+        def mk_image(decoder: Tensor) -> Tensor:
+            return torch.randn(2, 3, 4, 5)
+
+        @torch.library.register_fake("mylib::mk_image")
+        def _(decoder: Tensor) -> Tensor:
+            image_size = [torch.library.get_ctx().new_dynamic_size() for _ in range(4)]
+            return torch.empty(image_size)
+
+        @torch.compile(fullgraph=True)
+        def f(x):
+            return torch.ops.mylib.mk_image.default(x)
+
+        x = torch.zeros(100, dtype=torch.int64)
+        f(x)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_runtime_assert_replacement(self):
