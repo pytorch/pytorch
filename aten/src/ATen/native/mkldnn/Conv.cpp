@@ -200,7 +200,7 @@ static void check_shape_forward(const Tensor& input,
 //  but weight/bias and grad_weight/grad_bias are always CPU tensor.
 //
 
-static bool enabled_fpmatch_mode_bf16_for_fp32_for_mkldnn_conv(){
+static bool mkldnn_conv_enabled_fpmath_mode_bf16(){
   return at::globalContext().float32Precision("mkldnn", "conv") == "bf16";
 }
 
@@ -230,7 +230,7 @@ static void _mkldnn_convolution_out (
   auto weight = weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
   const ideep::tensor x = itensor_from_tensor(input, /*from_const_data_ptr*/true);
   const ideep::tensor w = itensor_from_tensor(weight, /*from_const_data_ptr*/true);
-  if (enabled_fpmatch_mode_bf16_for_fp32_for_mkldnn_conv() && input_t.scalar_type() ==at::kFloat){
+  if (mkldnn_conv_enabled_fpmath_mode_bf16() && input_t.scalar_type() ==at::kFloat){
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
   }
   if (bias.defined()) {
@@ -479,7 +479,7 @@ Tensor mkldnn_convolution_pointwise_binary(
     }
     op_attr.set_post_ops(po);
 
-    if (enabled_fpmatch_mode_bf16_for_fp32_for_mkldnn_conv() && input_t.scalar_type() ==at::kFloat){
+    if (mkldnn_conv_enabled_fpmath_mode_bf16() && input_t.scalar_type() ==at::kFloat){
       op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
     }
 
@@ -731,7 +731,7 @@ Tensor _mkldnn_convolution_transpose(
     y = itensor_from_tensor(output);
   }
 
-  if (enabled_fpmatch_mode_bf16_for_fp32_for_mkldnn_conv() && input_t.scalar_type() ==at::kFloat){
+  if (mkldnn_conv_enabled_fpmath_mode_bf16() && input_t.scalar_type() ==at::kFloat){
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
   }
 

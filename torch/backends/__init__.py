@@ -86,7 +86,7 @@ def set_flags(_fp32_precision=None):
 
 
 @contextmanager
-def flags(fp32_precision="ieee"):
+def flags(fp32_precision="default"):
     with __allow_nonbracketed_mutation():
         orig_flags = set_flags(fp32_precision)
     try:
