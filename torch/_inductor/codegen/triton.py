@@ -1504,7 +1504,6 @@ class TritonKernel(Kernel):
                 while (
                     current_group < len(remaining)
                     and sv.is_expr_static_and_true(remaining[current_group] == 1)
-                    and sv.size_hint(remaining[current_group]) == 1
                 ):
                     # scroll to next group with remaining elements
                     current_group += 1

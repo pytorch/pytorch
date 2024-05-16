@@ -319,15 +319,6 @@ class SizeVarAllocator:
         return self.is_expr_static_and_true(expr)
 
     # See Note - [On Statically Known]
-    def statically_known_gt(self, left: Expr, right: Expr) -> bool:
-        """
-        Returns a bool indicating if it is sound to optimize as if left is greater than right.
-        """
-        expr = left > right
-        return self.is_expr_static_and_true(expr)
-
-
-    # See Note - [On Statically Known]
     def statically_known_multiple_of(self, numerator: Expr, denominator: Expr) -> bool:
         """
         Return a bool indicating if it is sound to optimize for the numerator being a multiple of the denominator.
