@@ -20996,6 +20996,13 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         supports_out=True,
         sample_inputs_func=sample_inputs_alias_copy,
+        supports_fwgrad_bwgrad=True,
+        skips=(
+             # RuntimeError: aten::alias_copy hit the vmap fallback which is currently disabled
+             DecorateInfo(unittest.expectedFailure, 'TestVmapOperatorsOpInfoCPU', 'test_op_has_batch_rule_alias_copy_cpu_float32'),
+             DecorateInfo(unittest.expectedFailure, 'TestOperatorsCUDA', 'test_vmapvjp_has_batch_rule_alias_copy_cuda_float32'),
+             DecorateInfo(unittest.expectedFailure, 'TestVmapOperatorsOpInfoCUDA', 'test_op_has_batch_rule_alias_copy_cuda_float32'),
+        ),
     ),
 ]
 op_db += opinfo.definitions.op_db
