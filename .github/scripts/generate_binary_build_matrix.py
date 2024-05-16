@@ -232,26 +232,22 @@ def generate_conda_matrix(os: str) -> List[Dict[str, str]]:
         for arch_version in arches:
             gpu_arch_type = arch_type(arch_version)
             gpu_arch_version = "" if arch_version == "cpu" else arch_version
-            for use_split_build in ["true", "false"]:
-                build_name = f"conda-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
-                    ".", "_"
-                )
-                if use_split_build == "true":
-                    build_name += "-experimental-split-build"
-                ret.append(
-                    {
-                        "python_version": python_version,
-                        "gpu_arch_type": gpu_arch_type,
-                        "gpu_arch_version": gpu_arch_version,
-                        "desired_cuda": translate_desired_cuda(
-                            gpu_arch_type, gpu_arch_version
-                        ),
-                        "container_image": CONDA_CONTAINER_IMAGES[arch_version],
-                        "package_type": "conda",
-                        "use_split_build": use_split_build,
-                        "build_name": build_name,
-                    }
-                )
+            ret.append(
+                {
+                    "python_version": python_version,
+                    "gpu_arch_type": gpu_arch_type,
+                    "gpu_arch_version": gpu_arch_version,
+                    "desired_cuda": translate_desired_cuda(
+                        gpu_arch_type, gpu_arch_version
+                    ),
+                    "use_split_build": "false",
+                    "container_image": CONDA_CONTAINER_IMAGES[arch_version],
+                    "package_type": "conda",
+                    "build_name": f"conda-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
+                        ".", "_"
+                    ),
+                }
+            )
     return ret
 
 
