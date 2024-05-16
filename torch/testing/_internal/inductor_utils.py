@@ -34,16 +34,16 @@ HAS_CUDA = torch.cuda.is_available() and has_triton()
 
 HAS_XPU = torch.xpu.is_available() and has_triton()
 
-HAS_GPU = HAS_CUDA
+HAS_GPU = HAS_CUDA or HAS_XPU
 
-GPUS = ["cuda"]
+GPUS = ["cuda", "xpu"]
 
 HAS_MULTIGPU = any(
     getattr(torch, gpu).is_available() and getattr(torch, gpu).device_count() >= 2
     for gpu in GPUS
 )
 
-tmp_gpus = [x for x in ["cuda", "xpu"] if getattr(torch, x).is_available()]
+tmp_gpus = [x for x in GPUS if getattr(torch, x).is_available()]
 assert len(tmp_gpus) <= 1
 GPU_TYPE = "cuda" if len(tmp_gpus) == 0 else tmp_gpus.pop()
 del tmp_gpus

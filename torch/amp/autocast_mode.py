@@ -6,7 +6,19 @@ from typing import Any, Optional
 import torch
 from torch.types import _dtype
 
-__all__ = ["autocast_decorator", "autocast"]
+__all__ = ["autocast_decorator", "autocast", "is_autocast_available"]
+
+
+def is_autocast_available(device_type: str) -> bool:
+    r"""
+    Return a bool indicating if autocast is available on :attr:`device_type`.
+
+    Args:
+        device_type(str):  Device type to use. Possible values are: 'cuda', 'cpu', 'xpu' and so on.
+            The type is the same as the `type` attribute of a :class:`torch.device`.
+            Thus, you may obtain the device type of a tensor using `Tensor.device.type`.
+    """
+    return torch._C._is_autocast_available(device_type)
 
 
 def autocast_decorator(autocast_instance, func):
@@ -179,7 +191,10 @@ class autocast:
                                      Thus, you may obtain the device type of a tensor using `Tensor.device.type`.
         enabled(bool, optional):  Whether autocasting should be enabled in the region.
             Default: ``True``
-        dtype(torch_dtype, optional):  Whether to use torch.float16 or torch.bfloat16.
+        dtype(torch_dtype, optional):  Data type for ops run in autocast. It uses the default value
+            (``torch.float16`` for CUDA and ``torch.bfloat16`` for CPU), given by
+            :func:`~torch.get_autocast_dtype`, if :attr:`dtype` is ``None``.
+            Default: ``None``
         cache_enabled(bool, optional):  Whether the weight cache inside autocast should be enabled.
             Default: ``True``
     """
@@ -191,15 +206,20 @@ class autocast:
         enabled: bool = True,
         cache_enabled: Optional[bool] = None,
     ):
+        if not isinstance(device_type, str):
+            raise ValueError(
+                f"Expected `device_type` of type `str`, got: `{type(device_type)}`"
+            )
+        if dtype is None:
+            dtype = torch.get_autocast_dtype(device_type)
         if torch._jit_internal.is_scripting():
             self._enabled = enabled
             self.device = device_type
             self.fast_dtype = dtype
-            # TODO: support get_autocast_gpu/cpu_dtype
             assert dtype is not None
             return
         self.device = device_type
-        if not torch._C._is_autocast_available(self.device):
+        if not is_autocast_available(self.device):
             raise RuntimeError(
                 f"User specified an unsupported autocast device_type '{self.device}'"
             )

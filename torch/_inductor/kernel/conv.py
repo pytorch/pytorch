@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import functools
 import logging
-from typing import cast, List, Optional, Sequence, Tuple, TypedDict
+from typing import cast, List, Optional, Sequence, Tuple, TYPE_CHECKING, TypedDict
 
 import torch
+
 from .. import config, ir
-from ..ir import TensorBox
 
 from ..lowering import (
     add_layout_constraint,
@@ -29,6 +29,9 @@ from ..utils import (
 )
 from ..virtualized import V
 from .mm_common import filtered_configs
+
+if TYPE_CHECKING:
+    from ..ir import TensorBox
 
 log = logging.getLogger(__name__)
 
@@ -243,11 +246,11 @@ def conv_layout(
             ir.ir_node_to_tensor(x, guard_shape=True),
             ir.ir_node_to_tensor(weight, guard_shape=True),
             ir.ir_node_to_tensor(bias, guard_shape=True),
-            stride,
-            tuple(V.graph.sizevars.size_hint(p) for p in padding),  # type: ignore[arg-type]
+            V.graph.sizevars.size_hints(stride),  # type: ignore[arg-type]
+            V.graph.sizevars.size_hints(padding),  # type: ignore[arg-type]
             dilation,
             transposed,
-            tuple(V.graph.sizevars.size_hint(p) for p in output_padding),  # type: ignore[arg-type]
+            V.graph.sizevars.size_hints(output_padding),  # type: ignore[arg-type]
             groups,
         )
         sizes = ir.convert_shape_to_inductor(output.size())

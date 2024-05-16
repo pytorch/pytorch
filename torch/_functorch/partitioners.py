@@ -9,11 +9,10 @@ import math
 import operator
 import os
 from collections import defaultdict
-from typing import List, Optional, Set, Tuple, Union
-
-import sympy
+from typing import List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 import torch
+import torch._inductor.inductor_prims
 import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch.fx.experimental._backward_state import BackwardState
@@ -28,6 +27,9 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.passes import graph_drawer
 from . import config
 from .compile_utils import fx_graph_cse, get_aten_target
+
+if TYPE_CHECKING:
+    import sympy
 
 
 AOT_PARTITIONER_DEBUG = config.debug_partitioner
@@ -94,7 +96,10 @@ def _extract_graph_with_inputs_outputs(joint_graph, inputs, outputs):
         env[node] = new_node
 
     for node in joint_graph.nodes:
-        if node in inputs:
+        if node in env:
+            # Node must be one of our inputs. (Any member of env which wasn't an
+            # input to start must have been created by this loop and won't be in
+            # joint_graph.nodes).
             continue
         elif node.op == "placeholder":
             env[node] = InvalidNode
@@ -407,7 +412,7 @@ def _count_ops(graph):
     for node in graph.nodes:
         if node.op == "call_function":
             cnt[node.target.__name__] += 1
-    print(sorted(cnt.items(), key=lambda x: x[1], reverse=True))
+    print(sorted(cnt.items(), key=operator.itemgetter(1), reverse=True))
 
 
 @functools.lru_cache(None)
@@ -432,7 +437,7 @@ def sort_depths(args, depth_map):
     arg_depths = {
         arg: depth_map[arg] for arg in args if isinstance(arg, torch.fx.node.Node)
     }
-    return sorted(arg_depths.items(), key=lambda x: x[1], reverse=True)
+    return sorted(arg_depths.items(), key=operator.itemgetter(1), reverse=True)
 
 
 def reordering_to_mimic_autograd_engine(gm):
@@ -931,6 +936,7 @@ def min_cut_rematerialization_partition(
             aten.argmax,
             aten.maximum,
             prims.iota,
+            prims._low_memory_max_pool2d_offsets_to_indices,
         ]  # noqa: E501,B950
         view_ops += [
             aten.view,
@@ -1315,7 +1321,7 @@ def min_cut_rematerialization_partition(
         )
         print(
             "Count of Ops Rematerialized: ",
-            sorted(counts.items(), key=lambda x: x[1], reverse=True),
+            sorted(counts.items(), key=operator.itemgetter(1), reverse=True),
         )
     return fw_module, bw_module
 

@@ -6,9 +6,9 @@ import torch
 import torch.distributed._functional_collectives as funcol
 from torch.distributed._tensor import DTensor
 from torch.distributed._tensor._collective_utils import (
-    mesh_all_to_all,
     mesh_broadcast,
     mesh_scatter,
+    unpad_tensor,
 )
 from torch.distributed._tensor.placement_types import _Partial, Shard
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
@@ -23,10 +23,10 @@ from torch.distributed.distributed_c10d import (
     is_nccl_available,
     ProcessGroup,
 )
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
-    skip_unless_torch_gpu,
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -66,7 +66,7 @@ class DeviceMeshTest(DTensorTestBase):
         self.destroy_pg()
 
     @with_comms
-    @skip_unless_torch_gpu
+    @skip_if_lt_x_gpu(4)
     def test_assert_invalid_mesh_tensor(self):
         mesh = torch.arange(self.world_size).to(self.rank)
         with self.assertRaises(ValueError):
@@ -180,6 +180,17 @@ class DeviceMeshTest(DTensorTestBase):
             ref_global_mesh._coordinate_on_dim, global_mesh._coordinate_on_dim
         )
 
+    def test_raises_invalid_device_type(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Device type with GPU index is not supported",
+        ):
+            # test init_device_mesh with an invalid device type that contains a GPU index
+            mesh_shape = (2, self.world_size // 2)
+            mesh_2d = init_device_mesh(
+                "cuda:0", mesh_shape=mesh_shape, mesh_dim_names=("dp", "tp")
+            )
+
 
 class DeviceMeshTestNDim(DTensorTestBase):
     @property
@@ -214,7 +225,7 @@ class DeviceMeshTestNDim(DTensorTestBase):
         mesh_tensor_2d = torch.arange(8).reshape(4, 2)
         mesh = DeviceMesh(self.device_type, mesh_tensor_2d)
         mesh2 = DeviceMesh(self.device_type, mesh_tensor_2d)
-        self.assertNotEqual(hash(mesh), hash(mesh2))
+        self.assertEqual(hash(mesh), hash(mesh2))
         mesh_tensor_3d = torch.arange(8).reshape(2, 2, 2)
         mesh3 = DeviceMesh(self.device_type, mesh_tensor_3d)
         self.assertNotEqual(hash(mesh), hash(mesh3))
@@ -258,6 +269,44 @@ class DeviceMeshTestNDim(DTensorTestBase):
         expected_dp_rank = self.rank // 4
         self.assertEqual(dp_rank, expected_dp_rank)
 
+    @with_comms
+    def test_device_mesh_parent_child_hash(self):
+        mesh_2d = init_device_mesh(
+            self.device_type, (2, self.world_size // 2), mesh_dim_names=("DP", "TP")
+        )
+
+        mesh_group_1 = torch.arange(0, self.world_size // 2)
+        mesh_group_2 = torch.arange(self.world_size // 2, self.world_size)
+        ep_mesh_1 = DeviceMesh(self.device_type, mesh_group_1)
+        ep_mesh_2 = DeviceMesh(self.device_type, mesh_group_2)
+        ep_mesh = ep_mesh_1 if self.rank < self.world_size // 2 else ep_mesh_2
+        # # ep_mesh is considered different from mesh_2d["TP"]
+        # # since mesh_2d["TP"] has a parent mesh while ep_mesh does not.
+        self.assertEqual(mesh_2d["TP"]._flatten_mesh_list, ep_mesh._flatten_mesh_list)
+        self.assertEqual(mesh_2d["TP"].mesh.shape, ep_mesh.mesh.shape)
+        self.assertEqual(mesh_2d["TP"].device_type, ep_mesh.device_type)
+        self.assertNotEqual(mesh_2d["TP"].mesh_dim_names, ep_mesh.mesh_dim_names)
+        self.assertEqual(mesh_2d["TP"]._thread_id, ep_mesh._thread_id)
+        self.assertNotEqual(mesh_2d["TP"]._parent_mesh, ep_mesh._parent_mesh)
+        self.assertNotEqual(hash(mesh_2d["TP"]), hash(ep_mesh))
+        self.assertNotEqual(mesh_2d["TP"], ep_mesh)
+
+        another_mesh_1 = DeviceMesh(self.device_type, mesh_group_1)
+        another_mesh_2 = DeviceMesh(self.device_type, mesh_group_2)
+        another_mesh = (
+            another_mesh_1 if self.rank < self.world_size // 2 else another_mesh_2
+        )
+        # another_mesh is considered the same as ep_mesh
+        # since they have the same mesh and no parent mesh.
+        self.assertEqual(ep_mesh._flatten_mesh_list, another_mesh._flatten_mesh_list)
+        self.assertEqual(ep_mesh.mesh.shape, another_mesh.mesh.shape)
+        self.assertEqual(ep_mesh.device_type, another_mesh.device_type)
+        self.assertEqual(ep_mesh.mesh_dim_names, another_mesh.mesh_dim_names)
+        self.assertEqual(ep_mesh._thread_id, another_mesh._thread_id)
+        self.assertEqual(ep_mesh._parent_mesh, another_mesh._parent_mesh)
+        self.assertEqual(hash(ep_mesh), hash(another_mesh))
+        self.assertEqual(ep_mesh, another_mesh)
+
 
 class InitDeviceMeshTest(DTensorTestBase):
     @property
@@ -267,19 +316,19 @@ class InitDeviceMeshTest(DTensorTestBase):
     @with_comms
     def test_init_device_mesh(self):
         mesh_shape = (2, 4)
-        ref_mesh = DeviceMesh(self.device_type, torch.arange(8).view(mesh_shape))
+        mesh_dim_names = ("DP", "TP")
+        ref_mesh = DeviceMesh(
+            self.device_type,
+            torch.arange(8).view(mesh_shape),
+            mesh_dim_names=mesh_dim_names,
+        )
 
         # test init_device_mesh with mesh_dim_names
-        mesh_dim_names = ("DP", "TP")
         mesh_2d = init_device_mesh(
             self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
         )
         self.assertEqual(mesh_2d, ref_mesh)
         self.assertEqual(mesh_2d.mesh_dim_names, mesh_dim_names)
-
-        # test init_device_mesh without mesh_dim_names
-        mesh_2d = init_device_mesh(self.device_type, mesh_shape)
-        self.assertEqual(mesh_2d, ref_mesh)
 
     @with_comms
     def test_raises_duplicate_mesh_dim_names(self):
@@ -490,8 +539,8 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             mesh_scatter(scattered_tensor, padded_tensor_list, device_mesh, mesh_dim=0)
 
             if pad_sizes[my_rank] != 0:
-                scattered_tensor = shard_placement._unpad_tensor(
-                    scattered_tensor, pad_sizes[my_rank]
+                scattered_tensor = unpad_tensor(
+                    scattered_tensor, shard_dim, pad_sizes[my_rank]
                 )
 
             if scattered_tensor.numel() == 0:
@@ -533,7 +582,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             )
             unpadded_list = [
                 (
-                    shard_placement._unpad_tensor(big_tensor_chunks[i], pad_sizes[i])
+                    unpad_tensor(big_tensor_chunks[i], shard_dim, pad_sizes[i])
                     if pad_sizes[i] > 0
                     else big_tensor_chunks[i]
                 )
@@ -629,8 +678,8 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
 
             # unpad scattered_tensor
             if pad_sizes[my_rank] > 0:
-                scattered_tensor = shard_placement._unpad_tensor(
-                    scattered_tensor, pad_sizes[my_rank]
+                scattered_tensor = unpad_tensor(
+                    scattered_tensor, shard_dim, pad_sizes[my_rank]
                 )
 
             if scattered_tensor.numel() == 0:
@@ -687,70 +736,6 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             )
             mesh_scatter(received_tensor, scattered_tensors, mesh, mesh_dim=dim)
             self.assertEqual(received_tensor, torch.ones(3, 3) * self.rank)
-
-    @with_comms
-    def test_all_to_all_1d(self):
-        # transpose on a 2D tensor distributed over N nodes:
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-        tensor_shape = [3, 3]
-        input_tensor_list = [
-            torch.ones(*tensor_shape, device=self.device_type)
-            * (rank + self.rank * self.world_size)
-            for rank in range(self.world_size)
-        ]
-        expected_tensor_list = [
-            torch.ones(tensor_shape, device=self.device_type)
-            * (self.rank + rank * self.world_size)  # i.e. transpose
-            for rank in range(self.world_size)
-        ]
-        for scatter_dim in range(len(tensor_shape)):
-            output_tensor_list = [
-                torch.empty_like(input_tensor_list[idx])
-                for idx in range(len(input_tensor_list))
-            ]
-            # scatter on dim > 0 would generate non-contiguous tensor, verify that works
-            mesh_all_to_all(output_tensor_list, input_tensor_list, mesh, mesh_dim=0)
-            output_tensor = torch.cat(output_tensor_list, dim=scatter_dim)
-            expected_tensor = torch.cat(expected_tensor_list, dim=scatter_dim)
-
-            self.assertEqual(output_tensor, expected_tensor)
-
-    @with_comms
-    def test_all_to_all_nd(self):
-        mesh_tensor = torch.arange(8).reshape(2, 2, 2)
-        mesh = DeviceMesh(self.device_type, mesh_tensor)
-        tensor_shape = [3, 3, 3]
-        # check all dim groups
-        dim_to_subgroups = mesh.get_group()
-        for dim, dim_group in enumerate(dim_to_subgroups):
-            my_coordinate = mesh.get_coordinate()[dim]
-            dim_group_size = get_world_size(dim_group)
-            global_ranks = [
-                get_global_rank(dim_group, i) for i in range(dim_group_size)
-            ]
-            input_tensor_list = [
-                torch.ones(*tensor_shape, device=self.device_type)
-                * (i + self.rank * dim_group_size)
-                for i in range(dim_group_size)
-            ]
-            expected_tensor_list = [
-                torch.ones(*tensor_shape, device=self.device_type)
-                * (my_coordinate + global_rank * dim_group_size)  # i.e. transpose
-                for global_rank in global_ranks
-            ]
-            for scatter_dim in range(len(tensor_shape)):
-                # input_tensor = torch.cat(input_tensor_list, dim=scatter_dim)
-                output_tensor_list = [
-                    torch.empty_like(input_tensor_list[idx])
-                    for idx in range(len(input_tensor_list))
-                ]
-                # scatter on dim > 0 would generate non-contiguous tensor, verify that works
-                mesh_all_to_all(
-                    output_tensor_list, input_tensor_list, mesh, mesh_dim=dim
-                )
-                output_tensor = torch.cat(output_tensor_list, dim=scatter_dim)
-                expected_tensor = torch.cat(expected_tensor_list, dim=scatter_dim)
-                self.assertEqual(output_tensor, expected_tensor)
 
 
 if __name__ == "__main__":
