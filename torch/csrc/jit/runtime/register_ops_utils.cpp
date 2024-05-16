@@ -133,7 +133,7 @@ void checkDoubleInRange(double a) {
       a > double(std::numeric_limits<int64_t>::max()) ||
       a < double(std::numeric_limits<int64_t>::min())) {
     throw c10::Error(
-        "Cannot convert float " + c10::to_string(a) + " to integer", "");
+        "Cannot convert float " + c10::to_string(a) + " to integer");
     return;
   }
 }
@@ -403,7 +403,7 @@ void listSetItem(Stack& stack) {
 
 at::Generator make_generator_for_device(
     c10::Device device,
-    c10::optional<int64_t> seed) {
+    std::optional<int64_t> seed) {
   if (device.is_cpu()) {
     if (seed.has_value()) {
       return at::detail::createCPUGenerator(seed.value());

@@ -50,7 +50,7 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
     mapped_xs = args[:num_mapped_args]
     pos_args = args[num_mapped_args:]
 
-    # Note: We create "clean" environments for make_fx by suspending all dispatch keys
+    # Note:[HOP create fw_bw graph] We create "clean" environments for make_fx by suspending all dispatch keys
     # between Autograd and Python key. Currently, we only suspend functionalization but more can be
     # added when required. Will encounter two problems if we don't suspend functionalization:
     #
@@ -230,17 +230,9 @@ def trace_map(proxy_mode, func_overload, f, xs, pos_args):
     example_input = _unstack_pytree(xs)[0]
     body_graph = f
 
-    pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
-    body_graph = reenter_make_fx(body_graph, pre_dispatch)(*example_input, *pos_args)
+    body_graph = reenter_make_fx(body_graph)(*example_input, *pos_args)
 
-    next_name = None
-    i = 0
-    while not next_name:
-        candidate = f"body_graph_{i}"
-        if hasattr(proxy_mode.tracer.root, candidate):
-            i += 1
-        else:
-            next_name = candidate
+    next_name = proxy_mode.tracer.get_fresh_qualname("body_graph_")
 
     proxy_mode.tracer.root.register_module(next_name, body_graph)
 
