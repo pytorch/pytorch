@@ -1,0 +1,279 @@
+# TODO: this looks sort of similar to _linux-test, but there are like a dozen
+# places where you would have to insert an if statement. Probably it's better to
+# just use a different workflow altogether
+
+name: test
+
+on:
+  workflow_call:
+    inputs:
+      build-environment:
+        required: true
+        type: string
+        description: Top-level label for what's being built/tested.
+      test-matrix:
+        required: true
+        type: string
+        description: JSON description of what test configs to run.
+      docker-image:
+        required: true
+        type: string
+        description: Docker image to run in.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
+      timeout-minutes:
+        required: false
+        type: number
+        default: 300
+        description: |
+          Set the maximum (in minutes) how long the workflow should take to finish
+      tests-to-include:
+        required: false
+        type: string
+        default: ""
+        description: |
+          List of tests to include (empty string implies default list)
+
+env:
+  GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test:
+    # Don't run on forked repos or empty test matrix
+    if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
+    strategy:
+      matrix: ${{ fromJSON(inputs.test-matrix) }}
+      fail-fast: false
+    timeout-minutes: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      # [see note: pytorch repo ref]
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          no-sudo: true
+
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+
+      - name: configure aws credentials
+        id: aws_creds
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
+          aws-region: us-east-1
+          role-duration-seconds: 18000
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        continue-on-error: true
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Calculate docker image
+        id: calculate-docker-image
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+          docker-image-name: ${{ inputs.docker-image }}
+
+      - name: Pull docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+
+      - name: Start monitoring script
+        id: monitor-script
+        shell: bash
+        continue-on-error: true
+        run: |
+          python3 -m pip install psutil==5.9.1 nvidia-ml-py==11.525.84
+          python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
+          echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
+
+      - name: Download build artifacts
+        uses: ./.github/actions/download-build-artifacts
+        with:
+          name: ${{ inputs.build-environment }}
+
+      - name: Download TD artifacts
+        continue-on-error: true
+        uses: ./.github/actions/download-td-artifacts
+
+      - name: Parse ref
+        id: parse-ref
+        run: .github/scripts/parse_ref.py
+
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check for keep-going label and re-enabled test issues
+        # This uses the filter-test-configs action because it conviniently
+        # checks for labels and re-enabled test issues.  It does not actually do
+        # any filtering.  All filtering is done in the build step.
+        id: keep-going
+        uses: ./.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: ${{ inputs.test-matrix }}
+          job-name: ${{ steps.get-job-id.outputs.job-name }}
+
+      - name: Set Test step time
+        id: test-timeout
+        shell: bash
+        env:
+          JOB_TIMEOUT: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
+        run: |
+          echo "timeout=$((JOB_TIMEOUT-30))" >> "${GITHUB_OUTPUT}"
+
+      - name: Test
+        id: test
+        env:
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_WORKFLOW: ${{ github.workflow }}
+          GITHUB_JOB: ${{ github.job }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+          JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
+          VERBOSE_TEST_LOGS: ${{ steps.keep-going.outputs.ci-verbose-test-logs }}
+          NO_TEST_TIMEOUT: ${{ steps.keep-going.outputs.ci-no-test-timeout }}
+          NO_TD: ${{ steps.keep-going.outputs.ci-no-td }}
+          TEST_CONFIG: ${{ matrix.config }}
+          SHARD_NUMBER: ${{ matrix.shard }}
+          NUM_TEST_SHARDS: ${{ matrix.num_shards }}
+          REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
+          SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+          DOCKER_IMAGE: ${{ inputs.docker-image }}
+          XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
+          PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
+          PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
+          TESTS_TO_INCLUDE: ${{ inputs.tests-to-include }}
+        timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
+        run: |
+          set -x
+
+          if [[ $TEST_CONFIG == 'multigpu' ]]; then
+            TEST_COMMAND=.ci/pytorch/multigpu-test.sh
+          elif [[ $BUILD_ENVIRONMENT == *onnx* ]]; then
+            TEST_COMMAND=.ci/caffe2/test.sh
+          else
+            TEST_COMMAND=.ci/pytorch/test.sh
+          fi
+
+          # detached container should get cleaned up by teardown_ec2_linux
+          # TODO: Stop building test binaries as part of the build phase
+          # Used for GPU_FLAG since that doesn't play nice
+          # shellcheck disable=SC2086,SC2090
+          container_name=$(docker run \
+            ${GPU_FLAG:-} \
+            -e BUILD_ENVIRONMENT \
+            -e PR_NUMBER \
+            -e GITHUB_ACTIONS \
+            -e GITHUB_REPOSITORY \
+            -e GITHUB_WORKFLOW \
+            -e GITHUB_JOB \
+            -e GITHUB_RUN_ID \
+            -e GITHUB_RUN_NUMBER \
+            -e GITHUB_RUN_ATTEMPT \
+            -e JOB_ID \
+            -e JOB_NAME \
+            -e BRANCH \
+            -e SHA1 \
+            -e AWS_DEFAULT_REGION \
+            -e IN_WHEEL_TEST \
+            -e SHARD_NUMBER \
+            -e TEST_CONFIG \
+            -e NUM_TEST_SHARDS \
+            -e REENABLED_ISSUES \
+            -e CONTINUE_THROUGH_ERROR \
+            -e VERBOSE_TEST_LOGS \
+            -e NO_TEST_TIMEOUT \
+            -e NO_TD \
+            -e MAX_JOBS="$(nproc --ignore=2)" \
+            -e SCCACHE_BUCKET \
+            -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
+            -e PYTORCH_TEST_CUDA_MEM_LEAK_CHECK \
+            -e PYTORCH_TEST_RERUN_DISABLED_TESTS \
+            -e TESTS_TO_INCLUDE \
+            --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
+            --ulimit stack=10485760:83886080 \
+            --ulimit core=0 \
+            --security-opt seccomp=unconfined \
+            --cap-add=SYS_PTRACE \
+            --shm-size="8g" \
+            --tty \
+            --detach \
+            --name="${container_name}" \
+            --user jenkins \
+            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
+            -w /var/lib/jenkins/workspace \
+            "${DOCKER_IMAGE}"
+          )
+          # save container name for later step
+          echo "CONTAINER_NAME=${container_name}" >> "$GITHUB_ENV"
+          # jenkins user does not have write permission to mounted workspace; work-around by copying within container to jenkins home
+          docker exec -t "${container_name}" sh -c "cd .. && cp -R workspace pytorch && cd pytorch && pip install dist/*.whl && ${TEST_COMMAND}"
+
+      - name: Save test results
+        if: always()
+        run: |
+          # copy test results back to the mounted workspace, needed sudo, resulting permissions were correct
+          docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "cd ../pytorch && sudo cp -R test/test-reports ../workspace/test"
+
+      - name: Print remaining test logs
+        shell: bash
+        if: always() && steps.test.conclusion
+        run: |
+          cat test/**/*_toprint.log || true
+
+      - name: Stop monitoring script
+        if: always() && steps.monitor-script.outputs.monitor-script-pid
+        shell: bash
+        continue-on-error: true
+        env:
+          MONITOR_SCRIPT_PID: ${{ steps.monitor-script.outputs.monitor-script-pid }}
+        run: |
+          kill "$MONITOR_SCRIPT_PID"
+
+      - name: Upload test artifacts
+        uses: ./.github/actions/upload-test-artifacts
+        if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
+        with:
+          use-gha: true
+          file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
+
+      - name: Collect backtraces from coredumps (if any)
+        if: always()
+        run: |
+          # shellcheck disable=SC2156
+          find . -iname "core.[1-9]*" -exec docker exec "${CONTAINER_NAME}" sh -c "gdb python {} -ex 'bt' -ex 'q'" \;
+
+      - name: Store Core dumps on GitHub
+        uses: actions/upload-artifact@v3
+        if: failure()
+        with:
+          name: coredumps-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
+          retention-days: 14
+          if-no-files-found: ignore
+          path: ./**/core.[1-9]*
+
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
