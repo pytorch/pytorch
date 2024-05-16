@@ -362,7 +362,7 @@ class VariableBuilder:
                     torch.Tensor,
                     torch.nn.Parameter,
                     torch._subclasses.FakeTensor,
-                    torch._subclasses.functional_tensor.FunctionalTensor,
+                    # torch._subclasses.functional_tensor.FunctionalTensor,
                 ),
                 cls.wrap_tensor,
             ),
@@ -1189,6 +1189,9 @@ class VariableBuilder:
     def wrap_tensor(self, value: torch.Tensor):
         source = self.get_source()
 
+        if isinstance(value, torch._subclasses.functional_tensor.FunctionalTensor):
+            unimplemented("Cannot trace FunctionalTensor")
+
         # We cannot already be tracking the tensor, which implies
         # it would have already been wrapped
         assert value not in self.tx.output.side_effects
@@ -1235,7 +1238,7 @@ class VariableBuilder:
                 torch.Tensor,
                 torch.nn.Parameter,
                 torch._subclasses.fake_tensor.FakeTensor,
-                torch._subclasses.functional_tensor.FunctionalTensor,
+                # torch._subclasses.functional_tensor.FunctionalTensor,
             ) or is_traceable_wrapper_subclass(value), type(value)
             subclass_type = None
 
