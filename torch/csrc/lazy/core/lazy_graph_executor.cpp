@@ -610,7 +610,7 @@ LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
       } else if (config.force_ltc_data) {
         // The tensor only has at::Tensor data. We need to queue it for a
         // device upload.
-        c10::optional<at::Tensor> tensor_data = tensors[i]->CurrentTensorData();
+        std::optional<at::Tensor> tensor_data = tensors[i]->CurrentTensorData();
         TORCH_CHECK(tensor_data);
         at_tensors.push_back(*tensor_data);
         devices.push_back(tensors[i]->GetDevice());
@@ -996,7 +996,7 @@ std::vector<at::Tensor> LazyGraphExecutor::FetchTensors(
       ++literals_index;
       ++sync_index;
     } else {
-      c10::optional<at::Tensor> tensor_data =
+      std::optional<at::Tensor> tensor_data =
           (*tensors)[i]->CurrentTensorData();
       if (tensor_data) {
         results.push_back(*tensor_data);
