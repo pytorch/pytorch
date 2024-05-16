@@ -213,6 +213,7 @@ class TestUnbackedSymints(InductorTestCase):
         actual = torch.compile(fn, fullgraph=True)(*example_inputs)
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
 
 instantiate_device_type_tests(
