@@ -112,6 +112,7 @@ jobs:
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.8"
       runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
@@ -132,6 +133,7 @@ jobs:
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cuda-aarch64
       build_environment: linux-aarch64-binary-manywheel
@@ -154,6 +156,7 @@ jobs:
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cuda-aarch64
     secrets:
@@ -237,6 +240,7 @@ jobs:
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.9"
       runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
@@ -257,6 +261,7 @@ jobs:
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda-aarch64
       build_environment: linux-aarch64-binary-manywheel
@@ -279,6 +284,7 @@ jobs:
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda-aarch64
     secrets:
@@ -362,6 +368,7 @@ jobs:
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.10"
       runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
@@ -382,6 +389,7 @@ jobs:
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda-aarch64
       build_environment: linux-aarch64-binary-manywheel
@@ -404,6 +412,7 @@ jobs:
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda-aarch64
     secrets:
@@ -487,6 +496,7 @@ jobs:
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.11"
       runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
@@ -507,6 +517,7 @@ jobs:
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda-aarch64
       build_environment: linux-aarch64-binary-manywheel
@@ -529,6 +540,7 @@ jobs:
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda-aarch64
     secrets:
@@ -612,6 +624,7 @@ jobs:
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.12"
       runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
@@ -632,6 +645,7 @@ jobs:
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda-aarch64
       build_environment: linux-aarch64-binary-manywheel
@@ -654,6 +668,7 @@ jobs:
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda-aarch64
     secrets:
