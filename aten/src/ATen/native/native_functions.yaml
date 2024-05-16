@@ -3762,18 +3762,6 @@
 # This function should be deprecated in favor of differential_analytic_matrix_function in FunctionsManual.cpp
 - func: matrix_exp_backward(Tensor self, Tensor grad) -> Tensor
 
-# DEPRECATED: Use torch.aminmax instead
-- func: _aminmax(Tensor self) -> (Tensor, Tensor)
-  dispatch:
-    CPU, CUDA: _aminmax_all
-  autogen: _aminmax.out
-
-# DEPRECATED: Use torch.aminmax instead
-- func: _aminmax.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor, Tensor)
-  dispatch:
-    CPU, CUDA: _aminmax
-  autogen: _aminmax.dim_out
-
 - func: aminmax(Tensor self, *, int? dim=None, bool keepdim=False) -> (Tensor min, Tensor max)
   device_check: NoCheck   # TensorIterator
   structured_delegate: aminmax.out

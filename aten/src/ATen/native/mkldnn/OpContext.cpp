@@ -9,7 +9,7 @@ namespace mkldnn {
 
 c10::intrusive_ptr<ConvOpContext> MkldnnConvOpContext::create_context(
     at::Tensor&& weight,
-    c10::optional<at::Tensor>&& bias,
+    std::optional<at::Tensor>&& bias,
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& stride,
     std::vector<int64_t>&& dilation,

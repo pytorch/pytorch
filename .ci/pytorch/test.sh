@@ -352,7 +352,7 @@ test_inductor_cpp_wrapper_abi_compatible() {
   export TORCHINDUCTOR_ABI_COMPATIBLE=1
   echo "Testing Inductor cpp wrapper mode with TORCHINDUCTOR_ABI_COMPATIBLE=1"
   # cpu stack allocation causes segfault and needs more investigation
-  TORCHINDUCTOR_STACK_ALLOCATION=0 python test/run_test.py --include inductor/test_cpu_cpp_wrapper
+  python test/run_test.py --include inductor/test_cpu_cpp_wrapper
   python test/run_test.py --include inductor/test_cuda_cpp_wrapper
 }
 
@@ -587,6 +587,15 @@ test_inductor_torchbench_smoketest_perf() {
     python benchmarks/dynamo/check_memory_compression_ratio.py --actual \
       "$TEST_REPORTS_DIR/inductor_training_smoketest_$test.csv" \
       --expected benchmarks/dynamo/expected_ci_perf_inductor_torchbench.csv
+  done
+
+  # Perform some "warm-start" runs for a few huggingface models.
+  for test in AlbertForQuestionAnswering AllenaiLongformerBase DistilBertForMaskedLM DistillGPT2 GoogleFnet YituTechConvBert; do
+    python benchmarks/dynamo/huggingface.py --accuracy --training --amp --inductor --device cuda --warm-start-latency \
+      --only $test --output "$TEST_REPORTS_DIR/inductor_warm_start_smoketest_$test.csv"
+    python benchmarks/dynamo/check_accuracy.py \
+      --actual "$TEST_REPORTS_DIR/inductor_warm_start_smoketest_$test.csv" \
+      --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_huggingface_training.csv"
   done
 }
 

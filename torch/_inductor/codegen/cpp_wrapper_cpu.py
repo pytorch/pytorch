@@ -552,10 +552,8 @@ class CppWrapperCpu(WrapperCodeGen):
                         ), "Fails to get the dtype of the sympy.Expr"
                         cpp_dtype = DTYPE_TO_CPP[dtype]
                         if config.abi_compatible:
-                            self.prefix.writeline(f"{cpp_dtype} {input_key};")
-                            dtype_str = str(dtype).split(".")[-1]
-                            self.prefix.writeline(
-                                f"aoti_torch_item_{dtype_str}(inputs[{idx}], &{input_key});"
+                            self.codegen_tensor_item(
+                                dtype, f"inputs[{idx}]", input_key, self.prefix
                             )
                         else:
                             self.prefix.writeline(
@@ -890,6 +888,19 @@ class CppWrapperCpu(WrapperCodeGen):
         )
         return name
 
+    def codegen_tensor_item(
+        self, dtype: torch.dtype, tensor: str, scalar: str, indented_buffer=None
+    ):
+        assert (
+            config.abi_compatible
+        ), "codegen_tensor_item is only used for the ABI-compatible mode"
+        dtype_str = str(dtype).split(".")[-1]
+        writer = indented_buffer or self
+        writer.writeline(f"{DTYPE_TO_CPP[dtype]} {scalar};")
+        writer.writeline(
+            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_{dtype_str}({tensor}, &{scalar}));"
+        )
+
     @cache_on_self
     def get_output_refs(self):
         return [
@@ -1120,7 +1131,7 @@ class CppWrapperCpu(WrapperCodeGen):
         )
 
     def get_c_shim_func_name(self, kernel):
-        if not config.abi_compatible:
+        if not config.abi_compatible or kernel.startswith("aoti_torch_"):
             return kernel
 
         assert "::" in kernel, "Cpp kernel name: " + kernel + " does not contain '::'"
@@ -1158,7 +1169,9 @@ class CppWrapperCpu(WrapperCodeGen):
                 # so just avoid wrapping integers.
                 # Name matching is to find tensor is hacky, but fixing all the
                 # ArrayRefTensor issues is not a priority for now.
-                if isinstance(piece, str) and piece.startswith(("buf", "arg")):
+                if isinstance(piece, str) and piece.startswith(
+                    ("buf", "arg", "wrap_with_raii_handle_if_needed")
+                ):
                     piece = f"convert_arrayref_tensor_to_tensor({piece})"
                 wrapped_args.append(piece)
 
@@ -1374,10 +1387,9 @@ class CppWrapperCpu(WrapperCodeGen):
     def codegen_dynamic_scalar(self, node):
         (data,) = (t.codegen_reference() for t in node.inputs)
         if config.abi_compatible:
-            dtype = node.inputs[0].get_dtype()
-            dtype_str = str(dtype).split(".")[-1]
-            self.writeline(f"{DTYPE_TO_CPP[dtype]} {node.sym}_raw;")
-            self.writeline(f"aoti_torch_item_{dtype_str}({data}, &{node.sym}_raw);")
+            self.codegen_tensor_item(
+                node.inputs[0].get_dtype(), data, f"{node.sym}_raw"
+            )
         else:
             convert_type = DTYPE_TO_ATEN[node.inputs[0].get_dtype()].replace(
                 "at::k", "to"
@@ -1761,12 +1773,13 @@ class CppWrapperCpu(WrapperCodeGen):
                 outer_outputs.append(out.get_name())
 
             if not isinstance(conditional.predicate, ir.ShapeAsConstantBuffer):
-                predicate = f"{conditional.predicate.get_name()}_scalar"
-                self.writeline(f"bool {predicate};")
                 # in ABI-compatible mode, we need to use the ABI shim function
                 # to extract a C++ bool from the unrelying scalar bool Tensor
-                self.writeline(
-                    f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_bool({conditional.predicate.codegen_reference()}, &{predicate}));"
+                predicate = f"{conditional.predicate.get_name()}_scalar"
+                self.codegen_tensor_item(
+                    torch.bool,
+                    conditional.predicate.codegen_reference(),
+                    predicate,
                 )
             else:
                 # the predicate is not a Tensor: SymBool or Python bool
@@ -1845,12 +1858,7 @@ class CppWrapperCpu(WrapperCodeGen):
 
         if config.abi_compatible:
             cond_result = f"{cond_result_name}_scalar"
-            self.writeline(f"bool {cond_result};")
-            # in ABI-compatible mode, we need to use the ABI shim function
-            # to extract a C++ bool from the unrelying scalar bool Tensor
-            self.writeline(
-                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_bool({cond_result_name}, &{cond_result}));"
-            )
+            self.codegen_tensor_item(torch.bool, cond_result_name, cond_result)
         else:
             cond_result = f"{cond_result_name}.item<bool>()"
         self.writeline(f"if (!{cond_result}) break;")
@@ -2235,7 +2243,7 @@ if (py_{buf_name}.get() == NULL) {{
     def generate_save_uncompiled_kernels(self):
         pass
 
-    def val_to_cpp_arg_str(self, type_, val) -> str:
+    def val_to_cpp_arg_str(self, val, type_) -> str:
         if config.abi_compatible and isinstance(type_, torch.OptionalType):
             if val is None:
                 return "0"  # nullptr is not available in C
@@ -2272,13 +2280,26 @@ if (py_{buf_name}.get() == NULL) {{
                 self.writeline(f"AtenTensorHandle {var_name} = {base_handle}.get();")
                 return f"&{var_name}"
 
-        return self.val_to_arg_str(val)
+        return self.val_to_arg_str(val, type_)
 
-    def val_to_arg_str(self, val) -> str:
+    def val_to_arg_str(self, val, type_=None) -> str:
         if val is None:
             # When None is passed as an argument, it represents an optional that does not contain a value.
             if config.abi_compatible:
-                return "0"  # nullptr is not available in C
+                if type_ is None or isinstance(type_, torch.OptionalType):
+                    return "NULL"  # nullptr is not available in C
+                elif isinstance(type_, torch.TensorType):
+                    var_name = f"var_{next(self.arg_var_id)}"
+                    self.writeline(f"AtenTensorHandle {var_name}_handle;")
+                    self.writeline(
+                        f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_uninitialized_tensor(&{var_name}_handle));"
+                    )
+                    self.writeline(
+                        f"RAIIAtenTensorHandle {var_name}({var_name}_handle);"
+                    )
+                    return var_name
+                else:
+                    raise AssertionError("Can not map None to a known data type")
             return "c10::nullopt"
         elif isinstance(val, bool):
             if config.abi_compatible:
