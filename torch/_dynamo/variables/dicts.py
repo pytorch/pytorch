@@ -150,15 +150,6 @@ class ConstDictVariable(VariableTracker):
     def as_proxy(self):
         return {k.vt.as_proxy(): v.as_proxy() for k, v in self.items.items()}
 
-    def debug_repr(self):
-        return (
-            "{"
-            + ", ".join(
-                f"{k.vt.debug_repr()}: {v.debug_repr()}" for k, v in self.items.items()
-            )
-            + "}"
-        )
-
     def as_python_constant(self):
         return {
             k.vt.as_python_constant(): v.as_python_constant()
@@ -324,11 +315,6 @@ class DefaultDictVariable(ConstDictVariable):
             return False
         return super().is_python_constant()
 
-    def debug_repr(self):
-        return (
-            f"defaultdict({self.default_factory.debug_repr()}, {super().debug_repr()})"
-        )
-
     @staticmethod
     def is_supported_arg(arg):
         if isinstance(arg, variables.BuiltinVariable):
@@ -371,12 +357,6 @@ class SetVariable(ConstDictVariable):
     ):
         items = dict.fromkeys(items, SetVariable._default_value())
         super().__init__(items, **kwargs)
-
-    def debug_repr(self):
-        if not self.items:
-            return "set()"
-        else:
-            return "{" + ",".join(k.vt.debug_repr() for k in self.items.keys()) + "}"
 
     @property
     def set_items(self):
