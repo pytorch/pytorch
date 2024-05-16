@@ -144,7 +144,7 @@ template <typename RNG, typename ret_type,                                      
 C10_HOST_DEVICE inline bool maybe_get_next_##TYPE##_normal_sample(RNG* generator, ret_type* ret) {  \
   if (generator->next_##TYPE##_normal_sample()) {                                                   \
     *ret = *(generator->next_##TYPE##_normal_sample());                                             \
-    generator->set_next_##TYPE##_normal_sample(c10::optional<TYPE>());                              \
+    generator->set_next_##TYPE##_normal_sample(std::optional<TYPE>());                              \
     return true;                                                                                    \
   }                                                                                                 \
   return false;                                                                                     \
