@@ -488,6 +488,7 @@ class FakifiedOutWrapper(CompilerWrapper):
             return out
 
         from torch.fx.experimental.symbolic_shapes import statically_known_true
+
         for i in range(len(out)):
             if not isinstance(out[i], Tensor):
                 continue
