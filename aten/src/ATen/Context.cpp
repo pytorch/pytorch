@@ -20,9 +20,6 @@
 
 namespace at {
 
-static fp32_precision_doc = "You can check the detail at" +
-  "https://github.com/pytorch/pytorch/blob/main/docs/source/notes/cuda.rst#tensorfloat-32-tf32-on-ampere-and-later-devices";
-
 static std::vector<std::string> generic_precisions = {"default", "tf32", "bf16"};
 static std::vector<std::string> cuda_precisions = {"default", "tf32"};
 static std::vector<std::string> mkldnn_precisions = {"default", "bf16"};
@@ -146,8 +143,14 @@ bool Context::allowTF32CuDNN(const std::string& op) const {
   if (op.size() == 0){
     bool allow_tf32_rnn = float32Precision("cuda", "rnn") == "tf32";
     bool allow_tf32_conv = float32Precision("cuda", "conv") == "tf32";
-    TORCH_CHECK(allow_tf32_rnn == allow_tf32_conv,  "Invalid status");
-    TORCH_CHECK(allow_tf32_rnn == allow_tf32_cudnn, "Invalid status");
+    TORCH_CHECK(
+        allow_tf32_rnn == allow_tf32_conv,
+        "Invalid status, you can check the detail at",
+        "https://github.com/pytorch/pytorch/blob/main/docs/source/notes/cuda.rst#tensorfloat-32-tf32-on-ampere-and-later-devices");
+    TORCH_CHECK(
+        allow_tf32_rnn == allow_tf32_cudnn,
+        "Invalid status, you can check the detail at",
+        "https://github.com/pytorch/pytorch/blob/main/docs/source/notes/cuda.rst#tensorfloat-32-tf32-on-ampere-and-later-devices");
   } else {
     return float32Precision("cuda", op) == "tf32";
   }
@@ -254,7 +257,10 @@ void Context::setBenchmarkLimitCuDNN(int b) {
 bool Context::allowTF32CuBLAS() const {
   bool legacy_allow_tf32 = float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
   bool allow_tf32 = float32Precision("cuda", "matmul") == "tf32" ? true : false;
-  TORCH_CHECK(legacy_allow_tf32 == allow_tf32, "Invalid status");
+  TORCH_CHECK(
+      legacy_allow_tf32 == allow_tf32,
+      "Invalid status, you can check the detail at",
+      "https://github.com/pytorch/pytorch/blob/main/docs/source/notes/cuda.rst#tensorfloat-32-tf32-on-ampere-and-later-devices");
   return allow_tf32;
 }
 
