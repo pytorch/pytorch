@@ -10,7 +10,7 @@ from typing import Any, List, Optional
 import sympy
 
 import torch
-from ...config import cuda as inductor_cuda_config
+from ... import config
 from ...ir import Layout
 
 from ...runtime.runtime_utils import cache_dir
@@ -48,12 +48,15 @@ def _gen_cutlass_file(
 
 @functools.lru_cache(None)
 def try_import_cutlass() -> bool:
+    if config.is_fbcode():
+        return True
+
     # Copy CUTLASS python scripts to a temp dir and add the temp dir to Python search path.
     # This is a temporary hack to avoid CUTLASS module naming conflicts.
     # TODO(ipiszy): remove this hack when CUTLASS solves Python scripts packaging structure issues.
 
     cutlass_py_full_path = os.path.abspath(
-        os.path.join(inductor_cuda_config.cutlass_dir, "python/cutlass_library")
+        os.path.join(config.cuda.cutlass_dir, "python/cutlass_library")
     )
     tmp_cutlass_py_full_path = os.path.abspath(
         os.path.join(cache_dir(), "torch_cutlass_library")
