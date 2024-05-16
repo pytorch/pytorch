@@ -71,8 +71,12 @@ test_failures_cpp_wrapper = {
 if TEST_WITH_ROCM:
     test_failures_cpp_wrapper.update(
         {
-            "test_linear_packed": test_torchinductor.TestFailure(("cpp_wrapper"), is_skip=True),
-            "test_linear_packed_dynamic_shapes": test_torchinductor.TestFailure(("cpp_wrapper"), is_skip=True)
+            "test_linear_packed": test_torchinductor.TestFailure(
+                ("cpp_wrapper"), is_skip=True
+            ),
+            "test_linear_packed_dynamic_shapes": test_torchinductor.TestFailure(
+                ("cpp_wrapper"), is_skip=True
+            ),
         }
     )
 if config.abi_compatible:
