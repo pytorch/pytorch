@@ -10,7 +10,6 @@ in `runtime_wrappers`.
 import logging
 from contextlib import nullcontext
 
-from functools import wraps
 from typing import Any, List, Sequence
 
 import torch
@@ -27,7 +26,7 @@ from .dispatch_and_compile_graph import (
     aot_dispatch_autograd_graph,
     aot_dispatch_base_graph,
 )
-from .logging_utils import describe_input, format_guard_bug_msg, track_graph_compiling
+from .logging_utils import track_graph_compiling
 
 from .runtime_wrappers import (
     AOTDedupeWrapper,
@@ -35,6 +34,7 @@ from .runtime_wrappers import (
     AOTDispatchSubclassWrapper,
     AOTSyntheticBaseWrapper,
     AutogradLazyBackwardCompileInfo,
+    DebugAssertWrapper,
     FakifiedOutWrapper,
     FunctionalizedRngRuntimeWrapper,
     RuntimeWrapper,
@@ -80,11 +80,11 @@ def post_compile(
     compiled_fn,
     aot_config: AOTConfig,
     *,
-    fw_metadata: ViewAndMutationMeta,
+    runtime_metadata: ViewAndMutationMeta,
 ):
     for wrapper in reversed(pre_compile_wrappers):
         compiled_fn = wrapper.post_compile(
-            compiled_fn, aot_config, runtime_metadata=fw_metadata
+            compiled_fn, aot_config, runtime_metadata=runtime_metadata
         )
     return compiled_fn
 
@@ -115,7 +115,7 @@ def aot_dispatch_export(
     # We still run these wrappers to make sure that they're not needed pre compile,
     # but we technically don't need to run them post compile at all here.
     compiled_fn = post_compile(
-        pre_compile_wrappers, graph, aot_config, fw_metadata=fw_metadata
+        pre_compile_wrappers, graph, aot_config, runtime_metadata=fw_metadata
     )
 
     # Therefore, since no wrapperes run, we don't get back a callable - we get back the raw fx graph
@@ -222,7 +222,7 @@ def aot_dispatch_base(
     )
 
     compiled_fn = post_compile(
-        pre_compile_wrappers, compiled_fn, aot_config, fw_metadata=fw_metadata
+        pre_compile_wrappers, compiled_fn, aot_config, runtime_metadata=fw_metadata
     )
     return compiled_fn
 
@@ -577,41 +577,17 @@ def aot_dispatch_autograd(
         fw_metadata=fw_metadata,
     )
 
-    if not config.debug_assert:
-        return post_compile(
-            pre_compile_wrappers, compiled_function, aot_config, fw_metadata=fw_metadata
-        )
-
-    flat_requires_grad = [
-        a.requires_grad if isinstance(a, Tensor) else None for a in flat_args
-    ]
-
-    @wraps(compiled_function)
-    def debug_compiled_function(args: List[Any]):
-        # TODO: Check aliasing relationships
-        # TODO: Check strides for metadata mutation
-        # (NB: ideally, this logic is factored out of this function and
-        # you move these debug checks there)
-
-        # Check requires grad.  Bad case is when we compiled with
-        # requires_grad = False, but input requires_grad = True
-        # (vice versa is OK; we compute a gradient and then throw
-        # it away when it hits the input.)
-        for i, a in enumerate(args):
-            can_require_grad = flat_requires_grad[i]
-            if can_require_grad is None:
-                assert not isinstance(a, Tensor)
-            elif not can_require_grad:
-                assert not a.requires_grad, format_guard_bug_msg(
-                    aot_config,
-                    f"{describe_input(i, aot_config)} would not require grad",
-                )
-
-        return compiled_function(args)
+    if config.debug_assert:
+        flat_requires_grad = [
+            a.requires_grad if isinstance(a, Tensor) else None for a in flat_args
+        ]
+        compiled_function = DebugAssertWrapper(
+            flat_requires_grad=flat_requires_grad
+        ).post_compile(compiled_function, aot_config, runtime_metadata=fw_metadata)
 
     return post_compile(
         pre_compile_wrappers,
-        debug_compiled_function,
+        compiled_function,
         aot_config,
-        fw_metadata=fw_metadata,
+        runtime_metadata=fw_metadata,
     )
