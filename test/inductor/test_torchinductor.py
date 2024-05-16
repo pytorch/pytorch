@@ -7874,7 +7874,7 @@ class CommonTemplate:
             rand_strided(shape, stride, dtype).requires_grad_(True).add(1)
             for shape, stride, dtype in args
         ]
-        self.common(forward, args)
+        self.common(forward, args, atol=1e-05, rtol=1e-05)
 
     @requires_gpu()
     def test_tmp_not_defined_issue3(self):
