@@ -235,7 +235,6 @@ if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
     )
     sys.exit(-1)
 
-import os
 import platform
 
 BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
