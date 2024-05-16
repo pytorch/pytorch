@@ -631,7 +631,13 @@ class TestExport(TestCase):
         self.assertEqual(actual_result, expected_result)
 
     # TODO(yidi)
-    @unittest.expectedFailure
+    # Expected failure for test cases that calls run_decomposition().
+    # The top-level cond node has pre-existing metadata,
+    # which overrides the metadata for operators in subgraph due to interpreter.run(),
+    # where cond is a single node in the interpreter.run(). And we preserve metadata
+    # by copying current node's metadata for all nodes created during interpreting.
+    @testing.expectedFailurePreDispatchRunDecomp
+    @testing.expectedFailureRetraceability
     def test_export_cond_preserve_torch_fn_for_subgraphs(self):
         class MySubModule(torch.nn.Module):
             def foo(self, x):
@@ -2090,6 +2096,32 @@ class TestExport(TestCase):
             RuntimeError, "cannot mutate tensors with frozen storage"
         ):
             export(Module(), (torch.tensor(1, device="cpu"),))
+
+    def test_float_conversion(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return x.float()
+
+        ep = export(Module(), (torch.tensor(1, dtype=torch.float),))
+        ops = []
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+        self.assertGreater(len(ops), 0)
+        for op in ops:
+            self.assertIn(op, (torch.ops.aten._to_copy.default,))
+
+    def test_device_to_mutation_float(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                y = x.float()
+                y.add_(1)
+                return y, x
+
+        with self.assertRaisesRegex(
+            RuntimeError, "cannot mutate tensors with frozen storage"
+        ):
+            export(Module(), (torch.tensor(1, dtype=torch.float),))
 
     def test_module(self):
         class MyLinear(torch.nn.Module):
@@ -4889,6 +4921,31 @@ def forward(self, x, y):
         # unflatten
         unflattened = unflatten(ep)
         self.assertTrue(torch.allclose(m1(*inps), unflattened(*inps)))
+
+    @testing.expectedFailureRetraceability
+    def test_unused_aliases(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # param
+                self.alpha = torch.nn.Parameter(torch.randn(4))
+                self.beta = self.alpha
+                self.gamma = self.alpha
+
+            def forward(self, x):
+                return x + self.gamma
+
+        inps = (torch.randn(4),)
+        ep = export(Foo(), inps)
+        # placeholder nodes will be deduplicated in strict-mode,
+        # but check that all params still appear in state dict
+        for param in ["alpha", "beta", "gamma"]:
+            self.assertTrue(param in ep.state_dict)
+
+        # check that they also appear in unflattened state dict
+        unep = unflatten(ep)
+        for param in ["alpha", "beta", "gamma"]:
+            self.assertTrue(param in unep.state_dict())
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
