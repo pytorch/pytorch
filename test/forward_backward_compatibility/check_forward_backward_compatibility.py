@@ -147,8 +147,6 @@ ALLOW_LIST = [
     ("aten::_aminmax.dim", datetime.date(2024, 12, 31)),
     ("aten::_aminmax.out", datetime.date(2024, 12, 31)),
     ("aten::_aminmax.dim_out", datetime.date(2024, 12, 31)),
-    # BC-breaking change in can_cast signature: 'from' -> 'from_'
-    ("aten::can_cast", datetime.date(2024, 5, 31)),
 ]
 
 ALLOW_LIST_COMPILED = [
