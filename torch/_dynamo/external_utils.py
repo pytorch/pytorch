@@ -97,6 +97,41 @@ def untyped_storage_size(x: torch.Tensor):
     return x.untyped_storage().size()
 
 
+def _init_final_callbacks():
+    final_callbacks = getattr(
+        torch._dynamo.compiled_autograd._compiled_autograd_state_tls,
+        "final_callbacks",
+        None,
+    )
+    if final_callbacks is None:
+        torch._dynamo.compiled_autograd._compiled_autograd_state_tls.final_callbacks = (
+            []
+        )
+
+
+def queue_callback(cb):
+    _init_final_callbacks()
+    torch._dynamo.compiled_autograd._compiled_autograd_state_tls.final_callbacks.append(
+        cb
+    )
+
+
+def get_final_callbacks():
+    _init_final_callbacks()
+    return torch._dynamo.compiled_autograd._compiled_autograd_state_tls.final_callbacks
+
+
+def reset_final_callbacks():
+    _init_final_callbacks()
+    torch._dynamo.compiled_autograd._compiled_autograd_state_tls.final_callbacks.clear()
+
+
+def exec_final_callbacks():
+    for cb in get_final_callbacks():
+        cb()
+    reset_final_callbacks()
+
+
 def call_hook_from_backward_state(*args, bw_state, hook_name: str, **kwargs):
     return getattr(bw_state, hook_name)(*args, **kwargs)
 

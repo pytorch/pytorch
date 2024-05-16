@@ -612,6 +612,40 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         return super().var_getattr(tx, name)
 
 
+class AutogradEngineVariable(UserDefinedObjectVariable):
+    """
+    Represents a torch._C._ImperativeEngine instance.
+    """
+
+    def __init__(
+        self,
+        value,
+        value_type=None,
+        **kwargs,
+    ):
+        super().__init__(value=value, value_type=value_type, **kwargs)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "queue_callback":
+            if isinstance(args[0], variables.UserMethodVariable):
+                torch._dynamo.external_utils.queue_callback(
+                    getattr(args[0].obj.value, args[0].fn.__name__)
+                )
+            elif isinstance(args[0], variables.UserFunctionVariable):
+                torch._dynamo.external_utils.queue_callback(args[0].fn)
+            else:
+                unimplemented(f"Unsupported callback function type: {type(args[0])}")
+            return variables.ConstantVariable.create(None)
+        else:
+            unimplemented(f"torch._C._ImperativeEngine method: {name}")
+
+
 class LambdaVariable(VariableTracker):
     def __init__(self, fn, **kwargs):
         super().__init__(**kwargs)

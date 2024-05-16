@@ -137,6 +137,7 @@ from .lists import (
     TupleVariable,
 )
 from .misc import (
+    AutogradEngineVariable,
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     ComptimeVariable,
@@ -682,6 +683,9 @@ class VariableBuilder:
                 ),
                 "apply",
             )
+        elif isinstance(value, torch._C._ImperativeEngine):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return AutogradEngineVariable(value, source=self.source)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
