@@ -3595,10 +3595,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         self.mutated_inputs = mutated_inputs
         if mutated_inputs is not None:
             # Ensure that the mutated inputs are only allowed for certain nodes
-            allowed_set = {
-                torch.ops.higher_order.flex_attention,
-                torch.ops.higher_order.flex_attention_backward,
-            }
+            allowed_set = {torch.ops.higher_order.flex_attention}
             current_node = V.graph.current_node.target
             assert (
                 current_node in allowed_set
