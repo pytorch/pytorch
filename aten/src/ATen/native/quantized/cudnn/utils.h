@@ -27,7 +27,7 @@ C10_DIAGNOSTIC_POP()
 struct PackedLinearWeightCudnn : public LinearPackedParamsBase {
   PackedLinearWeightCudnn(
       at::Tensor orig_weight,
-      c10::optional<at::Tensor> bias,
+      std::optional<at::Tensor> bias,
       c10::QScheme q_scheme)
       : orig_weight(std::move(orig_weight)),
         bias_(std::move(bias)),
@@ -53,19 +53,19 @@ struct PackedLinearWeightCudnn : public LinearPackedParamsBase {
     "parameter type");
   }
 
-  std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
+  std::tuple<at::Tensor, std::optional<at::Tensor>> unpack() override;
 
-  c10::optional<at::Tensor> bias() override {
+  std::optional<at::Tensor> bias() override {
     return bias_;
   }
 
   static c10::intrusive_ptr<LinearPackedParamsBase> prepack(
       at::Tensor weight,
-      c10::optional<at::Tensor> bias);
+      std::optional<at::Tensor> bias);
 
  private:
   at::Tensor orig_weight;
-  c10::optional<at::Tensor> bias_;
+  std::optional<at::Tensor> bias_;
   c10::QScheme q_scheme;
 
   template <bool ReluFused>
@@ -85,7 +85,7 @@ template <int kSpatialDim = 2>
 struct PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim> {
   PackedConvWeightCudnn(
       at::Tensor orig_weight,
-      c10::optional<at::Tensor> bias,
+      std::optional<at::Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> output_padding,
@@ -127,11 +127,11 @@ struct PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim> {
     TORCH_CHECK(false, "apply_dynamic_relu is currently not reported");
   }
 
-  std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
+  std::tuple<at::Tensor, std::optional<at::Tensor>> unpack() override;
 
   static c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> prepack(
       at::Tensor weight,
-      c10::optional<at::Tensor> bias,
+      std::optional<at::Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> output_padding,
@@ -171,7 +171,7 @@ struct PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim> {
   // convention "maybe"_padded_weight.
   // TODO: when and if cudnn enables padding in their operators, we can remove padding on our end and rename this to orig_weight_
   at::Tensor maybe_padded_weight_;
-  c10::optional<at::Tensor> bias_;
+  std::optional<at::Tensor> bias_;
   torch::List<int64_t> stride_;
   torch::List<int64_t> padding_;
   torch::List<int64_t> output_padding_;

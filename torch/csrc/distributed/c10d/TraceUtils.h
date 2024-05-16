@@ -15,6 +15,34 @@
 #include <vector>
 namespace c10d {
 
+static c10::IValue entries_key = "entries";
+static c10::IValue nccl_comm_key = "nccl_comm_state";
+static c10::IValue version_key = "version";
+// Update whenever changing contents or formatting of the dump
+// (minor when adding fields, major when changing existing fields)
+static c10::IValue version_val = "1.5";
+static c10::IValue pg_config_key = "pg_config";
+static c10::IValue record_id_key = "record_id";
+static c10::IValue pg_id_key = "pg_id";
+static c10::IValue pg_name_key = "process_group";
+static c10::IValue seq_id_key = "seq_id";
+static c10::IValue op_id_key = "op_id";
+static c10::IValue profiling_name_key = "profiling_name";
+static c10::IValue input_sizes_key = "input_sizes";
+static c10::IValue output_sizes_key = "output_sizes";
+static c10::IValue time_created_key = "time_created_ns";
+static c10::IValue duration_key = "duration_ms";
+
+static c10::IValue frames_key = "frames";
+static c10::IValue state_key = "state";
+static c10::IValue line_key = "line";
+static c10::IValue name_key = "name";
+static c10::IValue filename_key = "filename";
+static c10::IValue retired_key = "retired";
+static c10::IValue time_discovered_started_key = "time_discovered_started_ns";
+static c10::IValue time_discovered_completed_key =
+    "time_discovered_completed_ns";
+
 /* Trace Utils Related to TORCH_NCCL_DESYNC_DEBUG */
 
 inline std::string getTraceStartKey(const std::string& pgName, int rank) {
@@ -417,18 +445,18 @@ struct NCCLTraceBuffer {
     // timestamp when the entry was created, likely close to the time the work
     // was 'enqueued'- not necessarily started
     c10::time_t time_created_;
-    c10::optional<float> duration_;
+    std::optional<float> duration_;
 
     // timestamp when our CPU threads discovered that the kernel started.
     // will always be _after_ it actually started, and can be very late
     // if the watchdog thread got stuck on CUDA APIs.
-    c10::optional<c10::time_t> time_discovered_started_;
+    std::optional<c10::time_t> time_discovered_started_;
 
     // timestamp when our CPU threads discovered that the kernel completed.
     // will always be _after_ it actually complated, and can be the same time
     // as the discovery of the start if the watchdog thread is stuck on CUDA
     // APIs
-    c10::optional<c10::time_t> time_discovered_completed_;
+    std::optional<c10::time_t> time_discovered_completed_;
 
     // size information for input/output tensors
     c10::SmallVector<int, 4> input_dims_;
@@ -448,7 +476,7 @@ struct NCCLTraceBuffer {
   std::map<std::tuple<std::string, std::string>, std::vector<uint64_t>>
       pg_name_to_ranks_ = {};
 
-  c10::optional<size_t> record(
+  std::optional<size_t> record(
       size_t pg_id,
       const std::tuple<std::string, std::string>& pg_name,
       size_t seq_id,
@@ -551,7 +579,7 @@ struct NCCLTraceBuffer {
   never hang. (timing must also be enabled for compute_duration - see
   TORCH_NCCL_ENABLE_TIMING).
   */
-  void retire_id(c10::optional<size_t> id, bool compute_duration = true) {
+  void retire_id(std::optional<size_t> id, bool compute_duration = true) {
     if (!enabled_ || !id) {
       return;
     }
@@ -559,7 +587,7 @@ struct NCCLTraceBuffer {
     bool can_compute_duration = false;
     Event* startEvent = nullptr;
     Event* endEvent = nullptr;
-    c10::optional<float> duration = c10::nullopt;
+    std::optional<float> duration = c10::nullopt;
 
     std::unique_lock<std::mutex> guard(mutex_);
 
@@ -601,37 +629,11 @@ struct NCCLTraceBuffer {
   }
 
   std::string dump(
-      const c10::optional<std::unordered_map<
+      const std::optional<std::unordered_map<
           std::string,
           std::unordered_map<std::string, std::string>>>& ncclDumpMap) {
     auto result = dump_entries();
     auto entries = new_list();
-    c10::IValue entries_key = "entries";
-    c10::IValue nccl_comm_key = "nccl_comm_state";
-    c10::IValue version_key = "version";
-    // Update whenever changing contents or formatting of the dump
-    // (minor when adding fields, major when changing existing fields)
-    c10::IValue version_val = "1.5";
-    c10::IValue pg_config_key = "pg_config";
-    c10::IValue record_id_key = "record_id";
-    c10::IValue pg_id_key = "pg_id";
-    c10::IValue pg_name_key = "process_group";
-    c10::IValue seq_id_key = "seq_id";
-    c10::IValue op_id_key = "op_id";
-    c10::IValue profiling_name_key = "profiling_name";
-    c10::IValue input_sizes_key = "input_sizes";
-    c10::IValue output_sizes_key = "output_sizes";
-    c10::IValue time_created_key = "time_created_ns";
-    c10::IValue duration_key = "duration_ms";
-
-    c10::IValue frames_key = "frames";
-    c10::IValue state_key = "state";
-    c10::IValue line_key = "line";
-    c10::IValue name_key = "name";
-    c10::IValue filename_key = "filename";
-    c10::IValue retired_key = "retired";
-    c10::IValue time_discovered_started_key = "time_discovered_started_ns";
-    c10::IValue time_discovered_completed_key = "time_discovered_completed_ns";
 
     std::vector<torch::CapturedTraceback*> tracebacks;
     for (auto& e : result) {
