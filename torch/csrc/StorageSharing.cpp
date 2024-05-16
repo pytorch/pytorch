@@ -27,6 +27,7 @@
 
 #include <ATen/MapAllocator.h>
 #include <ATen/StorageUtils.h>
+#include <ATen/DeviceAccelerator.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <atomic>
 #include <string>
@@ -377,7 +378,7 @@ static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_releaseIPCCounter(
+static PyObject* THPStorage_releaseIPCCounterCuda(
     PyObject* _unused,
     PyObject* args) {
   HANDLE_TH_ERRORS
@@ -651,18 +652,77 @@ PyObject* THPStorage_isShared(PyObject* self, PyObject* noargs) {
   }
 }
 
+static PyObject* THPStorage_shareDevice(PyObject* self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  c10::DeviceType device_type = at::getAccelerator(true).value();
+  if (device_type == at::kCUDA) {
+    return THPStorage_shareCuda(self, noargs);
+  } else if (device_type == at::kPrivateUse1) {
+    at::globalContext().lazyInitPrivateUse1();
+    return (PyObject*)at::detail::getPrivateUse1Hooks().Storage_shareDevice(
+        self, noargs);
+  } else {
+    TORCH_CHECK(false,
+                "The device ",
+                device_type,
+                " does not support _share_device_");
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPStorage_newSharedDevice(PyObject* _unused, PyObject* args) {
+  HANDLE_TH_ERRORS
+  c10::DeviceType device_type = at::getAccelerator(true).value();
+  if (device_type == at::kCUDA) {
+    return THPStorage_newSharedCuda(_unused, args);
+  } else if (device_type == at::kPrivateUse1) {
+    at::globalContext().lazyInitPrivateUse1();
+    return (PyObject*)at::detail::getPrivateUse1Hooks().Storage_newSharedDevice(
+        _unused, args);
+  } else {
+    TORCH_CHECK(false,
+                "The device ",
+                device_type,
+                " does not support _new_shared_device");
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPStorage_releaseIPCCounter(
+    PyObject* _unused,
+    PyObject* args) {
+  HANDLE_TH_ERRORS
+  c10::DeviceType device_type = at::getAccelerator(true).value();
+  if (device_type == at::kCUDA) {
+    return THPStorage_releaseIPCCounterCuda(_unused, args);
+  } else if (device_type == at::kPrivateUse1) {
+    at::globalContext().lazyInitPrivateUse1();
+    return (PyObject*)at::detail::getPrivateUse1Hooks()
+        .Storage_releaseIPCCounterDevice(_unused, args);
+  } else {
+    TORCH_CHECK(false,
+                "The device ",
+                device_type,
+                " does not support _release_ipc_counter_device");
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static PyMethodDef THPStorage_sharingMethods[] = {
     {"_new_with_weak_ptr",
      THPStorage_newWithWeakPtr,
      METH_O | METH_CLASS,
      nullptr},
-    {"_share_cuda_", THPStorage_shareCuda, METH_NOARGS, nullptr},
-    {"_new_shared_cuda",
-     THPStorage_newSharedCuda,
+    {"_share_device_", THPStorage_shareDevice, METH_NOARGS, nullptr},
+    {"_new_shared_device",
+     THPStorage_newSharedDevice,
      METH_VARARGS | METH_STATIC,
      nullptr},
-    {"_release_ipc_counter_cuda",
+    {"_release_ipc_counter_device",
      THPStorage_releaseIPCCounter,
      METH_VARARGS | METH_STATIC,
      nullptr},

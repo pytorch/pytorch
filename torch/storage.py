@@ -91,7 +91,7 @@ class _StorageBase:
     @classmethod
     def _new_shared_filename_cpu(cls: Type[T], manager, obj, size, *, device=None, dtype=None) -> T: ...  # type: ignore[empty-body] # noqa: E704
     @classmethod
-    def _release_ipc_counter_cuda(cls: Type[T], *args, **kwargs) -> T: ...  # type: ignore[empty-body] # noqa: E704
+    def _release_ipc_counter_device(cls: Type[T], *args, **kwargs) -> T: ...  # type: ignore[empty-body] # noqa: E704
     @classmethod
     def _new_with_weak_ptr(cls: Type[T], *args, **kwargs) -> T: ...  # type: ignore[empty-body] # noqa: E704
     def _shared_decref(self) -> T: ...  # type: ignore[empty-body, misc, type-var] # noqa: E704
@@ -100,10 +100,10 @@ class _StorageBase:
     def _weak_ref(self, *args, **kwargs) -> T: ...  # type: ignore[empty-body, misc, type-var] # noqa: E704
     def _set_from_file(self, *args, **kwargs): ...  # noqa: E704
     def _set_cdata(self, *args, **kwargs): ...  # noqa: E704
-    def _share_cuda_(self, *args, **kwargs): ...  # noqa: E704
+    def _share_device_(self, *args, **kwargs): ...  # noqa: E704
     def is_shared(self) -> bool: ...  # type: ignore[empty-body] # noqa: E704
     @classmethod
-    def _new_shared_cuda(cls: Type[T], *args, **kwargs) -> T: ...  # type: ignore[empty-body] # noqa: E704
+    def _new_shared_device(cls: Type[T], *args, **kwargs) -> T: ...  # type: ignore[empty-body] # noqa: E704
     def _shared_incref(self, *args, **kwargs): ...  # noqa: E704
     @classmethod
     def _free_weak_ref(cls, *args, **kwargs): ...  # noqa: E704
@@ -1196,8 +1196,8 @@ class TypedStorage:
     def _set_cdata(self, *args, **kwargs):
         return self._untyped_storage._set_cdata(*args, **kwargs)
 
-    def _share_cuda_(self, *args, **kwargs):
-        return self._untyped_storage._share_cuda_(*args, **kwargs)
+    def _share_device_(self, *args, **kwargs):
+        return self._untyped_storage._share_device_(*args, **kwargs)
 
     def is_shared(self):
         _warn_typed_storage_removal()
@@ -1208,8 +1208,8 @@ class TypedStorage:
         return self._untyped_storage.is_shared()
 
     @classmethod
-    def _new_shared_cuda(cls, *args, **kwargs):
-        return torch.UntypedStorage._new_shared_cuda(*args, **kwargs)
+    def _new_shared_device(cls, *args, **kwargs):
+        return torch.UntypedStorage._new_shared_device(*args, **kwargs)
 
     def _share_filename_cpu_(self, *args, **kwargs):
         manager_handle, storage_handle, size = self._untyped_storage._share_filename_cpu_(*args, **kwargs)
@@ -1220,8 +1220,8 @@ class TypedStorage:
         return self
 
     @classmethod
-    def _release_ipc_counter(cls, *args, device=None, **kwargs):
-        return torch.UntypedStorage._release_ipc_counter_cuda(*args, **kwargs)
+    def _release_ipc_counter(cls, *args, **kwargs):
+        return torch.UntypedStorage._release_ipc_counter_device(*args, **kwargs)
 
     def _shared_incref(self, *args, **kwargs):
         return self._untyped_storage._shared_incref(*args, **kwargs)
@@ -1269,7 +1269,7 @@ class _LegacyStorage(TypedStorage, metaclass=_LegacyStorageMeta):
 
     @classmethod
     def _release_ipc_counter(cls, *args, **kwargs):
-        return torch.UntypedStorage._release_ipc_counter_cuda(*args, **kwargs)
+        return torch.UntypedStorage._release_ipc_counter_device(*args, **kwargs)
 
     @classmethod
     def _new_shared_filename(cls, manager, obj, size):
