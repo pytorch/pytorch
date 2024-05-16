@@ -1397,7 +1397,7 @@ class CppVecOverrides(CppOverrides):
         assert isinstance(V.kernel, CppVecKernel)
         code = BracesBuffer()
         var = V.kernel.cse.newvar()
-        with V.kernel.masked(mask) as new_mask:
+        with V.kernel.masked(mask) as new_mask, V.kernel.bool_vectors_are_masks(False):
             code.writeline(f"auto {var} = [&]")
             with V.kernel.swap_buffers(code), code.indent():
                 result = body()
@@ -1508,6 +1508,7 @@ class CppKernel(Kernel):
         self.poststores = IndentedBuffer()
         self.num_threads = num_threads  # num_threads the kernel specialized for
         self.reduction_omp_dec: Dict[Tuple[str, str], str] = {}
+        self._bool_vectors_are_masks = True
 
     def _gen_parallel_reduction_buffers(
         self,
@@ -1564,6 +1565,19 @@ class CppKernel(Kernel):
                 if m:
                     var_name = m.group(0)
                     self.stores._lines[i] = line.replace(var_name, f"{var_name}_local")
+
+    @contextlib.contextmanager
+    def bool_vectors_are_masks(self, value):
+        """Context manager to set the assumption that bool vectors are
+        masks or not. By default we assume that bool vectors are masks
+        which results in using at::vec::VecMask<float, 1> being used instead of
+        at::vec::Vectorized<bool>."""
+        prior = self._bool_vectors_are_masks
+        self._bool_vectors_are_masks = value
+        try:
+            yield value
+        finally:
+            self._bool_vectors_are_masks = prior
 
     @contextlib.contextmanager
     def masked(self, mask):
@@ -2074,7 +2088,7 @@ class CppVecKernel(CppKernel):
             else:
                 load_mask_str = f"{self._get_mask_cast(load_mask, torch.float)}"
         loadbuf = f"{var} + {cexpr_index(index)}" if index != 0 else var
-        if dtype == torch.bool:
+        if self._bool_vectors_are_masks and dtype == torch.bool:
             # TODO: should we consider load mask here?
             line = f"{self._get_mask_type()}::from({loadbuf})"
         else:
