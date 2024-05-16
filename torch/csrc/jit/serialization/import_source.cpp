@@ -304,7 +304,7 @@ void SourceImporterImpl::importNamedType(
   }
 }
 
-c10::optional<Assign> SourceImporterImpl::
+std::optional<Assign> SourceImporterImpl::
     attributeAssignmentSpecialHandlingHack(
         const QualifiedName& qualified_classname,
         const Assign& assign) {
@@ -703,7 +703,7 @@ void SourceImporterImpl::importNamedTuple(
     const auto assign = Assign(statement);
 
     auto name = Var(Assign(statement).lhs()).name().name();
-    c10::optional<IValue> default_val;
+    std::optional<IValue> default_val;
     if (assign.rhs().present()) {
       std::vector<IValue> parsed = type_parser.evaluateDefaults(
           assign.rhs().range(), {assign.rhs().get()}, {assign.type().get()});
