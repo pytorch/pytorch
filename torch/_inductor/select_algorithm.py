@@ -789,12 +789,16 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         return f"template_kernels.{self.name}"
 
     def hash_key(self):
-        return "-".join(
-            [
-                self.name.rsplit("_", 1)[0],
-                self.bmreq.module_cache_key,
-            ]
-        ) if not config.max_autotune_gemm_verbose_cache else self.debug_extra
+        return (
+            "-".join(
+                [
+                    self.name.rsplit("_", 1)[0],
+                    self.bmreq.module_cache_key,
+                ]
+            )
+            if not config.max_autotune_gemm_verbose_cache
+            else self.debug_extra
+        )
 
     def output_node(self):
         return ir.TensorBox.create(
