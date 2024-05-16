@@ -1236,24 +1236,22 @@ class AlgorithmSelectorCache(PersistentCache):
             }
             example_inputs = list(unique_example_inputs.values())
             example_inputs_extern = [
-                (
-                    unique_example_inputs[input_node.get_name()]
-                    if unique_example_inputs[input_node.get_name()].is_mkldnn
-                    else torch.as_strided(
-                        unique_example_inputs[input_node.get_name()],
-                        V.graph.sizevars.size_hints(
-                            input_node.get_size(),
-                            fallback=config.unbacked_symint_fallback,
-                        ),
-                        V.graph.sizevars.size_hints(
-                            input_node.get_stride(),
-                            fallback=config.unbacked_symint_fallback,
-                        ),
-                        V.graph.sizevars.size_hint(
-                            input_node.get_layout().offset,
-                            fallback=config.unbacked_symint_fallback,
-                        ),
-                    )
+                unique_example_inputs[input_node.get_name()]
+                if unique_example_inputs[input_node.get_name()].is_mkldnn
+                else torch.as_strided(
+                    unique_example_inputs[input_node.get_name()],
+                    V.graph.sizevars.size_hints(
+                        input_node.get_size(),
+                        fallback=config.unbacked_symint_fallback,
+                    ),
+                    V.graph.sizevars.size_hints(
+                        input_node.get_stride(),
+                        fallback=config.unbacked_symint_fallback,
+                    ),
+                    V.graph.sizevars.size_hint(
+                        input_node.get_layout().offset,
+                        fallback=config.unbacked_symint_fallback,
+                    ),
                 )
                 for input_node in input_nodes
             ]
