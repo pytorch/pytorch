@@ -76,7 +76,9 @@ def aot_compile(
     flat_args_with_path, received_spec = pytree.tree_flatten_with_path(
         (args, kwargs or {})
     )
-    flat_example_inputs = tuple(x[1] for x in flat_args_with_path)
+    flat_example_inputs = tuple(
+        x[1] for x in flat_args_with_path if isinstance(x[1], torch.Tensor)
+    )
 
     if in_spec is not None and received_spec != in_spec:
         raise ValueError(  # noqa: TRY200

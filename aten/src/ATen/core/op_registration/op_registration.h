@@ -399,7 +399,7 @@ public:
     }
 
   private:
-    Options&& kernel(c10::optional<DispatchKey> dispatch_key, KernelFunction&& func, c10::optional<impl::CppSignature> cpp_signature, std::unique_ptr<FunctionSchema>&& inferred_function_schema) && {
+    Options&& kernel(std::optional<DispatchKey> dispatch_key, KernelFunction&& func, c10::optional<impl::CppSignature> cpp_signature, std::unique_ptr<FunctionSchema>&& inferred_function_schema) && {
       KernelRegistrationConfig config;
       config.dispatch_key = dispatch_key;
       config.func = std::move(func);
@@ -425,13 +425,13 @@ public:
         , inferred_function_schema(nullptr)
       {}
 
-      c10::optional<DispatchKey> dispatch_key;
+      std::optional<DispatchKey> dispatch_key;
       KernelFunction func;
-      c10::optional<impl::CppSignature> cpp_signature;
+      std::optional<impl::CppSignature> cpp_signature;
       std::unique_ptr<FunctionSchema> inferred_function_schema;
     };
 
-    c10::optional<std::variant<OperatorName, FunctionSchema>> schemaOrName_;
+    std::optional<std::variant<OperatorName, FunctionSchema>> schemaOrName_;
 
     std::vector<KernelRegistrationConfig> kernels;
     optional<AliasAnalysisKind> aliasAnalysisKind_;

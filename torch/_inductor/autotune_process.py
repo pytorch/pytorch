@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     from torch._inductor.select_algorithm import TritonTemplateCaller
 
 from . import config
-from .runtime.runtime_utils import do_bench, do_bench_cpu
+from .runtime.runtime_utils import do_bench_cpu, do_bench_gpu
 from .virtualized import V
 
 CUDA_VISIBLE_DEVICES = "CUDA_VISIBLE_DEVICES"
@@ -592,7 +592,7 @@ class GPUDeviceBenchmarkRequest(BenchmarkRequest):
             device_idx = torch.cuda.current_device()
 
         with torch.cuda.device(device_idx):
-            out = do_bench(fn)
+            out = do_bench_gpu(fn)
             torch.cuda.synchronize()  # shake out any CUDA errors
 
         return out

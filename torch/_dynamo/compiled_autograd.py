@@ -1,5 +1,6 @@
 import contextlib
-from typing import Any, Callable, List, Optional, TYPE_CHECKING
+import functools
+from typing import List, Optional, TYPE_CHECKING
 
 import torch
 from torch._dynamo.external_utils import call_backward, call_hook
@@ -43,7 +44,8 @@ def maybe_clone(x):
 
 
 class AutogradCompilerInstance:
-    def __init__(self) -> None:
+    def __init__(self, compiler_fn) -> None:
+        self.compiler_fn = compiler_fn
         self.stack = contextlib.ExitStack()
         self.close = self.stack.close
         self.shape_env = ShapeEnv()
@@ -220,9 +222,7 @@ class AutogradCompilerInstance:
             "compiled_autograd_graph",
             payload_fn=lambda: graph.print_readable(print_output=False),
         )
-        global override_compiler_fn
-        assert override_compiler_fn
-        return override_compiler_fn(graph)
+        return self.compiler_fn(graph)
 
     def reorder_accumulate_grad_nodes(self):
         """
@@ -270,34 +270,60 @@ class AutogradCompilerInstance:
 
 
 compiled_autograd_enabled = False
-override_compiler_fn: Optional[Callable[[Any], Any]] = None
+
+# We may have code like:
+# with enable(compiler_fn):
+#   ...
+#   with disable():
+#     ...
+#   ...
+# The disable() call just want to disable compiled autograd temporarily.
+# But overall the feature is enabled.
+#
+# The code covered by the disable context manager has no way to know if
+# compiled autograd is overall eanbled. Use another variable
+# compiled_autograd_enabled_count to indicate how many times compiled
+# autograd has been enabled in the call stack for this purpose.
+compiled_autograd_enabled_count = 0
 
 
 @contextlib.contextmanager
 def enable(compiler_fn):
-    global compiled_autograd_enabled, override_compiler_fn
-    assert not compiled_autograd_enabled
-    compiled_autograd_enabled = True
-    override_compiler_fn = compiler_fn
     prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
-        AutogradCompilerInstance
+        functools.partial(AutogradCompilerInstance, compiler_fn)
     )
-    assert not prior
     torch._C._dynamo.compiled_autograd.set_verbose_logging(
         snapshot_verbose_logging_enabled()
     )
+    global compiled_autograd_enabled, compiled_autograd_enabled_count
+    compiled_autograd_enabled = True
+    compiled_autograd_enabled_count += 1
     try:
         with torch.autograd.set_multithreading_enabled(False):
             yield
     finally:
-        compiled_autograd_enabled = False
-        torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
+        compiled_autograd_enabled_count -= 1
+        if not prior:
+            compiled_autograd_enabled = False
+        torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
 
 
 @contextlib.contextmanager
-def disable_compiler():
+def disable():
     prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
+    global compiled_autograd_enabled
+    compiled_autograd_enabled = False
     try:
         yield
     finally:
+        if prior:
+            compiled_autograd_enabled = True
         torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
+
+
+# return to starting state of a new process
+def reset() -> None:
+    compiled_autograd_enable = False
+    assert compiled_autograd_enabled_count == 0
+    torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
+    torch._C._dynamo.compiled_autograd.set_verbose_logging(False)

@@ -39,6 +39,7 @@ from torch._inductor.debug import save_args_for_compile_fx_inner
 from torch._inductor.utils import (
     BoxedBool,
     count_tangents,
+    fresh_inductor_cache,
     should_assume_input_aligned,
     tensor_is_aligned,
 )
@@ -414,6 +415,15 @@ def get_patched_config_dict(config_patches=None) -> Dict[str, Any]:
         return config.get_config_copy()
 
 
+@functools.wraps
+def with_fresh_cache_if_config(f):
+    if config.force_disable_caches:
+        with fresh_inductor_cache():
+            return f
+    else:
+        return f
+
+
 @DebugContext.wrap
 @torch.utils._python_dispatch._disable_current_modes()
 @time_and_log(attr="compilation time (in seconds)")
@@ -422,6 +432,7 @@ def get_patched_config_dict(config_patches=None) -> Dict[str, Any]:
 # compile_fx return and we may want to use the _LazyGraphModule for compiling
 # the backward graph as well.
 @_use_lazy_graph_module(dynamo_config.use_lazy_graph_module)
+@with_fresh_cache_if_config
 @dynamo_utils.dynamo_timed(phase_name="inductor_compile")
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
@@ -494,7 +505,11 @@ def compile_fx_inner(
     start = time.time()
 
     fx_graph_remote_cache = should_use_remote_fx_graph_cache()
-    if (config.fx_graph_cache or fx_graph_remote_cache) and not aot_mode:
+    if (
+        not config.force_disable_caches
+        and (config.fx_graph_cache or fx_graph_remote_cache)
+        and not aot_mode
+    ):
         compiled_graph = FxGraphCache.load(
             fx_codegen_and_compile,
             gm,
@@ -1413,7 +1428,6 @@ def compile_fx(
 
     @compile_time_strobelight_meta(phase_name="bw_compiler")
     @dynamo_utils.dynamo_timed
-    @dynamo_utils.maybe_cprofile
     def bw_compiler(model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
         user_visible_outputs = {}
 
@@ -1469,16 +1483,12 @@ def compile_fx(
         # will be the same as the generated FP16 patterns.
         disable_amp = torch._C._is_any_autocast_enabled()
         context = torch._C._DisableAutocast if disable_amp else contextlib.nullcontext
-        with V.set_fake_mode(
-            fake_mode
-        ), compiled_autograd.disable_compiler(), context():
+        with V.set_fake_mode(fake_mode), compiled_autograd.disable(), context():
             return inference_compiler(unlifted_gm, example_inputs_)
 
     with V.set_fake_mode(fake_mode), torch._guards.tracing(
         tracing_context
-    ), compiled_autograd.disable_compiler(), functorch_config.patch(
-        unlift_effect_tokens=True
-    ):
+    ), compiled_autograd.disable(), functorch_config.patch(unlift_effect_tokens=True):
         return aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,

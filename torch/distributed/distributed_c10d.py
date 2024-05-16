@@ -66,7 +66,7 @@ __all__ = [
     'ProcessGroup', 'ReduceOp', 'ReduceOptions', 'ReduceScatterOptions',
     'ScatterOptions', 'Store', 'DebugLevel', 'get_debug_level', 'Work',
     'default_pg_timeout', 'get_group_rank', 'get_global_rank', 'get_process_group_ranks',
-    'reduce_op', 'all_gather_into_tensor', 'reduce_scatter_tensor',
+    'reduce_op', 'all_gather_into_tensor', 'reduce_scatter_tensor', 'get_node_local_rank',
 ]
 
 _MPI_AVAILABLE = True
