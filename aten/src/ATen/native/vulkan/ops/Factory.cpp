@@ -8,10 +8,10 @@ namespace ops {
 
 Tensor _empty_affine_quantized(
     const IntArrayRef sizes,
-    const c10::optional<ScalarType> dtype,
-    const c10::optional<c10::Layout> layout,
-    const c10::optional<Device> device,
-    const c10::optional<bool> pin_memory,
+    const std::optional<ScalarType> dtype,
+    const std::optional<c10::Layout> layout,
+    const std::optional<Device> device,
+    const std::optional<bool> pin_memory,
     const double scale,
     const int64_t zero_point,
     const optional<MemoryFormat> memory_format) {
@@ -30,10 +30,10 @@ Tensor _empty_affine_quantized(
 
 Tensor empty_memory_format(
     const IntArrayRef sizes,
-    const c10::optional<ScalarType> dtype,
-    const c10::optional<c10::Layout> layout,
-    const c10::optional<Device> device,
-    const c10::optional<bool> pin_memory,
+    const std::optional<ScalarType> dtype,
+    const std::optional<c10::Layout> layout,
+    const std::optional<Device> device,
+    const std::optional<bool> pin_memory,
     const optional<MemoryFormat> memory_format) {
   api::StorageType storage_type = api::StorageType::TEXTURE_3D;
   return convert(vTensor{

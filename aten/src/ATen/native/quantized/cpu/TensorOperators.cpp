@@ -81,7 +81,7 @@ AT_FORALL_OPERATORS(DEFINE_COMPARATOR)
 const Tensor& quantized_resize_cpu_(
     const Tensor& self,
     IntArrayRef size,
-    c10::optional<MemoryFormat> optional_memory_format) {
+    std::optional<MemoryFormat> optional_memory_format) {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because if storage is resized, new elements are uninitialized
   globalContext().alertNotDeterministic("quantized_resize_cpu_");
