@@ -1285,7 +1285,6 @@ def min_cut_rematerialization_partition(
     joint_module: fx.GraphModule,
     _joint_inputs,
     compiler="inductor",
-    recomputable_ops=None,
     *,
     num_fwd_outputs,
 ) -> Tuple[fx.GraphModule, fx.GraphModule]:
