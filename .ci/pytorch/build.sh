@@ -272,7 +272,7 @@ else
   # check that setup.py would fail with bad arguments
   echo "The next three invocations are expected to fail with invalid command error messages."
   ( ! get_exit_code python setup.py bad_argument )
-  ( ! get_exit_code python setup.py clean] )
+  ( ! get_exit_code python setup.py clean )
   ( ! get_exit_code python setup.py clean bad_argument )
 
   if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
