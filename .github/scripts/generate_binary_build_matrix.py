@@ -361,45 +361,45 @@ def generate_wheels_matrix(
                 if use_split_build == "true":
                     build_name += "-experimental-split-build"
 
-            # 12.1 linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
-            if arch_version in ["12.4", "12.1", "11.8"] and os == "linux":
-                ret.append(
-                    {
-                        "python_version": python_version,
-                        "gpu_arch_type": gpu_arch_type,
-                        "gpu_arch_version": gpu_arch_version,
-                        "desired_cuda": translate_desired_cuda(
-                            gpu_arch_type, gpu_arch_version
-                        ),
-                        "devtoolset": "",
-                        "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
-                        "package_type": package_type,
-                        "use_split_build": use_split_build,
-                        "pytorch_extra_install_requirements": PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version],  # fmt: skip
-                        "build_name": build_name,
-                    }
-                )
-            else:
-                ret.append(
-                    {
-                        "python_version": python_version,
-                        "gpu_arch_type": gpu_arch_type,
-                        "gpu_arch_version": gpu_arch_version,
-                        "desired_cuda": translate_desired_cuda(
-                            gpu_arch_type, gpu_arch_version
-                        ),
-                        "devtoolset": "cxx11-abi"
-                        if arch_version == "cpu-cxx11-abi"
-                        else "",
-                        "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
-                        "package_type": package_type,
-                        "use_split_build": use_split_build,
-                        "build_name": build_name,
-                        "pytorch_extra_install_requirements":
-                        PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.1"]  # fmt: skip
-                        if os != "linux" else "",
-                    }
-                )
+                # 12.1 linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
+                if arch_version in ["12.4", "12.1", "11.8"] and os == "linux":
+                    ret.append(
+                        {
+                            "python_version": python_version,
+                            "gpu_arch_type": gpu_arch_type,
+                            "gpu_arch_version": gpu_arch_version,
+                            "desired_cuda": translate_desired_cuda(
+                                gpu_arch_type, gpu_arch_version
+                            ),
+                            "devtoolset": "",
+                            "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
+                            "package_type": package_type,
+                            "use_split_build": use_split_build,
+                            "pytorch_extra_install_requirements": PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version],  # fmt: skip
+                            "build_name": build_name,
+                        }
+                    )
+                else:
+                    ret.append(
+                        {
+                            "python_version": python_version,
+                            "gpu_arch_type": gpu_arch_type,
+                            "gpu_arch_version": gpu_arch_version,
+                            "desired_cuda": translate_desired_cuda(
+                                gpu_arch_type, gpu_arch_version
+                            ),
+                            "devtoolset": "cxx11-abi"
+                            if arch_version == "cpu-cxx11-abi"
+                            else "",
+                            "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
+                            "package_type": package_type,
+                            "use_split_build": use_split_build,
+                            "build_name": build_name,
+                            "pytorch_extra_install_requirements":
+                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.1"]  # fmt: skip
+                            if os != "linux" else "",
+                        }
+                    )
     return ret
 
 
