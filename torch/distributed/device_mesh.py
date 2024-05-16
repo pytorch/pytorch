@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
 import math
+import threading
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
@@ -57,11 +58,10 @@ else:
                 "DeviceMesh requires numpy >= 1.21 to be installed for type checking"
             )
 
-    class _MeshEnv:
+    class _MeshEnv(threading.local):
         def __init__(self) -> None:
             self.mesh_stack: List[DeviceMesh] = []
             self.child_to_parent_mapping: Dict[DeviceMesh, DeviceMesh] = {}
-            self.parent_to_child_mapping: Dict[DeviceMesh, Dict[str, DeviceMesh]] = {}
 
         def get_current_mesh(self) -> "DeviceMesh":
             if len(self.mesh_stack) == 0:
@@ -71,13 +71,6 @@ else:
         def create_child_mesh(
             self, device_mesh: "DeviceMesh", mesh_dim: int, mesh_dim_name: str
         ) -> "DeviceMesh":
-            # Directly return the child mesh if it is already created.
-            child_mesh_mappings = self.parent_to_child_mapping.get(device_mesh)
-            if child_mesh_mappings:
-                sub_mesh = child_mesh_mappings.get(mesh_dim_name)
-                if sub_mesh:
-                    return sub_mesh
-
             # swap the current dim to the last dim then reshape to flatten out other
             # dims, so we can just extract the list of ranks which contains cur_rank.
             cur_rank = device_mesh.get_rank()
@@ -96,11 +89,10 @@ else:
                     res_sub_mesh = sub_mesh
 
             res_sub_mesh._dim_group_infos = [device_mesh._dim_group_infos[mesh_dim]]  # type: ignore[possibly-undefined]
+            res_sub_mesh._parent_mesh = device_mesh
             # Assign the current DeviceMesh as the parent of the child DeviceMesh.
+            # We need to update the mappings after the child mesh hash update.
             self.child_to_parent_mapping[res_sub_mesh] = device_mesh
-            self.parent_to_child_mapping.setdefault(device_mesh, {})[
-                mesh_dim_name
-            ] = res_sub_mesh
             return res_sub_mesh
 
         def get_parent_mesh(self, device_mesh: "DeviceMesh") -> Optional["DeviceMesh"]:
@@ -219,11 +211,12 @@ else:
                 if isinstance(mesh, torch.Tensor)
                 else torch.tensor(mesh, dtype=torch.int)
             )
-            self.mesh_dim_names = mesh_dim_names
+            self.mesh_dim_names = tuple(mesh_dim_names) if mesh_dim_names else None
 
             # private field to pre-generate DeviceMesh's hash
             self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
-            self._hash = hash((self._flatten_mesh_list, self.mesh.shape, id(self)))
+            self._parent_mesh: Optional["DeviceMesh"] = None
+            self._thread_id = threading.get_ident()
 
             # Skip process group initialization if xla device or init backend is False
             # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
@@ -344,17 +337,35 @@ else:
             return device_mesh_repr
 
         def __hash__(self):
+            # lazily compute hash
+            self._hash = getattr(self, "_hash", None)
+            if not self._hash:
+                self._hash = hash(
+                    (
+                        self._flatten_mesh_list,
+                        self.mesh.shape,
+                        self.device_type,
+                        self.mesh_dim_names,
+                        self._parent_mesh,
+                        self._thread_id,
+                    )
+                )
             return self._hash
 
         def __eq__(self, other: object) -> bool:
             if not isinstance(other, DeviceMesh):
                 return False
-            if id(self.mesh) == id(other.mesh):
+            if id(self) == id(other):
                 return True
-            return (
-                self.mesh.shape == other.mesh.shape
-                and self._flatten_mesh_list == other._flatten_mesh_list
-            )
+            else:
+                return (
+                    self._flatten_mesh_list == other._flatten_mesh_list
+                    and self.mesh.shape == other.mesh.shape
+                    and self.device_type == other.device_type
+                    and self.mesh_dim_names == other.mesh_dim_names
+                    and self._parent_mesh == other._parent_mesh
+                    and self._thread_id == other._thread_id
+                )
 
         def __getitem__(self, mesh_dim_name: str) -> "DeviceMesh":
             """
@@ -545,6 +556,7 @@ else:
 
         Args:
             device_type (str): The device type of the mesh. Currently supports: "cpu", "cuda/cuda-like".
+                Passing in a device type with a GPU index, such as "cuda:0", is not allowed.
             mesh_shape (Tuple[int]): A tuple defining the dimensions of the multi-dimensional array
                 describing the layout of devices.
             mesh_dim_names (Tuple[str], optional): A tuple of mesh dimension names to assign to each dimension
@@ -574,6 +586,13 @@ else:
                     "mesh_shape and mesh_dim_names should have same length!",
                     f"Found len(mesh_dim_names): {len(mesh_dim_names)} and len(mesh_shape):{len(mesh_shape)}.",
                 )
+
+        # assume valid device types are all letters
+        if device_type and not device_type.isalpha():
+            raise RuntimeError(
+                f"Device type with GPU index is not supported but got {device_type}. ",
+                "If you maintained a 'torch.device' object, it's recommended to pass in 'device.type'.",
+            )
 
         # Always initialize the mesh's tensor on CPU, regardless of what the
         # external device type has been set to be (e.g. meta)
