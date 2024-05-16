@@ -29,7 +29,7 @@ ListTypePtr ListType::ofOptionalTensors() {
 
 namespace {
 
-c10::optional<TypePtr> subtractTypeSetFrom(std::vector<TypePtr>& to_subtract, ArrayRef<TypePtr> from) {
+std::optional<TypePtr> subtractTypeSetFrom(std::vector<TypePtr>& to_subtract, ArrayRef<TypePtr> from) {
   std::vector<TypePtr> types;
 
   // Given a TypePtr `lhs`, this function says whether or not `lhs` (or
@@ -93,7 +93,7 @@ void filterDuplicateSubtypes(std::vector<TypePtr>* types) {
   if (types->empty()) {
     return;
   }
-  auto get_supertype = [](const TypePtr& t1, const TypePtr& t2) -> c10::optional<TypePtr> {
+  auto get_supertype = [](const TypePtr& t1, const TypePtr& t2) -> std::optional<TypePtr> {
     // We don't want nested Optionals. Also, prematurely unifying to
     // `Optional` could prevent us from coalescing other types
     if ((t1->isSubtypeOf(*NoneType::get()) && !t2->isSubtypeOf(*NoneType::get()))
@@ -114,7 +114,7 @@ void filterDuplicateSubtypes(std::vector<TypePtr>* types) {
   size_t end_idx = types->size()-1;
   for (size_t i = types->size()-1; i > 0; --i) {
     for (size_t j = std::min(i-1, end_idx); ; --j) {
-      c10::optional<TypePtr> unified;
+      std::optional<TypePtr> unified;
       unified = get_supertype((*types)[i], (*types)[j]);
       if (unified) {
         (*types)[j] = *unified;
@@ -272,11 +272,11 @@ UnionTypePtr UnionType::create(std::vector<TypePtr> reference) {
   return union_type;
 }
 
-c10::optional<TypePtr> UnionType::subtractTypeSet(std::vector<TypePtr>& to_subtract) const {
+std::optional<TypePtr> UnionType::subtractTypeSet(std::vector<TypePtr>& to_subtract) const {
   return subtractTypeSetFrom(to_subtract, containedTypes());
 }
 
-c10::optional<TypePtr> UnionType::toOptional() const {
+std::optional<TypePtr> UnionType::toOptional() const {
   if (!canHoldType(*NoneType::get())) {
       return c10::nullopt;
   }
@@ -432,7 +432,7 @@ bool UnionType::canHoldType(const Type& type) const {
 bool OptionalType::equals(const Type& rhs) const {
   if (auto union_rhs = rhs.cast<UnionType>()) {
     auto optional_rhs = union_rhs->toOptional();
-    // `**optional_rhs` = `*` to get value of `c10::optional<TypePtr>`,
+    // `**optional_rhs` = `*` to get value of `std::optional<TypePtr>`,
     // then `*` to dereference the pointer
     return optional_rhs && *this == **optional_rhs;
   } else if (auto optional_rhs = rhs.cast<OptionalType>()) {

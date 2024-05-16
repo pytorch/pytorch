@@ -547,7 +547,8 @@ class ExportedProgram:
                 placeholders.append(node)
             return placeholders
 
-        decomp_table = decomp_table or core_aten_decompositions()
+        if decomp_table is None:
+            decomp_table = core_aten_decompositions()
 
         old_placeholders = _get_placeholders(self.graph_module)
         fake_args = [node.meta["val"] for node in old_placeholders]
