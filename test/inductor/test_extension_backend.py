@@ -6,6 +6,7 @@ import unittest
 
 import torch
 import torch._dynamo
+from torch._dynamo.testing import expectedFailureScalar
 import torch.utils.cpp_extension
 from torch._C import FileCheck
 
@@ -103,6 +104,10 @@ class ExtensionBackendTests(TestCase):
         # return the working directory (see setUp)
         os.chdir(self.old_working_dir)
 
+    # When test the scalar version, i.e., ATEN_CPU_CAPABILITY=default,
+    # Expected to find "loadu" but did not find it.
+    # See https://github.com/pytorch/pytorch/issues/126372.
+    @expectedFailureScalar
     def test_open_device_registration(self):
         torch.utils.rename_privateuse1_backend("extension_device")
         torch._register_device_module("extension_device", self.module)
