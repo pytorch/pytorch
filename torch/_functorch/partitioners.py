@@ -13,6 +13,7 @@ from typing import Callable, Dict, List, Optional, Set, Tuple, Union
 import sympy
 
 import torch
+import torch._inductor.inductor_prims
 import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch.fx.experimental._backward_state import BackwardState
