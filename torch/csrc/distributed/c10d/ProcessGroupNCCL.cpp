@@ -1567,6 +1567,8 @@ void ProcessGroupNCCL::watchdogHandler() {
       data.strings["last_enqueued_work_name"] = lastEnqueuedWorkName_;
       data.strings["last_started_work_name"] = lastStartedWorkName_;
       data.strings["last_completed_work_name"] = lastCompletedWorkName_;
+      data.strings["pg_name"] = pg_name_;
+      data.strings["pg_desc"] = pg_desc_;
       logger->log(data);
       lastStatusUpdateTime = std::chrono::steady_clock::now();
     }
