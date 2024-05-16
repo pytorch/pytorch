@@ -352,9 +352,9 @@ std::string dump_nccl_trace() {
 }
 #endif
 
-c10::optional<std::function<void(std::function<void(const std::string&)>)>>&
+std::optional<std::function<void(std::function<void(const std::string&)>)>>&
 get_cpp_trace_dumper() {
-  static c10::optional<
+  static std::optional<
       std::function<void(std::function<void(const std::string&)>)>>
       dumper(c10::nullopt);
   return dumper;
@@ -431,7 +431,7 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
     OpType opType,
     uint64_t seq,
     const char* profilingTitle,
-    const c10::optional<std::vector<at::Tensor>>& inputs,
+    const std::optional<std::vector<at::Tensor>>& inputs,
     bool desyncDebug,
     bool enableTiming,
     DebugLevel distDebugLevel)
@@ -546,7 +546,7 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
 }
 
 bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
-    c10::optional<std::chrono::milliseconds> timeout) {
+    std::optional<std::chrono::milliseconds> timeout) {
   auto currentTimepoint = std::chrono::steady_clock::now();
   auto timeElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
       currentTimepoint - workStartTime_);
@@ -748,7 +748,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // both timeout and other errors.
   dumpOnException_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
-  enableNanCheck_ = getCvarBool(TORCH_NCCL_NAN_CHECK, false);
   heartbeat_ = 1ULL;
   monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, true));
   heartbeatTimeoutInSec_ =
@@ -837,7 +836,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
             << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << ncclTraceBufferSize_
             << ", TORCH_NCCL_COORD_CHECK_MILSEC: " << coordCheckIntervalMilSec_
-            << ", TORCH_NCCL_NAN_CHECK: " << enableNanCheck_
             << ", PG Name: " << options_->group_name;
 
   if (options_->global_ranks_in_group.empty()) {
@@ -1038,7 +1036,7 @@ void ProcessGroupNCCL::waitForFutureOrTimeout(
 
 void ProcessGroupNCCL::abortCommsFromMap(
     std::unordered_map<std::string, std::shared_ptr<NCCLComm>>& ncclCommsMap,
-    c10::optional<std::string> abortReason) {
+    std::optional<std::string> abortReason) {
   // The process may control multiple devices, loop through the communicators on
   // each device
   for (auto& it : ncclCommsMap) {
@@ -1071,7 +1069,7 @@ void ProcessGroupNCCL::abortCommsFromMap(
 }
 
 // Abort all communicators on this rank
-bool ProcessGroupNCCL::abort(c10::optional<std::string> abortReason) {
+bool ProcessGroupNCCL::abort(std::optional<std::string> abortReason) {
   // Remove record from global ncclCommDevIdxMapMutex before aboarting,
   // so that a new cache segment would not register to already aborded
   // communicators. Note that ncclCommDevIdxMap is a global container which may
@@ -1090,7 +1088,7 @@ bool ProcessGroupNCCL::abort(c10::optional<std::string> abortReason) {
   return true;
 }
 
-void ProcessGroupNCCL::shutdown(c10::optional<std::string> reason) {
+void ProcessGroupNCCL::shutdown(std::optional<std::string> reason) {
   // Don't join threads here since the purpose of this method is to abort all
   // communicators and signal the threads to exit. Joining on the threads could
   // potentially block and hence avoid it in this method.
@@ -1190,7 +1188,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
                                             : heartbeatTimeoutInSec_ * 1000;
   auto lastTimePollStore = std::chrono::steady_clock::now();
   auto lastTimeHeartBeatCheck = std::chrono::steady_clock::now();
-  c10::optional<DumpPipe> dumpPipe = c10::nullopt;
+  std::optional<DumpPipe> dumpPipe = c10::nullopt;
   if (uid_ == 0) {
     // DumpPipe is one per-trainer process, and its convenient to name them
     // after 'global' ranks in the system, So we assume processgroup (uid)==0 is
@@ -2243,7 +2241,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
       opType,
       seq_,
       profilingTitle,
-      profilingTitle != nullptr ? c10::optional<std::vector<at::Tensor>>(inputs)
+      profilingTitle != nullptr ? std::optional<std::vector<at::Tensor>>(inputs)
                                 : c10::nullopt,
       desyncDebug_,
       enableTiming_.load(),
@@ -2426,9 +2424,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     OpType opType,
     const char* profilingTitle,
     bool avoidRecordStreams) {
-  if (enableNanCheck_) {
-    checkForNan(input);
-  }
   // Environment setting by the user may add onto collective call's option
   avoidRecordStreams |= avoidRecordStreams_;
   c10::cuda::CaptureStatus capture_status =
@@ -2784,9 +2779,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     PreProcess pre,
     PostProcess post,
     const char* profilingTitle) {
-  if (enableNanCheck_) {
-    checkForNan(tensor);
-  }
   // avoidRecordStreams_ note:
   // send, recv, and irecv should be ok with avoidRecordStreams,
   // However, for isend, I don't think the API requires the user

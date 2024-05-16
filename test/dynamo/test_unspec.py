@@ -11,6 +11,7 @@ import torch.nn.functional as F
 
 from torch._dynamo.comptime import comptime
 from torch._dynamo.testing import CompileCounter, same
+from torch.testing._internal.logging_utils import logs_to_string
 
 
 # The intention of this test file is you should put test cases specifically
@@ -547,6 +548,25 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
         self.assertExpectedInline(cnts.frame_count, """2""")
         self.assertExpectedInline(cnts.op_count, """4""")
+
+    def test_prune_torch_check(self):
+        log_stream, ctx = logs_to_string("torch._dynamo.output_graph", "graph_code")
+
+        @torch.compile(fullgraph=True, dynamic=True, backend="eager")
+        def f(x, y):
+            torch._check(y + 5 == 85)
+            torch._check(x.size(0) == 80)
+
+        with ctx():
+            f(torch.randn(80, 100), 80)
+
+        out = "\n".join(log_stream.getvalue().strip().split("\n")[3:]).strip()
+        self.assertExpectedInline(
+            out,
+            """\
+def forward(self):
+        return ()""",
+        )
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_split_aot_autograd(self):
