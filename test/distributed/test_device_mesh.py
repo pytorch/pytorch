@@ -351,8 +351,19 @@ class DeviceMeshTestNDim(DTensorTestBase):
             ref_mesh_dp_dim_group_infos, dp_mesh._dim_group_infos
         ):
             self.assertEqual(ref_ranks, ranks)
-        self.assertEqual(dp_mesh["dp_replicate"], ref_mesh["dp_replicate"])
-        self.assertEqual(dp_mesh["dp_shard"], ref_mesh["dp_shard"])
+        # Cannot check directly for mesh equality since parent meshes are not
+        # the same since the ref's parent mesh is 3D
+        self.assertEqual(dp_mesh["dp_replicate"].mesh, ref_mesh["dp_replicate"].mesh)
+        for (_, ref_ranks, _), (_, ranks, _) in zip(
+            dp_mesh["dp_replicate"]._dim_group_infos,
+            ref_mesh["dp_replicate"]._dim_group_infos,
+        ):
+            self.assertEqual(ref_ranks, ranks)
+        self.assertEqual(dp_mesh["dp_shard"].mesh, ref_mesh["dp_shard"].mesh)
+        for (_, ref_ranks, _), (_, ranks, _) in zip(
+            dp_mesh["dp_shard"]._dim_group_infos, ref_mesh["dp_shard"]._dim_group_infos
+        ):
+            self.assertEqual(ref_ranks, ranks)
 
 
 class InitDeviceMeshTest(DTensorTestBase):
