@@ -19,6 +19,7 @@ import torch.nn.functional as F
 from torch._dynamo.eval_frame import unsupported
 from torch._dynamo.mutation_guard import GenerationTracker
 from torch._dynamo.testing import expectedFailureDynamic, same
+from torch._dynamo.utils import ifdynstaticdefault
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
 
@@ -1405,13 +1406,13 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             ref2 = mod(x)
             res2 = opt_mod(x)
             self.assertTrue(torch.allclose(ref2, res2))
-            self.assertEqual(cnt.frame_count, 2)
+            self.assertEqual(cnt.frame_count, ifdynstaticdefault(2, 1))
 
             # No re-compilation!
             ref3 = mod(x)
             res3 = opt_mod(x)
             self.assertTrue(torch.allclose(ref3, res3))
-            self.assertEqual(cnt.frame_count, 2)
+            self.assertEqual(cnt.frame_count, ifdynstaticdefault(2, 1))
 
     # RuntimeError: SymIntArrayRef expected to contain only concrete integers
     @expectedFailureDynamic
