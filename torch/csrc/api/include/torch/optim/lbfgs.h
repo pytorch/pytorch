@@ -17,11 +17,11 @@ struct TORCH_API LBFGSOptions : public OptimizerCloneableOptions<LBFGSOptions> {
   LBFGSOptions(double lr = 1);
   TORCH_ARG(double, lr) = 1;
   TORCH_ARG(int64_t, max_iter) = 20;
-  TORCH_ARG(c10::optional<int64_t>, max_eval) = c10::nullopt;
+  TORCH_ARG(std::optional<int64_t>, max_eval) = c10::nullopt;
   TORCH_ARG(double, tolerance_grad) = 1e-7;
   TORCH_ARG(double, tolerance_change) = 1e-9;
   TORCH_ARG(int64_t, history_size) = 100;
-  TORCH_ARG(c10::optional<std::string>, line_search_fn) = c10::nullopt;
+  TORCH_ARG(std::optional<std::string>, line_search_fn) = c10::nullopt;
 
  public:
   void serialize(torch::serialize::InputArchive& archive) override;
@@ -45,7 +45,7 @@ struct TORCH_API LBFGSParamState
   TORCH_ARG(std::deque<Tensor>, old_dirs);
   TORCH_ARG(std::deque<Tensor>, old_stps);
   TORCH_ARG(std::deque<Tensor>, ro);
-  TORCH_ARG(c10::optional<std::vector<Tensor>>, al) = c10::nullopt;
+  TORCH_ARG(std::optional<std::vector<Tensor>>, al) = c10::nullopt;
 
  public:
   void serialize(torch::serialize::InputArchive& archive) override;
@@ -82,7 +82,7 @@ class TORCH_API LBFGS : public Optimizer {
   void load(serialize::InputArchive& archive) override;
 
  private:
-  c10::optional<int64_t> _numel_cache;
+  std::optional<int64_t> _numel_cache;
   int64_t _numel();
   Tensor _gather_flat_grad();
   void _add_grad(const double step_size, const Tensor& update);
