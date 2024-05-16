@@ -191,22 +191,24 @@ class TestUnbackedSymints(InductorTestCase):
     @skipCUDAIf(not HAS_CUDA, "requires cuda")
     @dynamo_config.patch({"capture_scalar_outputs": True})
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
-    def test_colin(self, device):
-        def fn(data, shapes):
-            # unbacked = torch.ones(shapes.tolist()).cuda()
-            # dynamic_shape = data.reshape(*shapes.tolist(), -1)
-            nz = torch.nonzero(shapes)
-            unbacked = nz
-            # add data becaused it has concerete shapes and we need it
-            # otherwise scheduler say we cant fuse a commonb uffer with unbacked symints
-            squared = unbacked + data
-            # buf2 and buf3 must have shared data that doesn't have unbacked symints
-            # buf3 must depend on buf2's ancestors
-            reduced = torch.sum(squared + data)
-            return squared, reduced
+    def test_vertical_pointwise_reduction_fusion(self, device):
+        # Tests fusing a pointwise & reduction op with unbacked numel/rnumel.
+        def fn(x, y, repeats):
+            u0 = repeats.item()
+            unbacked = y.expand(u0, *y.shape)  # [u0, 1, 16]
 
-        # inp = torch.randn(3, 3, 2, device="cuda")
-        example_inputs = (torch.randn(1,).cuda(), torch.tensor([2, 5]).cuda(),)
+            # Note: We add x to both pointwise and reduction. Otherwise, the
+            # scheduler will refuse to fuse ops whose common buffer has
+            # unbacked symints.
+            pointwise = unbacked + x
+            reduction = torch.sum(pointwise + x)
+            return pointwise, reduction
+
+        example_inputs = (
+            torch.randn(32, 16).cuda(),
+            torch.randn(1, 16).cuda(),
+            torch.tensor(32).cuda(),
+        )
 
         actual = torch.compile(fn, fullgraph=True)(*example_inputs)
         expected = fn(*example_inputs)
