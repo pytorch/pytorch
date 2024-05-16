@@ -368,9 +368,6 @@ def should_pad_bench(
         mat1 = realize_tensor(mat1)
         mat2 = realize_tensor(mat2)
 
-        if any(dim == 0 for dim in mat1.shapes) or any(dim == 0 for dim in mat2.shapes):
-            return False
-
         # since we key on whether or not the inputs can be memory planned, set cache for the
         # original time which is unaffected by whether or not the input can be planned
         ori_time_key = should_pad_bench_key(
