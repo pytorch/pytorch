@@ -45,8 +45,8 @@ from torch.distributed._composable.fsdp._fsdp_init import (
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.distributed._tensor import init_device_mesh
 # from llama_model_toy import ToyTransformer, ModelArgs
-from llama_model_toy_graph_break import ToyTransformerWithGraphBreak, ModelArgs
-# from llama_model import Transformer, ModelArgs
+# from llama_model_toy_graph_break import ToyTransformerWithGraphBreak, ModelArgs
+from llama_model import Transformer, ModelArgs
 # from llama_model_graph_break import TransformerWithGraphBreak, ModelArgs
 
 # from torchviz import make_dot
@@ -394,8 +394,8 @@ def init(activation_checkpoint):
             vocab_size=1024,
         )
         # transformer_class = ToyTransformer  # makes comm-induced peak memory issue more prominent
-        transformer_class = ToyTransformerWithGraphBreak
-        # transformer_class = Transformer
+        # transformer_class = ToyTransformerWithGraphBreak
+        transformer_class = Transformer
         # transformer_class = TransformerWithGraphBreak
         model = transformer_class(model_args)
         for layer_id, mod in enumerate(model.layers):
@@ -505,10 +505,10 @@ def main_compiled(n_iter, activation_checkpoint, backend):
     print("done eager 1st run for compiled!")
 
     def compiler_fn(gm):
-        if dist.get_rank() == 0:
-            # HACK: delay rank 0 by X seconds, so that rank 1 will always fail first.
-            import time
-            time.sleep(600)
+        # if dist.get_rank() == 0:
+        #     # HACK: delay rank 0 by X seconds, so that rank 1 will always fail first.
+        #     import time
+        #     time.sleep(600)
         torch_log.warning("Compiling autograd?")
         return torch.compile(gm, backend=backend, fullgraph=False)
 
