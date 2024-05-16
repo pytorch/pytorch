@@ -1000,7 +1000,7 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
     if not config.cpp.weight_prepack:
         return False
 
-    layout_dtypes = [torch.float32]
+    layout_dtypes = [torch.float32, torch.bfloat16, torch.half]
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2)
     # TODO(jgong5): support dynamic shapes for n or k
     if has_free_symbols((n, k)):
@@ -1008,7 +1008,13 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
     if isinstance(mat2, ir.BaseView):
         mat2 = mat2.unwrap_view()
     micro_gemm = create_micro_gemm(
-        "micro_gemm", m, n, k, layout.dtype, num_threads=parallel_num_threads()
+        "micro_gemm",
+        m,
+        n,
+        k,
+        input_dtype=layout.dtype,
+        output_dtype=torch.float,
+        num_threads=parallel_num_threads(),
     )
     # TODO(jgong5): support n % n_block_size != 0
     return (
@@ -1636,6 +1642,10 @@ def aoti_compile_with_persistent_cache(
                 options=options,
                 remove_runtime_assertions=remove_runtime_assertions,
                 disable_constraint_solver=disable_constraint_solver,
+                # Some operations may have non-Tensor parameters like int, float, bool. These
+                # non-Tensor parameters will not be the input of the graph. Therefore, we do
+                # need to keep the same signature.
+                same_signature=False,
             )
 
             kernel_metadata_items = []
@@ -1686,3 +1696,26 @@ def aoti_compile_with_persistent_cache(
             return kernel_lib_path
         except Exception as e:
             return ""
+
+
+def run_and_get_cpp_code(fn, *args, **kwargs):
+    # We use the patch context manager instead of using it as a decorator.
+    # In this way, we can ensure that the attribute is patched and unpatched correctly
+    # even if this run_and_get_cpp_code function is called multiple times.
+    with unittest.mock.patch.object(config, "debug", True):
+        torch._dynamo.reset()
+        import io
+        import logging
+
+        log_capture_string = io.StringIO()
+        ch = logging.StreamHandler(log_capture_string)
+        from torch._inductor.graph import output_code_log
+
+        output_code_log.addHandler(ch)
+        prev_level = output_code_log.level
+        output_code_log.setLevel(logging.DEBUG)
+        result = fn(*args, **kwargs)
+        s = log_capture_string.getvalue()
+        output_code_log.setLevel(prev_level)
+        output_code_log.removeHandler(ch)
+    return result, s
