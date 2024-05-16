@@ -154,20 +154,12 @@ class OpStrategy(StrategyType):
             return output_spec[0].mesh.shape
 
     @property
-    def output_ndim(self):
+    def ndim(self):
         return self.strategies[0].output_spec.ndim
 
     @property
-    def output_shape(self):
-        return self.strategies[0].output_spec.shape
-
-    @property
-    def ndim(self):
-        return self.output_ndim
-
-    @property
     def shape(self):
-        return self.output_shape
+        return self.strategies[0].output_spec.shape
 
 
 class TupleStrategy(StrategyType):

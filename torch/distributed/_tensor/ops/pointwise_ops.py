@@ -447,7 +447,7 @@ def common_pointwise_strategy(
 ) -> OpStrategy:
     # handle broadcasting
     common_shape = torch.broadcast_shapes(
-        *[arg.output_shape for arg in args_schema if isinstance(arg, OpStrategy)]
+        *[arg.shape for arg in args_schema if isinstance(arg, OpStrategy)]
     )
     pointwise_strategy = OpStrategy([])
 

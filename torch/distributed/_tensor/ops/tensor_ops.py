@@ -184,7 +184,7 @@ def new_factory_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     # 2. let the output follow the input if input and output have the same shape
     input_strategy = op_schema.args_schema[0]
     assert isinstance(input_strategy, OpStrategy)
-    input_shape = input_strategy.output_shape
+    input_shape = input_strategy.shape
     output_shape = op_schema.args_schema[1]
     assert isinstance(output_shape, list)
 
@@ -247,8 +247,8 @@ def gen_slice_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
         op_schema.args_schema + defaults[len(op_schema.args_schema) :]
     )
     assert isinstance(input_strategy, OpStrategy)
-    input_shape = input_strategy.output_shape
-    input_ndim = input_strategy.output_ndim
+    input_shape = input_strategy.shape
+    input_ndim = input_strategy.ndim
     assert isinstance(dim, int)
     if start is None:
         start = 0
@@ -321,7 +321,7 @@ def gen_slice_scatter_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> Strateg
 
     input_strategy = op_schema.args_schema[0]
     assert isinstance(input_strategy, OpStrategy)
-    input_ndim = input_strategy.output_ndim
+    input_ndim = input_strategy.ndim
     slice_dim = (
         cast(int, op_schema.args_schema[2]) if len(op_schema.args_schema) > 2 else 0
     )
@@ -367,8 +367,8 @@ def gather_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     dim = cast(int, op_schema.args_schema[1])
     index_strategy = cast(OpStrategy, op_schema.args_schema[2])
 
-    input_shape = input_strategy.output_shape
-    index_shape = index_strategy.output_shape
+    input_shape = input_strategy.shape
+    index_shape = index_strategy.shape
 
     all_mesh_dim_strategies = []
 
@@ -506,7 +506,7 @@ def stack_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     assert isinstance(input_tuple_strategy, TupleStrategy), f"{input_tuple_strategy}"
     first_input_strategy = input_tuple_strategy.childs[0]
     assert isinstance(first_input_strategy, OpStrategy), f"{first_input_strategy}"
-    common_input_ndim = first_input_strategy.output_ndim
+    common_input_ndim = first_input_strategy.ndim
     dim = cast(int, args_schema[1]) if len(args_schema) > 1 else 0
     # normalize the dim to be within the common input ndim
     dim = normalize_dim(dim, common_input_ndim)
@@ -539,7 +539,7 @@ def cat_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     assert isinstance(input_tuple_strategy, TupleStrategy), f"{input_tuple_strategy}"
     first_input_strategy = input_tuple_strategy.childs[0]
     assert isinstance(first_input_strategy, OpStrategy), f"{first_input_strategy}"
-    common_input_ndim = first_input_strategy.output_ndim
+    common_input_ndim = first_input_strategy.ndim
     dim = cast(int, args_schema[1]) if len(args_schema) > 1 else 0
     # normalize the dim to be within the common input ndim
     dim = normalize_dim(dim, common_input_ndim)

@@ -304,9 +304,9 @@ def linear_reduction_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
     assert isinstance(input_strategy, OpStrategy)
     dims = None
     if len(op_schema.args_schema) > 1:
-        dims = _infer_reduction_dims(args_schema[1], input_strategy.output_ndim)
+        dims = _infer_reduction_dims(args_schema[1], input_strategy.ndim)
 
-    reduce_dims = list(range(input_strategy.output_ndim)) if dims is None else dims
+    reduce_dims = list(range(input_strategy.ndim)) if dims is None else dims
 
     keep_dim = len(op_schema.args_schema) > 2 and bool(op_schema.args_schema[2])
     reduction_op = LINEAR_REDUCTION_OP_MAP[op_schema.op]
@@ -330,9 +330,9 @@ def var_reduction_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     assert isinstance(input_strategy, OpStrategy)
     dims = None
     if len(op_schema.args_schema) > 1:
-        dims = _infer_reduction_dims(args_schema[1], input_strategy.output_ndim)
+        dims = _infer_reduction_dims(args_schema[1], input_strategy.ndim)
 
-    reduce_dims = list(range(input_strategy.output_ndim)) if dims is None else dims
+    reduce_dims = list(range(input_strategy.ndim)) if dims is None else dims
 
     keep_dim = cast(bool, op_schema.kwargs_schema.get("keepdim", False))
     return common_reduction_strategy(
@@ -351,8 +351,8 @@ def vector_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     assert isinstance(norm_type, (int, float, str)), f"{norm_type}"
     dim = args_schema[2] if len(args_schema) > 2 else None
     keepdim = args_schema[3] if len(args_schema) > 3 else False
-    dims = _infer_reduction_dims(dim, input_strategy.output_ndim)
-    reduce_dims = list(range(input_strategy.output_ndim)) if dims is None else dims
+    dims = _infer_reduction_dims(dim, input_strategy.ndim)
+    reduce_dims = list(range(input_strategy.ndim)) if dims is None else dims
     return common_reduction_strategy(
         mesh,
         input_strategy,
@@ -375,7 +375,7 @@ def foreach_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> TupleStrateg
     output_tuple_strategy_childs: List[OpStrategy] = []
     for op_strategy in input_tuple_strategy.childs:
         assert isinstance(op_strategy, OpStrategy), f"{op_strategy}"
-        reduce_dims = list(range(op_strategy.output_ndim))
+        reduce_dims = list(range(op_strategy.ndim))
         output_strategy = common_reduction_strategy(
             mesh,
             op_strategy,
@@ -394,7 +394,7 @@ def softmax_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     input_strategy, softmax_dim, _ = op_schema.args_schema
     input_strategy = cast(OpStrategy, input_strategy)
     softmax_dim = cast(int, softmax_dim)
-    softmax_dim = normalize_dim(softmax_dim, input_strategy.output_ndim)
+    softmax_dim = normalize_dim(softmax_dim, input_strategy.ndim)
 
     output_strategy = OpStrategy([])
     for idx, input_placement_strategy in enumerate(input_strategy.strategies):
@@ -436,7 +436,7 @@ def softmax_backward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
     grad_out_strategy = cast(OpStrategy, grad_out_strategy)
     out_strategy = cast(OpStrategy, out_strategy)
     softmax_dim = cast(int, softmax_dim)
-    softmax_dim = normalize_dim(softmax_dim, grad_out_strategy.output_ndim)
+    softmax_dim = normalize_dim(softmax_dim, grad_out_strategy.ndim)
 
     grad_in_strategy = OpStrategy([])
     for grad_out_placement_strat, out_placement_strat in zip(
@@ -485,7 +485,7 @@ def nll_loss_forward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
     target_strategy = cast(OpStrategy, target_strategy)
     reduction = cast(int, reduction)
 
-    input_shape = input_strategy.output_shape
+    input_shape = input_strategy.shape
     channel_dim = 1 if len(input_shape) >= 2 else 0
 
     output_strategy = OpStrategy([])
@@ -610,7 +610,7 @@ def nll_loss_backward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrat
     reduction = cast(int, reduction)
     total_weight_strategy = cast(OpStrategy, total_weight_strategy)
 
-    input_shape = input_strategy.output_shape
+    input_shape = input_strategy.shape
     channel_dim = 1 if len(input_shape) >= 2 else 0
 
     grad_in_strategy = OpStrategy([])
@@ -725,7 +725,7 @@ def layer_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     assert isinstance(normalized_shape, (int, Sequence, torch.Size))
     normalized_size = normalize_to_torch_size(normalized_shape)
 
-    input_ndim = input_strategy.output_ndim
+    input_ndim = input_strategy.ndim
     axis = input_ndim - len(normalized_size)
 
     # we use OpStrategy because the output (out, mean, rstd)
@@ -823,7 +823,7 @@ def layer_norm_bwd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy
 
     assert isinstance(normalized_shape, (int, Sequence, torch.Size))
     normalized_size = normalize_to_torch_size(normalized_shape)
-    input_ndim = input_strategy.output_ndim
+    input_ndim = input_strategy.ndim
     axis = input_ndim - len(normalized_size)
     outer_dims = list(range(axis))
 
