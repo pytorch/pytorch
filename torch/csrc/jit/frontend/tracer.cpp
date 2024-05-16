@@ -44,7 +44,7 @@ template <typename T>
 void genericAddOptionalInput(
     Node* n,
     const char* name,
-    const c10::optional<T>& value) {
+    const std::optional<T>& value) {
   if (value) {
     jit::tracer::addInputs(n, name, *value);
   } else {
@@ -110,7 +110,7 @@ void TracingState::delValue(const IValue& var) {
 Value* getValueTrace(const IValue& var) {
   return getTracingState()->getValue(var);
 }
-static Value* getOptTensorValueTrace(const c10::optional<at::Tensor>& var) {
+static Value* getOptTensorValueTrace(const std::optional<at::Tensor>& var) {
   return getValueTrace(IValue(var));
 }
 Value* TracingState::getValue(const IValue& var) {
@@ -617,7 +617,7 @@ void addInputs(Node* n, const char* name, c10::SymInt value) {
   addInputs(n, name, value.guard_int(__FILE__, __LINE__));
 }
 
-void addInputs(Node* n, const char* name, c10::optional<int64_t> value) {
+void addInputs(Node* n, const char* name, std::optional<int64_t> value) {
   using ArgumentStash = jit::tracer::ArgumentStash;
   if (ArgumentStash::hasValue(name)) {
     Value* v = ArgumentStash::popValue(name);
@@ -633,13 +633,13 @@ void addInputs(Node* n, const char* name, c10::optional<int64_t> value) {
 void addInputs(Node* n, const char* name, bool value) {
   detail::genericAddInput(n, value);
 }
-void addInputs(Node* n, const char* name, const c10::optional<bool>& value) {
+void addInputs(Node* n, const char* name, const std::optional<bool>& value) {
   detail::genericAddOptionalInput(n, name, value);
 }
 void addInputs(Node* n, const char* name, double value) {
   detail::genericAddInput(n, value);
 }
-void addInputs(Node* n, const char* name, const c10::optional<double>& value) {
+void addInputs(Node* n, const char* name, const std::optional<double>& value) {
   detail::genericAddOptionalInput(n, name, value);
 }
 void addInputs(Node* n, const char* name, const at::Scalar& value) {
@@ -654,7 +654,7 @@ void addInputs(Node* n, const char* name, const at::Scalar& value) {
 void addInputs(
     Node* n,
     const char* name,
-    const c10::optional<at::Scalar>& value) {
+    const std::optional<at::Scalar>& value) {
   detail::genericAddOptionalInput(n, name, value);
 }
 void addInputs(Node* n, const char* name, const c10::string_view value) {
@@ -663,7 +663,7 @@ void addInputs(Node* n, const char* name, const c10::string_view value) {
 void addInputs(
     Node* n,
     const char* name,
-    const c10::optional<c10::string_view>& value) {
+    const std::optional<c10::string_view>& value) {
   detail::genericAddOptionalInput(n, name, value);
 }
 void addInputs(Node* n, const char* name, const at::Tensor& value) {
@@ -672,13 +672,13 @@ void addInputs(Node* n, const char* name, const at::Tensor& value) {
 void addInputs(
     Node* n,
     const char* name,
-    const c10::optional<at::Tensor>& value) {
+    const std::optional<at::Tensor>& value) {
   detail::genericAddOptionalInput(n, name, value);
 }
 void addInputs(
     Node* n,
     const char* name,
-    const c10::optional<at::Generator>& value) {
+    const std::optional<at::Generator>& value) {
   Graph* g = n->owningGraph();
 
   if (value.has_value() && value->defined()) {
@@ -706,31 +706,31 @@ void addInputs(Node* n, const char* name, at::MemoryFormat value) {
 void addInputs(
     Node* n,
     const char* name,
-    const c10::optional<at::MemoryFormat>& value) {
+    const std::optional<at::MemoryFormat>& value) {
   detail::genericAddOptionalInput(n, name, value);
 }
 void addInputs(
     Node* n,
     const char* name,
-    const c10::optional<at::Layout>& value) {
+    const std::optional<at::Layout>& value) {
   detail::genericAddOptionalInput(n, name, value);
 }
 void addInputs(
     Node* n,
     const char* name,
-    const c10::optional<at::Device>& value) {
+    const std::optional<at::Device>& value) {
   detail::genericAddOptionalInput(n, name, value);
 }
 void addInputs(
     Node* n,
     const char* name,
-    c10::optional<at::DimnameList> value) {
+    std::optional<at::DimnameList> value) {
   TORCH_CHECK(false, "NYI: Named tensors are not supported with the tracer");
 }
 void addInputs(
     Node* n,
     const char* name,
-    const c10::optional<at::ScalarType>& value) {
+    const std::optional<at::ScalarType>& value) {
   detail::genericAddOptionalInput(n, name, value);
 }
 void addInputs(
@@ -767,7 +767,7 @@ void addInputs(
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    const List<c10::optional<at::Tensor>>& value) {
+    const List<std::optional<at::Tensor>>& value) {
   Graph* g = n->owningGraph();
   Node* list_node = nullptr;
   list_node = g->insertNode(g->createList(
@@ -813,7 +813,7 @@ void addInputs(Node* n, const char* name, c10::SymIntArrayRef value) {
   addInputs(n, name, C10_AS_INTARRAYREF_SLOW(value));
 }
 
-void addInputs(Node* n, const char* name, c10::optional<c10::SymInt> value) {
+void addInputs(Node* n, const char* name, std::optional<c10::SymInt> value) {
   addInputs(
       n,
       name,
@@ -825,7 +825,7 @@ void addInputs(Node* n, const char* name, c10::optional<c10::SymInt> value) {
 void addInputs(
     Node* n,
     const char* name,
-    const c10::optional<at::IntArrayRef>& opt_value) {
+    const std::optional<at::IntArrayRef>& opt_value) {
   detail::genericAddOptionalInput(n, name, opt_value);
 }
 
@@ -869,7 +869,7 @@ void addInputs(Node* n, const char* name, ArrayRef<double> value) {
 void addInputs(
     Node* n,
     const char* name,
-    const c10::optional<c10::ArrayRef<double>>& opt_value) {
+    const std::optional<c10::ArrayRef<double>>& opt_value) {
   detail::genericAddOptionalInput(n, name, opt_value);
 }
 
@@ -995,7 +995,7 @@ void ensureUniqueIfOutOfPlaced(const char* name, const at::Tensor& tensor) {
 }
 void ensureUniqueIfOutOfPlaced(
     const char* name,
-    const c10::optional<at::Tensor>& tensor) {
+    const std::optional<at::Tensor>& tensor) {
   ensureUniqueIfOutOfPlaced(name, tensor.has_value() ? *tensor : at::Tensor());
 }
 

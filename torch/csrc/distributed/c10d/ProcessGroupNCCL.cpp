@@ -352,9 +352,9 @@ std::string dump_nccl_trace() {
 }
 #endif
 
-c10::optional<std::function<void(std::function<void(const std::string&)>)>>&
+std::optional<std::function<void(std::function<void(const std::string&)>)>>&
 get_cpp_trace_dumper() {
-  static c10::optional<
+  static std::optional<
       std::function<void(std::function<void(const std::string&)>)>>
       dumper(c10::nullopt);
   return dumper;
@@ -431,7 +431,7 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
     OpType opType,
     uint64_t seq,
     const char* profilingTitle,
-    const c10::optional<std::vector<at::Tensor>>& inputs,
+    const std::optional<std::vector<at::Tensor>>& inputs,
     bool desyncDebug,
     bool enableTiming,
     DebugLevel distDebugLevel)
@@ -546,7 +546,7 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
 }
 
 bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
-    c10::optional<std::chrono::milliseconds> timeout) {
+    std::optional<std::chrono::milliseconds> timeout) {
   auto currentTimepoint = std::chrono::steady_clock::now();
   auto timeElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
       currentTimepoint - workStartTime_);
@@ -1036,7 +1036,7 @@ void ProcessGroupNCCL::waitForFutureOrTimeout(
 
 void ProcessGroupNCCL::abortCommsFromMap(
     std::unordered_map<std::string, std::shared_ptr<NCCLComm>>& ncclCommsMap,
-    c10::optional<std::string> abortReason) {
+    std::optional<std::string> abortReason) {
   // The process may control multiple devices, loop through the communicators on
   // each device
   for (auto& it : ncclCommsMap) {
@@ -1069,7 +1069,7 @@ void ProcessGroupNCCL::abortCommsFromMap(
 }
 
 // Abort all communicators on this rank
-bool ProcessGroupNCCL::abort(c10::optional<std::string> abortReason) {
+bool ProcessGroupNCCL::abort(std::optional<std::string> abortReason) {
   // Remove record from global ncclCommDevIdxMapMutex before aboarting,
   // so that a new cache segment would not register to already aborded
   // communicators. Note that ncclCommDevIdxMap is a global container which may
@@ -1088,7 +1088,7 @@ bool ProcessGroupNCCL::abort(c10::optional<std::string> abortReason) {
   return true;
 }
 
-void ProcessGroupNCCL::shutdown(c10::optional<std::string> reason) {
+void ProcessGroupNCCL::shutdown(std::optional<std::string> reason) {
   // Don't join threads here since the purpose of this method is to abort all
   // communicators and signal the threads to exit. Joining on the threads could
   // potentially block and hence avoid it in this method.
@@ -1188,7 +1188,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
                                             : heartbeatTimeoutInSec_ * 1000;
   auto lastTimePollStore = std::chrono::steady_clock::now();
   auto lastTimeHeartBeatCheck = std::chrono::steady_clock::now();
-  c10::optional<DumpPipe> dumpPipe = c10::nullopt;
+  std::optional<DumpPipe> dumpPipe = c10::nullopt;
   if (uid_ == 0) {
     // DumpPipe is one per-trainer process, and its convenient to name them
     // after 'global' ranks in the system, So we assume processgroup (uid)==0 is
@@ -2241,7 +2241,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
       opType,
       seq_,
       profilingTitle,
-      profilingTitle != nullptr ? c10::optional<std::vector<at::Tensor>>(inputs)
+      profilingTitle != nullptr ? std::optional<std::vector<at::Tensor>>(inputs)
                                 : c10::nullopt,
       desyncDebug_,
       enableTiming_.load(),
