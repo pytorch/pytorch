@@ -209,6 +209,14 @@ class FSDPParam:
             global_tp_mesh_dim = _mesh_resources.get_parent_mesh_dim(tp_mesh)
             assert global_dp_mesh_dim is not None  # mypy
             assert global_tp_mesh_dim is not None  # mypy
+            # for PP, DP, TP case, dp mesh dim would be 1, tp mesh dim would be 2
+            # DP/TP would only live in the inner most 2-3 dims (HSDP + TP would be 3)
+            dp_tp_mesh_ndim = dp_mesh.ndim + tp_mesh.ndim
+            outer_mesh_ndim = self._global_mesh.ndim - dp_tp_mesh_ndim
+            if self._global_mesh.ndim > dp_tp_mesh_ndim:
+                global_dp_mesh_dim = global_dp_mesh_dim - outer_mesh_ndim
+                global_tp_mesh_dim = global_tp_mesh_dim - outer_mesh_ndim
+
             # TODO: Hard code FSDP + TP; need to support HSDP + TP
             global_placements[global_dp_mesh_dim] = Shard(0)
             global_placements[global_tp_mesh_dim] = self._tp_spec.placements[0]
@@ -237,7 +245,7 @@ class FSDPParam:
         self.padded_sharded_param_size = padded_sharded_param.size()
         if sharded_param.numel() > 0:
             padded_sharded_param[: sharded_param.size(0)].copy_(sharded_param)
-        if self.offload_to_cpu:
+        if self.offload_to_cpu and not padded_sharded_param.is_meta:
             padded_sharded_param = padded_sharded_param.cpu()
             if self.pin_memory:
                 padded_sharded_param = padded_sharded_param.pin_memory()
@@ -576,6 +584,8 @@ class FSDPParam:
                 )
             self.sharded_param = new_param
         local_tensor = new_param._local_tensor
+        if local_tensor.is_meta:
+            return
         padded_sharded_size = self.padded_sharded_param_size
         if local_tensor.size() != padded_sharded_size:
             padded_local_tensor = local_tensor.new_zeros(padded_sharded_size)

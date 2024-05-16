@@ -188,13 +188,13 @@ QScheme qscheme_quant(const Tensor& self) {
 
 Tensor quantized_clone(
     const Tensor& self,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
+    std::optional<c10::MemoryFormat> optional_memory_format) {
   auto memory_format =
       optional_memory_format.value_or(MemoryFormat::Contiguous);
 
   // TODO: To support all features of MemoryFormat::Preserve we need to add
   // _empty_affine_quantized_strided function and use it similarly to
-  // Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat>
+  // Tensor clone(const Tensor& src, std::optional<c10::MemoryFormat>
   // optional_memory_format) if (self.is_non_overlapping_and_dense()) ->
   // _empty_affine_quantized_strided
   if (memory_format == MemoryFormat::Preserve) {

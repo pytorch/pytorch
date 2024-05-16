@@ -32,7 +32,7 @@ class InlinedCallStackSerializer {
  private:
   // module_info = [ClassType.qualifiedName, instance_name]
   c10::IValue serialize_module_instance_info(
-      const c10::optional<ModuleInstanceInfo>& m);
+      const std::optional<ModuleInstanceInfo>& m);
 
   // This caches serialized inlined callstack ptr, since many
   // InlinedCallStackPtr can refer to the same one.
@@ -64,7 +64,7 @@ class InlinedCallStackDeserializer {
       const std::shared_ptr<CompilationUnit>& cu);
 
  private:
-  c10::optional<ModuleInstanceInfo> deserialize_module_instance_info(
+  std::optional<ModuleInstanceInfo> deserialize_module_instance_info(
       const c10::IValue& iv,
       const std::shared_ptr<CompilationUnit>& cu);
 

@@ -28,7 +28,11 @@ from torch._prims_common import (
 )
 
 from . import config, inductor_prims
-from .utils import needs_fallback_due_to_atomic_add_limitations, use_scatter_fallback
+from .utils import (
+    is_gpu,
+    needs_fallback_due_to_atomic_add_limitations,
+    use_scatter_fallback,
+)
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -167,7 +171,7 @@ def convolution_backward(
     groups,
     output_mask,
 ):
-    if not output_mask[2] or grad_output.device.type != "cuda":
+    if not output_mask[2] or not is_gpu(grad_output.device.type):
         return NotImplemented
     grad_bias = aten.sum(grad_output, [0] + list(range(2, grad_output.dim())))
     grad_inp, grad_weight, _ = aten.convolution_backward(
@@ -478,70 +482,6 @@ def linear_dynamic_fp16_unpacked_weight(
     )
 
 
-# The difference between quantize_per_tensor.default and quantize_per_tensor.tensor is
-# scale and zero_point is scalar or scalar tensor
-@register_decomposition(quantized_decomposed.quantize_per_tensor.default)
-def quantize_per_tensor_default_decomp_impl(
-    input: torch.Tensor,
-    scale: float,
-    zero_point: int,
-    quant_min: int,
-    quant_max: int,
-    dtype: torch.dtype,
-) -> torch.Tensor:
-    if input.dtype == torch.bfloat16:
-        input = input.to(torch.float32)
-    inv_scale = 1.0 / scale
-    return torch.clamp(
-        torch.round(input * inv_scale) + zero_point, quant_min, quant_max
-    ).to(dtype)
-
-
-# The difference between dequantize_per_tensor.default and dequantize_per_tensor.tensor is
-# scale and zero_point is scalar or scalar tensor
-@register_decomposition(quantized_decomposed.dequantize_per_tensor.default)
-def dequantize_per_tensor_default_decomp_impl(
-    input: torch.Tensor,
-    scale: float,
-    zero_point: int,
-    quant_min: int,
-    quant_max: int,
-    dtype: torch.dtype,
-) -> torch.Tensor:
-    return (input.to(torch.float32) - zero_point) * scale
-
-
-@register_decomposition(quantized_decomposed.quantize_per_tensor.tensor)
-def quantize_per_tensor_tensor_decomp_impl(
-    input: torch.Tensor,
-    scale: torch.Tensor,
-    zero_point: torch.Tensor,
-    quant_min: int,
-    quant_max: int,
-    dtype: torch.dtype,
-) -> torch.Tensor:
-    if input.dtype == torch.bfloat16:
-        input = input.to(torch.float32)
-    inv_scale = 1.0 / scale
-    return torch.clamp(
-        torch.round(input * inv_scale) + zero_point, quant_min, quant_max
-    ).to(dtype)
-
-
-@register_decomposition(quantized_decomposed.dequantize_per_tensor.tensor)
-def dequantize_per_tensor_tensor_decomp_impl(
-    input: torch.Tensor,
-    scale: torch.Tensor,
-    zero_point: torch.Tensor,
-    quant_min: int,
-    quant_max: int,
-    dtype: torch.dtype,
-) -> torch.Tensor:
-    return (input.to(torch.float32) - zero_point.to(torch.int32)) * scale.to(
-        torch.float32
-    )
-
-
 @register_decomposition(torch.ops.quantized.embedding_bag_byte_unpack)
 def q_embedding_bag_byte_unpack_decomp(packed):
     def bitcast_u8_to_f32(u8):
@@ -657,7 +597,7 @@ def select_decomp_table():
 
 @register_decomposition(aten.masked_scatter)
 def masked_scatter(self, mask, source):
-    if self.device.type == "cuda":
+    if is_gpu(self.device.type):
         # This two-step algorithm is the same as eager CUDA, for eager CPU we
         # use a 1-shot serial iteration.
         self, mask = aten.broadcast_tensors([self, mask])
