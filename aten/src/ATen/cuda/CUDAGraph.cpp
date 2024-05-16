@@ -124,6 +124,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
     } else {
       auto mempool = c10::cuda::MemPool({}, false);
       mempool_id_ = mempool.id_;
+      TORCH_INTERNAL_ASSERT(mempool_id_.first > 0);
     }
   }
 
@@ -155,7 +156,6 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
   AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &capture_id_));
   TORCH_INTERNAL_ASSERT(status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive);
 
-  TORCH_INTERNAL_ASSERT(id_ > 0);
 }
 
 void CUDAGraph::capture_end() {
