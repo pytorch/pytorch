@@ -46,8 +46,12 @@ class CppWrapperCpu(WrapperCodeGen):
         self.supports_intermediate_hooks = False
         self.outputs_need_copy = set()
         self.kernel_callsite_id = count()
-        self.var_array_id = count()  # for different types of local array variable declarations
+        self.var_array_id = (
+            count()
+        )  # for different types of local array variable declarations
         self.declared_var_array_vars = set()
+        self.int_array_id = count()  # for int array local variable declarations
+        self.declared_int_array_vars = set()
         self.tmp_tensor_id = count()  # for tmp tensor local variable declarations
         self.arg_var_id = count()
         self.used_cached_devices = set()
@@ -1474,13 +1478,13 @@ class CppWrapperCpu(WrapperCodeGen):
             return DTYPE_TO_ATEN[dtype]
 
     @functools.lru_cache(None)
-    def codegen_var_array(
+    def codegen_int_array_var(
         self,
-        var_array: str,
+        int_array: str,
         writer=None,
         known_statically=False,
         graph=None,  # for per-graph caching
-        type_hint=None, # ['int64_t', 'int32_t', 'tensor', 'bool']
+        is_bool=False,
     ):
         # Because the memory planning is done in two passes (see the implementation
         # of self.generate), the writeline behavior is different in the two passes.
@@ -1491,13 +1495,45 @@ class CppWrapperCpu(WrapperCodeGen):
             # The first pass codegen uses `self` as the writer
             writer = self
 
+        var = f"int_array_{next(self.int_array_id)}"
+        ctype = "int32_t" if is_bool else "int64_t"
+        if var not in self.declared_int_array_vars:
+            self.declared_int_array_vars.add(var)
+            if known_statically:
+                writer.writeline(f"static constexpr {ctype} {var}[] = {int_array};")
+            else:
+                writer.writeline(f"const {ctype} {var}[] = {int_array};")
+        return var
+
+    @functools.lru_cache(None)
+    def codegen_var_array(
+        self,
+        var_array: str,
+        writer=None,
+        known_statically=False,
+        graph=None,  # for per-graph caching
+        type_hint=None,  # ['int64_t', 'int32_t', 'tensor', 'bool']
+    ):
+        # Because the memory planning is done in two passes (see the implementation
+        # of self.generate), the writeline behavior is different in the two passes.
+        # As a result, the emitted int array declarations may appear in a later
+        # position of the generated code, so the second pass codegen should not
+        # reuse int array declarations generated in the first pass
+        if writer is None:
+            # The first pass codegen uses `self` as the writer
+            writer = self
+        if not type_hint or type_hint in ["bool", "int32_t", "int64_t"]:
+            return self.codegen_int_array_var(
+                var_array,
+                writer,
+                known_statically,
+                graph,
+                is_bool=type_hint == "bool",
+            )
+
         var = f"var_array_{next(self.var_array_id)}"
-        if type_hint == "bool" or type_hint == "int32_t":
-            ctype = "int32_t"
-        elif type_hint == "tensor":
-            ctype = "AtenTensorHandle*"
-        else:
-            ctype = "int64_t"
+        assert type_hint == "tensor"
+        ctype = "AtenTensorHandle*"
         if var not in self.declared_var_array_vars:
             self.declared_var_array_vars.add(var)
             if known_statically:
@@ -2316,11 +2352,17 @@ if (py_{buf_name}.get() == NULL) {{
             if config.abi_compatible:
                 assert len(val) > 0, "Empty array is not supported in C"
                 static = self.is_statically_known_list_of_ints(val)
-                type_hint = 'bool' if isinstance(val[0], bool) else 'int64_t'
-                if type_ is not None and isinstance(type_, torch._C.ListType) and isinstance(
-                    type_.getElementType(), torch._C.OptionalType
-                ) and isinstance(type_.getElementType().getElementType(), torch._C.TensorType) and isinstance(
-                    type_.getElementType().getElementType(), torch._C.TensorType
+                type_hint = "bool" if isinstance(val[0], bool) else "int64_t"
+                if (
+                    type_ is not None
+                    and isinstance(type_, torch._C.ListType)
+                    and isinstance(type_.getElementType(), torch._C.OptionalType)
+                    and isinstance(
+                        type_.getElementType().getElementType(), torch._C.TensorType
+                    )
+                    and isinstance(
+                        type_.getElementType().getElementType(), torch._C.TensorType
+                    )
                 ):
                     type_hint = "tensor"
                     tmp_arg_list = ""

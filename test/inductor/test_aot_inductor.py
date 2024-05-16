@@ -2854,6 +2854,7 @@ CPU_TEST_FAILURES = {
         is_skip=True
     ),
     "test_dup_unbacked_sym_decl": fail_with_and_without_stack_allocation(),
+    "test_dup_unbacked_sym_decl": fail_abi_compatible_cuda(),
     "test_dup_unbacked_sym_decl_with_refinement": fail_with_and_without_stack_allocation(),
     "test_dynamic_cat": fail_minimal_arrayref_interface(),
     # https://github.com/pytorch/pytorch/issues/122978
