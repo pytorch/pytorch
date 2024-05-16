@@ -412,12 +412,17 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             b = torch.tensor([[[456]]])
             return torch.tensor([a, b])
 
+        def f5():
+            a = np.array([1, 2])
+            return torch.tensor([a, a])
+
         optimize = torch.compile(backend="aot_eager", fullgraph=True)
 
         self.assertEqual(f1().shape, optimize(f1)().shape)
         self.assertEqual(f2(), optimize(f2)())
         self.assertEqual(f3(), optimize(f3)())
         self.assertEqual(f4(), optimize(f4)())
+        self.assertEqual(f5(), optimize(f5)())
 
     def test_sym_int_conversion(self):
         def f(x):
