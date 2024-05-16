@@ -1164,6 +1164,32 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return a + b
         return a - b
 
+    @unittest.skipIf(
+        sys.version_info < (3, 9),
+        "SET_UPDATE was added at Python 3.9",
+    )
+    @make_test
+    def test_set_update_bytecode(x):
+        # This produces bytecode SET_UPDATE since python 3.9
+        var = {"apple", "banana", "cherry"}
+        if isinstance(var, set):
+            return x + 1
+        else:
+            return x - 1
+
+    @unittest.skipIf(
+        sys.version_info < (3, 9),
+        "SET_UPDATE was added at Python 3.9",
+    )
+    @make_test
+    def test_set_update_list_with_duplicated_items(x):
+        list1 = ["apple", "banana", "apple"]
+        list2 = ["orange", "banana"]
+        if len({*list1, *list2}) == 3:
+            return x + 1
+        else:
+            return x - 1
+
     @make_test
     def test_set_contains(a, b):
         vals = set(["a", "b", "c"])
