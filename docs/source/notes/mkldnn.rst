@@ -18,7 +18,6 @@ for deep learning applications.
 Users can disable MKLDNN backend by:
 .. code:: python
 
-  # The flag below controls whether enable MKLDNN backend in Pytorch.
   torch.backends.mkldnn.enabled = False
 
 .. _bf16_on_mkldnn:
