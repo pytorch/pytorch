@@ -59,13 +59,14 @@ struct IsVecType<at::vec::Vectorized<T>>: std::true_type {};
 
 template <typename T>
 struct WeightRecp {
+  using scalar_t = typename T::value_type;
   int64_t N;
-  std::vector<T> weight_recps;
+  std::vector<scalar_t> weight_recps;
   WeightRecp(int64_t N) : N(N) {
     weight_recps.reserve(N);
     for (const auto i : c10::irange(N)) {
       weight_recps.push_back(
-          T(static_cast<double>(1) / static_cast<double>(i + 1)));
+          scalar_t(static_cast<double>(1) / static_cast<double>(i + 1)));
     }
   }
 };
@@ -101,7 +102,7 @@ Welford<T> welford_combine(const Welford<T> &acc, T data, const WeightRecp<T>* w
     new_mean = acc.mean +
       ((w == nullptr || acc.index >= w->weight_recps.size())
             ? delta / T(index)
-            : delta * w->weight_recps[acc.index]);
+            : delta * T(w->weight_recps[acc.index]));
   }
   auto new_delta = data - new_mean;
   auto result = Welford<T>{
