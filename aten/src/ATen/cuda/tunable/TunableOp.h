@@ -117,15 +117,16 @@ class TunableOp {
       auto op_sig = Signature();
       auto params_sig = params->Signature();
       TUNABLE_LOG("finding fastest for ", op_sig, '(', params_sig, ')', " out of ", op_names_.size(), " candidates");
-      auto min_duration_ms = std::numeric_limits<double>::infinity();
       std::string id_name = "Default";
 
       // calcaulte a reference answer for numerical check
       ParamsT* reference_params = params->DeepCopy();
-      TORCH_CHECK(ops_[ResultEntry::Default()]->Call(reference_params) == OK);
+      TORCH_CHECK(ops_[id_name]->Call(reference_params) == OK);
 
       // need a copy of params to reuse
       ParamsT* reusable_params = params->DeepCopy();
+      constexpr const int approx_num_iter = 3;
+      auto min_duration_ms = Profile(ops_[id_name].get(), reusable_params, approx_num_iter);
 
       for (size_t i = 0; i < op_names_.size(); i++) {
         auto* candidate = ops_[op_names_[i]].get(); // borrow pointer
@@ -147,7 +148,6 @@ class TunableOp {
         }
 
         // collect a small profile
-        constexpr const int approx_num_iter = 3;
         auto approx_duration = Profile(candidate, reusable_params, approx_num_iter);
         // bail if too slow
         if (approx_duration > 2 * min_duration_ms) {
