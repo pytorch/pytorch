@@ -149,10 +149,6 @@ class TensorVariable(VariableTracker):
             _is_name_set = self.proxy.node.op == "placeholder"
         self._is_name_set: bool = _is_name_set
 
-    def debug_repr(self):
-        # TODO: strip off fake tensor from repr here
-        return repr(self.proxy.node.meta["example_value"])
-
     def as_proxy(self):
         return self.proxy
 
@@ -972,9 +968,6 @@ class SymNodeVariable(VariableTracker):
         "sym_num",
         *VariableTracker._nonvar_fields,
     }
-
-    def debug_repr(self):
-        return repr(self.sym_num)
 
     @classmethod
     def create(cls, tx, proxy, sym_num=None, **options):
