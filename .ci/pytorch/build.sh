@@ -289,8 +289,8 @@ else
         python -mpip install --pre numpy==2.0.0rc1
       fi
       if [[ "$USE_SPLIT_BUILD" != "false" ]]; then
-        WERROR=1 BUILD_LIBTORCH_WHL=1 python setup.py install
-        WERROR=1 BUILD_LIBTORCH_WHL=1 python setup.py clean
+        WERROR=1 BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py install
+        WERROR=1 BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py clean
         WERROR=1 BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py clean
         WERROR=1 BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py install
       else
@@ -298,8 +298,8 @@ else
       fi
     else
       if [[ "$USE_SPLIT_BUILD" != "false" ]]; then
-        BUILD_LIBTORCH_WHL=1 python setup.py install
-        BUILD_LIBTORCH_WHL=1 python setup.py clean
+        BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py install
+        BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py clean
         BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py clean
         BUILD_PYTHON_ONLY=1 BUILD_LIBTORCH_WHL=0 python setup.py install
       else
