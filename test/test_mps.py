@@ -885,7 +885,7 @@ def mps_ops_modifier(ops):
         'round': [torch.float16],
 
         # atomic operations not supported
-        '_unsafe_masked_index_put_accumulate': [torch.int8],
+        '_unsafe_masked_index_put_accumulate': [torch.int8, torch.float16],
     }
 
     if product_version < 14.0:
