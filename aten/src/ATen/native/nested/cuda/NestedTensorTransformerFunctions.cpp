@@ -234,7 +234,7 @@ _scaled_dot_product_flash_attention_nestedtensor_cuda(
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
-    c10::optional<double> scale) {
+    std::optional<double> scale) {
   Tensor query_buffer_reshaped, key_buffer_reshaped, value_buffer_reshaped,
       cumulative_sequence_length_q, cumulative_sequence_length_kv, output_shape;
   int64_t max_seqlen_batch_q{0}, max_seqlen_batch_kv{0};
@@ -285,11 +285,11 @@ _scaled_dot_product_efficient_attention_nestedtensor_cuda(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
-    const c10::optional<at::Tensor>&  attn_bias,
+    const std::optional<at::Tensor>&  attn_bias,
     bool compute_log_sumexp,
     double dropout_p,
     bool is_causal,
-    c10::optional<double> scale) {
+    std::optional<double> scale) {
   Tensor query_buffer_reshaped, key_buffer_reshaped, value_buffer_reshaped,
       cumulative_sequence_length_q, cumulative_sequence_length_kv, output_shape;
   int64_t max_seqlen_batch_q{0};
@@ -344,7 +344,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
     bool is_causal,
     const at::Tensor& philox_seed,
     const at::Tensor& philox_offset,
-    c10::optional<double> scale){
+    std::optional<double> scale){
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
   }

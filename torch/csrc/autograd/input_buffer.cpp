@@ -129,8 +129,8 @@ static void accumulate(
 void InputBuffer::add(
     size_t pos,
     Variable&& var,
-    const c10::optional<c10::Stream>& opt_producer_stream,
-    const c10::optional<c10::Stream>& opt_consumer_stream) {
+    const std::optional<c10::Stream>& opt_producer_stream,
+    const std::optional<c10::Stream>& opt_consumer_stream) {
   TORCH_INTERNAL_ASSERT(pos < buffer.size());
   if (!var.defined()) {
     return;
@@ -159,7 +159,7 @@ void InputBuffer::add(
   //      Accumulation happens on the var device's default stream.
 
   TORCH_INTERNAL_ASSERT(device_of(var));
-  c10::optional<c10::Stream> opt_accumulate_stream = c10::nullopt;
+  std::optional<c10::Stream> opt_accumulate_stream = c10::nullopt;
   const auto device_type = device_of(var).value().type();
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   if (device_of(var)->is_cuda() || device_of(var)->is_privateuseone()) {
@@ -179,7 +179,7 @@ void InputBuffer::add(
         record_stream_any_impl(var, *opt_accumulate_stream);
       }
     } else {
-      c10::optional<c10::Stream> opt_sync_stream = c10::nullopt;
+      std::optional<c10::Stream> opt_sync_stream = c10::nullopt;
       const auto guard = c10::impl::VirtualGuardImpl{device_type};
       if (on_consumer && !on_producer) {
         // (3a)
