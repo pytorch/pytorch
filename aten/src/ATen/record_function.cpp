@@ -43,7 +43,7 @@ RecordFunctionCallbacks::iterator findCallback(
   return std::find_if(entries.begin(), entries.end(), match_handle);
 }
 
-c10::optional<RecordFunctionCallback> extractCallback(
+std::optional<RecordFunctionCallback> extractCallback(
     RecordFunctionCallbacks& entries,
     CallbackHandle handle) {
   auto it = findCallback(entries, handle);
@@ -132,7 +132,7 @@ class CacheEntry {
   // The caller is expected to check `GlobalCallbackManager::get().version()'
   // and call CacheEntry::update() if necessary.
   StepCallbacks getActiveCallbacks();
-  c10::optional<StepCallbacks> getActiveCallbacksUnlessEmpty();
+  std::optional<StepCallbacks> getActiveCallbacksUnlessEmpty();
 
   // Full rebuild. (E.g. during registration)
   void update(const std::vector<RecordFunctionCallback>& callbacks);
@@ -174,7 +174,7 @@ class LocalCallbackManager {
  public:
   const RecordFunctionTLS& getTLS() const;
   StepCallbacks getActiveCallbacks(const RecordScope scope);
-  c10::optional<StepCallbacks> getActiveCallbacksUnlessEmpty(const RecordScope scope);
+  std::optional<StepCallbacks> getActiveCallbacksUnlessEmpty(const RecordScope scope);
 
   void setTLS(const RecordFunctionTLS& tls);
   void seed(uint32_t seed);
@@ -310,7 +310,7 @@ StepCallbacks CacheEntry::getActiveCallbacks() {
   return active_callbacks_;
 }
 
-c10::optional<StepCallbacks> CacheEntry::getActiveCallbacksUnlessEmpty() {
+std::optional<StepCallbacks> CacheEntry::getActiveCallbacksUnlessEmpty() {
   getActiveCallbacksImpl();
   if (C10_LIKELY(active_callbacks_.empty())) {
     return c10::nullopt;
@@ -397,7 +397,7 @@ StepCallbacks LocalCallbackManager::getActiveCallbacks(
   return active_callbacks_[static_cast<size_t>(scope)].getActiveCallbacks();
 }
 
-c10::optional<StepCallbacks> LocalCallbackManager::getActiveCallbacksUnlessEmpty(
+std::optional<StepCallbacks> LocalCallbackManager::getActiveCallbacksUnlessEmpty(
     const RecordScope scope) {
   rebuildActiveCallbacksIfNeeded();
   return active_callbacks_[static_cast<size_t>(scope)].getActiveCallbacksUnlessEmpty();
@@ -585,25 +585,25 @@ size_t RecordFunction::num_outputs() const {
       fn_);
 }
 
-c10::optional<OperatorName> RecordFunction::operator_name() const {
+std::optional<OperatorName> RecordFunction::operator_name() const {
   return std::visit(
       c10::overloaded(
-          [&](const std::string&) -> c10::optional<OperatorName> {
+          [&](const std::string&) -> std::optional<OperatorName> {
             return c10::nullopt;
           },
-          [](const schema_ref_t schema) -> c10::optional<OperatorName> {
+          [](const schema_ref_t schema) -> std::optional<OperatorName> {
             return schema.get().operator_name();
           }),
       fn_);
 }
 
-c10::optional<c10::FunctionSchema> RecordFunction::operator_schema() const {
+std::optional<c10::FunctionSchema> RecordFunction::operator_schema() const {
   return std::visit(
       c10::overloaded(
-          [&](const std::string&) -> c10::optional<c10::FunctionSchema> {
+          [&](const std::string&) -> std::optional<c10::FunctionSchema> {
             return c10::nullopt;
           },
-          [](const schema_ref_t schema) -> c10::optional<c10::FunctionSchema> {
+          [](const schema_ref_t schema) -> std::optional<c10::FunctionSchema> {
             return schema.get();
           }),
       fn_);
@@ -613,7 +613,7 @@ StepCallbacks getStepCallbacks(RecordScope scope) {
   return LocalCallbackManager::get().getActiveCallbacks(scope);
 }
 
-c10::optional<StepCallbacks> getStepCallbacksUnlessEmpty(RecordScope scope) {
+std::optional<StepCallbacks> getStepCallbacksUnlessEmpty(RecordScope scope) {
   return LocalCallbackManager::get().getActiveCallbacksUnlessEmpty(scope);
 }
 

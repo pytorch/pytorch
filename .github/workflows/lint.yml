@@ -43,6 +43,8 @@ jobs:
       submodules: true
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
+        pip install onnx==1.16.0
+        pip install numpy==1.26.4
         export ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT"
         .github/scripts/lintrunner.sh
 
@@ -230,11 +232,11 @@ jobs:
         with:
           submodules: false
           fetch-depth: 1
-      - name: Setup Python 3.5
+      - name: Setup Python 3.6
         if: matrix.test_type == 'older_python_version'
         uses: actions/setup-python@v4
         with:
-          python-version: '3.5'
+          python-version: '3.6'
           architecture: x64
           check-latest: false
           cache: pip

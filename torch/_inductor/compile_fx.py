@@ -29,12 +29,17 @@ from torch._dynamo.utils import (
 from torch._functorch import config as functorch_config
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
-from torch._inductor.cudagraph_utils import BoxedDeviceIndex, get_placeholders
+from torch._inductor.cudagraph_utils import (
+    BoxedDeviceIndex,
+    get_placeholders,
+    log_cudagraph_skip_and_bump_counter,
+)
 
 from torch._inductor.debug import save_args_for_compile_fx_inner
 from torch._inductor.utils import (
     BoxedBool,
     count_tangents,
+    fresh_inductor_cache,
     should_assume_input_aligned,
     tensor_is_aligned,
 )
@@ -68,7 +73,7 @@ if config.is_fbcode():
     from torch._inductor.fb.utils import log_optimus_to_scuba, time_and_log
 else:
     # no-op decorator
-    def time_and_log(attr: str, extra_loggings: Optional[Dict[str, str]] = None):
+    def time_and_log(attr: str):
         return dynamo_utils.identity
 
 
@@ -386,23 +391,48 @@ def fake_tensor_prop(
     return fake_mode
 
 
+def should_use_remote_fx_graph_cache():
+    if config.fx_graph_remote_cache:
+        return True
+    if not config.is_fbcode():
+        return False
+    if torch.version.hip is not None:
+        return False
+
+    try:
+        from triton.runtime.fb_memcache import MEMCACHE_VERSION
+    except ModuleNotFoundError:
+        return False
+
+    return MEMCACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
+        "pytorch/remote_cache:fx_graph_memcache_version"
+    )
+
+
 # pass config dict back to user
 def get_patched_config_dict(config_patches=None) -> Dict[str, Any]:
     with config.patch(config_patches):
         return config.get_config_copy()
 
 
+@functools.wraps
+def with_fresh_cache_if_config(f):
+    if config.force_disable_caches:
+        with fresh_inductor_cache():
+            return f
+    else:
+        return f
+
+
 @DebugContext.wrap
 @torch.utils._python_dispatch._disable_current_modes()
-@time_and_log(
-    attr="compilation time (in seconds)",
-    extra_loggings={"config_dict": str(get_patched_config_dict())},
-)
+@time_and_log(attr="compilation time (in seconds)")
 # Need this decorator for compile_fx_inner even if we already have one for
 # compile_fx. The reason is the compilation for backward graph may happen after
 # compile_fx return and we may want to use the _LazyGraphModule for compiling
 # the backward graph as well.
 @_use_lazy_graph_module(dynamo_config.use_lazy_graph_module)
+@with_fresh_cache_if_config
 @dynamo_utils.dynamo_timed(phase_name="inductor_compile")
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
@@ -474,9 +504,19 @@ def compile_fx_inner(
 
     start = time.time()
 
-    if config.fx_graph_cache and not aot_mode:
+    fx_graph_remote_cache = should_use_remote_fx_graph_cache()
+    if (
+        not config.force_disable_caches
+        and (config.fx_graph_cache or fx_graph_remote_cache)
+        and not aot_mode
+    ):
         compiled_graph = FxGraphCache.load(
-            fx_codegen_and_compile, gm, example_inputs, graph_kwargs
+            fx_codegen_and_compile,
+            gm,
+            example_inputs,
+            graph_kwargs,
+            local=config.fx_graph_cache,
+            remote=fx_graph_remote_cache,
         )
     else:
         compiled_graph = fx_codegen_and_compile(
@@ -488,9 +528,8 @@ def compile_fx_inner(
     # check cudagraph disabling reasons from inductor lowering
     if cudagraphs and compiled_graph.disabled_cudagraphs_reason:
         if "cuda" in compiled_graph.device_types:
-            perf_hint_log.warning(
-                "skipping cudagraphs due to %s",
-                compiled_graph.disabled_cudagraphs_reason,
+            log_cudagraph_skip_and_bump_counter(
+                f"skipping cudagraphs due to {compiled_graph.disabled_cudagraphs_reason}"
             )
         BoxedBool.disable(cudagraphs)
 
@@ -601,10 +640,12 @@ def compile_fx_inner(
                 # prefer better disable_cudagraphs_reason bc stack trace
                 # TODO: migrate all disable reasons to stack trace, refactor
                 if compiled_graph.disabled_cudagraphs_reason:
-                    perf_hint_log.warning(compiled_graph.disabled_cudagraphs_reason)
+                    log_cudagraph_skip_and_bump_counter(
+                        compiled_graph.disabled_cudagraphs_reason
+                    )
                 else:
-                    perf_hint_log.warning(
-                        "skipping cudagraphs due to %s", cudagraph_fail_reasons
+                    log_cudagraph_skip_and_bump_counter(
+                        f"skipping cudagraphs due to {cudagraph_fail_reasons}"
                     )
 
     # cudagraphs does its own aligning of inputs
@@ -703,7 +744,9 @@ def fx_codegen_and_compile(
             payload_fn=lambda: gm.print_readable(print_output=False),
         )
         if config.is_fbcode():
-            log_optimus_to_scuba()
+            log_optimus_to_scuba(
+                extra_logging={"pt2_configs": str(get_patched_config_dict())}
+            )
 
     with V.set_fake_mode(fake_mode), maybe_disable_comprehensive_padding(
         example_inputs
@@ -1385,7 +1428,6 @@ def compile_fx(
 
     @compile_time_strobelight_meta(phase_name="bw_compiler")
     @dynamo_utils.dynamo_timed
-    @dynamo_utils.maybe_cprofile
     def bw_compiler(model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
         user_visible_outputs = {}
 
