@@ -190,7 +190,6 @@ class TestUnbackedSymints(InductorTestCase):
 
     @skipCUDAIf(not HAS_CUDA, "requires cuda")
     @dynamo_config.patch({"capture_scalar_outputs": True})
-    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_vertical_pointwise_reduction_fusion(self, device):
         # Tests fusing a pointwise & reduction op with unbacked numel/rnumel.
         def fn(x, y, repeats):
@@ -198,7 +197,7 @@ class TestUnbackedSymints(InductorTestCase):
             unbacked = y.expand(u0, *y.shape)  # [u0, 1, 16]
 
             # Note: We add x to both pointwise and reduction. Otherwise, the
-            # scheduler will refuse to fuse ops whose common buffer has
+            # scheduler will refuse to fuse ops whose only common buffer has
             # unbacked symints.
             pointwise = unbacked + x
             reduction = torch.sum(pointwise + x)
