@@ -33,7 +33,7 @@ static inline void maybe_initialize_device(at::Device& device) {
   }
 }
 
-static inline void maybe_initialize_device(c10::optional<at::Device>& device) {
+static inline void maybe_initialize_device(std::optional<at::Device>& device) {
   if (!device.has_value()) {
     return;
   }
