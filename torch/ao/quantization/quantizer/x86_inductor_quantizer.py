@@ -224,7 +224,6 @@ def _node_checker_for_module_name_qconfig(nodes, filter_fn):
         log.warning("skip nodes %s", nodes)
         skip_annotate = True
         return skip_annotate
-    # import pdb; pdb.set_trace()
     log.warning("not skip nodes %s", nodes)
     return skip_annotate
 
@@ -728,6 +727,10 @@ class X86InductorQuantizer(Quantizer):
 
         for annotator_func in annotators.values():
             annotator_func(self, model, quantization_config, filter_fn)
+        
+        self._annotate_propagation_quantizable_pattern_entry(model, quantization_config, filter_fn)
+        self._annotate_output_for_int8_in_int8_out_pattern_entry(model, quantization_config, filter_fn)
+
         return model
 
     def _annotate_quantization_by_module_name_qconfig(
@@ -788,15 +791,15 @@ class X86InductorQuantizer(Quantizer):
         # Go through all the nodes from start to end.
         # Recipe refer to https://github.com/intel/intel-extension-for-pytorch/blob/
         # 90d19323d96afc53fcc22ba5a7bb3fb07fdd6c1c/intel_extension_for_pytorch/quantization/_recipe.py#L538
-        for node in model.graph.nodes:
-            self._annotate_propagation_quantizable_pattern(node)
+        # for node in model.graph.nodes:
+        #     self._annotate_propagation_quantizable_pattern(node)
 
-        # Step3: For quantizable ops, such as maxpool2d, we need to quantize its output if it is quantized
-        # in inputs. So, we can fuse dq-operator-q into a quantized op.
-        # Refer to https://github.com/intel/intel-extension-for-pytorch/blob/
-        # 90d19323d96afc53fcc22ba5a7bb3fb07fdd6c1c/intel_extension_for_pytorch/quantization/_recipe.py#L487
-        for node in model.graph.nodes:
-            self._annotate_output_for_int8_in_int8_out_pattern(node)
+        # # Step3: For quantizable ops, such as maxpool2d, we need to quantize its output if it is quantized
+        # # in inputs. So, we can fuse dq-operator-q into a quantized op.
+        # # Refer to https://github.com/intel/intel-extension-for-pytorch/blob/
+        # # 90d19323d96afc53fcc22ba5a7bb3fb07fdd6c1c/intel_extension_for_pytorch/quantization/_recipe.py#L487
+        # for node in model.graph.nodes:
+        #     self._annotate_output_for_int8_in_int8_out_pattern(node)
 
         return model
 
@@ -1251,7 +1254,8 @@ class X86InductorQuantizer(Quantizer):
             self._annotate_conv_node_helper(conv_node, True, quantization_config)
 
     def _annotate_maxpool2d(
-        self, node: Node, quantization_config: QuantizationConfig
+        self, node: Node, quantization_config: QuantizationConfig,
+        filter_fn
     ) -> None:
         if node.target is not torch.ops.aten.max_pool2d.default:
             return
@@ -1261,6 +1265,8 @@ class X86InductorQuantizer(Quantizer):
                 maxpool_node,
             ]
         ):
+            return
+        if _skip_annotate([maxpool_node], filter_fn):
             return
         input_node = maxpool_node.args[0]
         assert isinstance(input_node, Node)
@@ -1298,14 +1304,20 @@ class X86InductorQuantizer(Quantizer):
             _annotated=True,
             _is_output_of_quantized_pattern=True,
         )
-
-    def _annotate_propagation_quantizable_pattern(self, node: Node) -> None:
+    
+    def _annotate_propagation_quantizable_pattern_entry(self, model, quantization_config, filter_fn):
+        for node in model.graph.nodes:
+            # if _skip_annotate([node], filter_fn):
+            #     continue
+            self._annotate_propagation_quantizable_pattern(node, quantization_config, filter_fn)
+    
+    def _annotate_propagation_quantizable_pattern(self, node: Node, quantization_config, filter_fn) -> None:
         # Propagate annotation to quantizable patterns.
         if (
             (node.target in propagation_quantizable_ops)
             and (not _is_any_annotated([node]))
             and (node.op == "call_function")
-            and (quantization_config := self._get_aten_operator_qconfig(node.target))  # type: ignore[arg-type]
+            # and (quantization_config := self._get_aten_operator_qconfig(node.target))  # type: ignore[arg-type]
         ):
 
             def is_all_inputs_connected_to_quantized_op(input_nodes):
@@ -1320,7 +1332,7 @@ class X86InductorQuantizer(Quantizer):
                 input_nodes_to_check = [node.all_input_nodes[0]]
                 if not is_all_inputs_connected_to_quantized_op(input_nodes_to_check):
                     return
-                self._annotate_maxpool2d(node, quantization_config)
+                self._annotate_maxpool2d(node, quantization_config, filter_fn)
                 return
             elif node.target is torch.ops.aten.cat.default:
                 input_nodes_to_check = node.all_input_nodes
@@ -1361,8 +1373,18 @@ class X86InductorQuantizer(Quantizer):
                 edge_or_node
             )
         return
-
-    def _annotate_output_for_int8_in_int8_out_pattern(self, node: Node) -> None:
+    
+    
+    def _annotate_output_for_int8_in_int8_out_pattern_entry(self, model, quantization_config, filter_fn):
+        for node in model.graph.nodes:
+            # if _skip_annotate([node], filter_fn):
+            #     continue
+            # if quantization_config is None:
+            #     return
+            
+            self._annotate_output_for_int8_in_int8_out_pattern(node, quantization_config, filter_fn)
+            
+    def _annotate_output_for_int8_in_int8_out_pattern(self, node: Node, quantization_config, filter_fn) -> None:
         r"""
         Check and insert observer at output of node in int8_in_int8_out_ops if needed.
         Recipe refers to https://github.com/intel/intel-extension-for-pytorch/blob/
@@ -1382,6 +1404,9 @@ class X86InductorQuantizer(Quantizer):
                     ]
                 ):
                     return
+                # !!! Do not skip this, this annotator annotate a annotated node????
+                # if _skip_annotate([maxpool_node], filter_fn):
+                #     return
                 # Get the quantization_annotation from getitem_node
                 maxpool_node_quantization_annotation = (
                     maxpool_node.meta[QUANT_ANNOTATION_KEY]
