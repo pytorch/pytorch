@@ -169,7 +169,7 @@ void IRParser::parseOperatorOutputs(std::vector<VarWithType>* outs) {
 ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
   auto token = L.cur();
   std::string str;
-  std::pair<TypePtr, c10::optional<c10::AliasInfo>> type_alias;
+  std::pair<TypePtr, std::optional<c10::AliasInfo>> type_alias;
   ParsedLiteral r;
   switch (token.kind) {
     case TK_STRINGLITERAL:
