@@ -337,7 +337,8 @@ def should_pad_bench(
         ):
             return False
 
-        return True
+        if torch._inductor.config.force_shape_pad:
+            return True
 
         if not has_triton():
             return False
