@@ -373,6 +373,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._add_relu_",
         "torch._add_relu",
         "torch._addmm_activation",
+        "torch._aminmax",
         "torch._amp_foreach_non_finite_check_and_unscale_",
         "torch._amp_update_scale_",
         "torch._assert_async",
