@@ -1066,7 +1066,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         else:
                             raise e
                     except ImportError:
-                        raise e
+                        raise e from None
 
                 executor.shutdown(wait=True)
 
@@ -1275,7 +1275,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         else:
                             raise e
                     except ImportError:
-                        raise e
+                        raise e from None
 
                 timings[choice] = timing
 

@@ -6304,7 +6304,7 @@ class TestDelMisc(TestCase):
         except TypeError:
             pass
         except Exception:
-            raise AssertionError
+            raise AssertionError from None
 
 
 class TestConversion(TestCase):
