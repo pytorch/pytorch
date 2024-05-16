@@ -230,7 +230,7 @@ std::vector<Tensor> atleast_3d(TensorList tensors) {
   return result;
 }
 
-Tensor chalf(const Tensor& self, c10::optional<MemoryFormat> memory_format) {
+Tensor chalf(const Tensor& self, std::optional<MemoryFormat> memory_format) {
   return self.to(kComplexHalf, false, false, memory_format);
 }
 

@@ -502,15 +502,18 @@ class FakifiedOutWrapper(CompilerWrapper):
         fwd_output_strides = self.fwd_output_strides
         if not fwd_output_strides:
             return out
-        with TracingContext.get().fake_mode.shape_env.suppress_guards():
-            for i in range(len(out)):
-                if not isinstance(out[i], Tensor):
-                    continue
-                if all(
-                    s1 == s2 for s1, s2 in zip(out[i].stride(), fwd_output_strides[i])
-                ):
-                    continue
-                out[i] = out[i].as_strided(out[i].shape, fwd_output_strides[i])
+
+        from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+        for i in range(len(out)):
+            if not isinstance(out[i], Tensor):
+                continue
+            if all(
+                statically_known_true(s1 == s2)
+                for s1, s2 in zip(out[i].stride(), fwd_output_strides[i])
+            ):
+                continue
+            out[i] = out[i].as_strided(out[i].shape, fwd_output_strides[i])
         return out
 
     # To be called post compile
@@ -1353,6 +1356,19 @@ class AutogradLazyBackwardCompileInfo:
 # This is wrapped in a class just for namespacing purposes
 # No need to make it into an actual CompilerWrapper because it doesn't fit the abstract as cleanly
 class AOTDispatchAutograd:
+    @staticmethod
+    def _force_contiguous(x):
+        if not isinstance(x, torch.Tensor):
+            return x
+        x = x.contiguous()
+        if not is_traceable_wrapper_subclass(x):
+            return x
+        for attr in x.__tensor_flatten__()[0]:  # type: ignore[attr-defined]
+            elem = getattr(x, attr)
+            if not elem.is_contiguous():
+                setattr(x, attr, elem.contiguous())
+        return x
+
     # See Note [Tangents must be contiguous, Part 2]
     @staticmethod
     def coerce_runtime_tangent(x, metadata_tensor):
@@ -1368,31 +1384,18 @@ class AOTDispatchAutograd:
         if not hasattr(x, "__coerce_same_metadata_as_tangent__"):
             raise RuntimeError(
                 f"""
-    During the backward, we encountered a tensor subclass where we guessed its
-    metadata incorrectly.
+During the backward, we encountered a tensor subclass where we guessed its
+metadata incorrectly.
 
-    Expected metadata: {str(expected_tangent_metadata)}
+Expected metadata: {str(expected_tangent_metadata)}
 
-    Runtime metadata: {str(runtime_tangent_metadata)}
+Runtime metadata: {str(runtime_tangent_metadata)}
 
-    shape: {str(x.shape)}
-    To fix this, your tensor subclass must implement the dunder method __force_to_same_metadata__.
-    """
+shape: {str(x.shape)}
+To fix this, your tensor subclass must implement the dunder method __force_to_same_metadata__.
+"""
             )
         return x.__coerce_same_metadata_as_tangent__(metadata_tensor)  # type: ignore[attr-defined]
-
-    @staticmethod
-    def _force_contiguous(x):
-        if not isinstance(x, torch.Tensor):
-            return x
-        x = x.contiguous()
-        if not is_traceable_wrapper_subclass(x):
-            return x
-        for attr in x.__tensor_flatten__()[0]:  # type: ignore[attr-defined]
-            elem = getattr(x, attr)
-            if not elem.is_contiguous():
-                setattr(x, attr, elem.contiguous())
-        return x
 
     @staticmethod
     def post_compile(
