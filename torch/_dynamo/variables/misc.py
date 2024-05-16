@@ -633,9 +633,9 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "queue_callback":
-            return variables.UserFunctionVariable(torch._dynamo.external_utils.queue_callback, source=self.source).call_function(
-                tx, args, kwargs
-            )
+            return variables.UserFunctionVariable(
+                torch._dynamo.external_utils.queue_callback, source=self.source
+            ).call_function(tx, args, kwargs)
         else:
             unimplemented(f"torch._C._ImperativeEngine method: {name}")
 

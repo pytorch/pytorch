@@ -99,6 +99,7 @@ def untyped_storage_size(x: torch.Tensor):
 
 final_callbacks = []
 
+
 def queue_callback(cb):
     final_callbacks.append(cb)
 

@@ -1,6 +1,5 @@
 import contextlib
 import functools
-import threading
 from typing import List, Optional, TYPE_CHECKING
 
 import torch
