@@ -290,14 +290,16 @@ else
       fi
       if [[ "$USE_SPLIT_BUILD" != "false" ]]; then
         WERROR=1 BUILD_LIBTORCH_WHL=1 python setup.py install
-        WERROR=1 BUILD_PYTHON_ONLY=1 python setup.py install
+        WERROR=1 BUILD_LIBTORCH_WHL=1 python setup.py clean
+        WERROR=1 BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py install
       else
         WERROR=1 python setup.py bdist_wheel
       fi
     else
       if [[ "$USE_SPLIT_BUILD" != "false" ]]; then
         BUILD_LIBTORCH_WHL=1 python setup.py install
-        BUILD_PYTHON_ONLY=1 python setup.py install
+        BUILD_LIBTORCH_WHL=1 python setup.py clean
+        BUILD_PYTHON_ONLY=1 BUILD_LIBTORCH_WHL=0 python setup.py install
       else
         python setup.py bdist_wheel
       fi
