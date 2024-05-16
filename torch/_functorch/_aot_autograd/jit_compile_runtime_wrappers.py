@@ -10,7 +10,6 @@ in `runtime_wrappers`.
 import logging
 from contextlib import nullcontext
 
-from functools import wraps
 from typing import Any, List, Sequence
 
 import torch
@@ -27,12 +26,13 @@ from .dispatch_and_compile_graph import (
     aot_dispatch_autograd_graph,
     aot_dispatch_base_graph,
 )
-from .logging_utils import describe_input, format_guard_bug_msg, track_graph_compiling
+from .logging_utils import track_graph_compiling
 
 from .runtime_wrappers import (
     AOTDispatchAutograd,
     AOTDispatchSubclassWrapper,
     AutogradLazyBackwardCompileInfo,
+    DebugAssertWrapper,
     FakifiedOutWrapper,
     FunctionalizedRngRuntimeWrapper,
     RuntimeWrapper,
@@ -493,34 +493,12 @@ def aot_dispatch_autograd(
         fw_metadata=fw_metadata,
     )
 
-    if not config.debug_assert:
-        return compiled_function
+    if config.debug_assert:
+        flat_requires_grad = [
+            a.requires_grad if isinstance(a, Tensor) else None for a in flat_args
+        ]
+        compiled_function = DebugAssertWrapper(
+            flat_requires_grad=flat_requires_grad
+        ).post_compile(compiled_function, aot_config, runtime_metadata=fw_metadata)
 
-    flat_requires_grad = [
-        a.requires_grad if isinstance(a, Tensor) else None for a in flat_args
-    ]
-
-    @wraps(compiled_function)
-    def debug_compiled_function(args: List[Any]):
-        # TODO: Check aliasing relationships
-        # TODO: Check strides for metadata mutation
-        # (NB: ideally, this logic is factored out of this function and
-        # you move these debug checks there)
-
-        # Check requires grad.  Bad case is when we compiled with
-        # requires_grad = False, but input requires_grad = True
-        # (vice versa is OK; we compute a gradient and then throw
-        # it away when it hits the input.)
-        for i, a in enumerate(args):
-            can_require_grad = flat_requires_grad[i]
-            if can_require_grad is None:
-                assert not isinstance(a, Tensor)
-            elif not can_require_grad:
-                assert not a.requires_grad, format_guard_bug_msg(
-                    aot_config,
-                    f"{describe_input(i, aot_config)} would not require grad",
-                )
-
-        return compiled_function(args)
-
-    return debug_compiled_function
+    return compiled_function
