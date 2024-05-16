@@ -411,18 +411,36 @@ class Schedule1F1B(PipelineScheduleSingle):
         fwd_sends_to_wait: List[dist.Work] = []
         bwd_sends_to_wait: List[dist.Work] = []
 
+        def is_forward_step(i):
+            return i < self._n_microbatches
+
+        def is_backward_step(i):
+            return i >= warmup_steps and self._has_backward
+
+        def is_1f1b_step(i):
+            return is_forward_step(i) and is_backward_step(i)
+
+        def is_warmup_step(i):
+            return is_forward_step(i) and not is_backward_step(i)
+
+        def is_cooldown_step(i):
+            return not is_forward_step(i) and is_backward_step(i)
+
+        def should_coalesce_fwd_send_bwd_recv(fwd_send_i):
+            return is_1f1b_step(fwd_send_i) or (is_warmup_step(fwd_send_i) and is_cooldown_step(fwd_send_i + 1))
+
+        def should_coalesce_bwd_send_fwd_recv(bwd_send_i):
+            # The backward send to prev stage should be coalesced with the fwd recv from the previous stage
+            return bwd_send_i >= warmup_steps and is_1f1b_step(bwd_send_i + 1)
+
         # bwd chunk counter
         bwd_mb_index = 0
         self._stage._configure_data_parallel_mode(last_backward=False)
         for i in range(total_steps):
-            if i < self._n_microbatches:
-                # forward
+            if is_forward_step(i):
                 with record_function(f"Forward {i}"):
                     ops = self._stage.get_fwd_recv_ops()
-                    if i >= warmup_steps + 1 and self._has_backward:
-                        # Note: coalesced bwd-send/fwd-recv
-                        # "i >= warmup_steps + 1" means "we ran a backward last iteration"
-                        # the backward send to prev stage should be coalesced with the fwd recv from the previous stage
+                    if should_coalesce_bwd_send_fwd_recv(i - 1):
                         ops.extend(self._stage.get_bwd_send_ops())
 
                     works = sorted_batch_isend_irecv(ops)
@@ -431,20 +449,23 @@ class Schedule1F1B(PipelineScheduleSingle):
 
                     output = self._stage.forward_one_chunk(arg_mbs[i], kwarg_mbs[i])  # type: ignore[index]
 
-                    ops = self._stage.get_fwd_send_ops()
-                    works = sorted_batch_isend_irecv(ops)
-                    fwd_sends_to_wait.extend(works.values())
+                    if not should_coalesce_fwd_send_bwd_recv(i):
+                        ops = self._stage.get_fwd_send_ops()
+                        works = sorted_batch_isend_irecv(ops)
+                        fwd_sends_to_wait.extend(works.values())
 
                 self._maybe_compute_loss(self._stage, output, target_mbs, i)
 
-            if i >= warmup_steps and self._has_backward:
+            if is_backward_step(i):
                 self._stage._configure_data_parallel_mode(
                     last_backward=(i == total_steps - 1)
                 )
-
-                # backward
                 with record_function(f"Backward {bwd_mb_index}"):
                     ops = self._stage.get_bwd_recv_ops()
+
+                    if should_coalesce_fwd_send_bwd_recv(i - 1):
+                        ops.extend(self._stage.get_fwd_send_ops())
+
                     works = sorted_batch_isend_irecv(ops)
                     for work in works.values():
                         work.wait()
@@ -452,7 +473,7 @@ class Schedule1F1B(PipelineScheduleSingle):
                     loss = self._maybe_get_loss(self._stage, bwd_mb_index)
                     self._stage.backward_one_chunk(loss=loss)
 
-                    if i + 1 >= self._n_microbatches:
+                    if should_coalesce_bwd_send_fwd_recv(i):
                         # see Note: coalesced bwd-send/fwd-recv
                         ops = self._stage.get_bwd_send_ops()
                         works = sorted_batch_isend_irecv(ops)
