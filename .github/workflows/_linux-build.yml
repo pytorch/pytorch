@@ -119,7 +119,6 @@ jobs:
         run: |
           tag=${ECR_DOCKER_IMAGE##*/}
           echo "docker pull ghcr.io/pytorch/ci-image:${tag/:/-}"
-          echo "docker-image=${DOCKER_IMAGE_NAME}" >> "${GITHUB_OUTPUT}"
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.3
