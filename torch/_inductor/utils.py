@@ -1002,7 +1002,7 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
     if not config.cpp.weight_prepack:
         return False
 
-    layout_dtypes = [torch.float32]
+    layout_dtypes = [torch.float32, torch.bfloat16, torch.half]
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2)
     # TODO(jgong5): support dynamic shapes for n or k
     if has_free_symbols((n, k)):
@@ -1010,7 +1010,13 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
     if isinstance(mat2, ir.BaseView):
         mat2 = mat2.unwrap_view()
     micro_gemm = create_micro_gemm(
-        "micro_gemm", m, n, k, layout.dtype, num_threads=parallel_num_threads()
+        "micro_gemm",
+        m,
+        n,
+        k,
+        input_dtype=layout.dtype,
+        output_dtype=torch.float,
+        num_threads=parallel_num_threads(),
     )
     # TODO(jgong5): support n % n_block_size != 0
     return (
@@ -1638,6 +1644,10 @@ def aoti_compile_with_persistent_cache(
                 options=options,
                 remove_runtime_assertions=remove_runtime_assertions,
                 disable_constraint_solver=disable_constraint_solver,
+                # Some operations may have non-Tensor parameters like int, float, bool. These
+                # non-Tensor parameters will not be the input of the graph. Therefore, we do
+                # need to keep the same signature.
+                same_signature=False,
             )
 
             kernel_metadata_items = []
