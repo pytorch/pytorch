@@ -787,29 +787,27 @@ class BuiltinVariable(VariableTracker):
 
                 def constant_fold_handler(tx, args, kwargs):
                     # fast path
-                    try:
-                        res = fn(
+                    return builder(
+                        tx,
+                        fn(
                             *[x.as_python_constant() for x in args],
-                        )
-                    except Exception as exc:
-                        unimplemented(f"constant fold exception: {repr(exc)}")
-                    return builder(tx, res)
+                        ),
+                    )
 
             else:
 
                 def constant_fold_handler(tx, args, kwargs):
                     # path with a runtime check
                     if check_unspec_or_constant_args(args, kwargs):
-                        try:
-                            res = fn(
+                        return builder(
+                            tx,
+                            fn(
                                 *[x.as_python_constant() for x in args],
                                 **{
                                     k: v.as_python_constant() for k, v in kwargs.items()
                                 },
-                            )
-                        except Exception as exc:
-                            unimplemented(f"constant fold exception: {repr(exc)}")
-                        return builder(tx, res)
+                            ),
+                        )
 
             handlers.append(constant_fold_handler)
 
