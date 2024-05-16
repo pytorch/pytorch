@@ -332,7 +332,10 @@ class CKGemmTemplate(CKTemplate):
         # which are very similar to each other. Randomizing the choice seems to solve this.
         random.seed(-11)
         chosen_instances = (
-            random.sample(filtered_instances, config.rocm.n_max_profiling_configs)
+            random.sample(
+                filtered_instances,
+                min(len(filtered_instances), config.rocm.n_max_profiling_configs),
+            )
             if config.rocm.n_max_profiling_configs
             else filtered_instances
         )

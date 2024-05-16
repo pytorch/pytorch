@@ -117,6 +117,42 @@ class TestCKBackend(TestCase):
             Y = mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
 
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CK path setup")
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
+    def test_max_autotune_precompile_non_contiguous(self, max_autotune_gemm_backends):
+        """
+        Make sure the ck template can work with non-contiguous inputs
+        """
+
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        tensor_options = {"device": "cuda", "dtype": torch.float16}
+
+        a = torch.empty_strided((50257, 32768), (1, 50304), **tensor_options)
+        b = torch.empty_strided((32768, 768), (768, 1), **tensor_options)
+
+        assert "rocm" in dir(config)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": True,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "compile_threads": 2,
+                "rocm.n_max_profiling_configs": 2,
+            }
+        ):
+
+            @torch.compile(dynamic=False)
+            def mm(a, b):
+                return a @ b
+
+            Y_compiled = mm(a, b)
+            Y_eager = a @ b
+            torch.testing.assert_close(Y_compiled, Y_eager)
+
 
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
