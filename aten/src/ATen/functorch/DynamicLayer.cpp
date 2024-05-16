@@ -387,7 +387,7 @@ bool isInplaceOp(const FunctionSchema& schema) {
   return return_alias_info && return_alias_info->isWrite();
 }
 
-c10::optional<size_t> findAliasedOutput(const FunctionSchema& schema, const int64_t immutable_input_idx) {
+std::optional<size_t> findAliasedOutput(const FunctionSchema& schema, const int64_t immutable_input_idx) {
   for (size_t res_idx = 0; res_idx != schema.returns().size(); ++res_idx) {
     if (schema.may_contain_alias(SchemaArgument(SchemaArgType::input, immutable_input_idx), SchemaArgument(SchemaArgType::output, res_idx))) {
       return res_idx; // for everything currently in native_functions, each input aliases at most one output (tensor list counts as one output)

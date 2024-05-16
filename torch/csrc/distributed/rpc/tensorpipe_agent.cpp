@@ -111,7 +111,7 @@ std::vector<c10::Stream> getCurrentStreamsForDevices(
 
 std::vector<c10::Device> getDevicesOfTensors(
     const std::vector<torch::Tensor>& tensors) {
-  c10::optional<c10::impl::VirtualGuardImpl> impl;
+  std::optional<c10::impl::VirtualGuardImpl> impl;
   size_t deviceCount = 0;
   std::vector<bool> indexBitset;
   for (const torch::Tensor& tensor : tensors) {

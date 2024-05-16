@@ -894,6 +894,12 @@ def _all_to_all_single_meta(
         return input.new_empty(out_size)
 
 
+def _all_gather_into_tensor_out_native_meta(input, group_size, group_name, *, out):
+    shape = list(input.size())
+    shape[0] *= group_size
+    return input.new_empty(shape)
+
+
 def _all_gather_into_tensor_native_meta(input, group_size, group_name):
     shape = list(input.size())
     shape[0] *= group_size
@@ -932,6 +938,9 @@ if not torch._running_with_deploy():
     lib_impl.impl("all_reduce_coalesced", _all_reduce_coalesced_meta, "Meta")
     lib_impl.impl("all_reduce_coalesced_", _all_reduce_coalesced__meta, "Meta")
     lib_impl.impl("wait_tensor", _wait_tensor_meta, "Meta")
+    lib_impl.impl(
+        "all_gather_into_tensor_out", _all_gather_into_tensor_out_native_meta, "Meta"
+    )
     lib_impl.impl("all_gather_into_tensor", _all_gather_into_tensor_native_meta, "Meta")
     lib_impl.impl(
         "all_gather_into_tensor_coalesced",

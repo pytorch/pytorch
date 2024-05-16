@@ -27,9 +27,9 @@ class TORCH_API LLVMCodeGen : public CodeGen {
       at::Device device = at::kCPU,
       const std::string& kernel_func_name = "func",
       Dtype dtype = kInt,
-      c10::optional<std::string> triple = c10::nullopt,
-      c10::optional<std::string> cpu = c10::nullopt,
-      c10::optional<std::string> attrs = c10::nullopt);
+      std::optional<std::string> triple = c10::nullopt,
+      std::optional<std::string> cpu = c10::nullopt,
+      std::optional<std::string> attrs = c10::nullopt);
   explicit LLVMCodeGen(StmtPtr stmt);
 
   LLVMCodeGen() = delete;
@@ -48,10 +48,10 @@ class TORCH_API LLVMCodeGen : public CodeGen {
   at::Tensor empty_strided(
       c10::IntArrayRef size,
       c10::IntArrayRef stride,
-      c10::optional<c10::ScalarType> dtype_opt,
-      c10::optional<c10::Layout> layout_opt,
-      c10::optional<c10::Device> device_opt,
-      c10::optional<bool> pin_memory_opt) override;
+      std::optional<c10::ScalarType> dtype_opt,
+      std::optional<c10::Layout> layout_opt,
+      std::optional<c10::Device> device_opt,
+      std::optional<bool> pin_memory_opt) override;
 
   template <typename T>
   T value() {
@@ -126,14 +126,14 @@ struct TORCH_API LLVMCodeGenBuilder {
   at::Device device_ = at::kCPU;
   std::string kernelFuncName_ = "func";
   Dtype dtype_ = kInt;
-  c10::optional<std::string> triple_ = c10::nullopt;
-  c10::optional<std::string> cpu_ = c10::nullopt;
-  c10::optional<std::string> attrs_ = c10::nullopt;
+  std::optional<std::string> triple_ = c10::nullopt;
+  std::optional<std::string> cpu_ = c10::nullopt;
+  std::optional<std::string> attrs_ = c10::nullopt;
 };
 
-TORCH_API c10::optional<std::string>& LLVMTargetTriple();
-TORCH_API c10::optional<std::string>& LLVMTargetCPU();
-TORCH_API c10::optional<std::string>& LLVMTargetAttrs();
+TORCH_API std::optional<std::string>& LLVMTargetTriple();
+TORCH_API std::optional<std::string>& LLVMTargetCPU();
+TORCH_API std::optional<std::string>& LLVMTargetAttrs();
 TORCH_API bool& LLVMAOTWorkflow();
 
 } // namespace tensorexpr
