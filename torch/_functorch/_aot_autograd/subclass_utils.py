@@ -8,7 +8,7 @@ from typing import Any, List, Optional, Tuple, Union
 
 import torch.utils._pytree as pytree
 
-from torch import Tensor
+from torch import SymInt, Tensor
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .schemas import MutationType, SubclassCreationMeta, ViewAndMutationMeta
@@ -79,15 +79,27 @@ def create_subclass_meta(
 def unwrap_tensor_subclasses(wrapped_args, *, is_joint_structure: bool):
     def concat_inner_tensors_from_subclasses(xs):
         xs_inner = []
+        new_sizes = []
+
+        has_symint = any(not isinstance(x, Tensor) for x in xs)
+
         for x in xs:
             if isinstance(x, Tensor) and is_traceable_wrapper_subclass(x):
                 attrs, _ = x.__tensor_flatten__()  # type: ignore[attr-defined]
                 xs_inner += [getattr(x, attr) for attr in attrs]
+                if has_symint:
+                    for sz in x.size():
+                        if sz not in new_sizes:
+                            new_sizes.append(sz)
             else:
                 xs_inner += [x]
-        for x in xs:
-            if isinstance(x, Tensor) and is_traceable_wrapper_subclass(x):
-                xs_inner += list(x.size())
+
+        for i, e in enumerate(xs_inner):
+            if isinstance(e, SymInt):
+                lst = [sz for sz in new_sizes if sz == e]
+                if len(lst) > 0:
+                    xs_inner[i] = lst[0]
+
         return xs_inner
 
     if is_joint_structure:
@@ -115,7 +127,6 @@ def wrap_tensor_subclasses(
     is_runtime: bool = False,
 ) -> Tuple[Any, ...]:
     wrapped_args = []
-    num_arg_sizes_to_ignore = 0
     num_args_tallied = 0
     for subclass_meta in subclass_metas:
         if isinstance(subclass_meta, int):
@@ -126,7 +137,6 @@ def wrap_tensor_subclasses(
             wrapped_args.append(
                 subclass_meta.creation_fn(unwrapped_args, is_runtime=is_runtime)
             )
-            num_arg_sizes_to_ignore += len(wrapped_args[-1].size())
             num_args_tallied += subclass_meta.arg_count
 
     # Note: [Partitioner handling for Subclasses, Part 2]
@@ -163,7 +173,7 @@ def wrap_tensor_subclasses(
             return wrapped_args + activations
         return tuple(list(wrapped_args) + list(activations))
     else:
-        assert len(unwrapped_args) == num_args_tallied + num_arg_sizes_to_ignore
+        assert len(unwrapped_args) == num_args_tallied
         return tuple(wrapped_args)
 
 

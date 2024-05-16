@@ -3323,10 +3323,11 @@ def forward(self, tangents_1):
         self.assertExpectedInline(
             fw_graph.code.strip(),
             """\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
-    mul = torch.ops.aten.mul.Tensor(arg0_1, arg2_1);  arg0_1 = None
-    mul_1 = torch.ops.aten.mul.Tensor(arg1_1, arg2_1);  arg1_1 = None
-    return [mul, mul_1, arg2_1, arg3_1]""",
+def forward(self, arg0_1, arg1_1):
+    sym_size_int = torch.ops.aten.sym_size.int(arg0_1, 0)
+    mul = torch.ops.aten.mul.Tensor(arg0_1, sym_size_int);  arg0_1 = None
+    mul_1 = torch.ops.aten.mul.Tensor(arg1_1, sym_size_int);  arg1_1 = sym_size_int = None
+    return [mul, mul_1]""",
         )
 
     def test_tensor_subclass_clone_view(self):
@@ -3342,12 +3343,14 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
         self.assertExpectedInline(
             fw_graph.code.strip(),
             """\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
-    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+def forward(self, arg0_1, arg1_1):
+    clone = torch.ops.aten.clone.default(arg0_1)
     clone_1 = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
-    view = torch.ops.aten.view.default(clone, [arg3_1, arg2_1]);  clone = None
-    view_1 = torch.ops.aten.view.default(clone_1, [arg3_1, arg2_1]);  clone_1 = None
-    return [view, view_1, arg3_1, arg2_1]""",
+    sym_size_int = torch.ops.aten.sym_size.int(arg0_1, 1)
+    sym_size_int_1 = torch.ops.aten.sym_size.int(arg0_1, 0);  arg0_1 = None
+    view = torch.ops.aten.view.default(clone, [sym_size_int, sym_size_int_1]);  clone = None
+    view_1 = torch.ops.aten.view.default(clone_1, [sym_size_int, sym_size_int_1]);  clone_1 = sym_size_int = sym_size_int_1 = None
+    return [view, view_1]""",
         )
 
     def test_tensor_subclass_mul(self):
@@ -3364,16 +3367,20 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
         self.assertExpectedInline(
             fw_graph.code.strip(),
             """\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
-    mul = torch.ops.aten.mul.Tensor(arg0_1, arg4_1);  arg0_1 = None
-    mul_1 = torch.ops.aten.mul.Tensor(arg1_1, arg4_1);  arg1_1 = None
-    mul_2 = torch.ops.aten.mul.Tensor(mul, arg5_1);  mul = None
-    mul_3 = torch.ops.aten.mul.Tensor(mul_1, arg5_1);  mul_1 = None
-    mul_4 = torch.ops.aten.mul.Tensor(mul_2, arg4_1);  mul_2 = None
-    mul_5 = torch.ops.aten.mul.Tensor(mul_3, arg4_1);  mul_3 = None
-    mul_6 = torch.ops.aten.mul.Tensor(mul_4, arg5_1);  mul_4 = None
-    mul_7 = torch.ops.aten.mul.Tensor(mul_5, arg5_1);  mul_5 = None
-    return [mul_6, mul_7, arg4_1, arg5_1]""",
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
+    sym_size_int = torch.ops.aten.sym_size.int(arg2_1, 0)
+    mul = torch.ops.aten.mul.Tensor(arg0_1, sym_size_int);  arg0_1 = None
+    mul_1 = torch.ops.aten.mul.Tensor(arg1_1, sym_size_int);  arg1_1 = sym_size_int = None
+    sym_size_int_1 = torch.ops.aten.sym_size.int(arg2_1, 1);  arg2_1 = None
+    mul_2 = torch.ops.aten.mul.Tensor(mul, sym_size_int_1);  mul = None
+    mul_3 = torch.ops.aten.mul.Tensor(mul_1, sym_size_int_1);  mul_1 = sym_size_int_1 = None
+    sym_size_int_2 = torch.ops.aten.sym_size.int(arg3_1, 0)
+    mul_4 = torch.ops.aten.mul.Tensor(mul_2, sym_size_int_2);  mul_2 = None
+    mul_5 = torch.ops.aten.mul.Tensor(mul_3, sym_size_int_2);  mul_3 = sym_size_int_2 = None
+    sym_size_int_3 = torch.ops.aten.sym_size.int(arg3_1, 1);  arg3_1 = None
+    mul_6 = torch.ops.aten.mul.Tensor(mul_4, sym_size_int_3);  mul_4 = None
+    mul_7 = torch.ops.aten.mul.Tensor(mul_5, sym_size_int_3);  mul_5 = sym_size_int_3 = None
+    return [mul_6, mul_7]""",
         )
 
     def test_tensor_subclass_view(self):
@@ -3389,12 +3396,14 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         self.assertExpectedInline(
             fw_graph.code.strip(),
             """\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
-    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+def forward(self, arg0_1, arg1_1):
+    clone = torch.ops.aten.clone.default(arg0_1)
     clone_1 = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
-    view = torch.ops.aten.view.default(clone, [arg2_1, arg3_1]);  clone = None
-    view_1 = torch.ops.aten.view.default(clone_1, [arg2_1, arg3_1]);  clone_1 = None
-    return [view, view_1, arg2_1, arg3_1]""",
+    sym_size_int = torch.ops.aten.sym_size.int(arg0_1, 0)
+    sym_size_int_1 = torch.ops.aten.sym_size.int(arg0_1, 1);  arg0_1 = None
+    view = torch.ops.aten.view.default(clone, [sym_size_int, sym_size_int_1]);  clone = None
+    view_1 = torch.ops.aten.view.default(clone_1, [sym_size_int, sym_size_int_1]);  clone_1 = sym_size_int = sym_size_int_1 = None
+    return [view, view_1]""",
         )
 
     def test_tensor_subclass_view_mul(self):
@@ -3410,13 +3419,15 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
         self.assertExpectedInline(
             fw_graph.code.strip(),
             """\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
-    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+def forward(self, arg0_1, arg1_1):
+    clone = torch.ops.aten.clone.default(arg0_1)
     clone_1 = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
-    mul = arg2_1 * arg3_1;  arg2_1 = arg3_1 = None
+    sym_size_int = torch.ops.aten.sym_size.int(arg0_1, 0)
+    sym_size_int_1 = torch.ops.aten.sym_size.int(arg0_1, 1);  arg0_1 = None
+    mul = sym_size_int * sym_size_int_1;  sym_size_int = sym_size_int_1 = None
     view = torch.ops.aten.view.default(clone, [mul]);  clone = None
-    view_1 = torch.ops.aten.view.default(clone_1, [mul]);  clone_1 = None
-    return [view, view_1, mul]""",
+    view_1 = torch.ops.aten.view.default(clone_1, [mul]);  clone_1 = mul = None
+    return [view, view_1]""",
         )
 
     def test_tensor_subclass_return_shape(self):
