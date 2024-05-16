@@ -2,8 +2,11 @@ import inspect
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple, Type, Union
 
 import torch
-from torch.streambase import EventBase, StreamBase
-from torch.streambase import EventBase as _EventBase
+from torch.streambase import (  # noqa: F401
+    EventBase,
+    EventBase as _EventBase,
+    StreamBase,
+)
 
 get_cuda_stream: Optional[Callable[[int], int]]
 if torch.cuda._is_compiled():
