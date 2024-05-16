@@ -139,7 +139,7 @@ def mps_ops_grad_modifier(ops):
         'round': [torch.float16],
 
         # atomic operation in backward pass
-        '_unsafe_masked_index': [torch.int8],
+        '_unsafe_masked_index': [torch.int8, torch.float16],
     }
 
     MACOS_12_3_XFAILLIST_GRAD = {
