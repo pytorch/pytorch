@@ -29,7 +29,9 @@ def _msg_dict_from_dcp_method_args(*args, **kwargs) -> Dict[str, Any]:
     if not checkpoint_id and (serializer := storage_writer or storage_reader):
         checkpoint_id = getattr(serializer, "checkpoint_id", None)
 
-    msg_dict["checkpoint_id"] = str(checkpoint_id)
+    msg_dict["checkpoint_id"] = (
+        str(checkpoint_id) if checkpoint_id is not None else checkpoint_id
+    )
 
     return msg_dict
 
