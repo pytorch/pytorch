@@ -2243,7 +2243,7 @@ if (py_{buf_name}.get() == NULL) {{
     def generate_save_uncompiled_kernels(self):
         pass
 
-    def val_to_cpp_arg_str(self, type_, val) -> str:
+    def val_to_cpp_arg_str(self, val, type_) -> str:
         if config.abi_compatible and isinstance(type_, torch.OptionalType):
             if val is None:
                 return "0"  # nullptr is not available in C
@@ -2280,13 +2280,26 @@ if (py_{buf_name}.get() == NULL) {{
                 self.writeline(f"AtenTensorHandle {var_name} = {base_handle}.get();")
                 return f"&{var_name}"
 
-        return self.val_to_arg_str(val)
+        return self.val_to_arg_str(val, type_)
 
-    def val_to_arg_str(self, val) -> str:
+    def val_to_arg_str(self, val, type_=None) -> str:
         if val is None:
             # When None is passed as an argument, it represents an optional that does not contain a value.
             if config.abi_compatible:
-                return "0"  # nullptr is not available in C
+                if type_ is None or isinstance(type_, torch.OptionalType):
+                    return "NULL"  # nullptr is not available in C
+                elif isinstance(type_, torch.TensorType):
+                    var_name = f"var_{next(self.arg_var_id)}"
+                    self.writeline(f"AtenTensorHandle {var_name}_handle;")
+                    self.writeline(
+                        f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_uninitialized_tensor(&{var_name}_handle));"
+                    )
+                    self.writeline(
+                        f"RAIIAtenTensorHandle {var_name}({var_name}_handle);"
+                    )
+                    return var_name
+                else:
+                    raise AssertionError("Can not map None to a known data type")
             return "c10::nullopt"
         elif isinstance(val, bool):
             if config.abi_compatible:
