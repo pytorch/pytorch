@@ -633,15 +633,9 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "queue_callback":
-            if isinstance(args[0], variables.UserMethodVariable):
-                torch._dynamo.external_utils.queue_callback(
-                    getattr(args[0].obj.value, args[0].fn.__name__)
-                )
-            elif isinstance(args[0], variables.UserFunctionVariable):
-                torch._dynamo.external_utils.queue_callback(args[0].fn)
-            else:
-                unimplemented(f"Unsupported callback function type: {type(args[0])}")
-            return variables.ConstantVariable.create(None)
+            return variables.UserFunctionVariable(torch._dynamo.external_utils.queue_callback, source=self.source).call_function(
+                tx, args, kwargs
+            )
         else:
             unimplemented(f"torch._C._ImperativeEngine method: {name}")
 

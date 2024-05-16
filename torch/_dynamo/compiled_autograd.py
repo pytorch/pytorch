@@ -326,6 +326,3 @@ def disable():
         if prior:
             compiled_autograd_enabled = True
         torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
-
-
-_compiled_autograd_state_tls = threading.local()
