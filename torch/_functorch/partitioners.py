@@ -798,6 +798,8 @@ def get_saved_values(
             return False
         if node.target == operator.getitem:
             return False
+        if op_types.is_view(node):
+            return False
         if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
             return False
         # NB: "recompute" == 0 means that must save this node.
@@ -876,8 +878,11 @@ def get_saved_values(
     banned_nodes = set()
 
     def ban_recomputation_if_allowed(node):
+        if op_types.is_view(node):
+            return False
         if node in dont_ban:
             return False
+        # breakpoint()
         # This bans recomputation of the node unless we've been forced not to by
         # user annotation
         # NB: "recompute" > 0 means that user annotation has asked us to
@@ -936,7 +941,6 @@ def get_saved_values(
             )
         else:
             weight = get_node_weight(node)
-
         # Creates the weights on the "node" edge
         nx_graph.add_edge(node.name + "_in", node.name + "_out", capacity=weight)
         for user in node.users:
@@ -1063,6 +1067,7 @@ def get_saved_values(
     except Exception:
         print("Failed to compute min-cut on following graph:")
         print("\n".join(nx.readwrite.edgelist.generate_edgelist(nx_graph)))
+        visualize_min_cut_graph(nx_graph)
         raise
 
     reachable, non_reachable = partition
@@ -1083,6 +1088,23 @@ def get_saved_values(
         (name_to_node[node] for node in cut_nodes), key=lambda x: node_idx[x]
     )
     return saved_values, banned_nodes
+
+
+def visualize_min_cut_graph(nx_graph):
+    import networkx as nx
+    import pydot
+
+    dot_format = nx.nx_pydot.to_pydot(nx_graph).to_string()
+    dot_graph = pydot.graph_from_dot_data(dot_format)[0]
+    for edge in dot_graph.get_edges():
+        weight = nx_graph[edge.get_source()][edge.get_destination()]["capacity"]
+        # Set edge label to weight
+        edge.set_label(str(weight))
+        # Color edges with weight 'inf' as red
+        if weight == float("inf"):
+            edge.set_color("red")
+    print("Visualizing the failed graph to min_cut_failed.svg")
+    dot_graph.write_svg("min_cut_failed.svg")
 
 
 def get_default_op_list() -> OpTypes:
