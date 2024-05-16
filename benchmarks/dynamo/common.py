@@ -354,13 +354,13 @@ def patch_torch_manual_seed():
     torch.manual_seed = deterministic_torch_manual_seed
 
 
-def empty_gpu_cache():
+def empty_gpu_cache(device):
     """
     Explicitly empty gpu cache to avoid OOM in subsequent run.
     """
-    if HAS_CUDA:
+    if device == "cuda":
         torch.cuda.empty_cache()
-    if HAS_XPU:
+    if device == "xpu":
         torch.xpu.empty_cache()
 
 
@@ -2289,7 +2289,7 @@ class BenchmarkRunner:
     def batch_size_finder(self, device, model_name, initial_batch_size=1024):
         batch_size = initial_batch_size
         while batch_size >= 1:
-            empty_gpu_cache()
+            empty_gpu_cache(current_device)
             try:
                 device, name, model, example_inputs, _ = self.load_model(
                     device,
@@ -2479,7 +2479,7 @@ class BenchmarkRunner:
                 fp64_outputs = None
             finally:
                 del model_fp64, inputs_fp64
-                empty_gpu_cache()
+                empty_gpu_cache(current_device)
 
             tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
                 self.args.training, current_device, name
@@ -2508,7 +2508,7 @@ class BenchmarkRunner:
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
-                empty_gpu_cache()
+                empty_gpu_cache(current_device)
 
             # Rerun native pytorch
             reset_rng_state()
@@ -2529,7 +2529,7 @@ class BenchmarkRunner:
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
-                empty_gpu_cache()
+                empty_gpu_cache(current_device)
 
             # Two eager runs should have exactly same result
             is_same = True
@@ -2730,7 +2730,7 @@ class BenchmarkRunner:
             try:
                 if current_device == "cuda":
                     torch.cuda.reset_peak_memory_stats()
-                    empty_gpu_cache()
+                    empty_gpu_cache(current_device)
                 t0 = time.perf_counter()
                 for _ in range(niters):
                     fn(model, example_inputs)
@@ -2960,7 +2960,7 @@ class BenchmarkRunner:
                 name, model, example_inputs, optimize_ctx, experiment, tag
             )
             print(status)
-        empty_gpu_cache()
+        empty_gpu_cache(current_device)
 
         self.maybe_preserve_compile_debug(name, status)
 
