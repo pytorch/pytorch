@@ -28,7 +28,7 @@ std::string::size_type SkipTagSeparator(
   return node_string.compare(pos, 2, ", ") == 0 ? pos + 2 : pos;
 }
 
-c10::optional<AttrTag> ParseAttrTag(
+std::optional<AttrTag> ParseAttrTag(
     const std::string& node_string,
     std::string::size_type pos) {
   // @lint-ignore-every CLANGTIDY facebook-hte-StdRegexIsAwful
@@ -97,7 +97,7 @@ std::unordered_map<const Node*, size_t> GetRootsIds(
   return roots_ids;
 }
 
-c10::optional<size_t> GetRootNodeId(
+std::optional<size_t> GetRootNodeId(
     const Node* node,
     const std::unordered_map<const Node*, size_t>& roots_ids) {
   auto it = roots_ids.find(node);

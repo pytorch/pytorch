@@ -1,8 +1,15 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import torch
+
+from model_registry import MLPModule
 from torch.distributed.pipelining import pipe_split, pipeline
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
 d_hid = 512
@@ -39,21 +46,6 @@ class ExampleCode(torch.nn.Module):
         return x
 
 
-# MLP example
-class MLPModule(torch.nn.Module):
-    def __init__(self, d_hid):
-        super().__init__()
-        self.net1 = torch.nn.Linear(d_hid, d_hid)
-        self.relu = torch.nn.ReLU()
-        self.net2 = torch.nn.Linear(d_hid, d_hid)
-
-    def forward(self, x):
-        x = self.net1(x)
-        x = self.relu(x)
-        x = self.net2(x)
-        return x
-
-
 class MultiMLP(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -74,8 +66,9 @@ class MultiMLP(torch.nn.Module):
 
 
 class PipeTests(TestCase):
-    def _test_model_split(self, model_class):
-        mod = model_class()
+    @parametrize("ModelClass", [ExampleCode, MultiMLP])
+    def test_model_split(self, ModelClass):
+        mod = ModelClass()
         x = torch.randn(batch_size, d_hid)
         y = torch.randn(batch_size, d_hid)
 
@@ -108,12 +101,8 @@ class PipeTests(TestCase):
         """
         print("Qualname check passed")
 
-    def test_example_code(self):
-        self._test_model_split(ExampleCode)
 
-    def test_multi_mlp(self):
-        self._test_model_split(MultiMLP)
-
+instantiate_parametrized_tests(PipeTests)
 
 if __name__ == "__main__":
     run_tests()

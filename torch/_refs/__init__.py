@@ -6361,9 +6361,20 @@ def _infer_scalar_type(obj):
 def _recursive_build(
     scalarType: torch.dtype, obj: Union[TensorOrNumberLikeType, TensorSequenceType]
 ):
-    if isinstance(obj, Tensor) and obj.ndim <= 1:
+    if isinstance(obj, Tensor) and obj.numel() == 1:
         return obj.detach().to(dtype=scalarType, device="cpu", copy=True).view(())
     elif isinstance(obj, Tensor):
+        # tensor have more than one dimension
+        # >>> a = np.random.uniform(size=(20, 1))
+        # >>> torch.tensor([a, a, a]).shape
+        # torch.Size([3, 20, 1])
+        #
+        # It is invalid to call ".tensor([...])" with a non-scalar tensor in eager mode
+        # >>> torch.tensor([torch.randn(2)])
+        # ValueError: only one element tensors can be converted to Python scalars
+        # But it is possible with a NumPy array
+        # >>> torch.tensor([np.random.uniform(size=(2,))]).shape
+        # torch.Size([1, 2])
         return obj.detach().to(dtype=scalarType, device="cpu", copy=True)
     elif isinstance(obj, Number):
         return torch.scalar_tensor(obj, dtype=scalarType)

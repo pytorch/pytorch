@@ -663,6 +663,31 @@ class NopKernelSchedulerNode(BaseSchedulerNode):
     pass
 
 
+def debug_triton_code(node: Union["SchedulerNode", "FusedSchedulerNode"]) -> List[str]:
+    lines = []
+    is_multi_template = node.is_template() and isinstance(
+        node.get_template_node(), ir.MultiTemplateBuffer
+    )
+    if is_multi_template and node.get_template_node().make_kernel_render is None:
+        lines.append(f"{node.get_name()} Unfinalized multi template buffer")
+    else:
+        snodes = (node,) if isinstance(node, SchedulerNode) else node.snodes
+        device = snodes[0].get_device()
+        backend = node.scheduler.get_backend(device)
+        V.graph.scheduler.current_device = device
+
+        # Don't increment kernel count when generating debug string.
+        # This will confuse some unit tests that check the number of
+        # generated kernels.
+        old_generated_kernel_count = metrics.generated_kernel_count
+        triton_code = backend.generate_kernel_code_from_nodes(snodes).strip()
+        metrics.generated_kernel_count = old_generated_kernel_count
+
+        lines.append(f"{node.get_name()} Triton code:")
+        lines.append(textwrap.indent(triton_code, "    "))
+    return lines
+
+
 class SchedulerNode(BaseSchedulerNode):
     def __init__(
         self,
@@ -718,18 +743,8 @@ class SchedulerNode(BaseSchedulerNode):
             lines.append(textwrap.indent(self._body.debug_str(), "    "))
 
         if ir.is_triton(self.node.get_device()):
-            backend = self.scheduler.get_backend(self.node.get_device())
-            V.graph.scheduler.current_device = self.node.get_device()
+            lines.extend(debug_triton_code(self))
 
-            # Don't increment kernel count when generating debug string.
-            # This will confuse some unit tests that check the number of
-            # generated kernels.
-            old_generated_kernel_count = metrics.generated_kernel_count
-            triton_code = backend.generate_kernel_code_from_nodes((self,)).strip()
-            metrics.generated_kernel_count = old_generated_kernel_count
-
-            lines.append(f"{self.get_name()} Triton code:")
-            lines.append(textwrap.indent(triton_code, "    "))
         return "\n".join(lines)
 
     def get_ranges(self):
@@ -827,9 +842,6 @@ class SchedulerNode(BaseSchedulerNode):
                     )
         return buffers_store_as_atomic_add
 
-    def has_atomic_add(self, check_buf):
-        return check_buf in self._get_atomic_add_buffers()
-
 
 class FusedSchedulerNode(BaseSchedulerNode):
     """
@@ -889,13 +901,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
         ]
         device = self.snodes[0].node.get_device()
         if ir.is_triton(device):
-            backend = self.scheduler.get_backend(device)
-            V.graph.scheduler.current_device = device
-            old_generated_kernel_count = metrics.generated_kernel_count
-            triton_code = backend.generate_kernel_code_from_nodes(self.snodes).strip()
-            metrics.generated_kernel_count = old_generated_kernel_count
-            lines.append(f"{self.get_name()} Triton code:")
-            lines.append(textwrap.indent(triton_code, "    "))
+            lines.extend(debug_triton_code(self))
 
         return textwrap.indent("\n".join(lines).rstrip(), "    ")
 
@@ -958,15 +964,6 @@ class FusedSchedulerNode(BaseSchedulerNode):
         for node in self.snodes:
             op_counts.update(node.op_counts())
         return op_counts
-
-    def has_atomic_add(self, check_buf):
-        return any(
-            (
-                isinstance(sub_schedule_node1, SchedulerNode)
-                and sub_schedule_node1.has_atomic_add(check_buf)
-            )
-            for sub_schedule_node1 in self.get_nodes()
-        )
 
     # None of these need to be implemented, as a FusedSchedulerNode is just an
     # abstraction for scheduling purposes
@@ -1276,6 +1273,7 @@ class Scheduler:
         self.available_buffer_names = {
             *V.graph.graph_inputs.keys(),
             *V.graph.constants.keys(),
+            *V.graph.torchbind_constants.keys(),
         }
 
         self.nodes = [self.create_scheduler_node(n) for n in nodes]
@@ -1525,13 +1523,22 @@ class Scheduler:
                 if (r := unbacked_symbol_to_origin_node[s]) is not None:
                     node.add_fake_dep(StarDep(r))
 
+            if (
+                len(node.read_writes.writes) == 1
+                and (dep := next(iter(node.read_writes.writes)))
+                and isinstance(dep, MemoryDep)
+            ):
+                node_mode = dep.mode
+            else:
+                node_mode = None
+
             # a node will mutate either 0 or 1 buffers
             assert len(node.get_mutations()) <= 1
             for alt_name in node.get_mutations():
                 alt_name = rename(alt_name)
                 # this node must run after the prior writer
                 add_user(alt_name, node)
-                node.add_mutation_dep(StarDep(alt_name))
+                node.add_mutation_dep(StarDep(alt_name, mode=node_mode))
                 for other_node in name_to_users[alt_name].items:
                     # this node must run after all prior readers
                     other_name = rename(other_node.get_name())
@@ -2161,25 +2168,6 @@ class Scheduler:
             why("node1 must go before node2")
             return False
 
-        if (
-            isinstance(node1, (FusedSchedulerNode, SchedulerNode))
-            and isinstance(node2, SchedulerNode)
-            and isinstance(node2._body, ir.LoopBody)
-        ):
-            # Fix issue: https://github.com/pytorch/pytorch/issues/108963
-            # Check:
-            #   If node2 reads a buf which is a mutation buf of node1(SchedulerNode) or among nodes in node1(FusedSchedulerNode),
-            #   we will get the corresponding mutation buf and check if this mutation buf is stored by atomic_add mode.
-            # If True, we will disable the fusion of node1 and node2.
-            if any(
-                (
-                    node2_used_buf in self.mutation_renames
-                    and node1.has_atomic_add(self.mutation_renames[node2_used_buf])
-                )
-                for node2_used_buf in node2._body.reads_name2expr.keys()
-            ):
-                return False
-
         if node2.is_template():
             why("templates can only fuse epilogues")
             return False
@@ -2266,6 +2254,23 @@ class Scheduler:
         # we still can match unmet dep
         # if there's indirect indexing, don't match it
         def fusable_read_and_write(read: Dep, write: Dep):
+            read_name = self.mutation_renames.get(read.name, read.name)
+            write_name = self.mutation_renames.get(write.name, write.name)
+            if (
+                isinstance(read, MemoryDep)
+                and isinstance(write, MemoryDep)
+                and read.mode == write.mode
+                and write.mode is not None
+            ):
+                return True
+            if (
+                isinstance(read, StarDep)
+                and isinstance(write, MemoryDep)
+                and read.mode == write.mode
+                and write.mode is not None
+                and read_name == write_name
+            ):
+                return True
             return (
                 self.mutation_renames.get(read.name, read.name) == write.name
                 and (isinstance(read, MemoryDep) and isinstance(write, MemoryDep))
