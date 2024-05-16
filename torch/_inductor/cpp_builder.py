@@ -755,7 +755,7 @@ class CppTorchOptions(CppOptions):
         self._remove_duplicate_options()
 
 
-def _get_cuda_related_args(aot_mode: bool):
+def _get_cuda_related_args(cuda: bool, aot_mode: bool):
     definations: List[str] = []
     include_dirs: List[str] = []
     cflags: List[str] = []
@@ -763,9 +763,6 @@ def _get_cuda_related_args(aot_mode: bool):
     libraries_dirs: List[str] = []
     libraries: List[str] = []
     passthough_args: List[str] = []
-
-    # if not use cuda, don't call this function.
-    cuda = True
 
     if (
         config.is_fbcode()
@@ -779,22 +776,23 @@ def _get_cuda_related_args(aot_mode: bool):
     include_dirs = cpp_extension.include_paths(cuda)
     libraries_dirs = cpp_extension.library_paths(cuda)
 
-    definations.append(" USE_ROCM" if torch.version.hip else " USE_CUDA")
+    if cuda:
+        definations.append(" USE_ROCM" if torch.version.hip else " USE_CUDA")
 
-    if torch.version.hip is not None:
-        if config.is_fbcode():
-            libraries += ["amdhip64"]
-        else:
-            libraries += ["c10_hip", "torch_hip"]
-            definations.append(" __HIP_PLATFORM_AMD__")
-    else:
-        if config.is_fbcode():
-            libraries += ["cuda"]
+        if torch.version.hip is not None:
+            if config.is_fbcode():
+                libraries += ["amdhip64"]
+            else:
+                libraries += ["c10_hip", "torch_hip"]
+                definations.append(" __HIP_PLATFORM_AMD__")
         else:
             if config.is_fbcode():
                 libraries += ["cuda"]
             else:
-                libraries += ["c10_cuda", "cuda", "torch_cuda"]
+                if config.is_fbcode():
+                    libraries += ["cuda"]
+                else:
+                    libraries += ["c10_cuda", "cuda", "torch_cuda"]
 
     if aot_mode:
         cpp_prefix_include_dir = [f"{os.path.dirname(_cpp_prefix_path())}"]
@@ -835,7 +833,7 @@ def _get_cuda_related_args(aot_mode: bool):
     )
 
 
-def get_cpp_torch_cuda_options(aot_mode: bool = False):
+def get_cpp_torch_cuda_options(cuda: bool, aot_mode: bool = False):
     definations: List[str] = []
     include_dirs: List[str] = []
     cflags: List[str] = []
@@ -852,7 +850,7 @@ def get_cpp_torch_cuda_options(aot_mode: bool = False):
         libraries_dirs,
         libraries,
         passthough_args,
-    ) = _get_cuda_related_args(aot_mode)
+    ) = _get_cuda_related_args(cuda=cuda, aot_mode=aot_mode)
 
     return (
         definations,
@@ -900,16 +898,15 @@ class CppTorchCudaOptions(CppTorchOptions):
         cuda_libraries: List[str] = []
         cuda_passthough_args: List[str] = []
 
-        if cuda:
-            (
-                cuda_definations,
-                cuda_include_dirs,
-                cuda_cflags,
-                cuda_ldflags,
-                cuda_libraries_dirs,
-                cuda_libraries,
-                cuda_passthough_args,
-            ) = get_cpp_torch_cuda_options(aot_mode=aot_mode)
+        (
+            cuda_definations,
+            cuda_include_dirs,
+            cuda_cflags,
+            cuda_ldflags,
+            cuda_libraries_dirs,
+            cuda_libraries,
+            cuda_passthough_args,
+        ) = get_cpp_torch_cuda_options(cuda=cuda, aot_mode=aot_mode)
 
         if compile_only:
             cuda_libraries_dirs = []
