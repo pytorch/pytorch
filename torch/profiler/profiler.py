@@ -873,3 +873,12 @@ class ExecutionTraceObserver(_ITraceObserver):
                 "A callback to the ET profiler needs to be registered "
                 "first before getting the output file path"
             )
+
+    def record_pg_config(self) -> None:
+        # Records the PG config info to the trace as node:
+        #  ## process_group:init ##
+        if self.is_registered:
+            pg_config_info = torch.distributed.distributed_c10d._world.pg_config_info
+            torch.autograd._record_function_with_args_enter(
+                "## process_group:init ##", json.dumps(pg_config_info)
+            )
