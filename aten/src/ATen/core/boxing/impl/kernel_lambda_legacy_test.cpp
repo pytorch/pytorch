@@ -188,15 +188,15 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithIntListOutp
 
 TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithMultipleOutputs_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-     .op("_test::multiple_outputs(Tensor dummy) -> (Tensor, int, Tensor[], int?, Dict(str, Tensor))", [] (Tensor) -> std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>> {
+     .op("_test::multiple_outputs(Tensor dummy) -> (Tensor, int, Tensor[], int?, Dict(str, Tensor))", [] (Tensor) -> std::tuple<Tensor, int64_t, std::vector<Tensor>, std::optional<int64_t>, Dict<string, Tensor>> {
        Dict<string, Tensor> dict;
        dict.insert("first", dummyTensor(DispatchKey::CPU));
        dict.insert("second", dummyTensor(DispatchKey::CUDA));
-       return std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>>(
+       return std::tuple<Tensor, int64_t, std::vector<Tensor>, std::optional<int64_t>, Dict<string, Tensor>>(
          dummyTensor(DispatchKey::CUDA),
          5,
          {dummyTensor(DispatchKey::CPU), dummyTensor(DispatchKey::CUDA)},
-         c10::optional<int64_t>(std::in_place, 0),
+         std::optional<int64_t>(std::in_place, 0),
          dict
        );
      });
@@ -733,13 +733,13 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenFallbackKernelWithout
 TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithOptionalInputs_withoutOutput_whenRegistered_thenCanBeCalled) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool called;
-  c10::optional<Tensor> called_arg2 = c10::nullopt;
-  c10::optional<int64_t> called_arg3 = c10::nullopt;
-  c10::optional<std::string> called_arg4 = c10::nullopt;
+  std::optional<Tensor> called_arg2 = c10::nullopt;
+  std::optional<int64_t> called_arg3 = c10::nullopt;
+  std::optional<std::string> called_arg4 = c10::nullopt;
 
   auto registrar = RegisterOperators().op(
     "_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> ()",
-    [&] (Tensor arg1, const c10::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
+    [&] (Tensor arg1, const std::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
       called = true;
       called_arg2 = arg2;
       called_arg3 = arg3;
@@ -773,13 +773,13 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithOptionalInp
 TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithOptionalInputs_withOutput_whenRegistered_thenCanBeCalled) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool called;
-  c10::optional<Tensor> called_arg2 = c10::nullopt;
-  c10::optional<int64_t> called_arg3 = c10::nullopt;
-  c10::optional<std::string> called_arg4 = c10::nullopt;
+  std::optional<Tensor> called_arg2 = c10::nullopt;
+  std::optional<int64_t> called_arg3 = c10::nullopt;
+  std::optional<std::string> called_arg4 = c10::nullopt;
 
   auto registrar = RegisterOperators().op(
     "_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> Tensor?",
-    [&] (Tensor arg1, const c10::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
+    [&] (Tensor arg1, const std::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
       called = true;
       called_arg2 = arg2;
       called_arg3 = arg3;
@@ -816,13 +816,13 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithOptionalInp
 TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithOptionalInputs_withMultipleOutputs_whenRegistered_thenCanBeCalled) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool called;
-  c10::optional<Tensor> called_arg2 = c10::nullopt;
-  c10::optional<int64_t> called_arg3 = c10::nullopt;
-  c10::optional<std::string> called_arg4 = c10::nullopt;
+  std::optional<Tensor> called_arg2 = c10::nullopt;
+  std::optional<int64_t> called_arg3 = c10::nullopt;
+  std::optional<std::string> called_arg4 = c10::nullopt;
 
   auto registrar = RegisterOperators().op(
     "_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> (Tensor?, int?, str?)",
-    [] (Tensor arg1, const c10::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
+    [] (Tensor arg1, const std::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
       return std::make_tuple(arg2, arg3, arg4);
     });
   auto op = c10::Dispatcher::singleton().findSchema({"_test::opt_input", ""});
@@ -866,7 +866,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernel_whenRegistered
   auto op = c10::Dispatcher::singleton().findSchema({"_test::no_schema_specified", ""});
   ASSERT_TRUE(op.has_value());
 
-  c10::optional<std::string> differences = c10::findSchemaDifferences(torch::jit::parseSchema("_test::no_schema_specified(Tensor arg1, int arg2, Tensor[] arg3) -> (int, Tensor)"), op->schema());
+  std::optional<std::string> differences = c10::findSchemaDifferences(torch::jit::parseSchema("_test::no_schema_specified(Tensor arg1, int arg2, Tensor[] arg3) -> (int, Tensor)"), op->schema());
   EXPECT_FALSE(differences.has_value());
 }
 
