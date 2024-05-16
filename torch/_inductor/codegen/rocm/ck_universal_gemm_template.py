@@ -258,7 +258,8 @@ class CKGemmTemplate(CKTemplate):
 * Generated code for CK inductor backend
 * See {type(self).__module__}.{type(self).__qualname__}
 *
-* {op=}
+* Problem size M={X.get_layout().size[-2]} N={W.get_layout().size[-1]} K={X.get_layout().size[-1]}
+* Template instance {op}
 *
 * {torch.__version__=}
 * {torch.version.git_version=}
