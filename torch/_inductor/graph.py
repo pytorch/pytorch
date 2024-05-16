@@ -273,9 +273,17 @@ class GraphLowering(torch.fx.Interpreter):
     def init_backend_registration(self):
         if get_scheduling_for_device("cpu") is None:
             from .codegen.cpp import CppScheduling
+            from .codegen.halide import HalideScheduling
+
+            cpu_backends = {"cpp": CppScheduling, "halide": HalideScheduling}
 
             register_backend_for_device(
-                "cpu", CppScheduling, WrapperCodeGen, CppWrapperCpu
+                "cpu",
+                lambda *args, **kwargs: cpu_backends[config.cpu_backend](
+                    *args, **kwargs
+                ),
+                WrapperCodeGen,
+                CppWrapperCpu,
             )
 
         if get_scheduling_for_device("cuda") is None:

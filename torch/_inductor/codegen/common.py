@@ -120,7 +120,7 @@ device_op_overrides_dict: Dict[str, DeviceOpOverrides] = {}
 # https://github.com/intel/intel-extension-for-pytorch/blob/5dcc9d57e5422cf295e1a1ee97896d6b6a554a85/intel_extension_for_pytorch/_inductor/__init__.py#L9
 def register_backend_for_device(
     device: str,
-    device_scheduling: type,
+    device_scheduling: Any,
     device_wrapper_codegen: type,
     device_cpp_wrapper_codegen: type = type(None),
 ):
@@ -1133,6 +1133,9 @@ class CSEVariable:
 
     def update_on_args(self, name, args, kwargs):
         pass
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}({self.name!r})"
 
 
 class CppWrapperKernelArgs(KernelArgs):

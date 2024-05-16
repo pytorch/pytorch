@@ -524,6 +524,10 @@ decompose_mem_bound_mm: bool = False
 assume_aligned_inputs: bool = False
 
 
+# Backend to use for CPU codegen either "cpp" or "halide" (experimental)
+cpu_backend = "cpp"
+
+
 # config specific to codegen/cpp.py
 class cpp:
     # set to torch.get_num_threads()
