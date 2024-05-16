@@ -7,7 +7,7 @@ import math
 import operator
 import os
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
@@ -34,6 +34,71 @@ log = logging.getLogger(__name__)
 
 aten = torch.ops.aten
 prims = torch.ops.prims
+
+
+@dataclass
+class OpTypes:
+    """Class for keeping track of different operator categories"""
+
+    fusible_ops: Set[Callable]
+    compute_intensive_ops: Set[Callable]
+    random_ops: Set[Callable]
+    view_ops: Set[Callable]
+    recomputable_ops: Set[Callable]
+
+    def is_fusible(self, node: fx.Node):
+        return get_aten_target(node) in self.fusible_ops
+
+    def is_compute_intensive(self, node: fx.Node):
+        return get_aten_target(node) in self.compute_intensive_ops
+
+    def is_random(self, node: fx.Node):
+        return get_aten_target(node) in self.random_ops
+
+    def is_view(self, node: fx.Node):
+        return get_aten_target(node) in self.view_ops
+
+    def is_recomputable(self, node: fx.Node):
+        return get_aten_target(node) in self.recomputable_ops
+
+
+@dataclass
+class NodeInfo:
+    # Be careful about iterating over these explicitly, as their order may not
+    # be deterministic
+    inputs: List[fx.Node]
+    _required_fw_nodes: Set[fx.Node]
+    required_bw_nodes: Set[fx.Node]
+    unclaimed_nodes: Set[fx.Node]
+    fw_order: Dict[fx.Node, int]
+
+    @property
+    def required_fw_nodes(self) -> List[fx.Node]:
+        return sorted(
+            (n for n in self._required_fw_nodes), key=lambda n: self.fw_order[n]
+        )
+
+    def is_required_fw(self, n: fx.Node) -> bool:
+        return n in self._required_fw_nodes
+
+    def is_required_bw(self, n: fx.Node) -> bool:
+        return n in self.required_bw_nodes
+
+    def is_unclaimed(self, n: fx.Node) -> bool:
+        return n in self.unclaimed_nodes
+
+    def get_fw_order(self, n: fx.Node) -> int:
+        assert n in self._required_fw_nodes, f"Node {n} not in fw nodes!"
+        return self.fw_order[n]
+
+
+@dataclass
+class MinCutOptions:
+    ban_if_used_far_apart: bool
+    ban_if_long_fusible_chains: bool
+    ban_if_materialized_backward: bool
+    ban_if_not_in_allowlist: bool
+    ban_if_reduction: bool
 
 
 def must_recompute(node: fx.Node) -> bool:
@@ -680,18 +745,15 @@ def cleanup_recompute_tags(joint_module: fx.GraphModule) -> fx.GraphModule:
     return joint_module
 
 
-def get_saved_values(joint_graph: fx.Graph, node_info, heuristics_on, dont_ban=None):
+def get_saved_values(
+    joint_graph: fx.Graph,
+    node_info: NodeInfo,
+    min_cut_options: MinCutOptions,
+    dont_ban=None,
+):
     if dont_ban is None:
         dont_ban = set()
     op_types = get_default_op_list()
-
-    (
-        BAN_IF_USED_FAR_APART,
-        BAN_IF_LONG_FUSIBLE_CHAINS,
-        BAN_IF_MATERIALIZED_BACKWARDS,
-        BAN_IF_NOT_IN_ALLOWLIST,
-        BAN_IF_REDUCTION,
-    ) = heuristics_on
 
     def is_fusible(a, b):
         # We can perform "memory fusion" into a cat, but cat cannot be a
@@ -706,11 +768,6 @@ def get_saved_values(joint_graph: fx.Graph, node_info, heuristics_on, dont_ban=N
         raise RuntimeError(
             "Need networkx installed to perform smart recomputation " "heuristics"
         ) from e
-    if config.aggressive_recomputation:
-        BAN_IF_MATERIALIZED_BACKWARDS = False
-        BAN_IF_USED_FAR_APART = False
-        BAN_IF_LONG_FUSIBLE_CHAINS = False
-        BAN_IF_NOT_IN_ALLOWLIST = False
 
     def is_materialized_backwards(node):
         if op_types.is_view(node):
@@ -737,8 +794,8 @@ def get_saved_values(joint_graph: fx.Graph, node_info, heuristics_on, dont_ban=N
         if node.meta.get("recompute", None) == 0:
             return True
 
-        if BAN_IF_NOT_IN_ALLOWLIST:
-            if op_types.is_recomputable(node):
+        if min_cut_options.ban_if_not_in_allowlist:
+            if not op_types.is_recomputable(node):
                 return True
         else:
             if op_types.is_random(node) or op_types.is_compute_intensive(node):
@@ -749,7 +806,9 @@ def get_saved_values(joint_graph: fx.Graph, node_info, heuristics_on, dont_ban=N
         # general, the assumption we make is that recomputing a node in the
         # backwards pass is "free". However, if a node must be materialized
         # in the backwards pass, then recomputing it is never free.
-        if BAN_IF_MATERIALIZED_BACKWARDS and is_materialized_backwards(node):
+        if min_cut_options.ban_if_materialized_backward and is_materialized_backwards(
+            node
+        ):
             log.info("materialized backwards: %s %s", node, tuple(node.users))
             return True
 
@@ -765,7 +824,7 @@ def get_saved_values(joint_graph: fx.Graph, node_info, heuristics_on, dont_ban=N
         # things like reductions, saving the output of the reduction is very
         # cheap/small, and it makes sure we don't do things like recompute
         # normalizations in the backwards.
-        if BAN_IF_REDUCTION:
+        if min_cut_options.ban_if_reduction:
             input_tensors_size = sum(
                 _size_of(i) for i in node.args if isinstance(i, fx.Node)
             )
@@ -913,7 +972,7 @@ def get_saved_values(joint_graph: fx.Graph, node_info, heuristics_on, dont_ban=N
                     )
         return max_range
 
-    if BAN_IF_USED_FAR_APART:
+    if min_cut_options.ban_if_used_far_apart:
         for used_node in node_info.required_fw_nodes:
             orders = [
                 node_info.get_fw_order(user)
@@ -921,7 +980,7 @@ def get_saved_values(joint_graph: fx.Graph, node_info, heuristics_on, dont_ban=N
                 if user in node_info.required_fw_nodes
             ]
             fw_users = [
-                user for user in used_node.users if user in node_info.required_fw_nodes
+                user for user in used_node.users if node_info.is_required_fw(user)
             ]
             if len(orders) > 0:
                 first_unfusible_use = find_first_unfusible(fw_users, max(orders))
@@ -954,7 +1013,7 @@ def get_saved_values(joint_graph: fx.Graph, node_info, heuristics_on, dont_ban=N
 
     # Some models it improves perf on are cait_m36_384, mixer_b16_224, poolformer_m36
 
-    if BAN_IF_LONG_FUSIBLE_CHAINS:
+    if min_cut_options.ban_if_long_fusible_chains:
         visited = set()
         for start_node in joint_graph.nodes:
             if start_node not in node_info.required_fw_nodes:
@@ -1014,62 +1073,6 @@ def get_saved_values(joint_graph: fx.Graph, node_info, heuristics_on, dont_ban=N
         (name_to_node[node] for node in cut_nodes), key=lambda x: node_idx[x]
     )
     return saved_values, banned_nodes
-
-
-@dataclass
-class OpTypes:
-    """Class for keeping track of an item in inventory."""
-
-    fusible_ops: Set[Callable]
-    compute_intensive_ops: Set[Callable]
-    random_ops: Set[Callable]
-    view_ops: Set[Callable]
-    recomputable_ops: Set[Callable]
-
-    def is_fusible(self, node: fx.Node):
-        return get_aten_target(node) in self.fusible_ops
-
-    def is_compute_intensive(self, node: fx.Node):
-        return get_aten_target(node) in self.compute_intensive_ops
-
-    def is_random(self, node: fx.Node):
-        return get_aten_target(node) in self.random_ops
-
-    def is_view(self, node: fx.Node):
-        return get_aten_target(node) in self.view_ops
-
-    def is_recomputable(self, node: fx.Node):
-        return get_aten_target(node) in self.recomputable_ops
-
-
-@dataclass
-class NodeInfo:
-    # Be careful about iterating over these explicitly, as their order may not
-    # be deterministic
-    inputs: List[fx.Node]
-    _required_fw_nodes: Set[fx.Node]
-    required_bw_nodes: Set[fx.Node]
-    unclaimed_nodes: Set[fx.Node]
-    fw_order: Dict[fx.Node, int]
-
-    @property
-    def required_fw_nodes(self) -> List[fx.Node]:
-        return sorted(
-            (n for n in self._required_fw_nodes), key=lambda n: self.fw_order[n]
-        )
-
-    def is_required_fw(self, n: fx.Node) -> bool:
-        return n in self._required_fw_nodes
-
-    def is_required_bw(self, n: fx.Node) -> bool:
-        return n in self.required_bw_nodes
-
-    def is_unclaimed(self, n: fx.Node) -> bool:
-        return n in self.unclaimed_nodes
-
-    def get_fw_order(self, n: fx.Node) -> int:
-        assert n in self._required_fw_nodes, f"Node {n} not in fw nodes!"
-        return self.fw_order[n]
 
 
 def get_default_op_list() -> OpTypes:
@@ -1236,11 +1239,10 @@ def get_name_to_node(graph: fx.Graph):
         name_to_node[node.name] = node
     return name_to_node
 
-from scipy.optimize import Bounds, LinearConstraint, milp
 
 def _optimize_runtime_with_given_memory(
-    memory: torch.Tensor,
-    runtimes: torch.Tensor,
+    memory: List[float],
+    runtimes: List[float],
     max_memory: float,
 ) -> torch.Tensor:
     """
@@ -1251,6 +1253,8 @@ def _optimize_runtime_with_given_memory(
     Uses https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.milp.html
     """
     import numpy as np
+    from scipy.optimize import Bounds, LinearConstraint, milp
+
     memory = np.array(memory)
     runtimes = np.array(runtimes)
     c = -runtimes  # type: ignore[operator]
@@ -1266,14 +1270,18 @@ def _optimize_runtime_with_given_memory(
         raise RuntimeError("Somehow scipy solving failed")
     return res.x
 
-from torch.utils._mode_utils import no_dispatch
+
 from triton.testing import do_bench
 
+from torch.utils._mode_utils import no_dispatch
+
 RUNTIME_MODE = "analytical"
+
+
 def estimate_runtime(node):
     def materialize_arg(x):
-        if isinstance(x, fx.Node) and isinstance(x.meta['val'], torch.Tensor):
-            return torch.zeros_like(x.meta['val'])
+        if isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.Tensor):
+            return torch.zeros_like(x.meta["val"])
         return x
 
     if RUNTIME_MODE == "placeholder":
@@ -1288,6 +1296,7 @@ def estimate_runtime(node):
     if RUNTIME_MODE == "analytical":
         # todo(chilli): Normalize this to also return ms
         from torch.utils.flop_counter import FlopCounterMode
+
         args, kwargs = pytree.tree_map(materialize_arg, (node.args, node.kwargs))
         with FlopCounterMode(display=False) as mode:
             node.target(*args, **kwargs)
@@ -1296,14 +1305,26 @@ def estimate_runtime(node):
 
     return 1
 
+
 def choose_saved_values_set(
-    joint_graph: fx.Graph, node_info, memory_budget=1
-) -> Set[fx.Node]:
-    BAN_IF_USED_FAR_APART = config.ban_recompute_used_far_apart
-    BAN_IF_LONG_FUSIBLE_CHAINS = config.ban_recompute_long_fusible_chains
-    BAN_IF_MATERIALIZED_BACKWARDS = config.ban_recompute_materialized_backward
-    BAN_IF_NOT_IN_ALLOWLIST = config.ban_recompute_not_in_allowlist
-    BAN_IF_REDUCTION = config.ban_recompute_reductions
+    joint_graph: fx.Graph, node_info: NodeInfo, memory_budget=1
+) -> List[fx.Node]:
+    min_cut_options = MinCutOptions(
+        ban_if_used_far_apart=config.ban_recompute_used_far_apart,
+        ban_if_long_fusible_chains=config.ban_recompute_long_fusible_chains,
+        ban_if_materialized_backward=config.ban_recompute_materialized_backward,
+        ban_if_not_in_allowlist=config.ban_recompute_not_in_allowlist,
+        ban_if_reduction=config.ban_recompute_reductions,
+    )
+
+    if config.aggressive_recomputation:
+        min_cut_options = replace(
+            min_cut_options,
+            ban_if_used_far_apart=False,
+            ban_if_long_fusible_chains=False,
+            ban_if_materialized_backward=False,
+            ban_if_not_in_allowlist=False,
+        )
 
     if memory_budget == 0:
         return node_info.inputs
@@ -1311,85 +1332,126 @@ def choose_saved_values_set(
     runtime_optimized_saved_values, _ = get_saved_values(
         joint_graph,
         node_info,
-        (
-            BAN_IF_USED_FAR_APART,
-            BAN_IF_LONG_FUSIBLE_CHAINS,
-            BAN_IF_MATERIALIZED_BACKWARDS,
-            BAN_IF_NOT_IN_ALLOWLIST,
-            BAN_IF_REDUCTION,
-        ),
+        min_cut_options,
     )
     # return runtime_optimized_saved_values
     if memory_budget == 1:
         return runtime_optimized_saved_values
 
-
     def estimate_activations_size(saved_values):
         return sum([_size_of(i) for i in saved_values]) / 1e9
 
-    min_act_size = estimate_activations_size(inputs)
+    min_act_size = estimate_activations_size(node_info.inputs)
     max_act_size = estimate_activations_size(runtime_optimized_saved_values)
 
-    import time
-    begin = time.time()
-    more_aggressive_saved_values, _ = get_saved_values(joint_graph, node_classifications, (False, False, False, BAN_IF_NOT_IN_ALLOWLIST, BAN_IF_REDUCTION))
+    more_aggressive_options = replace(
+        min_cut_options,
+        ban_if_used_far_apart=False,
+        ban_if_long_fusible_chains=False,
+        ban_if_materialized_backward=False,
+    )
+    more_aggressive_saved_values, _ = get_saved_values(
+        joint_graph, node_info, more_aggressive_options
+    )
+
     def get_normalized_size(sz):
         return (sz / 1e9) / (max_act_size - min_act_size)
 
     def get_mem_ratio(cur):
         return (cur - min_act_size) / (max_act_size - min_act_size)
 
-    if get_mem_ratio(estimate_activations_size(more_aggressive_saved_values)) < memory_budget:
+    if (
+        get_mem_ratio(estimate_activations_size(more_aggressive_saved_values))
+        < memory_budget
+    ):
         return more_aggressive_saved_values
 
-    aggressive_recomputation_saved_values, banned_nodes = get_saved_values(joint_graph, node_classifications, (False, False, False, False, BAN_IF_REDUCTION))
+    aggressive_options = replace(
+        more_aggressive_options,
+        ban_if_not_in_allowlist=False,
+    )
+    aggressive_recomputation_saved_values, banned_nodes = get_saved_values(
+        joint_graph, node_info, aggressive_options
+    )
 
-    if get_mem_ratio(estimate_activations_size(aggressive_recomputation_saved_values)) < memory_budget:
+    if (
+        get_mem_ratio(estimate_activations_size(aggressive_recomputation_saved_values))
+        < memory_budget
+    ):
         return aggressive_recomputation_saved_values
 
     from torch._inductor.fx_utils import get_node_storage
-    input_storages = {get_node_storage(node) for node in inputs}
+
+    input_storages = {get_node_storage(node) for node in node_info.inputs}
 
     def get_recomputable_banned_nodes(banned_nodes, saved_values):
-        return [i for i in banned_nodes if not (i.dist_from_bw >= int(1e9) or get_node_storage(i) in input_storages)]
-    recomputable_banned_nodes = get_recomputable_banned_nodes(banned_nodes, aggressive_recomputation_saved_values)
+        return [
+            i
+            for i in banned_nodes
+            if not (i.dist_from_bw >= int(1e9) or get_node_storage(i) in input_storages)
+        ]
+
+    recomputable_banned_nodes = get_recomputable_banned_nodes(
+        banned_nodes, aggressive_recomputation_saved_values
+    )
 
     def print_budget_real_mem(act_size, name=""):
         print(f"{get_mem_ratio(act_size):.2f}: {act_size:.2f}GB ({name})")
 
-    print_budget_real_mem(estimate_activations_size(runtime_optimized_saved_values), "default")
-    print_budget_real_mem(estimate_activations_size(more_aggressive_saved_values), "more aggressive")
-    print_budget_real_mem(estimate_activations_size(aggressive_recomputation_saved_values), "aggressive")
+    print_budget_real_mem(
+        estimate_activations_size(runtime_optimized_saved_values), "default"
+    )
+    print_budget_real_mem(
+        estimate_activations_size(more_aggressive_saved_values), "more aggressive"
+    )
+    print_budget_real_mem(
+        estimate_activations_size(aggressive_recomputation_saved_values), "aggressive"
+    )
 
-
-    all_recomputable_banned_nodes = sorted(list(recomputable_banned_nodes), key=_size_of, reverse=True)
+    all_recomputable_banned_nodes = sorted(
+        recomputable_banned_nodes, key=_size_of, reverse=True
+    )
     memories = [get_normalized_size(_size_of(i)) for i in all_recomputable_banned_nodes]
     runtimes = [estimate_runtime(node) for node in all_recomputable_banned_nodes]
     cur_memory_budget = memory_budget
     from torch.utils._mode_utils import no_dispatch
+
     with no_dispatch():
-        banned_nodes = _optimize_runtime_with_given_memory(memories, runtimes, max(memory_budget, 0))
+        banned_nodes = _optimize_runtime_with_given_memory(
+            memories, runtimes, max(memory_budget, 0)
+        )
         dont_ban = set()
         for idx, i in enumerate(banned_nodes.tolist()):
             if not i:
                 dont_ban.add(all_recomputable_banned_nodes[idx])
+        predicted_saved_nodes = set(all_recomputable_banned_nodes) - dont_ban
         # print([(i, get_normalized_size(_size_of(i))) for i in dont_ban])
-        estimated_activations_saved = estimate_activations_size(set(all_recomputable_banned_nodes) - dont_ban) / (max_act_size - min_act_size)
-        saved_values, banned_nodes = get_saved_values(joint_graph, node_classifications, (False, False, False, False, BAN_IF_REDUCTION), dont_ban)
-        # todo(chilli): Estimated doesn't align exaclty with actual - actual is usually less memory than estimated. i'm guessing (actually quite unsure about this) that's because estimated is just only including tensors we actually banned from recompute, but there may be other tensors that we choose to save.
+        estimated_activations_saved = estimate_activations_size(
+            predicted_saved_nodes
+        ) / (max_act_size - min_act_size)
+
+        saved_values, banned_nodes = get_saved_values(
+            joint_graph,
+            node_info,
+            aggressive_options,
+            dont_ban,
+        )
+        # todo(chilli): Estimated doesn't align exaclty with actual - actual is
+        # usually less memory than estimated. i'm guessing (actually quite
+        # unsure about this) that's because estimated is just only including
+        # tensors we actually banned from recompute, but there may be other
+        # tensors that we choose to save.
         print(f"desired: {cur_memory_budget} ")
         print(f"allow recomputing: {dont_ban}")
-        print(f"estimated: {estimate_activations_size(set(all_recomputable_banned_nodes) - dont_ban)}")
-        print(f"estimated ratio: {(estimate_activations_size(set(all_recomputable_banned_nodes) - dont_ban))/(max_act_size - min_act_size)}")
+        print(f"estimated: {estimate_activations_size(predicted_saved_nodes)}")
+        print(
+            f"estimated ratio: {estimate_activations_size(predicted_saved_nodes)/(max_act_size - min_act_size)}"
+        )
         print(f"actual: {estimate_activations_size(saved_values) - min_act_size}")
         print(f"actual ratio: {get_mem_ratio(estimate_activations_size(saved_values))}")
         print_budget_real_mem(estimate_activations_size(saved_values), "milp")
 
         return saved_values
-
-    print_budget_real_mem(estimate_activations_size(inputs), "full checkpoint")
-    saved_values = inputs
-    return saved_values
 
 
 def min_cut_rematerialization_partition(
@@ -1516,7 +1578,7 @@ def min_cut_rematerialization_partition(
         print("Ops banned from rematerialization: ", ops_ignored)
         print()
 
-    memory_budget = 1
+    memory_budget = config.memory_budget
     for node in joint_graph.nodes:
         if isinstance(node.meta.get("memory_budget", None), float):
             memory_budget = node.meta["memory_budget"]

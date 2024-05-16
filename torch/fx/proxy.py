@@ -92,7 +92,6 @@ _COPY_META_FIELDS = [
     "source_fn_stack",
     "original_aten",
     "recompute",
-    "memory_budget",
     "from_node",
     "quantization_tag",
 ]
@@ -156,9 +155,6 @@ class TracerBase:
             for field in _COPY_META_FIELDS:
                 if field in current_meta:
                     node.meta[field] = copy.copy(current_meta[field])
-            if "recompute" in current_meta:
-                print(current_meta["memory_budget"])
-                print(node.meta["memory_budget"])
 
             # Here we decrement to account for the sequence_nr having
             # just been incremented while tracing this lowered aten op.
