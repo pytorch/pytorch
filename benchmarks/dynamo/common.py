@@ -357,10 +357,11 @@ def patch_torch_manual_seed():
 def empty_gpu_cache():
     """
     Explicitly empty gpu cache to avoid OOM in subsequent run.
-    Note that there should be no side effect to call empty_cache for non-existing devices.
     """
-    torch.cuda.empty_cache()
-    torch.xpu.empty_cache()
+    if HAS_CUDA:
+        torch.cuda.empty_cache()
+    if HAS_XPU:
+        torch.xpu.empty_cache()
 
 
 def synchronize():
