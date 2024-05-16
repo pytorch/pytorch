@@ -1577,7 +1577,7 @@ class BuiltinVariable(VariableTracker):
             ) and trace_rules.is_aten_op_or_tensor_method(member):
                 return TorchInGraphFunctionVariable(member, **options)
         elif isinstance(obj, (PythonModuleVariable, DummyModule)):
-            if obj.is_torch or name not in obj.value.__dict__:
+            if obj.is_torch:
                 member = getattr(obj.value, name)
             else:
                 member = obj.value.__dict__[name]
