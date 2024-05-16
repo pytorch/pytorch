@@ -3165,7 +3165,8 @@ def _unsafe_masked_index(self, mask, indices, fill):
     mask_loader = mask.make_loader()
 
     def inner_fn(idx):
-        return ops.masked(mask_loader(idx), lambda: _unsafe_index_fn(idx), fill)
+        mask_val = ops.to_dtype(mask_loader(idx), torch.bool)
+        return ops.masked(mask_val, lambda: _unsafe_index_fn(idx), fill)
 
     return Pointwise.create(
         device=self.get_device(),
