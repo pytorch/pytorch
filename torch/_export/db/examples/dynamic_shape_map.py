@@ -5,7 +5,7 @@ from functorch.experimental.control_flow import map
 
 
 @export_case(
-    example_inputs=(torch.ones(3, 2), torch.ones(2)),
+    example_inputs=(torch.randn(3, 2), torch.randn(2)),
     tags={"torch.dynamic-shape", "torch.map"},
 )
 class DynamicShapeMap(torch.nn.Module):

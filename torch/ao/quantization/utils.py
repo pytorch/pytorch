@@ -151,6 +151,8 @@ def to_underlying_dtype(qdtype):
         torch.int8: torch.int8,
         torch.int16: torch.int16,
         torch.int32: torch.int32,
+        torch.float8_e5m2: torch.float8_e5m2,
+        torch.float8_e4m3fn: torch.float8_e4m3fn,
     }
     assert qdtype in DTYPE_MAPPING, "Unsupported dtype: " + str(qdtype)
     return DTYPE_MAPPING[qdtype]
@@ -231,7 +233,9 @@ def activation_is_statically_quantized(qconfig):
             torch.uint8,
             torch.int8,
             torch.int16,
-            torch.int32
+            torch.int32,
+            torch.float8_e5m2,
+            torch.float8_e4m3fn,
         ]
         and (not activation_is_dynamically_quantized(qconfig))
     )
@@ -269,7 +273,9 @@ def weight_is_quantized(qconfig):
         torch.uint8,
         torch.int8,
         torch.int16,
-        torch.int32
+        torch.int32,
+        torch.float8_e5m2,
+        torch.float8_e4m3fn,
     ]
 
 def weight_is_statically_quantized(qconfig):
@@ -305,7 +311,18 @@ def get_quant_type(qconfig):
     assert qconfig is not None
     activation = qconfig.activation()
     weight = qconfig.weight()
-    static_dtypes = [torch.quint8, torch.qint8, torch.quint4x2, torch.qint32, torch.uint8, torch.int8, torch.int16, torch.int32]
+    static_dtypes = [
+        torch.quint8,
+        torch.qint8,
+        torch.quint4x2,
+        torch.qint32,
+        torch.uint8,
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.float8_e5m2,
+        torch.float8_e4m3fn
+    ]
     if weight.dtype in static_dtypes:
         if hasattr(activation, 'is_dynamic') and activation.is_dynamic:
             return QuantType.DYNAMIC
@@ -320,7 +337,7 @@ def get_quant_type(qconfig):
         elif activation.dtype == torch.float16:
             return QuantType.STATIC
 
-    raise Exception(f"Unrecognized dtype combination in get_quant_type: activation({activation.dtype}),"
+    raise Exception(f"Unrecognized dtype combination in get_quant_type: activation({activation.dtype}),"  # noqa: TRY002
                     f"weight({weight.dtype})")
 
 def check_min_max_valid(min_val: torch.Tensor, max_val: torch.Tensor) -> bool:
@@ -670,6 +687,27 @@ def get_fqn_to_example_inputs(
         # restore the module call even if there is an exception
         torch.nn.Module.__call__ = orig_module_call  # type: ignore[method-assign]
     return fqn_to_example_inputs
+
+def _assert_and_get_unique_device(module: torch.nn.Module) -> Any:
+    """
+    Returns the unique device for a module, or None if no device is found.
+    Throws an error if multiple devices are detected.
+    """
+    devices = {p.device for p in module.parameters()} | \
+        {p.device for p in module.buffers()}
+    """
+    As a temp workaround for AIMP HHC publish we added CPU check.remove it later. T163614564
+    """
+    if {torch.device("cpu"), torch.device("meta")} == devices:
+        warnings.warn("Both 'meta' and 'cpu' are present in the list of devices. Module can have one device. We Select 'cpu'.")
+        devices = {torch.device("cpu")}
+    ""
+    assert len(devices) <= 1, (
+        "prepare only works with cpu or single-device CUDA modules, "
+        f"but got devices {devices}"
+    )
+    device = next(iter(devices)) if len(devices) > 0 else None
+    return device
 
 __all__ = [
     "NodePattern",

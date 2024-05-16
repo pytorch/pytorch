@@ -579,6 +579,7 @@ coverage_ignore_functions = [
     "barrier",
     "get_all",
     "synchronize",
+    "store_timeout",
     # torch.distributed.fsdp.wrap
     "always_wrap_policy",
     "enable_wrap",
@@ -2795,6 +2796,7 @@ coverage_ignore_classes = [
     "ConstraintViolationError",
     "DynamicDimConstraintPrinter",
     "GuardOnDataDependentSymNode",
+    "PendingUnbackedSymbolNotFound",
     "LoggingShapeGuardPrinter",
     "RelaxedUnspecConstraint",
     "RuntimeAssert",
@@ -3557,6 +3559,15 @@ html_css_files = [
 
 from sphinx.ext.coverage import CoverageBuilder
 
+# NB: Due to some duplications of the following modules/functions, we keep
+# them as expected failures for the time being instead of return 1
+ignore_duplicated_modules = {
+    "torch.nn.utils.weight_norm",
+    "torch.nn.utils.spectral_norm",
+    "torch.nn.parallel.data_parallel",
+    "torch.ao.quantization.quantize",
+}
+
 
 def coverage_post_process(app, exception):
     if exception is not None:
@@ -3597,7 +3608,7 @@ def coverage_post_process(app, exception):
         path=torch.__path__, prefix=torch.__name__ + "."
     ):
         if is_not_internal(modname):
-            if modname not in modules:
+            if modname not in modules and modname not in ignore_duplicated_modules:
                 missing.add(modname)
 
     output = []

@@ -308,10 +308,11 @@ class TestQuantizedTensor(TestCase):
         # Test save/load
         with tempfile.NamedTemporaryFile() as f:
             torch.save(qr, f)
-            f.seek(0)
-            loaded_q = torch.load(f)
-            loaded_int_repr = loaded_q.int_repr()
-            self.assertEqual(int_repr, loaded_int_repr)
+            for weights_only in [True, False]:
+                f.seek(0)
+                loaded_q = torch.load(f, weights_only=weights_only)
+                loaded_int_repr = loaded_q.int_repr()
+                self.assertEqual(int_repr, loaded_int_repr)
 
     def test_qtensor_channel_float_assignment(self):
         t1 = torch.rand(2, 3, 5, 5)
@@ -831,11 +832,12 @@ class TestQuantizedTensor(TestCase):
             with tempfile.NamedTemporaryFile() as f:
                 # Serializing and Deserializing Tensor
                 torch.save((qr, qrv), f)
-                f.seek(0)
-                qr2, qrv2 = torch.load(f)
-                self.assertEqual(qr, qr2)
-                self.assertEqual(qrv, qrv2)
-                self.assertEqual(qr2.storage().data_ptr(), qrv2.storage().data_ptr())
+                for weights_only in [True, False]:
+                    f.seek(0)
+                    qr2, qrv2 = torch.load(f, weights_only=weights_only)
+                    self.assertEqual(qr, qr2)
+                    self.assertEqual(qrv, qrv2)
+                    self.assertEqual(qr2.storage().data_ptr(), qrv2.storage().data_ptr())
 
     def test_qtensor_per_channel_load_save(self):
         r = torch.rand(20, 10, dtype=torch.float) * 4 - 2
@@ -849,9 +851,10 @@ class TestQuantizedTensor(TestCase):
             with tempfile.NamedTemporaryFile() as f:
                 # Serializing and Deserializing Tensor
                 torch.save(qr, f)
-                f.seek(0)
-                qr2 = torch.load(f)
-                self.assertEqual(qr, qr2)
+                for weights_only in [True, False]:
+                    f.seek(0)
+                    qr2 = torch.load(f, weights_only=weights_only)
+                    self.assertEqual(qr, qr2)
 
     def test_qtensor_copy(self):
         scale = 0.5
@@ -1345,6 +1348,7 @@ class TestQuantizedTensor(TestCase):
         torch.save(f, buf)
 
         buf.seek(0)
+        # Don't test weights_only here as this is loading a Module (legacy)
         f2 = torch.load(buf)
 
         self.assertEqual(f2.qscheme, torch.per_tensor_symmetric)
@@ -1429,9 +1433,10 @@ class TestQuantizedTensor(TestCase):
             m = M()
             m(q, qc)
             with open(fname, "rb") as handle:
-                loaded_q, loaded_qc = torch.load(fname)
-                self.assertEqual(loaded_q, q)
-                self.assertEqual(loaded_qc, qc)
+                for weights_only in [True, False]:
+                    loaded_q, loaded_qc = torch.load(fname, weights_only=weights_only)
+                    self.assertEqual(loaded_q, q)
+                    self.assertEqual(loaded_qc, qc)
 
     def test_pickle_checkpoint_qtensor(self):
         self._test_pickle_checkpoint_qtensor('cpu')
@@ -1601,6 +1606,66 @@ class TestQuantizedTensor(TestCase):
 
         self.assertEqual(quantized_X.int_repr(), quantized_decomposed_X)
         self.assertEqual(dequantized_X, dequantized_decomposed_X)
+
+    def test_decomposed_choose_qparams_per_token_asymmetric_backward(self):
+        # register the ops
+        import torch.ao.quantization.fx._decomposed
+        x = torch.randn(2, 3).requires_grad_()
+        (s, zp) = torch.ops.quantized_decomposed._choose_qparams_per_token_asymmetric_impl(x, torch.int8)
+        out = x.div(s).add(zp).round()
+        out.sum().backward()
+
+    def test_decomposed_quantize_per_channel_group(self):
+        # register the ops
+        import torch.ao.quantization.fx._decomposed
+        qmin, qmax = (-8, 7)
+        group_size = 128
+        x = torch.randn(100, 256)
+        s = torch.randn(100, 2)
+        zp = torch.randint(qmax, size=(100, 2), dtype=torch.int32)
+
+        # simulate fake quantize per channel group with qdq
+        q = torch.ops.quantized_decomposed.quantize_per_channel_group(
+            x, s, zp, qmin, qmax, torch.int8, group_size,
+        )
+        dq = torch.ops.quantized_decomposed.dequantize_per_channel_group(
+            q, s, zp, qmin, qmax, torch.int8, group_size, torch.float32
+        )
+
+        # express per group fake quant using `torch.fake_quantize_per_channel_affine`
+        x_grouped = x.reshape(-1, group_size)
+        s_flattened = s.flatten()
+        zp_flattened = zp.flatten()
+        fq = torch.fake_quantize_per_channel_affine(
+            x_grouped, s_flattened, zp_flattened, 0, qmin, qmax,
+        )
+        fq = fq.reshape_as(x)
+        torch.testing.assert_close(dq, fq, rtol=0, atol=0)
+
+    def test_decomposed_quantize_per_token(self):
+        # register the ops
+        import torch.ao.quantization.fx._decomposed
+        qmin, qmax = (-8, 7)
+        x = torch.randn(100, 256)
+        s = torch.randn(100, 1)
+        zp = torch.randint(qmax, size=(100, 1), dtype=torch.int32)
+
+        # simulate fake quantize per token with qdq
+        q = torch.ops.quantized_decomposed.quantize_per_token(
+            x, s, zp, qmin, qmax, torch.int8,
+        )
+        dq = torch.ops.quantized_decomposed.dequantize_per_token(
+            q, s, zp, qmin, qmax, torch.int8, torch.float32
+        )
+
+        # express per token fake quant using `torch.fake_quantize_per_channel_affine`
+        s_flattened = s.flatten()
+        zp_flattened = zp.flatten()
+        fq = torch.fake_quantize_per_channel_affine(
+            x, s_flattened, zp_flattened, 0, qmin, qmax,
+        )
+        torch.testing.assert_close(dq, fq, rtol=0, atol=0)
+
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"

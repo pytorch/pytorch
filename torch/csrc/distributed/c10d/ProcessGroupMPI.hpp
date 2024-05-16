@@ -86,7 +86,7 @@ class TORCH_API ProcessGroupMPI : public Backend {
     explicit WorkMPI(
         std::vector<at::Tensor> outputTensors,
         const char* profilingTitle = nullptr,
-        const c10::optional<std::vector<at::Tensor>>& inputTensors =
+        const std::optional<std::vector<at::Tensor>>& inputTensors =
             c10::nullopt)
         : Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors),
           outputTensors_(std::move(outputTensors)),
@@ -102,7 +102,7 @@ class TORCH_API ProcessGroupMPI : public Backend {
 
    private:
     void finishWorkMPI();
-    void finishWorkMPIError(std::exception_ptr eptr);
+    void finishWorkMPIError(const std::exception_ptr& eptr);
 
     std::vector<at::Tensor> outputTensors_;
     c10::intrusive_ptr<at::ivalue::Future> future_;
@@ -114,7 +114,7 @@ class TORCH_API ProcessGroupMPI : public Backend {
         MPI_Request request,
         std::vector<at::Tensor> outputTensors,
         const char* profilingTitle = nullptr,
-        const c10::optional<std::vector<at::Tensor>>& inputTensors =
+        const std::optional<std::vector<at::Tensor>>& inputTensors =
             c10::nullopt);
 
     ~AsyncWork() override;
@@ -137,7 +137,7 @@ class TORCH_API ProcessGroupMPI : public Backend {
    private:
     const std::vector<at::Tensor> outputTensors_;
     MPI_Request request_;
-    MPI_Status status_;
+    MPI_Status status_{};
   };
 
   // Constructor will spawn up the worker thread loop
@@ -243,7 +243,7 @@ class TORCH_API ProcessGroupMPI : public Backend {
   c10::intrusive_ptr<Work> enqueue(
       std::unique_ptr<WorkEntry> entry,
       const char* profilingTitle = nullptr,
-      const c10::optional<std::vector<at::Tensor>>& inputTensors =
+      const std::optional<std::vector<at::Tensor>>& inputTensors =
           c10::nullopt);
 
   bool stop_;

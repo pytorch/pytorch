@@ -206,6 +206,7 @@ skip:
       - hf_T5_generate
       - doctr_det_predictor
       - doctr_reco_predictor
+      - moondream
       # doesnt fit in memory
       - phi_1_5
       - detectron2_fcos_r_50_fpn
@@ -251,6 +252,7 @@ accuracy:
     eager_not_deterministic:
       # Models that deterministic algorithms can not be turned on for eager mode.
       - Background_Matting
+      - pytorch_unet
 
   max_batch_size:
     hf_GPT2: 2

@@ -81,7 +81,7 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
   if (has_simple_data_ptr(storage)) {
     // Case 1) We have a simple data pointer: wrap it.
     std::unique_ptr<void, DeleterFnPtr> original_ctx =
-        storage.mutable_data_ptr().move_context();
+        storage._mutable_data_ptr_no_checks().move_context();
 
     // Save this for the result.
     new_data_ptr = make_data_ptr(

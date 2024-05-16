@@ -1,15 +1,18 @@
 # Owner(s): ["oncall: jit"]
 
+import torch
+from torch._C import parse_ir
 from torch.testing._internal.common_utils import TemporaryFileName
 from torch.testing._internal.jit_utils import JitTestCase
-from torch._C import parse_ir
-import torch
 
 
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_jit.py TESTNAME\n\n"
-                       "instead.")
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test file is not meant to be run directly, use:\n\n"
+        "\tpython test/test_jit.py TESTNAME\n\n"
+        "instead."
+    )
+
 
 class TestAliasAnalysis(JitTestCase):
     def test_becomes_wildcard_annotations(self):
@@ -26,9 +29,13 @@ class TestAliasAnalysis(JitTestCase):
         alias_db = graph.alias_db()
         split_node = graph.findNode("aten::split")
         # split input enters wildcard set, list initalized as containing wildcard set
-        self.assertTrue(alias_db.may_contain_alias(next(split_node.inputs()), split_node.output()))
+        self.assertTrue(
+            alias_db.may_contain_alias(next(split_node.inputs()), split_node.output())
+        )
         # because %x.1 enters wildcard set, it now aliases other members of wildcard set (graph inputs)
-        self.assertTrue(alias_db.may_contain_alias(next(split_node.inputs()), next(graph.inputs())))
+        self.assertTrue(
+            alias_db.may_contain_alias(next(split_node.inputs()), next(graph.inputs()))
+        )
 
     def test_nested_list_construct_not_wildcard(self):
         @torch.jit.script
@@ -42,7 +49,9 @@ class TestAliasAnalysis(JitTestCase):
         ten_construct = graph.findNode("aten::rand").output()
         output = next(graph.outputs())
         self.assertTrue(alias_db.may_contain_alias(ten_construct, output))
-        self.assertFalse(alias_db.may_contain_alias(next(graph.inputs()), ten_construct))
+        self.assertFalse(
+            alias_db.may_contain_alias(next(graph.inputs()), ten_construct)
+        )
 
     def test_recursive_calls(self):
         @torch.jit.script
@@ -108,7 +117,9 @@ class TestAliasAnalysis(JitTestCase):
         class MultiTmpFile:
             def __init__(self, N):
                 self.N = N
-                self.ctxs = [TemporaryFileName(mode="w", suffix=".py") for _ in range(N)]
+                self.ctxs = [
+                    TemporaryFileName(mode="w", suffix=".py") for _ in range(N)
+                ]
 
             def __enter__(self):
                 return [x.__enter__() for x in self.ctxs]

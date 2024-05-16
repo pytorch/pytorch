@@ -40,6 +40,7 @@
 #include <ATen/ops/_unsafe_view.h>
 #include <ATen/ops/_weight_int4pack_mm_native.h>
 #include <ATen/ops/_weight_int8pack_mm_native.h>
+#include <ATen/ops/abs.h>
 #include <ATen/ops/addbmm_native.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addr.h>
@@ -120,6 +121,7 @@
 #include <ATen/ops/mul.h>
 #include <ATen/ops/mv.h>
 #include <ATen/ops/narrow.h>
+#include <ATen/ops/ne.h>
 #include <ATen/ops/norm.h>
 #include <ATen/ops/nuclear_norm_native.h>
 #include <ATen/ops/ones.h>
@@ -278,7 +280,7 @@ TORCH_META_FUNC(_linalg_slogdet)(const Tensor& A) {
 }
 
 template <typename Meta>
-void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm, const c10::optional<Tensor>& self_baddbmm = nullopt) {
+void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm, const std::optional<Tensor>& self_baddbmm = nullopt) {
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
 
@@ -633,7 +635,7 @@ namespace {
 Tensor linalg_matrix_power_impl(
     const Tensor& self,
     int64_t n,
-    c10::optional<Tensor> _out) {
+    std::optional<Tensor> _out) {
   NoTF32Guard disable_tf32;
   auto out = _out.value_or(Tensor());
 
@@ -927,7 +929,7 @@ Tensor matrix_chain_multiplication(
 }
 
 // Implements torch.linalg.multi_dot
-Tensor multi_dot_impl(TensorList _tensors, c10::optional<Tensor> _out) {
+Tensor multi_dot_impl(TensorList _tensors, std::optional<Tensor> _out) {
   const size_t n = _tensors.size();
   TORCH_CHECK(n >= 2, "multi_dot(): expected at least 2 tensors but got ", n);
 
@@ -2815,6 +2817,42 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   // values larger than 10^53 (same for negative numbers), so that's fine.
   auto ord = scalar_ord.toDouble();
   auto dim = opt_dim.value_or(IntArrayRef{});
+  auto size = self.sizes();
+  auto ndim = self.dim();
+
+  auto opt_dim_ = dim.vec();
+  maybe_wrap_dims(opt_dim_, ndim);
+
+  using Int = IntArrayRef::value_type;
+  std::vector<Int> all_dim(ndim);
+  std::iota(all_dim.begin(), all_dim.end(), 0);
+
+  bool is_all_reduce = !opt_dim.has_value() || opt_dim.value().empty();
+  auto reduce_dim = is_all_reduce ? all_dim : opt_dim_;
+
+  bool is_reduce_over_1D_vector = true;
+  for (auto i : reduce_dim) {
+    if (size[i] != 1){
+      is_reduce_over_1D_vector = false;
+      break;
+    }
+  }
+
+  if (is_reduce_over_1D_vector) {
+    Tensor self_;
+    if (opt_dtype.has_value()) {
+      self_ = self.to(*opt_dtype);
+    } else {
+      self_ = self;
+    }
+    if (ord != 0.0) {
+      keepdim ? at::abs_outf(self_, const_cast<Tensor&>(result)) : at::abs_outf(self_.squeeze(reduce_dim), const_cast<Tensor&>(result));
+    } else {
+      keepdim ? at::ne_outf(self_, 0, const_cast<Tensor&>(result)) : at::ne_outf(self_.squeeze(reduce_dim), 0, const_cast<Tensor&>(result));
+    }
+    return;
+  }
+
   // No need to handle opt_dtype explicitly as it is already encoded in the dtype of result
 
   // https://github.com/pytorch/pytorch/issues/52648
@@ -3447,8 +3485,8 @@ Tensor _weight_int4pack_mm_cpu(
   auto N = B.size(0) * kNTileSize;
   auto K = A.size(1);
 
-  TORCH_CHECK(A.dtype() == kBFloat16,
-      __func__, " : expect A to be bfloat16 tensor.");
+  TORCH_CHECK(A.dtype() == kBFloat16 || A.dtype() == kHalf || A.dtype() == kFloat,
+      __func__, " : expect A to be either 32-bit or 16-bit float tensor.");
   TORCH_CHECK(A.is_contiguous(),
       __func__, " : expect A to be contiguous.");
   TORCH_CHECK(A.dim() == 2,
@@ -3484,8 +3522,8 @@ Tensor _weight_int8pack_mm_cpu(
   auto N = B.size(0);
   auto K = A.size(1);
 
-  TORCH_CHECK(A.dtype() == kBFloat16,
-      __func__, " : expect A to be bfloat16 tensor.");
+  TORCH_CHECK(A.dtype() == kBFloat16 || A.dtype() == kHalf || A.dtype() == kFloat,
+      __func__, " : expect A to be either 32-bit or 16-bit float tensor.");
   TORCH_CHECK(A.is_contiguous(),
       __func__, " : expect A to be contiguous.");
   TORCH_CHECK(A.dim() == 2,

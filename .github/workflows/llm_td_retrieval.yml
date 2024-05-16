@@ -57,12 +57,6 @@ jobs:
           cd ../codellama
           pip install -e .
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v3
-        with:
-          role-to-assume: arn:aws:iam::308535385114:role/gha_target_determinator_s3_read
-          aws-region: us-east-1
-
       - name: Fetch CodeLlama Checkpoint
         shell: bash -l {0}
         run: |
@@ -90,6 +84,7 @@ jobs:
 
       - name: Run Retriever
         id: run_retriever
+        continue-on-error: true  # ghstack not currently supported due to problems getting git diff
         shell: bash -l {0}
         run: |
           set -euxo pipefail
@@ -107,6 +102,7 @@ jobs:
 
       - name: Upload results to s3
         uses: seemethere/upload-artifact-s3@v5
+        if: ${{ steps.run_retriever.outcome == 'success' }}
         with:
           name: llm_results
           retention-days: 14

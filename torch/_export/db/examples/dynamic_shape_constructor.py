@@ -4,7 +4,7 @@ from torch._export.db.case import export_case
 
 
 @export_case(
-    example_inputs=(torch.ones(3, 2),),
+    example_inputs=(torch.randn(3, 2),),
     tags={"torch.dynamic-shape"},
 )
 class DynamicShapeConstructor(torch.nn.Module):
@@ -16,4 +16,4 @@ class DynamicShapeConstructor(torch.nn.Module):
         super().__init__()
 
     def forward(self, x):
-        return torch.ones(x.shape[0] * 2)
+        return torch.zeros(x.shape[0] * 2)

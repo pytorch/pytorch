@@ -14,7 +14,6 @@ from torch.backends.cuda import (
 )
 
 from torch.nn.attention import SDPBackend
-
 from .nested_tensor import buffer_from_jagged, NestedTensor, ViewNestedFromBuffer
 
 log = logging.getLogger(__name__)

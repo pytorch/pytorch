@@ -10,10 +10,10 @@ import abc
 import unittest.mock as mock
 
 from torch.distributed.elastic.metrics.api import (
+    _get_metric_name,
     MetricData,
     MetricHandler,
     MetricStream,
-    _get_metric_name,
     prof,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -34,7 +34,7 @@ class TestMetricsHandler(MetricHandler):
 class Parent(abc.ABC):
     @abc.abstractmethod
     def func(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def base_func(self):
         self.func()
@@ -57,7 +57,7 @@ class MetricsApiTest(TestCase):
 
     @prof
     def throw(self):
-        raise RuntimeError()
+        raise RuntimeError
 
     @prof(group="torchelastic")
     def bar2(self):

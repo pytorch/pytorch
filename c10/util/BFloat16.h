@@ -7,8 +7,8 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
-
 #include <iosfwd>
+#include <ostream>
 
 #if defined(__CUDACC__) && !defined(USE_ROCM)
 #include <cuda_bf16.h>
@@ -99,7 +99,7 @@ struct alignas(2) BFloat16 {
   }
 
   constexpr C10_HOST_DEVICE BFloat16(unsigned short bits, from_bits_t)
-      : x(bits){};
+      : x(bits) {}
   inline C10_HOST_DEVICE BFloat16(float value);
   inline C10_HOST_DEVICE operator float() const;
 
@@ -114,7 +114,12 @@ struct alignas(2) BFloat16 {
 #endif
 };
 
-C10_API std::ostream& operator<<(std::ostream& out, const BFloat16& value);
+C10_API inline std::ostream& operator<<(
+    std::ostream& out,
+    const BFloat16& value) {
+  out << (float)value;
+  return out;
+}
 
 } // namespace c10
 
