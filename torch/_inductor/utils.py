@@ -1020,7 +1020,7 @@ def use_ck_template(layout, m, n, k):
     # TBD: investigate if backend needs to be disabled for small gemms similar to CUTLASS
     return True
 
-    
+
 def _use_template_for_cpu(layout):
     return use_max_autotune() and layout.device.type == "cpu"
 

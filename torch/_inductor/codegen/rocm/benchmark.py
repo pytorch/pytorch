@@ -1,7 +1,7 @@
 import logging
 import sys
 
-import pandas
+import pandas  # type: ignore[import-untyped]
 
 import torch
 from torch._dynamo import config as dynconfig
