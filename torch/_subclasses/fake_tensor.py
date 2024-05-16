@@ -1059,7 +1059,7 @@ class FakeTensorMode(TorchDispatchMode):
         and cache the result (if the result is eligible for caching).
         """
         output: Union[FakeTensor, _Unassigned] = _UNASSIGNED
-        key = self._cache_key(func, args, kwargs)
+        key, valid_key = self._cache_key(func, args, kwargs)
         entry = FakeTensorMode.cache.get(key, None)
         if isinstance(entry, _DispatchCacheEntry):
             # We already have this dispatch key cached
@@ -1080,6 +1080,9 @@ class FakeTensorMode(TorchDispatchMode):
                 # args. This will raise _BypassDispatchCache if there's an
                 # invalid value in the args.
                 self._validate_cache_key(func, args, kwargs)
+                # If there was an _UNHASHABLE in the key then we should never
+                # get here.
+                assert valid_key
                 output = self._dispatch_impl(func, types, args, kwargs)
                 entry = self._make_cache_entry(key, func, args, kwargs, output)
             except _BypassDispatchCache as e:
@@ -1105,7 +1108,7 @@ class FakeTensorMode(TorchDispatchMode):
         func: OpOverload,
         args: Tuple[Any, ...],
         kwargs: Dict[str, Any],
-    ) -> _DispatchCacheKey:
+    ) -> Tuple[_DispatchCacheKey, bool]:
         """
         Create a cache key given the dispatch args. Raises _BypassDispatchCache
         for any situation that precludes caching.
@@ -1127,11 +1130,13 @@ class FakeTensorMode(TorchDispatchMode):
             self.shape_env.settings if self.shape_env else None,
         ]
         # Translate any FakeTensor args to metadata.
+        valid_input = True
         if args:
-            self._prep_args_for_hash(key_values, args)
+            valid_input = self._prep_args_for_hash(key_values, args) and valid_input
         if kwargs:
-            self._prep_args_for_hash(key_values, kwargs)
-        return _DispatchCacheKey(tuple(key_values))
+            valid_input = self._prep_args_for_hash(key_values, kwargs) and valid_input
+
+        return _DispatchCacheKey(tuple(key_values)), valid_input
 
     def _validate_cache_key(
         self,
@@ -1180,37 +1185,48 @@ class FakeTensorMode(TorchDispatchMode):
 
     def _prep_args_for_hash(self, output: List[Any], args: Any):
         """
-        Translate the provided args into a form suitable for caching at FakeTensor
-        dispatch, i.e., convert unhashable types like lists & dicts into tuples and
-        convert FakeTensors into metadata. Raises _BypassDispatchCache to signal
-        unsupported cases that should bypass caching.
+        Translate the provided args into a form suitable for caching at
+        FakeTensor dispatch, i.e., convert unhashable types like lists & dicts
+        into tuples and convert FakeTensors into metadata. For any unhashable
+        types remaining (like SymInt, for example) this function should append
+        _UNHASHABLE and _verify_args_for_hash() should raise
+        _BypassDispatchCache.
+
+        Returns True if all values were valid and False if any _UNHASHABLEs were
+        produced.
         """
         if isinstance(args, dict):
-            self._prep_args_for_hash(output, args.keys())
-            self._prep_args_for_hash(output, args.values())
-            return
+            return self._prep_args_for_hash(
+                output, args.keys()
+            ) and self._prep_args_for_hash(output, args.values())
 
+        valid_input = True
         for arg in args:
             if isinstance(arg, torch.Tensor):
                 if isinstance(arg, FakeTensor):
-                    if arg._has_symbolic_sizes_strides:
+                    if (
+                        arg._has_symbolic_sizes_strides
+                        or isinstance(arg.untyped_storage().nbytes(), torch.SymInt)
+                        or arg.fake_mode is not self
+                    ):
                         # This will get caught by _verify_args_for_hash later. We
                         # can't just ignore it because it's an unhashable value. Use
                         # a sentinel to indicate the unhashable value (so we don't
                         # collide with a "good" hash).
                         output.append(_UNHASHABLE)
-                    elif arg.fake_mode is not self:
-                        output.append(_UNHASHABLE)
+                        valid_input = False
                     else:
                         output.append(torch._C._FakeTensor_extract_tensor_metadata(arg))
                 else:
                     # Caught by _verify_args_for_hash later.
                     output.append(_UNHASHABLE)
+                    valid_input = False
             elif isinstance(arg, (torch.SymBool, torch.SymInt, torch.SymFloat)):
                 # Caught by _verify_args_for_hash later.
                 output.append(_UNHASHABLE)
+                valid_input = False
             elif isinstance(arg, (list, tuple, dict)):
-                self._prep_args_for_hash(output, arg)
+                valid_input = self._prep_args_for_hash(output, arg) and valid_input
             else:
                 # It's important to capture the type of the arg since, e.g., 1 and 1.0
                 # hash to the same value, but can produce different dtypes for the
@@ -1218,12 +1234,14 @@ class FakeTensorMode(TorchDispatchMode):
                 output.append(type(arg))
                 output.append(arg)
 
+            return valid_input
+
     def _verify_args_for_hash(self, args: Any):
         """
-        Translate the provided args into a form suitable for caching at FakeTensor
-        dispatch, i.e., convert unhashable types like lists & dicts into tuples and
-        convert FakeTensors into metadata. Raises _BypassDispatchCache to signal
-        unsupported cases that should bypass caching.
+        Verify that the provided args are suitable for caching at FakeTensor
+        dispatch. Any values which are either inherently unhashable (like
+        SymInt) or undesirable (like FakeTensor from a different FakeTensorMode)
+        should raise _BypassDispatchCache.
         """
         if isinstance(args, dict):
             self._verify_args_for_hash(args.keys())
