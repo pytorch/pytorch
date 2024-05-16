@@ -201,7 +201,8 @@ static void check_shape_forward(const Tensor& input,
 //
 
 static bool mkldnn_conv_enabled_fpmath_mode_bf16(){
-  return at::globalContext().float32Precision("mkldnn", "conv") == "bf16";
+  return at::globalContext().float32Precision("mkldnn", "conv") == "bf16" &&
+      mkldnn_bf16_device_check();
 }
 
 
@@ -851,7 +852,8 @@ Tensor mkldnn_convolution_backward_input(
     grad_x = itensor_from_tensor(grad_input);
   }
   ideep::attr_t op_attr = ideep::attr_t();
-  if (enabled_fpmatch_mode_bf16_for_fp32_for_mkldnn_conv() && weight.scalar_type() ==at::kFloat){
+  if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
+      weight.scalar_type() == at::kFloat) {
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
   }
   ideep::convolution_backward_data::compute_v2(
@@ -891,7 +893,8 @@ std::tuple<Tensor, Tensor> mkldnn_convolution_backward_weights(
 
   ideep::tensor grad_w, grad_b;
   ideep::attr_t op_attr = ideep::attr_t();
-  if (enabled_fpmatch_mode_bf16_for_fp32_for_mkldnn_conv() && input.scalar_type() ==at::kFloat){
+  if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
+      input.scalar_type() == at::kFloat) {
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
   }
   if (bias_defined) {
@@ -1012,7 +1015,8 @@ Tensor mkldnn_convolution_transpose_backward_input(
     grad_x = itensor_from_tensor(grad_input);
   }
   ideep::attr_t op_attr = ideep::attr_t();
-  if (enabled_fpmatch_mode_bf16_for_fp32_for_mkldnn_conv() && weight.scalar_type() ==at::kFloat){
+  if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
+      weight.scalar_type() == at::kFloat) {
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
   }
   ideep::convolution_transpose_backward_data::compute_v3(
@@ -1053,7 +1057,8 @@ std::tuple<Tensor,Tensor> mkldnn_convolution_transpose_backward_weights(
 
   ideep::tensor grad_w, grad_b;
   ideep::attr_t op_attr = ideep::attr_t();
-  if (enabled_fpmatch_mode_bf16_for_fp32_for_mkldnn_conv() && input.scalar_type() ==at::kFloat){
+  if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
+      input.scalar_type() == at::kFloat) {
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
   }
   if (bias_defined) {
