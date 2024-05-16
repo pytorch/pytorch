@@ -755,6 +755,16 @@ def get_saved_values(
         dont_ban = set()
     op_types = get_default_op_list()
 
+    if AOT_PARTITIONER_DEBUG:
+        joint_module_ops = {
+            str(node.target._overloadpacket)
+            for node in joint_graph.nodes
+            if node.op == "call_function" and hasattr(node.target, "_overloadpacket")
+        }
+        ops_ignored = joint_module_ops - {str(i) for i in op_types.recomputable_ops}
+        print("Ops banned from rematerialization: ", ops_ignored)
+        print()
+
     def is_fusible(a, b):
         # We can perform "memory fusion" into a cat, but cat cannot be a
         # producer to a fusion
@@ -1384,16 +1394,6 @@ def min_cut_rematerialization_partition(
             node.dist_from_bw = int(1e9)
             for user in node.users:
                 node.dist_from_bw = min(node.dist_from_bw, user.dist_from_bw + 1)
-
-    if AOT_PARTITIONER_DEBUG:
-        joint_module_ops = {
-            str(node.target._overloadpacket)
-            for node in joint_module.graph.nodes
-            if node.op == "call_function" and hasattr(node.target, "_overloadpacket")
-        }
-        ops_ignored = joint_module_ops - {str(i) for i in recomputable_ops}
-        print("Ops banned from rematerialization: ", ops_ignored)
-        print()
 
     saved_values = choose_saved_values_set(joint_graph, node_info, memory_budget=1)
     # save_for_backward on tensors and stashes symints in autograd .ctx
