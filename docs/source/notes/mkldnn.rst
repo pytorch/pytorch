@@ -48,25 +48,28 @@ To get an idea of the precision and speed, see the example code and benchmark da
 
 .. code:: python
 
+  torch.manual_seed(0)
   a_full = torch.randn(10240, 10240, dtype=torch.double)
   b_full = torch.randn(10240, 10240, dtype=torch.double)
   ab_full = a_full @ b_full
-  mean = ab_full.abs().mean()  # 80.7277
+  mean = ab_full.abs().mean()  # 80.7451
 
   a = a_full.float()
   b = b_full.float()
 
   # Do matmul at BF16 mode.
   torch.backends.mkldnn.matmul.fp32_precision = 'bf16'
-  ab_tf32 = a @ b  # takes 0.016s on SPR
-  error = (ab_tf32 - ab_full).abs().max()  # 0.1747
-  relative_error = error / mean  # 0.0022
+  ab_bf16 = a @ b  # takes 0.145s on SPR
+  error = (ab_bf16 - ab_full).abs().max()  # 1.3704
+  relative_error = error / mean  # 0.0170
+  print(error, relative_error)
 
   # Do matmul FP32 mode.
   torch.backends.mkldnn.matmul.fp32_precision = 'default'
-  ab_fp32 = a @ b  # takes 0.11s on SPR
-  error = (ab_fp32 - ab_full).abs().max()  # 0.0031
-  relative_error = error / mean  # 0.000039
+  ab_fp32 = a @ b  # takes 0.369s on SPR
+  error = (ab_fp32 - ab_full).abs().max()  # 0.0003
+  relative_error = error / mean  # 0.00000317
+  print(error, relative_error)
 
 From the above example, we can see that with BF16, the speed is ~7x faster on SPR, and that
 relative error compared to double precision is approximately 2 orders of magnitude larger.
