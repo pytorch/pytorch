@@ -168,7 +168,7 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertEqual(global_tensor.shape, (self.world_size * 2, 8))
 
     @with_comms
-    def test_from_group(self):
+    def test_from_group_with_global_pg(self):
         # Simple test: check `from_group` for a global PG vs. directly
         # initializing via `init_device_mesh`
         global_pg = _get_default_group()
@@ -179,6 +179,23 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertEqual(
             ref_global_mesh._coordinate_on_dim, global_mesh._coordinate_on_dim
         )
+
+    @with_comms
+    def test_from_group_with_invalid_mesh(self):
+        global_pg = _get_default_group()
+        global_pg_size = global_pg.size()
+        assert global_pg_size == 4, "Test assumes global world size of 4"
+        invalid_mesh = [[0, 1], [2, 3]]  # 2D mesh when we need 1D
+        regex = r"Invalid mesh \[\[0, 1\], \[2, 3\]\] for ProcessGroup with ranks \[0, 1, 2, 3\]"
+        with self.assertRaisesRegex(ValueError, regex):
+            DeviceMesh.from_group(global_pg, "cuda", invalid_mesh)
+
+        device_mesh = init_device_mesh(self.device_type, (2, 2))
+        groups = device_mesh.get_group()
+        invalid_mesh = (0, 1, 2, 3)  # 1D mesh when we need 2D
+        regex = r"Expects mesh with ndim equal to number of ProcessGroups but got mesh \[0, 1, 2, 3\] and 2 ProcessGroups"
+        with self.assertRaisesRegex(ValueError, regex):
+            DeviceMesh.from_group(groups, self.device_type, invalid_mesh)
 
     def test_raises_invalid_device_type(self):
         with self.assertRaisesRegex(
@@ -280,8 +297,8 @@ class DeviceMeshTestNDim(DTensorTestBase):
         ep_mesh_1 = DeviceMesh(self.device_type, mesh_group_1)
         ep_mesh_2 = DeviceMesh(self.device_type, mesh_group_2)
         ep_mesh = ep_mesh_1 if self.rank < self.world_size // 2 else ep_mesh_2
-        # # ep_mesh is considered different from mesh_2d["TP"]
-        # # since mesh_2d["TP"] has a parent mesh while ep_mesh does not.
+        # ep_mesh is considered different from mesh_2d["TP"]
+        # since mesh_2d["TP"] has a parent mesh while ep_mesh does not.
         self.assertEqual(mesh_2d["TP"]._flatten_mesh_list, ep_mesh._flatten_mesh_list)
         self.assertEqual(mesh_2d["TP"].mesh.shape, ep_mesh.mesh.shape)
         self.assertEqual(mesh_2d["TP"].device_type, ep_mesh.device_type)
@@ -306,6 +323,47 @@ class DeviceMeshTestNDim(DTensorTestBase):
         self.assertEqual(ep_mesh._parent_mesh, another_mesh._parent_mesh)
         self.assertEqual(hash(ep_mesh), hash(another_mesh))
         self.assertEqual(ep_mesh, another_mesh)
+
+    @with_comms
+    def test_from_group_with_mesh_shape(self):
+        """Tests ``from_group`` when passing ``mesh_shape`` as 2D."""
+        # Consider two different logical views of the same mesh:
+        # - (4, 2) ("dp", "tp") mesh
+        # - (2, 2, 2) ("dp_replicate", "dp_shard", "tp") mesh
+        mesh_shape = (2, 2, 2)
+        mesh_dim_names = ("dp_replicate", "dp_shard", "tp")
+        ref_mesh = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+
+        dp_shard_group = ref_mesh["dp_shard"].get_group()
+        dp_replicate_group = ref_mesh["dp_replicate"].get_group()
+
+        dp_mesh = DeviceMesh.from_group(
+            [dp_replicate_group, dp_shard_group],
+            self.device_type,
+            mesh=ref_mesh.mesh[:, :, ref_mesh.get_local_rank(2)],
+            mesh_dim_names=mesh_dim_names[:2],
+        )
+
+        ref_mesh_dp_dim_group_infos = ref_mesh._dim_group_infos[:2]
+        for (_, ref_ranks, _), (_, ranks, _) in zip(
+            ref_mesh_dp_dim_group_infos, dp_mesh._dim_group_infos
+        ):
+            self.assertEqual(ref_ranks, ranks)
+        # Cannot check directly for mesh equality since parent meshes are not
+        # the same since the ref's parent mesh is 3D
+        self.assertEqual(dp_mesh["dp_replicate"].mesh, ref_mesh["dp_replicate"].mesh)
+        for (_, ref_ranks, _), (_, ranks, _) in zip(
+            dp_mesh["dp_replicate"]._dim_group_infos,
+            ref_mesh["dp_replicate"]._dim_group_infos,
+        ):
+            self.assertEqual(ref_ranks, ranks)
+        self.assertEqual(dp_mesh["dp_shard"].mesh, ref_mesh["dp_shard"].mesh)
+        for (_, ref_ranks, _), (_, ranks, _) in zip(
+            dp_mesh["dp_shard"]._dim_group_infos, ref_mesh["dp_shard"]._dim_group_infos
+        ):
+            self.assertEqual(ref_ranks, ranks)
 
 
 class InitDeviceMeshTest(DTensorTestBase):
