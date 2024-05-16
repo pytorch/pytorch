@@ -43,6 +43,10 @@
 #include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu_native.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu_backward.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu_backward_native.h>
+#include <ATen/ops/_scaled_dot_product_flash_attention_overrideable.h>
+#include <ATen/ops/_scaled_dot_product_flash_attention_overrideable_native.h>
+#include <ATen/ops/_scaled_dot_product_flash_attention_overrideable_backward.h>
+#include <ATen/ops/_scaled_dot_product_flash_attention_overrideable_backward_native.h>
 #include <ATen/ops/_softmax.h>
 #include <ATen/ops/_transform_bias_rescale_qkv.h>
 #include <ATen/ops/_transform_bias_rescale_qkv_native.h>
@@ -659,7 +663,7 @@ Tensor scaled_dot_product_attention(
       return std::get<0>(out_lse_softmax);
     }
     case sdp::SDPBackend::flash_attention: {
-      if(query_.device().type() == DeviceType::CUDA){
+      if(query_.device().type() == DeviceType::CUDA) {
         c10::SymInt og_size = query_.sym_size(-1);
         Tensor query_padded = pad_last_dim<8, false>(query_);
         Tensor key_padded = pad_last_dim<8, false>(key);
@@ -669,10 +673,15 @@ Tensor scaled_dot_product_attention(
         auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
             query_padded, key_padded, value_padded, dropout_p, is_causal, false /*return_debug_mask*/, og_scale.as_float_unchecked());
         return post_process_flash_output(std::get<0>(out_lse_softmax), og_size);
-      }
+      } else if (query_.device().type() == DeviceType::PrivateUse1) {
+        auto out_lse_softmax = at::_scaled_dot_product_flash_attention_overrideable(
+            query_, key, value, dropout_p, is_causal, false /*return_debug_mask*/, scale);
+        return std::get<0>(out_lse_softmax);
+      } else {
       // For the CPU case we do not need to pad the last dim
       return std::get<0>(at::_scaled_dot_product_flash_attention_for_cpu(
           query_, key, value, dropout_p, is_causal, attn_mask, scale));
+      }
     }
     case sdp::SDPBackend::efficient_attention: {
       bool compute_logsumexp = should_compute_logsumexp(query_, key, value);
@@ -836,6 +845,42 @@ _scaled_dot_product_flash_attention_cpu_backward(
   grad_v = grad_v.transpose(1, 2);
 
   return std::make_tuple(std::move(grad_q), std::move(grad_k), std::move(grad_v));
+}
+
+std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, c10::SymInt, c10::SymInt, at::Tensor, at::Tensor, at::Tensor>
+_scaled_dot_product_flash_attention_overrideable(
+    const at::Tensor & query,
+    const at::Tensor & key,
+    const at::Tensor & value,
+    double dropout_p,
+    bool is_causal,
+    bool return_debug_mask,
+    std::optional<double> scale) {
+  TORCH_CHECK_NOT_IMPLEMENTED(false, "_scaled_dot_product_flash_attention_overrideable not implemented. This is an operator for privateuse1 backends, please use TORCH_LIBRARY_IMPL to override this function ");
+}
+
+std::tuple<at::Tensor,at::Tensor,at::Tensor>
+_scaled_dot_product_flash_attention_overrideable_backward(
+    const at::Tensor & grad_out,
+    const at::Tensor & query,
+    const at::Tensor & key,
+    const at::Tensor & value,
+    const at::Tensor & out,
+    const at::Tensor & logsumexp,
+    const at::Tensor & cum_seq_q,
+    const at::Tensor & cum_seq_k,
+    int64_t max_q,
+    int64_t max_k,
+    double dropout_p,
+    bool is_causal,
+    const at::Tensor & philox_seed,
+    const at::Tensor & philox_offset,
+    std::optional<double> scale) {
+  TORCH_CHECK_NOT_IMPLEMENTED(false, "_scaled_dot_product_flash_attention_overrideable_backward not implemented: This is an operator for privateuse1 backends, please use TORCH_LIBRARY_IMPL to override this function ");
+  return std::tuple<Tensor, Tensor, Tensor>(
+          at::empty_like(query),
+          at::empty_like(key),
+          at::empty_like(value));
 }
 
 Tensor triton_multi_head_attention(
