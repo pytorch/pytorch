@@ -42,7 +42,7 @@ class NCCLTestBase {
   void initialize(
       int rank,
       int size,
-      c10::optional<::std::shared_ptr<::c10d::ProcessGroupNCCL>> split_from =
+      std::optional<::std::shared_ptr<::c10d::ProcessGroupNCCL>> split_from =
           c10::nullopt) {
     store_ = c10::make_intrusive<::c10d::FileStore>(path_, size);
 

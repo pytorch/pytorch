@@ -15,7 +15,7 @@ at::Tensor& to_copy_out(
     const Tensor& self,
     bool non_blocking,
     bool copy_strides,
-    c10::optional<MemoryFormat> memory_format);
+    std::optional<MemoryFormat> memory_format);
 } // namespace at::native
 
 namespace torch::jit {

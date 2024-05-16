@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import cast, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
@@ -16,6 +16,7 @@ from .optimizer import (
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
+    ParamsT,
 )
 
 __all__ = ["NAdam", "nadam"]
@@ -24,12 +25,12 @@ __all__ = ["NAdam", "nadam"]
 class NAdam(Optimizer):
     def __init__(
         self,
-        params,
-        lr=2e-3,
-        betas=(0.9, 0.999),
-        eps=1e-8,
-        weight_decay=0,
-        momentum_decay=4e-3,
+        params: ParamsT,
+        lr: float = 2e-3,
+        betas: Tuple[float, float] = (0.9, 0.999),
+        eps: float = 1e-8,
+        weight_decay: float = 0,
+        momentum_decay: float = 4e-3,
         decoupled_weight_decay: bool = False,
         *,
         foreach: Optional[bool] = None,
@@ -156,13 +157,13 @@ class NAdam(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            params_with_grad = []
-            grads = []
-            exp_avgs = []
-            exp_avg_sqs = []
-            mu_products = []
-            state_steps = []
-            beta1, beta2 = group["betas"]
+            params_with_grad: List[Tensor] = []
+            grads: List[Tensor] = []
+            exp_avgs: List[Tensor] = []
+            exp_avg_sqs: List[Tensor] = []
+            mu_products: List[Tensor] = []
+            state_steps: List[Tensor] = []
+            beta1, beta2 = cast(Tuple[float, float], group["betas"])
 
             has_complex = self._init_group(
                 group,
@@ -421,7 +422,7 @@ def _multi_tensor_nadam(
                 # Perform stepweight decay
                 torch._foreach_mul_(grouped_params, 1 - lr * weight_decay)
             else:
-                grouped_grads = torch._foreach_add(
+                grouped_grads = torch._foreach_add(  # type: ignore[assignment]
                     grouped_grads, grouped_params, alpha=weight_decay
                 )
 
@@ -435,6 +436,9 @@ def _multi_tensor_nadam(
 
         exp_avg_sq_sqrt = torch._foreach_sqrt(grouped_exp_avg_sqs)
 
+        bias_correction_sqrt: Union[Tuple[Tensor, ...], List[Tensor]]
+        mus: Union[Tuple[Tensor, ...], List[Tensor]]
+        mu_nexts: Union[Tuple[Tensor, ...], List[Tensor]]
         if capturable:
             # mus will be beta1 * (1 - 0.5 * 0.96 ** (step * momentum_decay))
             exponent = torch._foreach_mul(grouped_state_steps, momentum_decay)
@@ -534,10 +538,10 @@ def _multi_tensor_nadam(
             )
 
             torch._foreach_addcdiv_(
-                grouped_params, grouped_grads, exp_avg_sq_sqrt, step_size_grads
+                grouped_params, grouped_grads, exp_avg_sq_sqrt, step_size_grads  # type: ignore[arg-type]
             )
             torch._foreach_addcdiv_(
-                grouped_params, grouped_exp_avgs, exp_avg_sq_sqrt, step_size_expavg
+                grouped_params, grouped_exp_avgs, exp_avg_sq_sqrt, step_size_expavg  # type: ignore[arg-type]
             )
 
 
