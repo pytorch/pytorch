@@ -78,9 +78,9 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
                 nn.Linear(mlp_dim, mlp_dim, bias=False),
                 nn.Linear(mlp_dim, mlp_dim, bias=False),
             )
-            for module in model:
-                fully_shard(module, offload_policy=offload_policy)
-            fully_shard(model, offload_policy=offload_policy)
+        for module in model:
+            fully_shard(module, offload_policy=offload_policy)
+        fully_shard(model, offload_policy=offload_policy)
 
         # split full sd into multiple pieces
         # to test loading with `strict=False`
