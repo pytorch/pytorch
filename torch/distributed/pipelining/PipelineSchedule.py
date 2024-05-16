@@ -419,6 +419,12 @@ class Schedule1F1B(PipelineScheduleSingle):
                 # forward
                 with record_function(f"Forward {i}"):
                     ops = self._stage.get_fwd_recv_ops()
+                    if i >= warmup_steps + 1 and self._has_backward:
+                        # Note: coalesced bwd-send/fwd-recv
+                        # "i >= warmup_steps + 1" means "we ran a backward last iteration"
+                        # the backward send to prev stage should be coalesced with the fwd recv from the previous stage
+                        ops.extend(self._stage.get_bwd_send_ops())
+
                     works = sorted_batch_isend_irecv(ops)
                     for work in works.values():
                         work.wait()
@@ -446,9 +452,12 @@ class Schedule1F1B(PipelineScheduleSingle):
                     loss = self._maybe_get_loss(self._stage, bwd_mb_index)
                     self._stage.backward_one_chunk(loss=loss)
 
-                    ops = self._stage.get_bwd_send_ops()
-                    works = sorted_batch_isend_irecv(ops)
-                    bwd_sends_to_wait.extend(works.values())
+                    if i + 1 >= self._n_microbatches:
+                        # see Note: coalesced bwd-send/fwd-recv
+                        ops = self._stage.get_bwd_send_ops()
+                        works = sorted_batch_isend_irecv(ops)
+                        bwd_sends_to_wait.extend(works.values())
+
                     bwd_mb_index += 1
 
         # Wait for all forward sends to finish
