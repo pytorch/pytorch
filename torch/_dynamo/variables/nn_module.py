@@ -709,27 +709,6 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             if hasattr(x, "__code__") and x not in supported
         }
 
-    def unpack_var_sequence(self, tx):
-        from .builder import VariableBuilder
-
-        try:
-            fn = inspect.getattr_static(self.value_type, "__iter__")
-        except AttributeError as e:
-            raise NotImplementedError from e
-
-        if fn in (
-            torch.nn.ModuleList.__iter__,
-            torch.nn.ParameterList.__iter__,
-            torch.nn.Sequential.__iter__,
-        ):
-            assert self.source
-            return [
-                VariableBuilder(tx, source=GetItemSource(self.source, idx))(item)
-                for idx, item in enumerate(self.value)
-            ]
-
-        return super().unpack_var_sequence(tx)
-
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
