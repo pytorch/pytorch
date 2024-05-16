@@ -1491,7 +1491,7 @@ def _reduction_configs(
         and inductor_meta.get("num_load", 0) + inductor_meta.get("num_reduction", 0)
         >= 10
     ):
-        # A heuristics to reduce RBLOCK is a kernel potentially need more registers.
+        # A heuristics to reduce RBLOCK if a kernel potentially need many registers.
         # Consider load and reduction since load need move data into registers and
         # reduction needs an accumulator.
         #
