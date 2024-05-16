@@ -523,8 +523,8 @@ test_single_dynamo_benchmark() {
 }
 
 test_inductor_micro_benchmark() {
-  TEST_REPORTS_DIR=$(pwd)/test/test-micro-reports
-  python benchmarks/gpt_fast/benchmark.py
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  python benchmarks/gpt_fast/benchmark.py --output "${TEST_REPORTS_DIR}/gpt_fast_benchmark.csv"
 }
 
 test_dynamo_benchmark() {
@@ -587,6 +587,15 @@ test_inductor_torchbench_smoketest_perf() {
     python benchmarks/dynamo/check_memory_compression_ratio.py --actual \
       "$TEST_REPORTS_DIR/inductor_training_smoketest_$test.csv" \
       --expected benchmarks/dynamo/expected_ci_perf_inductor_torchbench.csv
+  done
+
+  # Perform some "warm-start" runs for a few huggingface models.
+  for test in AlbertForQuestionAnswering AllenaiLongformerBase DistilBertForMaskedLM DistillGPT2 GoogleFnet YituTechConvBert; do
+    python benchmarks/dynamo/huggingface.py --accuracy --training --amp --inductor --device cuda --warm-start-latency \
+      --only $test --output "$TEST_REPORTS_DIR/inductor_warm_start_smoketest_$test.csv"
+    python benchmarks/dynamo/check_accuracy.py \
+      --actual "$TEST_REPORTS_DIR/inductor_warm_start_smoketest_$test.csv" \
+      --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_huggingface_training.csv"
   done
 }
 

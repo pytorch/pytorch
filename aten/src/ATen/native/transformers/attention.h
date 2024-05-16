@@ -9,16 +9,16 @@ namespace at {
 namespace native {
 
 using fused_sdp_choice_fn = int64_t (*)(const Tensor& query_, const Tensor& key, const Tensor& value,
-        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, c10::optional<double> scale);
+        const std::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, c10::optional<double> scale);
 
 DECLARE_DISPATCH(fused_sdp_choice_fn, _fused_sdp_choice_stub);
 
 TORCH_API Tensor bmm_nt(const Tensor& a, const Tensor& b);
 TORCH_API Tensor masked_softmax(
     Tensor& attn_scores,
-    c10::optional<Tensor> attn_mask,
+    std::optional<Tensor> attn_mask,
     const Tensor& query,
-    c10::optional<int64_t> mask_type = {});
+    std::optional<int64_t> mask_type = {});
 
 using transform_bias_rescale_qkv_fn = void(*)(
     at::ScalarType type,
@@ -53,8 +53,8 @@ using flash_attention_fn = void (*)(
     const Tensor& output, const Tensor& logsumexp,
     const Tensor& query, const Tensor& key, const Tensor& value,
     double dropout_p, bool is_causal,
-    c10::optional<Tensor> attn_mask,
-    c10::optional<double> scale);
+    std::optional<Tensor> attn_mask,
+    std::optional<double> scale);
 
 using flash_attention_backward_fn = void (*)(
     const Tensor& grad_q, const Tensor& grad_k,
@@ -62,8 +62,8 @@ using flash_attention_backward_fn = void (*)(
     const Tensor& query, const Tensor& key,
     const Tensor& value, const Tensor& out, const Tensor& logsumexp,
     double dropout_p, bool is_causal,
-    c10::optional<Tensor> attn_mask,
-    c10::optional<double> scale);
+    std::optional<Tensor> attn_mask,
+    std::optional<double> scale);
 
 DECLARE_DISPATCH(flash_attention_fn, flash_attention_kernel);
 DECLARE_DISPATCH(flash_attention_backward_fn, flash_attention_backward_kernel);

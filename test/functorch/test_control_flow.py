@@ -890,6 +890,42 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
         )(inp)
         self.assertEqual(gm_functional(torch.zeros(1, 2)), f(torch.zeros(1, 2)))
 
+    def test_cond_subgraph_same_shape_env_as_parent(self):
+        def true_fn(x):
+            return x.sin() + 10
+
+        def false_fn(x):
+            return x.cos() - 20
+
+        def f(x, pred):
+            y = cond(pred, true_fn, false_fn, [x])
+            z = torch.add(y, y)
+            return z
+
+        symbolic_traced_graph = self._check_tracing(f, (torch.ones(4), True))[
+            "symbolic"
+        ]
+        graph_shape_env = symbolic_traced_graph.shape_env
+
+        def _node_shape_env_iter(gm):
+            for node in symbolic_traced_graph.graph.nodes:
+                if node.op == "call_function":
+                    val = node.meta.get("val")
+                    if isinstance(val, tuple):
+                        for v in val:
+                            yield v.fake_mode.shape_env
+                    else:
+                        yield val.fake_mode.shape_env
+
+        for shape_env in _node_shape_env_iter(symbolic_traced_graph):
+            self.assertTrue(shape_env is graph_shape_env)
+
+        for shape_env in _node_shape_env_iter(symbolic_traced_graph.true_graph_0):
+            self.assertTrue(shape_env is graph_shape_env)
+
+        for shape_env in _node_shape_env_iter(symbolic_traced_graph.false_graph_0):
+            self.assertTrue(shape_env is graph_shape_env)
+
     def test_cond_functionalized_nested(self):
         def true_true_fn(x):
             y = x.cos()
