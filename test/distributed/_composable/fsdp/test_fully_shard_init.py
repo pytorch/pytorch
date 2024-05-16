@@ -688,9 +688,10 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
         dp_pg = ref_dp_mesh.get_group(0)
 
         # Check the `from_group()` API for correctness
-        dp_mesh = DeviceMesh.from_group(dp_pg, "cuda")
+        dp_mesh = DeviceMesh.from_group(dp_pg, "cuda", mesh_dim_names=("dp",))
+        # Only compare the mesh tensors, not `DeviceMesh` objects themselves,
+        # since the ref has a parent mesh, while the `from_group` one does not
         self.assertEqual(dp_mesh.mesh, ref_dp_mesh.mesh)
-        self.assertEqual(dp_mesh, ref_dp_mesh)
         self.assertEqual(dp_mesh._coordinate_on_dim, ref_dp_mesh._coordinate_on_dim)
         self.assertEqual(dp_mesh._dim_group_infos, ref_dp_mesh._dim_group_infos)
 
@@ -724,8 +725,15 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
         loss.backward()
         self.assertEqual(loss, ref_loss)
         for param, ref_param in zip(model.parameters(), ref_model.parameters()):
-            self.assertEqual(param, ref_param)
-            self.assertEqual(param.grad, ref_param.grad)
+            # Cannot compare `DTensor`s directly since their meshes are not
+            # equal due to the ref parameter's mesh having a parent mesh while
+            # the other's mesh does not
+            self.assertEqual(param.to_local(), ref_param.to_local())
+            self.assertEqual(param.device_mesh.mesh, ref_param.device_mesh.mesh)
+            self.assertEqual(param.grad.to_local(), ref_param.grad.to_local())
+            self.assertEqual(
+                param.grad.device_mesh.mesh, ref_param.grad.device_mesh.mesh
+            )
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_2d_process_group_init(self):

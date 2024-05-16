@@ -699,8 +699,8 @@ class TestOptimRenewed(TestCase):
         assert impl in ("foreach", "fused")
         if impl == "foreach" and "foreach" not in optim_info.supported_impls:
             return unittest.skip(f"foreach not supported for {optim_info.optim_cls.__name__}")
-        elif impl == "fused" and "fused" not in optim_info.supported_impls:
-            return unittest.skip(f"fused not supported for {optim_info.optim_cls.__name__}")
+        elif impl == "fused" and "cuda" not in optim_info.supports_fused_on:
+            return unittest.skip(f"fused not supported for {optim_info.optim_cls.__name__} on cuda")
 
         params = [
             torch.rand(2, 3, dtype=torch.float64, device='cuda:0', requires_grad=True),
