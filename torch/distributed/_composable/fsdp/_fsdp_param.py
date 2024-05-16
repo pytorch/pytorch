@@ -364,22 +364,13 @@ class FSDPParam:
             storage_offset=0,
         )
         if self.is_dtensor:
-            if not torch._dynamo.compiled_autograd.compiled_autograd_enabled:
-                unsharded_param = _from_local_no_grad(
-                    unsharded_param,
-                    self._tp_spec.mesh,
-                    self._tp_spec.placements,
-                    self._global_size,
-                    self._global_stride,
-                )
-            else:
-                unsharded_param = DTensor.from_local(
-                    unsharded_param,
-                    self._tp_spec.mesh,
-                    self._tp_spec.placements,
-                    shape=self._global_size,
-                    stride=self._global_stride,
-                )
+            unsharded_param = _from_local_no_grad(
+                unsharded_param,
+                self._tp_spec.mesh,
+                self._tp_spec.placements,
+                self._global_size,
+                self._global_stride,
+            )
         self._unsharded_param = nn.Parameter(unsharded_param)
         self._unsharded_param.requires_grad_(self.sharded_param.requires_grad)
 
@@ -463,23 +454,13 @@ class FSDPParam:
             _raise_assert_with_print(
                 f"Expects size {self.sharded_size} but got {tensor.shape}"
             )
-        if not torch._dynamo.compiled_autograd.compiled_autograd_enabled:
-            ret = _from_local_no_grad(
-                tensor,
-                self._global_mesh,
-                self._global_placements,
-                self._global_size,
-                self._global_stride,
-            )
-        else:
-            ret = DTensor.from_local(
-                tensor,
-                self._global_mesh,
-                self._global_placements,
-                shape=self._global_size,
-                stride=self._global_stride,
-            )
-        return ret
+        return _from_local_no_grad(
+            tensor,
+            self._global_mesh,
+            self._global_placements,
+            self._global_size,
+            self._global_stride,
+        )
 
     def to_sharded_post_forward_dtensor(self, tensor: torch.Tensor) -> DTensor:
         if tensor.shape != self.sharded_post_forward_size:
@@ -489,23 +470,13 @@ class FSDPParam:
         assert isinstance(self.post_forward_mesh_info, HSDPMeshInfo)
         # TODO: Prefer this DTensor to be read-only and generalize the
         # placement once we support TP.
-        if not torch._dynamo.compiled_autograd.compiled_autograd_enabled:
-            ret = _from_local_no_grad(
-                tensor,
-                self.post_forward_mesh_info.mesh,
-                (Replicate(), Shard(0)),
-                self._global_size,
-                self._global_stride,
-            )
-        else:
-            ret = DTensor.from_local(
-                tensor,
-                self.post_forward_mesh_info.mesh,
-                (Replicate(), Shard(0)),
-                shape=self._global_size,
-                stride=self._global_stride,
-            )
-        return ret
+        return _from_local_no_grad(
+            tensor,
+            self.post_forward_mesh_info.mesh,
+            (Replicate(), Shard(0)),
+            self._global_size,
+            self._global_stride,
+        )
 
     def to_accumulated_grad_if_needed(self) -> None:
         # Access `_unsharded_param` to bypass the sharded state check since we
