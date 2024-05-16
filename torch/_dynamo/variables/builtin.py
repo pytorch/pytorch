@@ -1402,15 +1402,10 @@ class BuiltinVariable(VariableTracker):
 
     def call_issubclass(self, tx, left_ty, right_ty):
         """Checks if first arg is subclass of right arg"""
-        try:
-            left_ty_py = left_ty.as_python_constant()
-            right_ty_py = right_ty.as_python_constant()
-        except NotImplementedError:
-            unimplemented(
-                f"call_issubclass args not constant left_ty: {left_ty}, right_ty: {right_ty}"
-            )
+        left_ty = left_ty.as_python_constant()
+        right_ty = right_ty.as_python_constant()
 
-        return variables.ConstantVariable(issubclass(left_ty_py, right_ty_py))
+        return variables.ConstantVariable(issubclass(left_ty, right_ty))
 
     def call_super(self, tx, a, b):
         return variables.SuperVariable(a, b)
@@ -1577,7 +1572,7 @@ class BuiltinVariable(VariableTracker):
             ) and trace_rules.is_aten_op_or_tensor_method(member):
                 return TorchInGraphFunctionVariable(member, **options)
         elif isinstance(obj, (PythonModuleVariable, DummyModule)):
-            if obj.is_torch or name not in obj.value.__dict__:
+            if obj.is_torch:
                 member = getattr(obj.value, name)
             else:
                 member = obj.value.__dict__[name]
