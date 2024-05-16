@@ -2,6 +2,25 @@
    :description: A guide to torch.backends.mkldnn, a PyTorch backend to run MKLDNN operations
    :keywords: optimize PyTorch, MKLDNN
 
+.. _mkldnn_backend:
+
+MKLDNN backend
+---------------------------------------------------
+
+MKLDNN is an open-source cross-platform performance library of basic building blocks
+for deep learning applications.
+
+.. code:: python
+
+  # The flag below controls whether enable MKLDNN backend in Pytorch.
+  torch.backends.mkldnn.enabled = True
+
+Users can disable MKLDNN backend by:
+.. code:: python
+
+  # The flag below controls whether enable MKLDNN backend in Pytorch.
+  torch.backends.mkldnn.enabled = False
+
 .. _bf16_on_mkldnn:
 
 Bfloat16 (BF16) on MKLDNN backend
