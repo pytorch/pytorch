@@ -2931,7 +2931,6 @@ CPU_TEST_FAILURES = {
 
 CUDA_TEST_FAILURES = {
     # test_failures, xfail by default, set is_skip=True to skip
-    "test_dup_unbacked_sym_decl": fail_abi_compatible_cuda(),
     "test_dup_unbacked_sym_decl_with_refinement": fail_abi_compatible_cuda(),
     "test_large_grid": fail_cuda(),
     "test_normal_functional": fail_abi_compatible_cuda(),

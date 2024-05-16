@@ -46,8 +46,8 @@ class CppWrapperCpu(WrapperCodeGen):
         self.supports_intermediate_hooks = False
         self.outputs_need_copy = set()
         self.kernel_callsite_id = count()
-        self.int_array_id = count()  # for int array local variable declarations
-        self.declared_int_array_vars = set()
+        self.var_array_id = count()  # for different types of local array variable declarations
+        self.declared_var_array_vars = set()
         self.tmp_tensor_id = count()  # for tmp tensor local variable declarations
         self.arg_var_id = count()
         self.used_cached_devices = set()
@@ -1474,13 +1474,13 @@ class CppWrapperCpu(WrapperCodeGen):
             return DTYPE_TO_ATEN[dtype]
 
     @functools.lru_cache(None)
-    def codegen_int_array_var(
+    def codegen_var_array(
         self,
-        int_array: str,
+        var_array: str,
         writer=None,
         known_statically=False,
         graph=None,  # for per-graph caching
-        is_bool=False,
+        type_hint=None, # ['int64_t', 'int32_t', 'tensor', 'bool']
     ):
         # Because the memory planning is done in two passes (see the implementation
         # of self.generate), the writeline behavior is different in the two passes.
@@ -1491,14 +1491,19 @@ class CppWrapperCpu(WrapperCodeGen):
             # The first pass codegen uses `self` as the writer
             writer = self
 
-        var = f"int_array_{next(self.int_array_id)}"
-        ctype = "int32_t" if is_bool else "int64_t"
-        if var not in self.declared_int_array_vars:
-            self.declared_int_array_vars.add(var)
+        var = f"var_array_{next(self.var_array_id)}"
+        if type_hint == "bool" or type_hint == "int32_t":
+            ctype = "int32_t"
+        elif type_hint == "tensor":
+            ctype = "AtenTensorHandle*"
+        else:
+            ctype = "int64_t"
+        if var not in self.declared_var_array_vars:
+            self.declared_var_array_vars.add(var)
             if known_statically:
-                writer.writeline(f"static constexpr {ctype} {var}[] = {int_array};")
+                writer.writeline(f"static constexpr {ctype} {var}[] = {var_array};")
             else:
-                writer.writeline(f"const {ctype} {var}[] = {int_array};")
+                writer.writeline(f"const {ctype} {var}[] = {var_array};")
         return var
 
     def make_buffer_allocation(self, buffer):
@@ -1520,13 +1525,13 @@ class CppWrapperCpu(WrapperCodeGen):
         size = self.codegen_shape_tuple(shape)
         stride = self.codegen_shape_tuple(orig_stride)
         if config.abi_compatible:
-            size_array_var = self.codegen_int_array_var(
+            size_array_var = self.codegen_var_array(
                 size,
                 self.wrapper_call,
                 known_statically=self.is_statically_known_list_of_ints(shape),
                 graph=self.get_codegened_graph(),
             )
-            stride_array_var = self.codegen_int_array_var(
+            stride_array_var = self.codegen_var_array(
                 stride,
                 self.wrapper_call,
                 known_statically=self.is_statically_known_list_of_ints(orig_stride),
@@ -1593,10 +1598,10 @@ class CppWrapperCpu(WrapperCodeGen):
                 self.expr_printer(offset),  # bytes not numel
                 self.codegen_dtype(dtype),
                 str(len(shape)),
-                self.codegen_int_array_var(
+                self.codegen_var_array(
                     size, self.wrapper_call, graph=self.get_codegened_graph()
                 ),
-                self.codegen_int_array_var(
+                self.codegen_var_array(
                     stride, self.wrapper_call, graph=self.get_codegened_graph()
                 ),
                 f"&{tmp_name}",
@@ -1637,13 +1642,13 @@ class CppWrapperCpu(WrapperCodeGen):
             args = [
                 f"{data.get_name()}",
                 dim,
-                self.codegen_int_array_var(
+                self.codegen_var_array(
                     size,
                     writer,
                     known_statically=self.is_statically_known_list_of_ints(size_list),
                     graph=self.get_codegened_graph(),
                 ),
-                self.codegen_int_array_var(
+                self.codegen_var_array(
                     stride,
                     writer,
                     known_statically=self.is_statically_known_list_of_ints(stride_list),
@@ -2311,14 +2316,25 @@ if (py_{buf_name}.get() == NULL) {{
             if config.abi_compatible:
                 assert len(val) > 0, "Empty array is not supported in C"
                 static = self.is_statically_known_list_of_ints(val)
+                type_hint = 'bool' if isinstance(val[0], bool) else 'int64_t'
+                if type_ is not None and isinstance(type_, torch._C.ListType) and isinstance(
+                    type_.getElementType(), torch._C.OptionalType
+                ) and isinstance(type_.getElementType().getElementType(), torch._C.TensorType) and isinstance(
+                    type_.getElementType().getElementType(), torch._C.TensorType
+                ):
+                    type_hint = "tensor"
+                    tmp_arg_list = ""
+                    for x in val:
+                        tmp_arg_list += f"&{x}_handle, "
+                    result = f"{{{tmp_arg_list}}}"
                 # Need to pass the array length because we can't use std::vector
-                int_var_array = self.codegen_int_array_var(
+                var_array = self.codegen_var_array(
                     result,
                     known_statically=static,
                     graph=self.get_codegened_graph(),
-                    is_bool=isinstance(val[0], bool),
+                    type_hint=type_hint,
                 )
-                return f"{int_var_array}, {len(val)}"
+                return f"{var_array}, {len(val)}"
             else:
                 return result
         else:
