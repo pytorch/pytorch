@@ -17,7 +17,7 @@ from typing_extensions import Protocol
 
 import torch
 import torch.utils._pytree as pytree
-from torch.fx.graph import inplace_methods, magic_methods
+from torch.fx.graph import magic_methods
 from .utils import IndentedBuffer, reduction_num_outputs, sympy_index_symbol, sympy_str
 
 T = TypeVar("T")
@@ -578,9 +578,7 @@ class MockHandler:
 
             return inner
 
-        for name, format_string in itertools.chain(
-            magic_methods.items(), inplace_methods.items()
-        ):
+        for name, format_string in itertools.chain(magic_methods.items()):
             setattr(cls, name, make_handler(format_string))
 
 
