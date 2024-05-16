@@ -1342,52 +1342,6 @@ def merge_view_inputs(
         return args_to_functionalization, post_processed_calling_convention_meta
 
 
-zip = strict_zip
-
-
-def _compute_output_meta_with_inductor_strides(fw_module, fwd_output_strides):
-    out = [n.meta["val"] for n in (list(fw_module.graph.nodes)[-1].args[0])]
-    # will only be set for inductor
-    if not fwd_output_strides:
-        return out
-    with TracingContext.get().fake_mode.shape_env.suppress_guards():
-        for i in range(len(out)):
-            if not isinstance(out[i], Tensor):
-                continue
-            if all(s1 == s2 for s1, s2 in zip(out[i].stride(), fwd_output_strides[i])):
-                continue
-            out[i] = out[i].as_strided(out[i].shape, fwd_output_strides[i])
-    return out
-
-
-# See Note [Tangents must be contiguous, Part 2]
-def coerce_runtime_tangent(x, metadata_tensor):
-    if not isinstance(x, torch.Tensor):
-        return x
-    if not is_traceable_wrapper_subclass(x):
-        return x
-    assert is_traceable_wrapper_subclass(metadata_tensor)
-    _, runtime_tangent_metadata = x.__tensor_flatten__()  # type: ignore[attr-defined]
-    _, expected_tangent_metadata = metadata_tensor.__tensor_flatten__()
-    if runtime_tangent_metadata == expected_tangent_metadata:
-        return x
-    if not hasattr(x, "__coerce_same_metadata_as_tangent__"):
-        raise RuntimeError(
-            f"""
-During the backward, we encountered a tensor subclass where we guessed its
-metadata incorrectly.
-
-Expected metadata: {str(expected_tangent_metadata)}
-
-Runtime metadata: {str(runtime_tangent_metadata)}
-
-shape: {str(x.shape)}
-To fix this, your tensor subclass must implement the dunder method __force_to_same_metadata__.
-"""
-        )
-    return x.__coerce_same_metadata_as_tangent__(metadata_tensor)  # type: ignore[attr-defined]
-
-
 @dataclass
 class AutogradLazyBackwardCompileInfo:
     bw_module: Callable
@@ -1399,6 +1353,34 @@ class AutogradLazyBackwardCompileInfo:
 # This is wrapped in a class just for namespacing purposes
 # No need to make it into an actual CompilerWrapper because it doesn't fit the abstract as cleanly
 class AOTDispatchAutograd:
+    # See Note [Tangents must be contiguous, Part 2]
+    @staticmethod
+    def coerce_runtime_tangent(x, metadata_tensor):
+        if not isinstance(x, torch.Tensor):
+            return x
+        if not is_traceable_wrapper_subclass(x):
+            return x
+        assert is_traceable_wrapper_subclass(metadata_tensor)
+        _, runtime_tangent_metadata = x.__tensor_flatten__()  # type: ignore[attr-defined]
+        _, expected_tangent_metadata = metadata_tensor.__tensor_flatten__()
+        if runtime_tangent_metadata == expected_tangent_metadata:
+            return x
+        if not hasattr(x, "__coerce_same_metadata_as_tangent__"):
+            raise RuntimeError(
+                f"""
+    During the backward, we encountered a tensor subclass where we guessed its
+    metadata incorrectly.
+
+    Expected metadata: {str(expected_tangent_metadata)}
+
+    Runtime metadata: {str(runtime_tangent_metadata)}
+
+    shape: {str(x.shape)}
+    To fix this, your tensor subclass must implement the dunder method __force_to_same_metadata__.
+    """
+            )
+        return x.__coerce_same_metadata_as_tangent__(metadata_tensor)  # type: ignore[attr-defined]
+
     @staticmethod
     def _force_contiguous(x):
         if not isinstance(x, torch.Tensor):
@@ -1736,7 +1718,8 @@ class AOTDispatchAutograd:
     Expected grad_output types: {str(CompiledFunction.metadata.output_types)}
     Got grad_output types: {str(grad_output_types)}"""
 
-                # TODO: figure out how to refactor the backward properly so I can use aot_dispatch_subclass_wrapper() here.
+                # TODO: figure out how to refactor the backward properly
+                # so I can use aot_dispatch_subclass_wrapper() here.
                 if CompiledFunction.maybe_subclass_metadata is not None:
                     # Get the number of tangents after unwrapping
                     len_tangents = len(
@@ -1746,7 +1729,7 @@ class AOTDispatchAutograd:
                         )
                     )
                     all_args = [
-                        coerce_runtime_tangent(
+                        AOTDispatchAutograd.coerce_runtime_tangent(
                             t,
                             CompiledFunction.metadata.traced_tangents[
                                 i - tangents_start_idx
@@ -1872,7 +1855,8 @@ class AOTDispatchAutograd:
                         @staticmethod
                         def forward(ctx, *unused_args):
                             outs = call_compiled_backward()
-                            # TODO: figure out how to refactor the backward properly so I can use aot_dispatch_subclass_wrapper() here.
+                            # TODO: figure out how to refactor the backward properly
+                            # so I can use aot_dispatch_subclass_wrapper() here.
                             if CompiledFunction.maybe_subclass_metadata is not None:
                                 assert (
                                     CompiledFunction.maybe_subclass_metadata.grad_input_metas
@@ -1924,3 +1908,40 @@ class AOTDispatchAutograd:
         )
 
         return compiled_function
+
+
+@dataclass
+class DebugAssertWrapper(CompilerWrapper):
+    flat_requires_grad: List[Optional[bool]] = field(default_factory=list)
+
+    def post_compile(
+        self,
+        compiled_fn,
+        aot_config: AOTConfig,
+        *,
+        runtime_metadata: ViewAndMutationMeta,
+    ):
+        @wraps(compiled_fn)
+        def debug_compiled_function(args: List[Any]):
+            # TODO: Check aliasing relationships
+            # TODO: Check strides for metadata mutation
+            # (NB: ideally, this logic is factored out of this function and
+            # you move these debug checks there)
+
+            # Check requires grad.  Bad case is when we compiled with
+            # requires_grad = False, but input requires_grad = True
+            # (vice versa is OK; we compute a gradient and then throw
+            # it away when it hits the input.)
+            for i, a in enumerate(args):
+                can_require_grad = self.flat_requires_grad[i]
+                if can_require_grad is None:
+                    assert not isinstance(a, Tensor)
+                elif not can_require_grad:
+                    assert not a.requires_grad, format_guard_bug_msg(
+                        aot_config,
+                        f"{describe_input(i, aot_config)} would not require grad",
+                    )
+
+            return compiled_fn(args)
+
+        return debug_compiled_function
