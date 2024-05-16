@@ -169,6 +169,8 @@ inductor_skips["cpu"] = {
     "nn.functional.cosine_embedding_loss": {b8},  # flaky
     ("index_reduce", "prod"): {f16},  # flaky
     ("index_reduce", "mean"): {f16},  # flaky
+    # see https://github.com/pytorch/pytorch/issues/126449
+    "_unsafe_masked_index": {b8},
 }
 
 if IS_MACOS and IS_X86:
@@ -232,8 +234,6 @@ inductor_expected_failures_single_sample["cpu"] = {
         f64,
     },  # NYI: could not find kernel for aten.view.default at dispatch key DispatchKey.SparseCPU
     "view_as_complex": {f16},
-    # see https://github.com/pytorch/pytorch/issues/126449
-    "_unsafe_masked_index": {b8},
 }
 
 
