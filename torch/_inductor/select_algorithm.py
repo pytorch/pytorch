@@ -6,6 +6,7 @@ import logging
 
 import math
 import operator
+import os
 import sys
 import textwrap
 import time
@@ -921,6 +922,13 @@ class NoValidChoicesError(RuntimeError):
     pass
 
 
+@functools.lru_cache(None)
+def get_env_num_workers() -> Optional[int]:
+    if "TORCHINDUCTOR_COMPILE_THREADS" in os.environ:
+        return int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
+    return None
+
+
 class AlgorithmSelectorCache(PersistentCache):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -985,11 +993,10 @@ class AlgorithmSelectorCache(PersistentCache):
                 or precompilation_timeout_seconds <= 0
             ):
                 return no_op
-            num_workers = min(
-                config.compile_threads,
-                torch.get_num_threads(),
-                len(choices),
-            )
+
+            env_workers = get_env_num_workers()
+            num_workers = env_workers if env_workers is not None else (len(choices))
+
             if num_workers <= 0:
                 return no_op
 
