@@ -1297,16 +1297,6 @@ if(USE_UCC)
   endif()
 endif()
 
-# ---[ CUB
-if(USE_CUDA)
-  find_package(CUB)
-  if(CUB_FOUND)
-    include_directories(SYSTEM ${CUB_INCLUDE_DIRS})
-  else()
-    include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/cub)
-  endif()
-endif()
-
 if(USE_DISTRIBUTED AND USE_TENSORPIPE)
   if(MSVC)
     message(WARNING "Tensorpipe cannot be used on Windows.")
