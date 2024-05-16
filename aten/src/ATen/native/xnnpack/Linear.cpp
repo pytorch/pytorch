@@ -14,7 +14,7 @@ namespace {
 // TODO: Decouple and improve error handling and messages.
 bool available(
     const Tensor& weight,
-    const c10::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias,
     const float output_min,
     const float output_max) {
          // XNNPACK
@@ -65,7 +65,7 @@ Tensor create_and_run(
 
 ContextLinear create(
     const Tensor& weight,
-    const c10::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias,
     const float output_min,
     const float output_max) {
   const Tensor weight_contig = weight.contiguous();
@@ -173,9 +173,9 @@ Tensor run(
 
 c10::intrusive_ptr<xnnpack::LinearOpContext> createLinearClampPrePackOpContext(
     Tensor weight,
-    c10::optional<Tensor> bias,
-    const c10::optional<Scalar>& output_min,
-    const c10::optional<Scalar>& output_max) {
+    std::optional<Tensor> bias,
+    const std::optional<Scalar>& output_min,
+    const std::optional<Scalar>& output_max) {
   return xnnpack::XNNPackLinearOpContext::create_context(
       std::move(weight), std::move(bias), output_min, output_max);
 }

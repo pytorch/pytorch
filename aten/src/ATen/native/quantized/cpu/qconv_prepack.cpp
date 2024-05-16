@@ -28,7 +28,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
     kSpatialDim>::
     prepack(
         at::Tensor weight,
-        c10::optional<at::Tensor> bias,
+        std::optional<at::Tensor> bias,
         torch::List<int64_t> stride,
         torch::List<int64_t> padding,
         torch::List<int64_t> output_padding,
@@ -155,7 +155,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
     }
   }
 
-  c10::optional<at::Tensor> bias_contig;
+  std::optional<at::Tensor> bias_contig;
   if (bias.has_value()) {
     at::Tensor bias_vec = bias.value();
     TORCH_CHECK(bias_vec.dim() == 1, "bias should be a vector (1D Tensor)");
@@ -196,7 +196,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
     kSpatialDim>::
     prepack(
         at::Tensor weight,
-        c10::optional<at::Tensor> bias_in,
+        std::optional<at::Tensor> bias_in,
         torch::List<int64_t> stride,
         torch::List<int64_t> padding,
         torch::List<int64_t> output_padding,
@@ -313,7 +313,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<2>> PackedConvWeightsQnnp<
     2>::
     prepack(
         at::Tensor weight,
-        c10::optional<at::Tensor> bias_in,
+        std::optional<at::Tensor> bias_in,
         torch::List<int64_t> stride,
         torch::List<int64_t> padding,
         torch::List<int64_t> output_padding,
@@ -328,7 +328,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
     kSpatialDim>::
     prepack(
         at::Tensor weight,
-        c10::optional<at::Tensor> bias,
+        std::optional<at::Tensor> bias,
         torch::List<int64_t> stride,
         torch::List<int64_t> padding,
         torch::List<int64_t> output_padding,
@@ -458,7 +458,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
   packed_weight_p->set_zero_point(wgt_zero_points);
   std::unique_ptr<ideep::tensor> weight_ptr(packed_weight_p);
   // Bias
-  c10::optional<ideep::tensor> onednn_bias{c10::nullopt};
+  std::optional<ideep::tensor> onednn_bias{c10::nullopt};
   if (bias.has_value()) {
     at::Tensor bias_vec = bias.value();
     TORCH_CHECK(bias_vec.dim() == 1, "bias should be a vector (1D Tensor)");
@@ -468,7 +468,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
     auto bias_desc = ideep::tensor::desc(bias.value().sizes().vec(), dnnl::memory::data_type::f32);
     ideep::tensor packed_bias;
     packed_bias.init(bias_desc, bias.value().data_ptr());
-    onednn_bias = c10::optional<ideep::tensor>(packed_bias);
+    onednn_bias = std::optional<ideep::tensor>(packed_bias);
   }
   auto ret_ptr = c10::make_intrusive<PackedConvWeightsOnednn<kSpatialDim>>(
       PackedConvWeightsOnednn<kSpatialDim>{
@@ -499,7 +499,7 @@ at::Tensor _qconv_prepack_onednn(
     torch::List<int64_t> padding,
     torch::List<int64_t> dilation,
     int64_t groups,
-    c10::optional<torch::List<int64_t>> input_shape) {
+    std::optional<torch::List<int64_t>> input_shape) {
   int kSpatialDim = weight.ndimension() - 2;
   TORCH_CHECK(
       weight.ndimension() == kSpatialDim + 2,
@@ -624,7 +624,7 @@ class QConvPackWeightInt8 final {
  public:
   static c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> run_conv(
       Tensor weight,
-      c10::optional<Tensor> bias,
+      std::optional<Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> dilation,
@@ -640,7 +640,7 @@ class QConvPackWeightInt8 final {
 
   static c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> run_deconv(
       Tensor weight,
-      c10::optional<Tensor> bias,
+      std::optional<Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> output_padding,
@@ -653,7 +653,7 @@ class QConvPackWeightInt8 final {
  private:
   static c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> _run(
       Tensor weight,
-      c10::optional<Tensor> bias,
+      std::optional<Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> output_padding,
@@ -713,7 +713,7 @@ class QConv1dPackWeightInt8 final {
  public:
   static c10::intrusive_ptr<ConvPackedParamsBase<2>> run_conv(
       Tensor weight,
-      c10::optional<Tensor> bias,
+      std::optional<Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> dilation,
@@ -725,7 +725,7 @@ class QConv1dPackWeightInt8 final {
 
   static c10::intrusive_ptr<ConvPackedParamsBase<2>> run_deconv(
       Tensor weight,
-      c10::optional<Tensor> bias,
+      std::optional<Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> output_padding,
@@ -738,7 +738,7 @@ class QConv1dPackWeightInt8 final {
  private:
   static c10::intrusive_ptr<ConvPackedParamsBase<2>> _run(
       Tensor weight,
-      c10::optional<Tensor> bias,
+      std::optional<Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> output_padding,
@@ -814,7 +814,7 @@ class QConvPrepackOneDNN final {
     torch::List<int64_t> padding,
     torch::List<int64_t> dilation,
     int64_t groups,
-    c10::optional<torch::List<int64_t>> input_shape) {
+    std::optional<torch::List<int64_t>> input_shape) {
 #if AT_MKLDNN_ENABLED()
     return _qconv_prepack_onednn(
         weight, weight_scales, input_scale, input_zero_point,

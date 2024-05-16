@@ -14,6 +14,7 @@ from .optimizer import (
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
+    ParamsT,
 )
 
 __all__ = ["RMSprop", "rmsprop"]
@@ -22,12 +23,12 @@ __all__ = ["RMSprop", "rmsprop"]
 class RMSprop(Optimizer):
     def __init__(
         self,
-        params,
-        lr=1e-2,
-        alpha=0.99,
-        eps=1e-8,
-        weight_decay=0,
-        momentum=0,
+        params: ParamsT,
+        lr: float = 1e-2,
+        alpha: float = 0.99,
+        eps: float = 1e-8,
+        weight_decay: float = 0,
+        momentum: float = 0,
         centered=False,
         capturable=False,
         foreach: Optional[bool] = None,
@@ -147,12 +148,12 @@ class RMSprop(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            params_with_grad = []
-            grads = []
-            square_avgs = []
-            grad_avgs = []
-            momentum_buffer_list = []
-            state_steps = []
+            params_with_grad: List[Tensor] = []
+            grads: List[Tensor] = []
+            square_avgs: List[Tensor] = []
+            grad_avgs: List[Tensor] = []
+            momentum_buffer_list: List[Tensor] = []
+            state_steps: List[Tensor] = []
 
             has_complex = self._init_group(
                 group,
@@ -378,7 +379,7 @@ def _multi_tensor_rmsprop(
             _view_as_real(grouped_params, *state_and_grads)
 
         if maximize:
-            grouped_grads = torch._foreach_neg(grouped_grads)
+            grouped_grads = torch._foreach_neg(grouped_grads)  # type: ignore[assignment]
 
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
@@ -396,7 +397,7 @@ def _multi_tensor_rmsprop(
             if maximize:
                 torch._foreach_add_(grouped_grads, grouped_params, alpha=weight_decay)
             else:
-                grouped_grads = torch._foreach_add(
+                grouped_grads = torch._foreach_add(  # type: ignore[assignment]
                     grouped_grads, grouped_params, alpha=weight_decay
                 )
 

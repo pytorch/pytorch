@@ -61,10 +61,10 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   // Returns nullopt if the ith dimension is irregular. The ith dimension
   // of a NestedTensor is regular if the unbound tensors match in
   // size at the (i-1)th dimension.
-  c10::optional<int64_t> opt_size(int64_t d) const;
+  std::optional<int64_t> opt_size(int64_t d) const;
 
   int64_t size(int64_t d) const {
-    c10::optional<int64_t> optional_size = this->opt_size(d);
+    std::optional<int64_t> optional_size = this->opt_size(d);
     TORCH_CHECK(
         optional_size.has_value(),
         "Given dimension ",
@@ -171,7 +171,7 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   // Optional to allow it to be computed lazily from nested.
   // TODO: maybe we can remove this metadata since
   //       we can compute it from `nested_sizes_`
-  mutable c10::optional<std::vector<int64_t>> opt_sizes_;
+  mutable std::optional<std::vector<int64_t>> opt_sizes_;
 
   template <typename VariableVersion>
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach_core(

@@ -18,6 +18,7 @@ from .constants import default_pg_timeout
 
 _rendezvous_handlers: Dict[str, Callable[..., Iterator[Tuple[Store, int, int]]]] = {}
 
+__all__ = ["register_rendezvous_handler", "rendezvous"]
 
 def register_rendezvous_handler(scheme, handler):
     """
