@@ -310,7 +310,7 @@ class TORCH_API Context {
       const std::string& backend,
       const std::string& op);
   bool allowTF32CuDNN(const std::string& op = std::string()) const;
-  void setAllowTF32CuDNN(bool, const std::string& op = std::string());
+  void setAllowTF32CuDNN(bool);
   bool allowTF32CuBLAS() const;
   void setAllowTF32CuBLAS(bool);
   Float32MatmulPrecision float32MatmulPrecision() const;
@@ -407,23 +407,23 @@ class TORCH_API Context {
   bool allow_fp16_reduction_cpu = false;
 
   std::map<std::string, std::map<std::string, std::string>> fp32_precision = {
-      {"generic", {{"all", "ieee"}}},
+      {"generic", {{"all", "default"}}},
       {"mkldnn",
        {{"matmul",
          float32_matmul_precision == at::Float32MatmulPrecision::MEDIUM
              ? "bf16"
-             : "ieee"},
+             : "default"},
         {"conv", "default"},
         {"rnn", "default"},
         {"all", "default"}}},
       {"cuda",
        {{"matmul",
          float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST
-             ? "ieee"
+             ? "default"
              : "tf32"},
-        {"conv", allow_tf32_cudnn ? "tf32" : "ieee"},
-        {"rnn", allow_tf32_cudnn ? "tf32" : "ieee"},
-        {"all", "ieee"}}},
+        {"conv", allow_tf32_cudnn ? "tf32" : "default"},
+        {"rnn", allow_tf32_cudnn ? "tf32" : "default"},
+        {"all", "default"}}},
   };
 
   Allocator* prev_allocator_ptr_{nullptr};

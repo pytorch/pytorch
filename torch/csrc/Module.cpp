@@ -661,10 +661,12 @@ PyObject* THPModule_setAllowTF32CuDNN(PyObject* _unused, PyObject* arg) {
 }
 
 PyObject* THPModule_allowTF32CuDNN(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS
   if (at::globalContext().allowTF32CuDNN())
     Py_RETURN_TRUE;
   else
     Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject* THPModule_setFloat32MatmulPrecision(
@@ -685,6 +687,7 @@ PyObject* THPModule_setFloat32MatmulPrecision(
 PyObject* THPModule_float32MatmulPrecision(
     PyObject* _unused,
     PyObject* noargs) {
+  HANDLE_TH_ERRORS
   std::string s = "highest";
   auto p = at::globalContext().float32MatmulPrecision();
   if (p == at::Float32MatmulPrecision::HIGH) {
@@ -693,6 +696,7 @@ PyObject* THPModule_float32MatmulPrecision(
     s = "medium";
   }
   return THPUtils_packString(s);
+  END_HANDLE_TH_ERRORS
 }
 PyObject* THPModule_setSDPUseFlash(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
@@ -960,10 +964,12 @@ PyObject* THPModule_setAllowTF32CuBLAS(PyObject* _unused, PyObject* arg) {
 }
 
 PyObject* THPModule_allowTF32CuBLAS(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS
   if (at::globalContext().allowTF32CuBLAS()) {
     Py_RETURN_TRUE;
   }
   Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject* THPModule_setAllowFP16ReductionCuBLAS(
