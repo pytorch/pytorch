@@ -126,7 +126,8 @@ class ComptimeVar:
         return self.__variable
 
     def __repr__(self):
-        return self.__variable.debug_repr()
+        # TODO: The default repr is pretty bad, do better
+        return repr(self.__variable)
 
     # TODO: API for adding a custom guard
 
@@ -186,9 +187,6 @@ class ComptimeContext:
         for _ in range(stacklevel):
             tx = tx.parent
         return tx
-
-    def print(self, val, *, file=None):
-        print(repr(val), file=file)
 
     def print_disas(self, *, file=None, stacklevel=0):
         """
@@ -277,19 +275,15 @@ class ComptimeContext:
 
 class _Comptime:
     @staticmethod
-    def __call__(fn, fallback_fn=lambda: None):
-        """fn gets called at compile time in TorchDynamo, calls fallback_fn otherwise"""
-        fallback_fn()
+    def __call__(fn):
+        """fn gets called at compile time in TorchDynamo, does nothing otherwise"""
+        return
 
     # Convenience wrappers that are more compact to use
 
     @staticmethod
     def graph_break():
         comptime(lambda ctx: ctx.graph_break())
-
-    @staticmethod
-    def print(e):
-        comptime(lambda ctx: ctx.print(ctx.get_local("e")), lambda: print(e))
 
     @staticmethod
     def print_graph():
