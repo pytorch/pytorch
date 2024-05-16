@@ -567,8 +567,6 @@ def _is_valid_quantized_op_binary_optimization_pattern(
                     extra_input_of_binary_node = arg
                     break
             assert extra_input_of_binary_node is not None
-            if not isinstance(extra_input_of_binary_node, torch.fx.Node):
-                return False
             # Extra input of binary node comes from dequant pattern
             if extra_input_from_dequant and (
                 (not isinstance(extra_input_of_binary_node, torch.fx.Node))
