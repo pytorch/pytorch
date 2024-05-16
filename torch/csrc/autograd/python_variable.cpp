@@ -267,7 +267,7 @@ PyObject* THPVariable_Wrap(at::TensorBase var) {
         c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
   }
 
-  c10::optional<PyObject*> mb_obj =
+  std::optional<PyObject*> mb_obj =
       var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
           getPyInterpreter(), /*ignore_hermetic_tls=*/false);
   c10::impl::PyInterpreterStatus status{};
@@ -587,14 +587,14 @@ static PyObject* view_func_impl(
         auto& view_func = view_info.view_fn();
 
         // Determine new SymInt / tensor state as needed.
-        c10::optional<std::vector<c10::SymInt>> new_symints = c10::nullopt;
+        std::optional<std::vector<c10::SymInt>> new_symints = c10::nullopt;
         if (symint_visitor_fn != Py_None) {
           new_symints = map_py_func(
               py::cast<py::function>(symint_visitor_fn),
               view_func.get_symints());
         }
 
-        c10::optional<std::vector<at::Tensor>> new_tensors = c10::nullopt;
+        std::optional<std::vector<at::Tensor>> new_tensors = c10::nullopt;
         if (tensor_visitor_fn != Py_None) {
           new_tensors = map_py_func(
               py::cast<py::function>(tensor_visitor_fn),
@@ -815,7 +815,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
     auto sym_sizes = r.symintlist(1);
     auto sym_strides_own = r.symintlistOptional(2);
     auto sym_strides =
-        static_cast<c10::optional<c10::SymIntArrayRef>>(sym_strides_own);
+        static_cast<std::optional<c10::SymIntArrayRef>>(sym_strides_own);
     auto sym_storage_offset = r.toSymIntOptional(3);
 
     c10::SymInt size_bytes;
@@ -1931,7 +1931,7 @@ void THPVariable_subclass_dealloc(PyObject* self) {
   if (type->tp_del) {
     PyObject_GC_Track(self);
     type->tp_del(self);
-    if (self->ob_refcnt > 0) {
+    if (Py_REFCNT(self) > 0) {
       /* Resurrected */
       return;
     }
