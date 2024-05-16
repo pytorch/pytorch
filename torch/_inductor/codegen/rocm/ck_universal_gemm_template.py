@@ -65,7 +65,7 @@ class CKGemmTemplate(CKTemplate):
             {{c_elementwise_op}} {}
         );
         if (!gemm.IsSupportedArgument(argument)) {
-            // magic spell to assign +inf to benchmarking time in select_algorithm.py:1052 (1/2)
+            // we do our best to statically avoid this case in `CKGemmTemplate.filter_op`
             std::cerr << "invalid argument for gemm instance " << gemm.GetTypeString() << std::endl;
             argument.Print();
             return -23;
