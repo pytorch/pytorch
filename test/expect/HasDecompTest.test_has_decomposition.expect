@@ -461,6 +461,12 @@ aten::_nested_view_from_buffer_copy.out
 aten::_nested_view_from_jagged
 aten::_nested_view_from_jagged_copy
 aten::_nested_view_from_jagged_copy.out
+aten::_nested_strided_from_jagged
+aten::_nested_strided_from_jagged_copy
+aten::_nested_strided_from_jagged_copy.out
+aten::_nested_jagged_from_strided
+aten::_nested_jagged_from_strided_copy
+aten::_nested_jagged_from_strided_copy.out
 aten::_new_zeros_with_same_feature_meta
 aten::_new_zeros_with_same_feature_meta.out
 aten::_nnpack_spatial_convolution
