@@ -270,6 +270,7 @@ class TestTemplatedSDPA(InductorTestCase):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("score_mod", test_score_mods)
+    @common_utils.serialTest()
     def test_builtin_score_mods(self, dtype: torch.dtype, score_mod: Callable):
         self.run_test(score_mod, dtype)
 
