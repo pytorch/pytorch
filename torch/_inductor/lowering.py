@@ -4554,6 +4554,7 @@ def _avg_poolnd(
                 factor = ops.index_expr(hend - hstart, torch.int32)
                 divide_factors.append(factor)
             divide_factor = functools.reduce(ops.mul, divide_factors)
+            assert False
             return ops.div(fn_sum(idx, x_loader), divide_factor)
 
     rv = Pointwise.create(
