@@ -552,7 +552,9 @@ class CppWrapperCpu(WrapperCodeGen):
                         ), "Fails to get the dtype of the sympy.Expr"
                         cpp_dtype = DTYPE_TO_CPP[dtype]
                         if config.abi_compatible:
-                            self.codegen_tensor_item(dtype, f"inputs[{idx}]", input_key)
+                            self.codegen_tensor_item(
+                                dtype, f"inputs[{idx}]", input_key, self.prefix
+                            )
                         else:
                             self.prefix.writeline(
                                 f"{cpp_dtype} {input_key} = inputs[{idx}].item<{cpp_dtype}>();"
@@ -886,13 +888,16 @@ class CppWrapperCpu(WrapperCodeGen):
         )
         return name
 
-    def codegen_tensor_item(self, dtype: torch.dtype, tensor: str, scalar: str):
+    def codegen_tensor_item(
+        self, dtype: torch.dtype, tensor: str, scalar: str, indented_buffer=None
+    ):
         assert (
             config.abi_compatible
         ), "codegen_tensor_item is only used for the ABI-compatible mode"
         dtype_str = str(dtype).split(".")[-1]
-        self.writeline(f"{DTYPE_TO_CPP[dtype]} {scalar};")
-        self.writeline(
+        writer = indented_buffer or self
+        writer.writeline(f"{DTYPE_TO_CPP[dtype]} {scalar};")
+        writer.writeline(
             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_{dtype_str}({tensor}, &{scalar}));"
         )
 
