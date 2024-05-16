@@ -1,4 +1,5 @@
 import functools
+import itertools
 import operator
 from typing import List, Optional, Union
 
@@ -325,8 +326,18 @@ def should_pad_bench(
         if m_padded_length == k_padded_length == n_padded_length == 0:
             return False
 
-        if torch._inductor.config.force_shape_pad:
-            return True
+        def realize_symbols(ds):
+            return [d if isinstance(d, int) else d.node.hint for d in ds]
+
+        if any(
+            dim == 0
+            for dim in itertools.chain(
+                realize_symbols(mat1.shape), realize_symbols(mat2.shape)
+            )
+        ):
+            return False
+
+        return True
 
         if not has_triton():
             return False
@@ -342,9 +353,6 @@ def should_pad_bench(
         if cached_pad is not None:
             return cached_pad
 
-        def realize_symbols(ds):
-            return [d if isinstance(d, int) else d.node.hint for d in ds]
-
         def realize_tensor(t):
             if isinstance(t, FakeTensor):
                 size_hints = realize_symbols(t.size())
@@ -359,6 +367,9 @@ def should_pad_bench(
 
         mat1 = realize_tensor(mat1)
         mat2 = realize_tensor(mat2)
+
+        if any(dim == 0 for dim in mat1.shapes) or any(dim == 0 for dim in mat2.shapes):
+            return False
 
         # since we key on whether or not the inputs can be memory planned, set cache for the
         # original time which is unaffected by whether or not the input can be planned
