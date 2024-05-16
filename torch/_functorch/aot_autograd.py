@@ -2,7 +2,7 @@
 
 import itertools
 from contextlib import contextmanager, nullcontext
-from functools import wraps
+from functools import partial, wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from unittest.mock import patch
 
@@ -23,10 +23,6 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from . import config
 from ._aot_autograd.collect_metadata_analysis import (  # noqa: F401
     run_functionalized_fw_and_collect_metadata,
-)
-from ._aot_autograd.dispatch_and_compile_graph import (  # noqa: F401
-    aot_dispatch_autograd_graph,
-    aot_dispatch_base_graph,
 )
 from ._aot_autograd.functional_utils import (  # noqa: F401
     _check_if_mutation_can_be_in_graph,
@@ -51,6 +47,7 @@ from ._aot_autograd.input_output_analysis import (  # noqa: F401
 from ._aot_autograd.jit_compile_runtime_wrappers import (  # noqa: F401
     aot_dispatch_autograd,
     aot_dispatch_base,
+    aot_dispatch_export,
 )
 from ._aot_autograd.logging_utils import (  # noqa: F401
     callback_set,
@@ -651,53 +648,24 @@ Functionalized RNG is not currently supported in the aot_export workflow. Please
 or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
                 )
 
-        # crappy version of dispatcher
-        # TODO: Do this properly
-        if needs_autograd and not aot_config.pre_dispatch:
-            # For now, aot_dispatch_autograd knows to explicitly return a graph
-            # when run with export, and an opaque callable otherwise.
-            # In theory we could factor these out, but I wanted to let the dust
-            # settle on how functionalized rng fits into export first.
-            compiler_fn = (
-                aot_dispatch_autograd_graph
-                if aot_config.is_export
-                else aot_dispatch_autograd
-            )
-        else:
-            # aot_dispatch_base_graph contains only the "graph bits", while aot_dispatch_base
-            # includes some extra work around handling a runtime epilogue.
-            compiler_fn = (
-                aot_dispatch_base_graph if aot_config.is_export else aot_dispatch_base
-            )
+        def choose_dispatcher(needs_autograd, aot_config):
+            """
+            Pick a dispatcher based on the config rules.
+            """
+            if aot_config.is_export:
+                # export uses just the "graph bits", whereas the other
+                # two dispatchers include some extra work around handling a runtime epilogue
+                return partial(aot_dispatch_export, needs_autograd=needs_autograd)
+            elif needs_autograd and not aot_config.pre_dispatch:
+                return aot_dispatch_autograd
+            else:
+                return aot_dispatch_base
 
-        # Wrappers that edit fw_metadata
-        fw_metadata_wrappers = [
-            AOTDedupeWrapper(),
-            AOTSyntheticBaseWrapper(trace_joint=needs_autograd),
-            # Add more passes here
-        ]
-        for wrapper in fw_metadata_wrappers:
-            flat_fn, fake_flat_args, fw_metadata = wrapper.pre_compile(
-                flat_fn, fake_flat_args, aot_config, fw_metadata=fw_metadata
-            )
-        # Once all fw_metadata_wrappers have run, runtime_metadata is fixed
-        runtime_metadata = fw_metadata
+        compiler_fn = choose_dispatcher(needs_autograd, aot_config)
 
         compiled_fn = compiler_fn(
-            flat_fn, fake_flat_args, aot_config, fw_metadata=runtime_metadata
+            flat_fn, fake_flat_args, aot_config, fw_metadata=fw_metadata
         )
-
-        for wrapper in reversed(fw_metadata_wrappers):
-            compiled_fn = wrapper.post_compile(
-                compiled_fn, aot_config, runtime_metadata=runtime_metadata
-            )
-
-        if aot_config.is_export:
-            # During export, we don't get back a callable - we get back the raw fx graph
-            # (either a joint or an inference-only graph)
-            assert isinstance(compiled_fn, torch.fx.GraphModule)
-            return compiled_fn, fw_metadata
-
         return compiled_fn
 
 
