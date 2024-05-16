@@ -12,11 +12,11 @@ namespace utils {
 // The parameter allow_copy is to accept copy for Tensor.to (and by proxy
 // PackedSequences.to) but not nn.Module.to.
 inline std::tuple<
-    c10::optional<at::Device>,
-    c10::optional<at::ScalarType>,
+    std::optional<at::Device>,
+    std::optional<at::ScalarType>,
     bool,
     bool,
-    c10::optional<at::MemoryFormat>>
+    std::optional<at::MemoryFormat>>
 parse_to_conversion(PythonArgs& r, bool allow_copy) {
   if (r.idx == 0) {
     if (!allow_copy && !r.isNone(3))

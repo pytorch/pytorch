@@ -137,10 +137,7 @@ struct TORCH_API Engine {
       GraphTask& graph_task,
       bool accumulate_grad,
       const edge_list& outputs);
-  typedef bool (*compiled_autograd_active_ctx)();
-  static void set_compiled_autograd(
-      compiled_autograd_fn fn,
-      compiled_autograd_active_ctx is_ctx_manager);
+  static void set_compiled_autograd(compiled_autograd_fn fn);
 
   Engine(const Engine&) = delete;
   Engine(Engine&&) = delete;
@@ -206,7 +203,7 @@ struct TORCH_API Engine {
 
  protected:
   Engine();
-  bool compute_dependencies(Node* root, GraphTask& task, uint64_t min_topo_nr);
+  void compute_dependencies(Node* root, GraphTask& task, uint64_t min_topo_nr);
 
   // initialize the thread local ready queue with the ready queue that is
   // created elsewhere (i.e. thread_init, Engine::execute, etc), or create a new

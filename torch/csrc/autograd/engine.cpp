@@ -78,8 +78,6 @@ inline bool should_run_in_cpu_ready_queue(c10::DeviceType device) {
 }
 
 std::atomic<Engine::compiled_autograd_fn> the_compiled_autograd = nullptr;
-std::atomic<Engine::compiled_autograd_active_ctx>
-    the_compiled_autograd_active_ctx = nullptr;
 #define COMPILED_AUTOGRAD_POISON \
   reinterpret_cast<Engine::compiled_autograd_fn>(1)
 std::atomic<int32_t> num_threads_in_backwards;
@@ -1154,7 +1152,7 @@ inline static uint64_t compute_min_topological_nr(const edge_list& outputs) {
 auto Engine::compute_dependencies(
     Node* root,
     GraphTask& task,
-    uint64_t min_topo_nr) -> bool {
+    uint64_t min_topo_nr) -> void {
   // Computes the number of dependencies for each function which requires grad
   std::vector<Node*> queue{root};
   bool will_use_accelerator = false;
@@ -1162,7 +1160,6 @@ auto Engine::compute_dependencies(
   // Queue contains all nodes that will start propagating gradients.
   // We no longer have to expand functions that don't require grad.
   auto& dependencies = task.dependencies_;
-  bool marked_for_compiled_autograd = false;
   while (!queue.empty()) {
     auto fn = queue.back();
     queue.pop_back();
@@ -1172,11 +1169,6 @@ auto Engine::compute_dependencies(
     if (!will_use_accelerator) {
       will_use_accelerator = fn->stream().has_value();
     }
-    if (fn->has_compiler_fn()) {
-      // fn's forward was torch.compile'd with compiled autograd enabled
-      marked_for_compiled_autograd = true;
-    }
-
     for (const auto& edge : fn->next_edges()) {
       if (auto next_ptr = edge.function.get()) {
         dependencies[next_ptr] += 1;
@@ -1193,8 +1185,6 @@ auto Engine::compute_dependencies(
     // leaf_streams.
     task.stash_current_streams();
   }
-
-  return marked_for_compiled_autograd;
 }
 
 auto Engine::execute(
@@ -1222,7 +1212,6 @@ auto Engine::execute(
   CompiledAutogradThreadingDebugCheck _thread_check;
   auto compiled_autograd = the_compiled_autograd.load();
   TORCH_INTERNAL_ASSERT(compiled_autograd != COMPILED_AUTOGRAD_POISON);
-  auto compiled_autograd_active_ctx = the_compiled_autograd_active_ctx.load();
 
   // accumulate_grad is true if and only if the frontend call was to
   // backward(), not grad(). grad() returns the sum of the gradients
@@ -1259,16 +1248,14 @@ auto Engine::execute(
 
   auto min_topo_nr = compute_min_topological_nr(outputs);
   // Now compute the dependencies for all executable functions
-  bool marked_for_compiled_autograd =
-      compute_dependencies(graph_root.get(), *graph_task, min_topo_nr);
+  compute_dependencies(graph_root.get(), *graph_task, min_topo_nr);
 
   if (!outputs.empty()) {
     graph_task->init_to_execute(
         *graph_root, outputs, accumulate_grad, min_topo_nr);
   }
 
-  if (compiled_autograd != nullptr && compiled_autograd_active_ctx != nullptr &&
-      (marked_for_compiled_autograd || (*compiled_autograd_active_ctx)())) {
+  if (compiled_autograd != nullptr) {
     // see [Note: Compiled Autograd]
     TORCH_CHECK(
         !create_graph, "compiled_autograd does not support create_graph");
@@ -1411,19 +1398,15 @@ Engine& Engine::get_default_engine() {
   return engine_stub.load()();
 }
 
-void Engine::set_compiled_autograd(
-    Engine::compiled_autograd_fn fn,
-    Engine::compiled_autograd_active_ctx active_ctx) {
+void Engine::set_compiled_autograd(Engine::compiled_autograd_fn fn) {
   if (the_compiled_autograd.load() == fn) {
-    TORCH_CHECK(the_compiled_autograd_active_ctx.load() == active_ctx);
     return;
   }
   auto prior = the_compiled_autograd.exchange(COMPILED_AUTOGRAD_POISON);
   TORCH_CHECK(
       num_threads_in_backwards.load() == 0 && prior != COMPILED_AUTOGRAD_POISON,
-      "Enabling compiled autograd requires no threads in backwards()");
+      "compiled_autograd.enable() requires no threads in backwards()");
   the_compiled_autograd.store(fn);
-  the_compiled_autograd_active_ctx.store(active_ctx);
 }
 
 void Engine::queue_callback(std::function<void()> callback) {
@@ -1567,17 +1550,8 @@ void GraphTask::stash_current_streams() {
   caller_current_streams_.resize(num_devices);
   if (num_devices > 0) {
     for (c10::DeviceIndex idx = 0; idx < num_devices; idx++) {
-#if defined(USE_ROCM) && (ROCM_VERSION < 50000)
-      // If the build targets ROCM, stash streams for all visible devices
-      // unconditionally, to work around
-      // https://github.com/pytorch/pytorch/issues/59750.
-      // TODO: Remove ROCM-specific behavior when
-      // https://github.com/pytorch/pytorch/issues/59750 is fixed.
-      if (true) {
-#else
       if (at::globalContext().getAcceleratorHooksInterface().hasPrimaryContext(
               idx)) {
-#endif
         caller_current_streams_[idx] = guard.getStream({accelerator, idx});
       } else {
         caller_current_streams_[idx] = c10::nullopt;

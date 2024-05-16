@@ -1,6 +1,6 @@
 # Owner(s): ["module: inductor"]
-import contextlib
 import functools
+import logging
 import re
 import sys
 import unittest
@@ -11,7 +11,7 @@ from unittest import mock
 import torch
 import torch.nn as nn
 from torch import _inductor as inductor
-from torch._dynamo import compiled_autograd
+from torch._dynamo import compiled_autograd, config
 from torch._dynamo.utils import counters
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
@@ -51,24 +51,22 @@ def hook3(gI, gO):
     return (torch.sin(gI[0]) + gO[0],)
 
 
-@contextlib.contextmanager
-def set_flag():
-    torch._dynamo.config.compiled_autograd_enabled = True
-    try:
-        yield
-    finally:
-        torch._dynamo.config.compiled_autograd_enabled = False
-
-
 class TestCompiledAutograd(TestCase):
-    def check_output_and_recompiles(
-        self, fn, count=1, compiler_fn=compiler_fn, compile_fn=False, use_ctx=True
-    ):
-        if use_ctx:
-            ctx = (compiled_autograd.enable, (compiler_fn,))
-        else:
-            ctx = (set_flag, ())
+    def setUp(self) -> None:
+        super().setUp()
+        torch._logging.set_logs(compiled_autograd_verbose=False)
+        config.compiled_autograd = False
+        compiled_autograd.reset()
 
+    def tearDown(self) -> None:
+        super().tearDown()
+        torch._logging.set_logs(compiled_autograd_verbose=False)
+        config.compiled_autograd = False
+        compiled_autograd.reset()
+
+    def check_output_and_recompiles(
+        self, fn, count=1, compiler_fn=compiler_fn, compile_fn=False
+    ):
         if isinstance(count, list):
             captures, compiles = count
         else:
@@ -79,7 +77,7 @@ class TestCompiledAutograd(TestCase):
             torch.manual_seed(123)
             expected = list(fn())
             torch.manual_seed(123)
-            with ctx[0](*ctx[1]):
+            with compiled_autograd.enable(compiler_fn):
                 opt_fn = torch.compile(fn) if compile_fn else fn
                 actual = list(opt_fn())
             self.assertEqual(expected, actual)
@@ -238,67 +236,112 @@ main()
 
     def test_torch_compile_api_inductor(self):
         def fn():
+            torch.manual_seed(123)
             model = torch.nn.Sequential(
                 torch.nn.Linear(4, 4),
                 torch.nn.Sigmoid(),
             )
-            opt_model = torch.compile(model, fullgraph=True)
 
+            res = []
             for _ in range(3):
                 x = torch.randn([1, 4])
 
-                result = opt_model(x).sum()
+                result = model(x).sum()
                 result.backward()
-                yield model[0].weight.grad
-                yield model[0].bias.grad
+                res.append(model[0].weight.grad)
+                res.append(model[0].bias.grad)
                 model.zero_grad()
+            return res
 
-        self.check_output_and_recompiles(fn, count=[1, 0], use_ctx=False)
-        self.assertEqual(
-            counters["stats"]["unique_graphs"], 3
-        )  # 1 for joint eager, 1 for joint CA, 1 for CA
+        expected = fn()
+        with config.patch(compiled_autograd=True):
+            compiled_fn = torch.compile(fn)
+        actual = compiled_fn()
+        self.assertEqual(expected, actual)
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
 
     def test_torch_compile_api_aot_eager(self):
         def fn():
+            torch.manual_seed(123)
             model = torch.nn.Sequential(
                 torch.nn.Linear(4, 4),
                 torch.nn.Sigmoid(),
             )
-            opt_model = torch.compile(model, backend="aot_eager", fullgraph=True)
 
+            res = []
             for _ in range(3):
                 x = torch.randn([1, 4])
 
-                result = opt_model(x).sum()
+                result = model(x).sum()
                 result.backward()
-                yield model[0].weight.grad
-                yield model[0].bias.grad
+                res.append(model[0].weight.grad)
+                res.append(model[0].bias.grad)
                 model.zero_grad()
+            return res
 
-        self.check_output_and_recompiles(fn, count=[1, 0], use_ctx=False)
-        self.assertEqual(
-            counters["stats"]["unique_graphs"], 3
-        )  # 1 for joint eager, 1 for joint CA, 1 for CA
+        expected = fn()
+        with config.patch(compiled_autograd=True):
+            compiled_fn = torch.compile(fn, backend="aot_eager")
+        actual = compiled_fn()
+        self.assertEqual(expected, actual)
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
 
     def test_torch_compile_api_eager(self):
         def fn():
+            torch.manual_seed(123)
             model = torch.nn.Sequential(
                 torch.nn.Linear(4, 4),
                 torch.nn.Sigmoid(),
             )
-            opt_model = torch.compile(model, backend="eager", fullgraph=True)
 
+            res = []
             for _ in range(3):
                 x = torch.randn([1, 4])
 
-                result = opt_model(x).sum()
+                result = model(x).sum()
                 result.backward()
-                yield model[0].weight.grad
-                yield model[0].bias.grad
+                res.append(model[0].weight.grad)
+                res.append(model[0].bias.grad)
                 model.zero_grad()
+            return res
 
-        # no AOTAutograd to mark nodes, should not run compiled autograd
-        self.check_output_and_recompiles(fn, count=0, use_ctx=False)
+        expected = fn()
+        with config.patch(compiled_autograd=True):
+            compiled_fn = torch.compile(fn, backend="eager")
+        actual = compiled_fn()
+        self.assertEqual(expected, actual)
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+
+    def test_multiple_torch_compile(self):
+        model = torch.nn.Sequential(
+            torch.nn.Linear(4, 4),
+            torch.nn.Sigmoid(),
+        )
+        x = torch.randn([1, 4])
+        def fn():
+            result = model(x).sum()
+            result.backward()
+
+        model2 = torch.nn.Linear(4, 4)
+        x2 = torch.randn([1, 4])
+        def fn2():
+            result = model2(x2).sum()
+            result.backward()
+
+        no_ca1 = torch.compile(fn)
+        no_ca1()
+        self.assertEqual(counters["compiled_autograd"]["captures"], 0)
+        counters.clear()
+
+        with config.patch(compiled_autograd=True):
+            withca = torch.compile(fn2)
+            withca()
+            self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+            counters.clear()
+
+        no_ca2 = torch.compile(fn)
+        no_ca2()
+        self.assertEqual(counters["compiled_autograd"]["captures"], 0)
 
     def test_dynamo_boxed(self):
         def get_placeholders(gm_):
@@ -351,8 +394,7 @@ main()
 
     def test_inputs_aliasing_bytecode_attr_mutations(self):
         # Freeze compiled autograd graph
-        compiler = compiled_autograd.AutogradCompilerInstance()
-        compiled_autograd.override_compiler_fn = compiler_fn
+        compiler = torch._dynamo.compiled_autograd.AutogradCompilerInstance(compiler_fn)
         param = torch.ones(100)
         activ = torch.ones(100) * 2
         inputs = [param, activ]
@@ -402,6 +444,7 @@ main()
             handle.remove()
 
     def test_inputs_aliasing_bytecode_stack_restore(self):
+        logging.getLogger().setLevel(logging.WARNING)
         from torch.testing._internal.logging_tensor import LoggingTensor
 
         # Create a graph that allows inputs stealing
@@ -831,6 +874,52 @@ main()
                 yield z
 
         self.check_output_and_recompiles(fn, count=2)
+
+    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    def test_logging_tensor_flaky(self) -> None:
+        # when you first run some test using triton and then run test_inputs_aliasing_bytecode_stack_restore
+        # resulting in:
+        #   - pytest: `TypeError: unsupported operand type(s) for +: 'Tensor' and 'LoggingTensor'`
+        #   - python: `TypeError: not all arguments converted during string formatting`
+
+        # 1. some triton involving test
+        def fn():
+            def _fn(x):
+                return x
+
+            x = torch.arange(
+                1, 10, requires_grad=True, dtype=torch.float16, device="cuda"
+            )
+            out = _fn(x)
+            loss = out.sum()
+            loss.backward()
+
+        with compiled_autograd.enable(compiler_fn):
+            fn()
+
+        logging.getLogger().setLevel(
+            logging.WARNING
+        )  # triton setup overwrote it to INFO
+        # 2. test_inputs_aliasing_bytecode_stack_restore
+        from torch.testing._internal.logging_tensor import LoggingTensor
+
+        def forward(inputs):
+            add = inputs[0] + 1
+            add_1 = add + inputs[1]
+            out = add_1.cpu()
+            return (out,)
+
+        gm = torch.fx.symbolic_trace(forward)
+        print(gm.print_readable())
+        torch._dynamo.utils.set_locals_to_steal(gm, ["inputs"])
+        compiled_fn = torch.compile(gm)
+
+        inputs = [
+            torch.ones(1000000, dtype=torch.float32),
+            LoggingTensor(torch.ones(1)),
+        ]
+
+        compiled_fn(inputs)
 
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
     def test_custom_fn_output_metadata(self):
