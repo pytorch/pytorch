@@ -1496,7 +1496,7 @@ def dump_node_schedule(node_schedule):
     An API that can be used in pdb to dump a node_schedule.
     Right mainly dump the read/write dependencies but can add more as needed.
     """
-    from torch._inductor.codegen.triton import DisableReduction, EnableReduction
+    from torch._inductor.codegen.simd import DisableReduction, EnableReduction
     from torch._inductor.scheduler import SchedulerNode
 
     print(f"Node schedule with {len(node_schedule)} nodes")
