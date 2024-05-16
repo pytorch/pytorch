@@ -40,8 +40,7 @@ if HAS_CUDA:
 else:
     CONSTANT_C = 4
     STRING_CONSTANT_C = "CONSTANT_C"
-    BOOL_CONSTANT_C =  True
-
+    BOOL_CONSTANT_C = True
 
 
 class KernelTests(torch._inductor.test_case.TestCase):

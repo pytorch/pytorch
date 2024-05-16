@@ -1,11 +1,11 @@
 from __future__ import annotations
+
 import functools
+import importlib
 import os
 import sys
 import warnings
-from types import ModuleType
 from typing import Any, Callable
-import importlib
 
 
 def _reload_triton_kernel_in_subproc(reload_module, kernel_name):
@@ -32,19 +32,17 @@ def _reload_python_module_in_subproc(key, path):
 
 def _reload_python_module(key, path):
     spec = importlib.util.spec_from_file_location(f"{__name__}.{key}", path)
-    if spec is None:
-        raise RuntimeError(
-            f"Failed to import {path}\n{type(e).__name__}: {e}"
-        )
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Failed to import {path}: path not found")
     module = importlib.util.module_from_spec(spec)
-    module.key = key
+    module.key = key  # type: ignore[attr-defined]
     try:
         spec.loader.exec_module(module)
     except Exception as e:
         raise RuntimeError(
             f"Failed to import {path}\n{type(e).__name__}: {e}"
         ) from None
-        
+
     sys.modules[module.__name__] = module
     return module
 
