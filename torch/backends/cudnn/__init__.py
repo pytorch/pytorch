@@ -165,7 +165,7 @@ def flags(
     benchmark_limit=10,
     deterministic=False,
     allow_tf32=True,
-    fp32_precision="tf32",
+    fp32_precision="default",
 ):
     with __allow_nonbracketed_mutation():
         orig_flags = set_flags(
