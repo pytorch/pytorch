@@ -685,8 +685,9 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
 
         # Check the `from_group()` API for correctness
         dp_mesh = DeviceMesh.from_group(dp_pg, "cuda")
+        # We only compare the mesh tensors instead of the DeviceMesh objects
+        # since mesh_dim_names attributes and parent mesh are different.
         self.assertEqual(dp_mesh.mesh, ref_dp_mesh.mesh)
-        self.assertEqual(dp_mesh, ref_dp_mesh)
         # self.assertFalse(hasattr(dp_mesh, "_coordinate_on_dim"))
         self.assertEqual(dp_mesh._coordinate_on_dim, ref_dp_mesh._coordinate_on_dim)
         self.assertEqual(dp_mesh._dim_group_infos, ref_dp_mesh._dim_group_infos)
@@ -721,8 +722,13 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
         loss.backward()
         self.assertEqual(loss, ref_loss)
         for param, ref_param in zip(model.parameters(), ref_model.parameters()):
-            self.assertEqual(param, ref_param)
-            self.assertEqual(param.grad, ref_param.grad)
+            # we cannot directly compare param and ref_param because their parent mesh is different.
+            self.assertEqual(param.to_local(), ref_param.to_local())
+            self.assertEqual(param.device_mesh.mesh, ref_param.device_mesh.mesh)
+            self.assertEqual(param.grad.to_local(), ref_param.grad.to_local())
+            self.assertEqual(
+                param.grad.device_mesh.mesh, ref_param.grad.device_mesh.mesh
+            )
 
 
 class TestFullyShardHSDPBroadcast(FSDPTestMultiThread):
