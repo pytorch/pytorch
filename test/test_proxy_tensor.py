@@ -1137,8 +1137,7 @@ def forward(self, _a_1, _b_1, _stride_1):
     cat = torch.ops.aten.cat.default([randn, randn_1]);  randn = randn_1 = None
     add = _local_scalar_dense + _local_scalar_dense_1;  _local_scalar_dense = _local_scalar_dense_1 = None
     view = torch.ops.aten.view.default(cat, [add, _local_scalar_dense_2]);  cat = add = _local_scalar_dense_2 = None
-    return view"""
-        )
+    return view""")
 
     def test_cumsum_unbacked(self):
         def f(x):
