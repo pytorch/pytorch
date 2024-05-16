@@ -1512,7 +1512,7 @@ class CppWrapperCpu(WrapperCodeGen):
         writer=None,
         known_statically=False,
         graph=None,  # for per-graph caching
-        type_hint=None,  # ['int64_t', 'int32_t', 'tensor', 'bool']
+        type_hint=None,  # ['int64_t', 'tensor', 'bool']
     ):
         # Because the memory planning is done in two passes (see the implementation
         # of self.generate), the writeline behavior is different in the two passes.
@@ -1522,7 +1522,7 @@ class CppWrapperCpu(WrapperCodeGen):
         if writer is None:
             # The first pass codegen uses `self` as the writer
             writer = self
-        if not type_hint or type_hint in ["bool", "int32_t", "int64_t"]:
+        if not type_hint or type_hint in ["bool", "int64_t"]:
             return self.codegen_int_array_var(
                 var_array,
                 writer,
@@ -2357,9 +2357,6 @@ if (py_{buf_name}.get() == NULL) {{
                     type_ is not None
                     and isinstance(type_, torch._C.ListType)
                     and isinstance(type_.getElementType(), torch._C.OptionalType)
-                    and isinstance(
-                        type_.getElementType().getElementType(), torch._C.TensorType
-                    )
                     and isinstance(
                         type_.getElementType().getElementType(), torch._C.TensorType
                     )
