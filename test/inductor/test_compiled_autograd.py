@@ -318,12 +318,14 @@ main()
             torch.nn.Sigmoid(),
         )
         x = torch.randn([1, 4])
+
         def fn():
             result = model(x).sum()
             result.backward()
 
         model2 = torch.nn.Linear(4, 4)
         x2 = torch.randn([1, 4])
+
         def fn2():
             result = model2(x2).sum()
             result.backward()
@@ -334,14 +336,67 @@ main()
         counters.clear()
 
         with config.patch(compiled_autograd=True):
-            withca = torch.compile(fn2)
-            withca()
+            with_ca = torch.compile(fn2)
+            with_ca()
             self.assertEqual(counters["compiled_autograd"]["captures"], 1)
             counters.clear()
 
         no_ca2 = torch.compile(fn)
         no_ca2()
         self.assertEqual(counters["compiled_autograd"]["captures"], 0)
+
+    def test_torch_compile_graph_break(self):
+        model = torch.nn.Sequential(
+            torch.nn.Linear(4, 4),
+            torch.nn.Sigmoid(),
+        )
+        x = torch.randn([1, 4])
+
+        @torch._dynamo.disable()
+        def fn():
+            result = model(x).sum()
+            result.backward()
+
+        with config.patch(compiled_autograd=True):
+            opt_fn = torch.compile(fn)
+            opt_fn()
+
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+
+    def test_torch_compile_graph_break2(self):
+        model = torch.nn.Sequential(
+            torch.nn.Linear(4, 4),
+            torch.nn.Sigmoid(),
+        )
+        x = torch.randn([1, 4])
+
+        @torch._dynamo.disable()
+        def inner_fn(loss):
+            loss.backward()
+
+        def fn():
+            result = model(x).sum()
+            inner_fn(result)
+
+        with config.patch(compiled_autograd=True):
+            opt_fn = torch.compile(fn)
+            opt_fn()
+
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+
+    def test_torch_compile_only_backward_call(self):
+        model = torch.nn.Sequential(
+            torch.nn.Linear(4, 4),
+            torch.nn.Sigmoid(),
+        )
+        x = torch.randn([1, 4])
+
+        result = model(x).sum()
+        with config.patch(compiled_autograd=True):
+            opt_bwd = torch.compile(lambda: result.backward())
+            opt_bwd()
+
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
 
     def test_dynamo_boxed(self):
         def get_placeholders(gm_):

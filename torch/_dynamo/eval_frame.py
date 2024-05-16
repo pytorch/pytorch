@@ -481,7 +481,9 @@ class OptimizeContext(_TorchDynamoContext):
         export=False,
         dynamic=None,
         compiler_config=None,
-        rebuild_ctx: Optional[Callable[[Callable], OptimizeContext]] = None,
+        rebuild_ctx: Optional[
+            Callable[[], Union[OptimizeContext, _NullDecorator]]
+        ] = None,
     ):
         def on_enter():
             install_generation_tagging_init()
@@ -645,7 +647,7 @@ def optimize(*args, **kwargs):
 
 
 def _optimize(
-    rebuild_ctx: Callable[[Callable], OptimizeContext],
+    rebuild_ctx: Callable[[], Union[OptimizeContext, _NullDecorator]],
     backend="inductor",
     *,
     nopython=False,
@@ -653,7 +655,7 @@ def _optimize(
     guard_fail_fn=None,
     disable=False,
     dynamic=None,
-) -> OptimizeContext:
+) -> Union[OptimizeContext, _NullDecorator]:
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
     backend() to optimize extracted graphs.
