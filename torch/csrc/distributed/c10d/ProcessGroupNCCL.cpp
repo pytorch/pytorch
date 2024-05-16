@@ -1,5 +1,3 @@
-
-#include <torch/csrc/distributed/c10d/Work.hpp>
 #ifdef USE_C10D_NCCL
 
 #include <exception>
@@ -749,6 +747,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // both timeout and other errors.
   dumpOnException_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
+  enableNanCheck_ = getCvarBool(TORCH_NCCL_NAN_CHECK, false);
   heartbeat_ = 1ULL;
   monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, true));
   heartbeatTimeoutInSec_ =
@@ -837,6 +836,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
             << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << ncclTraceBufferSize_
             << ", TORCH_NCCL_COORD_CHECK_MILSEC: " << coordCheckIntervalMilSec_
+            << ", TORCH_NCCL_NAN_CHECK: " << enableNanCheck_
             << ", PG Name: " << options_->group_name;
 
   if (options_->global_ranks_in_group.empty()) {
@@ -2433,6 +2433,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     OpType opType,
     const char* profilingTitle,
     bool avoidRecordStreams) {
+  if (enableNanCheck_) {
+    checkForNan(input);
+  }
   // Environment setting by the user may add onto collective call's option
   avoidRecordStreams |= avoidRecordStreams_;
   c10::cuda::CaptureStatus capture_status =
@@ -2789,6 +2792,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     PreProcess pre,
     PostProcess post,
     const char* profilingTitle) {
+  if (enableNanCheck_) {
+    checkForNan(tensor);
+  }
   // avoidRecordStreams_ note:
   // send, recv, and irecv should be ok with avoidRecordStreams,
   // However, for isend, I don't think the API requires the user
@@ -2855,7 +2861,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // First let NCCL streams wait for input tensors allocation streams
   syncStream(device, ncclEvents_[key], ncclStream);
 
-  bool isP2P = isP2POp(opType);
   // Work itself will create the CUDA events on all GPUs of tensors
   c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> work;
   if (coalescing_state_) {
@@ -2875,7 +2880,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         {tensor},
         nullptr,
         nullptr,
-        isP2P);
+        /*isP2P=*/true);
     // TODO(whc) if we want to make the per-p2p-op flightrecorder entries get
     // their timings/states updated by proxy when the Work obj representing the
     // coalesce group gets its update, we could accumulate these trace_ids
@@ -2908,7 +2913,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         {tensor},
         work->ncclStartEvent_.get(),
         work->ncclEndEvent_.get(),
-        isP2P);
+        /*isP2P=*/true);
   }
 
   // is gpuGuard needed for the if block below, or can i swap them
