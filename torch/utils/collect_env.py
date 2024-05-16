@@ -399,6 +399,7 @@ def get_pip_packages(run_lambda, patterns=None):
     # People generally have `pip` as `pip` or `pip3`
     # But here it is invoked as `python -mpip`
     def run_with_pip(pip):
+        os.environ['PIP_DISABLE_PIP_VERSION_CHECK'] = '1'
         out = run_and_read_all(run_lambda, pip + ["list", "--format=freeze"])
         return "\n".join(
             line
