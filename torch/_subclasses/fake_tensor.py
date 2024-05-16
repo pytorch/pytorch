@@ -24,7 +24,7 @@ from weakref import ReferenceType
 import torch
 import torch._custom_op
 import torch._logging
-from torch._C._functorch import is_functorch_wrapped_tensor
+from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedtensor
 
 from torch._guards import Source
 from torch._ops import OpOverload
@@ -214,9 +214,11 @@ class FakeTensorConverter:
 
     meta_converter: MetaConverter
     constant_storage_mapping: Dict[StorageWeakRef, List[ReferenceType]]
+    export: bool
 
-    def __init__(self, *, copy_data=False):
+    def __init__(self, *, copy_data=False, export=False):
         self.meta_converter = MetaConverter(copy_data=copy_data)
+        self.export = export
 
         # map from to storage to corresponding constant tensors
         self.constant_storage_mapping = {}
@@ -320,6 +322,79 @@ class FakeTensorConverter:
         )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
+
+        from torch._dynamo.source import RandomValueSource
+
+        # TODO: extend this for smaller dtypes too.  Some care will have to be
+        # taken though, because smaller dtypes will compute differently but
+        # Python sympy compute is always done at arbitrary precision.
+        value = None
+        if (
+            not self.export
+            and type(t) is torch.Tensor
+            # TODO: It sure would be nice to test if something was a plain
+            # tensor without having to enumerate all the cases
+            and t.layout == torch.strided
+            and not (
+                t.is_sparse
+                or t.is_nested
+                or is_functorch_wrapped_tensor(t)
+                or is_legacy_batchedtensor(t)
+                or torch._is_functional_tensor(t)
+            )
+            and t.dim() == 0
+            and t.device.type == "cpu"
+            and t.dtype in [torch.int64, torch.float64]
+            and source is not None
+            # Impede setting up item() on things coming from random.  These
+            # are not "real" item() calls, instead UnspecializedPythonVariable
+            # is unsafely pretending an int is a tensor, which can sometimes
+            # implicitly cause an item call.  The problem is this is pretty
+            # unsound: there's no reason substituting an int with a Tensor is
+            # going to give the same results.  Today, you mostly get around
+            # this by typically not having capture_scalar_outputs on and graph
+            # breaking when someone tries to use the unspec variable in an
+            # int-y context.  But allowing it through here would break that.
+            # So don't.
+            #
+            # Once random values are setup to be represented as
+            # SymNodeVariable, this condition can be removed.  To check if
+            # you've done it right, this is a good test:
+            #
+            #   PYTORCH_TEST_WITH_DYNAMO=1 python test/test_reductions.py -k
+            #   TestReductionsCPU.test_dim_reduction_fns_fn_name_amax_cpu_bfloat16
+            and not isinstance(source, RandomValueSource)
+            and shape_env is not None
+        ):
+            from torch._dynamo.source import CallMethodItemSource, FloatTensorSource
+            from torch.fx.experimental.symbolic_shapes import DimDynamic
+
+            with no_dispatch():
+                value = t.item()
+            # Peephole strip out unnecessary torch.as_tensor(x).item()
+            if isinstance(source, FloatTensorSource):
+                item_source = source.base
+            else:
+                item_source = CallMethodItemSource(source)
+            symbol = shape_env.create_unspecified_symbol(
+                value,
+                source=item_source,
+                dynamic_dim=DimDynamic.DYNAMIC,
+            )
+            # NB: reusing item_memo here ensures that we invalidate on
+            # mutation
+            if t.dtype == torch.int64:
+                out.item_memo = shape_env.create_symintnode(
+                    symbol,
+                    hint=value,
+                    source=item_source,
+                )
+            elif t.dtype == torch.float64:
+                out.item_memo = shape_env.create_symfloatnode(
+                    symbol,
+                    hint=value,
+                    source=item_source,
+                )
         if make_constant:
             self.add_constant_storage_mapping(out)
         # NB: meta_converter set the memo
@@ -853,6 +928,7 @@ class FakeTensorMode(TorchDispatchMode):
         allow_non_fake_inputs=False,
         shape_env=None,
         static_shapes=None,
+        export=False,
     ):
         log.debug("create_mode 0x%x", id(self))
         self.allow_fallback_kernels = allow_fallback_kernels
@@ -864,7 +940,8 @@ class FakeTensorMode(TorchDispatchMode):
             torch._functorch.config.fake_tensor_propagate_real_tensors
         )
         self.fake_tensor_converter = FakeTensorConverter(
-            copy_data=self.propagate_real_tensors
+            copy_data=self.propagate_real_tensors,
+            export=export,
         )
 
         if static_shapes is not None:
