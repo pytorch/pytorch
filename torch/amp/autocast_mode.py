@@ -6,7 +6,6 @@ from typing import Any, Optional
 import torch
 from torch.types import _dtype
 
-
 __all__ = ["autocast_decorator", "autocast", "is_autocast_available"]
 
 
