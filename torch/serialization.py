@@ -59,6 +59,9 @@ __all__ = [
     'LoadEndianness',
     'get_default_load_endianness',
     'set_default_load_endianness',
+    'clear_safe_globals',
+    'get_safe_globals',
+    'add_safe_globals',
 ]
 
 
@@ -147,6 +150,27 @@ def set_default_mmap_options(flags: int):
         raise ValueError("Invalid argument in function set_default_mmap_options, "
                          f"expected mmap.MAP_PRIVATE or mmap.MAP_SHARED, but got {flags}")
     _default_mmap_options = flags
+
+def clear_safe_globals() -> None:
+    '''
+    Clears the list of globals that are safe for ``weights_only`` load.
+    '''
+    _weights_only_unpickler._clear_safe_globals()
+
+def get_safe_globals() -> List[Any]:
+    '''
+    Returns the list of user-added globals that are safe for ``weights_only`` load.
+    '''
+    return _weights_only_unpickler._get_safe_globals()
+
+def add_safe_globals(safe_globals: List[Any]) -> None:
+    '''
+    Marks the given globals as safe for ``weights_only`` load.
+
+    Args:
+        safe_globals (List[Any]): list of globals to mark as safe
+    '''
+    _weights_only_unpickler._add_safe_globals(safe_globals)
 
 def _is_zipfile(f) -> bool:
     # This is a stricter implementation than zipfile.is_zipfile().
@@ -952,7 +976,9 @@ def load(
     UNSAFE_MESSAGE = (
         "Weights only load failed. Re-running `torch.load` with `weights_only` set to `False`"
         " will likely succeed, but it can result in arbitrary code execution."
-        "Do it only if you get the file from a trusted source. WeightsUnpickler error: "
+        " Do it only if you get the file from a trusted source. Alternatively, to load"
+        " with `weights_only` please check the recommended steps in the following error message."
+        " WeightsUnpickler error: "
     )
     # Add ability to force safe only weight loads via environment variable
     if os.getenv("TORCH_FORCE_WEIGHTS_ONLY_LOAD", "0").lower() in ['1', 'y', 'yes', 'true']:
