@@ -354,7 +354,7 @@ def cprofile_wrapper(func):
             torch._logging.trace_structured(
                 "link",
                 lambda: {
-                    "name": "manifold_url",
+                    "name": "cprofile_manifold_url",
                     "url": manifold_link
                 },
             )
