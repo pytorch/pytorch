@@ -358,12 +358,17 @@ def empty_gpu_cache(device):
     """
     Explicitly empty gpu cache to avoid OOM in subsequent run.
     """
-    assert (
-        device != ""
-    ), "The empty_gpu_cache needs to be called with a non empty device str"
+
+    if device not in ["cuda", "xpu"]:
+        log.warning(
+            "Trying to call the empty_gpu_cache for device: %s, which is not in list [cuda, xpu]",
+            device,
+        )
+        return
+
     if device == "cuda":
         torch.cuda.empty_cache()
-    if device == "xpu":
+    elif device == "xpu":
         torch.xpu.empty_cache()
 
 
