@@ -161,6 +161,14 @@ class OpStrategy(StrategyType):
     def output_shape(self):
         return self.strategies[0].output_spec.shape
 
+    @property
+    def ndim(self):
+        return self.output_ndim
+
+    @property
+    def shape(self):
+        return self.output_shape
+
 
 class TupleStrategy(StrategyType):
     """
