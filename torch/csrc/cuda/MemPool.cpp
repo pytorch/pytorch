@@ -11,7 +11,8 @@ using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 void THCPMemPool_init(PyObject* module) {
   auto torch_C_m = py::handle(module).cast<py::module>();
   shared_ptr_class_<::c10::cuda::MemPool>(torch_C_m, "_MemPool")
-      .def(py::init<c10::cuda::CUDACachingAllocator::CUDAAllocator*, bool>());
+      .def(py::init<c10::cuda::CUDACachingAllocator::CUDAAllocator*, bool>())
+      .def_property_readonly("id", &::c10::cuda::MemPool::id);
   shared_ptr_class_<::c10::cuda::MemPoolContext>(torch_C_m, "_MemPoolContext")
       .def(py::init<c10::cuda::MemPool*>());
 }

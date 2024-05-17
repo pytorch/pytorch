@@ -21,7 +21,7 @@ MempoolId_t graph_pool_handle() {
   // Sets just the second value, to distinguish it from MempoolId_ts created from
   // cudaStreamGetCaptureInfo id_s in capture_begin.
   auto new_pool = c10::cuda::MemPool();
-  return new_pool.id_;
+  return new_pool.id();
 }
 
 /**
@@ -120,10 +120,10 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
     // Sets just the first value, to distinguish it from MempoolId_ts created by graph_pool_handle().
     auto active_mempool = c10::cuda::MemPoolContext::getActiveMemPool();
     if(active_mempool) {
-      mempool_id_ = active_mempool->id_;
+      mempool_id_ = active_mempool->id();
     } else {
       auto mempool = c10::cuda::MemPool({}, false);
-      mempool_id_ = mempool.id_;
+      mempool_id_ = mempool.id();
       TORCH_INTERNAL_ASSERT(mempool_id_.first > 0);
     }
   }

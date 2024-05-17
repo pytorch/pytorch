@@ -915,16 +915,19 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
 #endif
 }
 
-void ProcessGroupNCCL::registerUserBuffers(
-    at::Device device,
-    c10::cuda::MemPool& pool) {
+void ProcessGroupNCCL::registerUserBuffers(at::Device device) {
+  auto active_pool = c10::cuda::MemPoolContext::getActiveMemPool();
+  TORCH_INTERNAL_ASSERT(
+      active_pool,
+      "registerUserBuffers expects a user provided pool that is currently active");
+
   const auto key = getKeyFromDevice(device);
   LOG(INFO) << logPrefix()
             << "Performing user buffer registration on backend device "
             << device << ", key " << key << ", i am " << this;
   auto ncclComm = getNCCLComm(key, device, OpType::ALLREDUCE);
-  auto snapshot =
-      c10::cuda::CUDACachingAllocator::snapshot(device.index(), pool);
+  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot(
+      device.index(), active_pool->id());
   for (const auto& segmentInfo : snapshot.segments) {
     TORCH_INTERNAL_ASSERT(
         segmentInfo.device == device.index(),
@@ -934,16 +937,19 @@ void ProcessGroupNCCL::registerUserBuffers(
   }
 }
 
-void ProcessGroupNCCL::deregisterUserBuffers(
-    at::Device device,
-    c10::cuda::MemPool& pool) {
+void ProcessGroupNCCL::deregisterUserBuffers(at::Device device) {
+  auto active_pool = c10::cuda::MemPoolContext::getActiveMemPool();
+  TORCH_INTERNAL_ASSERT(
+      active_pool,
+      "deregisterUserBuffers expects a user provided pool that is currently active");
+
   const auto key = getKeyFromDevice(device);
   LOG(INFO) << logPrefix()
             << "Performing user buffer deregistration on backend device "
             << device << ", key " << key << ", i am " << this;
   auto ncclComm = getNCCLComm(key, device, OpType::ALLREDUCE);
-  auto snapshot =
-      c10::cuda::CUDACachingAllocator::snapshot(device.index(), pool);
+  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot(
+      device.index(), active_pool->id());
   for (const auto& segmentInfo : snapshot.segments) {
     TORCH_INTERNAL_ASSERT(
         segmentInfo.device == device.index(),

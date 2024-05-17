@@ -154,11 +154,17 @@ def set_per_process_memory_fraction(
     torch._C._cuda_setMemoryFraction(fraction, device)
 
 
-def empty_cache() -> None:
+def empty_cache(
+    device: Union[Device, int] = None, mempool_id: Tuple[int, int] = None
+) -> None:
     r"""Release all unoccupied cached memory currently held by the caching
     allocator so that those can be used in other GPU application and visible in
     `nvidia-smi`.
 
+    Args:
+        device (torch.device or int, optional): selected device. Releases
+            all unoccupied cached memory across all devices
+            if :attr:`device` is ``None`` (default).
     .. note::
         :func:`~torch.cuda.empty_cache` doesn't increase the amount of GPU
         memory available for PyTorch. However, it may help reduce fragmentation
@@ -166,7 +172,9 @@ def empty_cache() -> None:
         more details about GPU memory management.
     """
     if is_initialized():
-        torch._C._cuda_emptyCache()
+        device_index = -1 if device is None else _get_device_index(device)
+        id_ = (0, 0) if mempool_id is None else mempool_id
+        torch._C._cuda_emptyCache(device_index, id_)
 
 
 def memory_stats(device: Union[Device, int] = None) -> Dict[str, Any]:
@@ -465,17 +473,26 @@ def max_memory_cached(device: Union[Device, int] = None) -> int:
     return max_memory_reserved(device=device)
 
 
-def memory_snapshot():
-    r"""Return a snapshot of the CUDA memory allocator state across all devices.
+def memory_snapshot(
+    device: Union[Device, int] = None, mempool_id: Tuple[int, int] = None
+):
+    r"""Return a snapshot of the CUDA memory allocator state.
 
     Interpreting the output of this function requires familiarity with the
     memory allocator internals.
+
+    Args:
+        device (torch.device or int, optional): selected device. Returns
+            a snapshot of the CUDA memory allocator state across all devices
+            if :attr:`device` is ``None`` (default).
 
     .. note::
         See :ref:`cuda-memory-management` for more details about GPU memory
         management.
     """
-    return torch._C._cuda_memorySnapshot()["segments"]
+    device_index = -1 if device is None else _get_device_index(device)
+    id_ = (0, 0) if mempool_id is None else mempool_id
+    return torch._C._cuda_memorySnapshot(device_index, id_)["segments"]
 
 
 def memory_summary(device: Union[Device, int] = None, abbreviated: bool = False) -> str:
@@ -757,7 +774,7 @@ def _record_memory_history_impl(
 _record_memory_history.__signature__ = signature(_record_memory_history_impl)  # type: ignore[attr-defined]
 
 
-def _snapshot(device: Union[Device, int] = None):
+def _snapshot(device: Union[Device, int] = None, mempool_id: Tuple[int, int] = None):
     """Save a snapshot of CUDA memory state at the time it was called.
 
     The state is represented as a dictionary with the following structure.
@@ -831,7 +848,9 @@ def _snapshot(device: Union[Device, int] = None):
     Returns:
         The Snapshot dictionary object
     """
-    return _C._cuda_memorySnapshot()
+    device_index = -1 if device is None else _get_device_index(device)
+    id_ = (0, 0) if mempool_id is None else mempool_id
+    return _C._cuda_memorySnapshot(device_index, id_)
 
 
 def _dump_snapshot(filename="dump_snapshot.pickle"):

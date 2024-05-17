@@ -483,23 +483,27 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     // introduces performance nondeterminism.
   }
 
-  void emptyCache() override {
-    std::lock_guard<std::mutex> lk(general_mutex);
+  void emptyCacheHelper(int dev) {
+    if (devs_initialized_flags[dev]) {
+      CUDAGuard g(static_cast<c10::DeviceIndex>(dev));
 
-    for (int dev = 0; dev < device_count; dev++) {
-      if (devs_initialized_flags[dev]) {
-        CUDAGuard g(static_cast<c10::DeviceIndex>(dev));
-
-        cudaMemPool_t mempool = nullptr;
-        cudaDeviceGetDefaultMemPool(&mempool, dev);
-        cudaDeviceSynchronize();
-        cudaMemPoolTrimTo(mempool, 0);
-      }
+      cudaMemPool_t mempool = nullptr;
+      cudaDeviceGetDefaultMemPool(&mempool, dev);
+      cudaDeviceSynchronize();
+      cudaMemPoolTrimTo(mempool, 0);
     }
   }
 
-  void emptyUserPool(c10::DeviceIndex device, MemPool& mempool) override {
-    TORCH_CHECK(false, "Not implemented.")
+  void emptyCache(c10::DeviceIndex device = -1, MempoolId_t mempool_id = {0, 0})
+      override {
+    std::lock_guard<std::mutex> lk(general_mutex);
+    if (device == -1) {
+      for (int dev = 0; dev < device_count; dev++) {
+        emptyCacheHelper(dev);
+      }
+    } else {
+      emptyCacheHelper(device);
+    }
   }
 
   void cacheInfo(c10::DeviceIndex device, size_t* maxWorkspaceGuess) override {
@@ -753,18 +757,9 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         cudaMemPoolSetAttribute(mempool, cudaMemPoolAttrUsedMemHigh, &zero));
   }
 
-  SnapshotInfo snapshot() override {
-    TORCH_CHECK(
-        false,
-        "Calling snapshot with backend:cudaMallocAsync is not meaningful. "
-        "(For backend:native, snapshot returns a detailed summary of all "
-        "blocks tracked by the allocator, but the cudaMallocAsync backend "
-        "does not track individual blocks.)");
-    // Alternative: TORCH_WARN
-    return {};
-  }
-
-  SnapshotInfo snapshot(c10::DeviceIndex device, MemPool& mempool) override {
+  SnapshotInfo snapshot(
+      c10::DeviceIndex device = -1,
+      MempoolId_t mempool_id = {0, 0}) override {
     TORCH_CHECK(
         false,
         "Calling snapshot with backend:cudaMallocAsync is not meaningful. "
@@ -787,10 +782,6 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         !capture_underway,
         "Only one capture at a time is allowed in a process.")
     capture_underway = true;
-  }
-
-  void startUsingUserPool(c10::DeviceIndex device) override {
-    TORCH_CHECK(false, "Not implemented.")
   }
 
   void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id)
@@ -843,8 +834,9 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     //    but stale ptrs will not permanently leak into ptr_info.
   }
 
-  void stopUsingUserPool(c10::DeviceIndex device) override {
-    TORCH_CHECK(false, "Not implemented.");
+  int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id)
+      override {
+    return 0;
   }
 
   void* raw_alloc(size_t nbytes) override {

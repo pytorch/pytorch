@@ -540,9 +540,25 @@ PyObject* THCPModule_setMemoryFraction(PyObject* _unused, PyObject* args) {
   Py_RETURN_NONE;
 }
 
-PyObject* THCPModule_emptyCache(PyObject* _unused, PyObject* noargs) {
+PyObject* THCPModule_emptyCache(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
-  c10::cuda::CUDACachingAllocator::emptyCache();
+  PyObject* device_o = nullptr;
+  PyObject* mempool_id_o = nullptr;
+  if (!PyArg_ParseTuple(args, "OO", &device_o, &mempool_id_o)) {
+    THPUtils_invalidArguments(
+        args,
+        nullptr,
+        "empty_cache",
+        1,
+        "(int device, MempoolId_t mempool_id);");
+    return nullptr;
+  }
+  auto device_index = THPUtils_unpackDeviceIndex(device_o);
+  auto first = THPUtils_unpackLong(PyTuple_GET_ITEM(mempool_id_o, 0));
+  auto second = THPUtils_unpackLong(PyTuple_GET_ITEM(mempool_id_o, 1));
+  c10::cuda::MempoolId_t mempool_id = {first, second};
+
+  c10::cuda::CUDACachingAllocator::emptyCache(device_index, mempool_id);
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
@@ -636,8 +652,19 @@ CapturedTraceback* getFromContext(
       "attempting to gather stack context from the wrong StackContext type.");
 }
 
-PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
+PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
+  PyObject* device_o = nullptr;
+  PyObject* mempool_id_o = nullptr;
+  if (!PyArg_ParseTuple(args, "OO", &device_o, &mempool_id_o)) {
+    THPUtils_invalidArguments(
+        args, nullptr, "snapshot", 1, "(int device, MempoolId_t mempool_id);");
+    return nullptr;
+  }
+  auto device_index = THPUtils_unpackDeviceIndex(device_o);
+  auto first = THPUtils_unpackLong(PyTuple_GET_ITEM(mempool_id_o, 0));
+  auto second = THPUtils_unpackLong(PyTuple_GET_ITEM(mempool_id_o, 1));
+  c10::cuda::MempoolId_t mempool_id = {first, second};
 
   using c10::cuda::CUDACachingAllocator::BlockInfo;
   using c10::cuda::CUDACachingAllocator::SegmentInfo;
@@ -716,7 +743,8 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
     return segmentDict;
   };
 
-  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot();
+  auto snapshot =
+      c10::cuda::CUDACachingAllocator::snapshot(device_index, mempool_id);
 
   py::list segments;
 
@@ -1053,7 +1081,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
           "set_reset_fn",
           [](torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator& self,
              uint64_t func_ptr) {
-            using FuncType = void();
+            using FuncType = void(c10::DeviceIndex, c10::cuda::MempoolId_t);
             std::function<FuncType> func =
                 // NOLINTNEXTLINE(performance-no-int-to-ptr)
                 reinterpret_cast<FuncType*>(func_ptr);
@@ -1233,8 +1261,8 @@ static void registerCudaPluggableAllocator(PyObject* module) {
               return target == stream;
             });
       });
-  m.def("_cuda_startUsingUserPool", [](int device) {
-    c10::cuda::CUDACachingAllocator::startUsingUserPool(device);
+  m.def("_cuda_startUsingUserPool", [](c10::DeviceIndex device) {
+    c10::cuda::CUDACachingAllocator::beginAllocateToPool(device);
   });
 
   m.def(
@@ -1249,13 +1277,12 @@ static void registerCudaPluggableAllocator(PyObject* module) {
         c10::cuda::CUDACachingAllocator::releasePool(device, mempool_id);
       });
 
-  m.def("_cuda_stopUsingUserPool", [](int device) {
-    c10::cuda::CUDACachingAllocator::stopUsingUserPool(device);
-  });
-
-  m.def("_cuda_emptyUserPool", [](int device, c10::cuda::MemPool& mempool) {
-    c10::cuda::CUDACachingAllocator::emptyUserPool(device, mempool);
-  });
+  m.def(
+      "_cuda_getPoolUseCount",
+      [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
+        return c10::cuda::CUDACachingAllocator::getPoolUseCount(
+            device, mempool_id);
+      });
 
   m.def(
       "_cuda_checkPoolLiveAllocations",
@@ -1506,7 +1533,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
      THCPModule_setMemoryFraction,
      METH_VARARGS,
      nullptr},
-    {"_cuda_emptyCache", THCPModule_emptyCache, METH_NOARGS, nullptr},
+    {"_cuda_emptyCache", THCPModule_emptyCache, METH_VARARGS, nullptr},
     {"_cuda_memoryStats", THCPModule_memoryStats, METH_O, nullptr},
     {"_cuda_resetAccumulatedMemoryStats",
      THCPModule_resetAccumulatedMemoryStats,
@@ -1516,7 +1543,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
      THCPModule_resetPeakMemoryStats,
      METH_O,
      nullptr},
-    {"_cuda_memorySnapshot", THCPModule_memorySnapshot, METH_NOARGS, nullptr},
+    {"_cuda_memorySnapshot", THCPModule_memorySnapshot, METH_VARARGS, nullptr},
     {"_cuda_attach_out_of_memory_observer",
      THCPModule_attachOutOfMemoryObserver,
      METH_O,

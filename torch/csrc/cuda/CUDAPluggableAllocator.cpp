@@ -46,7 +46,8 @@ void CUDAPluggableAllocator::set_init_fn(std::function<void(int)> init_fn) {
   init_fn_ = std::move(init_fn);
 }
 
-void CUDAPluggableAllocator::set_reset_fn(std::function<void()> reset_fn) {
+void CUDAPluggableAllocator::set_reset_fn(
+    std::function<void(c10::DeviceIndex, c10::cuda::MempoolId_t)> reset_fn) {
   reset_fn_ = std::move(reset_fn);
 }
 
@@ -160,19 +161,12 @@ void CUDAPluggableAllocator::setMemoryFraction(
   }
 }
 
-void CUDAPluggableAllocator::emptyCache() {
-  if (reset_fn_) {
-    return reset_fn_();
-  }
-}
-
-void CUDAPluggableAllocator::emptyUserPool(
+void CUDAPluggableAllocator::emptyCache(
     c10::DeviceIndex device,
-    c10::cuda::MemPool& mempool) {
-  TORCH_CHECK(
-      false,
-      "CUDAPluggableAllocator does not yet support emptyUserPool. "
-      "If you need it, please file an issue describing your use case.");
+    c10::cuda::MempoolId_t mempool_id) {
+  if (reset_fn_) {
+    return reset_fn_(device, mempool_id);
+  }
 }
 
 void CUDAPluggableAllocator::cacheInfo(
@@ -222,17 +216,9 @@ void CUDAPluggableAllocator::resetPeakStats(c10::DeviceIndex device) {
       "If you need it, please file an issue describing your use case.");
 }
 
-c10::cuda::CUDACachingAllocator::SnapshotInfo CUDAPluggableAllocator::
-    snapshot() {
-  TORCH_CHECK(
-      false,
-      "CUDAPluggableAllocator does not yet support snapshot. "
-      "If you need it, please file an issue describing your use case.");
-}
-
 c10::cuda::CUDACachingAllocator::SnapshotInfo CUDAPluggableAllocator::snapshot(
     c10::DeviceIndex device,
-    c10::cuda::MemPool& mempool) {
+    c10::cuda::MempoolId_t mempool_id) {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support snapshot. "
@@ -256,11 +242,6 @@ void CUDAPluggableAllocator::beginAllocateToPool(
   }
 }
 
-void CUDAPluggableAllocator::startUsingUserPool(c10::DeviceIndex device) {
-  TORCH_CHECK(
-      false, "CUDAPluggableAllocator does not support startUsingUserPool. ");
-}
-
 void CUDAPluggableAllocator::endAllocateToPool(
     c10::DeviceIndex device,
     c10::cuda::MempoolId_t mempool_id) {
@@ -277,9 +258,10 @@ void CUDAPluggableAllocator::releasePool(
   }
 }
 
-void CUDAPluggableAllocator::stopUsingUserPool(c10::DeviceIndex device) {
-  TORCH_CHECK(
-      false, "CUDAPluggableAllocator does not support stopUsingUserPool. ");
+int CUDAPluggableAllocator::getPoolUseCount(
+    c10::DeviceIndex device,
+    c10::cuda::MempoolId_t mempool_id) {
+  return 0;
 }
 
 void CUDAPluggableAllocator::recordHistory(

@@ -1,4 +1,6 @@
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/MemPool.h>
+#include <iostream>
 
 namespace c10::cuda {
 
@@ -25,6 +27,10 @@ MemPool::MemPool(
     // MempoolId_ts created by graph_pool_handle().
     id_ = {uuid_++, 0};
   }
+}
+
+MempoolId_t MemPool::id() {
+  return id_;
 }
 
 thread_local MemPool* MemPoolContext::active_mempool_ = nullptr;
