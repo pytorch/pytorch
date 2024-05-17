@@ -714,6 +714,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
               v_t,
               c10::nullopt,
               c10::nullopt,
+              c10::nullopt,
+              c10::nullopt,
               max_seqlen_batch_q,
               max_seqlen_batch_k,
               dropout_p,
@@ -836,6 +838,8 @@ _flash_attention_forward(
     const Tensor& value,
     const std::optional<Tensor>& cumulative_sequence_length_q,
     const std::optional<Tensor>& cumulative_sequence_length_k,
+    const std::optional<Tensor>& seqused_k,
+    const std::optional<Tensor>& alibi_slopes,
     int64_t max_seqlen_batch_q,
     int64_t max_seqlen_batch_k,
     double dropout_p,
@@ -848,11 +852,6 @@ _flash_attention_forward(
   const auto softmax_scale =
       sdp::calculate_scale(query, scale).as_float_unchecked();
   std::optional<Tensor> out = c10::nullopt;
-  // This can be used when your sequence length k is not the full extent
-  // of the tensor. This is useful for kv cache scenarios but for now
-  // we will not support in this PR.
-  std::optional<Tensor> seqused_k = c10::nullopt;
-  std::optional<Tensor> alibi_slopes = c10::nullopt;
 
   const int non_null_window_left = window_size_left.has_value() ? window_size_left.value() : -1;
   const int non_null_window_right = window_size_right.has_value() ? window_size_right.value() : -1;
