@@ -3454,9 +3454,9 @@ class NCCLTraceTest(NCCLTraceTestBase):
             self.assertTrue(s <= f)
         self.assertIn("test_c10d_nccl.py", str(last["frames"]))
         self.assertEqual(last["input_sizes"], ((3, 4),))
-        self.assertEqual(last["input_dtypes"], ['float'])
+        self.assertEqual(last["input_dtypes"], [6])
         self.assertEqual(last["output_sizes"], ((3, 4),))
-        self.assertEqual(last["output_dtypes"], ['float'])
+        self.assertEqual(last["output_dtypes"], [6])
         self.assertEqual(last["collective_seq_id"], 2)
         now = datetime.now()
         event_created_time = datetime.fromtimestamp(

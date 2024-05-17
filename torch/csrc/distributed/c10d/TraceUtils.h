@@ -1,5 +1,5 @@
 #pragma once
-
+#include <c10/core/ScalarType.h>
 #include <c10/util/ApproximateClock.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
@@ -18,7 +18,6 @@
 #include <string>
 #include <system_error>
 #include <vector>
-
 namespace c10d {
 
 static c10::IValue entries_key = "entries";
@@ -477,9 +476,9 @@ struct NCCLTraceBuffer {
 
     // size information for input/output tensors
     c10::SmallVector<int, 4> input_dims_;
-    std::vector<std::string> input_dtypes_;
+    std::vector<c10::ScalarType> input_dtypes_;
     c10::SmallVector<int, 4> output_dims_;
-    std::vector<std::string> output_dtypes_;
+    std::vector<c10::ScalarType> output_dtypes_;
     c10::SmallVector<int64_t, 8> sizes_; // flattened from inputs, outputs
     bool retired_ = false; // is this work entry no longer in the workMetaList_?
                            // a retired but not completed event has timed out
@@ -530,14 +529,14 @@ struct NCCLTraceBuffer {
 
     for (const auto& input : inputs) {
       c10::IntArrayRef sizes = input.sizes();
-      te.input_dtypes_.push_back(std::string{input.dtype().name()});
+      te.input_dtypes_.push_back(input.dtype().toScalarType());
       te.input_dims_.push_back(sizes.size());
       te.sizes_.insert(te.sizes_.end(), sizes.begin(), sizes.end());
     }
 
     for (const auto& output : outputs) {
       c10::IntArrayRef sizes = output.sizes();
-      te.output_dtypes_.push_back(std::string{output.dtype().name()});
+      te.output_dtypes_.push_back(output.dtype().toScalarType());
       te.output_dims_.push_back(sizes.size());
       te.sizes_.insert(te.sizes_.end(), sizes.begin(), sizes.end());
     }
