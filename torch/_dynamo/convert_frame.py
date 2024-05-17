@@ -773,6 +773,22 @@ def _compile(
             "".join(CapturedTraceback.extract(skip=2 + skip).format()),
         )
         # -4: -2 as above, plus trace_structured frames
+        #
+        # NB: the frame looks like this:
+        #
+        # # handled by skip argument
+        # torch/_dynamo/convert_frame.py:1069 in catch_errors
+        # torch/_dynamo/convert_frame.py:910 in _convert_frame
+        # torch/_dynamo/convert_frame.py:464 in _convert_frame_assert
+        # torch/_utils_internal.py:70 in wrapper_function
+        #
+        # # 2 current frame and context lib
+        # env/lib/python3.10/contextlib.py:79 in inner
+        # torch/_dynamo/convert_frame.py:776 in _compile
+        #
+        # # 2 extra here
+        # torch/_logging/_internal.py:1064 in trace_structured
+        # torch/_dynamo/convert_frame.py:780 in <lambda>
         torch._logging.trace_structured(
             "dynamo_start",
             lambda: {
