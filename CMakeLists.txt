@@ -1194,10 +1194,11 @@ if(BUILD_SHARED_LIBS)
       ${PROJECT_SOURCE_DIR}/cmake/Modules/FindSYCLToolkit.cmake
       DESTINATION share/cmake/Caffe2/
       COMPONENT dev)
-
-  install(EXPORT Caffe2Targets DESTINATION share/cmake/Caffe2
-      FILE Caffe2Targets.cmake
-      COMPONENT dev)
+  if(NOT BUILD_LIBTORCHLESS)
+    install(EXPORT Caffe2Targets DESTINATION share/cmake/Caffe2
+        FILE Caffe2Targets.cmake
+        COMPONENT dev)
+  endif()
 else()
   message(WARNING
       "Generated cmake files are only available when building "
