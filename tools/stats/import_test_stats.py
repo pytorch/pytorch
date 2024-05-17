@@ -28,6 +28,7 @@ TEST_CLASS_RATINGS_FILE = "test-class-ratings.json"
 TD_HEURISTIC_PROFILING_FILE = "td_heuristic_profiling.json"
 TD_HEURISTIC_HISTORICAL_EDITED_FILES = "td_heuristic_historical_edited_files.json"
 TD_HEURISTIC_PREVIOUSLY_FAILED = "previous_failures.json"
+TD_HEURISTIC_PREVIOUSLY_FAILED_ADDITIONAL = "previous_failures_additional.json"
 
 FILE_CACHE_LIFESPAN_SECONDS = datetime.timedelta(hours=3).seconds
 
