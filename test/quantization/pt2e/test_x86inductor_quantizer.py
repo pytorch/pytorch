@@ -538,6 +538,7 @@ class X86InductorQuantTestCase(QuantizationTestCase):
         expected_node_occurrence,
         expected_node_list=None,
         is_qat=False,
+        debug=False,
     ):
         m_eager = model.train() if is_qat else model.eval()
 
@@ -556,6 +557,8 @@ class X86InductorQuantTestCase(QuantizationTestCase):
         prepare_model = copy.deepcopy(m)
         m = convert_pt2e(m)
         convert_model = copy.deepcopy(m)
+        if debug:
+            convert_model.print_readable(True)
         pt2_quant_output = m(*example_inputs)
         node_occurrence = {
             ns.call_function(k): v for k, v in expected_node_occurrence.items()
@@ -1912,6 +1915,113 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             torch.ops.aten.linear.default,
         ]
         self._test_quantizer(m, example_inputs, quantizer, node_occurrence, node_list)
+
+    @skipIfNoX86
+    def test_set_module_name_and_set_module_type_case2(self):
+        """
+
+        All linear are quantized except the second one.
+        """
+
+        class Sub(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+                self.sub = Sub()
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.sub(x)
+                return x
+
+        m = M().eval()
+        example_inputs = (torch.randn(3, 5),)
+        # Set global to no quantization and then default config for a specific submodule.
+        quantizer = X86InductorQuantizer()
+        quantizer.set_module_name_qconfig("sub", None).set_module_type_qconfig(
+            torch.nn.Linear, xiq.get_default_x86_inductor_quantization_config()
+        )
+
+        node_occurrence = {
+            torch.ops.aten.linear.default: 2,
+            # input and output for the first linear
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+        }
+        node_list = [
+            # first linear is quantized
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default,
+            torch.ops.aten.linear.default,
+            # second linear is not quantized
+            torch.ops.aten.linear.default,
+        ]
+        self._test_quantizer(
+            m, example_inputs, quantizer, node_occurrence, node_list, debug=True
+        )
+
+    @skipIfNoX86
+    def test_set_module_name_and_set_module_type(self):
+        """
+        All linear are not quantized except the second one.
+        """
+
+        class Sub(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+                self.sub = Sub()
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.sub(x)
+                return x
+
+        m = M().eval()
+        example_inputs = (torch.randn(3, 5),)
+        # Set global to no quantization and then default config for a specific submodule.
+        quantizer = X86InductorQuantizer()
+        quantizer.set_module_name_qconfig(
+            "sub", xiq.get_default_x86_inductor_quantization_config()
+        ).set_module_type_qconfig(torch.nn.Linear, None)
+
+        node_occurrence = {
+            torch.ops.aten.linear.default: 2,
+            # input and output for the second linear
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+        }
+        node_list = [
+            # first linear is not quantized
+            torch.ops.aten.linear.default,
+            # second linear is quantized
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default,
+            torch.ops.aten.linear.default,
+        ]
+        self._test_quantizer(
+            m, example_inputs, quantizer, node_occurrence, node_list, debug=True
+        )
 
     @skipIfNoX86
     def test_set_module_name_qconfig_with_underscores(self) -> None:

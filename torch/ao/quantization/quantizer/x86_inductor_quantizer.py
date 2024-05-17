@@ -110,7 +110,7 @@ quantizable_ops = default_quantizable_ops | {
 QUANT_ANNOTATION_KEY = "quantization_annotation"
 
 
-def _get_operator_type_filter(operator_type: Callable):
+def _get_operator_type_filter(operator_type: Callable, module_name_list):
     """Get the operator_type_filter function for a given operator type, the filter accepts
     a node and checks if the node has certain module type
 
@@ -122,8 +122,12 @@ def _get_operator_type_filter(operator_type: Callable):
     >> print(operator_type_filter(node))
     True  # the node's target is `torch.ops.aten.linear.default`
     """
+    module_name_list_filters = [_get_module_name_filter(m) for m in module_name_list]
 
     def operator_type_filter(n: Node) -> bool:
+        not_module_name_node = not any(f(n) for f in module_name_list_filters)
+        # if not not_module_name_node:
+        #     return False
         result = n.target == operator_type
         # log.warning(
         #     f"!!for node: {n}, (name: {n.name}, target:{n.target}) n.target equal operator_type ({operator_type})? {result}"
@@ -136,7 +140,7 @@ def _get_operator_type_filter(operator_type: Callable):
             operator_type,
             result,
         )
-        return result
+        return not_module_name_node and result
 
     return operator_type_filter
 
@@ -147,8 +151,12 @@ def _x86_get_not_module_type_or_name_filter(
     # Check if the node is 1) belong to the `default_quantizable_ops` and 2) not be marked
     # by `set_module_name_qconfig`, or `set_module_type_qconfig` `set_function_type_qconfig`.
 
-    operator_type_filters = [_get_operator_type_filter(tp) for tp in tp_list]
-    module_name_list_filters = [_get_module_name_filter(m) for m in module_name_list]
+    operator_type_filters = [
+        _get_operator_type_filter(tp, module_name_list) for tp in tp_list
+    ]
+    module_name_list_filters: List[
+        Callable
+    ] = []  # [_get_module_name_filter(m) for m in module_name_list]
 
     def not_module_type_or_name_filter(n: Node) -> bool:
         # For global_config, only quantize the `default_quantizable_ops`
@@ -557,9 +565,9 @@ class X86InductorQuantizer(Quantizer):
         quantizer.set_module_name_qconfig("blocks.sub"), it will quantize all supported operator/operator
         patterns in the submodule with this module name with the given `quantization_config`
         """
-        assert (
-            quantization_config is not None
-        ), " quantization_config == None is not supported yet"
+        # assert (
+        #     quantization_config is not None
+        # ), " quantization_config == None is not supported yet"
         self.module_name_qconfig[module_name] = quantization_config
         return self
 
@@ -709,7 +717,7 @@ class X86InductorQuantizer(Quantizer):
     ) -> torch.fx.GraphModule:
         """Select the annotator functions according to the `quantization_config` and apply."""
 
-        # <TODO> implement the support for None to be canceling out previous annotations
+        # For `quantization_config`, skip the annotation, and it won't be annotated by the next stage either.
         if quantization_config is None:
             return model
 
@@ -727,9 +735,13 @@ class X86InductorQuantizer(Quantizer):
 
         for annotator_func in annotators.values():
             annotator_func(self, model, quantization_config, filter_fn)
-        
-        self._annotate_propagation_quantizable_pattern_entry(model, quantization_config, filter_fn)
-        self._annotate_output_for_int8_in_int8_out_pattern_entry(model, quantization_config, filter_fn)
+
+        self._annotate_propagation_quantizable_pattern_entry(
+            model, quantization_config, filter_fn
+        )
+        self._annotate_output_for_int8_in_int8_out_pattern_entry(
+            model, quantization_config, filter_fn
+        )
 
         return model
 
@@ -745,7 +757,9 @@ class X86InductorQuantizer(Quantizer):
         tp_list = list(self.operator_type_qconfig.keys())
         for operator_type, qconfig in self.operator_type_qconfig.items():
             self._annotate_by_single_config(
-                model, qconfig, _get_operator_type_filter(operator_type)
+                model,
+                qconfig,
+                _get_operator_type_filter(operator_type, module_name_list),
             )
         log.warning("start to handle global config")
         if self.global_config:
@@ -1254,8 +1268,7 @@ class X86InductorQuantizer(Quantizer):
             self._annotate_conv_node_helper(conv_node, True, quantization_config)
 
     def _annotate_maxpool2d(
-        self, node: Node, quantization_config: QuantizationConfig,
-        filter_fn
+        self, node: Node, quantization_config: QuantizationConfig, filter_fn
     ) -> None:
         if node.target is not torch.ops.aten.max_pool2d.default:
             return
@@ -1304,14 +1317,20 @@ class X86InductorQuantizer(Quantizer):
             _annotated=True,
             _is_output_of_quantized_pattern=True,
         )
-    
-    def _annotate_propagation_quantizable_pattern_entry(self, model, quantization_config, filter_fn):
+
+    def _annotate_propagation_quantizable_pattern_entry(
+        self, model, quantization_config, filter_fn
+    ):
         for node in model.graph.nodes:
             # if _skip_annotate([node], filter_fn):
             #     continue
-            self._annotate_propagation_quantizable_pattern(node, quantization_config, filter_fn)
-    
-    def _annotate_propagation_quantizable_pattern(self, node: Node, quantization_config, filter_fn) -> None:
+            self._annotate_propagation_quantizable_pattern(
+                node, quantization_config, filter_fn
+            )
+
+    def _annotate_propagation_quantizable_pattern(
+        self, node: Node, quantization_config, filter_fn
+    ) -> None:
         # Propagate annotation to quantizable patterns.
         if (
             (node.target in propagation_quantizable_ops)
@@ -1373,18 +1392,23 @@ class X86InductorQuantizer(Quantizer):
                 edge_or_node
             )
         return
-    
-    
-    def _annotate_output_for_int8_in_int8_out_pattern_entry(self, model, quantization_config, filter_fn):
+
+    def _annotate_output_for_int8_in_int8_out_pattern_entry(
+        self, model, quantization_config, filter_fn
+    ):
         for node in model.graph.nodes:
             # if _skip_annotate([node], filter_fn):
             #     continue
             # if quantization_config is None:
             #     return
-            
-            self._annotate_output_for_int8_in_int8_out_pattern(node, quantization_config, filter_fn)
-            
-    def _annotate_output_for_int8_in_int8_out_pattern(self, node: Node, quantization_config, filter_fn) -> None:
+
+            self._annotate_output_for_int8_in_int8_out_pattern(
+                node, quantization_config, filter_fn
+            )
+
+    def _annotate_output_for_int8_in_int8_out_pattern(
+        self, node: Node, quantization_config, filter_fn
+    ) -> None:
         r"""
         Check and insert observer at output of node in int8_in_int8_out_ops if needed.
         Recipe refers to https://github.com/intel/intel-extension-for-pytorch/blob/
