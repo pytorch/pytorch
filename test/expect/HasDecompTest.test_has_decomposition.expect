@@ -18,6 +18,10 @@ aten::_add_relu.Tensor
 aten::_add_relu.out
 aten::_add_relu_.Scalar
 aten::_add_relu_.Tensor
+aten::_aminmax
+aten::_aminmax.dim
+aten::_aminmax.dim_out
+aten::_aminmax.out
 aten::_amp_foreach_non_finite_check_and_unscale
 aten::_amp_foreach_non_finite_check_and_unscale.out
 aten::_amp_foreach_non_finite_check_and_unscale_
@@ -335,6 +339,9 @@ aten::_functional_assert_async.msg
 aten::_functional_assert_scalar
 aten::_functional_sym_constrain_range
 aten::_functional_sym_constrain_range_for_size
+aten::_fused_adagrad
+aten::_fused_adagrad.out
+aten::_fused_adagrad_
 aten::_fused_adam
 aten::_fused_adam.out
 aten::_fused_adam.tensor_lr

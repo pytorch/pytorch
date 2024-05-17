@@ -8,8 +8,8 @@ from typing import Dict
 
 import torch
 import torch.nn as nn
-from torch.distributed._composable.fsdp import fully_shard
-from torch.distributed._tensor import DTensor
+from torch.distributed._composable.fsdp import CPUOffloadPolicy, fully_shard
+from torch.distributed._tensor import distribute_tensor, DTensor
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
@@ -67,6 +67,42 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
         self.assertEqual(set(ref_sharded_sd.keys()), set(sharded_sd.keys()))
         for key, value in ref_sharded_sd.items():
             self.assertEqual(value, sharded_sd[key])
+
+    @skip_if_lt_x_gpu(2)
+    def test_1d_state_dict_cpu_offload(self):
+        mlp_dim = 4
+        offload_policy = CPUOffloadPolicy(pin_memory=True)
+        torch.manual_seed(42)
+        with torch.device("meta"):
+            model = nn.Sequential(
+                nn.Linear(mlp_dim, mlp_dim, bias=False),
+                nn.Linear(mlp_dim, mlp_dim, bias=False),
+            )
+        for module in model:
+            fully_shard(module, offload_policy=offload_policy)
+        fully_shard(model, offload_policy=offload_policy)
+
+        # split full sd into multiple pieces
+        # to test loading with `strict=False`
+        state_dicts = []
+        for name, dtensor in model.named_parameters():
+            full_tensor = torch.randn(dtensor.size())
+            sharded_tensor = distribute_tensor(
+                full_tensor, dtensor.device_mesh, dtensor.placements
+            )
+            state_dicts.append({name: sharded_tensor})
+
+        # check that we can load with some parameters still on meta device
+        for sd in state_dicts:
+            model.load_state_dict(sd, assign=True, strict=False)
+
+        # lazy init without error
+        inp = torch.rand((mlp_dim, mlp_dim), device="cuda")
+        model(inp)
+
+        state_dict = model.state_dict()
+        for name, dtensor in state_dict.items():
+            self.assertEqual(dtensor.device.type, "cpu")
 
     @skip_if_lt_x_gpu(2)
     def test_2d_state_dict_save_load(self):

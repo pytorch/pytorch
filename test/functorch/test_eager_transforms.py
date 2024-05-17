@@ -67,9 +67,7 @@ from torch.testing._internal.common_dtype import get_all_fp_dtypes
 from torch.testing._internal.common_utils import (
     freeze_rng_state,
     instantiate_parametrized_tests,
-    IS_ARM64,
     IS_FBCODE,
-    IS_MACOS,
     IS_WINDOWS,
     markDynamoStrictTest,
     parametrize,
@@ -5082,9 +5080,7 @@ class TestCompileTransforms(TestCase):
     @skipIfRocm(msg="test leaks memory on ROCm")
     # torch.compile is not supported on Windows
     # Triton only supports GPU with SM70 or later.
-    @expectedFailureIf(
-        (IS_ARM64 and not IS_MACOS) or IS_WINDOWS or (TEST_CUDA and not SM70OrLater)
-    )
+    @expectedFailureIf(IS_WINDOWS or (TEST_CUDA and not SM70OrLater))
     def test_compile_vmap_hessian(self, device):
         # The model and inputs are a smaller version
         # of code at benchmark repo:
