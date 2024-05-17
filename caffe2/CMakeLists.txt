@@ -782,10 +782,30 @@ foreach(input_filename ${Caffe2_CPU_SRCS})
 endforeach(input_filename)
 set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS_NON_AVX} ${Caffe2_CPU_SRCS_AVX2} ${Caffe2_CPU_SRCS_AVX512})
 
+if(BUILD_LIBTORCHLESS)
+  find_library(TORCH_LIB torch PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
+  find_library(TORCH_CPU_LIB torch_cpu PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
+
+  if(USE_CUDA)
+    find_library(TORCH_CUDA_LIB torch_cuda PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
+  endif()
+
+  if(USE_ROCM)
+    find_library(TORCH_HIP_LIB torch_hip PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
+  endif()
+
+  if(USE_XPU)
+    find_library(TORCH_XPU_LIB torch_xpu PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
+  endif()
+  add_subdirectory(../torch torch)
+
+endif()
+
 # ==========================================================
 # END formerly-libtorch sources
 # ==========================================================
 
+if(NOT BUILD_LIBTORCHLESS)
 add_library(torch_cpu ${Caffe2_CPU_SRCS})
 if(HAVE_SOVERSION)
   set_target_properties(torch_cpu PROPERTIES
@@ -1434,7 +1454,13 @@ if($ENV{TH_BINARY_BUILD})
   endif()
 endif()
 
-target_link_libraries(torch_cpu PUBLIC c10)
+if(BUILD_LIBTORCHLESS)
+  target_link_libraries(torch_cpu PUBLIC ${C10_LIB})
+else()
+  # unclear why we need to use c10 here otherwise c10 symbols are not included
+  target_link_libraries(torch_cpu PUBLIC c10)
+endif()
+
 target_link_libraries(torch_cpu PUBLIC ${Caffe2_PUBLIC_DEPENDENCY_LIBS})
 target_link_libraries(torch_cpu PRIVATE ${Caffe2_DEPENDENCY_LIBS})
 target_link_libraries(torch_cpu PRIVATE ${Caffe2_DEPENDENCY_WHOLE_LINK_LIBS})
@@ -1552,14 +1578,14 @@ caffe2_interface_library(torch torch_library)
 install(TARGETS torch_cpu torch_cpu_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
 if(USE_CUDA)
-  install(TARGETS torch_cuda torch_cuda_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+#  install(TARGETS torch_cuda torch_cuda_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 elseif(USE_ROCM)
-  install(TARGETS torch_hip torch_hip_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+#  install(TARGETS torch_hip torch_hip_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 elseif(USE_XPU)
-  install(TARGETS torch_xpu torch_xpu_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+#  install(TARGETS torch_xpu torch_xpu_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 endif()
 
-install(TARGETS torch torch_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+# install(TARGETS torch torch_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
 target_link_libraries(torch PUBLIC torch_cpu_library)
 
@@ -1597,7 +1623,12 @@ if(USE_CUDA)
     target_link_libraries(torch_cpu PRIVATE torch::cudart)
   endif()
   target_link_libraries(torch_cuda INTERFACE torch::cudart)
-  target_link_libraries(torch_cuda PUBLIC c10_cuda torch::nvtoolsext)
+  if(BUILD_LIBTORCHLESS)
+    target_link_libraries(torch_cuda PUBLIC ${C10_CUDA_LIB} torch::nvtoolsext)
+  else()
+    # unclear why we need to use c10 here otherwise c10 symbols are not included
+    target_link_libraries(torch_cuda PUBLIC c10_cuda torch::nvtoolsext)
+  endif()
 
   target_include_directories(
       torch_cuda INTERFACE $<INSTALL_INTERFACE:include>)
@@ -1615,7 +1646,13 @@ endif()
 # ---[ XPU library.
 if(USE_XPU)
   target_link_libraries(torch_xpu INTERFACE torch::xpurt)
-  target_link_libraries(torch_xpu PUBLIC c10_xpu)
+
+  if(BUILD_LIBTORCHLESS)
+    target_link_libraries(torch_xpu PUBLIC ${C10_XPU_LIB})
+  else()
+    # unclear why we need to use c10 here otherwise c10 symbols are not included
+    target_link_libraries(torch_xpu PUBLIC c10_xpu)
+  endif()
 
   target_include_directories(
       torch_xpu INTERFACE $<INSTALL_INTERFACE:include>)
@@ -1694,7 +1731,13 @@ if(USE_ROCM)
 
   # Since PyTorch files contain HIP headers, these flags are required for the necessary definitions to be added.
   target_compile_options(torch_hip PUBLIC ${HIP_CXX_FLAGS})  # experiment
-  target_link_libraries(torch_hip PUBLIC c10_hip)
+
+  if(BUILD_LIBTORCHLESS)
+    target_link_libraries(torch_hip PUBLIC ${C10_HIP_LIB})
+  else()
+    # unclear why we need to use c10 here otherwise c10 symbols are not included
+    target_link_libraries(torch_hip PUBLIC c10_hip)
+  endif()
 
   if(NOT INTERN_BUILD_MOBILE)
     # TODO: Cut this over to ATEN_HIP_FILES_GEN_LIB.  At the moment, we
@@ -1757,7 +1800,7 @@ if(BUILD_TEST)
         if(NOT MSVC)
           add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}" ../aten/src/ATen/native/quantized/AffineQuantizerBase.cpp)
           # TODO: Get rid of c10 dependency (which is only needed for the implementation of AT_ERROR)
-          target_link_libraries(${test_name}_${CPU_CAPABILITY} c10 sleef gtest_main)
+          target_link_libraries(${test_name}_${CPU_CAPABILITY} ${C10_LIB} sleef gtest_main)
           if(USE_FBGEMM)
             target_link_libraries(${test_name}_${CPU_CAPABILITY} fbgemm)
           endif()
@@ -1914,7 +1957,7 @@ if(MSVC)
     set_source_files_properties(${tmp_path} PROPERTIES COMPILE_FLAGS "-Xcompiler /Zc:lambda")
   endforeach()
 endif()
-
+endif()
 # Note: we only install the caffe2 python files if BUILD_CAFFE2_OPS is ON
 # This is because the build rules here written in such a way that they always
 # appear to need to be re-run generating >600 pieces of work during the pytorch
