@@ -3,13 +3,13 @@
 import torch
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_GPU, GPU_TYPE
 
 aten = torch.ops.aten
 
 
 const = torch.tensor(0.0)
-device = "cuda"
+device = GPU_TYPE
 
 
 class TestReinplacingPassCorrectness(TestCase):
@@ -65,5 +65,5 @@ class TestReinplacingPassCorrectness(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA:
+    if IS_LINUX and HAS_GPU:
         run_tests()

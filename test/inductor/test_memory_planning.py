@@ -5,7 +5,7 @@ import sys
 import unittest
 
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, skipIfRocm
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_GPU, GPU_TYPE
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -47,7 +47,7 @@ class TestMemoryPlanning(TestCase):
         return (Foo(), (x, y, z))
 
     def test_python_wrapper(self):
-        f, args = self._generate(device="cuda")
+        f, args = self._generate(device=GPU_TYPE)
         compiled = torch.compile(f, dynamic=True)
         result, code = run_and_get_cpp_code(compiled, *args)
 
@@ -64,7 +64,7 @@ class TestMemoryPlanning(TestCase):
 
     @skipIfRocm
     def test_cpp_wrapper(self):
-        f, args = self._generate(device="cuda")
+        f, args = self._generate(device=GPU_TYPE)
         compiled = torch.compile(f, dynamic=True)
         with config.patch("cpp_wrapper", True):
             result, code = run_and_get_cpp_code(compiled, *args)
@@ -84,13 +84,13 @@ class TestMemoryPlanning(TestCase):
     def test_abi_compatible(self):
         from test_aot_inductor import AOTIRunnerUtil
 
-        f, args = self._generate(device="cuda")
+        f, args = self._generate(device=GPU_TYPE)
         dim0_x = Dim("dim0_x", min=1, max=2048)
         dynamic_shapes = ({0: dim0_x}, None, None)
         with config.patch("abi_compatible", True):
             result, code = run_and_get_cpp_code(
                 lambda: AOTIRunnerUtil.run(
-                    "cuda", f, args, dynamic_shapes=dynamic_shapes
+                    GPU_TYPE, f, args, dynamic_shapes=dynamic_shapes
                 )
             )
 
@@ -117,5 +117,5 @@ class TestMemoryPlanning(TestCase):
 
 
 if __name__ == "__main__":
-    if HAS_CUDA:
+    if HAS_GPU:
         run_tests()

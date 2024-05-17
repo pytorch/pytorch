@@ -1,4 +1,5 @@
 import functools
+import itertools
 import operator
 from typing import List, Optional, Union
 
@@ -325,6 +326,17 @@ def should_pad_bench(
         if m_padded_length == k_padded_length == n_padded_length == 0:
             return False
 
+        def realize_symbols(ds):
+            return [d if isinstance(d, int) else d.node.hint for d in ds]
+
+        if any(
+            dim == 0
+            for dim in itertools.chain(
+                realize_symbols(mat1.shape), realize_symbols(mat2.shape)
+            )
+        ):
+            return False
+
         if torch._inductor.config.force_shape_pad:
             return True
 
@@ -341,9 +353,6 @@ def should_pad_bench(
         cached_pad = get_cached_should_pad(key)
         if cached_pad is not None:
             return cached_pad
-
-        def realize_symbols(ds):
-            return [d if isinstance(d, int) else d.node.hint for d in ds]
 
         def realize_tensor(t):
             if isinstance(t, FakeTensor):
