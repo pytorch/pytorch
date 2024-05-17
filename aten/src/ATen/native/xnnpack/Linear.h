@@ -11,9 +11,9 @@ namespace internal::linear {
 
 c10::intrusive_ptr<xnnpack::LinearOpContext> createLinearClampPrePackOpContext(
     Tensor weight,
-    c10::optional<Tensor> bias,
-    const c10::optional<Scalar>& output_min,
-    const c10::optional<Scalar>& output_max);
+    std::optional<Tensor> bias,
+    const std::optional<Scalar>& output_min,
+    const std::optional<Scalar>& output_max);
 
 Tensor linear_clamp_run(const Tensor& input, const c10::intrusive_ptr<xnnpack::LinearOpContext>& op_context);
 
@@ -22,7 +22,7 @@ unpack_prepacked_sizes_linear(const IValue& ivalue);
 
 ContextLinear create(
     const Tensor& weight,
-    const c10::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias,
     const float output_min,
     const float output_max);
 

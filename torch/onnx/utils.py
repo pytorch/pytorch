@@ -350,11 +350,6 @@ def export(
                     %3 : Float = onnx::Mul(%2, %0)
                     return (%3)
 
-                If PyTorch was built with Caffe2 (i.e. with ``BUILD_CAFFE2=1``), then
-                Caffe2-specific behavior will be enabled, including special support
-                for ops are produced by the modules described in
-                `Quantization <https://pytorch.org/docs/stable/quantization.html>`_.
-
                 .. warning::
 
                     Models exported this way are probably runnable only by Caffe2.
@@ -1446,7 +1441,7 @@ def _setup_trace_module_map(
                 raise RuntimeError(
                     "Only type of the `nn.Module` should be "
                     "passed in the set for argument `export_modules_as_functions`. "
-                    "Got `%s`." % (type(v).__name__)
+                    f"Got `{type(v).__name__}`."
                 )
 
         module_typenames = {_find_typename(v) for v in export_modules_as_functions}
@@ -1771,6 +1766,7 @@ def _run_symbolic_method(g, op_name, symbolic_fn, args):
             original_node=None,  # type: ignore[arg-type]
             params_dict=_params_dict,
             env={},
+            values_in_env=set(),
             new_nodes=[],
         )
         return symbolic_fn(graph_context, *args)
@@ -1801,9 +1797,8 @@ def _add_output_to_block(block: _C.Block, value: _C.Value) -> int:
 def _should_aten_fallback(
     name: str, opset_version: int, operator_export_type: _C_onnx.OperatorExportTypes
 ):
-    # For BUILD_CAFFE2=0 builds, if domain=="aten" and operator_export_type==ONNX_ATEN,
+    # For all builds, if domain=="aten" and operator_export_type==ONNX_ATEN,
     #   an aten::ATen operator is created regardless of symbolics existence
-    # For BUILD_CAFFE2=1, the same applies only if there is no symbolic available
 
     is_exportable_aten_op = registration.registry.is_registered_op(name, opset_version)
     is_onnx_aten_export = operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN
@@ -1886,6 +1881,7 @@ def _run_symbolic_function(
     node: _C.Node,
     inputs: Any,
     env: Dict[_C.Value, _C.Value],
+    values_in_env: Set[_C.Value],
     new_nodes: List[_C.Node],
     operator_export_type=_C_onnx.OperatorExportTypes.ONNX,
 ) -> Optional[Union[_C.Value, Sequence[Optional[_C.Value]]]]:
@@ -1917,6 +1913,7 @@ def _run_symbolic_function(
         original_node=node,
         params_dict=_params_dict,
         env=env,
+        values_in_env=values_in_env,
         new_nodes=new_nodes,
     )
 

@@ -6445,14 +6445,7 @@ mz_bool mz_zip_writer_add_mem_ex_v2(mz_zip_archive *pZip, const char *pArchive_n
 
     if (store_data_uncompressed)
     {
-        mz_bool write_failed;
-        if (write_metadata_only) {
-            write_failed = pZip->m_pSeek(pZip->m_pIO_opaque, cur_archive_file_ofs, buf_size) != buf_size;
-        } else {
-            write_failed = pZip->m_pWrite(pZip->m_pIO_opaque, cur_archive_file_ofs, pBuf, buf_size) != buf_size;
-        }
-
-        if (write_failed)
+        if (pZip->m_pWrite(pZip->m_pIO_opaque, cur_archive_file_ofs, pBuf, buf_size) != buf_size)
         {
             pZip->m_pFree(pZip->m_pAlloc_opaque, pComp);
             return mz_zip_set_error(pZip, MZ_ZIP_FILE_WRITE_FAILED);

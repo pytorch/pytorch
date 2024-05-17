@@ -144,3 +144,14 @@ caffe2/utils/hip @jeffdaily @jithunnair-amd
 /torch/csrc/Storage* @mikaylagawarecki
 # subscribing for PyTorchFileWriter/PyTorchFileReader changes
 /torch/csrc/jit/python/init.cpp @mikaylagawarecki
+
+# CUDA and CUDA math libraries
+aten/src/ATen/cuda/ @eqy
+aten/src/ATen/cudnn/ @eqy
+aten/src/ATen/native/cuda/ @eqy
+aten/src/ATen/native/cudnn/ @eqy
+c10/cuda @eqy
+torch/cuda/ @eqy
+torch/csrc/cuda/ @eqy
+torch/backends/cuda/ @eqy
+torch/backends/cudnn/ @eqy

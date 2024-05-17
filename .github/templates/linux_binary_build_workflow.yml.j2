@@ -33,6 +33,8 @@ env:
   # Needed for conda builds
   {%- if "aarch64" in build_environment %}
   ALPINE_IMAGE: "arm64v8/alpine"
+  {%- elif "s390x" in build_environment %}
+  ALPINE_IMAGE: "docker.io/s390x/alpine"
   {%- else %}
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
   {%- endif %}
@@ -58,6 +60,9 @@ jobs:
       {%- if "aarch64" in build_environment %}
       runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
+      {%- elif "s390x" in build_environment %}
+      runs_on: linux.s390x
+      ALPINE_IMAGE: "docker.io/s390x/alpine"
       {%- elif "conda" in build_environment and config["gpu_arch_type"] == "cuda" %}
       runs_on: linux.24xlarge
       {%- endif %}
@@ -79,6 +84,9 @@ jobs:
       {%- if "aarch64" in build_environment %}
       runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
+      {%- elif "s390x" in build_environment %}
+      runs_on: linux.s390x
+      ALPINE_IMAGE: "docker.io/s390x/alpine"
       {%- elif config["gpu_arch_type"] == "rocm" %}
       runs_on: linux.rocm.gpu
       {%- elif config["gpu_arch_type"] == "cuda" %}

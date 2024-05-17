@@ -11,9 +11,7 @@
 
 #include <ATen/cuda/tunable/GemmCommon.h>
 #ifdef USE_ROCM
-#if ROCM_VERSION >= 50700
 #include <ATen/cuda/tunable/GemmHipblaslt.h>
-#endif
 #include <ATen/cuda/tunable/GemmRocblas.h>
 #endif
 #include <ATen/cuda/tunable/StreamTimer.h>
@@ -246,7 +244,6 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
       AddRocblasValidator();
     }
 
-#if ROCM_VERSION >= 50700
     static const char *env_hipblaslt = std::getenv("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
     if (env_hipblaslt == nullptr || strcmp(env_hipblaslt, "1") == 0) {
       rocm_validators = true;
@@ -291,7 +288,6 @@ class GemmStridedBatchedTunableOp : public TunableOp<GemmStridedBatchedParams<T>
       AddRocblasValidator();
     }
 
-#if ROCM_VERSION >= 50700
     static const char *env_hipblaslt = std::getenv("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
     if (env_hipblaslt == nullptr || strcmp(env_hipblaslt, "1") == 0) {
       rocm_validators = true;
@@ -326,7 +322,7 @@ class ScaledGemmTunableOp : public TunableOp<ScaledGemmParams<CT>, StreamTimer> 
 
     auto validators = getTuningContext()->GetTuningResultsValidator().GetAllValidators();
 
-#if defined(USE_ROCM) && ROCM_VERSION >= 50700
+#if defined(USE_ROCM)
     for (auto&& [name, op] : GetHipBlasLtScaledGemmTypeStringAndOps<AT, BT, CT, ALayout, BLayout>()) {
       this->RegisterOp(std::move(name), std::move(op));
     }

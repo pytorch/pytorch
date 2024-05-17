@@ -6,7 +6,6 @@ from itertools import combinations
 
 import torch
 from torch.fx.operator_schemas import normalize_function
-from torch.testing._internal.jit_utils import clone_inputs
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
@@ -25,6 +24,38 @@ SchemaInfo = torch._C._SchemaInfo
 #  - Records the called ops
 #  - Checks for mutations on all inputs
 #  - Checks for aliasing on all inputs
+
+
+# move these 2 functions here to avoid numpy dependency in testing/_internal/common_utils.py
+
+
+def is_iterable_of_tensors(iterable):
+    # Tensor itself is iterable so we check this first
+    if isinstance(iterable, torch.Tensor):
+        return False
+    try:
+        if len(iterable) == 0:
+            return False
+        for t in iter(iterable):
+            if not isinstance(t, torch.Tensor):
+                return False
+    except TypeError as te:
+        return False
+    return True
+
+
+def clone_inputs(args):
+    inputs = []
+
+    for arg in args:
+        if isinstance(arg, torch.Tensor):
+            inputs.append(arg.detach().clone())
+        elif is_iterable_of_tensors(arg):
+            inputs.append([t.detach().clone() for t in arg])
+        else:
+            inputs.append(arg)
+
+    return inputs
 
 
 class SchemaCheckMode(TorchDispatchMode):

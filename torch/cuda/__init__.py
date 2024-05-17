@@ -154,6 +154,14 @@ def _sleep(cycles):
     torch._C._cuda_sleep(cycles)
 
 
+def _extract_arch_version(arch_string: str):
+    """Extracts the architecture string from a CUDA version"""
+    base = arch_string.split("_")[1]
+    if base.endswith("a"):
+        base = base[:-1]
+    return int(base)
+
+
 def _check_capability():
     incorrect_binary_warn = """
     Found GPU%d %s which requires CUDA_VERSION >= %d to
@@ -177,7 +185,7 @@ def _check_capability():
             name = get_device_name(d)
             current_arch = major * 10 + minor
             min_arch = min(
-                (int(arch.split("_")[1]) for arch in torch.cuda.get_arch_list()),
+                (_extract_arch_version(arch) for arch in torch.cuda.get_arch_list()),
                 default=35,
             )
             if current_arch < min_arch:
@@ -198,7 +206,7 @@ If you want to use the {} GPU with PyTorch, please check the instructions at htt
     arch_list = get_arch_list()
     if len(arch_list) == 0:
         return
-    supported_sm = [int(arch.split("_")[1]) for arch in arch_list if "sm_" in arch]
+    supported_sm = [_extract_arch_version(arch) for arch in arch_list if "sm_" in arch]
     for idx in range(device_count()):
         cap_major, cap_minor = get_device_capability(idx)
         # NVIDIA GPU compute architectures are backward compatible within major version
@@ -1336,7 +1344,6 @@ __all__ = [
     "DeferredCudaCallError",
     "Event",
     "ExternalStream",
-    "OutOfMemoryError",
     "Stream",
     "StreamContext",
     "amp",

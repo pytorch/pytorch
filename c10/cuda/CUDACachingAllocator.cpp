@@ -550,7 +550,7 @@ struct ExpandableSegment {
   CUdeviceptr ptr_{};
   size_t max_handles_{0};
   size_t segment_size_;
-  std::vector<c10::optional<CUmemGenericAllocationHandle>> handles_;
+  std::vector<std::optional<CUmemGenericAllocationHandle>> handles_;
   // devices on which this memory should be mapped in addition
   // to the device where the physical memory lives (device_).
   std::vector<c10::DeviceIndex> peers_;
@@ -778,12 +778,9 @@ struct MempoolIdHash {
 };
 
 cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
-#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
   if (at::cuda::currentStreamCaptureStatusMayInitCtx() ==
       at::cuda::CaptureStatus::None) {
-#endif
     return C10_CUDA_ERROR_HANDLED(cudaMalloc(p, size));
-#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
   } else {
     // It's ok to capture cudaMallocs, as long as we never cudaFree those
     // addresses before replay.
@@ -792,7 +789,6 @@ cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
     at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
     return C10_CUDA_ERROR_HANDLED(cudaMalloc(p, size));
   }
-#endif
 }
 
 } // anonymous namespace
@@ -1111,6 +1107,26 @@ class DeviceCachingAllocator {
               .current;
       auto observers_local = oom_observers_;
 
+      size_t allocated_in_private_pools = 0;
+      auto get_size_block = [](const BlockPool& pool) {
+        size_t res = 0;
+        for (const auto& block : pool.blocks) {
+          res += block->size;
+        }
+        return res;
+      };
+      for (const auto& p : graph_pools) {
+        allocated_in_private_pools += get_size_block(p.second->large_blocks);
+        allocated_in_private_pools += get_size_block(p.second->small_blocks);
+      }
+
+      std::string private_pool_msg;
+
+      if (allocated_in_private_pools > 0) {
+        private_pool_msg = "with " + format_size(allocated_in_private_pools) +
+            " allocated in private pools (e.g., CUDA Graphs), ";
+      }
+
       // Make sure we do not have the device lock before calling our
       // observers which might need hold the GIL
       // It is safe to release at this point because will no longer
@@ -1157,9 +1173,12 @@ class DeviceCachingAllocator {
           " is free. ",
           proc_info,
           "Of the allocated memory ",
-          format_size(allocated_bytes),
-          " is allocated by PyTorch, and ",
-          format_size(reserved_bytes - allocated_bytes),
+          format_size(allocated_bytes + allocated_in_private_pools),
+          " is allocated by PyTorch, ",
+          private_pool_msg,
+          "and ",
+          format_size(
+              reserved_bytes - allocated_bytes - allocated_in_private_pools),
           " is reserved by PyTorch but unallocated.",
           " If reserved but unallocated memory is large try setting",
           " PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid"
@@ -2183,7 +2202,6 @@ class DeviceCachingAllocator {
   }
 
   BlockPool& get_pool(size_t size, cudaStream_t stream) {
-#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
     // captures_underway is a conservative guess that the current stream may be
     // capturing. It's only non-empty if some thread has begun and not yet ended
     // a capture, so it's usually 0, and we can short-circuit
@@ -2201,7 +2219,6 @@ class DeviceCachingAllocator {
         }
       }
     }
-#endif
     if (size <= kSmallSize) {
       return small_blocks;
     } else {

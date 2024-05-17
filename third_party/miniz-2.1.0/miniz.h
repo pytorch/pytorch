@@ -116,7 +116,7 @@
 
 
 
-/* Defines to completely disable specific portions of miniz.c:
+/* Defines to completely disable specific portions of miniz.c: 
    If all macros here are defined the only functionality remaining will be CRC-32, adler-32, tinfl, and tdefl. */
 
 /* Define MINIZ_NO_STDIO to disable all usage and any functions which rely on stdio for file I/O. */
@@ -139,7 +139,7 @@
 /* Define MINIZ_NO_ZLIB_COMPATIBLE_NAME to disable zlib names, to prevent conflicts against stock zlib. */
 #define MINIZ_NO_ZLIB_COMPATIBLE_NAMES
 
-/* Define MINIZ_NO_MALLOC to disable all calls to malloc, free, and realloc.
+/* Define MINIZ_NO_MALLOC to disable all calls to malloc, free, and realloc. 
    Note if MINIZ_NO_MALLOC is defined then the user must always provide custom user alloc/free/realloc
    callbacks to the zlib and archive API's, and a few stand-alone helper API's which don't provide custom user
    functions (such as tdefl_compress_mem_to_heap() and tinfl_decompress_mem_to_heap()) won't work. */
@@ -980,7 +980,6 @@ typedef struct
 
 typedef size_t (*mz_file_read_func)(void *pOpaque, mz_uint64 file_ofs, void *pBuf, size_t n);
 typedef size_t (*mz_file_write_func)(void *pOpaque, mz_uint64 file_ofs, const void *pBuf, size_t n);
-typedef size_t (*mz_file_seek_func)(void *pOpaque, mz_uint64 file_ofs, size_t n);
 typedef mz_bool (*mz_file_needs_keepalive)(void *pOpaque);
 
 struct mz_zip_internal_state_tag;
@@ -1072,7 +1071,6 @@ typedef struct mz_zip_archive /* note: added name so it can be forward declared 
 
     mz_file_read_func m_pRead;
     mz_file_write_func m_pWrite;
-    mz_file_seek_func m_pSeek;
     mz_file_needs_keepalive m_pNeeds_keepalive;
     void *m_pIO_opaque;
 

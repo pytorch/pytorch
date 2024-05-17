@@ -144,8 +144,9 @@ jobs:
       docker-image-name: pytorch-linux-jammy-py3-clang15-asan
       test-matrix: |
         { include: [
-          { config: "slow", shard: 1, num_shards: 2, runner: "linux.4xlarge" },
-          { config: "slow", shard: 2, num_shards: 2, runner: "linux.4xlarge" },
+          { config: "slow", shard: 1, num_shards: 3, runner: "linux.4xlarge" },
+          { config: "slow", shard: 2, num_shards: 3, runner: "linux.4xlarge" },
+          { config: "slow", shard: 3, num_shards: 3, runner: "linux.4xlarge" },
         ]}
       sync-tag: asan-build
 

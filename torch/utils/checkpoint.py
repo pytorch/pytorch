@@ -288,11 +288,10 @@ class CheckpointFunction(torch.autograd.Function):
                     set_device_states(ctx.fwd_devices, ctx.fwd_device_states)
             detached_inputs = detach_variable(tuple(inputs))
 
-            device_autocast_ctx = device_module.amp.autocast(
-                **ctx.device_autocast_kwargs
+            device_autocast_ctx = torch.amp.autocast(
+                device_type=ctx.device, **ctx.device_autocast_kwargs
             ) if torch.amp.is_autocast_available(ctx.device) else contextlib.nullcontext()
-            with torch.enable_grad(), device_autocast_ctx, \
-                 torch.cpu.amp.autocast(**ctx.cpu_autocast_kwargs):
+            with torch.enable_grad(), device_autocast_ctx, torch.cpu.amp.autocast(**ctx.cpu_autocast_kwargs):  # type: ignore[attr-defined]
                 outputs = ctx.run_function(*detached_inputs)
 
         if isinstance(outputs, torch.Tensor):
@@ -1395,11 +1394,10 @@ def _checkpoint_without_reentrant_generator(
                 if had_device_in_fwd:
                     set_device_states(fwd_devices, fwd_device_states)
 
-            device_autocast_ctx = device_module.amp.autocast(
-                **device_autocast_kwargs
+            device_autocast_ctx = torch.amp.autocast(
+                device_type=device, **device_autocast_kwargs
             ) if torch.amp.is_autocast_available(device) else contextlib.nullcontext()
-            with device_autocast_ctx, torch.cpu.amp.autocast(**cpu_autocast_kwargs), \
-                 recompute_context:
+            with device_autocast_ctx, torch.cpu.amp.autocast(**cpu_autocast_kwargs), recompute_context:  # type: ignore[attr-defined]
                 fn(*args, **kwargs)
 
     new_frame = _CheckpointFrame(

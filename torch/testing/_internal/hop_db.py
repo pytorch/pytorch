@@ -58,6 +58,7 @@ hop_that_doesnt_have_opinfo_test_allowlist = [
     "with_effects",
     "strict_mode",
     "_export_tracepoint",
+    "call_torchbind",
 ]
 
 torch.library.define(
@@ -117,9 +118,9 @@ def sample_inputs_flex_attention(opinfo, device, dtype, requires_grad, **kwargs)
         return score + h
 
     yield SampleInput(
-        make_arg(2, 2, 64, 8, low=0.1, high=2),
-        make_arg(2, 2, 64, 8, low=0.1, high=2),
-        make_arg(2, 2, 64, 8, low=0.1, high=2),
+        make_arg(2, 2, 128, 8, low=0.1, high=2),
+        make_arg(2, 2, 128, 8, low=0.1, high=2),
+        make_arg(2, 2, 128, 8, low=0.1, high=2),
         score_mod,
     )
 
