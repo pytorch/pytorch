@@ -152,6 +152,28 @@ inline at::vec::Vectorized<float> vec_shuffle_down(at::vec::Vectorized<float> x,
 }
 #endif
 
+#ifdef CPU_CAPABILITY_AVX512
+inline at::vec::Vectorized<float> vec_shuffle_down(at::vec::Vectorized<float> x, size_t n) {
+  using vec_t = at::vec::Vectorized<float>;
+#define SHUFFLE_MASK(z, y, x, w) ((z << 6) | (y << 4) | (x << 2) | w)
+  switch (n) {
+    case 1:
+      return vec_t(_mm512_permute_ps(x, SHUFFLE_MASK(1, 1, 3, 3)));
+    case 2:
+      return vec_t(_mm512_permute_ps(x, SHUFFLE_MASK(2, 2, 2, 2)));
+    case 4:
+      return vec_t(_mm512_permutexvar_ps(
+          _mm512_set_epi32(
+              12, 12, 12, 12, 12, 12, 12, 12, 4, 4, 4, 4, 4, 4, 4, 4),
+          x));
+    case 8:
+      return vec_t(_mm512_permutexvar_ps(
+          _mm512_set_epi32(8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8), x));
+  }
+  TORCH_CHECK(false, "Unhandled vec_shuffle_down value ", n);
+}
+#endif
+
 template <typename scalar_t>
 Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> acc) {
   using Vec = at::vec::Vectorized<scalar_t>;

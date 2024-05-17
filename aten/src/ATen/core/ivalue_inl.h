@@ -909,7 +909,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   using WeakStorage = c10::weak_intrusive_ptr<c10::StorageImpl>;
   void markCompleted(
       IValue value,
-      c10::optional<std::vector<WeakStorage>> storages = c10::nullopt) {
+      std::optional<std::vector<WeakStorage>> storages = c10::nullopt) {
     // Start by performing all steps that can throw, before setting any field.
     // Do this before even acquiring the mutex, because extractStorages might
     // acquire the GIL, which could lead to a lock inversion with our mutex.
@@ -1586,11 +1586,11 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   c10::intrusive_ptr<Object> copy() const;
 
   c10::intrusive_ptr<Object> deepcopy(
-      c10::optional<at::Device> device = c10::nullopt) const;
+      std::optional<at::Device> device = c10::nullopt) const;
 
   c10::intrusive_ptr<Object> deepcopy(
       IValue::HashAliasedIValueMap& memo,
-      c10::optional<at::Device> device = c10::nullopt) const;
+      std::optional<at::Device> device = c10::nullopt) const;
 
   bool is_weak_compilation_ref() const {
     return !type_.holds_strong_ref();
@@ -1613,7 +1613,7 @@ struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
  public:
   virtual PyObject* getPyObject() = 0;
   virtual c10::InferredType tryToInferType() = 0;
-  virtual IValue toIValue(const TypePtr& type, c10::optional<int32_t> N = c10::nullopt) = 0;
+  virtual IValue toIValue(const TypePtr& type, std::optional<int32_t> N = c10::nullopt) = 0;
   virtual std::string toStr() = 0;
   virtual std::vector<at::Tensor> extractTensors() = 0;
 
@@ -1909,7 +1909,7 @@ std::unordered_map<K, V> generic_to(
 }
 
 template <typename T>
-c10::optional<T> generic_to(IValue ivalue, _fake_type<c10::optional<T>>) {
+std::optional<T> generic_to(IValue ivalue, _fake_type<c10::optional<T>>) {
   if (ivalue.isNone()) {
     return c10::nullopt;
   }
@@ -1946,11 +1946,11 @@ inline T IValue::to() && {
 }
 
 template <>
-inline c10::optional<c10::string_view> IValue::to() && {
+inline std::optional<c10::string_view> IValue::to() && {
   // In the default implementation, the IValue is destroyed with std::move.
   // But if the unboxed type is optional<string_view> we cannot destroy
   // the IValue.
-  return generic_to(*this, _fake_type<c10::optional<c10::string_view>>{});
+  return generic_to(*this, _fake_type<std::optional<c10::string_view>>{});
 }
 
 template <typename T>
@@ -2046,20 +2046,20 @@ inline std::vector<at::Tensor> IValue::toTensorVector() const {
   return createVectorFromList<at::Tensor>(
       static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
 }
-inline c10::List<c10::optional<at::Tensor>> IValue::toOptionalTensorList() && {
+inline c10::List<std::optional<at::Tensor>> IValue::toOptionalTensorList() && {
   AT_ASSERT(isOptionalTensorList(), "Expected OptionalTensorList but got ", tagKind());
-  return c10::List<c10::optional<at::Tensor>>(moveToIntrusivePtr<c10::detail::ListImpl>());
+  return c10::List<std::optional<at::Tensor>>(moveToIntrusivePtr<c10::detail::ListImpl>());
 }
-inline c10::List<c10::optional<at::Tensor>> IValue::toOptionalTensorList() const& {
+inline c10::List<std::optional<at::Tensor>> IValue::toOptionalTensorList() const& {
   AT_ASSERT(isOptionalTensorList(), "Expected OptionalTensorList but got ", tagKind());
-  return c10::List<c10::optional<at::Tensor>>(toIntrusivePtr<c10::detail::ListImpl>());
+  return c10::List<std::optional<at::Tensor>>(toIntrusivePtr<c10::detail::ListImpl>());
 }
-inline std::vector<c10::optional<at::Tensor>> IValue::toOptionalTensorVector() const {
+inline std::vector<std::optional<at::Tensor>> IValue::toOptionalTensorVector() const {
   AT_ASSERT(isOptionalTensorList(), "Expected OptionalTensorList but got ", tagKind());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
       "called toOptionalTensorVector on null intrusive_ptr IValue");
-  return createVectorFromList<c10::optional<at::Tensor>>(
+  return createVectorFromList<std::optional<at::Tensor>>(
       static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
 }
 inline c10::List<IValue> IValue::toList() && {
@@ -2274,7 +2274,7 @@ inline IValue::IValue(std::unordered_map<Key, Value> v)
 }
 
 template <class T, IValue::enable_if_ivalue_constructible<T>>
-inline IValue::IValue(c10::optional<T> v) : IValue() {
+inline IValue::IValue(std::optional<T> v) : IValue() {
   if (v.has_value()) {
     *this = IValue(std::move(*v));
   }
@@ -2360,7 +2360,7 @@ inline const std::string& IValue::toStringRef() const {
              payload.u.as_intrusive_ptr)
       ->string();
 }
-inline c10::optional<std::reference_wrapper<const std::string>> IValue::
+inline std::optional<std::reference_wrapper<const std::string>> IValue::
     toOptionalStringRef() const {
   if (isNone()) {
     return c10::nullopt;

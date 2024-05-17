@@ -83,6 +83,9 @@ def _flex_attention(
     """
 
     if torch.compiler.is_dynamo_compiling():
+        # mark head_dim always to be static
+        for x in [query, key, value]:
+            torch._dynamo.mark_static(x, -1)
         out, _ = flex_attention_hop(query, key, value, score_mod)
         return out
 

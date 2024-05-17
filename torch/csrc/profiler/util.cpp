@@ -18,10 +18,10 @@ namespace profiler {
 namespace impl {
 
 namespace {
-c10::optional<bool> soft_assert_raises_;
+std::optional<bool> soft_assert_raises_;
 } // namespace
 
-void setSoftAssertRaises(c10::optional<bool> value) {
+void setSoftAssertRaises(std::optional<bool> value) {
   soft_assert_raises_ = value;
 }
 

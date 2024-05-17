@@ -20,12 +20,12 @@
 namespace torch {
 namespace jit {
 
-using ModuleQConfigMap = std::unordered_map<ModulePtr, c10::optional<QConfig>>;
+using ModuleQConfigMap = std::unordered_map<ModulePtr, std::optional<QConfig>>;
 
 namespace {
 
 struct OptionalQConfigHash {
-  inline size_t operator()(const c10::optional<QConfig>& qconfig_opt) const {
+  inline size_t operator()(const std::optional<QConfig>& qconfig_opt) const {
     if (qconfig_opt.has_value()) {
       const auto& m1 = std::get<0>(*qconfig_opt);
       const auto& m2 = std::get<1>(*qconfig_opt);
@@ -36,9 +36,9 @@ struct OptionalQConfigHash {
   }
 };
 using QConfigTypePtrMap =
-    std::unordered_map<c10::optional<QConfig>, TypePtr, OptionalQConfigHash>;
+    std::unordered_map<std::optional<QConfig>, TypePtr, OptionalQConfigHash>;
 using NameModuleVector = std::vector<std::pair<std::string, Module>>;
-using OptionalModuleVector = std::vector<c10::optional<Module>>;
+using OptionalModuleVector = std::vector<std::optional<Module>>;
 using ModuleMethodVector = std::vector<std::pair<Module, std::string>>;
 using graph_rewrite_helper::PatternInfo;
 using graph_rewrite_helper::replaceConvolutionWithAtenConv;
@@ -49,8 +49,8 @@ void fillQConfigMap(
     const QConfigDict& qconfig_dict,
     ModuleQConfigMap& map,
     const std::string& key = "",
-    const c10::optional<QConfig>& parent_qconfig = c10::nullopt) {
-  c10::optional<QConfig> qconfig;
+    const std::optional<QConfig>& parent_qconfig = c10::nullopt) {
+  std::optional<QConfig> qconfig;
   if (qconfig_dict.find(key) != qconfig_dict.end()) {
     GRAPH_DEBUG("Got module config for key:", key);
     qconfig = qconfig_dict.at(key);
@@ -187,7 +187,7 @@ class ModuleCloneHelper {
       const Module& source,
       Module& target,
       const ModuleQConfigMap& module_qconfig_map,
-      const std::function<TypePtr(TypePtr, c10::optional<QConfig>)>&
+      const std::function<TypePtr(TypePtr, std::optional<QConfig>)>&
           type_remap_fn) {
     // remap of %self will be done outside of the function
     // and we don't support the case when people pass in
@@ -239,7 +239,7 @@ class ModuleCloneHelper {
       const Module& source,
       Module& target,
       const ModuleQConfigMap& module_qconfig_map,
-      const std::function<TypePtr(TypePtr, c10::optional<QConfig>)>&
+      const std::function<TypePtr(TypePtr, std::optional<QConfig>)>&
           type_remap_fn) {
     remapTypes(
         graph->block(),
@@ -257,7 +257,7 @@ class ModuleCloneHelper {
       const ModuleQConfigMap& module_qconfig_map,
       const std::unordered_map<TypePtr, QConfigTypePtrMap>& type_remap) {
     auto type_remap_fn = [&](TypePtr type_ptr,
-                             const c10::optional<QConfig>& qconfig) {
+                             const std::optional<QConfig>& qconfig) {
       if (type_remap.find(type_ptr) != type_remap.end()) {
         const auto& qconfig_map = type_remap.at(type_ptr);
         if (qconfig_map.find(qconfig) != qconfig_map.end()) {
@@ -401,7 +401,7 @@ class InsertObserversHelper {
 
   // Uses the state created by fillBoundaryValueMap and fillValueObserverMap
   // to return an observer configured for a value, if it is needed.
-  c10::optional<Module> getObserverFor(Value* v);
+  std::optional<Module> getObserverFor(Value* v);
 
   // Uses the state created by fillPassThroughValueMap to propagage observed
   // property which should pass through from inputs to outputs.
@@ -1312,13 +1312,13 @@ void InsertObserversHelper::fillValueObserverMap(
   }
 }
 
-c10::optional<Module> InsertObserversHelper::getObserverFor(Value* v) {
+std::optional<Module> InsertObserversHelper::getObserverFor(Value* v) {
   if (observer_for_value_.count(v)) {
     auto observer = observer_for_value_.at(v);
     GRAPH_DEBUG("Got observer module config for:", v->debugName());
     return observer;
   }
-  c10::optional<Module> result;
+  std::optional<Module> result;
   if (boundary_value_map_.count(v)) {
     for (Value* next : boundary_value_map_.at(v)) {
       GRAPH_DEBUG(
@@ -1384,9 +1384,9 @@ InsertObserversHelper::insertObserversFor(
   // the graph itself can be shared
   std::unordered_set<Value*> inputs_outputs;
   // list of observer modules for input values
-  std::vector<c10::optional<Module>> block_input_observers;
+  std::vector<std::optional<Module>> block_input_observers;
   // list of observer modules for output values
-  std::vector<c10::optional<Module>> block_output_observers;
+  std::vector<std::optional<Module>> block_output_observers;
 
   // if the current block is the block for entry point graph(the forward graph
   // of the top level module), we can insert observers in the block directly

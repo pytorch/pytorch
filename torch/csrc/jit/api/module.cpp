@@ -167,8 +167,8 @@ void Module::to(at::Device device, bool non_blocking) {
 
 static void module_state_to(
     const autograd::Variable& variable,
-    const c10::optional<at::Device>& device,
-    const c10::optional<at::ScalarType>& dtype,
+    const std::optional<at::Device>& device,
+    const std::optional<at::ScalarType>& dtype,
     bool non_blocking) {
   // Need to access the `at::Tensor` as a `Variable` here.
   // Use the data's original device or dtype if not supplied here.
@@ -180,8 +180,8 @@ static void module_state_to(
 }
 
 void Module::to_impl(
-    const c10::optional<at::Device>& device,
-    const c10::optional<at::ScalarType>& dtype,
+    const std::optional<at::Device>& device,
+    const std::optional<at::ScalarType>& dtype,
     bool non_blocking) {
   for (at::Tensor e : parameters()) {
     module_state_to(e, device, dtype, non_blocking);
@@ -317,7 +317,7 @@ Module Module::copy() const {
   return Module(_ivalue()->copy());
 }
 
-Module Module::deepcopy(c10::optional<at::Device> device) const {
+Module Module::deepcopy(std::optional<at::Device> device) const {
   return Module(_ivalue()->deepcopy(device));
 }
 
@@ -476,7 +476,7 @@ IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
 
 Module freeze(
     const Module& module,
-    const c10::optional<std::vector<std::string>>& preserved_attrs,
+    const std::optional<std::vector<std::string>>& preserved_attrs,
     bool optimize_numerics) {
   TORCH_CHECK(
       !module.hasattr("training") || !module.is_training(),
