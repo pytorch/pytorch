@@ -1,0 +1,107 @@
+name: android-tests
+
+on:
+  workflow_call:
+    inputs:
+      test-matrix:
+        required: true
+        type: string
+        description: |
+          A JSON description of what configs to run later on.
+
+defaults:
+  run:
+    shell: bash -e -l {0}
+
+jobs:
+  filter:
+    if: github.repository_owner == 'pytorch'
+    runs-on: [self-hosted, linux.large]
+    outputs:
+      test-matrix: ${{ steps.filter.outputs.test-matrix }}
+      is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
+      keep-going: ${{ steps.filter.outputs.keep-going }}
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Select all requested test configurations
+        id: filter
+        uses: ./.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: ${{ inputs.test-matrix }}
+
+  build-and-test:
+    needs: filter
+    # Don't run on forked repos.
+    if: github.repository_owner == 'pytorch' && needs.filter.outputs.is-test-matrix-empty == 'False'
+    strategy:
+      matrix: ${{ fromJSON(needs.filter.outputs.test-matrix) }}
+      fail-fast: false
+    # NB: This job can only run on GitHub Linux runner atm. This is an ok thing though
+    # because that runner is ephemeral and could access upload secrets
+    runs-on: ${{ matrix.runner }}
+    env:
+      # GitHub runner installs Android SDK on this path
+      ANDROID_ROOT: /usr/local/lib/android
+      ANDROID_NDK_VERSION: '21.4.7075529'
+      BUILD_LITE_INTERPRETER: ${{ matrix.use_lite_interpreter }}
+      # 4 of them are supported atm: armeabi-v7a, arm64-v8a, x86, x86_64
+      SUPPORT_ABI: '${{ matrix.support_abi }}'
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+
+      - name: Setup miniconda
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+        with:
+          python-version: 3.8
+          environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}.txt
+
+      - name: Install NDK
+        uses: nick-fields/retry@v2.8.2
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          retry_wait_seconds: 90
+          command: |
+            set -eux
+
+            # Install NDK 21 after GitHub update
+            # https://github.com/actions/virtual-environments/issues/5595
+            ANDROID_SDK_ROOT="${ANDROID_ROOT}/sdk"
+            ANDROID_NDK="${ANDROID_SDK_ROOT}/ndk-bundle"
+
+            SDKMANAGER="${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"
+            # NB: This step downloads and installs NDK, thus it could be flaky.
+            # However, SDKMANAGER doesn't return a non-zero status code when it
+            # happens despite the fact that the corrupted file that it has isn't
+            # a ZIP archive and couldn't be extracted
+            echo "y" | ${SDKMANAGER} "ndk;${ANDROID_NDK_VERSION}"
+
+            ln -sfn "${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}" "${ANDROID_NDK}"
+            # So, we need to manually verify the existence of NDK afterward
+            # and return a failure if the file isn't there
+            if [ ! -f "${ANDROID_NDK}/build/cmake/android.toolchain.cmake" ]; then
+              exit 1
+            fi
+
+            echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}" >> "${GITHUB_ENV}"
+            echo "ANDROID_NDK=${ANDROID_NDK}" >> "${GITHUB_ENV}"
+
+      - name: Build PyTorch Android
+        run: |
+          set -eux
+
+          echo "CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${GITHUB_ENV}"
+          ${CONDA_RUN} ./scripts/build_pytorch_android.sh "${SUPPORT_ABI}"
+
+      - name: Run tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 25
+          script: ./android/run_tests.sh
