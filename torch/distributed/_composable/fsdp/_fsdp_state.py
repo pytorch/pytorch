@@ -201,11 +201,6 @@ class FSDPState(_State):
         return output
 
     def _pre_backward(self, grad: torch.Tensor) -> torch.Tensor:
-        if (
-            self._fsdp_param_group
-            and self._fsdp_param_group._training_state == TrainingState.PRE_BACKWARD
-        ):
-            return grad
         self._training_state = TrainingState.PRE_BACKWARD
         self._register_root_post_backward_final_callback()
         if self._fsdp_param_group:
