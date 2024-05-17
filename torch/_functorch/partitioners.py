@@ -1342,7 +1342,7 @@ def draw_graph(
             node.meta = {}
     base, ext = os.path.splitext(fname)
     if not ext:
-        ext = ".svg"
+        ext = "." + config.torch_compile_graph_format
     print(f"Writing FX graph to file: {base}{ext}")
     g = graph_drawer.FxGraphDrawer(
         traced,
