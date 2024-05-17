@@ -732,7 +732,7 @@ static __global__ void barrierKernel(
   }
 }
 
-void IntraNodeComm::barrier(c10::optional<std::vector<int64_t>> ranks) {
+void IntraNodeComm::barrier(std::optional<std::vector<int64_t>> ranks) {
   if (!ranks.has_value()) {
     ranks = std::vector<int64_t>(worldSize_);
     std::iota(ranks->begin(), ranks->end(), 0);

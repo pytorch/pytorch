@@ -19,6 +19,7 @@ from torch.distributed._composable.fsdp import (
     register_fsdp_forward_method,
 )
 from torch.distributed._tensor import DTensor, init_device_mesh
+from torch.distributed._tensor.debug.comm_mode import CommDebugMode
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
     apply_activation_checkpointing,
@@ -29,11 +30,6 @@ from torch.distributed.checkpoint.state_dict import (
     get_optimizer_state_dict,
 )
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor.parallel import (
-    ColwiseParallel,
-    parallelize_module,
-    RowwiseParallel,
-)
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -41,8 +37,8 @@ from torch.testing._internal.common_fsdp import (
     FSDPTest,
     FSDPTestMultiThread,
     MLP,
+    MLPStack,
     patch_all_gather,
-    patch_all_reduce,
     patch_reduce_scatter,
     test_compiled_fsdp,
 )
@@ -58,6 +54,8 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     TransformerBlock,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
+
+c10d_ops = torch.ops.c10d
 
 
 class TestFullyShardForwardInputs(FSDPTestMultiThread):
@@ -674,6 +672,12 @@ class TestFullyShardGradientAccumulation(FSDPTest):
                 "mode": ["all", "root_only", "some_mlps"],
                 "reshard_after_backward": [False, True],
                 "offload_policy": [OffloadPolicy(), CPUOffloadPolicy()],
+                # For HSDP only:
+                # `True`: reduce-scatter only (no all-reduce) each microbatch
+                # until the last microbatch
+                # `False`: neither reduce-scatter nor all-reduce each
+                # microbatch until the last microbatch
+                "reduce_scatter_only": [False, True],
             },
             self._test_gradient_accumulation,
         )
@@ -685,19 +689,23 @@ class TestFullyShardGradientAccumulation(FSDPTest):
         mode: str,
         reshard_after_backward: bool,
         offload_policy: OffloadPolicy,
+        reduce_scatter_only: bool,  # for HSDP
     ):
         if (
-            not reshard_after_backward
-            and (reshard_after_forward is not False or mode == "some_mlps")
-        ) or (
-            isinstance(offload_policy, CPUOffloadPolicy)
-            and reshard_after_forward is not True
+            (
+                not reshard_after_backward
+                and (reshard_after_forward is not False or mode == "some_mlps")
+            )
+            or (
+                isinstance(offload_policy, CPUOffloadPolicy)
+                and reshard_after_forward is not True
+            )
+            or (mesh.ndim != 2 and reduce_scatter_only)
         ):
-            return  # skip since not common
+            return  # skip since not common or applicable
 
         torch.manual_seed(42)
-        local_batch_size, lin_dim, num_mlps, num_microbatches = (2, 32, 3, 3)
-        global_batch_size = local_batch_size * self.world_size
+        batch_size, lin_dim, num_mlps, num_microbatches = (2, 32, 3, 3)
         if mode == "some_mlps":
             num_mlps_to_disable_reduce_scatter = 2
         modules = [nn.Linear(lin_dim, lin_dim)]
@@ -716,64 +724,46 @@ class TestFullyShardGradientAccumulation(FSDPTest):
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
-        # TODO: Migrate to `CommDebugMode` once it supports c10d collectives.
-        orig_all_gather = dist.all_gather_into_tensor
-        orig_reduce_scatter = dist.reduce_scatter_tensor
-        orig_all_reduce = dist.all_reduce
-        all_gather_count, reduce_scatter_count, all_reduce_count = 0, 0, 0
+        def set_grad_sync_flag(
+            module: nn.Module, is_last_microbatch: bool, recurse: bool = True
+        ):
+            if reduce_scatter_only:
+                module.set_requires_all_reduce(is_last_microbatch, recurse=recurse)
+            else:
+                module.set_requires_gradient_sync(is_last_microbatch, recurse=recurse)
 
-        def all_gather_with_count(*args, **kwargs):
-            nonlocal all_gather_count
-            all_gather_count += 1
-            return orig_all_gather(*args, **kwargs)
+        def set_backward_flags(_model: nn.Module, is_last_microbatch: bool):
+            if mode == "all":
+                set_grad_sync_flag(_model, is_last_microbatch)
+                if not reshard_after_backward:
+                    _model.set_reshard_after_backward(is_last_microbatch)
+            elif mode == "some_mlps":
+                for mlp in model[1 : 1 + num_mlps_to_disable_reduce_scatter]:
+                    set_grad_sync_flag(mlp, is_last_microbatch)
+                    if not reshard_after_backward:
+                        mlp.set_reshard_after_backward(is_last_microbatch)
+            elif mode == "root_only":
+                set_grad_sync_flag(model, is_last_microbatch, recurse=False)
+                if not reshard_after_backward:
+                    model.set_reshard_after_backward(is_last_microbatch, recurse=False)
 
-        def reduce_scatter_with_count(*args, **kwargs):
-            nonlocal reduce_scatter_count
-            reduce_scatter_count += 1
-            return orig_reduce_scatter(*args, **kwargs)
-
-        def all_reduce_with_count(*args, **kwargs):
-            nonlocal all_reduce_count
-            all_reduce_count += 1
-            return orig_all_reduce(*args, **kwargs)
-
-        torch.manual_seed(1)  # same on all ranks
+        torch.manual_seed(42 + self.rank + 1)
         for iter_idx in range(5):
-            with patch_all_gather(all_gather_with_count), patch_reduce_scatter(
-                reduce_scatter_with_count
-            ), patch_all_reduce(all_reduce_with_count):
+            with CommDebugMode() as comm_mode:
                 for microbatch_idx in range(num_microbatches):
                     is_last_microbatch = microbatch_idx == num_microbatches - 1
-                    if mode == "all":
-                        model.set_requires_gradient_sync(is_last_microbatch)
-                        if not reshard_after_backward:
-                            model.set_reshard_after_backward(is_last_microbatch)
-                    elif mode == "some_mlps":
-                        for mlp in model[1 : 1 + num_mlps_to_disable_reduce_scatter]:
-                            mlp.set_requires_gradient_sync(is_last_microbatch)
-                            if not reshard_after_backward:
-                                mlp.set_reshard_after_backward(is_last_microbatch)
-                    elif mode == "root_only":
-                        model.set_requires_gradient_sync(
-                            is_last_microbatch, recurse=False
-                        )
-                        if not reshard_after_backward:
-                            model.set_reshard_after_backward(
-                                is_last_microbatch, recurse=False
-                            )
-
-                    global_inp = torch.rand((global_batch_size, lin_dim), device="cuda")
-                    local_inp = global_inp[
-                        self.rank
-                        * local_batch_size : (self.rank + 1)
-                        * local_batch_size
-                    ].detach()
+                    set_backward_flags(model, is_last_microbatch)
+                    inp = torch.randn(batch_size, lin_dim, device="cuda")
                     losses: List[torch.Tensor] = []
-                    for _model, inp in ((ref_model, global_inp), (model, local_inp)):
+                    for _model in (ref_model, model):
                         losses.append(_model(inp).sum())
                         losses[-1].backward()
-                    dist.all_reduce(losses[1])  # partial -> replicated
                     self.assertEqual(losses[0], losses[1])
+
+            comm_counts = comm_mode.get_comm_counts()
+            all_gather_count = comm_counts[c10d_ops._allgather_base_]
+            reduce_scatter_count = comm_counts[c10d_ops._reduce_scatter_base_]
+            all_reduce_count = comm_counts[c10d_ops.allreduce_]
 
             # Expect one reduce-scatter per MLP plus one for the root's linear
             # on the last microbatch
@@ -787,14 +777,16 @@ class TestFullyShardGradientAccumulation(FSDPTest):
             elif mode == "root_only":
                 # Expect additional reduce-scatters for all MLPs
                 expected_reduce_scatter_count += (num_mlps) * (num_microbatches - 1)
+            expected_all_reduce_count = (
+                expected_reduce_scatter_count if mesh.ndim == 2 else 0
+            )
+            if reduce_scatter_only:
+                # Specially for HSDP if only reduce-scattering but not
+                # all-reducing until the last microbatch, expect one
+                # reduce-scatter per MLP plus for the root per microbatch
+                expected_reduce_scatter_count = (num_mlps + 1) * num_microbatches
             self.assertEqual(reduce_scatter_count, expected_reduce_scatter_count)
-            # Exclude the loss all-reduce per microbatch in our training loop
-            all_reduce_count -= num_microbatches
-            if mesh.ndim == 2:
-                self.assertEqual(all_reduce_count, expected_reduce_scatter_count)
-            else:
-                self.assertEqual(all_reduce_count, 0)
-            reduce_scatter_count = all_reduce_count = 0
+            self.assertEqual(all_reduce_count, expected_all_reduce_count)
 
             # Expect one all-gather per MLP plus one for the root's linear in
             # the first microbatch's forward
@@ -817,13 +809,10 @@ class TestFullyShardGradientAccumulation(FSDPTest):
                 # microbatch forward
                 expected_all_gather_count += num_mlps * (num_microbatches - 1)
             self.assertEqual(all_gather_count, expected_all_gather_count)
-            all_gather_count = 0
 
-            # Average the ref model's gradients over the world size to match
-            # data parallel semantics
             for param in ref_model.parameters():
                 if param.grad is not None:
-                    param.grad.div_(self.world_size)
+                    dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
             check_sharded_parity(self, ref_model, model)
             for _optim in (optim, ref_optim):
                 _optim.step()
@@ -933,38 +922,14 @@ class TestFullyShard2DTraining(FSDPTest):
         dp_pg = dp_mesh.get_group()  # used for `replicate()`
 
         torch.manual_seed(42)
-        model = nn.Sequential(
-            nn.LayerNorm(mlp_dim, bias=False),
-            # Use multiplier of 3 to exercise uneven case
-            MLP(mlp_dim, dim_multiplier=3),
-            MLP(mlp_dim),
-            MLP(mlp_dim, dim_multiplier=3),
-        )
+        model = MLPStack(mlp_dim)
         ref_model = copy.deepcopy(model).cuda()
         replicate(ref_model, device_ids=[self.rank], process_group=dp_pg)
-        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
-
-        model = parallelize_module(
-            model,
-            device_mesh=tp_mesh,
-            # Leave the layer norm as implicitly replicated
-            parallelize_plan={
-                # Pass `use_local_output=False` to keep as DTensor to preserve
-                # uneven activation dims
-                "1.in_proj": ColwiseParallel(use_local_output=False),
-                "1.out_proj": RowwiseParallel(use_local_output=False),
-                "2.in_proj": ColwiseParallel(use_local_output=False),
-                "2.out_proj": RowwiseParallel(use_local_output=False),
-                "3.in_proj": ColwiseParallel(use_local_output=False),
-                "3.out_proj": RowwiseParallel(),
-            },
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=False)
+        model.parallelize(
+            tp_mesh, dp_mesh, use_activation_checkpointing, reshard_after_forward
         )
-        for mlp in model:
-            if use_activation_checkpointing:
-                checkpoint(mlp)
-            fully_shard(mlp, mesh=dp_mesh, reshard_after_forward=reshard_after_forward)
-        fully_shard(model, mesh=dp_mesh, reshard_after_forward=reshard_after_forward)
-        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=False)
 
         torch.manual_seed(42 + dp_pg.rank() + 1)
         device = torch.device("cuda")
@@ -992,6 +957,8 @@ class TestFullyShard2DTraining(FSDPTest):
                 # else construct new ones (requiring eager optim state init)
                 "reuse_model_optim": [False, True],
                 "optimizer_class": [torch.optim.Adam, torch.optim.AdamW],
+                # TODO: need to update `parallelize` before including foreach=True for testing
+                "foreach": [False],
             },
             self._test_train_parity_2d_transformer_checkpoint_resume,
         )
@@ -1001,6 +968,7 @@ class TestFullyShard2DTraining(FSDPTest):
         use_seq_parallel: bool,
         reuse_model_optim: bool,
         optimizer_class: Type[torch.optim.Optimizer],
+        foreach: bool,
     ):
         def train_step(
             _model: nn.Module, _optim: torch.optim.Optimizer, _inp: torch.Tensor
@@ -1026,7 +994,9 @@ class TestFullyShard2DTraining(FSDPTest):
         model_no_cp = parallelize(
             Transformer(model_args), global_mesh, use_seq_parallel
         )
-        optim_no_cp = optimizer_class(model_no_cp.parameters(), lr=1e-2)
+        optim_no_cp = optimizer_class(
+            model_no_cp.parameters(), lr=1e-2, foreach=foreach
+        )
 
         torch.manual_seed(42 + global_mesh["dp"].get_local_rank() + 1)
         inp = torch.randint(0, model_args.vocab_size, (3, 16), device="cuda")
@@ -1037,7 +1007,7 @@ class TestFullyShard2DTraining(FSDPTest):
         # model/optimizer, load checkpoint, and run another iteration
         torch.manual_seed(seed)
         model_cp = parallelize(Transformer(model_args), global_mesh, use_seq_parallel)
-        optim_cp = optimizer_class(model_cp.parameters(), lr=1e-2)
+        optim_cp = optimizer_class(model_cp.parameters(), lr=1e-2, foreach=foreach)
 
         loss_cp1 = train_step(model_cp, optim_cp, inp)
         self.assertEqual(loss_no_cp1, loss_cp1)
@@ -1066,7 +1036,7 @@ class TestFullyShard2DTraining(FSDPTest):
             model_cp = parallelize(
                 Transformer(model_args), global_mesh, use_seq_parallel
             )
-            optim_cp = optimizer_class(model_cp.parameters(), lr=1e-2)
+            optim_cp = optimizer_class(model_cp.parameters(), lr=1e-2, foreach=foreach)
         self.assertNotEqual(loss_no_cp2, train_step(model_cp, optim_cp, inp))
 
         sharded_sd = {
@@ -1106,6 +1076,7 @@ class TestFullyShardNDTraining(FSDPTest):
                 "reshard_after_forward": [False, True],
                 "use_activation_checkpointing": [False, True],
                 "mlp_dim": [3, 16, 17],
+                "foreach": [False],
             },
             functools.partial(self._test_2d_mlp_with_nd_mesh, global_mesh),
         )
@@ -1116,6 +1087,7 @@ class TestFullyShardNDTraining(FSDPTest):
         reshard_after_forward: bool,
         use_activation_checkpointing: bool,
         mlp_dim: int,
+        foreach: bool,
     ):
         global_mesh = self.init_global_mesh()
         pp_mesh, dp_mesh, tp_mesh = (
@@ -1126,38 +1098,14 @@ class TestFullyShardNDTraining(FSDPTest):
         dp_pg = dp_mesh.get_group()  # used for `replicate()`
 
         torch.manual_seed(42)
-        model = nn.Sequential(
-            nn.LayerNorm(mlp_dim, bias=False),
-            # Use multiplier of 3 to exercise uneven case
-            MLP(mlp_dim, dim_multiplier=3),
-            MLP(mlp_dim),
-            MLP(mlp_dim, dim_multiplier=3),
-        )
+        model = MLPStack(mlp_dim)
         ref_model = copy.deepcopy(model).cuda()
         replicate(ref_model, device_ids=[self.rank], process_group=dp_pg)
-        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
-
-        model = parallelize_module(
-            model,
-            device_mesh=tp_mesh,
-            # Leave the layer norm as implicitly replicated
-            parallelize_plan={
-                # Pass `use_local_output=False` to keep as DTensor to preserve
-                # uneven activation dims
-                "1.in_proj": ColwiseParallel(use_local_output=False),
-                "1.out_proj": RowwiseParallel(use_local_output=False),
-                "2.in_proj": ColwiseParallel(use_local_output=False),
-                "2.out_proj": RowwiseParallel(use_local_output=False),
-                "3.in_proj": ColwiseParallel(use_local_output=False),
-                "3.out_proj": RowwiseParallel(),
-            },
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=foreach)
+        model.parallelize(
+            tp_mesh, dp_mesh, use_activation_checkpointing, reshard_after_forward
         )
-        for mlp in model:
-            if use_activation_checkpointing:
-                checkpoint(mlp)
-            fully_shard(mlp, mesh=dp_mesh, reshard_after_forward=reshard_after_forward)
-        fully_shard(model, mesh=dp_mesh, reshard_after_forward=reshard_after_forward)
-        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=foreach)
 
         torch.manual_seed(42 + dp_pg.rank() + 1)
         device = torch.device("cuda")
