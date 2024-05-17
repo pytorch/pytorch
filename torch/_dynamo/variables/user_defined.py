@@ -382,11 +382,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 inspect.getattr_static(self.value, "__init__", None)
                 is torch.nn.Module.__init__
             ):
-                tx.output.side_effects.store_attr(
-                    var,
-                    "__call_nn_module_init",
-                    variables.ConstantVariable.create(True),
-                )
+                var.call_method(tx, "__init__", args, kwargs)
                 return var
             else:
                 var.call_method(tx, "__init__", args, kwargs)
@@ -635,6 +631,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     else AttrSource(AttrSource(self.source, "__class__"), name)
                 )
                 # TODO(jansel): add a guard to check for monkey patching?
+                from ..mutation_guard import unpatched_nn_module_init
+
+                if method is torch.nn.Module.__init__:
+                    method = unpatched_nn_module_init
                 return UserMethodVariable(method, self, source=source).call_function(
                     tx, args, kwargs
                 )
