@@ -525,7 +525,7 @@ inline std::string getCommsNodeAttrs(const RecordFunction& fn) {
   std::vector<std::string> attrs;
 
 #ifdef USE_DISTRIBUTED
-  // We reply on paramcommsdebug object that is available in thread local info
+  // We rely on paramcommsdebug object that is available in thread local info
   auto debugInfo = dynamic_cast<ParamCommsDebugInfo*>(
       c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PARAM_COMMS_INFO));
   if (debugInfo == nullptr) {
@@ -729,11 +729,8 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
         op_schema_str = json_str_escape(c10::toString(op_schema.value()));
       }
 
-      std::string additiona_attrs = "";
-      /// XXX turn to constant
-      if (fn.isNcclMeta()) {
-        additiona_attrs = getCommsNodeAttrs(fn);
-      }
+      const std::string additiona_attrs =
+          fn.isNcclMeta() ? getCommsNodeAttrs(fn) : "";
 
       writeJsonNode(
           ob->out,
