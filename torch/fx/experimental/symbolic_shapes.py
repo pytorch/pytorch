@@ -55,6 +55,7 @@ from torch.fx.experimental.recording import (
     shape_env_check_state_equal
 )
 from torch.fx.experimental.sym_node import SymNode, SymTypes
+from torch._logging import trace_structured, structured
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import SymBool, SymFloat, SymInt
@@ -81,6 +82,9 @@ DimList = List
 log = logging.getLogger(__name__)
 
 class GuardOnDataDependentSymNode(RuntimeError):
+    pass
+
+class PendingUnbackedSymbolNotFound(RuntimeError):
     pass
 
 import sympy
@@ -602,14 +606,19 @@ def compute_unbacked_bindings(shape_env, example_value, old_example_value=None, 
             return r
 
         symbol_to_path = free_unbacked_symbols_with_path(example_value, ())
-        assert not pending, (
-            f"pending {pending} not in {example_value} " +
-            (
+        if not peek and pending:
+            extra = (
                 repr((example_value.stride(), example_value.storage_offset()))
                 if isinstance(example_value, torch.Tensor)
                 else ""
             )
-        )
+            raise PendingUnbackedSymbolNotFound(
+                f"Pending unbacked symbols {pending} not in returned outputs {example_value} {extra}.\n"
+                "Did you accidentally call new_dynamic_size() or item() more times "
+                "than you needed to in your fake implementation?\n"
+                "For more help, see https://docs.google.com/document/d/1RWrH-3wLEpzR9kCS6gGBNen_-Fs-8PVbWWFE5AcgeWE/edit"
+            )
+
         # Why do we have to do some rebinding here?  If the original FX node
         # wasn't a binding site because you had a memo hit, but post
         # translation you aren't a memo hit anymore, there's now a new binding
@@ -2498,7 +2507,7 @@ class ShapeEnv:
     def set_unbacked_var_to_val(self, k: sympy.Symbol, v: int) -> None:
         """Used only when propagate_real_tensors; registers a value for an
         unbacked symbol, which can be used last resort to resolve hints."""
-        self.unbacked_var_to_val[k] = v
+        self.unbacked_var_to_val[k] = sympy.sympify(v)
 
     # Unlike set_replacement, this records a shapeenv event
     @record_shapeenv_event()
@@ -3787,12 +3796,6 @@ class ShapeEnv:
             if expr in issued:
                 return
 
-            # When propagate_real_tensors is on, we may end up with guards on
-            # data dependent variables.  These guards are unissuable, so just ignore them
-            if free_unbacked_symbols(expr):
-                log.warning("propagate_real_tensors: ignoring guard %s", expr)
-                return
-
             issued.add(expr)
 
             try:
@@ -4309,6 +4312,18 @@ class ShapeEnv:
                 unsound_expr = result_expr.xreplace(self.unbacked_var_to_val)
                 if not unsound_expr.free_symbols:
                     log.warning("propagate_real_tensors size_hint(%s) -> %s", expr, unsound_expr)
+                    trace_structured(
+                        "propagate_real_tensors",
+                        metadata_fn=lambda: {
+                            "expr": repr(expr),
+                            "result": repr(unsound_expr),
+                            "stack": structured.from_traceback(CapturedTraceback.extract(skip=1).summary()),
+                        },
+                    )
+                    self.defer_runtime_assert(
+                        sympy.Eq(result_expr, unsound_expr),
+                        f"propagate_real_tensors: {result_expr} == {unsound_expr}"
+                    )
                     return unsound_expr
 
             raise self._make_data_dependent_error(result_expr, expr)
@@ -4381,6 +4396,9 @@ class ShapeEnv:
         Adds or updates a replacement for a symbol.
         Use this instead of `self.replacements[a] = tgt`.
         """
+
+        if tgt == self.replacements.get(a, None):
+            return
 
         # Precondition: a == tgt
         assert isinstance(a, sympy.Symbol)
@@ -4472,14 +4490,24 @@ class ShapeEnv:
                                    "[%s not subset of %s (size-oblivious conditions)]", a, tgt, msg, tgt_bound_so, src_bound_so)
                     return
 
-        if config.print_specializations and isinstance(tgt, (sympy.Integer, sympy.Float)):
-            # specializing to a constant, which is likely unexpected
+        if isinstance(tgt, (sympy.Integer, sympy.Float)):
+            # specializing to a constant, which is likely unexpected (unless
+            # you specified dynamic=True)
 
-            # NOTE(avik): It is possible that we try logging the same specialization multiple times, e.g.,
-            # when adding a to self.replacements, and again when simplifying an expression containing a.
-            # Thus to avoid duplication, checking whether a is in self.replacements isn't enough; if it is,
-            # it must not already map to `tgt`. Fortunately this check is cheap because `tgt` is a constant.
-            if a not in self.replacements or tgt != self.replacements[a]:
+            user_tb = TracingContext.extract_stack()
+            trace_structured(
+                "symbolic_shape_specialization",
+                metadata_fn=lambda: {
+                    "symbol": repr(a),
+                    "sources": [s.name() for s in self.var_to_sources[a]],
+                    "value": repr(tgt),
+                    "reason": msg,
+                    "stack": structured.from_traceback(CapturedTraceback.extract(skip=1).summary()),
+                    "user_stack": structured.from_traceback(user_tb) if user_tb else None,
+                }
+            )
+
+            if config.print_specializations:
                 self.log.warning("Specializing %s to %s", self.var_to_sources[a][0].name(), tgt)
                 self.log.debug("SPECIALIZATION", stack_info=True)
         log.info("set_replacement %s = %s (%s) %s", a, tgt, msg, tgt_bound)
@@ -4823,6 +4851,8 @@ class ShapeEnv:
                     assert static_expr == hint, f"{static_expr} != {hint}"
                 return static_expr
 
+            transmute_into_runtime_assert = False
+
             concrete_val = None
             if not (expr.free_symbols <= self.var_to_val.keys()):
                 # TODO: dedupe this with _maybe_evaluate_static
@@ -4843,6 +4873,15 @@ class ShapeEnv:
                         not (unsound_result := orig_expr.xreplace(self.unbacked_var_to_val)).free_symbols
                     ):
                         log.warning("propagate_real_tensors evaluate_expr(%s) -> %s", orig_expr, unsound_result)
+                        trace_structured(
+                            "propagate_real_tensors",
+                            metadata_fn=lambda: {
+                                "expr": repr(orig_expr),
+                                "result": repr(unsound_result),
+                                "stack": structured.from_traceback(CapturedTraceback.extract(skip=1).summary()),
+                            },
+                        )
+                        transmute_into_runtime_assert = True
                         concrete_val = unsound_result
                     else:
                         raise self._make_data_dependent_error(
@@ -4872,6 +4911,13 @@ class ShapeEnv:
                 g = sympy.Not(expr)
             else:
                 g = sympy.Eq(expr, concrete_val)  # type: ignore[arg-type]
+
+            if transmute_into_runtime_assert:
+                self.defer_runtime_assert(
+                    g,
+                    f"propagate_real_tensors: {orig_expr} == {unsound_result}"
+                )
+                return concrete_val
 
             if isinstance(g, sympy.Rel):
                 # TODO: If we successfully eliminate a symbol via equality, it
