@@ -168,12 +168,14 @@ static PyObject* THPModule_initExtension(
     PyObject* shm_manager_path) {
   HANDLE_TH_ERRORS
 #if !defined(FBCODE_CAFFE2)
-  if (torch::get_cpp_stacktraces_enabled() && !torch::get_disable_addr2line()) {
+  if (torch::get_cpp_stacktraces_enabled()) {
     c10::SetStackTraceFetcher([]() -> std::string {
       auto tb = torch::CapturedTraceback::gather(false, false, true);
-      LOG(WARNING)
-          << "symbolizing C++ stack trace for exception; if this hangs, rerun with TORCH_DISABLE_ADDR2LINE=1..."
-          << std::endl;
+      if (torch::get_symbolize_mode() == torch::unwind::Mode::addr2line) {
+        LOG(WARNING)
+            << "symbolizing C++ stack trace for exception; if this hangs, rerun with TORCH_DISABLE_ADDR2LINE=1..."
+            << std::endl;
+      }
       auto s_tbs = torch::symbolize({tb.get()});
       std::stringstream oss;
       oss << "C++ CapturedTraceback:" << std::endl;
@@ -2210,6 +2212,18 @@ Call this whenever a new thread is created in order to propagate values from
         return c10::impl::cow::is_cow_data_ptr(tensor.storage().data_ptr());
       },
       "Checks if a tensor's data pointer is COW");
+
+  py_module.def(
+      "_set_extra_conditional_view_warnings",
+      [](bool mode) {
+        c10::impl::cow::set_extra_conditional_view_warnings(mode);
+      },
+      "Enables extra warnings related to deprecation of conditional views.");
+
+  py_module.def(
+      "_get_extra_conditional_view_warnings",
+      []() { return c10::impl::cow::extra_conditional_view_warnings(); },
+      "Check if extra warnings related to deprecation of conditional views are enabled.");
 
   py_module.def(
       "_get_cudnn_batch_norm_reserve_space_size",

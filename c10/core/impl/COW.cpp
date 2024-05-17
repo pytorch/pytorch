@@ -130,6 +130,12 @@ c10::intrusive_ptr<StorageImpl> simulate_lazy_clone_storage(
   std::optional<DataPtr> new_data_ptr; // must be set below
 
   if (has_simple_data_ptr(storage)) {
+    if (extra_conditional_view_warnings()) {
+      TORCH_WARN(
+          "This operation creates a conditional view. This behavior is ",
+          "deprecated, and in the future it will unconditionally create a copy ",
+          "instead");
+    }
     // Case 1) We have a simple data pointer: wrap it.
     std::unique_ptr<void, DeleterFnPtr> original_ctx =
         storage._mutable_data_ptr_no_checks().move_context();
@@ -144,10 +150,11 @@ c10::intrusive_ptr<StorageImpl> simulate_lazy_clone_storage(
     storage.set_data_ptr_noswap(
         copy_data_ptr(*new_data_ptr, cow::cowsim_deleter));
   } else if (is_cowsim_data_ptr(data_ptr)) {
-    // Case 2): there is already a copy on write context. Just return a
+    // Case 2) there is already a cowsim context. Just return a
     // new storage impl.
     new_data_ptr = copy_data_ptr(data_ptr, cow::cowsim_deleter);
   } else if (is_cow_data_ptr(data_ptr)) {
+    // Case 3) Data pointer is COW, so we cannot wrap it with cowsim
     TORCH_CHECK(
         false,
         "You cannot create a simulated lazy clone of a genuine COW storage");

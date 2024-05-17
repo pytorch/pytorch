@@ -122,11 +122,16 @@ TEST(simulate_lazy_clone_test, basic) {
       cow::simulate_lazy_clone_storage(original_storage);
   ASSERT_THAT(new_storage.get(), testing::NotNull());
 
-  // The original storage was modified in-place to now hold a copy on
-  // write context.
+  // The original storage was modified in-place to now hold a cowsim context.
   ASSERT_THAT(original_storage, is_cowsim());
   ASSERT_THAT(original_storage, testing::Not(is_copy_on_write()));
   ASSERT_TRUE(!cow::has_simple_data_ptr(original_storage));
+
+  // The result is a different StorageImpl, also cowsim, and shares the same
+  // data
+  ASSERT_THAT(&*new_storage, testing::Ne(&original_storage));
+  ASSERT_THAT(*new_storage, is_cowsim());
+  ASSERT_THAT(new_storage->data(), testing::Eq(original_storage.data()));
 }
 
 struct MyDeleterContext {

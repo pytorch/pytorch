@@ -85,4 +85,9 @@ C10_API void cow_deleter(void* ctx);
 
 C10_API void cowsim_deleter(void* ctx);
 
+// Enables raising warnings upon conditional view creation and upon
+// the first write to a conditional view
+C10_API void set_extra_conditional_view_warnings(bool mode);
+C10_API bool extra_conditional_view_warnings();
+
 } // namespace c10::impl::cow

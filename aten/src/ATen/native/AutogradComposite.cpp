@@ -92,10 +92,14 @@ bool _has_same_storage_numel(const at::Tensor& base, const at::Tensor& other) {
   return base.storage().sym_nbytes() / base.itemsize() == other.storage().sym_nbytes() / other.itemsize();
 }
 
-Tensor _lazy_clone(Tensor const& self) {
+Tensor _lazy_clone_impl(Tensor const& self, bool simulate) {
   c10::StorageImpl* self_storage = self.storage().unsafeGetStorageImpl();
-  c10::intrusive_ptr<c10::StorageImpl> storage =
-    c10::impl::cow::lazy_clone_storage(*self_storage);
+  c10::intrusive_ptr<c10::StorageImpl> storage;
+  if (simulate) {
+    storage = c10::impl::cow::simulate_lazy_clone_storage(*self_storage);
+  } else {
+    storage = c10::impl::cow::lazy_clone_storage(*self_storage);
+  }
   TORCH_CHECK(storage != nullptr);
   auto tensor = c10::make_intrusive<c10::TensorImpl>(
       c10::Storage(std::move(storage)),
@@ -107,19 +111,12 @@ Tensor _lazy_clone(Tensor const& self) {
   return Tensor(std::move(tensor));
 }
 
+Tensor _lazy_clone(Tensor const& self) {
+  return _lazy_clone_impl(self, /*simulate=*/false);
+}
+
 Tensor _simulate_lazy_clone(Tensor const& self) {
-  c10::StorageImpl* self_storage = self.storage().unsafeGetStorageImpl();
-  c10::intrusive_ptr<c10::StorageImpl> storage =
-    c10::impl::cow::simulate_lazy_clone_storage(*self_storage);
-  TORCH_CHECK(storage != nullptr);
-  auto tensor = c10::make_intrusive<c10::TensorImpl>(
-      c10::Storage(std::move(storage)),
-      self.key_set(),
-      self.dtype());
-  tensor->set_sizes_and_strides(self.sym_sizes(),
-                                self.sym_strides(),
-                                self.sym_storage_offset());
-  return Tensor(std::move(tensor));
+  return _lazy_clone_impl(self, /*simulate=*/true);
 }
 
 } // namespace at::native

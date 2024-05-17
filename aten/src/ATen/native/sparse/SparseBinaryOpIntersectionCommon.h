@@ -275,8 +275,11 @@ void _sparse_binary_op_intersection_kernel_impl(
       KernelLauncher::launch(iter,
           // NOTE: capture by value required by CUDA
           [=] FUNCAPI (index_t nnz_idx) -> int64_t {
-          const auto* RESTRICT ptr_indices_dim = ptr_indices ? ptr_indices + nnz_idx * indices_nnz_stride : nullptr;
           int64_t hash = 0;
+          if (!ptr_indices) {
+            return hash;
+          }
+          const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
           for (int64_t dim = 0; dim < sparse_dim; ++dim) {
             const auto dim_hash_coeff = hash_coeffs[dim];
             const auto dim_index = ptr_indices_dim[dim * indices_dim_stride];
