@@ -400,7 +400,7 @@ class ListConfig:
         try:
             return ListConfig.ListIterator(self, resolve)
         except Exception:
-            raise AssertionError
+            raise AssertionError from None
 
     def __init__(self):
         self._content = [
