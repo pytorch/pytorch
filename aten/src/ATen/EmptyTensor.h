@@ -49,14 +49,14 @@ TORCH_API TensorBase empty_generic(
     c10::Allocator* allocator,
     c10::DispatchKeySet ks,
     ScalarType scalar_type,
-    c10::optional<c10::MemoryFormat> memory_format_opt);
+    std::optional<c10::MemoryFormat> memory_format_opt);
 
 TORCH_API TensorBase empty_generic_symint(
     SymIntArrayRef size,
     c10::Allocator* allocator,
     c10::DispatchKeySet ks,
     ScalarType scalar_type,
-    c10::optional<c10::MemoryFormat> memory_format_opt);
+    std::optional<c10::MemoryFormat> memory_format_opt);
 
 TORCH_API TensorBase empty_strided_generic(
     IntArrayRef size,
@@ -76,15 +76,15 @@ TORCH_API TensorBase empty_cpu(
     IntArrayRef size,
     ScalarType dtype,
     bool pin_memory = false,
-    c10::optional<c10::MemoryFormat> memory_format_opt = c10::nullopt);
+    std::optional<c10::MemoryFormat> memory_format_opt = c10::nullopt);
 
 TORCH_API TensorBase empty_cpu(
     IntArrayRef size,
-    c10::optional<ScalarType> dtype_opt,
-    c10::optional<Layout> layout_opt,
-    c10::optional<Device> device_opt,
-    c10::optional<bool> pin_memory_opt,
-    c10::optional<c10::MemoryFormat> memory_format_opt);
+    std::optional<ScalarType> dtype_opt,
+    std::optional<Layout> layout_opt,
+    std::optional<Device> device_opt,
+    std::optional<bool> pin_memory_opt,
+    std::optional<c10::MemoryFormat> memory_format_opt);
 
 TORCH_API TensorBase empty_cpu(IntArrayRef size, const TensorOptions& options);
 
@@ -97,10 +97,10 @@ TORCH_API TensorBase empty_strided_cpu(
 TORCH_API TensorBase empty_strided_cpu(
     IntArrayRef size,
     IntArrayRef stride,
-    c10::optional<ScalarType> dtype_opt,
-    c10::optional<Layout> layout_opt,
-    c10::optional<Device> device_opt,
-    c10::optional<bool> pin_memory_opt);
+    std::optional<ScalarType> dtype_opt,
+    std::optional<Layout> layout_opt,
+    std::optional<Device> device_opt,
+    std::optional<bool> pin_memory_opt);
 
 TORCH_API TensorBase empty_strided_cpu(
     IntArrayRef size,
@@ -110,23 +110,23 @@ TORCH_API TensorBase empty_strided_cpu(
 TORCH_API TensorBase empty_meta(
     IntArrayRef size,
     ScalarType dtype,
-    c10::optional<c10::MemoryFormat> memory_format_opt = c10::nullopt);
+    std::optional<c10::MemoryFormat> memory_format_opt = c10::nullopt);
 
 TORCH_API TensorBase empty_meta(
     IntArrayRef size,
-    c10::optional<ScalarType> dtype_opt,
-    c10::optional<Layout> layout_opt,
-    c10::optional<Device> device_opt,
-    c10::optional<bool> pin_memory_opt,
-    c10::optional<c10::MemoryFormat> memory_format_opt);
+    std::optional<ScalarType> dtype_opt,
+    std::optional<Layout> layout_opt,
+    std::optional<Device> device_opt,
+    std::optional<bool> pin_memory_opt,
+    std::optional<c10::MemoryFormat> memory_format_opt);
 
 TORCH_API TensorBase empty_symint_meta(
     SymIntArrayRef size,
-    c10::optional<ScalarType> dtype_opt,
-    c10::optional<Layout> layout_opt,
-    c10::optional<Device> device_opt,
-    c10::optional<bool> pin_memory_opt,
-    c10::optional<c10::MemoryFormat> memory_format_opt);
+    std::optional<ScalarType> dtype_opt,
+    std::optional<Layout> layout_opt,
+    std::optional<Device> device_opt,
+    std::optional<bool> pin_memory_opt,
+    std::optional<c10::MemoryFormat> memory_format_opt);
 
 TORCH_API TensorBase empty_meta(IntArrayRef size, const TensorOptions& options);
 
@@ -136,10 +136,10 @@ empty_strided_meta(IntArrayRef size, IntArrayRef stride, ScalarType dtype);
 TORCH_API TensorBase empty_strided_meta(
     IntArrayRef size,
     IntArrayRef stride,
-    c10::optional<ScalarType> dtype_opt,
-    c10::optional<Layout> layout_opt,
-    c10::optional<Device> device_opt,
-    c10::optional<bool> pin_memory_opt);
+    std::optional<ScalarType> dtype_opt,
+    std::optional<Layout> layout_opt,
+    std::optional<Device> device_opt,
+    std::optional<bool> pin_memory_opt);
 
 TORCH_API TensorBase empty_strided_meta(
     IntArrayRef size,
@@ -154,10 +154,10 @@ TORCH_API TensorBase empty_strided_symint_meta(
 TORCH_API TensorBase empty_strided_symint_meta(
     SymIntArrayRef size,
     SymIntArrayRef stride,
-    c10::optional<ScalarType> dtype_opt,
-    c10::optional<Layout> layout_opt,
-    c10::optional<Device> device_opt,
-    c10::optional<bool> pin_memory_opt);
+    std::optional<ScalarType> dtype_opt,
+    std::optional<Layout> layout_opt,
+    std::optional<Device> device_opt,
+    std::optional<bool> pin_memory_opt);
 
 TORCH_API TensorBase empty_strided_symint_meta(
     SymIntArrayRef size,

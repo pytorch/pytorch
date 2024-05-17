@@ -1019,7 +1019,8 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # Templates selected with input_gen_fns require specific input data to avoid IMA
         # Passing custom input gen fns to benchmark_fusion NYI, so skip deferred template selection
-        if input_gen_fns is not None:
+        # TODO(jgong5): support multi-template on CPU
+        if input_gen_fns is not None or layout.device.type == "cpu":
             return_multi_template = False
 
         # TODO - assert that we have not mutating kernels here
@@ -1499,7 +1500,7 @@ def autotune_select_algorithm(*args, **kwargs):
     if "return_multi_template" not in kwargs:
         kwargs[
             "return_multi_template"
-        ] = torch._inductor.config.benchmark_multi_templates
+        ] = torch._inductor.config.benchmark_epilogue_fusion
 
     return _ALGORITHM_SELECTOR_CACHE(*args, **kwargs)
 

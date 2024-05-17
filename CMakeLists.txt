@@ -277,8 +277,8 @@ if(NOT DEFINED USE_VULKAN)
 endif()
 
 option(USE_SLEEF_FOR_ARM_VEC256 "Use sleef for arm" OFF)
-option(USE_SOURCE_DEBUG_ON_MOBILE "Enable " ON)
-option(USE_LITE_INTERPRETER_PROFILER "Enable " ON)
+option(USE_SOURCE_DEBUG_ON_MOBILE "Enable" ON)
+option(USE_LITE_INTERPRETER_PROFILER "Enable" ON)
 option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference" OFF)
 option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
 # option USE_XNNPACK: try to enable xnnpack by default.
