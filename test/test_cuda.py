@@ -1801,7 +1801,7 @@ torch.cuda.synchronize()
     def test_autocast_custom_deprecated_warning(self):
         class MyMM(torch.autograd.Function):
             @staticmethod
-            @torch.cuda.amp.custom_fwd
+            @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
             def forward(ctx, x, y):
                 ctx.save_for_backward(x, y)
                 self.assertFalse(torch.is_autocast_enabled())
