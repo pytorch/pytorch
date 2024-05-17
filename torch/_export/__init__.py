@@ -149,7 +149,10 @@ def capture_pre_autograd_graph(
         kwargs = {}
 
     if export_api_rollout_check():
-        log.warning("Using torch.export._trace._export")
+        @lru_cache
+        def print_export_warning():
+            log.warning("Using torch.export._trace._export")
+        print_export_warning()
         module = torch.export._trace._export(f, args, kwargs, dynamic_shapes=dynamic_shapes, pre_dispatch=True).module()
     else:
         log_export_usage(event="export.private_api", flags={"capture_pre_autograd_graph"})
@@ -343,6 +346,7 @@ def aot_compile(
     options: Optional[Dict[str, Any]] = None,
     remove_runtime_assertions: bool = False,
     disable_constraint_solver: bool = False,
+    same_signature: bool = True,
 ) -> str:
     """
     Note: this function is not stable yet
@@ -393,6 +397,7 @@ def aot_compile(
             kwargs,
             dynamic_shapes,
             disable_constraint_solver=disable_constraint_solver,
+            same_signature=same_signature,
             # Disabling this flag, because instead we can rely on the mapping
             # dynamo_flat_name_to_original_fqn which is coming from Dynamo.
             restore_fqn=False,

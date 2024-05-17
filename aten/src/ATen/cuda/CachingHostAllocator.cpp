@@ -105,7 +105,7 @@ struct CUDACachingHostAllocatorImpl
   }
 
   void record_stream(
-      c10::optional<std::vector<EventPool::Event>>& events,
+      std::optional<std::vector<EventPool::Event>>& events,
       CUDAStream stream) override {
     auto event = create_event_internal(stream.device_index());
     event->record(stream);

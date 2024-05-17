@@ -30,7 +30,7 @@ void THCPGraph_init(PyObject* module) {
       .def(
           "capture_begin",
           [](::at::cuda::CUDAGraph& self,
-             c10::optional<c10::cuda::MempoolId_t> pool_opt,
+             std::optional<c10::cuda::MempoolId_t> pool_opt,
              std::string capture_error_mode) {
             cudaStreamCaptureMode capture_mode;
             c10::cuda::MempoolId_t pool = pool_opt.has_value()
