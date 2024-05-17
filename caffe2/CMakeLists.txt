@@ -786,6 +786,26 @@ set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS_NON_AVX} ${Caffe2_CPU_SRCS_AVX2} ${Caffe2_
 # END formerly-libtorch sources
 # ==========================================================
 
+if(BUILD_LIBTORCHLESS)
+  find_library(TORCH_LIB torch PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
+  find_library(TORCH_CPU_LIB torch_cpu PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
+
+  if(USE_CUDA)
+    find_library(TORCH_CUDA_LIB torch_cuda PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
+  endif()
+
+  if(USE_ROCM)
+    find_library(TORCH_HIP_LIB torch_hip PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
+  endif()
+
+  if(USE_XPU)
+    find_library(TORCH_XPU_LIB torch_xpu PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
+  endif()
+  add_subdirectory(../torch torch)
+
+endif()
+
+if(NOT BUILD_LIBTORCHLESS)
 add_library(torch_cpu ${Caffe2_CPU_SRCS})
 if(HAVE_SOVERSION)
   set_target_properties(torch_cpu PROPERTIES
@@ -1615,6 +1635,7 @@ endif()
 # ---[ XPU library.
 if(USE_XPU)
   target_link_libraries(torch_xpu INTERFACE torch::xpurt)
+
   target_link_libraries(torch_xpu PUBLIC c10_xpu)
 
   target_include_directories(
@@ -1643,41 +1664,6 @@ endif()
 
 target_link_libraries(torch_cpu PRIVATE flatbuffers)
 
-# Note [Global dependencies]
-# Some libraries (e.g. OpenMPI) like to dlopen plugins after they're initialized,
-# and they assume that all of their symbols will be available in the global namespace.
-# On the other hand we try to be good citizens and avoid polluting the symbol
-# namespaces, so libtorch is loaded with all its dependencies in a local scope.
-# That usually leads to missing symbol errors at run-time, so to avoid a situation like
-# this we have to preload those libs in a global namespace.
-if(BUILD_SHARED_LIBS)
-  add_library(torch_global_deps SHARED ${TORCH_SRC_DIR}/csrc/empty.c)
-  if(HAVE_SOVERSION)
-    set_target_properties(torch_global_deps PROPERTIES
-        VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
-  endif()
-  set_target_properties(torch_global_deps PROPERTIES LINKER_LANGUAGE C)
-  if(USE_MPI)
-    target_link_libraries(torch_global_deps MPI::MPI_CXX)
-  endif()
-  if(CAFFE2_USE_MKL)
-    target_link_libraries(torch_global_deps caffe2::mkl)
-  endif()
-  # The CUDA libraries are linked here for a different reason: in some
-  # cases we load these libraries with ctypes, and if they weren't opened
-  # with RTLD_GLOBAL, we'll do the "normal" search process again (and
-  # not find them, because they're usually in non-standard locations)
-  if(USE_CUDA)
-    target_link_libraries(torch_global_deps ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
-    target_link_libraries(torch_global_deps torch::cudart torch::nvtoolsext)
-  endif()
-  if(USE_TBB)
-    target_link_libraries(torch_global_deps TBB::tbb)
-  endif()
-
-  install(TARGETS torch_global_deps DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-endif()
-
 # ---[ Caffe2 HIP sources.
 if(USE_ROCM)
   # Call again since Caffe2_HIP_INCLUDE is extended with ATen include dirs.
@@ -1694,6 +1680,7 @@ if(USE_ROCM)
 
   # Since PyTorch files contain HIP headers, these flags are required for the necessary definitions to be added.
   target_compile_options(torch_hip PUBLIC ${HIP_CXX_FLAGS})  # experiment
+
   target_link_libraries(torch_hip PUBLIC c10_hip)
 
   if(NOT INTERN_BUILD_MOBILE)
@@ -1914,12 +1901,48 @@ if(MSVC)
     set_source_files_properties(${tmp_path} PROPERTIES COMPILE_FLAGS "-Xcompiler /Zc:lambda")
   endforeach()
 endif()
+endif()
 
 # Note: we only install the caffe2 python files if BUILD_CAFFE2_OPS is ON
 # This is because the build rules here written in such a way that they always
 # appear to need to be re-run generating >600 pieces of work during the pytorch
 # rebuild step. The long-term fix should be to clean up these rules so they
 # only rerun when needed.
+
+# Note [Global dependencies]
+# Some libraries (e.g. OpenMPI) like to dlopen plugins after they're initialized,
+# and they assume that all of their symbols will be available in the global namespace.
+# On the other hand we try to be good citizens and avoid polluting the symbol
+# namespaces, so libtorch is loaded with all its dependencies in a local scope.
+# That usually leads to missing symbol errors at run-time, so to avoid a situation like
+# this we have to preload those libs in a global namespace.
+if(BUILD_SHARED_LIBS)
+  add_library(torch_global_deps SHARED ${TORCH_SRC_DIR}/csrc/empty.c)
+  if(HAVE_SOVERSION)
+    set_target_properties(torch_global_deps PROPERTIES
+        VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+  endif()
+  set_target_properties(torch_global_deps PROPERTIES LINKER_LANGUAGE C)
+  if(USE_MPI)
+    target_link_libraries(torch_global_deps MPI::MPI_CXX)
+  endif()
+  if(CAFFE2_USE_MKL)
+    target_link_libraries(torch_global_deps caffe2::mkl)
+  endif()
+  # The CUDA libraries are linked here for a different reason: in some
+  # cases we load these libraries with ctypes, and if they weren't opened
+  # with RTLD_GLOBAL, we'll do the "normal" search process again (and
+  # not find them, because they're usually in non-standard locations)
+  if(USE_CUDA)
+    target_link_libraries(torch_global_deps ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+    target_link_libraries(torch_global_deps torch::cudart torch::nvtoolsext)
+  endif()
+  if(USE_TBB)
+    target_link_libraries(torch_global_deps TBB::tbb)
+  endif()
+
+  install(TARGETS torch_global_deps DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+endif()
 
 if(BUILD_PYTHON)
   # Python site-packages
