@@ -7,11 +7,7 @@ import torch
 from torch.types import _dtype
 
 
-__all__ = [
-    "autocast_decorator",
-    "autocast",
-    "is_autocast_available",
-]
+__all__ = ["autocast_decorator", "autocast", "is_autocast_available"]
 
 
 def is_autocast_available(device_type: str) -> bool:

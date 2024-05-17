@@ -12,7 +12,6 @@ except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
 from typing import Any
 
-
 __all__ = ["autocast", "custom_fwd", "custom_bwd"]
 
 
@@ -95,14 +94,17 @@ def _cast(value, dtype):
 def custom_fwd(fwd=None, *, cast_inputs=None):
     """
     Create a helper decorator for ``forward`` methods of custom autograd functions.
+
     Autograd functions are subclasses of :class:`torch.autograd.Function`.
     See the :ref:`example page<amp-custom-examples>` for more detail.
+
     Args:
         cast_inputs (:class:`torch.dtype` or None, optional, default=None):  If not ``None``,
             when ``forward`` runs in an autocast-enabled region, casts incoming
             floating-point CUDA Tensors to the target dtype (non-floating-point Tensors are not affected),
             then executes ``forward`` with autocast disabled.
             If ``None``, ``forward``'s internal ops execute with the current autocast state.
+
     .. note::
         If the decorated ``forward`` is called outside an autocast-enabled region,
         :func:`custom_fwd<custom_fwd>` is a no-op and ``cast_inputs`` has no effect.
@@ -125,10 +127,6 @@ def custom_fwd(fwd=None, *, cast_inputs=None):
             else:
                 return fwd(*args, **kwargs)
 
-    return functools.partial(torch.amp.custom_fwd, device_type="cuda")(
-        fwd=fwd, cast_inputs=cast_inputs
-    )
-
     return decorate_fwd
 
 
@@ -137,6 +135,7 @@ def custom_fwd(fwd=None, *, cast_inputs=None):
 # cast_inputs supplied to custom_fwd.
 def custom_bwd(bwd):
     """Create a helper decorator for backward methods of custom autograd functions.
+
     Autograd functions are subclasses of :class:`torch.autograd.Function`.
     Ensures that ``backward`` executes with the same autocast state as ``forward``.
     See the :ref:`example page<amp-custom-examples>` for more detail.
