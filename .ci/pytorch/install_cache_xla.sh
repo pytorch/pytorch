@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # Script for installing sccache on the xla build job, which uses xla's docker
-# image and doesn't have sccache installed on`it.  This is mostly copied from
+# image and doesn't have sccache installed on it.  This is mostly copied from
 # .ci/docker/install_cache.sh.  Changes are: removing checks that will always
 # return the same thing, ex checks for for rocm, CUDA, and changing the path
-# where sccache is installed.
+# where sccache is installed, and not changing /etc/environment.
 
 set -ex
 
@@ -15,7 +15,6 @@ install_binary() {
 
 mkdir -p /tmp/cache/bin
 mkdir -p /tmp/cache/lib
-# sed -e 's|PATH="\(.*\)"|PATH="/tmp/cache/bin:\1"|g' -i /etc/environment
 export PATH="/tmp/cache/bin:$PATH"
 
 install_binary
