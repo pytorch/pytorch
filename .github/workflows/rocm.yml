@@ -1,0 +1,57 @@
+name: rocm
+
+on:
+  push:
+    branches:
+      - main
+      - release/*
+    tags:
+      - ciflow/rocm/*
+  workflow_dispatch:
+  schedule:
+    - cron: 29 8 * * *  # about 1:29am PDT
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  target-determination:
+    name: before-test
+    uses: ./.github/workflows/target_determination.yml
+    permissions:
+      id-token: write
+      contents: read
+
+  linux-focal-rocm6_1-py3_8-build:
+    name: linux-focal-rocm6.1-py3.8
+    uses: ./.github/workflows/_linux-build-label.yml
+    with:
+      build-environment: linux-focal-rocm6.1-py3.8
+      docker-image-name: pytorch-linux-focal-rocm-n-py3
+      sync-tag: rocm-build
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 6, runner: "linux.rocm.gpu.2" },
+          { config: "default", shard: 2, num_shards: 6, runner: "linux.rocm.gpu.2" },
+          { config: "default", shard: 3, num_shards: 6, runner: "linux.rocm.gpu.2" },
+          { config: "default", shard: 4, num_shards: 6, runner: "linux.rocm.gpu.2" },
+          { config: "default", shard: 5, num_shards: 6, runner: "linux.rocm.gpu.2" },
+          { config: "default", shard: 6, num_shards: 6, runner: "linux.rocm.gpu.2" },
+        ]}
+
+  linux-focal-rocm6_1-py3_8-test:
+    permissions:
+      id-token: write
+      contents: read
+    name: linux-focal-rocm6.1-py3.8
+    uses: ./.github/workflows/_rocm-test.yml
+    needs:
+      - linux-focal-rocm6_1-py3_8-build
+      - target-determination
+    with:
+      build-environment: linux-focal-rocm6.1-py3.8
+      docker-image: ${{ needs.linux-focal-rocm6_1-py3_8-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-rocm6_1-py3_8-build.outputs.test-matrix }}

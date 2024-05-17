@@ -1,0 +1,9 @@
+(def
+  (ident fn)
+  (decl (list) (option))
+  (list
+    (raise
+      (apply
+        (variable (ident Exception))
+        (list (string_literal hello))
+        (list)))))
