@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Copy.h>
+#include <ATen/native/Copy.h>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
@@ -25,8 +26,12 @@
 #include <ATen/ops/_copy_from.h>
 #include <ATen/ops/_propagate_xla_data.h>
 #include <ATen/ops/_propagate_xla_data_native.h>
+#include <ATen/ops/copy.h>
 #include <ATen/ops/copy_native.h>
+#include <ATen/ops/_foreach_copy.h>
+#include <ATen/ops/_foreach_copy_native.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/empty_strided.h>
 #include <ATen/ops/expand_copy.h>
 #endif
 
@@ -303,13 +308,43 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   return self;
 }
 
-Tensor copy(const Tensor& self, const Tensor& src, bool non_blocking) {
-  // copy() is the "functional" form of copy_(). It exists so we can properly functionalize copy_(), but:
-  // (1) It isn't exposed to the frontend (no python bindings)
-  // (2) It isn't exposed to the backend (it's a composite, that decomposes into to() and expand_as() calls.
+Tensor copy_meta(const Tensor& self, const Tensor& src, bool non_blocking) {
+  // Must directly use self(), so we can dispatch properly is self is a subclass
   auto r = clone_preserve_strides(self);
   r.copy_(src, non_blocking);
   return r;
+}
+
+Tensor copy(const Tensor& self, const Tensor& src, bool non_blocking) {
+  at::Tensor r;
+  // copy() is the "functional" form of copy_(). It exists so we can properly functionalize copy_(), but:
+  // (1) It isn't exposed to the frontend (no python bindings)
+  // (2) It isn't exposed to the backend (it's a composite, that decomposes into to() and expand_as() calls.
+  auto self_storage = self.unsafeGetTensorImpl()->unsafe_storage().unsafeGetStorageImpl();
+  // If self has no real storage, we can't actually clone it.
+  // Instead, generate an empty tensor with the right sizes/strides, since we should be able to assume
+  // that copy_() will fully overwrite all data with that of src
+  if (self_storage->nbytes() == 0) {
+    r = at::empty_strided(self.sizes(), self.strides());
+  } else {
+    r = clone_preserve_strides(self);
+  }
+  r.copy_(src, non_blocking);
+  return r;
+}
+
+::std::vector<at::Tensor> _foreach_copy(at::TensorList self, at::TensorList src, bool non_blocking) {
+  std::vector<at::Tensor> outs;
+  outs.reserve(self.size());
+  // This is a very slow implementation, but needs to directly call the copy() kernel above to handle
+  // when self has zero storage.
+  // This kernel should never really be run, except with debugging using compile(backend="aot_eager")
+  for (const auto i : c10::irange(src.size())) {
+    auto curr_src = src[i];
+    auto curr_self = self[i];
+    outs.push_back(at::copy(curr_self, curr_src, non_blocking));
+  }
+  return outs;
 }
 
 Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {

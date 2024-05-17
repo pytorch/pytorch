@@ -1413,6 +1413,15 @@ def tensor_split_tensor_indices_or_sections_py_impl(
         return self.tensor_split(sections, dim)
     else:
         indices = [i.item() for i in tensor_indices_or_sections]
+        # WARNING: Tempted to torch._check_is_size on the indices here?  You
+        # can't: tensor_split works with negative values in indices:
+        #
+        # >>> torch.tensor_split(torch.randn(10), torch.tensor([-5, 5]))
+        # (tensor([ 0.3540,  2.1074, -0.8507,  1.1639,  0.3055]), tensor([]),
+        # tensor([-0.4285,  1.0692, -0.1776,  0.9362,  1.6143]))
+        #
+        # Sorry, I don't make the rules.  Explicitly do the item call in user
+        # code if you KNOW that they are non-negative.
         return self.tensor_split(indices, dim)
 
 

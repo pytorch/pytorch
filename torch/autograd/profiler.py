@@ -241,21 +241,22 @@ class profile:
                 use_kineto
             ), "Device-only events supported only with Kineto (use_kineto=True)"
 
-        VALID_DEVICE_OPTIONS = ["cuda", "xpu"]
-        if _get_privateuse1_backend_name() != "privateuseone":
-            VALID_DEVICE_OPTIONS.append(_get_privateuse1_backend_name())
-        if self.use_device not in VALID_DEVICE_OPTIONS:
-            warn(f"The {self.use_device} is not a valid device option.")
-            self.use_device = None
+        if self.use_device is not None:
+            VALID_DEVICE_OPTIONS = ["cuda", "xpu"]
+            if _get_privateuse1_backend_name() != "privateuseone":
+                VALID_DEVICE_OPTIONS.append(_get_privateuse1_backend_name())
+            if self.use_device not in VALID_DEVICE_OPTIONS:
+                warn(f"The {self.use_device} is not a valid device option.")
+                self.use_device = None
 
-        if self.use_device == "cuda" and not torch.cuda.is_available():
-            warn("CUDA is not available, disabling CUDA profiling")
-            self.use_cuda = False
-            self.use_device = None
+            if self.use_device == "cuda" and not torch.cuda.is_available():
+                warn("CUDA is not available, disabling CUDA profiling")
+                self.use_cuda = False
+                self.use_device = None
 
-        if self.use_device == "xpu" and not torch.xpu.is_available():
-            warn("XPU is not available, disabling XPU profiling")
-            self.use_device = None
+            if self.use_device == "xpu" and not torch.xpu.is_available():
+                warn("XPU is not available, disabling XPU profiling")
+                self.use_device = None
 
         self.kineto_activities = set()
         if self.use_cpu:
@@ -335,7 +336,15 @@ class profile:
             if hasattr(device_module, "synchronize"):
                 device_module.synchronize()
 
+        old_function_events: Optional[EventList] = None
+        if self.function_events:
+            old_function_events = self.function_events
+
         t0 = perf_counter_ns()
+
+        # TODO we are overwriting previous kineto results here
+        # Should combine previous results with the new results otherwise only
+        # the last "repeat" will be recorded in the trace
         self.kineto_results = _disable_profiler()
         t1 = perf_counter_ns()
         self._stats.profiler_disable_call_duration_us = int((t1 - t0) / 1000)
@@ -362,6 +371,9 @@ class profile:
         self._stats.profiling_window_duration_sec = (
             (self.profiling_end_time_ns - self.profiling_start_time_ns) * 1.0 / 1e9
         )
+        if old_function_events:
+            for evt in old_function_events:
+                self.function_events.append(evt)
         return False
 
     def __repr__(self):
@@ -403,6 +415,10 @@ class profile:
     table.__doc__ = EventList.table.__doc__
 
     def export_chrome_trace(self, path):
+        """
+        Exports the collected trace in Chrome JSON format. If kineto is enabled, only
+        last cycle in schedule is exported.
+        """
         self._check_finish()
         if kineto_available():
             self.kineto_results.save(path)  # type: ignore[union-attr]

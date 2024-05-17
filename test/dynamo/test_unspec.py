@@ -522,6 +522,17 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
         print(f(torch.randn(10, requires_grad=True), torch.tensor([7, 3])))
 
+    def test_bool_tensor_ctor(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, dynamic=True, fullgraph=True)
+        def f(x):
+            y = torch.empty((x.size(0) // 13) * 13)
+            return torch.tensor(y.numel() == 0)
+
+        self.assertTrue(f(torch.empty(8)).item())
+        self.assertFalse(f(torch.empty(13)).item())
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

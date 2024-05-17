@@ -427,7 +427,12 @@ def _multi_tensor_sgd(
                 device_grads = bufs
 
         if not device_has_sparse_grad:
-            torch._foreach_add_(device_params, device_grads, alpha=-lr)
+            # handle internal item() call if lr is a tensor
+            if isinstance(lr, torch.Tensor) and torch._utils.is_compiling():
+                grads_x_lr = torch._foreach_mul(device_grads, -lr)
+                torch._foreach_add_(device_params, grads_x_lr)
+            else:
+                torch._foreach_add_(device_params, device_grads, alpha=-lr)
         else:
             # foreach APIs don't support sparse
             for i in range(len(device_params)):

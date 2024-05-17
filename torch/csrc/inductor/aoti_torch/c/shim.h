@@ -40,7 +40,12 @@
 #define AOTI_TORCH_EXPORT __attribute__((__visibility__("default")))
 #else // !__GNUC__
 #ifdef _WIN32
-#define AOTI_TORCH_EXPORT __declspec(dllexport)
+// PyTorch2 doesn't currently work on Windows. Exporting these APIs can lead
+// to symbol clashes at link time if libtorch is included in a DLL and binary
+// that depends on the DLL. As a short term fix, we don't export the symbols.
+// In the long term, this will need to be addressed when Windows is supported.
+// #define AOTI_TORCH_EXPORT __declspec(dllexport)
+#define AOTI_TORCH_EXPORT
 #else // !_WIN32
 #define AOTI_TORCH_EXPORT
 #endif // _WIN32

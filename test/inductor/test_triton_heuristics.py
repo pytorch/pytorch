@@ -4,9 +4,10 @@ import sys
 import unittest
 
 import torch
+from torch.testing._internal.common_device_type import expectedFailureXPU
 
 from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 try:
     import triton  # noqa: F401
@@ -22,6 +23,8 @@ from torch._inductor.test_case import run_tests, TestCase
 
 
 class TestTritonHeuristics(TestCase):
+    device_type = GPU_TYPE
+
     def test_triton_config(self):
         """
         Make sure block size does not exceed the maximum defined in inductor config.
@@ -54,9 +57,9 @@ class TestTritonHeuristics(TestCase):
         s1 = 512
 
         args = [
-            torch.rand([2, 4], device="cuda"),
-            torch.rand([2], device="cuda"),
-            torch.rand([s0, s1], device="cuda"),
+            torch.rand([2, 4], device=GPU_TYPE),
+            torch.rand([2], device=GPU_TYPE),
+            torch.rand([s0, s1], device=GPU_TYPE),
         ]
         torch._dynamo.mark_dynamic(args[-1], 0)
         foo_c = torch.compile(forward)
@@ -64,17 +67,18 @@ class TestTritonHeuristics(TestCase):
         self.assertEqual(forward(*args), foo_c(*args))
 
         args = [
-            torch.rand([2, 4], device="cuda"),
-            torch.rand([2], device="cuda"),
-            torch.rand([s0, s1], device="cuda"),
+            torch.rand([2, 4], device=GPU_TYPE),
+            torch.rand([2], device=GPU_TYPE),
+            torch.rand([s0, s1], device=GPU_TYPE),
         ]
         self.assertEqual(forward(*args), foo_c(*args))
 
     @unittest.skip("https://github.com/pytorch/pytorch/issues/123210")
+    @expectedFailureXPU
     def test_artificial_zgrid(self):
         self._test_artificial_zgrid()
 
-    @unittest.skip("https://github.com/pytorch/pytorch/issues/123210")
+    @expectedFailureXPU
     @config.patch("cpp_wrapper", True)
     def test_artificial_grid_cpp_wrapper(self):
         self._test_artificial_zgrid()

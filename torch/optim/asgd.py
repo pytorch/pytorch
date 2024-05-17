@@ -7,6 +7,7 @@ from .optimizer import (
     _capturable_doc,
     _default_to_fused_or_foreach,
     _differentiable_doc,
+    _disable_dynamo_if_unsupported,
     _foreach_doc,
     _get_scalar_dtype,
     _get_value,
@@ -98,8 +99,12 @@ class ASGD(Optimizer):
                     state["step"] = torch.zeros(
                         (), device=p.device, dtype=_get_scalar_dtype()
                     )
-                    state["eta"] = torch.tensor(
-                        group["lr"], device=p.device, dtype=_get_scalar_dtype()
+                    state["eta"] = (
+                        torch.as_tensor(
+                            group["lr"], device=p.device, dtype=_get_scalar_dtype()
+                        )
+                        .clone()
+                        .detach()
                     )
                     state["mu"] = torch.ones(
                         (), device=p.device, dtype=_get_scalar_dtype()
@@ -185,63 +190,6 @@ ASGD.__doc__ = rf"""Implements Averaged Stochastic Gradient Descent.
         https://dl.acm.org/citation.cfm?id=131098
 
     """
-
-
-def asgd(
-    params: List[Tensor],
-    grads: List[Tensor],
-    axs: List[Tensor],
-    mus: List[Tensor],
-    etas: List[Tensor],
-    state_steps: List[Tensor],
-    # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
-    # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    foreach: Optional[bool] = None,
-    maximize: bool = False,
-    differentiable: bool = False,
-    capturable: bool = False,
-    has_complex: bool = False,
-    *,
-    lambd: float,
-    lr: float,
-    t0: float,
-    alpha: float,
-    weight_decay: float,
-):
-    r"""Functional API that performs asgd algorithm computation.
-
-    See :class:`~torch.optim.ASGD` for details.
-    """
-    if foreach is None:
-        _, foreach = _default_to_fused_or_foreach(
-            params, differentiable, use_fused=False
-        )
-
-    if foreach and torch.jit.is_scripting():
-        raise RuntimeError("torch.jit.script not supported with foreach optimizers")
-
-    if foreach and not torch.jit.is_scripting():
-        func = _multi_tensor_asgd
-    else:
-        func = _single_tensor_asgd
-
-    func(
-        params,
-        grads,
-        axs,
-        mus,
-        etas,
-        state_steps,
-        lambd=lambd,
-        lr=lr,
-        t0=t0,
-        alpha=alpha,
-        weight_decay=weight_decay,
-        maximize=maximize,
-        differentiable=differentiable,
-        capturable=capturable,
-        has_complex=has_complex,
-    )
 
 
 def _single_tensor_asgd(
@@ -441,3 +389,61 @@ def _multi_tensor_asgd(
 
             torch._foreach_copy_(grouped_etas, new_etas)
             torch._foreach_copy_(grouped_mus, new_mus)
+
+
+@_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_asgd)
+def asgd(
+    params: List[Tensor],
+    grads: List[Tensor],
+    axs: List[Tensor],
+    mus: List[Tensor],
+    etas: List[Tensor],
+    state_steps: List[Tensor],
+    # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
+    # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
+    foreach: Optional[bool] = None,
+    maximize: bool = False,
+    differentiable: bool = False,
+    capturable: bool = False,
+    has_complex: bool = False,
+    *,
+    lambd: float,
+    lr: float,
+    t0: float,
+    alpha: float,
+    weight_decay: float,
+):
+    r"""Functional API that performs asgd algorithm computation.
+
+    See :class:`~torch.optim.ASGD` for details.
+    """
+    if foreach is None:
+        _, foreach = _default_to_fused_or_foreach(
+            params, differentiable, use_fused=False
+        )
+
+    if foreach and torch.jit.is_scripting():
+        raise RuntimeError("torch.jit.script not supported with foreach optimizers")
+
+    if foreach and not torch.jit.is_scripting():
+        func = _multi_tensor_asgd
+    else:
+        func = _single_tensor_asgd
+
+    func(
+        params,
+        grads,
+        axs,
+        mus,
+        etas,
+        state_steps,
+        lambd=lambd,
+        lr=lr,
+        t0=t0,
+        alpha=alpha,
+        weight_decay=weight_decay,
+        maximize=maximize,
+        differentiable=differentiable,
+        capturable=capturable,
+        has_complex=has_complex,
+    )

@@ -185,9 +185,21 @@ def save_package(
     *,
     so_path: Optional[str] = None,
     exported_program: Optional[ExportedProgram] = None,
-):
+) -> str:
+    """
+    Saves the AOTInductor generated files and the exported program to the PT2Archive
+    format.
+
+    Args:
+        so_path: The path to AOTInductor's generated .so. We assume that the
+        other AOTInductor generated files are in the same directory.
+
+        exported_program: Exported program
+
+    Returns:
+        The path to the archive.
+    """
     work_dir = config.aot_inductor.output_path or pathlib.Path(so_path).parent
-    print(work_dir)
     archive_path = os.path.join(work_dir, f"{ARCHIVE_ROOT_NAME}.zip")
 
     with PT2ArchiveWriter(archive_path) as archive_writer:
@@ -199,7 +211,7 @@ def save_package(
     return archive_path
 
 
-def load_package(path: str, device: str):
+def load_package(path: str, device: str) -> Callable:
     with PT2ArchiveReader(path) as archive_reader:
         optimized = _extract_so(archive_reader, device)
 

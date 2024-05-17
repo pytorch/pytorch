@@ -2,7 +2,7 @@
 
 import os
 import time
-from typing import List, Optional, Union, TYPE_CHECKING
+from typing import List, Optional, TYPE_CHECKING, Union
 
 import torch
 
@@ -258,23 +258,6 @@ class SummaryWriter:
             v *= 1.1
         self.default_bins = neg_buckets[::-1] + [0] + buckets
 
-    def _check_caffe2_blob(self, item):
-        """
-        Check if the input is a string representing a Caffe2 blob name.
-
-        Caffe2 users have the option of passing a string representing the name of a blob
-        in the workspace instead of passing the actual Tensor/array containing the numeric values.
-        Thus, we need to check if we received a string as input
-        instead of an actual Tensor/array, and if so, we need to fetch the Blob
-        from the workspace corresponding to that name. Fetching can be done with the
-        following:
-
-        from caffe2.python import workspace (if not already imported)
-        workspace.FetchBlob(blob_name)
-        workspace.FetchBlobs([blob_name1, blob_name2, ...])
-        """
-        return isinstance(item, str)
-
     def _get_file_writer(self):
         """Return the default FileWriter instance. Recreates it if closed."""
         if self.all_writers is None or self.file_writer is None:
@@ -301,7 +284,12 @@ class SummaryWriter:
         return self.log_dir
 
     def add_hparams(
-        self, hparam_dict, metric_dict, hparam_domain_discrete=None, run_name=None, global_step=None
+        self,
+        hparam_dict,
+        metric_dict,
+        hparam_domain_discrete=None,
+        run_name=None,
+        global_step=None,
     ):
         """Add a set of hyperparameters to be compared in TensorBoard.
 
@@ -385,10 +373,6 @@ class SummaryWriter:
 
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_scalar")
-        if self._check_caffe2_blob(scalar_value):
-            from caffe2.python import workspace
-
-            scalar_value = workspace.FetchBlob(scalar_value)
 
         summary = scalar(
             tag, scalar_value, new_style=new_style, double_precision=double_precision
@@ -437,10 +421,6 @@ class SummaryWriter:
                     fw_tag, self.max_queue, self.flush_secs, self.filename_suffix
                 )
                 self.all_writers[fw_tag] = fw
-            if self._check_caffe2_blob(scalar_value):
-                from caffe2.python import workspace
-
-                scalar_value = workspace.FetchBlob(scalar_value)
             fw.add_summary(scalar(main_tag, scalar_value), global_step, walltime)
 
     def add_tensor(
@@ -471,10 +451,6 @@ class SummaryWriter:
 
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_tensor")
-        if self._check_caffe2_blob(tensor):
-            from caffe2.python import workspace
-
-            tensor = torch.tensor(workspace.FetchBlob(tensor))
 
         summary = tensor_proto(tag, tensor)
         self._get_file_writer().add_summary(summary, global_step, walltime)
@@ -516,10 +492,6 @@ class SummaryWriter:
 
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_histogram")
-        if self._check_caffe2_blob(values):
-            from caffe2.python import workspace
-
-            values = workspace.FetchBlob(values)
         if isinstance(bins, str) and bins == "tensorflow":
             bins = self.default_bins
         self._get_file_writer().add_summary(
@@ -648,10 +620,6 @@ class SummaryWriter:
 
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_image")
-        if self._check_caffe2_blob(img_tensor):
-            from caffe2.python import workspace
-
-            img_tensor = workspace.FetchBlob(img_tensor)
         self._get_file_writer().add_summary(
             image(tag, img_tensor, dataformats=dataformats), global_step, walltime
         )
@@ -696,10 +664,6 @@ class SummaryWriter:
 
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_images")
-        if self._check_caffe2_blob(img_tensor):
-            from caffe2.python import workspace
-
-            img_tensor = workspace.FetchBlob(img_tensor)
         self._get_file_writer().add_summary(
             image(tag, img_tensor, dataformats=dataformats), global_step, walltime
         )
@@ -737,14 +701,6 @@ class SummaryWriter:
             boxes and each 4 elements in a row represents (xmin, ymin, xmax, ymax).
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_image_with_boxes")
-        if self._check_caffe2_blob(img_tensor):
-            from caffe2.python import workspace
-
-            img_tensor = workspace.FetchBlob(img_tensor)
-        if self._check_caffe2_blob(box_tensor):
-            from caffe2.python import workspace
-
-            box_tensor = workspace.FetchBlob(box_tensor)
         if labels is not None:
             if isinstance(labels, str):
                 labels = [labels]
@@ -769,7 +725,7 @@ class SummaryWriter:
         figure: Union["Figure", List["Figure"]],
         global_step: Optional[int] = None,
         close: bool = True,
-        walltime: Optional[float] = None
+        walltime: Optional[float] = None,
     ) -> None:
         """Render matplotlib figure into an image and add it to summary.
 
@@ -837,10 +793,6 @@ class SummaryWriter:
             snd_tensor: :math:`(1, L)`. The values should lie between [-1, 1].
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_audio")
-        if self._check_caffe2_blob(snd_tensor):
-            from caffe2.python import workspace
-
-            snd_tensor = workspace.FetchBlob(snd_tensor)
         self._get_file_writer().add_summary(
             audio(tag, snd_tensor, sample_rate=sample_rate), global_step, walltime
         )
@@ -883,32 +835,10 @@ class SummaryWriter:
                 record your mutable container types (list, dict)
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_graph")
-        if hasattr(model, "forward"):
-            # A valid PyTorch model should have a 'forward' method
-            self._get_file_writer().add_graph(
-                graph(model, input_to_model, verbose, use_strict_trace)
-            )
-        else:
-            # Caffe2 models do not have the 'forward' method
-            from caffe2.proto import caffe2_pb2
-            from caffe2.python import core
-
-            from ._caffe2_graph import (
-                model_to_graph_def,
-                nets_to_graph_def,
-                protos_to_graph_def,
-            )
-
-            if isinstance(model, list):
-                if isinstance(model[0], core.Net):
-                    current_graph = nets_to_graph_def(model)
-                elif isinstance(model[0], caffe2_pb2.NetDef):
-                    current_graph = protos_to_graph_def(model)
-            else:
-                # Handles cnn.CNNModelHelper, model_helper.ModelHelper
-                current_graph = model_to_graph_def(model)
-            event = event_pb2.Event(graph_def=current_graph.SerializeToString())  # type: ignore[possibly-undefined]
-            self._get_file_writer().add_event(event)
+        # A valid PyTorch model should have a 'forward' method
+        self._get_file_writer().add_graph(
+            graph(model, input_to_model, verbose, use_strict_trace)
+        )
 
     @staticmethod
     def _encode(rawstr):
@@ -916,7 +846,7 @@ class SummaryWriter:
         retval = rawstr
         retval = retval.replace("%", f"%{ord('%'):02x}")
         retval = retval.replace("/", f"%{ord('/'):02x}")
-        retval = retval.replace("\\", "%%%02x" % (ord("\\")))
+        retval = retval.replace("\\", "%%%02x" % (ord("\\")))  # noqa: UP031
         return retval
 
     def add_embedding(
@@ -986,7 +916,7 @@ class SummaryWriter:
                     "warning: Embedding dir exists, did you set global_step for add_embedding()?"
                 )
             else:
-                raise Exception(  # noqa: TRY002
+                raise FileExistsError(
                     f"Path: `{save_path}` exists, but is a file. Cannot proceed."
                 )
         else:

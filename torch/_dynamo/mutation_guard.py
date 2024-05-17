@@ -83,6 +83,12 @@ class GenerationTracker:
             and cls.generation_values[obj] == cls.generation
         )
 
+    @classmethod
+    def clear(cls):
+        cls.generation = 0
+        cls.dynamic_classes = ExactWeakKeyDictionary()
+        cls.generation_values = ExactWeakKeyDictionary()
+
 
 def is_dynamic_nn_module(obj, is_export):
     """Check for nn.Modules() created dynamically or mutated"""

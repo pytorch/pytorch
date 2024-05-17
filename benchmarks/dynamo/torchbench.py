@@ -206,6 +206,12 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     def skip_models_due_to_control_flow(self):
         return self._skip["control_flow"]
 
+    @property
+    def guard_on_nn_module_models(self):
+        return {
+            "vision_maskrcnn",
+        }
+
     def load_model(
         self,
         device,
@@ -402,7 +408,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             if name in self._tolerance["higher_bf16"]:
                 return 1e-2, cosine
 
-        if is_training and current_device == "cuda":
+        if is_training and (current_device == "cuda" or current_device == "xpu"):
             tolerance = 1e-3
             if name in self._tolerance["cosine"]:
                 cosine = True

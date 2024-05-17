@@ -1446,7 +1446,7 @@ def _setup_trace_module_map(
                 raise RuntimeError(
                     "Only type of the `nn.Module` should be "
                     "passed in the set for argument `export_modules_as_functions`. "
-                    "Got `%s`." % (type(v).__name__)
+                    f"Got `{type(v).__name__}`."
                 )
 
         module_typenames = {_find_typename(v) for v in export_modules_as_functions}
@@ -1771,6 +1771,7 @@ def _run_symbolic_method(g, op_name, symbolic_fn, args):
             original_node=None,  # type: ignore[arg-type]
             params_dict=_params_dict,
             env={},
+            values_in_env=set(),
             new_nodes=[],
         )
         return symbolic_fn(graph_context, *args)
@@ -1886,6 +1887,7 @@ def _run_symbolic_function(
     node: _C.Node,
     inputs: Any,
     env: Dict[_C.Value, _C.Value],
+    values_in_env: Set[_C.Value],
     new_nodes: List[_C.Node],
     operator_export_type=_C_onnx.OperatorExportTypes.ONNX,
 ) -> Optional[Union[_C.Value, Sequence[Optional[_C.Value]]]]:
@@ -1917,6 +1919,7 @@ def _run_symbolic_function(
         original_node=node,
         params_dict=_params_dict,
         env=env,
+        values_in_env=values_in_env,
         new_nodes=new_nodes,
     )
 

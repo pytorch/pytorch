@@ -15,6 +15,7 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    TYPE_CHECKING,
     Union,
 )
 
@@ -58,7 +59,9 @@ from torch.distributed.tensor.parallel.fsdp import DTensorExtensions
 from torch.distributed.utils import _sync_params_and_buffers
 
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
-from torch.utils.hooks import RemovableHandle
+
+if TYPE_CHECKING:
+    from torch.utils.hooks import RemovableHandle
 
 _TORCHDISTX_AVAIL = True
 try:
@@ -469,6 +472,7 @@ def _init_core_state(
         backward_prefetch_limit,
         forward_prefetch_limit,
     )
+    state._unshard_event = None
     # Mapping from fully sharded module to the handles it is responsible to
     # unshard and reshard (see [Note: Fully Sharded Module])
     _fully_sharded_module_to_handle: Dict[nn.Module, FlatParamHandle] = dict()

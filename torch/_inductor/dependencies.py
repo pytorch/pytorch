@@ -63,6 +63,54 @@ class MemoryDep(Dep):
     def __repr__(self):
         return f"MemoryDep({self.name!r}, {self.index}, {self.ranges})"
 
+    def get_offset(self):
+        """
+        Return the offset by setting every variable to be 0.
+        """
+        return sympy_subs(self.index, {v: 0 for v in self.var_names})
+
+    def normalize_with_stride_order(self, prefix="t"):
+        r"""
+        Used to decide if two MemoryDep does not equal due to different loop orders.
+        More specifically, when dep1 and dep2 are not equal, we can normalize
+        both and check if they are equal after that. If yes, then the mismatch is
+        caused by different loop orders.
+        """
+        # import here to avoid circular import
+        from torch._inductor import ir
+
+        strides = V.graph.sizevars.stride_hints(self.index, self.var_names)
+
+        # pick a loop order with stride ordered decreasingly
+        order = sorted(range(len(strides)), key=strides.__getitem__, reverse=True)
+        stride_reorder = ir.same_reorder(order)
+        sizes = self.size
+        var_names = self.var_names
+
+        new_reordered_sizes = stride_reorder(sizes)
+        new_reordered_var_names = stride_reorder(var_names)
+
+        new_simplified_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
+            new_reordered_var_names,
+            new_reordered_sizes,
+            index_prevent_reordering(
+                [self.index], new_reordered_var_names, new_reordered_sizes
+            ),
+        )
+
+        # now let's create new symbols with the passed in prefix
+        var_ranges, add_var = var_builder(prefix)
+        replacement = dict(
+            zip(
+                new_reordered_var_names,
+                reindex([add_var(x) for x in new_simplified_sizes]),
+            )
+        )
+        new_index = sympy_subs(sympy.expand(self.index), replacement)
+
+        out = MemoryDep(self.name, new_index, tuple(var_ranges.keys()), tuple(var_ranges.values()))  # type: ignore[arg-type]
+        return out
+
     @property
     def ranges(self) -> Dict[sympy.Symbol, sympy.Expr]:
         """{c0: 128, c1: 512, ...}"""
@@ -274,6 +322,20 @@ class ReadWrites:
     def reads_and_writes(self):
         return itertools.chain(self.reads, self.writes)
 
+    def buffer_names(self, ignore_integer_index=True):
+        """
+        Integer index is used for load_seed.
+        """
+        names = set()
+        for dep in self.reads_and_writes():
+            if not isinstance(dep, MemoryDep):
+                continue
+            if not ignore_integer_index or not isinstance(
+                dep.index, (int, sympy.Integer)
+            ):
+                names.add(dep.name)
+        return names
+
 
 class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
     def __init__(self, var_ranges: VarRanges, normalize: bool):
@@ -382,6 +444,7 @@ class RecordLoadStore(V.KernelFormatterHandler):  # type: ignore[name-defined]
         super().__init__(parent_handler=parent_handler)
 
 
+# TODO: check call sites
 def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Symbol]]:
     cnt = itertools.count()
     var_ranges: VarRanges = dict()

@@ -1,3 +1,4 @@
+import contextlib
 import copy
 
 import torch
@@ -125,7 +126,9 @@ def _remove_set_grad_and_inline(node: torch.fx.Node):
     node_inline_(node)
 
 
-def _sequential_split_and_maybe_inline_subgraphs(gm: torch.fx.GraphModule):
+def _sequential_split_and_maybe_inline_subgraphs(
+    gm: torch.fx.GraphModule, graph_signature
+):
     """
     Helper function for replace_set_grad_with_hop_pass().
     Split the graph module into multiple subgraphs based on the set_grad_enabled nodes.
@@ -141,35 +144,40 @@ def _sequential_split_and_maybe_inline_subgraphs(gm: torch.fx.GraphModule):
     if need_replacing:
         new_gm = sequential_split(gm, _is_set_grad_enabled_node)
 
-        def _maybe_inline_or_replace_with_hop(node: torch.fx.Node):
-            if _is_set_grad_enabled_sub_mod(node, omit_if_same_with_ambient=True):
-                _replace_with_hop(node)
-            else:
-                _remove_set_grad_and_inline(node)
+        replace_ctx = contextlib.nullcontext()
+        if graph_signature is not None:
+            replace_ctx = new_gm._set_replace_hook(graph_signature.get_replace_hook())  # type: ignore[assignment]
 
-        nodes_map(
-            list(new_gm.graph.nodes),
-            lambda node: (
-                _maybe_inline_or_replace_with_hop(node)
-                if node.op == "call_module"
-                else node
-            ),
-        )
+        with replace_ctx:
+
+            def _maybe_inline_or_replace_with_hop(node: torch.fx.Node):
+                if _is_set_grad_enabled_sub_mod(node, omit_if_same_with_ambient=True):
+                    _replace_with_hop(node)
+                else:
+                    _remove_set_grad_and_inline(node)
+
+            nodes_map(
+                list(new_gm.graph.nodes),
+                lambda node: (
+                    _maybe_inline_or_replace_with_hop(node)
+                    if node.op == "call_module"
+                    else node
+                ),
+            )
         return new_gm
 
     return gm
 
 
-def replace_set_grad_with_hop_pass(gm: torch.fx.GraphModule):
-    new_gm = _sequential_split_and_maybe_inline_subgraphs(gm)
-
+def replace_set_grad_with_hop_pass(gm: torch.fx.GraphModule, graph_signature):
+    new_gm = _sequential_split_and_maybe_inline_subgraphs(gm, graph_signature)
     # recursively call
     for node in new_gm.graph.nodes:
         if node.op == "get_attr":
             subgm = getattr(new_gm, node.target)
             if not isinstance(subgm, torch.fx.GraphModule):
                 continue
-            new_subgm = replace_set_grad_with_hop_pass(subgm)
+            new_subgm = replace_set_grad_with_hop_pass(subgm, None)
             setattr(new_gm, node.target, new_subgm)
 
     new_gm.recompile()

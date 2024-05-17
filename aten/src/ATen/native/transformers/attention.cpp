@@ -497,8 +497,8 @@ inline void validate_sdpa_input(
       query_.dim(), " key.dim: ", key.dim(), " and value.dim: ", value.dim(), " instead.");
   if (attn_mask_.has_value()){
     auto mask_dtype = attn_mask_->dtype();
-    TORCH_CHECK(mask_dtype == at::kBool || mask_dtype == query_.dtype(),
-      "Expected attn_mask dtype to be bool or to match query dtype, but got attn_mask.dtype: ",
+    TORCH_CHECK(mask_dtype == at::kBool || mask_dtype == at::kFloat || mask_dtype == query_.dtype(),
+      "Expected attn_mask dtype to be bool or float or to match query dtype, but got attn_mask.dtype: ",
       mask_dtype, " and  query.dtype: ", query_.dtype(), " instead.");
     TORCH_CHECK(
       !query_.is_nested() && !key.is_nested(),
@@ -796,6 +796,7 @@ _scaled_dot_product_flash_attention_cpu(
   TORCH_CHECK((query.size(3) == value.size(3)) && (key.size(3) == value.size(3)),
     "scaled_dot_product_attention_flash_attention: Q/K/V should have the same head size");
   TORCH_CHECK(!attn_mask.has_value() ||
+          attn_mask.value().scalar_type() == at::kFloat ||
           dtype == attn_mask.value().scalar_type(),
     "scaled_dot_product_attention_flash_attention: Attention mask is the same data type as query");
   TORCH_CHECK(!attn_mask.has_value() ||

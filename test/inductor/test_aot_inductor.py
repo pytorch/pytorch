@@ -94,6 +94,7 @@ def check_model(
             "abi_compatible": self.abi_compatible,
             "allow_stack_allocation": self.allow_stack_allocation,
             "use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+            "aot_inductor.package": self.package,
         }
     ):
         torch.manual_seed(0)
@@ -206,10 +207,7 @@ class AOTInductorTestsTemplate:
         actual_path = AOTIRunnerUtil.compile(
             model,
             example_inputs,
-            options={
-                "aot_inductor.output_path": expected_path,
-                "aot_inductor.package": False,
-            },
+            options={"aot_inductor.output_path": expected_path},
         )
         self.assertTrue(actual_path == expected_path)
 
@@ -331,6 +329,19 @@ class AOTInductorTestsTemplate:
         with config.patch({"freezing": True}):
             self.check_model(Model(self.device), example_inputs)
 
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "normalization_pass": {},
+            "remove_split_with_size_one_pass": {},
+            "merge_getitem_cat_pass": {},
+            "merge_stack_tahn_unbind_pass": {},
+            "merge_splits_pass": {},
+            "mutate_cat_pass": {},
+            "split_cat_pass": {},
+            "unbind_stack_pass": {},
+        },
+        post_grad_fusion_options={},
+    )
     def test_simple_split(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -847,6 +858,39 @@ class AOTInductorTestsTemplate:
             torch.randn((1, 32), dtype=torch.float16, device=self.device),
         )
         self.check_model(Repro(), example_inputs)
+
+    def test_large_grid(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, primals_1, primals_2, primals_5):
+                view = torch.ops.aten.reshape.default(primals_5, [-1, 4, 128])
+                primals_5 = None
+                permute = torch.ops.aten.permute.default(view, [0, 2, 1])
+                clone = torch.ops.aten.clone.default(
+                    permute, memory_format=torch.contiguous_format
+                )
+                permute = None
+                view_1 = torch.ops.aten.reshape.default(clone, [-1, 4])
+                clone = None
+                permute_1 = torch.ops.aten.permute.default(primals_1, [1, 0])
+                primals_1 = None
+                addmm = torch.ops.aten.addmm.default(primals_2, view_1, permute_1)
+                primals_2 = None
+                return addmm
+
+        s0 = 727828
+        s1 = 512
+        example_inputs = (
+            torch.rand(2, 4, device=self.device),
+            torch.rand(2, device=self.device),
+            torch.rand(s0, s1, device=self.device),
+        )
+        self.check_model(Model(), example_inputs)
 
     def test_cond_simple(self):
         inputs = (
@@ -2088,7 +2132,6 @@ class AOTInductorTestsTemplate:
             so_path = AOTIRunnerUtil.compile(
                 model=TestModule().to(device=self.device),
                 example_inputs=(torch.rand(3, 4, device=self.device),),
-                options={"aot_inductor.package": False},
             )
 
         runner = AOTIRunnerUtil.load_runner(self.device, so_path)
@@ -2397,13 +2440,13 @@ class AOTInductorTestsTemplate:
             {
                 "abi_compatible": self.abi_compatible,
                 "aot_inductor.debug_compile": True,
+                "aot_inductor.package": False,
             }
         ):
             so_path = AOTIRunnerUtil.compile(
                 m,
                 inputs,
                 dynamic_shapes=dynamic_shapes,
-                options={"aot_inductor.package": False},
             )
         with open(os.path.splitext(so_path)[0] + ".cpp") as cpp:
             src_code = cpp.read()
@@ -2427,7 +2470,7 @@ class AOTInductorTestsTemplate:
                 21,  # we have 9 symbolic strides for which we don't generate checks
                 exactly=True,
             ).run(src_code)
-        optimized = AOTIRunnerUtil.load(self.device, so_path, package=False)
+        optimized = AOTIRunnerUtil.load(self.device, so_path)
         actual = optimized(*inputs)
         expected = m(*inputs)
         torch.testing.assert_close(actual, expected)
@@ -2674,6 +2717,58 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(16, 16, 16, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    def test_nested_tensor_from_jagged(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mlp = nn.Sequential(
+                    nn.Linear(128, 64), nn.ReLU(), nn.Linear(64, 32), nn.Sigmoid()
+                )
+
+            def forward(self, values, offsets):
+                nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+                res = self.mlp(nt)
+                return res.values()
+
+        model = Model().to(device=self.device)
+
+        example_inputs_1 = (
+            torch.randn((15, 128), device=self.device),
+            torch.tensor([0, 3, 4, 10, 15], device=self.device),
+        )
+
+        # same "NT batch size", different actual amount of data
+        example_inputs_2 = (
+            torch.randn((31, 128), device=self.device),
+            torch.tensor([0, 1, 20, 25, 31], device=self.device),
+        )
+
+        # same actual amount of data, different "NT batch size"
+        example_inputs_3 = (
+            torch.randn((15, 128), device=self.device),
+            torch.tensor([0, 3, 10, 15], device=self.device),
+        )
+
+        # different "NT batch size"
+        example_inputs_4 = (
+            torch.randn((37, 128), device=self.device),
+            torch.tensor([0, 5, 16, 25, 29, 37], device=self.device),
+        )
+
+        dim0_values = Dim("dim0_values", min=1, max=128)
+        dim0_offsets = Dim("dim0_offsets", min=1, max=9)
+        dynamic_shapes = {"values": {0: dim0_values}, "offsets": {0: dim0_offsets}}
+        example_inputs_list = [
+            example_inputs_1,
+            example_inputs_2,
+            example_inputs_3,
+            example_inputs_4,
+        ]
+
+        self.check_model_with_multiple_inputs(
+            model, example_inputs_list, dynamic_shapes=dynamic_shapes
+        )
+
     def test_misc_1(self):
         class Model(nn.Module):
             def __init__(self):
@@ -2708,6 +2803,7 @@ class AOTInductorTestABICompatibleCpu(TestCase):
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     allow_stack_allocation = False
     use_minimal_arrayref_interface = False
+    package = False
 
 
 def fail_with_and_without_stack_allocation(is_skip=False):
@@ -2740,14 +2836,18 @@ def fail_minimal_arrayref_interface(is_skip=False):
 
 def fail_cuda(is_skip=False):
     return TestFailure(
-        ("abi_compatible_cuda", "non_abi_compatible_cuda"),
+        (
+            "abi_compatible_cuda",
+            "non_abi_compatible_cuda",
+            "package_abi_compatible_cuda",
+        ),
         is_skip=is_skip,
     )
 
 
 def fail_abi_compatible_cuda(is_skip=False):
     return TestFailure(
-        ("abi_compatible_cuda",),
+        ("abi_compatible_cuda", "package_abi_compatible_cuda"),
         is_skip=is_skip,
     )
 
@@ -2755,6 +2855,13 @@ def fail_abi_compatible_cuda(is_skip=False):
 def fail_non_abi_compatible_cuda(is_skip=False):
     return TestFailure(
         ("non_abi_compatible_cuda",),
+        is_skip=is_skip,
+    )
+
+
+def fail_package_abi_compatible_cuda(is_skip=False):
+    return TestFailure(
+        ("package_abi_compatible_cuda",),
         is_skip=is_skip,
     )
 
@@ -2846,6 +2953,7 @@ CUDA_TEST_FAILURES = {
     # test_failures, xfail by default, set is_skip=True to skip
     "test_dup_unbacked_sym_decl": fail_abi_compatible_cuda(),
     "test_dup_unbacked_sym_decl_with_refinement": fail_abi_compatible_cuda(),
+    "test_large_grid": fail_cuda(),
     "test_normal_functional": fail_abi_compatible_cuda(),
     # There is a double-free issue which will be fixed in another PR
     # no ABI shim fn for torch.sort; remove this when adding one
@@ -2858,7 +2966,12 @@ CUDA_TEST_FAILURES = {
     "test_runtime_checks_shape_failed": fail_non_abi_compatible_cuda(is_skip=True),
     # quantized unsupported for GPU
     "test_quantized_linear": fail_cuda(is_skip=True),
+    "test_constant_original_fqn_and_dtype": fail_package_abi_compatible_cuda(
+        is_skip=True
+    ),
+    "test_output_path_2": fail_package_abi_compatible_cuda(is_skip=True),
 }
+
 
 if TEST_WITH_ROCM:
     CUDA_TEST_FAILURES.update(
@@ -2951,6 +3064,7 @@ class AOTInductorTestABICompatibleCpuWithStackAllocation(TestCase):
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     allow_stack_allocation = True
     use_minimal_arrayref_interface = False
+    package = False
 
 
 copy_tests(
@@ -2970,6 +3084,7 @@ class AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterf
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     allow_stack_allocation = True
     use_minimal_arrayref_interface = True
+    package = False
 
 
 copy_tests(
@@ -2988,12 +3103,32 @@ class AOTInductorTestABICompatibleCuda(TestCase):
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     allow_stack_allocation = False
     use_minimal_arrayref_interface = False
+    package = False
 
 
 copy_tests(
     AOTInductorTestsTemplate,
     AOTInductorTestABICompatibleCuda,
     "abi_compatible_cuda",
+    CUDA_TEST_FAILURES,
+)
+
+
+@unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
+class AOTInductorTestPackagedABICompatibleCuda(TestCase):
+    device = "cuda"
+    abi_compatible = True
+    check_model = check_model
+    check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    allow_stack_allocation = False
+    use_minimal_arrayref_interface = False
+    package = True
+
+
+copy_tests(
+    AOTInductorTestsTemplate,
+    AOTInductorTestPackagedABICompatibleCuda,
+    "packaged_abi_compatible_cuda",
     CUDA_TEST_FAILURES,
 )
 
@@ -3009,6 +3144,7 @@ class AOTInductorTestNonABICompatibleCpu(TestCase):
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     allow_stack_allocation = False
     use_minimal_arrayref_interface = False
+    package = False
 
 
 copy_tests(
@@ -3046,6 +3182,7 @@ class AOTInductorTestNonABICompatibleCuda(TestCase):
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     allow_stack_allocation = False
     use_minimal_arrayref_interface = False
+    package = False
 
 
 copy_tests(

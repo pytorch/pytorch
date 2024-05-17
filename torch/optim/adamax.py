@@ -7,6 +7,7 @@ from .optimizer import (
     _capturable_doc,
     _default_to_fused_or_foreach,
     _differentiable_doc,
+    _disable_dynamo_if_unsupported,
     _foreach_doc,
     _get_scalar_dtype,
     _get_value,
@@ -215,69 +216,6 @@ Adamax.__doc__ = (
 )
 
 
-def adamax(
-    params: List[Tensor],
-    grads: List[Tensor],
-    exp_avgs: List[Tensor],
-    exp_infs: List[Tensor],
-    state_steps: List[Tensor],
-    # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
-    # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    foreach: Optional[bool] = None,
-    maximize: bool = False,
-    differentiable: bool = False,
-    capturable: bool = False,
-    has_complex: bool = False,
-    *,
-    eps: float,
-    beta1: float,
-    beta2: float,
-    lr: float,
-    weight_decay: float,
-):
-    r"""Functional API that performs adamax algorithm computation.
-
-    See :class:`~torch.optim.Adamax` for details.
-    """
-
-    if not torch._utils.is_compiling() and not all(
-        isinstance(t, torch.Tensor) for t in state_steps
-    ):
-        raise RuntimeError(
-            "API has changed, `state_steps` argument must contain a list of singleton tensors"
-        )
-
-    if foreach is None:
-        _, foreach = _default_to_fused_or_foreach(
-            params, differentiable, use_fused=False
-        )
-
-    if foreach and torch.jit.is_scripting():
-        raise RuntimeError("torch.jit.script not supported with foreach optimizers")
-
-    if foreach and not torch.jit.is_scripting():
-        func = _multi_tensor_adamax
-    else:
-        func = _single_tensor_adamax
-
-    func(
-        params,
-        grads,
-        exp_avgs,
-        exp_infs,
-        state_steps,
-        eps=eps,
-        beta1=beta1,
-        beta2=beta2,
-        lr=lr,
-        weight_decay=weight_decay,
-        maximize=maximize,
-        differentiable=differentiable,
-        has_complex=has_complex,
-        capturable=capturable,
-    )
-
-
 def _single_tensor_adamax(
     params: List[Tensor],
     grads: List[Tensor],
@@ -448,7 +386,71 @@ def _multi_tensor_adamax(
             bias_corrections = [
                 1 - beta1 ** _get_value(step) for step in grouped_state_steps
             ]
-            step_size = [(lr / bc) * -1 for bc in bias_corrections]
+            step_size = [(_get_value(lr) / bc) * -1 for bc in bias_corrections]
             torch._foreach_addcdiv_(
                 grouped_params, grouped_exp_avgs, grouped_exp_infs, step_size
             )
+
+
+@_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_adamax)
+def adamax(
+    params: List[Tensor],
+    grads: List[Tensor],
+    exp_avgs: List[Tensor],
+    exp_infs: List[Tensor],
+    state_steps: List[Tensor],
+    # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
+    # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
+    foreach: Optional[bool] = None,
+    maximize: bool = False,
+    differentiable: bool = False,
+    capturable: bool = False,
+    has_complex: bool = False,
+    *,
+    eps: float,
+    beta1: float,
+    beta2: float,
+    lr: float,
+    weight_decay: float,
+):
+    r"""Functional API that performs adamax algorithm computation.
+
+    See :class:`~torch.optim.Adamax` for details.
+    """
+
+    if not torch._utils.is_compiling() and not all(
+        isinstance(t, torch.Tensor) for t in state_steps
+    ):
+        raise RuntimeError(
+            "API has changed, `state_steps` argument must contain a list of singleton tensors"
+        )
+
+    if foreach is None:
+        _, foreach = _default_to_fused_or_foreach(
+            params, differentiable, use_fused=False
+        )
+
+    if foreach and torch.jit.is_scripting():
+        raise RuntimeError("torch.jit.script not supported with foreach optimizers")
+
+    if foreach and not torch.jit.is_scripting():
+        func = _multi_tensor_adamax
+    else:
+        func = _single_tensor_adamax
+
+    func(
+        params,
+        grads,
+        exp_avgs,
+        exp_infs,
+        state_steps,
+        eps=eps,
+        beta1=beta1,
+        beta2=beta2,
+        lr=lr,
+        weight_decay=weight_decay,
+        maximize=maximize,
+        differentiable=differentiable,
+        has_complex=has_complex,
+        capturable=capturable,
+    )

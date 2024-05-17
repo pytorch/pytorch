@@ -931,7 +931,6 @@ static at::Tensor linear_int8_with_onednn_weight(
     c10::string_view& unary_post_op_algorithm) {
   using ideep::tensor;
   const int64_t dim = input.dim();
-  output_scale = 1.0f / output_scale;
   TORCH_CHECK(input.scalar_type() == c10::ScalarType::Byte,
       "qlinear with mkldnn tensor: data type of input should be uint8 (unsigned char).");
   TORCH_CHECK(onednn_weight.scalar_type() == c10::ScalarType::Char,

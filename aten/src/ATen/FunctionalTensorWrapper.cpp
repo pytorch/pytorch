@@ -137,7 +137,8 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& view_value, const
     ),
     value_(view_value),
     is_multi_output_view_(base->is_multi_output_view_ || meta.is_multi_output),
-    was_storage_changed_(base->was_storage_changed_)
+    was_storage_changed_(base->was_storage_changed_),
+    is_symbolic_(base->is_symbolic_)
 {
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(value_));
   TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
@@ -147,6 +148,7 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& view_value, const
       view_metas_ = base->view_metas_;  // copy
   }
   view_metas_.push_back(meta);
+  maybe_mark_symbolic(meta);
   storage_ = base->storage_; // alias this tensor's storage with the base tensor's
 }
 
@@ -178,6 +180,8 @@ void FunctionalTensorWrapper::mutate_view_meta(const at::functionalization::View
   view_metas_.push_back(meta);
   // Manually track the fact that this tensor recieved a metadata mutation!
   has_metadata_mutation_ = true;
+  // Mark this tensor as being symbolic if there are any symbolic inputs used by the view operation.
+  maybe_mark_symbolic(meta);
   // Note [Functionalization Pass - Inplace View Ops]
   // So, these ops are special - they're mutation AND view ops. They get special codegen.
   // An example is transpose_, e.g. `a.transpose_()`
@@ -257,6 +261,7 @@ void FunctionalTensorWrapper::set__impl(const FunctionalTensorWrapper* other) {
   value_ = other->value_;
   generation_ = other->generation_;
   view_metas_ = other->view_metas_;
+  is_symbolic_ = other->is_symbolic_;
   // FREEZE the old storage, preventing mutations to it.
   // this is a huge pain to handle properly in all cases, so we ban it.
   functional_storage_impl()->freeze();
@@ -274,6 +279,32 @@ void FunctionalTensorWrapper::set__impl(const FunctionalTensorWrapper* other) {
   auto strides_ = value_.sym_strides();
   auto storage_offset_ = value_.sym_storage_offset();
   set_sizes_and_strides(sizes_, strides_, storage_offset_);
+}
+
+void FunctionalTensorWrapper::storage_resize_(c10::SymInt new_size) {
+  auto curr_storage_size = value_.unsafeGetTensorImpl()->unsafe_storage().unsafeGetStorageImpl()->sym_nbytes();
+  // storage resizing is severely limited: we only support resizing either to zero, or from zero bytes.
+  TORCH_CHECK(new_size == 0 || curr_storage_size == 0, "new_size: ", new_size, ". curr_storage_size: ", curr_storage_size);
+  // The "functionalization rule" for storage resizing is a giant no-op, mainly because we don't want
+  // resize_() calls to actualy emit any ops in the functional graph.
+  // How does it work?
+  // Resizing up (old size == 0):
+  //   We do nothing in this case.
+  //   The expection is that for the user code to be valid, the next op that should run against the current tensor "x"
+  //   will be a x.copy_(y) (or similar), that will fully overwrite the data of x.
+  //   If there are any outstanding aliases of x, we expect them not to be used until after the copy_() call
+  //   (otherwise the eager code would be invalid),
+  //   and therefore functionalization will regenerate the aliases off of the result of `x.copy(y)`.
+  // Resizing down (new size == 0):
+  //   We also do nothing in this case. The assumption is that after resizing a tensor down,
+  //   it is fully unused in the program (unless it is later resized back up first, has data copied in)
+  //   Although it might be saved for backward, which happens in FSDP.
+  //   The expected pattern is that the param will then be resized back up from zero in the backward.
+
+  // Mark the tensor as having its storage resized.
+  // This is so we can detect it for inputs in AOTAutograd and error / emit
+  // an input mutation resize_() appropriately
+  functional_storage_impl()->mark_inductor_storage_resize(new_size);
 }
 
 void FunctionalTensorWrapper::maybe_replace_storage(const Tensor& other) {
@@ -388,6 +419,7 @@ void FunctionalTensorWrapper::copy_tensor_metadata(
     dest_impl->has_metadata_mutation_ = src_impl->has_metadata_mutation_;
     dest_impl->is_multi_output_view_ = src_impl->is_multi_output_view_;
     dest_impl->was_storage_changed_ = src_impl->was_storage_changed_;
+    dest_impl->is_symbolic_ = src_impl->is_symbolic_;
     dest_impl->generation_ = src_impl->generation_;
     dest_impl->view_metas_ = src_impl->view_metas_;
 }
