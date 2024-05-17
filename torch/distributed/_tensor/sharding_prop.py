@@ -45,15 +45,21 @@ class ShardingPropagator:
         # op map to save static argnum to decide to reuse sharding prop cache or re-run sharding prop
         self.op_to_schema_info: Dict[OpOverload, RuntimeSchemaInfo] = {}
         self.propagate_op_sharding = lru_cache(None)(self.propagate_op_sharding_non_cached)  # type: ignore[method-assign]
-        # op map to save indices of size (and stride) args which may need to be modified in sharding prop
-        self.op_to_size_and_stride_idx: Dict[
+        # op map to save indices of shape (and stride) args which may need to be modified in sharding prop
+        self.op_to_shape_and_stride_idx: Dict[
             OpOverload, Union[int, Tuple[int, int]]
         ] = {
+            # new factory ops
             aten.new_empty.default: 1,
             aten.new_full.default: 1,
             aten.new_ones.default: 1,
             aten.new_zeros.default: 1,
             aten.new_empty_strided.default: (1, 2),
+            # view ops
+            aten.expand.default: 1,
+            aten.reshape.default: 1,
+            aten.view.default: 1,
+            aten._unsafe_view.default: 1,
         }
 
     def register_sharding_prop_rule(
@@ -260,16 +266,19 @@ class ShardingPropagator:
                     )
                     suggestion_schema._inplace_rewrap_schema_suggestion(op_schema)
 
-                # size and stride args need to be modified for new factory ops, potentially
-                if op_schema.op in self.op_to_size_and_stride_idx:
+                # shape and stride args need to be modified for
+                # view ops and new factory ops, potentially
+                if op_schema.op in self.op_to_shape_and_stride_idx:
                     assert isinstance(output_strategy.output_spec, DTensorSpec)
                     # It happens when the output has the same shape as the input
                     # and the input placements are not all Replicate().
                     if output_strategy.output_spec.is_sharded():
-                        needs_redistribute = True
-                        suggestion_schema = self._adjust_size_and_stride_args(
-                            op_schema, output_strategy.output_spec, mesh
+                        schema = suggestion_schema or op_schema
+                        assert isinstance(out_tensor_meta, TensorMeta)
+                        suggestion_schema = self._adjust_shape_and_stride_args(
+                            out_tensor_meta, schema, output_strategy.output_spec, mesh
                         )
+                        needs_redistribute = True
 
                 # construct output spec for the op
                 if op_schema.return_type_tuple_tensor_like():
@@ -442,29 +451,31 @@ class ShardingPropagator:
         # for eager execution, we just select the one with the minimal redistribute cost
         return strategy.strategies[strategy_costs.index(min(strategy_costs))]
 
-    def _adjust_size_and_stride_args(
-        self, op_schema: OpSchema, spec: DTensorSpec, mesh: DeviceMesh
+    def _adjust_shape_and_stride_args(
+        self,
+        out_tensor_meta: TensorMeta,
+        schema: OpSchema,
+        spec: DTensorSpec,
+        mesh: DeviceMesh,
     ) -> OpSchema:
-        size_stride_idx = self.op_to_size_and_stride_idx[op_schema.op]
-        if isinstance(size_stride_idx, tuple):
-            size_idx, stride_idx = size_stride_idx
+        shape_stride_idx = self.op_to_shape_and_stride_idx[schema.op]
+        if isinstance(shape_stride_idx, tuple):
+            shape_idx, stride_idx = shape_stride_idx
         else:
-            size_idx = size_stride_idx
+            shape_idx = shape_stride_idx
             stride_idx = None
 
-        expected_input_schema = list(op_schema.args_schema)
-        size = cast(list, expected_input_schema[size_idx])
-        # # adjust size to be the same as that of the _local_tensor
-        # # of the DTensor input arg at index 0, which is inferred
-        expected_input_schema[size_idx] = compute_local_shape(
-            size, mesh, spec.placements
+        expected_input_schema = list(schema.args_schema)
+        # adjust shape to be the same as that of the _local_tensor
+        # of the DTensor input arg at index 0, which is inferred
+        expected_input_schema[shape_idx] = compute_local_shape(
+            out_tensor_meta.shape, mesh, spec.placements
         )
 
         # adjust the stride arg for aten.new_empty_strided.default
         if stride_idx:
-            stride = cast(list, expected_input_schema[stride_idx])
             expected_input_schema[stride_idx] = compute_local_stride(
-                stride, mesh, spec.placements
+                out_tensor_meta.stride, mesh, spec.placements
             )
 
-        return OpSchema(op_schema.op, tuple(expected_input_schema), {})
+        return OpSchema(schema.op, tuple(expected_input_schema), schema.kwargs_schema)

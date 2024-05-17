@@ -339,7 +339,7 @@ def print_performance(
 ):
     timings = torch.tensor([timed(fn, args, times, device) for _ in range(repeat)])
     took = torch.median(timings) / times
-    print(f"{took/baseline:.6f}")
+    print(f"{took / baseline:.6f}")
     return took
 
 
@@ -726,6 +726,8 @@ def fresh_inductor_cache(cache_entries=None):
     except Exception:
         log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
         raise
+    finally:
+        clear_inductor_caches()
 
 
 def argsort(seq) -> List[int]:
@@ -1493,7 +1495,7 @@ def should_assume_input_aligned(example_input: torch.Tensor):
     # See Note: [Input Alignment handling in Inductor]
 
     # right now, we only care about alignment for cuda tensors.
-    if example_input.device.type != "cuda":
+    if not is_gpu(example_input.device.type):
         return False
     return config.assume_aligned_inputs or tensor_is_aligned(example_input)
 
@@ -1600,6 +1602,10 @@ def aoti_compile_with_persistent_cache(
                 options=options,
                 remove_runtime_assertions=remove_runtime_assertions,
                 disable_constraint_solver=disable_constraint_solver,
+                # Some operations may have non-Tensor parameters like int, float, bool. These
+                # non-Tensor parameters will not be the input of the graph. Therefore, we do
+                # need to keep the same signature.
+                same_signature=False,
             )
 
             kernel_metadata_items = []
@@ -1650,3 +1656,26 @@ def aoti_compile_with_persistent_cache(
             return kernel_lib_path
         except Exception as e:
             return ""
+
+
+def run_and_get_cpp_code(fn, *args, **kwargs):
+    # We use the patch context manager instead of using it as a decorator.
+    # In this way, we can ensure that the attribute is patched and unpatched correctly
+    # even if this run_and_get_cpp_code function is called multiple times.
+    with unittest.mock.patch.object(config, "debug", True):
+        torch._dynamo.reset()
+        import io
+        import logging
+
+        log_capture_string = io.StringIO()
+        ch = logging.StreamHandler(log_capture_string)
+        from torch._inductor.graph import output_code_log
+
+        output_code_log.addHandler(ch)
+        prev_level = output_code_log.level
+        output_code_log.setLevel(logging.DEBUG)
+        result = fn(*args, **kwargs)
+        s = log_capture_string.getvalue()
+        output_code_log.setLevel(prev_level)
+        output_code_log.removeHandler(ch)
+    return result, s
