@@ -1994,6 +1994,7 @@ class CppVecKernel(CppKernel):
         tiling_factor=0,
         tiling_idx=-1,
         tiling_dtype=torch.float,
+        tail_size=None,
     ):
         super().__init__(args, num_threads)
         self.vec_isa = codecache.pick_vec_isa()
@@ -2002,6 +2003,7 @@ class CppVecKernel(CppKernel):
             tiling_factor = self.vec_isa.nelements(dtype=tiling_dtype)
         self.tiling_factor = tiling_factor
         self.tiling_idx = tiling_idx
+        self.tail_size = tail_size
 
     def _try_get_const_stride(self, index: sympy.Expr, itervar: sympy.Symbol):
         if self.index_indirect_depends_on(index, itervar):
@@ -2080,7 +2082,7 @@ class CppVecKernel(CppKernel):
             line = (
                 f"{load_mask_str}.template loadu<{cpp_type},{num_vectors}>({loadbuf})"
                 if load_mask_str
-                else f"{self._get_vec_type(dtype)}::loadu({loadbuf}, {self.tiling_factor})"
+                else f"{self._get_vec_type(dtype)}::loadu({loadbuf}, {self.tail_size if self.tail_size else self.tiling_factor})"
             )
         return line
 
@@ -2113,7 +2115,9 @@ class CppVecKernel(CppKernel):
             buffer = self.loads
 
         def get_result_size(dtype: torch.dtype) -> int:
-            if dtype.itemsize < 4:
+            if self.tail_size:
+                return self.tail_size
+            elif dtype.itemsize < 4:
                 return self.tiling_factor * (4 // dtype.itemsize)
             else:
                 return self.tiling_factor
@@ -2176,11 +2180,11 @@ class CppVecKernel(CppKernel):
                 else:
                     load_mask = f"{self._load_mask} != 0"
             if codecache.is_gcc():
-                code.writeline(f"#pragma GCC unroll {self.tiling_factor}")
+                code.writeline(f"#pragma GCC unroll {self.tail_size if self.tail_size else self.tiling_factor}")
             else:
-                code.writeline(f"#pragma unroll {self.tiling_factor}")
+                code.writeline(f"#pragma unroll {self.tail_size if self.tail_size else self.tiling_factor}")
             code.writeline(
-                f"for (long {itervar_inner} = 0; {itervar_inner} < {self.tiling_factor}; {itervar_inner}++)"
+                f"for (long {itervar_inner} = 0; {itervar_inner} < {self.tail_size if self.tail_size else self.tiling_factor}; {itervar_inner}++)"
             )
             with code.indent(), contextlib.ExitStack() as stack:
                 index_c = cexpr_index(index)
@@ -2257,10 +2261,7 @@ class CppVecKernel(CppKernel):
         stride = self._try_get_const_stride(index, tiling_var)
         code = IndentedBuffer()
         if stride == 1:
-            if dtype == torch.float:
-                code.writeline(f"{value}.store({var_expr});")
-            else:
-                code.writeline(f"{value}.store({var_expr}, {self.tiling_factor});")
+            code.writeline(f"{value}.store({var_expr}, {self.tail_size if self.tail_size else self.tiling_factor});")
         else:
             self._load_or_store_non_contiguous(
                 var, index, dtype, buffer=code, store_value=value
@@ -2447,7 +2448,10 @@ class CppVecKernel(CppKernel):
         elif reduction_type == "xor_sum":
             return f"{var} ^ {next_value}"
         elif reduction_type == "welford_reduce":
-            return f"welford_combine({var}, {next_value})"
+            if self.tail_size:
+                return f"welford_combine({var}, {next_value}, {self.tail_size})"
+            else:
+                return f"welford_combine({var}, {next_value})"
         elif reduction_type == "welford_combine":
             if isinstance(next_value, tuple):
                 # When reading a value from Inductor IR we have a tuple of variable names
@@ -3290,10 +3294,13 @@ class CppKernelProxy(CppKernel):
                 main_loop, tail_loop = self.loop_nest.split_with_tiling(
                     tiling_indices[0], factor=tiling_factors[0]
                 )
+                masked_vec_kernel = codegen_kernel(
+                    CppVecKernel, tiling_factors[0], tiling_indices[0], vec_dtype, tail_loop.steps
+                )
                 main_loop.set_kernel(vec_kernel)
-                tail_loop.set_kernel(scalar_kernel)
+                tail_loop.set_kernel(masked_vec_kernel)
                 main_loop.simd_vec = True
-                tail_loop.simd_omp = True
+                tail_loop.simd_vec = True
                 # We chop the loop into two cubes by the nelements - main loop and tail loop.
                 # Regarding the main loop, it is straightforward that it could be vectorized with
                 # nelements. But for the tail loop, it still could be vectorized. For example,
@@ -3907,6 +3914,7 @@ class LoopLevel:
 
             tail_loop = LoopLevel(self.var, self.size)
             tail_loop.offset = offset
+            tail_loop.steps = self.size - offset
             tail_loop.parallel = self.parallel
             tail_loop.collapsed = False
             tail_loop.is_reduction = self.is_reduction

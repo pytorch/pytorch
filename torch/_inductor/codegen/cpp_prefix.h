@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <limits>
+#include <optional>
 #include <omp.h>
 
 // WARNING: be extra careful when including more ATen/c10 header files here!
@@ -96,6 +97,32 @@ Welford<T> welford_combine(const Welford<T> &acc, T data) {
   };
   return result;
 }
+
+#if INDUCTOR_USE_VECTOR_TYPES()
+template <typename T>
+Welford<at::vec::Vectorized<T>> welford_combine(const Welford<at::vec::Vectorized<T>> &acc, at::vec::Vectorized<T> data, std::optional<int64_t> tail_size) {
+  // Add a single data point
+  using Vec = at::vec::Vectorized<T>;
+  auto delta = data - acc.mean;
+  auto new_weight = acc.weight + Vec(1);
+  auto new_mean = acc.mean + delta / new_weight;
+  auto new_delta = data - new_mean;
+  auto new_m2 = acc.m2 + delta * new_delta;
+  if (tail_size.has_value()) {
+    return Welford<Vec>{
+      Vec::set(acc.mean, new_mean, tail_size.value()),
+      Vec::set(acc.m2, new_m2, tail_size.value()),
+      Vec::set(acc.weight, new_weight, tail_size.value()),
+    };
+  } else {
+    return Welford<Vec>{
+      new_mean,
+      new_m2,
+      new_weight,
+    };
+  }
+}
+#endif
 
 // Refer to https://github.com/pytorch/pytorch/blob/b5b36cf0c4e1958f1ff25120f5d4beeef3288187/
 // aten/src/ATen/native/SharedReduceOps.h#L419-L445
