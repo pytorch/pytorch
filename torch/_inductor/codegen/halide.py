@@ -13,7 +13,8 @@ import torch._logging
 from ..._prims_common import is_integer_dtype
 from ...utils._sympy.symbol import symbol_is_type, SymT
 from ...utils._sympy.value_ranges import ValueRanges
-from .. import ir
+from .. import config, ir
+from ..codecache import HalideCodeCache
 from ..metrics import is_metric_table_enabled, log_kernel_metadata
 from ..ops_handler import ReductionType, StoreMode
 
@@ -21,6 +22,7 @@ from ..runtime.hints import HalideInputSpec, HalideMeta, ReductionHint
 from ..utils import (
     get_kernel_metadata,
     is_welford_reduction,
+    parallel_num_threads,
     sympy_index_symbol,
     sympy_subs,
 )
@@ -765,7 +767,21 @@ class HalideKernel(SIMDKernel):
                     numel,
                 )
             )
-        return HalideMeta(argtypes)
+        target = "host"
+        # cuda_capability_86
+        # for cuda: target="host-cuda-cuda_capability_86-user_context"
+        if config.halide.no_asserts:
+            target += "-no_asserts"
+
+        return HalideMeta(
+            argtypes,
+            target=target,
+            scheduler="Mullapudi2016",
+            scheduler_flags={
+                "parallelism": parallel_num_threads(),
+                "last_level_cache_size": HalideCodeCache.cpu_cache_size(),
+            },
+        )
 
     def codegen_kernel(self, name=None):
         self.halide_kernel_meta()  # ensure needed args are added

@@ -524,10 +524,6 @@ decompose_mem_bound_mm: bool = False
 assume_aligned_inputs: bool = False
 
 
-# Backend to use for CPU codegen either "cpp" or "halide" (experimental)
-cpu_backend = "cpp"
-
-
 # config specific to codegen/cpp.py
 class cpp:
     # set to torch.get_num_threads()
@@ -809,6 +805,15 @@ class cuda:
     # caused by the op ordering of the "pingpong" memory access
     # pattern used by some Cutlass Kernels.
     cutlass_op_denylist_regex: Optional[str] = "pingpong"
+
+
+# Backend to use for CPU codegen either "cpp" or "halide" (experimental)
+cpu_backend = "cpp"
+
+
+class halide:
+    # add `-no_asserts` to halide `target=`
+    no_asserts = False
 
 
 # create a directory containing lots of debug information

@@ -2,7 +2,7 @@ import collections
 import typing
 from dataclasses import fields
 from enum import auto, Enum
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 
 # NOTE: if these fail asserts submit a PR to increase them
@@ -137,5 +137,13 @@ class HalideInputSpec(typing.NamedTuple):
 
 class HalideMeta(typing.NamedTuple):
     argtypes: List[HalideInputSpec]
-    scheduler: str = "Mullapudi2016"
-    # TODO(jansel): gpu options
+    target: str
+    scheduler: str
+    scheduler_flags: Dict[str, str]
+
+    def args(self):
+        """Command line args to pass to halide generator"""
+        args = [f"target={self.target}", f"autoscheduler={self.scheduler}"]
+        for k, v in self.scheduler_flags.items():
+            args.append(f"autoscheduler.{k}={v}")
+        return args
