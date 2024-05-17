@@ -196,11 +196,11 @@ at::Tensor all_gather_into_tensor(
       inputs, group_size, std::move(group_name))[0];
 }
 
-at::Tensor& all_gather_into_tensor_(
-    at::Tensor& output,
+at::Tensor& all_gather_into_tensor_out(
     at::Tensor& input,
     int64_t group_size,
-    std::string group_name) {
+    std::string group_name,
+    at::Tensor& output) {
   c10d::AllgatherOptions opts;
 
   auto group = c10d::resolve_process_group(group_name);
@@ -335,10 +335,10 @@ TORCH_LIBRARY(_c10d_functional, m) {
       {at::Tag::pt2_compliant_tag});
 
   m.def(
-      "all_gather_into_tensor_(Tensor(a!) output, Tensor input, int group_size, str group_name) -> Tensor(a!)",
+      "all_gather_into_tensor_out(Tensor input, int group_size, str group_name, *, Tensor(a!) out) -> Tensor(a!)",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
-          ::all_gather_into_tensor_),
+          ::all_gather_into_tensor_out),
       {at::Tag::pt2_compliant_tag});
 
   m.def(

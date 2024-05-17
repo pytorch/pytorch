@@ -436,7 +436,7 @@ def reinplace_all_gather(mod):
     getitem: "bf16[16384256]" = all_gather_copy_in[0]
     getitem_1: "bf16[131074048]" = all_gather_copy_in[1];  all_gather_copy_in = None
 
-    all_gather_into_tensor: "bf16[131074048]" = torch.ops._c10d_functional.all_gather_into_tensor_.default(getitem_1, getitem, 8, '0');  getitem = None
+    all_gather_into_tensor: "bf16[131074048]" = torch.ops._c10d_functional.all_gather_into_tensor_out.default(getitem, 8, '0', out=getitem_1);  getitem = None
     """
     node_list = list(mod.graph.nodes)
     for i, n in enumerate(node_list):
@@ -456,7 +456,7 @@ def reinplace_all_gather(mod):
             all_gather_node = node_list[all_gather_node_start_index]
 
             with mod.graph.inserting_before(all_gather_node):
-                inplace_all_gather_node = mod.graph.call_function(torch.ops._c10d_functional.all_gather_into_tensor_.default, (getitem_1_node, getitem_0_node, *all_gather_node.args[1:]))
+                inplace_all_gather_node = mod.graph.call_function(torch.ops._c10d_functional.all_gather_into_tensor_out.default, (getitem_0_node, *all_gather_node.args[1:]), {"out": getitem_1_node})
             all_gather_node.replace_all_uses_with(inplace_all_gather_node, propagate_meta=True)
             mod.graph.erase_node(all_gather_node)
     mod.graph.lint()

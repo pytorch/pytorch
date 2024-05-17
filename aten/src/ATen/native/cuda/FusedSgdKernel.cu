@@ -157,8 +157,8 @@ void _fused_sgd_with_momentum_kernel_cuda_(
     const bool nesterov,
     const bool maximize,
     const bool is_first_step,
-    const c10::optional<at::Tensor>& grad_scale,
-    const c10::optional<at::Tensor>& found_inf) {
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
   TORCH_CHECK_GT(momentum, 0);
   TORCH_CHECK(at::native::check_fast_path_restrictions(
       {params, grads, momentum_buffer_list}));
@@ -203,8 +203,8 @@ void _fused_sgd_with_momentum_kernel_cuda_(
     const bool nesterov,
     const bool maximize,
     const bool is_first_step,
-    const c10::optional<at::Tensor>& grad_scale,
-    const c10::optional<at::Tensor>& found_inf) {
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
   if (lr.is_cpu()) {
     _fused_sgd_with_momentum_kernel_cuda_(
         params,
@@ -279,8 +279,8 @@ void _fused_sgd_kernel_cuda_(
     const bool nesterov,
     const bool maximize,
     const bool is_first_step,
-    const c10::optional<at::Tensor>& grad_scale,
-    const c10::optional<at::Tensor>& found_inf) {
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
   if (!momentum_buffer_list.empty()) {
     _fused_sgd_with_momentum_kernel_cuda_(
         params,
@@ -343,8 +343,8 @@ void _fused_sgd_kernel_cuda_(
     const bool nesterov,
     const bool maximize,
     const bool is_first_step,
-    const c10::optional<at::Tensor>& grad_scale,
-    const c10::optional<at::Tensor>& found_inf) {
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
   if (!momentum_buffer_list.empty()) {
     _fused_sgd_with_momentum_kernel_cuda_(
         params,

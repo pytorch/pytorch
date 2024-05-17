@@ -4,12 +4,19 @@
 #include <ATen/ATen.h>
 #include <ATen/core/boxing/KernelFunction.h>
 
+#include <torch/csrc/dynamo/guards.h>
+#include <torch/csrc/inductor/aoti_eager/kernel_meta_info.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
 #include <torch/csrc/utils/pybind.h>
 
 #include <string>
 
 namespace torch::inductor {
+
+struct AOTIKernelState {
+  std::shared_ptr<AOTIModelContainerRunner> kernel_runner_;
+  std::vector<torch::dynamo::TensorCheck> tensor_checks_;
+};
 
 // The AOTIPythonKernelHolder class uses the AOT Inductor to generate a kernel
 // for a specified operation. To speed up this process, the generated kernel
@@ -31,6 +38,10 @@ class AOTIPythonKernelHolder : public c10::OperatorKernel {
   // op_overload_name.
   c10::impl::PyInterpreter* pyinterpreter_;
 
+  std::
+      unordered_map<AOTIKernelMetadata, AOTIKernelState, AOTIKernelMetadataHash>
+          aoti_kernel_cache_;
+
  public:
   AOTIPythonKernelHolder(
       c10::DispatchKey dispatch_key,
@@ -45,20 +56,36 @@ class AOTIPythonKernelHolder : public c10::OperatorKernel {
  private:
   bool cache_lookup(
       const c10::OperatorHandle& op,
-      c10::DispatchKeySet keyset,
-      torch::jit::Stack* stack);
+      const c10::DispatchKeySet& keyset,
+      const torch::jit::Stack* stack,
+      AOTIKernelState& kernel_state);
   void cache_miss(
       const c10::OperatorHandle& op,
-      c10::DispatchKeySet keyset,
+      const c10::DispatchKeySet& keyset,
       torch::jit::Stack* stack);
   void cache_hit(
+      const AOTIKernelState& kernel_state,
       const c10::OperatorHandle& op,
-      c10::DispatchKeySet keyset,
+      const c10::DispatchKeySet& keyset,
       torch::jit::Stack* stack);
+  // Invoke python utility function on the Inductor side to produce AOTI kernel
+  // for the given operation.
+  //   Inductor utility function -
+  //   torch._inductor.utils.aoti_compile_with_persistent_cache
   std::string produce_aoti_kernel_lib(
       const c10::OperatorHandle& op,
-      c10::DispatchKeySet keyset,
-      torch::jit::Stack* stack);
+      const c10::DispatchKeySet& keyset,
+      const torch::jit::Stack* stack);
+  // Invoke python utility function on the Inductor side to load AOTI kernel for
+  // the given operation.
+  //   Inductor utility function - torch._inductor.utils.load_aoti_eager_cache
+  void init_aoti_kernel_cache();
+  // Abstract the meta information of each tensor for the given operation. The
+  // meta infomation will be used for cache lookup as the key.
+  AOTIKernelMetadata get_inputs_metadata(const std::vector<at::Tensor>&);
+  // Load the AOTIModelContainerRunner object from the given file path.
+  std::shared_ptr<AOTIModelContainerRunner> load_aoti_model_runner(
+      const std::string&);
 };
 
 } // namespace torch::inductor

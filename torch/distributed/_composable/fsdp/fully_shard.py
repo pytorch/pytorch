@@ -212,7 +212,7 @@ class FSDPModule:
         state._state_ctx.is_last_backward = is_last_backward
 
     def set_requires_gradient_sync(
-        self, requires_gradient_sync: bool, recurse: bool = True
+        self, requires_gradient_sync: bool, *, recurse: bool = True
     ) -> None:
         """
         Sets if the module should sync gradients. This can be used to implement
@@ -235,16 +235,13 @@ class FSDPModule:
                     fsdp_param_group.all_reduce_grads = requires_gradient_sync
 
     def set_requires_all_reduce(
-        self, requires_all_reduce: bool, recurse: bool = True
+        self, requires_all_reduce: bool, *, recurse: bool = True
     ) -> None:
         """
         Sets if the module should all-reduce gradients. This can be used to
         implement gradient accumulation with only reduce-scatter but not
         all-reduce for HSDP.
         """
-        # TODO: post_reduce_output += fsdp_param.sharded_param.grad
-        # after reduce-scatter and before all-reduce
-        raise NotImplementedError("requires_all_reduce is not yet supported in HSDP")
         self_module = cast(nn.Module, self)
         modules = list(self_module.modules()) if recurse else [self_module]
         for module in modules:
@@ -254,7 +251,7 @@ class FSDPModule:
                     fsdp_param_group.all_reduce_grads = requires_all_reduce
 
     def set_reshard_after_backward(
-        self, reshard_after_backward: bool, recurse: bool = True
+        self, reshard_after_backward: bool, *, recurse: bool = True
     ) -> None:
         """
         Sets if the module should reshard parameters after backward. This can

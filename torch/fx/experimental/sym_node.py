@@ -173,6 +173,16 @@ class SymNode:
         else:
             return None
 
+    def maybe_as_bool(self):
+        import sympy
+
+        if self.expr is sympy.true:
+            return True
+        elif self.expr is sympy.false:
+            return False
+        else:
+            return None
+
     def is_int(self):
         return self.pytype is int
 

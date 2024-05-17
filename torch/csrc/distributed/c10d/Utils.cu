@@ -25,7 +25,7 @@ void checkForNan(const at::Tensor& tensor) {
   if (!torch::is_floating_point(tensor)) {
     return;
   }
-  const size_t maxNumThreadsPerBlock = 512;
+  const size_t maxNumThreadsPerBlock = 256;
   const size_t maxNumBlocks = 24;
   const size_t numThreadsPerBlock =
       std::min<size_t>(maxNumThreadsPerBlock, tensor.numel());
