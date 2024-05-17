@@ -50,13 +50,6 @@ Notes:
 namespace torch::dynamo::autograd {
 using c10::SymInt;
 
-// snapshot of python verbose logging toggle
-static PyObject* python_verbose_logger = nullptr;
-void verbose_log_fn(std::string_view msg) {
-  TORCH_CHECK(python_verbose_logger != nullptr);
-  PyObject_CallFunction(python_verbose_logger, "s", msg.data());
-}
-
 static PyObject* wrap_int_list(const std::vector<int64_t>& inputs) {
   PyObject* pyinput = PyTuple_New(static_cast<Py_ssize_t>(inputs.size()));
   for (const auto i : c10::irange(inputs.size())) {
@@ -88,6 +81,13 @@ static PyObject* check(PyObject* pyresult) {
 static void check(bool result) {
   if (C10_UNLIKELY(!result))
     check(nullptr);
+}
+
+// snapshot of python verbose logging toggle
+static PyObject* python_verbose_logger = nullptr;
+void verbose_log_fn(std::string_view msg) {
+  TORCH_CHECK(python_verbose_logger != nullptr);
+  check(PyObject_CallFunction(python_verbose_logger, "s", msg.data()));
 }
 
 struct CacheNode {
