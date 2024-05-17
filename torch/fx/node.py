@@ -106,7 +106,7 @@ def _get_qualified_name(func: Callable[..., Any]) -> str:
     # torch._C._ImperativeEngine.{fn}
     if (
         isinstance(func, types.BuiltinFunctionType)
-        and func.__self__.__class__ is torch._C._ImperativeEngine
+        and isinstance(getattr(func, "__self__", None), torch._C._ImperativeEngine)
     ):
         return f"torch._C._ImperativeEngine.{func.__name__}"
     name = func.__name__

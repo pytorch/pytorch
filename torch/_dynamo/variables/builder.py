@@ -686,17 +686,15 @@ class VariableBuilder:
         elif isinstance(value, torch._C._ImperativeEngine):
             self.install_guards(GuardBuilder.ID_MATCH)
             return AutogradEngineVariable(value, source=self.source)
-        elif (
-            isinstance(getattr(value, "__self__", None), torch._C._ImperativeEngine)
-            and getattr(value, "__name__", "") == "_exec_final_callbacks_stub"
-            and value == getattr(value.__self__, "_exec_final_callbacks_stub", None)
+        elif isinstance(value, types.BuiltinFunctionType) and isinstance(
+            getattr(value, "__self__", None), torch._C._ImperativeEngine
         ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return GetAttrVariable(
                 AutogradEngineVariable(
                     value.__self__, source=AttrSource(self.source, member="__self__")
                 ),
-                "_exec_final_callbacks_stub",
+                value.__name__,
             )
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if is_callable_allowed(value):
