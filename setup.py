@@ -1493,7 +1493,7 @@ def main():
         for package in packages:
             parts = package.split(".")
             if parts[0] == "torch":
-                modified_packages.append("libtorch" + package[len("torch") :])
+                modified_packages.append(DEFAULT_PACKAGE_NAME + package[len("torch") :])
         packages = modified_packages
         package_dir = {"libtorch": "torch"}
         torch_package_dir_name = "libtorch"
