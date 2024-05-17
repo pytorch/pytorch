@@ -83,7 +83,7 @@ from .utils import (
     same,
     set_example_value,
 )
-from .variables.base import MutableLocal, VariableTracker
+from .variables.base import VariableTracker
 from .variables.builder import (
     BackwardStateGraphArg,
     GraphArg,
@@ -403,10 +403,6 @@ class OutputGraph:
         )
 
         self.guard_on_key_order: Set[str] = set()
-        self.autograd_final_callbacks: List[Callable] = []
-        self.autograd_final_callbacks_var = variables.ListVariable(
-            self.autograd_final_callbacks, mutable_local=MutableLocal()
-        )
 
     def install_builtins_dict_in_fglobals(self):
         # f_globals["__builtins__"] can be a dict or a module. This is an

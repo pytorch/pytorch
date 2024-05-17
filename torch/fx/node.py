@@ -105,12 +105,6 @@ def _get_qualified_name(func: Callable[..., Any]) -> str:
     if (isinstance(func, (types.MethodDescriptorType, types.WrapperDescriptorType))
        and func is getattr(torch.Tensor, func.__name__, None)):
         return f"torch.Tensor.{func.__name__}"
-    # torch._C._ImperativeEngine.{fn}
-    if (
-        isinstance(func, types.BuiltinFunctionType)
-        and func.__self__.__class__ is torch._C._ImperativeEngine
-    ):
-        return f"torch._C._ImperativeEngine.{func.__name__}"
     name = func.__name__
     if name == "<lambda>":
         # For lambdas, try to get their defining name in the module

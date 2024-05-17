@@ -287,7 +287,6 @@ manual_torch_name_rule_map = {
     "torch._tensor._convert": UserFunctionVariable,
     "torch.jit._unwrap_optional": UserFunctionVariable,
     "torch.backends.mha.get_fastpath_enabled": UserFunctionVariable,
-    # "torch._C._ImperativeEngine#_exec_final_callbacks_stub": UserFunctionVariable,
     "torch._C._functorch._add_batch_dim": TorchInGraphFunctionVariable,
     "torch._C._functorch._remove_batch_dim": TorchInGraphFunctionVariable,
     "torch._C._functorch._wrap_for_grad": TorchInGraphFunctionVariable,
@@ -2854,7 +2853,7 @@ Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
 """
 
 
-# @functools.lru_cache(None)
+@functools.lru_cache(None)
 def get_torch_obj_rule_map():
     d: Dict[Any, VariableTracker] = dict()
     for m in torch_name_rule_map:
@@ -2893,7 +2892,7 @@ def load_object(name):
             assert len(x) == 1, f"Invalid obj name {name}"
             val = _load_obj_from_str(x[0])
         val = unwrap_if_wrapper(val)
-    except (AttributeError, ImportError) as e:
+    except (AttributeError, ImportError):
         val = None
     return val
 

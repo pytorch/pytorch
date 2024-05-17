@@ -1,10 +1,10 @@
 import contextlib
 import functools
-import logging
+import threading
 from typing import List, Optional, TYPE_CHECKING
 
 import torch
-from torch._dynamo.external_utils import call_backward, call_hook
+from torch._dynamo.external_utils import call_backward, call_hook, exec_final_callbacks
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.utils import counters, lazy_format_graph_code, set_locals_to_steal
 from torch._logging import getArtifactLogger, trace_structured
@@ -30,8 +30,6 @@ if TYPE_CHECKING:
 
 compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
 verbose_log = getArtifactLogger(__name__, "compiled_autograd_verbose")
-
-torch_log = logging.getLogger("torch")
 
 
 def snapshot_verbose_logging_enabled():
@@ -209,7 +207,7 @@ class AutogradCompilerInstance:
     def end_capture(self, outputs):
         self.fx_tracer.create_proxy(
             "call_function",
-            torch.autograd.Variable._execution_engine._exec_final_callbacks_stub,
+            exec_final_callbacks,
             (),
             {},
         )
