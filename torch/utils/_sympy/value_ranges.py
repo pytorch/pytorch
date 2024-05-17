@@ -137,8 +137,8 @@ class ValueRanges(Generic[_T]):
         try:
             if not sympy_generic_le(lower, upper):
                 raise ValueRangeError(f"Invalid ranges [{lower}:{upper}]")
-        except TypeError:
-            raise TypeError(f"Could not compare {lower} <= {upper}")  # noqa: TRY200
+        except TypeError as e:
+            raise TypeError(f"Could not compare {lower} <= {upper}") from e
         # Because this is a frozen class
         object.__setattr__(self, "lower", lower)
         object.__setattr__(self, "upper", upper)
@@ -872,12 +872,15 @@ def bound_sympy(
         #      size variables can come with a lower bound of 2, as we specialise on 0 and 1
         unbounded_ranges: Dict[sympy.Symbol, ValueRanges] = {}
         for s in unbounded_vars:
-            assert s.is_integer  # type: ignore[attr-defined]
-            if s.is_positive:  # type: ignore[attr-defined]
-                lower = 1
-            elif s.is_nonnegative:  # type: ignore[attr-defined]
-                lower = 0
+            if s.is_integer:  # type: ignore[attr-defined]
+                if s.is_positive:  # type: ignore[attr-defined]
+                    lower = 1
+                elif s.is_nonnegative:  # type: ignore[attr-defined]
+                    lower = 0
+                else:
+                    lower = -math.inf  # type: ignore[assignment]
             else:
+                # Don't bother trying very hard here
                 lower = -math.inf  # type: ignore[assignment]
             unbounded_ranges[s] = ValueRanges(lower, math.inf)  # type: ignore[index]
         ranges = {**ranges, **unbounded_ranges}

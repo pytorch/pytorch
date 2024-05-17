@@ -102,10 +102,10 @@ class AbstractTimeoutTest:
     def _init_methods(self):
         f = tempfile.NamedTemporaryFile(delete=False)
         if sys.platform == "win32":
-            yield "file:///%s" % f.name.replace("\\", "/")
+            yield "file:///{}".format(f.name.replace("\\", "/"))
             f.close()
         else:
-            yield "file://%s" % f.name
+            yield f"file://{f.name}"
             f.close()
             yield "tcp://127.0.0.1:%d" % common.find_free_port()
 

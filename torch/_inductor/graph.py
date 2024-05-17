@@ -67,6 +67,7 @@ from .ir import (
     Reduction,
     StorageBox,
     TensorBox,
+    TorchBindObject,
 )
 from .lowering import (
     constrain_to_fx_strides,
@@ -358,6 +359,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.constants: Dict[str, torch.Tensor] = (
             const_module.constants if const_module else {}
         )
+        self.torchbind_constants: Dict[str, torch._C.ScriptObject] = {}
         self.constant_reprs: Dict[str, str] = {}
         self.removed_buffers: Set[str] = set()
         self.removed_inplace_buffers: Set[str] = set()
@@ -992,6 +994,11 @@ class GraphLowering(torch.fx.Interpreter):
         if isinstance(value, torch.fx.GraphModule):
             return ir.Subgraph(name=target, graph_module=value)
 
+        if isinstance(value, torch._C.ScriptObject):
+            self.torchbind_constants[target] = value
+            self.constant_reprs[target] = ""
+            return TorchBindObject(target, value)
+
         if (
             config.aot_inductor.use_runtime_constant_folding
             or config.always_keep_tensor_constants
@@ -1296,6 +1303,8 @@ class GraphLowering(torch.fx.Interpreter):
                                 torch.ops.aten.mkldnn_rnn_layer.default,
                                 torch.ops.onednn.qlinear_pointwise.default,
                                 torch.ops.onednn.qlinear_pointwise.tensor,
+                                torch.ops.onednn.qlinear_pointwise.binary,
+                                torch.ops.onednn.qlinear_pointwise.binary_tensor,
                             ]
                             need_fixed_channels_last_layout += [
                                 torch.ops.mkldnn._convolution_pointwise.default,
@@ -1671,7 +1680,10 @@ class GraphLowering(torch.fx.Interpreter):
         linemap = [(line_no, node.stack_trace) for line_no, node in linemap]
         key, path = PyCodeCache.write(code)
         mod = PyCodeCache.load_by_key_path(
-            key, path, linemap=linemap, attrs=self.constants
+            key,
+            path,
+            linemap=linemap,
+            attrs={**self.constants, **self.torchbind_constants},
         )
         self.cache_key = key
         self.cache_path = path

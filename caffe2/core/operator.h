@@ -605,7 +605,7 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
   std::string type_;
   vector<const Blob*> inputs_;
   vector<Blob*> outputs_;
-  // Preferably use c10::optional, but nvcc doesn't work
+  // Preferably use std::optional, but nvcc doesn't work
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   std::unique_ptr<const c10::FunctionSchema> fn_schema_;
@@ -649,7 +649,7 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
     }
   }
 
-  c10::optional<int> argumentIndexWithName(c10::string_view name) const;
+  std::optional<int> argumentIndexWithName(c10::string_view name) const;
 
   // An event used by asynchronous execution.
   std::unique_ptr<Event> event_;

@@ -1,6 +1,7 @@
 # mypy: ignore-errors
 
 import copy
+import json
 import itertools
 import math
 import os
@@ -8,7 +9,7 @@ import random
 import sys
 import tempfile
 import time
-from collections import namedtuple, OrderedDict
+from collections import namedtuple, OrderedDict, defaultdict
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import timedelta
@@ -204,6 +205,24 @@ def get_profiling_event(event_name, profiler, dedup_gpu_user_annotation=False):
         )
     ]
 
+def get_profiler_nccl_meta(prof):
+    """Torch profiler includes nccl metadata in an inserted operator called "record_param_comms"
+    We will need to test metadata obtained from profiler here"""
+    tf = tempfile.NamedTemporaryFile(
+        mode="w+t", suffix=".json", delete=False
+    )
+    tf.close()
+    trace_file = tf.name
+
+    prof.export_chrome_trace(trace_file)
+    with open(trace_file) as f:
+        events = json.load(f)["traceEvents"]
+    print(f"Trace saved to {trace_file}")
+
+    # Comment to debug
+    os.remove(trace_file)
+
+    return [e for e in events if e.get("name") == "record_param_comms"]
 
 # Base error message substring on unfinished reductions.
 ddp_prev_reduction_unfinished_str = (
@@ -658,6 +677,33 @@ class DistributedTest:
                 dist.all_gather(gathered_bufs_m2, buf2)
                 for b in gathered_bufs_m2:
                     self.assertEqual(b, buf2)
+
+        def _sanity_check_profiler_nccl_meta(self, nccl_meta_events):
+            """Torch profiler includes nccl metadata in an inserted operator called "record_param_comms"
+            We test for basic fields in this profiler event that correspond to the nccl communication
+            collectives"""
+            per_coll_meta = defaultdict(list)
+            for e in nccl_meta_events:
+                args = e.get("args", {})
+                collname = args.get("Collective name", "")
+                self.assertNotEqual(collname, "")
+                self.assertNotEqual(args.get("dtype", ""), "")
+
+                per_coll_meta[collname].append(args)
+                if collname in {"wait"}:
+                    continue
+
+                self.assertEqual(args["Process Group Description"], "default_pg")
+                self.assertNotEqual(args["Process Group Ranks"], "")
+
+                self.assertGreaterEqual(args.get("In msg nelems", -1), 0)
+                self.assertGreaterEqual(args.get("Out msg nelems", -1), 0)
+                self.assertGreaterEqual(args.get("Group size", -1), 0)
+                self.assertGreaterEqual(args.get("Global rank start", -1), 0)
+                self.assertGreaterEqual(args.get("Global rank stride", -1), 0)
+
+            # print(per_coll_meta)
+            return per_coll_meta
 
         def test_dump_DDP_relevant_env_vars(self):
             with captured_output() as (out, _):
@@ -1587,6 +1633,7 @@ class DistributedTest:
                         ]
                         for event in events:
                             self.assertTrue(event.input_shapes in expected_shapes)
+
 
         @skip_if_no_gpu
         @skip_but_pass_in_sandcastle_if(BACKEND != "nccl", "NCCL Send Recv Only")
@@ -6880,6 +6927,8 @@ class DistributedTest:
             events = get_profiling_event("search_unused_parameters", prof)
             self.assertEqual(len(events), 1)
 
+            return prof
+
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle("Currently failing in NVIDIA internal CI")
@@ -6898,7 +6947,29 @@ class DistributedTest:
             cpu_act = torch.profiler.ProfilerActivity.CPU
             cuda_act = torch.profiler.ProfilerActivity.CUDA
             torch_profiler_ctx = torch.profiler.profile(activities=[cpu_act, cuda_act])
-            self._test_ddp_profiling(profiler_ctx=torch_profiler_ctx)
+            prof = self._test_ddp_profiling(profiler_ctx=torch_profiler_ctx)
+
+            if dist.get_backend() != "nccl":
+                return
+
+            # Note comment out the "os.remove(trace_file)" in `get_profiler_nccl_meta()`
+            # to debug any mismatches.
+            nccl_meta_events = get_profiler_nccl_meta(prof)
+            self.assertGreater(len(nccl_meta_events), 0)
+
+            nccl_meta = self._sanity_check_profiler_nccl_meta(nccl_meta_events)
+
+            # additionally check the specific collectives in this test case
+            self.assertEqual(len(nccl_meta["allreduce"]), 2)
+            self.assertEqual(len(nccl_meta["wait"]), 1)
+
+            # check allreduce message sizes
+            a0 = nccl_meta["allreduce"][0]
+            self.assertEqual(a0["Out msg nelems"], 100, msg=f"{a0}")
+            self.assertEqual(a0["dtype"], "Float", msg=f"{a0}")
+            a1 = nccl_meta["allreduce"][1]
+            self.assertEqual(a1["Out msg nelems"], 1, msg=f"{a1}")
+            self.assertEqual(a1["dtype"], "Int", msg=f"{a1}")
 
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(

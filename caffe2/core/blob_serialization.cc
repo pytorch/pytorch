@@ -1,5 +1,6 @@
 #include "caffe2/core/blob_serialization.h"
 
+#include <limits>
 #include <mutex>
 #include <sstream>
 #include <utility>
@@ -83,8 +84,7 @@ Range<T*> GetMutableTensorDataRange(
     size_t start,
     size_t numElements) {
   CAFFE_ENFORCE(
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      start + numElements <= tensor.numel(),
+      static_cast<int64_t>(start + numElements) <= tensor.numel(),
       "Requested invalid mutable tensor range [",
       start,
       ", ",
@@ -100,8 +100,7 @@ c10::ArrayRef<T> GetTensorDataRange(
     size_t start,
     size_t numElements) {
   CAFFE_ENFORCE(
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      start + numElements <= tensor.numel(),
+      static_cast<int64_t>(start + numElements) <= tensor.numel(),
       "Requested invalid tensor range [",
       start,
       ", ",
@@ -390,8 +389,7 @@ void TensorSerializer::SerializeWithOptions(
   // Poorman's IOBound ThreadPool
   SimpleQueue<size_t> chunkQueue;
   auto task = [&]() {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    size_t chunkStart;
+    size_t chunkStart = std::numeric_limits<size_t>::max();
     while (chunkQueue.Pop(&chunkStart)) {
       processChunk(chunkStart);
     }
@@ -409,8 +407,7 @@ void TensorSerializer::SerializeWithOptions(
   VLOG(1) << "Serializing blob " << name;
   // Serialize whole vector. If vector is empty, it's shape still needs to be
   // serialized in empty proto
-  for (size_t chunkBegin = 0;
-       // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+  for (int64_t chunkBegin = 0;
        chunkBegin < std::max(tensor.numel(), static_cast<int64_t>(1));
        chunkBegin += chunk_size) {
     VLOG(2) << "Starting a chunk at " << chunkBegin;
@@ -582,8 +579,7 @@ void SerializeTensorData(const SerializeParams<float>& params) {
       BlobSerializationOptions_FloatFormat_FLOAT_BFLOAT16) {
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     std::unique_ptr<float[]> tmp_buffer;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    const float* src;
+    const float* src = nullptr;
     if (params.context.device() == CPU) {
       src = params.input.data();
     } else {
@@ -653,14 +649,12 @@ void TensorSerializer::Serialize(
     size_t chunkBegin,
     int32_t chunkSize) {
   CAFFE_ENFORCE(
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      chunkBegin <= input.numel(),
+      static_cast<int64_t>(chunkBegin) <= input.numel(),
       "Chunk begin is out of tensor: ",
       chunkBegin,
       ' ',
       input.numel());
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  if (chunkBegin + chunkSize > input.numel()) {
+  if (static_cast<int64_t>(chunkBegin + chunkSize) > input.numel()) {
     chunkSize = input.numel() - chunkBegin;
   }
 
@@ -1029,8 +1023,7 @@ DESERIALIZE_IMPL(float, FMT_BFLOAT16) {
       params.tensor_proto.raw_data().data());
 
   // If we are on a big-endian machine, byte-swap the serialized data.
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  const fbgemm::bfloat16* src;
+  const fbgemm::bfloat16* src = nullptr;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   std::unique_ptr<fbgemm::bfloat16[]> bswap_buffer;
   if (kIsLittleEndian) {
@@ -1045,8 +1038,7 @@ DESERIALIZE_IMPL(float, FMT_BFLOAT16) {
   // bfloat16 to float conversion.
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   std::unique_ptr<float[]> tmp_buffer;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  float* dest;
+  float* dest = nullptr;
   if (params.context.device() == CPU) {
     dest = params.dest.data();
   } else {
