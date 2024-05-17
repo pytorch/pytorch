@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
@@ -16,6 +16,7 @@ from .optimizer import (
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
+    ParamsT,
 )
 
 __all__ = ["Adamax", "adamax"]
@@ -24,11 +25,11 @@ __all__ = ["Adamax", "adamax"]
 class Adamax(Optimizer):
     def __init__(
         self,
-        params,
-        lr=2e-3,
-        betas=(0.9, 0.999),
-        eps=1e-8,
-        weight_decay=0,
+        params: ParamsT,
+        lr: float = 2e-3,
+        betas: Tuple[float, float] = (0.9, 0.999),
+        eps: float = 1e-8,
+        weight_decay: float = 0,
         foreach: Optional[bool] = None,
         *,
         maximize: bool = False,
@@ -128,11 +129,11 @@ class Adamax(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            params_with_grad = []
-            grads = []
-            exp_avgs = []
-            exp_infs = []
-            state_steps = []
+            params_with_grad: List[Tensor] = []
+            grads: List[Tensor] = []
+            exp_avgs: List[Tensor] = []
+            exp_infs: List[Tensor] = []
+            state_steps: List[Tensor] = []
 
             beta1, beta2 = group["betas"]
             eps = group["eps"]
@@ -298,11 +299,11 @@ def _multi_tensor_adamax(
     exp_infs: List[Tensor],
     state_steps: List[Tensor],
     *,
+    eps: float,
     beta1: float,
     beta2: float,
     lr: float,
     weight_decay: float,
-    eps: float,
     maximize: bool,
     differentiable: bool,
     capturable: bool,
@@ -340,7 +341,7 @@ def _multi_tensor_adamax(
             )
 
         if maximize:
-            grouped_grads = torch._foreach_neg(grouped_grads)
+            grouped_grads = torch._foreach_neg(grouped_grads)  # type: ignore[assignment]
 
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
@@ -358,7 +359,7 @@ def _multi_tensor_adamax(
                 # Re-use the intermediate memory (grouped_grads) already allocated for maximize
                 torch._foreach_add_(grouped_grads, grouped_params, alpha=weight_decay)
             else:
-                grouped_grads = torch._foreach_add(
+                grouped_grads = torch._foreach_add(  # type: ignore[assignment]
                     grouped_grads, grouped_params, alpha=weight_decay
                 )
 
@@ -371,13 +372,14 @@ def _multi_tensor_adamax(
         # in this case, we need to introduce a copy of the grads
         # since one has not been introduced previously
         if not maximize and weight_decay == 0:
-            grouped_grads = torch._foreach_abs(grouped_grads)
+            grouped_grads = torch._foreach_abs(grouped_grads)  # type: ignore[assignment]
         else:
             torch._foreach_abs_(grouped_grads)
 
         torch._foreach_add_(grouped_grads, eps)
         torch._foreach_maximum_(grouped_exp_infs, grouped_grads)
 
+        bias_corrections: Union[Tuple[Tensor, ...], List[Tensor]]
         if capturable:
             bias_corrections = torch._foreach_pow(beta1, grouped_state_steps)
             # foreach_sub doesn't allow a scalar as the first arg
