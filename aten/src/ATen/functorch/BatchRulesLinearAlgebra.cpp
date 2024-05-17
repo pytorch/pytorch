@@ -157,9 +157,9 @@ void _linalg_check_errors_batch_rule(const Tensor& info, optional<int64_t> info_
   at::_linalg_check_errors(info_, api_name, false);
 }
 
-std::tuple<Tensor, c10::optional<int64_t>>
-householder_product_batch_rule(const Tensor &input, c10::optional<int64_t> input_bdim,
-                               const Tensor &tau, c10::optional<int64_t> tau_bdim)
+std::tuple<Tensor, std::optional<int64_t>>
+householder_product_batch_rule(const Tensor &input, std::optional<int64_t> input_bdim,
+                               const Tensor &tau, std::optional<int64_t> tau_bdim)
 {
   auto input_ = moveBatchDimToFront(input, input_bdim);
   auto tau_ = moveBatchDimToFront(tau, tau_bdim);
@@ -330,8 +330,8 @@ oneOutput linalg_lu_solve_batch_rule(
 }
 
 oneOutput cholesky_solve_batch_rule(
-    const Tensor& self, c10::optional<int64_t> self_bdim,
-    const Tensor& A, c10::optional<int64_t> A_bdim,
+    const Tensor& self, std::optional<int64_t> self_bdim,
+    const Tensor& A, std::optional<int64_t> A_bdim,
     bool upper) {
   TORCH_CHECK(rankWithoutBatchDim(self, self_bdim) >= 2,
            "b should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
@@ -345,14 +345,14 @@ oneOutput cholesky_solve_batch_rule(
 }
 
 threeOutputs linalg_lu_factor_ex_batch_rule(
-    const Tensor& A, c10::optional<int64_t> A_bdim, bool pivot, bool check_errors) {
+    const Tensor& A, std::optional<int64_t> A_bdim, bool pivot, bool check_errors) {
   TORCH_CHECK(rankWithoutBatchDim(A, A_bdim) >= 2, "torch.lu_factor_ex: Expected tensor with 2 or more dimensions. Got size: ", A.sizes(), " instead");
   const auto A_ = moveBatchDimToFront(A, A_bdim);
   const auto res = at::linalg_lu_factor_ex(A_, pivot, check_errors);
   return std::make_tuple(std::get<0>(res), 0, std::get<1>(res), 0, std::get<2>(res), 0);
 }
 
-oneOutput matrix_exp_batch_rule(const Tensor& self, c10::optional<int64_t> self_bdim) {
+oneOutput matrix_exp_batch_rule(const Tensor& self, std::optional<int64_t> self_bdim) {
   TORCH_CHECK(rankWithoutBatchDim(self, self_bdim) >= 2, "torch.matrix_exp: The input tensor A must have at least 2 dimensions.");
   const auto self_ = moveBatchDimToFront(self, self_bdim).contiguous();  // seems to be a bug
   return std::make_tuple(at::matrix_exp(self_), 0);
@@ -400,8 +400,8 @@ fourOutputs solve_ex_batch_rule(
   return std::make_tuple(std::get<0>(res), 0, std::get<1>(res), 0, std::get<2>(res), 0, std::get<3>(res), 0);
 }
 
-oneOutput cross_batch_rule(const Tensor& self, c10::optional<int64_t> self_bdim,
-                           const Tensor& other, c10::optional<int64_t> other_bdim, const int64_t dim) {
+oneOutput cross_batch_rule(const Tensor& self, std::optional<int64_t> self_bdim,
+                           const Tensor& other, std::optional<int64_t> other_bdim, const int64_t dim) {
   // match cross dimension checks
   TORCH_CHECK(rankWithoutBatchDim(self, self_bdim) == rankWithoutBatchDim(other, other_bdim),
     "linalg.cross: inputs must have the same number of dimensions."
@@ -418,16 +418,16 @@ oneOutput cross_batch_rule(const Tensor& self, c10::optional<int64_t> self_bdim,
   return std::make_tuple(linalg_cross(self_, other_, dim_), 0);
 }
 
-c10::optional<int64_t> batch_dim_if_not_empty(const Tensor& t) {
+std::optional<int64_t> batch_dim_if_not_empty(const Tensor& t) {
   if (t.dim() == 1 && t.size(0) == 0) {
-    return c10::optional<int64_t>();
+    return std::optional<int64_t>();
   }
-  return c10::optional<int64_t>(0);
+  return std::optional<int64_t>(0);
 }
 
 fourOutputs linalg_lstsq_batch_rule(
-    const Tensor& self, c10::optional<int64_t> self_bdim, const Tensor& b, c10::optional<int64_t> b_bdim,
-    c10::optional<double> rcond, c10::optional<c10::string_view> driver) {
+    const Tensor& self, std::optional<int64_t> self_bdim, const Tensor& b, c10::optional<int64_t> b_bdim,
+    std::optional<double> rcond, c10::optional<c10::string_view> driver) {
   TORCH_CHECK(rankWithoutBatchDim(self, self_bdim) >= 2, "torch.linalg.lstsq: input must have at least 2 dimensions.");
   TORCH_CHECK(rankWithoutBatchDim(b, b_bdim) >= 1, "torch.linalg.lstsq: other must have at least 1 dimension.");
 
@@ -449,7 +449,7 @@ fourOutputs linalg_lstsq_batch_rule(
 }
 
 template<typename F>
-std::tuple<Tensor, c10::optional<int64_t>>
+std::tuple<Tensor, std::optional<int64_t>>
 atol_rtol_tensor_batch_rule(
     F Func, const Tensor& input, optional<int64_t> input_bdim,
     const optional<Tensor>& atol, const optional<int64_t> atol_bdim,
@@ -478,11 +478,11 @@ atol_rtol_tensor_batch_rule(
   return std::make_tuple(Func(input_, atol_, rtol_, hermitian), 0);
 }
 
-static std::tuple<Tensor, c10::optional<int64_t>>
+static std::tuple<Tensor, std::optional<int64_t>>
 pinv_batch_rule(
-    const Tensor& input, c10::optional<int64_t> input_bdim, const optional<Tensor>& atol,
-    const c10::optional<int64_t> atol_bdim, const optional<Tensor>& rtol,
-    const c10::optional<int64_t> rtol_bdim, bool hermitian) {
+    const Tensor& input, std::optional<int64_t> input_bdim, const optional<Tensor>& atol,
+    const std::optional<int64_t> atol_bdim, const optional<Tensor>& rtol,
+    const std::optional<int64_t> rtol_bdim, bool hermitian) {
   return atol_rtol_tensor_batch_rule(ATEN_FN2(linalg_pinv, atol_rtol_tensor), input, input_bdim, atol, atol_bdim, rtol, rtol_bdim, hermitian, "linalg.pinv");
 }
 }

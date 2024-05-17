@@ -58,7 +58,7 @@ std::string Error::compute_what(bool include_backtrace) const {
   return oss.str();
 }
 
-const Error::Backtrace& Error::backtrace() const {
+const Backtrace& Error::backtrace() const {
   return backtrace_;
 }
 
@@ -142,7 +142,7 @@ namespace {
 WarningHandler* getBaseHandler() {
   static WarningHandler base_warning_handler_ = WarningHandler();
   return &base_warning_handler_;
-};
+}
 
 class ThreadWarningHandler {
  public:
