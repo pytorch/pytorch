@@ -760,11 +760,6 @@ class CommonTemplate:
             ),
         )
 
-    def test_new_cpp_build_logical(self):
-        from torch._inductor.codecache import validate_new_cpp_commands
-
-        validate_new_cpp_commands()
-
     def test_add_const_int(self):
         def fn(a):
             return (a + 1, torch.add(a, 1, alpha=2))
@@ -8876,6 +8871,11 @@ class CommonTemplate:
                         self.assertEqual(get_data_type(node), torch.float)
                     elif node.target == "output":
                         self.assertEqual(get_data_type(node), torch.bfloat16)
+
+    def test_new_cpp_build_logical(self):
+        from torch._inductor.codecache import validate_new_cpp_commands
+
+        validate_new_cpp_commands()
 
     # Calling div only torch.SymInt arguments is not yet supported.
     # To support this behavior, we need to allow const-propping tensors that store symint data.
