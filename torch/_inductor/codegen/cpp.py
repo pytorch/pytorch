@@ -1837,59 +1837,48 @@ class CppKernel(Kernel):
                                 stack.enter_context(code.indent())
                                 gen_loop_kernel(loop)
                 else:
-                    kernel.codegen_tile2d_kernel(code)
-                    kernel.codegen_vec_kernel(code)
-                    kernel.codegen_scalar_kernel(code)
+                    assert isinstance(kernel, CppKernelDispatcher)
+                    kernel.gen_code(code)
 
-            def get_reduction_code_buffer(loop, buffer="prefix"):
-                def get_kernel_buffer(kernel, buffer="prefix"):
-                    if buffer == "local":
-                        return (
-                            kernel.local_reduction_init,
-                            kernel.local_reduction_stores,
-                        )
-                    elif buffer == "suffix":
-                        suffix = kernel.reduction_suffix
-                        if loop.parallel:
-                            suffix = kernel.parallel_reduction_suffix + suffix
-                        return suffix
-                    else:
-                        prefix = kernel.reduction_prefix
-                        if loop.parallel:
-                            prefix = prefix + kernel.parallel_reduction_prefix
-                        return prefix
-
-                assert buffer in ("prefix", "suffix", "local")
-                kernel = loop.get_kernel()
-                return get_kernel_buffer(kernel, buffer)
+            def get_reduction_prefix_suffix(kernel, parallel=False, buffer="prefix"):
+                if buffer == "suffix":
+                    suffix = kernel.reduction_suffix
+                    if parallel:
+                        suffix = kernel.parallel_reduction_suffix + suffix
+                    return suffix
+                else:
+                    assert buffer == "prefix"
+                    prefix = kernel.reduction_prefix
+                    if parallel:
+                        prefix = prefix + kernel.parallel_reduction_prefix
+                    return prefix
 
             def gen_loop_maybe_reduction(loop: LoopLevel, in_reduction=False):
+                kernel = loop.get_kernel()
                 with contextlib.ExitStack() as stack_outer:
-                    local_reduction_init = local_reduction_stores = None
                     if loop.is_reduction and not in_reduction:
-                        reduction_prefix = get_reduction_code_buffer(loop)
+                        reduction_prefix = get_reduction_prefix_suffix(
+                            kernel, loop.parallel, "prefix"
+                        )
                         if reduction_prefix:
                             stack_outer.enter_context(code.indent())
                         code.splice(reduction_prefix)
                     if loop_nest.is_reduction_only() and loop.parallel:
-                        (
-                            local_reduction_init,
-                            local_reduction_stores,
-                        ) = get_reduction_code_buffer(loop, "local")
                         worksharing.parallel(threads)
-                        if local_reduction_init:
-                            assert local_reduction_stores
-                            code.splice(local_reduction_init)
+                        if kernel.local_reduction_init:
+                            assert kernel.local_reduction_stores
+                            code.splice(kernel.local_reduction_init)
 
                     gen_loop(loop)
 
                     if loop_nest.is_reduction_only() and loop.parallel:
-                        if local_reduction_stores:
-                            code.splice(local_reduction_stores)
+                        if kernel.local_reduction_stores:
+                            code.splice(kernel.local_reduction_stores)
                         worksharing.close()
                     if loop.is_reduction and not in_reduction:
-                        code.splice(get_reduction_code_buffer(loop, "suffix"))
-                        pass
+                        code.splice(
+                            get_reduction_prefix_suffix(kernel, loop.parallel, "suffix")
+                        )
 
             def gen_loop(loop: LoopLevel):
                 with contextlib.ExitStack() as stack:
@@ -2872,8 +2861,11 @@ class CppVecKernelChecker(CppVecKernel):
 
 
 class CppKernelDispatcher(CppKernel):
-    def __init__(self, loops, split=False):
-        self.scalar_kernel: Optional[CppKernel] = None
+    def __init__(
+        self, loops, scalar_kernel, vec_kernel=None, tile2d_kernel=None, split_level=0
+    ):
+        self.scalar_kernel: CppKernel = scalar_kernel
+        self.call_ranges = self.scalar_kernel.call_ranges
         self.vec_kernel: Optional[CppVecKernel] = None
         self.tile2d_kernel: Optional[CppTile2DKernel] = None
         self.itervars = []
@@ -2888,9 +2880,9 @@ class CppKernelDispatcher(CppKernel):
         self.reduction_var_dict = {}
         self.need_arr_acc_var = False
         self.loops = loops
-
-        self.split = split
-        if split:
+        self.split_level = split_level
+        if split_level > 0:
+            assert split_level == len(loops)
             for loop in loops:
                 self.itervars.append(loop.var)
                 self.itervars_tail.append(f"{loop.var}_tail")
@@ -2898,15 +2890,42 @@ class CppKernelDispatcher(CppKernel):
                 self.tiling_ranges.append(FloorDiv(loop.size, loop.steps) * loop.steps)
             self.gen_tiling_conditions()
             self.gen_tiling_loops()
-            if not loops[0].is_reduction and loops[0].inner and loops[0].inner.is_reduction:
+            if (
+                not loops[0].is_reduction
+                and loops[0].inner
+                and loops[0].inner.is_reduction
+            ):
                 self.need_arr_acc_var = True
+            if self.loops[0].steps != 1:
+                assert vec_kernel
+                assert self.call_ranges == vec_kernel.call_ranges
+                self.vec_kernel = vec_kernel
+                if split_level == 2 and self.loops[1].steps != 1:
+                    assert tile2d_kernel
+                    assert self.call_ranges == tile2d_kernel.call_ranges
+                    self.tile2d_kernel = tile2d_kernel
+        self.aggregate_reduction_buffers()
+
+    def gen_code(self, code):
+        if self.tile2d_kernel:
+            assert self.split_level == 2
+            if self.tiling_ranges[0] != 0 and self.tiling_ranges[1] != 0:
+                self.codegen_tile2d_kernel(code)
+        if self.vec_kernel:
+            assert self.split_level > 0
+            if self.tiling_ranges[0] != 0:
+                self.codegen_vec_kernel(code)
+        assert self.scalar_kernel
+        self.codegen_scalar_kernel(code)
 
     def gen_tiling_conditions(self):
-        if len(self.tiling_ranges) == 1:
+        if self.split_level == 1:
             # generate 1-d tiling condition
             if self.tiling_ranges[0] == 0:
+                # no enough values for vec kernel
                 self.loops[0].steps = 1
             elif self.tiling_ranges[0] == self.sizes[0]:
+                # all values are used for vec kernel, no additional condition need to be checked
                 return
             else:
                 self.vec_condition.writeline(
@@ -2914,26 +2933,28 @@ class CppKernelDispatcher(CppKernel):
                 )
                 self.scalar_condition.writeline(
                     f"if ({self.itervars[0]} >= {cexpr_index(self.tiling_ranges[0])})"
-            )
-        elif len(self.tiling_ranges) == 2:
+                )
+        elif self.split_level == 2:
             # generate 2-d tiling condition
             if self.tiling_ranges[0] == 0:
+                # no enough values for tild2d/vec kernel
                 self.loops[0].steps = 1
                 self.loops[1].steps = 1
-                self.split = False
                 return
 
             if self.tiling_ranges[1] == 0:
+                # no enough values for tild2d kernel
                 self.loops[1].steps = 1
                 if self.tiling_ranges[0] != self.sizes[0]:
-                    self.vec_condition.writeline(f"if ({self.itervars[0]} < {cexpr_index(self.tiling_ranges[0])})")
+                    self.vec_condition.writeline(
+                        f"if ({self.itervars[0]} < {cexpr_index(self.tiling_ranges[0])})"
+                    )
                     self.scalar_condition.writeline(
                         f"if ({self.itervars[0]} >= {cexpr_index(self.tiling_ranges[0])} && "
                         + f"{self.itervars[1]} == 0)"
                     )
                 return
-            
-            
+
             self.tile2d_condition.writeline(
                 f"if ({self.itervars[0]} < {cexpr_index(self.tiling_ranges[0])} && "
                 + f"{self.itervars[1]} < {cexpr_index(self.tiling_ranges[1])})"
@@ -2982,25 +3003,14 @@ class CppKernelDispatcher(CppKernel):
                 lines[i] = modified_line
 
     def replace_vars(self, kernel, dim: List[int]):
-        def replace_loop_vars(lines, var, new_var):
-            pattern = re.compile(f"(?<!{var}_){var}")
-            for i, line in enumerate(lines):
-                if isinstance(line, IndirectAssertLine):
-                    continue
-                elif isinstance(line, DeferredLine):
-                    line.line = pattern.sub(new_var, line.line)
-                else:
-                    modified_line = pattern.sub(new_var, line)
-                    lines[i] = modified_line
-
         for i in dim:
-            replace_loop_vars(
+            self.replace_loop_vars(
                 kernel.loads._lines, self.itervars[i], self.itervars_tail[i]
             )
-            replace_loop_vars(
+            self.replace_loop_vars(
                 kernel.stores._lines, self.itervars[i], self.itervars_tail[i]
             )
-            replace_loop_vars(
+            self.replace_loop_vars(
                 kernel.compute._lines, self.itervars[i], self.itervars_tail[i]
             )
 
@@ -3018,48 +3028,41 @@ class CppKernelDispatcher(CppKernel):
             code.splice(kernel.poststores)
 
     def codegen_scalar_kernel(self, code):
-        if self.scalar_kernel:
-            if not self.split or self.tiling_ranges[0] == 0:
+        if self.split_level == 0:
+            self.gen_kernel(self.scalar_kernel, code)
+        if self.split_level > 0:
+            code.splice(self.scalar_condition)
+            if self.tiling_ranges[0] == 0:
                 self.gen_kernel(self.scalar_kernel, code)
-            elif self.split and self.tiling_ranges[0] == self.sizes[0]:
-                return
             else:
-                code.splice(self.scalar_condition)
+                replace_dim = [0] if self.split_level == 1 else [0, 1]
+                self.replace_vars(self.scalar_kernel, replace_dim)
+                if len(self.reduction_var_dict):
+                    for k, v in self.reduction_var_dict.items():
+                        self.replace_loop_vars(
+                            self.scalar_kernel.stores._lines, k, v["new_var"]
+                        )
                 with contextlib.ExitStack() as stack:
                     stack.enter_context(code.indent())
                     code.splice(self.scalar_loop)
                     stack.enter_context(code.indent())
-                    if len(self.tiling_ranges) == 1:
-                        self.replace_vars(self.scalar_kernel, [0])
-                    elif len(self.tiling_ranges) == 2:
-                        self.replace_vars(self.scalar_kernel, [0, 1])
-                    if len(self.reduction_var_dict):
-                        for k, v in self.reduction_var_dict.items():
-                            self.replace_loop_vars(self.scalar_kernel.stores._lines, k, v["new_var"])
                     self.gen_kernel(self.scalar_kernel, code)
 
     def codegen_vec_kernel(self, code):
-        if self.vec_kernel and self.tiling_ranges[0] != 0:
-            code.splice(self.vec_condition)
-            if len(self.tiling_ranges) == 2:
-                with contextlib.ExitStack() as stack:
-                    stack.enter_context(code.indent())
-                    if self.tiling_ranges[1] != 0:
-                        code.splice(self.vec_loop)
-                        stack.enter_context(code.indent())
-                        self.replace_vars(self.vec_kernel, [1])
-                    self.gen_kernel(self.vec_kernel, code)
-            else:
-                with contextlib.ExitStack() as stack:
-                    stack.enter_context(code.indent())
-                    self.gen_kernel(self.vec_kernel, code)
+        code.splice(self.vec_condition)
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(code.indent())
+            if self.split_level == 2 and self.tiling_ranges[1] != 0:
+                code.splice(self.vec_loop)
+                stack.enter_context(code.indent())
+                self.replace_vars(self.vec_kernel, [1])
+            self.gen_kernel(self.vec_kernel, code)
 
     def codegen_tile2d_kernel(self, code):
-        if self.tile2d_kernel and self.tiling_ranges[0] != 0 and self.tiling_ranges[1] != 0:
-            code.splice(self.tile2d_condition)
-            with contextlib.ExitStack() as stack:
-                stack.enter_context(code.indent())
-                self.gen_kernel(self.tile2d_kernel, code)
+        code.splice(self.tile2d_condition)
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(code.indent())
+            self.gen_kernel(self.tile2d_kernel, code)
 
     def update_stores_with_parallel_reduction(self):
         if self.tile2d_kernel:
@@ -3069,14 +3072,15 @@ class CppKernelDispatcher(CppKernel):
         if self.scalar_kernel:
             self.scalar_kernel.update_stores_with_parallel_reduction()
 
-    def rewrite_scalar_reduction_prefix(self):
-        # float tmp_acc0 = 0; -> float tmp_acc0_arr[n];
+    def may_rewrite_scalar_reduction_prefix(self):
+        # float tmp_acc0 = 0; ->
+        # float tmp_acc0_arr[tail_size];
+        # for (int i = 0; i < tail_size; i++)
+        #   tmp_acc0_arr[i] = 0;
         if not self.need_arr_acc_var:
             return
-
         if self.tiling_ranges[0] == 0 or self.tiling_ranges[0] == self.sizes[0]:
             return
-
         new_prefix = IndentedBuffer()
         for i in range(len(self.scalar_kernel.reduction_prefix._lines)):
             line = self.scalar_kernel.reduction_prefix._lines[i]
@@ -3097,12 +3101,11 @@ class CppKernelDispatcher(CppKernel):
                     "}",
                 ],
             )
-            pass
         self.scalar_kernel.reduction_prefix = new_prefix
 
     def rewrite_scalar_reduction_suffix(self):
         # out_ptr0[x1] = tmp_acc0; ->
-        # out_ptr0[x1_tail] = tmp_acc0_arr[x1_tail - start_idx];
+        # out_ptr0[x1_tail] = tmp_acc0_arr[x1_tail - tail_start_idx];
         if not self.need_arr_acc_var:
             return
         if self.tiling_ranges[0] == 0 or self.tiling_ranges[0] == self.sizes[0]:
@@ -3116,76 +3119,56 @@ class CppKernelDispatcher(CppKernel):
             value = value.rstrip(";")
             if "." in value:
                 value = value.split(".")[0]
-            new_value = (
-                f"{value}_arr[{self.itervars_tail[0]} - {cexpr_index(self.tiling_ranges[0])}]"
-            )
+            new_value = f"{value}_arr[{self.itervars_tail[0]} - {cexpr_index(self.tiling_ranges[0])}]"
             line = line.replace(value, new_value)
             if isinstance(self.scalar_kernel.reduction_suffix._lines[0], DeferredLine):
                 self.scalar_kernel.reduction_suffix._lines[i].line = line
             else:
                 self.scalar_kernel.reduction_suffix._lines[i] = line
-            pass
-
-    def set_kernels(self, scalar_kernel, vec_kernel=None, tile2d_kernel=None):
-        self.call_ranges = scalar_kernel.call_ranges
-        self.scalar_kernel = scalar_kernel
-        if vec_kernel:
-            assert scalar_kernel.call_ranges == vec_kernel.call_ranges
-        if tile2d_kernel:
-            assert scalar_kernel.call_ranges == tile2d_kernel.call_ranges
-        if self.split:
-            self.vec_kernel = vec_kernel
-            self.tile2d_kernel = tile2d_kernel
-        self.aggregate_reduction_buffers()
 
     def aggregate_reduction_buffers(self):
-
-        def remove_duplicated_max_theads(lines: list):
-            # remove duplicated max threads
+        def remove_duplicated_max_theads(lines):
+            # "int max_threads = omp_get_max_threads();" may be generated in both scalar and vec kernel
+            # remove one
             max_thread_declarations = []
             for i, line in enumerate(lines):
-                if line == 'int max_threads = omp_get_max_threads();':
+                if line == "int max_threads = omp_get_max_threads();":
                     max_thread_declarations.append(i)
             if len(max_thread_declarations) > 1:
                 assert len(max_thread_declarations) == 2
                 lines.pop(max_thread_declarations[1])
 
-
         def aggregate_buffers(attr):
             buf = BracesBuffer()
             if self.scalar_kernel:
                 if attr == "reduction_prefix":
-                    self.rewrite_scalar_reduction_prefix()
+                    self.may_rewrite_scalar_reduction_prefix()
                 buf.splice(getattr(self.scalar_kernel, attr))
             if self.vec_kernel:
                 buf.splice(getattr(self.vec_kernel, attr))
-            # if self.tile2d_kernel:
-            #     buf.splice(getattr(self.tile2d_kernel, attr))
             remove_duplicated_max_theads(buf._lines)
             setattr(self, attr, buf)
 
         def aggregate_reduction_suffix():
-            #  For horizontal reduction, we should choose vec kernel suffix
+            #  For horizontal reduction, we should only choose vec kernel suffix
             #  scalar kernel suffix
             #  out_ptr1[static_cast<long>(x0)] = tmp_acc0;
             #  vec kernel suffix
-            #  tmp_acc0 = tmp_acc0 + at::vec::vec_reduce_all<float>([](at::vec::Vectorized<float>& x, at::vec::Vectorized<float>& y) { return x + y; }, tmp_acc0_vec);
+            #  tmp_acc0 = tmp_acc0 + at::vec::vec_reduce_all<float>(xyz);
             #  out_ptr1[static_cast<long>(x0)] = static_cast<float>(tmp_acc0);
-            buf = BracesBuffer()
-            if self.vec_kernel:
-                horizontal_reduction = (
-                    self.vec_kernel.tiling_idx >= self.vec_kernel.reduction_depth
-                )
-                if horizontal_reduction:
-                    buf.splice(self.vec_kernel.reduction_suffix)
-                    self.reduction_suffix = buf
-                    return
-            # self.reduction_suffix = buf
-            # return
+            horizontal_reduction = (
+                self.vec_kernel
+                and self.vec_kernel.tiling_idx >= self.vec_kernel.reduction_depth
+            )
+            if horizontal_reduction:
+                self.reduction_suffix = self.vec_kernel.reduction_suffix  # type: ignore[union-attr]
+                return
 
+            buf = BracesBuffer()
             if self.scalar_kernel:
                 with contextlib.ExitStack() as stack:
                     if self.need_arr_acc_var:
+                        self.rewrite_scalar_reduction_suffix()
                         scalar_condition = IndentedBuffer()
                         scalar_condition.writeline(
                             f"if ({self.itervars[0]} >= {cexpr_index(self.tiling_ranges[0])})"
@@ -3199,8 +3182,8 @@ class CppKernelDispatcher(CppKernel):
                         stack.enter_context(buf.indent())
                         buf.splice(scalar_loop)
                         stack.enter_context(buf.indent())
-                        self.rewrite_scalar_reduction_suffix()
                     buf.splice(self.scalar_kernel.reduction_suffix)
+
             if self.vec_kernel:
                 vec_condition = IndentedBuffer()
                 vec_condition.writeline(
@@ -3210,15 +3193,9 @@ class CppKernelDispatcher(CppKernel):
                     buf.splice(vec_condition)
                     stack.enter_context(buf.indent())
                     buf.splice(self.vec_kernel.reduction_suffix)
-            # if self.tile2d_kernel:
-            #     with contextlib.ExitStack() as stack:
-            #         buf.splice(self.tile2d_condition)
-            #         stack.enter_context(buf.indent())
-            #         buf.splice(self.tile2d_kernel.reduction_suffix)
             self.reduction_suffix = buf
 
         aggregate_reduction_suffix()
-        # aggregate_buffers("reduction_suffix")
         aggregate_buffers("reduction_prefix")
         aggregate_buffers("parallel_reduction_prefix")
         aggregate_buffers("parallel_reduction_suffix")
@@ -3613,8 +3590,7 @@ class CppKernelProxy(CppKernel):
                 loop = self.loop_nest.split_with_tiling(
                     tiling_indices[0], factor=tiling_factors[0]
                 )
-                kernel = CppKernelDispatcher([loop], True)
-                kernel.set_kernels(scalar_kernel, vec_kernel)
+                kernel = CppKernelDispatcher([loop], scalar_kernel, vec_kernel, None, 1)
                 loop.set_kernel(kernel)
                 loop.simd_vec = True
             elif len(tiling_indices) == 2:
@@ -3635,8 +3611,13 @@ class CppKernelProxy(CppKernel):
                 inner_loop = outer_loop.split_with_tiling(
                     tiling_indices[1] - tiling_indices[0], factor=tiling_factors[0]
                 )
-                kernel = CppKernelDispatcher([outer_loop, inner_loop], True)
-                kernel.set_kernels(scalar_kernel, vec_kernel, tile2d_kernel)
+                kernel = CppKernelDispatcher(
+                    [outer_loop, inner_loop],
+                    scalar_kernel,
+                    vec_kernel,
+                    tile2d_kernel,
+                    2,
+                )
                 inner_loop.set_kernel(kernel)
 
     def codegen_loops(self, code, worksharing):
@@ -3650,9 +3631,7 @@ class OuterLoopFusedKernel(CppKernel):
 
     def decide_parallel_depth(self, max_parallel_depth, threads) -> int:
         kernels_parallel_depth = []
-        nested_kernels: List[CppKernel] = [
-            loop.get_kernel() for loop in self.inner
-        ]
+        nested_kernels: List[CppKernel] = [loop.get_kernel() for loop in self.inner]
         for kernel in nested_kernels:
             # For any ScalarKernel, VecKernel, or Tile2DKernel,
             # they should all have the same call_ranges
@@ -4302,8 +4281,7 @@ class LoopNestWithSplit:
         if inner_most:
             while inner_most.inner:
                 inner_most = inner_most.inner
-        _kernel = CppKernelDispatcher([inner_most])
-        _kernel.set_kernels(kernel)
+        _kernel = CppKernelDispatcher([inner_most], kernel)
 
         if loop:
             loop.kernel = _kernel
@@ -4371,4 +4349,4 @@ class LoopNestWithSplit:
         """Get all kernel objects under this loop nest"""
         if self.kernel:
             return self.kernel
-        return self.root.get_kernel()
+        return self.root.get_kernel()  # type: ignore[union-attr]
