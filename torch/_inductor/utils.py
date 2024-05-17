@@ -873,8 +873,8 @@ def restore_stdout_stderr(initial_stdout, initial_stderr):
     try:
         yield
     finally:
-        sys.stdout = initial_stdout
-        sys.stderr = initial_stderr
+        sys.stdout = sys.__stdout__
+        sys.stderr = sys.__stderr__
 
 
 class DeferredLineBase:

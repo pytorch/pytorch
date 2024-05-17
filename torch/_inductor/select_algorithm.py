@@ -490,6 +490,9 @@ class TritonTemplateKernel(TritonKernel):
             )
 
 
+mm_log_filename = "mm_logs_10.json"
+
+
 @functools.lru_cache(None)
 def _jinja2_env():
     try:
@@ -899,6 +902,29 @@ class ExternKernelCaller(ChoiceCaller):
         }
 
 
+import json
+
+from filelock import FileLock
+
+mm_log_filename = "mm_logs_10.json"
+mm_log_lockfile = mm_log_filename + ".lock"
+
+
+def append_to_log(filename, data):
+    lock = FileLock(mm_log_lockfile)
+    with lock:
+        try:
+            with open(filename) as f:
+                log_data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            log_data = []
+
+        log_data.append(data)
+
+        with open(filename, "w") as f:
+            json.dump(log_data, f, indent=4)
+
+
 class DataProcessorChoiceCallerWrapper:
     def __init__(self, wrapped, preprocessor, postprocessor):
         self._wrapped = wrapped
@@ -1026,6 +1052,13 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # TODO(nmacchioni): remove once CI tests are fixed
         choices = [choice for choice in choices if choice is not None]
+
+        import os
+
+        if os.environ.get("ELIAS_WRITE_MATMUL", "1") == "1" and "mm" in name:
+            M, K = input_nodes[-2].get_size()[:2]
+            N = input_nodes[-1].get_size()[-1]
+            append_to_log(mm_log_filename, {"invoke": str((M, K, N))})
 
         if len(choices) == 0:
             raise NoValidChoicesError(
@@ -1411,9 +1444,53 @@ class AlgorithmSelectorCache(PersistentCache):
                 for n in input_nodes
             ]
         )
+        import os
+
         n = None if log.getEffectiveLevel() == logging.DEBUG else 10
         top_k = sorted(timings, key=timings.__getitem__)[:n]
         best = top_k[0]
+
+        def get_choice_info(choice):
+            if isinstance(choice, torch._inductor.select_algorithm.ExternKernelCaller):
+                return {"type": "cublas", "time": timings[choice]}
+
+            assert isinstance(
+                choice, torch._inductor.select_algorithm.TritonTemplateCaller
+            )
+
+            info = choice.info_dict()
+            tile = info["tile_shape"]
+
+            tile_vals = eval(tile)
+            BLOCK_M = tile_vals[0]
+            BLOCK_K = tile_vals[1]
+            BLOCK_N = tile_vals[2]
+
+            return {
+                "type": "triton",
+                "time": timings[choice],
+                "BLOCK_M": BLOCK_M,
+                "BLOCK_K": BLOCK_K,
+                "BLOCK_N": BLOCK_N,
+                "num_stages": info["num_stages"],
+                "num_warps": info["num_warps"],
+            }
+
+        if os.environ.get("ELIAS_WRITE_MATMUL", "1") == "1" and "mm" in name:
+            M, K = input_nodes[-2].get_size()[:2]
+            N = input_nodes[-1].get_size()[-1]
+            # assert M == 256
+            # assert K == 512
+            # assert N == 1024
+
+            out_dict = {
+                str((M, K, N)): list(
+                    get_choice_info(choice) for choice in timings.keys()
+                )
+            }
+
+            append_to_log(mm_log_filename, out_dict)
+
         best_time = timings[best]
         sys.stderr.write(f"AUTOTUNE {name}({sizes})\n")
         for choice in top_k:
