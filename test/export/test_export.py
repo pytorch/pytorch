@@ -1522,7 +1522,6 @@ class TestExport(TestCase):
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
     @testing.expectedFailureSerDer  # we don't save placeholder metadata
-    @testing.expectedFailureSerDerPreDispatch
     @testing.expectedFailureNonStrict
     def test_linear_conv(self):
         class MyLinear(torch.nn.Module):
@@ -2902,7 +2901,6 @@ def forward(self, x):
             )
 
     @testing.expectedFailureSerDer  # We don't preserve metadata on graph module
-    @testing.expectedFailureSerDerPreDispatch
     @testing.expectedFailureNonStrict
     def test_retrace_graph_level_meta_preservation(self):
         class Foo(torch.nn.Module):
@@ -3692,7 +3690,6 @@ def forward(self, x):
         self.assertEqual(ep.module()(*inputs), m(*inputs))
 
     @testing.expectedFailureSerDer  # symfloat nyi
-    @testing.expectedFailureSerDerPreDispatch  # symfloat nyi
     def test_sym_sqrt(self):
         import math
 
