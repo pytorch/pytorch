@@ -465,6 +465,30 @@ class MetaTensorDesc:
         return self.size
 
 
+# A more faithful reproduction would do a copy on the entire
+# storage, but this needs to be done carefully because the
+# underlying storage could have larger extent than is implied
+# by size/stride.  The real fix is to properly call
+# meta_storage recursively here.
+#
+# These "safe" functions are intended to be used under no_dispatch() mode.
+# The no_dispatch() here is intended to prevent ambient fake tensor mode from
+# fakeifying the operation.  But if we are given an honest to goodness
+# FakeTensor as src, we MUST NOT run the copy/clone operation.  A better way
+# to do this would be to not use no_dispatch and instead just disable fake
+# tensor mode only (allowing for subclass dispatch to occur)
+def _safe_copy(dst, src):
+    if type(src) is not torch.Tensor:
+        return
+    dst.copy_(src)
+
+
+def _safe_clone(src):
+    if type(src) is not torch.Tensor:
+        return None
+    return src.clone()
+
+
 # This is a class for converting multiple tensors into meta tensors which
 # share the same view/storage structure.  The operation model is you allocate
 # one of these, and then call it repeatedly on all the tensors you want to
@@ -513,6 +537,8 @@ class MetaConverter:
                 lambda: torch.empty(s.size, dtype=torch.uint8, device="meta"),
             ).untyped_storage()
             if self.copy_data:
+                # NB: no_dispatch is needed because internally storage copy is
+                # implemented as Tensor operations
                 with torch.no_grad(), no_dispatch():
                     assert s.data is not None
                     r_s.real_storage = s.data.clone()
@@ -677,13 +703,6 @@ class MetaConverter:
                         ),
                     )
                 )
-                # Note [Inaccessible data is not copied]
-                # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-                # A more faithful reproduction would do a copy on the entire
-                # storage, but this needs to be done carefully because the
-                # underlying storage could have larger extent than is implied
-                # by size/stride.  The real fix is to properly call
-                # meta_storage recursively here.
                 if self.copy_data:
                     with torch.no_grad(), no_dispatch():
                         r.real_tensor = torch.empty_strided(
@@ -693,9 +712,7 @@ class MetaConverter:
                             device=inner_t.device,
                         )
                         assert inner_t.data is not None
-                        r.real_tensor.copy_(
-                            inner_t.data
-                        )  # Note [Inaccessible data is not copied]
+                        _safe_copy(r.real_tensor, inner_t.data)
                 return r
 
             transformed_tensors_dict = {
@@ -943,7 +960,7 @@ class MetaConverter:
                         # Pray that sparse clone doesn't lose information
                         assert t.data is not None
                         with torch.no_grad(), no_dispatch():
-                            r.real_tensor = t.data.clone()
+                            r.real_tensor = _safe_clone(t.data)
                     assert safe_is_leaf(r), "the callback you passed in doesn't detach"
                     # Note [is_coalesced is dispatched]
                     # Strangely enough, is_coalesced() is a dispatched operator,
@@ -995,7 +1012,7 @@ class MetaConverter:
                         # Pray sparse clone doesn't lose information
                         assert t.data is not None
                         with torch.no_grad(), no_dispatch():
-                            r.real_tensor = t.data.clone()
+                            r.real_tensor = _safe_clone(t.data)
                     assert safe_is_leaf(r), "the callback you passed in doesn't detach"
                     if t.requires_grad:
                         r.requires_grad = True
@@ -1033,9 +1050,7 @@ class MetaConverter:
                                 t.size, t.stride, dtype=t.dtype, device=t.device
                             )
                             assert t.data is not None
-                            r.real_tensor.copy_(
-                                t.data
-                            )  # Note [Inaccessible data is not copied]
+                            _safe_copy(r.real_tensor, t.data)
                     assert safe_is_leaf(r), "the callback you passed in doesn't detach"
                     if t.requires_grad:
                         r.requires_grad = True
@@ -1135,10 +1150,7 @@ class MetaConverter:
                                         device=t.device,
                                     )
                                     assert t.data is not None
-                                    # Note [Inaccessible data is not copied]
-                                    r.real_tensor.copy_(  # type: ignore[attr-defined]
-                                        t.data
-                                    )
+                                    _safe_copy(r.real_tensor, t.data)  # type: ignore[attr-defined]
                         return r
 
                     r = _to_fake_tensor(t)
@@ -1273,6 +1285,13 @@ class MetaConverter:
                 else:
                     is_leaf = t.is_leaf
 
+                    # Graph-Break for wrapped tensors
+                    if (
+                        not (t.is_batchedtensor or t.is_gradtrackingtensor)
+                        and t.is_functorch_wrapped
+                    ) or t.is_legacy_batchedtensor:
+                        return NotImplemented
+
                     (
                         sizes,
                         strides,
@@ -1301,6 +1320,7 @@ class MetaConverter:
                                 r.real_tensor = torch.empty_strided(
                                     t.size, t.stride, dtype=t.dtype, device=t.device
                                 )
+                                _safe_copy(r.real_tensor, t.data)
 
                     assert safe_is_leaf(r), "the callback you passed in doesn't detach"
                     if t.requires_grad:
@@ -1320,13 +1340,6 @@ class MetaConverter:
                                 1,
                             )(r)
 
-                    # Graph-Break for wrapped tensors
-                    if (
-                        not (t.is_batchedtensor or t.is_gradtrackingtensor)
-                        and t.is_functorch_wrapped
-                    ) or t.is_legacy_batchedtensor:
-                        return NotImplemented
-
                     s = t.storage
                     assert s is not None
                     if s.id not in self.storage_memo and (
@@ -1339,11 +1352,9 @@ class MetaConverter:
                         # You're normal and happy, install the fresh storage into the memo
                         self.set_storage_memo(s, r.untyped_storage())
                         if self.copy_data:
-                            with torch.no_grad(), no_dispatch():
-                                r.real_tensor.untyped_storage().copy_(s.data)
-                                r.untyped_storage().real_storage = (
-                                    r.real_tensor.untyped_storage()
-                                )
+                            r.untyped_storage().real_storage = (
+                                r.real_tensor.untyped_storage()
+                            )
                     else:
                         # You're in crazy town; somehow you gave us a tensor
                         # that wasn't a view, but had nonzero storage offset,
