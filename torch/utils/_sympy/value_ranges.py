@@ -137,8 +137,8 @@ class ValueRanges(Generic[_T]):
         try:
             if not sympy_generic_le(lower, upper):
                 raise ValueRangeError(f"Invalid ranges [{lower}:{upper}]")
-        except TypeError:
-            raise TypeError(f"Could not compare {lower} <= {upper}")  # noqa: TRY200
+        except TypeError as e:
+            raise TypeError(f"Could not compare {lower} <= {upper}") from e
         # Because this is a frozen class
         object.__setattr__(self, "lower", lower)
         object.__setattr__(self, "upper", upper)
