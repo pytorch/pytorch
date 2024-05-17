@@ -284,6 +284,9 @@ class ReplicateTest(MultiProcessTestCase):
             "fuse_ddp_with_coalesced_op",
             "schedule_comm_wait",
         ]
+        # todo: This pass mucks things up since Inductor thinks its inference
+        # and can apply this. Should turn off these passes in compiled autograd
+        torch._inductor.config.reorder_for_locality = False
 
         # Gradient is None
         code = self._test_bucketing()
