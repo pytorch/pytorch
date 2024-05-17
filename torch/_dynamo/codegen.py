@@ -141,15 +141,14 @@ class PyCodegen:
             and value.python_type() == float
             and not self.tx.export
         ):
-            # Do this a little unusual; force the output convention to be a
+            # This is a little unusual; force the output convention to be a
             # Tensor here.  Don't do this for export because this is
             # apparently load bearing for export tests (but I am a bit
             # doubtful it actually works in the real world)
-            graph_outputs_key = id(value.as_proxy())
-            if graph_outputs_key not in self.graph_outputs:
-                self.graph_outputs[graph_outputs_key] = GraphOutputEntry(
-                    len(self.graph_outputs), value.as_tensor(self.tx)
-                )
+            # NB: It works to add_graph_output on a computed expression
+            # as_tensor here, because we memoize as_tensor calls on
+            # SymNodeVariable!
+            graph_outputs_key = self.add_graph_output(value.as_tensor(self.tx))
             self.load_graph_output(graph_outputs[graph_outputs_key].index)
             output.extend(
                 [self.create_load_attr("item")] + create_call_function(0, True)

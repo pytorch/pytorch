@@ -26,7 +26,7 @@ from torch.serialization import check_module_version_greater_or_equal, get_defau
 
 from torch.testing._internal.common_utils import (
     IS_FILESYSTEM_UTF8_ENCODING, TemporaryDirectoryName,
-    TestCase, IS_WINDOWS, TEST_DILL, run_tests, download_file, BytesIOContext, TemporaryFileName,
+    TestCase, IS_FBCODE, IS_WINDOWS, TEST_DILL, run_tests, download_file, BytesIOContext, TemporaryFileName,
     parametrize, instantiate_parametrized_tests, AlwaysWarnTypedStorageRemoval, serialTest)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_dtype import all_types_and_complex_and
@@ -493,6 +493,15 @@ class SerializationMixin:
         def map_location(storage, loc):
             return storage
 
+        def generate_map_locations(device_type):
+            return [
+                {'cuda:0': device_type + ':0'},
+                device_type,
+                device_type + ':0',
+                torch.device(device_type),
+                torch.device(device_type, 0)
+            ]
+
         def load_bytes():
             with open(test_file_path, 'rb') as f:
                 return io.BytesIO(f.read())
@@ -504,33 +513,38 @@ class SerializationMixin:
             'cpu',
             torch.device('cpu'),
         ]
-        gpu_0_map_locations = [
-            {'cuda:0': 'cuda:0'},
-            'cuda',
-            'cuda:0',
-            torch.device('cuda'),
-            torch.device('cuda', 0)
-        ]
+        gpu_0_map_locations = generate_map_locations('cuda')
         gpu_last_map_locations = [
             f'cuda:{torch.cuda.device_count() - 1}',
         ]
+        xpu_0_map_locations = generate_map_locations('xpu')
+        xpu_last_map_locations = [
+            f'xpu:{torch.xpu.device_count() - 1}',
+        ]
 
-        def check_map_locations(map_locations, tensor_class, intended_device):
+        def check_map_locations(map_locations, dtype, intended_device):
             for fileobject_lambda in fileobject_lambdas:
                 for map_location in map_locations:
                     tensor = torch.load(fileobject_lambda(), map_location=map_location)
 
                     self.assertEqual(tensor.device, intended_device)
-                    self.assertIsInstance(tensor, tensor_class)
-                    self.assertEqual(tensor, tensor_class([[1.0, 2.0], [3.0, 4.0]]))
+                    self.assertEqual(tensor.dtype, dtype)
+                    self.assertEqual(tensor, torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=dtype, device=intended_device))
 
-        check_map_locations(cpu_map_locations, torch.FloatTensor, torch.device('cpu'))
+        check_map_locations(cpu_map_locations, torch.float, torch.device('cpu'))
         if torch.cuda.is_available():
-            check_map_locations(gpu_0_map_locations, torch.cuda.FloatTensor, torch.device('cuda', 0))
+            check_map_locations(gpu_0_map_locations, torch.float, torch.device('cuda', 0))
             check_map_locations(
                 gpu_last_map_locations,
-                torch.cuda.FloatTensor,
+                torch.float,
                 torch.device('cuda', torch.cuda.device_count() - 1)
+            )
+        if torch.xpu.is_available():
+            check_map_locations(xpu_0_map_locations, torch.float, torch.device('xpu', 0))
+            check_map_locations(
+                xpu_last_map_locations,
+                torch.float,
+                torch.device('xpu', torch.xpu.device_count() - 1)
             )
 
     @unittest.skipIf(torch.cuda.is_available(), "Testing torch.load on CPU-only machine")
@@ -3999,6 +4013,51 @@ class TestSerialization(TestCase, SerializationMixin):
             y['odd'][0] = torch.tensor(0.25, dtype=dtype)
             y['even'][0] = torch.tensor(-0.25, dtype=dtype)
             self.assertEqual(y['x'][:2].to(dtype=torch.float32), torch.tensor([-0.25, 0.25]))
+
+    @parametrize('filename', (True, False))
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
+    @unittest.skipIf(IS_FBCODE, "miniz version differs between fbcode and oss")
+    def test_filewriter_metadata_writing(self, filename):
+        sd = torch.nn.Linear(3, 5).state_dict()
+        weight_nbytes = sd['weight'].untyped_storage().nbytes()
+        bias_nbytes = sd['bias'].untyped_storage().nbytes()
+        # TemporaryFileName will give a string
+        # NamedTemporaryFile will be treated as a buffer
+        file_creation_func = TemporaryFileName if filename else tempfile.NamedTemporaryFile
+
+        with file_creation_func() as f, file_creation_func() as g:
+            # save state_dict in f
+            torch.save(sd, f)
+            if not filename:
+                f.seek(0)
+            # extract 'data.pkl' for use in our fake checkpoint
+            with torch.serialization._open_file_like(f, 'rb') as opened_file:
+                with torch.serialization._open_zipfile_reader(opened_file) as zip_file:
+                    data_file = io.BytesIO(zip_file.get_record('data.pkl'))
+                    data_0_offset = zip_file.get_record_offset('data/0')
+                    data_1_offset = zip_file.get_record_offset('data/1')
+
+            # write nulls for 'data/0' and 'data/1'
+            with open(f if filename else f.name, 'rb+') as opened_f:
+                opened_f.seek(data_0_offset)
+                opened_f.write(b'0' * weight_nbytes)
+                opened_f.seek(data_1_offset)
+                opened_f.write(b'0' * bias_nbytes)
+
+            with torch.serialization._open_zipfile_writer(g) as zip_file:
+                data_value = data_file.getvalue()
+                zip_file.write_record('data.pkl', data_value, len(data_value))
+                zip_file.write_record('byteorder', sys.byteorder, len(sys.byteorder))
+                # Only write metadata for storages
+                zip_file.write_record_metadata('data/0', weight_nbytes)
+                zip_file.write_record_metadata('data/1', bias_nbytes)
+
+            if not filename:
+                f.seek(0)
+                g.seek(0)
+            sd_loaded = torch.load(g)
+            sd_loaded_ref = torch.load(f)
+            self.assertEqual(sd_loaded, sd_loaded_ref)
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):

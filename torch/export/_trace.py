@@ -127,7 +127,7 @@ def _convert_input_to_fake(gm, args, kwargs):
     if detected_fake_mode := detect_fake_mode(fake_inps):
         fake_mode = detected_fake_mode
     else:
-        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv(), export=True)
 
     if len(args) == 0 and len(kwargs) == 0:
         return (), {}, params_buffers, fake_mode
@@ -246,6 +246,12 @@ def _get_param_buffer_mapping(
     for name, buffer in original_module.named_buffers(remove_duplicate=False):
         buffer_lookup.setdefault(id(buffer), []).append(name)
 
+    # reverse lists so FQN assignment is FIFO wrt model structure
+    for name, fqns in param_lookup.items():
+        param_lookup[name] = fqns[::-1]
+    for name, fqns in buffer_lookup.items():
+        buffer_lookup[name] = fqns[::-1]
+
     param_buffer_table: Dict[str, str] = {}
     for dynamo_name, dynamo_param in traced_module.named_parameters(
         remove_duplicate=False
@@ -270,7 +276,7 @@ def _remap_constants(
     constants: Dict[str, Union[torch.Tensor, torch.ScriptObject]],
 ) -> None:
     """Rewrite the graph signature and constants table to use the FQN from the original module."""
-    remap_table: Dict[str, str] = {}
+    remap_table: Dict[str, List[str]] = {}
     for name, value in constants.items():
         if value in orig_constant_attrs:
             remap_table[name] = orig_constant_attrs[value]
@@ -282,11 +288,13 @@ def _remap_constants(
         ):
             orig_target = spec.target
             assert orig_target is not None
-            spec.target = remap_table.get(orig_target, orig_target)
+            targets = remap_table.get(orig_target, [orig_target])
+            spec.target = targets[0]
 
             constant = constants[orig_target]
             del constants[orig_target]
-            constants[spec.target] = constant
+            for target in targets:
+                constants[target] = constant
 
 
 def _rename_constants_nodes(
@@ -407,6 +415,7 @@ def _export_to_torch_ir(
     disable_constraint_solver: bool = False,
     restore_fqn: bool = True,
     _log_export_usage: bool = True,
+    same_signature: bool = True,
 ) -> torch.fx.GraphModule:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -437,14 +446,15 @@ def _export_to_torch_ir(
                     tracing_mode="symbolic",
                     disable_constraint_solver=disable_constraint_solver,
                     _log_export_usage=_log_export_usage,
+                    same_signature=same_signature,
                 )(
                     *args,
                     **kwargs,
                 )
         except (ConstraintViolationError, ValueRangeError) as e:
-            raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: TRY200
+            raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: B904
         except GuardOnDataDependentSymNode as e:
-            raise UserError(  # noqa: TRY200
+            raise UserError(  # noqa: B904
                 UserErrorType.ANTI_PATTERN,
                 f"Consider annotating your code using torch._check*(). {str(e)}",
                 case_name="constrain_as_size_example",
@@ -1091,7 +1101,7 @@ def _export(
                 _disable_forced_specializations=_disable_forced_specializations,
             )
         except (ConstraintViolationError, ValueRangeError) as e:
-            raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: TRY200
+            raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: B904
 
         combined_args = _combine_args(mod, args, kwargs)
         range_constraints = make_constraints(
