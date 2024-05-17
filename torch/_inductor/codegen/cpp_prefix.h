@@ -52,15 +52,19 @@ struct Welford {
 
 template <typename T>
 struct IsVecType: std::false_type {};
+template <typename T>
+struct Is2VecType: std::false_type {};
 
 #if INDUCTOR_USE_VECTOR_TYPES()
 template <typename T>
 struct IsVecType<at::vec::Vectorized<T>>: std::true_type {};
+template <typename T>
+struct Is2VecType<at::vec::VectorizedN<T, 2>>: std::true_type {};
 #endif
 
 template <typename T>
 Welford<T> welford_combine(const Welford<T> &a, const Welford<T> &b) {
-  if constexpr (!IsVecType<T>::value) {
+  if constexpr (!IsVecType<T>::value && !Is2VecType<T>::value) {
     if (a.weight == 0) {
       return b;
     }
@@ -71,7 +75,7 @@ Welford<T> welford_combine(const Welford<T> &a, const Welford<T> &b) {
   auto delta = b.mean - a.mean;
   auto new_weight = a.weight + b.weight;
   auto wb_over_w = b.weight / new_weight;
-  if constexpr (IsVecType<T>::value) {
+  if constexpr (IsVecType<T>::value || Is2VecType<T>::value) {
     // Guard against division by zero
     wb_over_w = T::blendv(wb_over_w, T(0), new_weight == T(0));
   }
@@ -198,6 +202,23 @@ Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> 
   result.weight = array[0];
 
   return result;
+}
+
+template <typename scalar_t>
+Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::VectorizedN<scalar_t, 2>> acc) {
+  auto Welford0 = Welford<at::vec::Vectorized<scalar_t>>{
+    acc.mean[0],
+    acc.m2[0],
+    acc.weight[0]
+  };
+  auto Welford1 = Welford<at::vec::Vectorized<scalar_t>>{
+    acc.mean[1],
+    acc.m2[1],
+    acc.weight[1]
+  };
+  auto result0 = welford_vec_reduce_all(Welford0);
+  auto result1 = welford_vec_reduce_all(Welford1);
+  return welford_combine(result0, result1);
 }
 #endif
 
