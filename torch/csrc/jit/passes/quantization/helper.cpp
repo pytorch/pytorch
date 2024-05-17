@@ -235,7 +235,7 @@ std::vector<std::string> _propagate_quant_binary_ops = {
 bool matchAtenFuncToUse(
     const Use& use,
     const std::string& func_name,
-    c10::optional<int> n) {
+    std::optional<int> n) {
   Node* node = use.user;
   return node->kind() == Symbol::aten(func_name) &&
       (!n.has_value() || static_cast<size_t>(n.value()) == use.offset);
@@ -244,7 +244,7 @@ bool matchAtenFuncToUse(
 bool matchCallFuncToUse(
     const Use& use,
     const std::string& func_name,
-    c10::optional<int> n) {
+    std::optional<int> n) {
   Node* node = use.user;
   return node->kind() == prim::CallFunction &&
       getFuncName(node->inputs()[0]) == func_name &&
@@ -316,7 +316,7 @@ bool isEmbeddingBagNonInput(Value* v) {
   return result;
 }
 
-c10::optional<Use> getClampScalarInputUse(Value* v) {
+std::optional<Use> getClampScalarInputUse(Value* v) {
   for (const auto& use : v->uses()) {
     for (const auto& aten_func : _clamp_funcs) {
       if (matchAtenFuncToUse(use, aten_func, 1) ||
@@ -493,7 +493,7 @@ bool isBinaryOpWithScalarInput(Node* n) {
   return isPropagateQuantBinaryOp(n) && isScalar(n->input(1));
 }
 
-c10::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(Node* n) {
+std::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(Node* n) {
   static std::vector<NodeKind> fixed_qparam_funcs;
   std::transform(
       _fixed_qparams_map.begin(),
@@ -642,7 +642,7 @@ Module getInvokedModule(Module& module, Node* n, Value* self) {
   return findChildModule(module, path);
 }
 
-c10::optional<Module> getInvokedModuleOpt(
+std::optional<Module> getInvokedModuleOpt(
     const Module& module,
     Node* n,
     Value* self) {
@@ -686,7 +686,7 @@ std::string removeTorchMangle(const std::string& orig_name) {
   return qualified_name;
 }
 
-c10::optional<std::string> getModuleName(Value* value) {
+std::optional<std::string> getModuleName(Value* value) {
   auto type = value->type()->cast<ClassType>();
   if (type && type->name()) {
     return removeTorchMangle(type->name()->qualifiedName());
