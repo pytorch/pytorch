@@ -8,8 +8,7 @@ set(C10_CUDA_ALL_TEST_FILES
     impl/CUDAAssertionsTest_multiple_writes_from_blocks_and_threads.cu
     impl/CUDAAssertionsTest_multiple_writes_from_multiple_blocks.cu
     impl/CUDAAssertionsTest_multiple_writes_from_same_block.cu
-    impl/CUDATest.cpp
-)
+    impl/CUDATest.cpp)
 if(BUILD_TEST)
   foreach(test_src ${C10_CUDA_ALL_TEST_FILES})
     get_filename_component(test_file_name ${test_src} NAME_WE)
