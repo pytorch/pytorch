@@ -151,9 +151,6 @@
 #   USE_REDIS
 #     Whether to use Redis for distributed workflows (Linux only)
 #
-#   USE_ZSTD
-#     Enables use of ZSTD, if the libraries are found
-#
 #   USE_ROCM_KERNEL_ASSERT=1
 #     Enable kernel assert in ROCm platform
 #
