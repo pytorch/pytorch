@@ -223,15 +223,15 @@ TEST(OperatorRegistrationTestFunctionBasedKernel, givenKernelWithIntListOutput_w
   EXPECT_EQ(6, result[0].toIntVector()[2]);
 }
 
-std::tuple<Tensor, int64_t, c10::List<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>> kernelWithMultipleOutputs(Tensor) {
+std::tuple<Tensor, int64_t, c10::List<Tensor>, std::optional<int64_t>, Dict<string, Tensor>> kernelWithMultipleOutputs(Tensor) {
   Dict<string, Tensor> dict;
   dict.insert("first", dummyTensor(DispatchKey::CPU));
   dict.insert("second", dummyTensor(DispatchKey::CUDA));
-  return std::tuple<Tensor, int64_t, c10::List<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>>(
+  return std::tuple<Tensor, int64_t, c10::List<Tensor>, std::optional<int64_t>, Dict<string, Tensor>>(
     dummyTensor(DispatchKey::CUDA),
     5,
     c10::List<Tensor>({dummyTensor(DispatchKey::CPU), dummyTensor(DispatchKey::CUDA)}),
-    c10::optional<int64_t>(std::in_place, 0),
+    std::optional<int64_t>(std::in_place, 0),
     dict
   );
 }
@@ -550,11 +550,11 @@ TEST(OperatorRegistrationTestFunctionBasedKernel, givenFallbackKernelWithoutTens
   EXPECT_EQ(4, outputs[0].toInt());
 }
 
-c10::optional<Tensor> called_arg2 = c10::nullopt;
-c10::optional<int64_t> called_arg3 = c10::nullopt;
-c10::optional<std::string> called_arg4 = c10::nullopt;
+std::optional<Tensor> called_arg2 = c10::nullopt;
+std::optional<int64_t> called_arg3 = c10::nullopt;
+std::optional<std::string> called_arg4 = c10::nullopt;
 
-void kernelWithOptInputWithoutOutput(Tensor arg1, const c10::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
+void kernelWithOptInputWithoutOutput(Tensor arg1, const std::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
   called = true;
   called_arg2 = arg2;
   called_arg3 = arg3;
@@ -588,7 +588,7 @@ TEST(OperatorRegistrationTestFunctionBasedKernel, givenKernelWithOptionalInputs_
   EXPECT_FALSE(called_arg4.has_value());
 }
 
-c10::optional<Tensor> kernelWithOptInputWithOutput(Tensor arg1, const c10::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
+std::optional<Tensor> kernelWithOptInputWithOutput(Tensor arg1, const c10::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
   called = true;
   called_arg2 = arg2;
   called_arg3 = arg3;
@@ -625,8 +625,8 @@ TEST(OperatorRegistrationTestFunctionBasedKernel, givenKernelWithOptionalInputs_
   EXPECT_FALSE(called_arg4.has_value());
 }
 
-std::tuple<c10::optional<Tensor>, c10::optional<int64_t>, c10::optional<std::string>>
-kernelWithOptInputWithMultipleOutputs(Tensor arg1, const c10::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
+std::tuple<std::optional<Tensor>, c10::optional<int64_t>, c10::optional<std::string>>
+kernelWithOptInputWithMultipleOutputs(Tensor arg1, const std::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
   return std::make_tuple(arg2, arg3, arg4);
 }
 
@@ -690,7 +690,7 @@ TEST(OperatorRegistrationTestFunctionBasedKernel, givenKernel_whenRegisteredWith
   auto op = c10::Dispatcher::singleton().findSchema({"_test::no_schema_specified", ""});
   ASSERT_TRUE(op.has_value());
 
-  c10::optional<std::string> differences = c10::findSchemaDifferences(torch::jit::parseSchema("_test::no_schema_specified(Tensor arg1, int arg2, Tensor[] arg3) -> (int, Tensor)"), op->schema());
+  std::optional<std::string> differences = c10::findSchemaDifferences(torch::jit::parseSchema("_test::no_schema_specified(Tensor arg1, int arg2, Tensor[] arg3) -> (int, Tensor)"), op->schema());
   EXPECT_FALSE(differences.has_value());
 }
 

@@ -400,7 +400,7 @@ class ListConfig:
         try:
             return ListConfig.ListIterator(self, resolve)
         except Exception:
-            raise AssertionError
+            raise AssertionError from None
 
     def __init__(self):
         self._content = [
@@ -962,7 +962,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         )
         # (dynamic shapes, static shapes)
         self.assertIn(cnt.frame_count, (5, 7))
-        self.assertIn(cnt.op_count, (106, 127))
+        self.assertIn(cnt.op_count, (104, 106, 127))
 
     def test_convert_boxes_to_pooler_format(self):
         boxes1 = [
@@ -989,7 +989,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertExpectedInline(cnt.op_count, """10""")
         else:
             self.assertExpectedInline(cnt.frame_count, """4""")
-            self.assertExpectedInline(cnt.op_count, """16""")
+            self.assertExpectedInline(cnt.op_count, """14""")
 
     def test_boxes_len(self):
         def fn(boxes):
@@ -1194,7 +1194,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertExpectedInline(cnt.op_count, """11""")
         else:
             self.assertExpectedInline(cnt.frame_count, """1""")
-            self.assertExpectedInline(cnt.op_count, """12""")
+            self.assertExpectedInline(cnt.op_count, """11""")
 
     def test_module_in_skipfiles(self):
         model = nn.Linear(10, 10)
@@ -3346,8 +3346,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return y
 
         x = {"a": torch.tensor([1]), "b": torch.tensor([1])}
-        # FIXME It should be KeyError here
-        self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError, lambda: fn(x))
+        self.assertRaises(KeyError, lambda: fn(x))
 
     def test_attached_attribute_in_dir(self):
         class MyModule(torch.nn.Module):
@@ -4541,29 +4540,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             """\
 def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
     l_x_ = L_x_
-    size = l_x_.size()
-    getitem = size[0];  size = None
-    gt = getitem > 3;  getitem = None
     getitem_2 = l_x_[0]
     sum_1 = getitem_2.sum();  getitem_2 = None
     gt_1 = sum_1 > 0;  sum_1 = None
     _assert_async = torch._assert_async(gt_1, 'assertion error');  gt_1 = None
-    size_1 = l_x_.size()
-    getitem_3 = size_1[0];  size_1 = None
-    floordiv = getitem_3 // 2;  getitem_3 = None
-    mod = 1 % floordiv;  floordiv = None
-    ne = mod != 0;  mod = None
-    size_2 = l_x_.size()
-    getitem_5 = size_2[0];  size_2 = None
-    floordiv_1 = getitem_5 // 2;  getitem_5 = None
-    pow_1 = floordiv_1 ** 2;  floordiv_1 = None
-    mul = 32 * pow_1;  pow_1 = None
-    size_3 = l_x_.size()
-    getitem_7 = size_3[0];  size_3 = None
-    floordiv_2 = getitem_7 // 2;  getitem_7 = None
-    mul_1 = 16 * floordiv_2;  floordiv_2 = None
-    sub = mul - mul_1;  mul = mul_1 = None
-    ne_1 = sub != 0;  sub = None
     cos = l_x_.cos();  l_x_ = None
     return (cos,)""",
         )
@@ -4933,6 +4913,79 @@ def forward(self, primals_1, primals_2):
         data = torch.randn(3, 4)
         opt_ladder = torch.compile(ladder, fullgraph=True, backend="eager")
         self.assertEqual(opt_ladder(data), ladder(data))
+
+    @unittest.expectedFailure
+    def test_trace_functional_tensor_with_error(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch._subclasses.functional_tensor import (
+            FunctionalTensor,
+            FunctionalTensorMode,
+        )
+
+        def f(a, tmp):
+            a_view = a.view(-1)
+            with torch.no_grad():
+                a.set_(tmp)
+                a_view.mul_(2)
+            return a + tmp
+
+        fake_mode = FakeTensorMode()
+        with FunctionalTensorMode():
+            inp = torch.ones(3, 3, requires_grad=True)
+            inp = fake_mode.from_tensor(inp, static_shapes=True)
+            inp = FunctionalTensor.to_functional(inp)
+
+            tmp = torch.ones(3, 3, requires_grad=True)
+            tmp = fake_mode.from_tensor(tmp, static_shapes=True)
+            tmp = FunctionalTensor.to_functional(tmp)
+
+            opt_f = torch.compile(f, backend="eager")
+            with self.assertRaisesRegex(
+                RuntimeError, "cannot mutate tensors with frozen storage"
+            ):
+                opt_f(inp, tmp)
+
+        # grad state may not be properly reset after the error
+        self.assertTrue(torch.is_grad_enabled())
+
+    def test_const_dict_keyerror(self):
+        d = {}
+
+        def fn(x):
+            try:
+                y = d[0]
+            except KeyError:
+                y = 1
+            return x + y
+
+        opt_fn = torch.compile(fn, backend="eager")
+        inp = torch.randn(3, 3)
+        self.assertEqual(fn(inp), opt_fn(inp))
+
+    def test_nonconst_issubclass(self):
+        def fn(x):
+            if issubclass(x.__class__, np.ndarray):
+                return 1
+            return 0
+
+        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn(np.ones([3, 3]))
+
+    def test_issue126128(self):
+        def fn():
+            x = torch.randn(1, 10)
+            y = torch.randn(10, 1)
+            return torch.mm(x, y).sum()
+
+        def fn2():
+            x = torch.randn(10, 100)
+            y = torch.randn(100, 10)
+            return torch.mm(x, y).sum()
+
+        with torch._inductor.utils.fresh_inductor_cache():
+            torch.compile(fn)()
+
+        torch.compile(fn2)()
 
 
 instantiate_parametrized_tests(ReproTests)

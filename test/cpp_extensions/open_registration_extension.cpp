@@ -277,11 +277,11 @@ REGISTER_ALLOCATOR(c10::DeviceType::PrivateUse1, &global_custom_alloc);
 // basic dummy empty function, so we can directly construct tensors on the custom device
 // This dummy test device will just use the CPU allocator, and ignores pinned memory.
 at::Tensor custom_empty_memory_format(at::IntArrayRef size,
-                                      c10::optional<at::ScalarType> dtype,
-                                      c10::optional<at::Layout> layout,
-                                      c10::optional<at::Device> device,
-                                      c10::optional<bool> pin_memory,
-                                      c10::optional<at::MemoryFormat> memory_format) {
+                                      std::optional<at::ScalarType> dtype,
+                                      std::optional<at::Layout> layout,
+                                      std::optional<at::Device> device,
+                                      std::optional<bool> pin_memory,
+                                      std::optional<at::MemoryFormat> memory_format) {
   constexpr c10::DispatchKeySet private_use_ks(c10::DispatchKey::PrivateUse1);
   return at::detail::empty_generic(size,
                                    &global_custom_alloc,
@@ -290,11 +290,11 @@ at::Tensor custom_empty_memory_format(at::IntArrayRef size,
                                    memory_format);
 }
 at::Tensor custom_empty_symint(c10::IntArrayRef size,
-                               c10::optional<at::ScalarType> dtype,
-                               c10::optional<at::Layout> layout,
-                               c10::optional<at::Device> device,
-                               c10::optional<bool> pin_memory,
-                               c10::optional<at::MemoryFormat> memory_format) {
+                               std::optional<at::ScalarType> dtype,
+                               std::optional<at::Layout> layout,
+                               std::optional<at::Device> device,
+                               std::optional<bool> pin_memory,
+                               std::optional<at::MemoryFormat> memory_format) {
   constexpr c10::DispatchKeySet private_use_ks(c10::DispatchKey::PrivateUse1);
   return at::detail::empty_generic(size,
     &global_custom_alloc, private_use_ks, c10::dtype_or_default(dtype), memory_format);
@@ -368,10 +368,10 @@ at::Tensor custom__copy_from_and_resize(const at::Tensor& self, const at::Tensor
 
 at::Tensor custom_empty_strided(c10::IntArrayRef size,
                                 c10::IntArrayRef stride,
-                                c10::optional<at::ScalarType> dtype_opt,
-                                c10::optional<at::Layout> layout_opt,
-                                c10::optional<at::Device> device_opt,
-                                c10::optional<bool> pin_memory_opt) {
+                                std::optional<at::ScalarType> dtype_opt,
+                                std::optional<at::Layout> layout_opt,
+                                std::optional<at::Device> device_opt,
+                                std::optional<bool> pin_memory_opt) {
   constexpr c10::DispatchKeySet private_use_ks(c10::DispatchKey::PrivateUse1);
   auto dtype = c10::dtype_or_default(dtype_opt);
   return  at::detail::empty_strided_generic(size, stride, &global_custom_alloc, private_use_ks, dtype);
@@ -406,7 +406,7 @@ at::Tensor& custom_set_source_Storage_storage_offset(at::Tensor& result,
 // basic dummy functions related to pin_memory.
 std::vector<void*> custom_pinned_data_ptr;
 
-at::Tensor custom__pin_memory(const at::Tensor& self, c10::optional<at::Device> device) {
+at::Tensor custom__pin_memory(const at::Tensor& self, std::optional<at::Device> device) {
   TORCH_CHECK(
       self.device().is_cpu(),
       "cannot pin '",
@@ -420,7 +420,7 @@ at::Tensor custom__pin_memory(const at::Tensor& self, c10::optional<at::Device> 
   return dump_pinned_tensor;
 }
 
-bool custom_is_pinned(const at::Tensor& self, c10::optional<at::Device> device) {
+bool custom_is_pinned(const at::Tensor& self, std::optional<at::Device> device) {
   // Only CPU tensors can be pinned
   if (!self.is_cpu()) {
     return false;
@@ -436,7 +436,7 @@ bool custom_is_pinned(const at::Tensor& self, c10::optional<at::Device> device) 
 }
 
 const at::Tensor& custom_resize_(const at::Tensor& self, at::IntArrayRef size,
-                          c10::optional<at::MemoryFormat> optional_memory_format) {
+                          std::optional<at::MemoryFormat> optional_memory_format) {
   at::TensorImpl* tensor_impl = self.unsafeGetTensorImpl();
   tensor_impl->set_sizes_contiguous(size);
   const auto itemsize = tensor_impl->dtype().itemsize();

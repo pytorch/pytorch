@@ -234,39 +234,27 @@ def gen_alias_from_base(
     # In summary, we use the fact that FunctionalTensorWrapper saves the view
     # functions applied to itself (collected during functionalization) so as
     # to replay them (view functions) on the aliased_base_tensor.
-    if config.view_replay_for_aliased_outputs and target_functional_tensor is not None:
+    if (
+        config.view_replay_for_aliased_outputs
+        and target_functional_tensor is not None
+        and not torch._functionalize_is_symbolic(target_functional_tensor.tensor)
+    ):
         from .schemas import FunctionalTensorMetadataEq
 
         assert isinstance(target_functional_tensor, FunctionalTensorMetadataEq)
         functional_tensor = target_functional_tensor.tensor
 
-        try:
-            out = torch._functionalize_apply_view_metas(
-                functional_tensor, aliased_base_tensor
-            )
-        except RuntimeError as e:
-            # NYI for dynamic shapes.
-            #
-            # On functionalization, the ViewMeta lambdas will have symbolic shapes.
-            # When trying to apply those lambdas on concrete tensors, it will fail.
-            #
-            # In order for this to work, we should have a way to replace those
-            # symbolic shapes with concrete numbers.
-            aot_joint_log.info(
-                "could not reconstruct view by re-applying a ViewMeta sequence. "
-                "Fallbacking to reconstruction using as_strided. "
-                "Reason: %s",
-                str(e),
-            )
-        else:
-            # If re-applying the ViewMeta sequence succeeded, there should be no more
-            # problems going forward. We just check we got to the target shape and
-            # patch requires_grad flag.
-            assert out.shape == target_meta_tensor.shape, (
-                "incorrect out shape after application of ViewMeta sequence: "
-                f"{tuple(out.shape)} (actual) vs {tuple(target_meta_tensor.shape)} (expected)"
-            )
-            return patch_requires_grad(out)
+        out = torch._functionalize_apply_view_metas(
+            functional_tensor, aliased_base_tensor
+        )
+        # If re-applying the ViewMeta sequence succeeded, there should be no more
+        # problems going forward. We just check we got to the target shape and
+        # patch requires_grad flag.
+        assert out.shape == target_meta_tensor.shape, (
+            "incorrect out shape after application of ViewMeta sequence: "
+            f"{tuple(out.shape)} (actual) vs {tuple(target_meta_tensor.shape)} (expected)"
+        )
+        return patch_requires_grad(out)
 
     # Try to do view-replay if possible.
     # fall back to .as_strided() if we can't.

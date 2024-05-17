@@ -10,9 +10,7 @@
 #include <libkineto.h>
 #endif
 #ifdef USE_DISTRIBUTED
-#ifdef USE_C10D
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
-#endif // USE_C10D
 #endif // USE_DISTRIBUTED
 
 namespace torch {
@@ -20,10 +18,10 @@ namespace profiler {
 namespace impl {
 
 namespace {
-c10::optional<bool> soft_assert_raises_;
+std::optional<bool> soft_assert_raises_;
 } // namespace
 
-void setSoftAssertRaises(c10::optional<bool> value) {
+void setSoftAssertRaises(std::optional<bool> value) {
   soft_assert_raises_ = value;
 }
 
@@ -337,7 +335,6 @@ std::vector<std::string> inputTypes(const at::RecordFunction& fn) {
 // -- NCCL Metadata -----------------------------------------------------------
 // ----------------------------------------------------------------------------
 #ifdef USE_DISTRIBUTED
-#ifdef USE_C10D
 static constexpr auto kCommsName = "Collective name";
 static constexpr auto kDtype = "dtype";
 static constexpr auto kInMsgNelems = "In msg nelems";
@@ -352,14 +349,12 @@ static constexpr auto kProcessGroupDesc = "Process Group Description";
 static constexpr auto kGroupRanks = "Process Group Ranks";
 
 static constexpr int32_t kTruncatLength = 30;
-#endif // USE_C10D
 #endif // USE_DISTRIBUTED
 
 std::unordered_map<std::string, std::string> saveNcclMeta(
     const at::RecordFunction& fn) {
   std::unordered_map<std::string, std::string> map;
 #ifdef USE_DISTRIBUTED
-#ifdef USE_C10D
   auto debugInfo = dynamic_cast<ParamCommsDebugInfo*>(
       c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PARAM_COMMS_INFO));
   if (debugInfo == nullptr) {
@@ -434,7 +429,6 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
                 ", "),
             groupRanks.back()));
   }
-#endif // USE_C10D
 #endif // USE_DISTRIBUTED
   return map;
 }
