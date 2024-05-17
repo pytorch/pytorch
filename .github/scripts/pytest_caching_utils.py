@@ -239,9 +239,13 @@ def _merged_lastfailed_content(
     return to_lastfailed
 
 
-def _merge_additional_failures_files(source_pytest_cache: Path, dest_pytest_cache: Path) -> None:
+def _merge_additional_failures_files(
+    source_pytest_cache: Path, dest_pytest_cache: Path
+) -> None:
     # Simple cases where one of the files doesn't exist
-    source_lastfailed_file = source_pytest_cache / TD_HEURISTIC_PREVIOUSLY_FAILED_ADDITIONAL
+    source_lastfailed_file = (
+        source_pytest_cache / TD_HEURISTIC_PREVIOUSLY_FAILED_ADDITIONAL
+    )
     dest_lastfailed_file = dest_pytest_cache / TD_HEURISTIC_PREVIOUSLY_FAILED_ADDITIONAL
 
     if not source_lastfailed_file.exists():
