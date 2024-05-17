@@ -66,6 +66,7 @@ def layer_norm(
         axis_i=axis,
     )
 
+
 @_onnx_symbolic("quantized::layer_norm")
 def quantized_layer_norm(
     g: jit_utils.GraphContext,
@@ -82,6 +83,7 @@ def quantized_layer_norm(
     output = layer_norm(g, x, normalized_shape, weight, bias, eps, False)
 
     return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
 
 def _compute_edge_sizes(n_fft, window_size):
     """Helper function to compute the sizes of the edges (left and right)
