@@ -304,6 +304,7 @@ class OutputGraph:
                 shape_env=shape_env,
                 # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
                 allow_non_fake_inputs=True if self.export else False,
+                export=self.export,
             )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
         self.init_ambient_guards()

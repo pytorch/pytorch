@@ -1423,6 +1423,7 @@ def forward(self, x_1, y_1):
             return r.view(12, -1, 192)
         make_fx(f, tracing_mode="symbolic")(torch.tensor(24))
 
+    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     def test_view_divisibility_unbacked_relatively_prime(self):
         # See https://github.com/pytorch/pytorch/issues/123651
         def f(x):
@@ -1432,7 +1433,7 @@ def forward(self, x_1, y_1):
             # be chosen such that 448 / 447 < 2 (which it is.)
             torch._check(i0 <= 448)
             return torch.zeros(256 * i0).view(-1, 447)
-        make_fx(f, tracing_mode="symbolic")(torch.tensor(256 * 447))
+        make_fx(f, tracing_mode="symbolic")(torch.tensor(256 * 447, device="cuda"))
 
     def test_unbacked_unify_guard(self):
         def f(x, y):
@@ -1451,6 +1452,7 @@ def forward(self, x_1, y_1):
     add = torch.ops.aten.add.Tensor(y_1, 2);  y_1 = None
     return add""")  # noqa: B950
 
+    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     @unittest.expectedFailure
     def test_unbacked_unify_guard_transitivity(self):
         def f(x1, x2, y):
@@ -1463,7 +1465,11 @@ def forward(self, x_1, y_1):
             else:
                 return y + 2
 
-        gm = make_fx(f, tracing_mode="symbolic")(torch.tensor(10), torch.tensor(10), torch.randn(10))
+        gm = make_fx(f, tracing_mode="symbolic")(
+            torch.tensor(10, device="cuda"),
+            torch.tensor(10, device="cuda"),
+            torch.randn(10, device="cuda")
+        )
         insert_deferred_runtime_asserts(gm, gm.shape_env, "test")
         gm.recompile()
         r = str(gm.code).strip()
@@ -1471,6 +1477,7 @@ def forward(self, x_1, y_1):
         #     r, """"""  # noqa: B950
         # )
 
+    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     def test_unbacked_unify_dependency_violation(self):
         def f(x1, x2, x3, y):
             z1 = x1.item()
@@ -1484,14 +1491,25 @@ def forward(self, x_1, y_1):
             else:
                 return y + 3
 
-        # NB:
+        # NB: inputs are done as CUDA to ensure they aren't queried to be
+        # backed
 
-        gm = make_fx(f, tracing_mode="symbolic")(torch.tensor(10), torch.tensor(5), torch.tensor(5), torch.randn(1))
+        gm = make_fx(f, tracing_mode="symbolic")(
+            torch.tensor(10, device="cuda"), torch.tensor(5, device="cuda"),
+            torch.tensor(5, device="cuda"), torch.randn(1, device="cuda")
+        )
         insert_deferred_runtime_asserts(gm, gm.shape_env, "test")
         gm.recompile()
-        self.assertEqual(gm(torch.tensor(12), torch.tensor(6), torch.tensor(6), torch.tensor([1.0])), torch.tensor([2.0]))
+        self.assertEqual(gm(
+            torch.tensor(12, device="cuda"), torch.tensor(6, device="cuda"),
+            torch.tensor(6, device="cuda"), torch.tensor([1.0], device="cuda")),
+            torch.tensor([2.0], device="cuda")
+        )
         with self.assertRaises(RuntimeError):
-            gm(torch.tensor(20), torch.tensor(10), torch.tensor(10), torch.tensor([1.0]))
+            gm(
+                torch.tensor(20, device="cuda"), torch.tensor(10, device="cuda"),
+                torch.tensor(10, device="cuda"), torch.tensor([1.0], device="cuda")
+            )
 
 
     def test_split_unbacked_sizes(self):
@@ -1915,7 +1933,6 @@ make_fx_failures = {
     xfail('corrcoef'),
     xfail('quantile'),
     xfail('nanquantile'),
-    xfail('narrow'),
 
     # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
     xfail('sparse.sampled_addmm'),
@@ -1930,6 +1947,14 @@ make_fx_failures = {
     skip('empty_strided', '', device_type='cpu'),
 }
 
+only_real_tensor_failures = {
+    xfail('narrow'),
+}
+
+only_fake_tensor_failures = {
+    xfail('narrow'),
+}
+
 fake_tensor_failures = {
     # ASAN failures due to divide by 0
     skip('nn.functional.nll_loss'),
@@ -1942,7 +1967,6 @@ symbolic_tensor_failures = {
     xfail('histogramdd', ''),  # aten._histogramdd_bin_edges.default - couldn't find symbolic meta function/decomposition
     xfail('kthvalue', ''),  # aten.kthvalue.default - couldn't find symbolic meta function/decomposition
     xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
-    xfail('narrow', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decom...
     xfail('nn.functional.cross_entropy', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
@@ -2080,12 +2104,13 @@ filtered_hop_db = [op for op in hop_db if op.name != "auto_functionalize"]
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "Cond requires dynamo")
 class TestProxyTensorOpInfo(TestCase):
     @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_exhaustive', make_fx_failures)
+    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_exhaustive', make_fx_failures.union(only_real_tensor_failures))
     def test_make_fx_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "real")
 
     @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive', make_fx_failures.union(fake_tensor_failures))
+    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive',
+             make_fx_failures.union(fake_tensor_failures, only_fake_tensor_failures))
     def test_make_fx_fake_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "fake")
 
