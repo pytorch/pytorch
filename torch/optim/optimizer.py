@@ -234,7 +234,7 @@ _foreach_doc = r"""foreach (bool, optional): whether foreach implementation of o
             being a tensorlist vs just one tensor. If memory is prohibitive, batch fewer
             parameters through the optimizer at a time or switch this flag to False (default: None)"""
 
-_fused_doc = r"""fused (bool, optional): whether the fused implementation (CUDA only) is used.
+_fused_doc = r"""fused (bool, optional): whether the fused implementation is used.
             Currently, `torch.float64`, `torch.float32`, `torch.float16`, and `torch.bfloat16`
             are supported. (default: None)
 
