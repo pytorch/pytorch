@@ -166,6 +166,16 @@ def copy_pytest_cache() -> None:
     )
 
 
+def copy_additional_previous_failures() -> None:
+    original_path = REPO_ROOT / ".pytest_cache" / TD_HEURISTIC_PREVIOUSLY_FAILED_ADDITIONAL
+    if not original_path.exists():
+        return
+    shutil.copyfile(
+        original_path,
+        REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER / TD_HEURISTIC_PREVIOUSLY_FAILED_ADDITIONAL,
+    )
+
+
 def get_from_test_infra_generated_stats(
     from_file: str, to_file: str, failure_explanation: str
 ) -> Dict[str, Any]:

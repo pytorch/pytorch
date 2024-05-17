@@ -69,7 +69,7 @@ def gen_additional_test_failures_file(tests: List[str]) -> None:
 
 
 def read_additional_test_failures_file() -> Set[str]:
-    path = REPO_ROOT / ".pytest_cache" / TD_HEURISTIC_PREVIOUSLY_FAILED_ADDITIONAL
+    path = REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER / TD_HEURISTIC_PREVIOUSLY_FAILED_ADDITIONAL
     if not os.path.exists(path):
         print(f"could not find path {path}")
         return set()
