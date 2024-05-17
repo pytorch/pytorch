@@ -720,7 +720,7 @@ def _process_dynamic_shapes(
             if solution is not None:
                 return int(solution[1])  # type: ignore[call-overload]
             else:
-                raise UserError(  # noqa: TRY200
+                raise UserError(  # noqa: B904
                     UserErrorType.CONSTRAINT_VIOLATION,
                     f"Expected shape[{i}] = {tensor.shape[i]} of input Tensor to be "
                     f"of the form {expr}, where {symbol} is an integer",
