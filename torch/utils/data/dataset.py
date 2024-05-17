@@ -311,15 +311,6 @@ class ConcatDataset(Dataset[T_co]):
     datasets: List[Dataset[T_co]]
     cumulative_sizes: List[int]
 
-    @staticmethod
-    def cumsum(sequence):
-        r, s = [], 0
-        for e in sequence:
-            l = len(e)
-            r.append(l + s)
-            s += l
-        return r
-
     def __init__(self, datasets: Iterable[Dataset]) -> None:
         super().__init__()
         self.datasets = list(datasets)
@@ -328,7 +319,7 @@ class ConcatDataset(Dataset[T_co]):
             assert not isinstance(
                 d, IterableDataset
             ), "ConcatDataset does not support IterableDataset"
-        self.cumulative_sizes = self.cumsum(self.datasets)
+        self.cumulative_sizes = list(itertools.accumulate(map(len, self.datasets)))
 
     def __len__(self):
         return self.cumulative_sizes[-1]
