@@ -408,6 +408,21 @@ class P2POp:
         _check_single_tensor(tensor, "tensor")
         return object.__new__(cls)
 
+    def __repr__(self):
+        my_group_rank = get_rank(self.group)
+        peer_group_rank = get_group_rank(self.group, self.peer) if self.group else self.peer
+        op_name = self.op.__name__
+        group_name = self.group.group_name if self.group else "default_pg"
+        if "send" in op_name:
+            s = my_group_rank
+            d = peer_group_rank
+        elif "recv" in op_name:
+            s = peer_group_rank
+            d = my_group_rank
+        else:
+            return super().__repr__()
+
+        return f"P2POp({op_name} pg={group_name}, s={s}, d={d},  numel={self.tensor.numel()}, {self.tensor.dtype})"
 
 class _CollOp:
     """
