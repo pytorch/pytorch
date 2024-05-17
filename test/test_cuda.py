@@ -1804,6 +1804,7 @@ torch.cuda.synchronize()
             @torch.cuda.amp.custom_fwd
             def forward(ctx, x, y):
                 ctx.save_for_backward(x, y)
+                self.assertFalse(torch.is_autocast_enabled())
                 return x + y
 
             @staticmethod
@@ -1824,6 +1825,7 @@ torch.cuda.synchronize()
             with torch.amp.autocast("cuda"):
                 output = mymm(x, y)
                 loss = output.sum()
+
         with self.assertWarnsRegex(
             DeprecationWarning,
             r"torch.cuda.amp.custom_bwd\(args...\) is deprecated.",
