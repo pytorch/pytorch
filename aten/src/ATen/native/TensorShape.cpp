@@ -228,7 +228,7 @@ inline void cat_check_no_zero_dim(const MaterializedITensorListRef& tensors) {
 }
 
 inline c10::MemoryFormat cat_compute_output_memory_format(const MaterializedITensorListRef& inputs) {
-  c10::optional<c10::MemoryFormat> format = c10::nullopt;
+  std::optional<c10::MemoryFormat> format = c10::nullopt;
   for (const Tensor& t : inputs) {
     auto f = t.suggest_memory_format();
     if (f == c10::MemoryFormat::Contiguous) {
@@ -2511,8 +2511,8 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
 Tensor slice(
     const Tensor& self,
     int64_t dim,
-    c10::optional<int64_t> start,
-    c10::optional<int64_t> end,
+    std::optional<int64_t> start,
+    std::optional<int64_t> end,
     int64_t step) {
   int64_t ndim = self.dim();
   if (ndim == 0) {
@@ -2568,8 +2568,8 @@ Tensor slice_inverse_symint(
     const Tensor& self,
     const Tensor& base,
     int64_t /* dim */,
-    c10::optional<SymInt> /* start */,
-    c10::optional<SymInt> /* end */,
+    std::optional<SymInt> /* start */,
+    std::optional<SymInt> /* end */,
     SymInt /* step */) {
   // assume self has enough to storage to be viewed with base's metadata
   return self.as_strided_symint(base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
@@ -3519,7 +3519,7 @@ static inline void handle_unflatten_exception(const std::runtime_error &e,
                                               const Tensor &self,
                                               int64_t dim,
                                               SymIntArrayRef sizes,
-                                              c10::optional <DimnameList> names) {
+                                              std::optional <DimnameList> names) {
   if (!strstr(e.what(), "is invalid for input of size")) {
     TORCH_CHECK(false, "unflatten got an unexpected error:\n", e.what());
   }
@@ -3536,7 +3536,7 @@ static inline void handle_unflatten_exception(const std::runtime_error &e,
   }
 }
 
-static Tensor unflatten_impl(const Tensor& self, int64_t dim, SymIntArrayRef sizes, c10::optional<DimnameList> names) {
+static Tensor unflatten_impl(const Tensor& self, int64_t dim, SymIntArrayRef sizes, std::optional<DimnameList> names) {
   dim = maybe_wrap_dim(dim, self.dim());
 
   TORCH_CHECK(!sizes.empty(), "unflatten: sizes must be non-empty");
@@ -4013,7 +4013,7 @@ at::Tensor clone_preserve_strides(const at::Tensor& self) {
 }
 
 
-at::Tensor slice_scatter(const at::Tensor& self, const at::Tensor& src, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step) {
+at::Tensor slice_scatter(const at::Tensor& self, const at::Tensor& src, int64_t dim, std::optional<int64_t> start, c10::optional<int64_t> end, int64_t step) {
     // See Note [*_scatter ops preserve strides]
     auto output = clone_preserve_strides(self);
     auto slice = output.slice(dim, start, end, step);
@@ -4036,7 +4036,7 @@ at::Tensor diagonal_scatter(const at::Tensor& self, const at::Tensor& src, int64
     slice.copy_(src);
     return output;
 }
-at::Tensor as_strided_scatter_symint(const at::Tensor& self, const at::Tensor& src, at::SymIntArrayRef size, at::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset) {
+at::Tensor as_strided_scatter_symint(const at::Tensor& self, const at::Tensor& src, at::SymIntArrayRef size, at::SymIntArrayRef stride, std::optional<c10::SymInt> storage_offset) {
     // See Note [as_strided_scatter backward support]
     TORCH_INTERNAL_ASSERT(!self.requires_grad() || self.is_contiguous(), "as_strided_scatter is currently only supported for contiguous inputs");
     // See Note [*_scatter ops preserve strides]

@@ -31,7 +31,7 @@ struct TORCH_API CanonicalizedSymbolicShape {
       const CanonicalizedSymbolicShape& b);
 
  private:
-  c10::optional<std::vector<int64_t>> values_;
+  std::optional<std::vector<int64_t>> values_;
 
   void init(
       const c10::SymbolicShape& orig_shape,
@@ -39,7 +39,7 @@ struct TORCH_API CanonicalizedSymbolicShape {
 };
 
 // SHAPE CACHE API
-TORCH_API c10::optional<std::vector<at::SymbolicShape>>
+TORCH_API std::optional<std::vector<at::SymbolicShape>>
 get_cached_shape_function(
     const FunctionSchema* schema,
     const std::vector<SSAInput>& arg_vec);

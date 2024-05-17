@@ -150,7 +150,10 @@ class OptimizedModule(torch.nn.Module):
 
     def _initialize(self):
         # Do this stuff in constructor to lower overhead slightly
-        if isinstance(self._orig_mod.forward, types.MethodType) and trace_rules.check(
+        if isinstance(self.dynamo_ctx, DisableContext):
+            # No need to check trace rules
+            self.forward = self.dynamo_ctx(self._orig_mod.__call__)
+        elif isinstance(self._orig_mod.forward, types.MethodType) and trace_rules.check(
             self._orig_mod.forward
         ):
             # This may be a torch.nn.* instance in trace_rules.py which
@@ -353,14 +356,9 @@ class _TorchDynamoContext:
             # User has wrapped the class with compile/disable decorator. Apply
             # disable to init/call method.
             cls_obj = fn
-            if isinstance(self, DisableContext):
-                # Disable on init is useful for reconstruction of bytecodes where we
-                # want to prevent Dynamo from tracing into the init function. Check
-                # test_reconstruction in test_model_output.py.
-                cls_obj.__init__ = self(cls_obj.__init__)
             cls_obj.__call__ = self(cls_obj.__call__)
             if issubclass(cls_obj, torch.nn.Module):
-                # NN module variable tracker directly inlines the _call_impl. Disable it.
+                # NN module variable tracker directly inlines the _call_impl.
                 cls_obj._call_impl = self(cls_obj._call_impl)
             return cls_obj
 
@@ -383,12 +381,8 @@ class _TorchDynamoContext:
 
         callback = self.callback
 
-        if isinstance(self, DisableContext):
-            is_jit_tracing = always_false
-            is_fx_tracing = always_false
-        else:
-            is_jit_tracing = torch._C._is_tracing
-            is_fx_tracing = torch.fx._symbolic_trace.is_fx_tracing
+        is_jit_tracing = torch._C._is_tracing
+        is_fx_tracing = torch.fx._symbolic_trace.is_fx_tracing
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
@@ -424,10 +418,7 @@ class _TorchDynamoContext:
                     cleanup()
 
         # hooks to properly handle inlining
-        if isinstance(self, DisableContext):
-            _fn._torchdynamo_disable = True  # type: ignore[attr-defined]
-        else:
-            _fn._torchdynamo_inline = fn  # type: ignore[attr-defined]
+        _fn._torchdynamo_inline = fn  # type: ignore[attr-defined]
 
         # Save the function pointer to find the original callable while nesting
         # of decorators.
@@ -518,6 +509,53 @@ class RunOnlyContext(_TorchDynamoContext):
 class DisableContext(_TorchDynamoContext):
     def __init__(self):
         super().__init__(callback=None)
+
+    def __call__(self, fn):
+        # Earlier this code was in the base class _TorchDynamoContext. But we
+        # moved it here to have better code organization. For disable, we just
+        # want the callback to be None. We don't have to check trace_rules or
+        # create any wrapper.
+        fn = innermost_fn(fn)
+
+        if isinstance(fn, torch.nn.Module):
+            mod = fn
+            new_mod = OptimizedModule(mod, self)
+            new_mod._torchdynamo_orig_callable = mod.forward
+            return new_mod
+
+        if inspect.isclass(fn):
+            # User has wrapped the class with compile/disable decorator. Apply
+            # disable to init/call method.
+            cls_obj = fn
+            # Disable on init is useful for reconstruction of bytecodes where we
+            # want to prevent Dynamo from tracing into the init function. Check
+            # test_reconstruction in test_model_output.py.
+            cls_obj.__init__ = self(cls_obj.__init__)
+            cls_obj.__call__ = self(cls_obj.__call__)
+            if issubclass(cls_obj, torch.nn.Module):
+                # NN module variable tracker directly inlines the _call_impl. Disable it.
+                cls_obj._call_impl = self(cls_obj._call_impl)
+            return cls_obj
+
+        assert callable(fn)
+
+        callback = self.callback
+
+        @functools.wraps(fn)
+        def _fn(*args, **kwargs):
+            prior = set_eval_frame(callback)
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                set_eval_frame(prior)
+
+        _fn._torchdynamo_disable = True  # type: ignore[attr-defined]
+
+        # Save the function pointer to find the original callable while nesting
+        # of decorators.
+        _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+
+        return _fn
 
 
 def _optimize_catch_errors(
@@ -1349,7 +1387,7 @@ def export(
                     )(*example_fake_inputs)
                 except CondOpArgsMismatchError as e:
                     # Wrap the internal error to the user-facing error
-                    raise UserError(  # noqa: TRY200
+                    raise UserError(  # noqa: B904
                         UserErrorType.DYNAMIC_CONTROL_FLOW,
                         str(e),
                         case_name="cond_operands",

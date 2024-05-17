@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import torch
 from torch import Tensor
@@ -14,6 +14,7 @@ from .optimizer import (
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
+    ParamsT,
 )
 
 __all__ = ["Rprop", "rprop"]
@@ -22,10 +23,10 @@ __all__ = ["Rprop", "rprop"]
 class Rprop(Optimizer):
     def __init__(
         self,
-        params,
-        lr=1e-2,
-        etas=(0.5, 1.2),
-        step_sizes=(1e-6, 50),
+        params: ParamsT,
+        lr: float = 1e-2,
+        etas: Tuple[float, float] = (0.5, 1.2),
+        step_sizes: Tuple[float, float] = (1e-6, 50),
         *,
         capturable: bool = False,
         foreach: Optional[bool] = None,
@@ -121,11 +122,11 @@ class Rprop(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            params = []
-            grads = []
-            prevs = []
-            step_sizes = []
-            state_steps = []
+            params: List[Tensor] = []
+            grads: List[Tensor] = []
+            prevs: List[Tensor] = []
+            step_sizes: List[Tensor] = []
+            state_steps: List[Tensor] = []
 
             etaminus, etaplus = group["etas"]
             step_size_min, step_size_max = group["step_sizes"]

@@ -81,8 +81,8 @@ bool unpack_ivalue(
     // ivalue is scalar
     unpack_scalar_ivalue(ivalue, device, inputs);
   } else if (
-      *argument.real_type() == *c10::getTypePtr<c10::optional<at::Tensor>>()) {
-    // ivalue is c10::optional<at::Tensor>
+      *argument.real_type() == *c10::getTypePtr<std::optional<at::Tensor>>()) {
+    // ivalue is std::optional<at::Tensor>
     unpack_optional_tensor_ivalue(ivalue, device, inputs);
   } else {
     // Unsupport IValue type.
