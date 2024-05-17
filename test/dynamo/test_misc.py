@@ -4587,7 +4587,7 @@ def fn():
             return modules, module_dict
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
         modules, module_dict = opt_fn()
 
         self.assertEqual(len(module_dict), len(modules))
