@@ -36,7 +36,7 @@ TORCH_API Tensor new_with_itensor_mkldnn(ideep::tensor&& it, std::optional<Scala
 // Retrieve `ideep::tensor` from MKL-DNN tensor
 TORCH_API ideep::tensor& itensor_from_mkldnn(const Tensor& mkldnn_tensor);
 
-TORCH_API int64_t data_size_from_mkldnn(const Tensor& mkldnn_tensor);
+TORCH_API int64_t nbytes_from_mkldnn(const Tensor& mkldnn_tensor);
 
 // Construct an `ideep::tensor` "view" from dense tensor, note the
 // ideep::tensor will share the underlying buffer

@@ -225,8 +225,6 @@ class AOTInductorModelBase {
       auto layout = this->constant_layout(i);
       auto opaque_metadata_ptr = this->opaque_metadata(i);
       auto opaque_metadata_size = this->opaque_metadata_size(i);
-      std::vector<uint8_t> vector_opaque_metadata{
-          opaque_metadata_ptr, opaque_metadata_ptr + opaque_metadata_size};
 
       AtenTensorHandle tensor_handle;
       AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(

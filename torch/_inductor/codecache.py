@@ -2019,7 +2019,7 @@ class AotCodeCompiler:
 
             output_o = os.path.splitext(input_path)[0] + ".o"
             consts_size = sum(
-                torch.ops.mkldnn._data_size(tensor)
+                torch.ops.mkldnn._nbytes(tensor)
                 if tensor.is_mkldnn
                 else tensor.untyped_storage().nbytes()
                 for (name, tensor) in graph.constants.items()
@@ -2057,7 +2057,7 @@ class AotCodeCompiler:
                 if t.is_mkldnn:
                     raw_array = ctypes.cast(
                         torch.ops.mkldnn.data_ptr(t),
-                        ctypes.POINTER(ctypes.c_ubyte * torch.ops.mkldnn._data_size(t)),
+                        ctypes.POINTER(ctypes.c_ubyte * torch.ops.mkldnn._nbytes(t)),
                     )
                     return bytes(raw_array.contents)
 

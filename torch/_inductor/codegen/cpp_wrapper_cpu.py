@@ -730,7 +730,7 @@ class CppWrapperCpu(WrapperCodeGen):
                 )
                 if tensor.is_mkldnn:
                     self.prefix.writeline(
-                        f"constants_info_[{idx}].data_size = {torch.ops.mkldnn._data_size(tensor)};"
+                        f"constants_info_[{idx}].data_size = {torch.ops.mkldnn._nbytes(tensor)};"
                     )
                 else:
                     self.prefix.writeline(

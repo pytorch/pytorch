@@ -76,7 +76,7 @@ TORCH_LIBRARY(mkldnn, m) {
   m.def("_is_mkldnn_acl_supported", &is_mkldnn_acl_supported);
   m.def("mkldnn::data_ptr(Tensor mkldnn_tensor) -> int");
   m.def("mkldnn::_get_mkldnn_serialized_md (Tensor mkldnn_tensor) -> Tensor");
-  m.def("mkldnn::_data_size(Tensor mkldnn_tensor) -> int");
+  m.def("mkldnn::_nbytes(Tensor mkldnn_tensor) -> int");
 }
 
 TORCH_LIBRARY(mkldnn_prepacked, m) {

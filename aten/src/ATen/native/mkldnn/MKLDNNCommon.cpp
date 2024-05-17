@@ -88,7 +88,7 @@ ideep::tensor& itensor_from_mkldnn(const MKLDNNTensor& mkldnn_tensor) {
   return mklimpl->unsafe_opaque_handle()->get_target();
 }
 
-int64_t data_size_from_mkldnn(const Tensor& mkldnn_tensor) {
+int64_t nbytes_from_mkldnn(const Tensor& mkldnn_tensor) {
   ideep::tensor t = itensor_from_mkldnn(mkldnn_tensor);
   return t.get_desc().get_size();
 }
@@ -184,8 +184,8 @@ TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
       TORCH_SELECTIVE_NAME("mkldnn::data_ptr"),
       TORCH_FN(data_ptr_from_mkldnn));
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_data_size"),
-      TORCH_FN(data_size_from_mkldnn));
+      TORCH_SELECTIVE_NAME("mkldnn::_nbytes"),
+      TORCH_FN(nbytes_from_mkldnn));
 }
 
 }}
