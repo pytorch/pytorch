@@ -1508,7 +1508,7 @@ class Kernel(CodeGen):
                     return ValueRanges.unknown()
 
                 fx_node = V.interpreter.current_node
-                if fx_node.target == name:
+                if fx_node.target == name and self.node_to_bounds is not None:
                     assert isinstance(self.node_to_bounds, dict)
                     return self.node_to_bounds.get(fx_node, ValueRanges.unknown())
                 elif config.compute_all_bounds and hasattr(ValueRangeAnalysis, name):

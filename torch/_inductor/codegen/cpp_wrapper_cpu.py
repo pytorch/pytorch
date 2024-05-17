@@ -2287,7 +2287,7 @@ if (py_{buf_name}.get() == NULL) {{
             # When None is passed as an argument, it represents an optional that does not contain a value.
             if config.abi_compatible:
                 if type_ is None or isinstance(type_, torch.OptionalType):
-                    return "NULL"  # nullptr is not available in C
+                    return "0"  # nullptr is not available in C
                 elif isinstance(type_, torch.TensorType):
                     var_name = f"var_{next(self.arg_var_id)}"
                     self.writeline(f"AtenTensorHandle {var_name}_handle;")
