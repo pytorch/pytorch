@@ -32,7 +32,9 @@ struct THPEngine {
 
 static bool _reinitialize_engine = false;
 
-namespace torch::autograd::python {
+namespace torch {
+namespace autograd {
+namespace python {
 
 PythonEngine::PythonEngine() = default;
 
@@ -158,7 +160,9 @@ c10::intrusive_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
     throw;
   }
 }
-} // namespace torch::autograd::python
+} // namespace python
+} // namespace autograd
+} // namespace torch
 
 PyObject* THPEngineClass = nullptr;
 
