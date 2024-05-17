@@ -83,6 +83,9 @@ def _flex_attention(
     """
 
     if torch.compiler.is_dynamo_compiling():
+        # mark head_dim always to be static
+        for x in [query, key, value]:
+            torch._dynamo.mark_static(x, -1)
         out, _ = flex_attention_hop(query, key, value, score_mod)
         return out
 
@@ -93,6 +96,8 @@ def _flex_attention(
         raise ValueError(
             "NYI: The target sequence length (L) of the query tensor must match the source sequence length (S) of the key tensor."
         )
+    if query.size(-2) % 128 != 0:
+        raise ValueError("NYI: S and L must be a multiple of 128")
 
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("flex_attention requires dynamo support.")
@@ -146,7 +151,7 @@ def _rel_causal(
     token_q: torch.Tensor,
     token_kv: torch.Tensor,
 ) -> torch.Tensor:
-    return torch.where(token_q <= token_kv, score + (token_q - token_kv), float("-inf"))
+    return torch.where(token_q >= token_kv, score + (token_q - token_kv), float("-inf"))
 
 
 def _generate_alibi_bias(num_heads: int):

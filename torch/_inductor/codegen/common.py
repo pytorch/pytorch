@@ -601,6 +601,8 @@ class OverridesData:
     )
 
 
+# NB: if you add a new special function, don't forget to update
+# torch._inductor.ops_handler too
 pointwise_overrides_data: Dict[str, OverridesData] = dict(
     airy_ai=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
