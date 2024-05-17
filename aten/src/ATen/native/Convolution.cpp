@@ -368,7 +368,7 @@ struct ConvParams {
     }
   }
 
-  bool use_cpu_depthwise3x3_winograd(const at::Tensor& input, const at::Tensor& weight, const c10::optional<at::Tensor>& bias) const {
+  bool use_cpu_depthwise3x3_winograd(const at::Tensor& input, const at::Tensor& weight, const std::optional<at::Tensor>& bias) const {
 #if defined(__ARM_NEON__)
     // Currently only 3x3 depthwise convolutions on tensors of float are supported.
     return (input.ndimension() == 4) &&
@@ -878,7 +878,7 @@ at::Tensor complex_convolution(
 at::Tensor complex_convolution_mode(
     const at::Tensor& input,
     const at::Tensor& weight,
-    const c10::optional<at::Tensor>& bias_opt,
+    const std::optional<at::Tensor>& bias_opt,
     c10::SymIntArrayRef stride,
     c10::string_view padding,
     c10::SymIntArrayRef dilation,
@@ -908,7 +908,7 @@ at::Tensor complex_convolution_mode(
 } // namespace
 
 at::Tensor conv1d_symint(
-    const Tensor& input_, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
+    const Tensor& input_, const Tensor& weight, const std::optional<Tensor>& bias_opt,
     SymIntArrayRef stride, SymIntArrayRef padding, SymIntArrayRef dilation, c10::SymInt groups) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
@@ -933,7 +933,7 @@ at::Tensor conv1d_symint(
 }
 
 at::Tensor conv2d_symint(
-    const Tensor& input_, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
+    const Tensor& input_, const Tensor& weight, const std::optional<Tensor>& bias_opt,
     SymIntArrayRef stride, SymIntArrayRef padding, SymIntArrayRef dilation, c10::SymInt groups) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
@@ -958,7 +958,7 @@ at::Tensor conv2d_symint(
 }
 
 at::Tensor conv3d_symint(
-    const Tensor& input_, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
+    const Tensor& input_, const Tensor& weight, const std::optional<Tensor>& bias_opt,
     SymIntArrayRef stride, SymIntArrayRef padding, SymIntArrayRef dilation, c10::SymInt groups) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
@@ -1049,7 +1049,7 @@ static Tensor convolution_same(
 }
 
 Tensor _convolution_mode_symint(
-    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
+    const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt,
     SymIntArrayRef stride, c10::string_view padding, SymIntArrayRef dilation,
     c10::SymInt groups) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -1067,7 +1067,7 @@ Tensor _convolution_mode_symint(
 }
 
 at::Tensor conv1d_padding_symint(
-    const Tensor& input_, const Tensor& weight, const c10::optional<Tensor>& bias,
+    const Tensor& input_, const Tensor& weight, const std::optional<Tensor>& bias,
     c10::SymIntArrayRef stride, c10::string_view padding, c10::SymIntArrayRef dilation,
     c10::SymInt groups) {
   auto [input, is_batched] = batchify(input_, /*num_spatial_dims=*/ 1, "conv1d");
@@ -1081,7 +1081,7 @@ at::Tensor conv1d_padding_symint(
 }
 
 at::Tensor conv2d_padding_symint(
-    const Tensor& input_, const Tensor& weight, const c10::optional<Tensor>& bias,
+    const Tensor& input_, const Tensor& weight, const std::optional<Tensor>& bias,
     c10::SymIntArrayRef stride, c10::string_view padding, c10::SymIntArrayRef dilation,
     c10::SymInt groups) {
   auto [input, is_batched] = batchify(input_, /*num_spatial_dims=*/ 2, "conv2d");
@@ -1095,7 +1095,7 @@ at::Tensor conv2d_padding_symint(
 }
 
 at::Tensor conv3d_padding_symint(
-    const Tensor& input_, const Tensor& weight, const c10::optional<Tensor>& bias,
+    const Tensor& input_, const Tensor& weight, const std::optional<Tensor>& bias,
     c10::SymIntArrayRef stride, c10::string_view padding, c10::SymIntArrayRef dilation,
     c10::SymInt groups) {
   auto [input, is_batched] = batchify(input_, /*num_spatial_dims=*/ 3, "conv3d");
@@ -1109,7 +1109,7 @@ at::Tensor conv3d_padding_symint(
 }
 
 at::Tensor conv_transpose1d_symint(
-    const Tensor& input_, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
+    const Tensor& input_, const Tensor& weight, const std::optional<Tensor>& bias_opt,
     SymIntArrayRef stride, SymIntArrayRef padding, SymIntArrayRef output_padding, c10::SymInt groups, SymIntArrayRef dilation) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
@@ -1128,7 +1128,7 @@ at::Tensor conv_transpose1d_symint(
 }
 
 at::Tensor conv_transpose2d_symint(
-    const Tensor& input_, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
+    const Tensor& input_, const Tensor& weight, const std::optional<Tensor>& bias_opt,
     SymIntArrayRef stride, SymIntArrayRef padding, SymIntArrayRef output_padding, c10::SymInt groups, SymIntArrayRef dilation) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
@@ -1147,7 +1147,7 @@ at::Tensor conv_transpose2d_symint(
 }
 
 at::Tensor conv_transpose3d_symint(
-    const Tensor& input_, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
+    const Tensor& input_, const Tensor& weight, const std::optional<Tensor>& bias_opt,
     SymIntArrayRef stride, SymIntArrayRef padding, SymIntArrayRef output_padding, c10::SymInt groups, SymIntArrayRef dilation) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
@@ -1166,7 +1166,7 @@ at::Tensor conv_transpose3d_symint(
 }
 
 at::Tensor convolution(
-    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
+    const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
     bool transposed, IntArrayRef output_padding, int64_t groups) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -1182,7 +1182,7 @@ at::Tensor convolution(
 }
 
 at::Tensor convolution_overrideable(
-    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
+    const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
     bool transposed, IntArrayRef output_padding, int64_t groups) {
   TORCH_CHECK_NOT_IMPLEMENTED(false, "convolution_overrideable not implemented. You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use TORCH_LIBRARY_IMPL to override this function ");
@@ -1197,7 +1197,7 @@ template <typename T>
 ConvBackend _select_conv_backend(
     const Tensor& input,
     const Tensor& weight,
-    const c10::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias,
     const at::OptionalArrayRef<T> bias_sizes_opt,
     const bool need_backward,
     const ConvParams<T>& params) {
@@ -1304,7 +1304,7 @@ ConvBackend _select_conv_backend(
 
 // Selects a backend for convolution based on the inputs and params.
 ConvBackend select_conv_backend(
-    const Tensor& input_r, const Tensor& weight_r, const c10::optional<Tensor>& bias_opt,
+    const Tensor& input_r, const Tensor& weight_r, const std::optional<Tensor>& bias_opt,
     SymIntArrayRef stride_, SymIntArrayRef padding_, SymIntArrayRef dilation_,
     bool transposed_, SymIntArrayRef output_padding_, c10::SymInt groups_, const at::OptionalSymIntArrayRef bias_sizes_opt) {
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
@@ -1339,7 +1339,7 @@ ConvBackend select_conv_backend(
     weight = view4d(weight);
   }
 
-  auto bias_sizes = bias.defined() ? c10::optional<SymIntArrayRef>(bias.sym_sizes()) : bias_sizes_opt;
+  auto bias_sizes = bias.defined() ? std::optional<SymIntArrayRef>(bias.sym_sizes()) : bias_sizes_opt;
   bool need_backward = GradMode::is_enabled() &&
       (input.requires_grad() || weight.requires_grad() || (bias.defined() && bias.requires_grad()));
   return _select_conv_backend(input, weight, bias, bias_sizes, need_backward, params);
@@ -1461,7 +1461,7 @@ at::MemoryFormat _determine_backend_memory_format(
 }
 
 at::Tensor _convolution(
-    const Tensor& input_r, const Tensor& weight_r, const c10::optional<Tensor>& bias_r_opt,
+    const Tensor& input_r, const Tensor& weight_r, const std::optional<Tensor>& bias_r_opt,
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
     bool transposed_, IntArrayRef output_padding_, int64_t groups_,
     bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32) {
@@ -1504,7 +1504,7 @@ at::Tensor _convolution(
   }
 
   // Select appropriate backend to use.
-  auto bias_sizes_opt = bias.defined() ? c10::optional<IntArrayRef>(bias.sizes()) : c10::nullopt;
+  auto bias_sizes_opt = bias.defined() ? std::optional<IntArrayRef>(bias.sizes()) : c10::nullopt;
   bool need_backward = GradMode::is_enabled() &&
       (input.requires_grad() || weight.requires_grad() || (bias.defined() && bias.requires_grad()));
   ConvBackend backend = _select_conv_backend(input, weight, bias, c10::OptionalIntArrayRef(bias_sizes_opt), need_backward, params);
@@ -1701,7 +1701,7 @@ at::Tensor _convolution(
 }
 
 at::Tensor _convolution(
-    const Tensor& input_r, const Tensor& weight_r, const c10::optional<Tensor>& bias_r_opt,
+    const Tensor& input_r, const Tensor& weight_r, const std::optional<Tensor>& bias_r_opt,
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
     bool transposed_, IntArrayRef output_padding_, int64_t groups_,
     bool benchmark, bool deterministic, bool cudnn_enabled)
@@ -1730,7 +1730,7 @@ static Tensor subvariable(const Tensor& var, int dim, int groups, int g) {
   return result;
 }
 
-std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const c10::optional<Tensor>& ggI_opt, const c10::optional<Tensor>& ggW_r_opt, const c10::optional<Tensor>& ggb_opt,
+std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const std::optional<Tensor>& ggI_opt, const c10::optional<Tensor>& ggW_r_opt, const c10::optional<Tensor>& ggb_opt,
     const Tensor& gO_r, const Tensor& weight_r, const Tensor& input,
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
     bool transposed_, IntArrayRef output_padding_, int64_t groups_,

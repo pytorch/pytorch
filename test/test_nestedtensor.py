@@ -4497,7 +4497,6 @@ class TestNestedTensorSubclass(TestCase):
         # should be equivalent to the original values
         self.assertEqual(values, output_jagged)
 
-
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
 instantiate_device_type_tests(TestNestedTensorAutograd, globals())
