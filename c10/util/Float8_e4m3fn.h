@@ -19,7 +19,7 @@
 #include <c10/util/floating_point_utils.h>
 #include <type_traits>
 
-#if defined(__cplusplus) && (__cplusplus >= 201103L)
+#if defined(__cplusplus)
 #include <cmath>
 #include <cstdint>
 #elif !defined(__OPENCL_VERSION__)

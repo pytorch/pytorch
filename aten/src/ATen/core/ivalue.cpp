@@ -887,12 +887,12 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::create(
 }
 
 IValue IValue::deepcopy(std::optional<at::Device> device) const {
-  IValue::HashAliasedIValueMap memo;
+  IValue::HashIdentityIValueMap memo;
   return deepcopy(memo, device);
 }
 
 IValue IValue::deepcopy(
-    IValue::HashAliasedIValueMap& memo,
+    IValue::HashIdentityIValueMap& memo,
     std::optional<at::Device> device) const {
   if (memo.count(*this)) {
     return memo.at(*this);
@@ -1028,12 +1028,12 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::copy_to_weak_compilation_ref(
 
 c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(
     std::optional<at::Device> device) const {
-  IValue::HashAliasedIValueMap memo;
+  IValue::HashIdentityIValueMap memo;
   return deepcopy(memo, device);
 }
 
 c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(
-    IValue::HashAliasedIValueMap& memo,
+    IValue::HashIdentityIValueMap& memo,
     std::optional<at::Device> device) const {
   auto cu = type_.cu_;
   auto object = ivalue::Object::create(WeakOrStrongTypePtr(type_.cu_, type_.type_), type()->numAttributes());
