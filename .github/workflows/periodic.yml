@@ -215,6 +215,7 @@ jobs:
     with:
       build-environment: linux-focal-rocm6.0-py3.8
       docker-image-name: pytorch-linux-focal-rocm-n-py3
+      docker-image-tag: cea4be730564c18dd285a12828c7c449490b10b9
       test-matrix: |
         { include: [
           { config: "distributed", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },

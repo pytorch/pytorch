@@ -11,6 +11,11 @@ on:
         required: true
         type: string
         description: Name of the base docker image to build with.
+      docker-image-tag:
+        required: false
+        type: string
+        description: Name of the base docker image tag
+        default: ""
       build-generates-artifacts:
         required: false
         type: boolean
@@ -69,7 +74,7 @@ jobs:
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 240
     outputs:
-      docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+      docker-image: ${{ steps.calculate-docker.outputs.docker-image }}
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
     steps:
       - name: Setup SSH (Click me for login details)
@@ -93,10 +98,24 @@ jobs:
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
 
+      - name: Override docker image tag if pinned
+        id: calculate-docker
+        env:
+          ECR_DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+        shell: bash
+        run: |
+          export NEW_TAG=${{ inputs.docker-image-tag }}
+          if [[ ${NEW_TAG} != '' ]]; then
+            IMAGE=${ECR_DOCKER_IMAGE%:*}
+            echo "docker-image=${IMAGE}:${NEW_TAG}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "docker-image=${ECR_DOCKER_IMAGE}" >> "${GITHUB_OUTPUT}"
+          fi
+
       - name: Use following to pull public copy of the image
         id: print-ghcr-mirror
         env:
-          ECR_DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          ECR_DOCKER_IMAGE: ${{ steps.calculate-docker.outputs.docker-image }}
         shell: bash
         run: |
           tag=${ECR_DOCKER_IMAGE##*/}
@@ -105,7 +124,7 @@ jobs:
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.3
         with:
-          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          docker-image: ${{ steps.calculate-docker.outputs.docker-image }}
 
       - name: Parse ref
         id: parse-ref
@@ -149,7 +168,7 @@ jobs:
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
           TORCH_CUDA_ARCH_LIST: ${{ inputs.cuda-arch-list }}
-          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          DOCKER_IMAGE: ${{ steps.calculate-docker.outputs.docker-image }}
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
           DEBUG: ${{ inputs.build-with-debug && '1' || '0' }}
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
