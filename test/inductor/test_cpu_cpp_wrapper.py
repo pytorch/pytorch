@@ -71,7 +71,6 @@ test_failures_cpp_wrapper = {
 
 if config.abi_compatible:
     xfail_list = [
-        "test_bernoulli1_cpu",  # cpp fallback op naming issue
         "test_conv2d_binary_inplace_fusion_failed_cpu",
         "test_conv2d_binary_inplace_fusion_pass_cpu",
         "test_dynamic_qlinear_cpu",
