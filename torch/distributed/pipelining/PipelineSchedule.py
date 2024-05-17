@@ -391,9 +391,6 @@ class Schedule1F1B(PipelineScheduleSingle):
         """
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
 
-        # forward for num_microbatches + backward for num_microbatches
-        total_ops = self._n_microbatches * 2
-
         # Example, 4 GPUs, 8 microbatches
         # Stage 0: 6 warmup, 2 1f1b, 6 cooldown
         # Stage 1: 4 warmup, 4 1f1b, 4 cooldown
@@ -407,7 +404,7 @@ class Schedule1F1B(PipelineScheduleSingle):
         # fwd + bwd
         main_1f1b_steps = self._n_microbatches - warmup_steps
         # bwd only
-        cooldown_steps = total_ops - (warmup_steps + (2 * main_1f1b_steps))
+        cooldown_steps = (2 * self._n_microbatches) - (warmup_steps + (2 * main_1f1b_steps))
         total_steps = warmup_steps + main_1f1b_steps + cooldown_steps
         logger.debug(
             f"Stage {self._stage.stage_index}: "  # noqa: G004
