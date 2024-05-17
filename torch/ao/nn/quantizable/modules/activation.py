@@ -106,8 +106,8 @@ class MultiheadAttention(nn.MultiheadAttention):
 
         # Set the linear weights
         # for the type: ignores, see https://github.com/pytorch/pytorch/issues/58969
-        observed.out_proj.weight = other.out_proj.weight  # type: ignore[has-type]
-        observed.out_proj.bias = other.out_proj.bias  # type: ignore[has-type]
+        observed.out_proj.weight = other.out_proj_weight  # type: ignore[has-type]
+        observed.out_proj.bias = other.out_proj_bias  # type: ignore[has-type]
         if other._qkv_same_embed_dim:
             # Use separate params
             bias = other.in_proj_bias
@@ -178,9 +178,9 @@ class MultiheadAttention(nn.MultiheadAttention):
         # to deal with them -- might need to ignore the typing checks.
         # for the type: ignore[has-type], see https://github.com/pytorch/pytorch/issues/58969
         w, b = self.out_proj._weight_bias()  # type: ignore[operator, has-type]
-        fp.out_proj.weight = nn.Parameter(w.dequantize())
+        fp.out_proj_weight = nn.Parameter(w.dequantize())
         if b is not None:
-            fp.out_proj.bias = nn.Parameter(b)
+            fp.out_proj_bias = nn.Parameter(b)
 
         wQ, bQ = self.linear_Q._weight_bias()  # type: ignore[operator]
         wQ = wQ.dequantize()

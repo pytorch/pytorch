@@ -459,8 +459,8 @@ std::tuple<Tensor, Tensor> MultiheadAttentionImpl::forward(
             /*bias_v=*/bias_v,
             /*add_zero_attn=*/options.add_zero_attn(),
             /*dropout_p=*/options.dropout(),
-            /*out_proj_weight=*/out_proj->weight,
-            /*out_proj_bias=*/out_proj->bias)
+            /*out_proj_weight=*/out_proj_weight,
+            /*out_proj_bias=*/out_proj_bias)
             .training(is_training())
             .key_padding_mask(key_padding_mask)
             .need_weights(need_weights)
@@ -484,8 +484,8 @@ std::tuple<Tensor, Tensor> MultiheadAttentionImpl::forward(
             /*bias_v=*/bias_v,
             /*add_zero_attn=*/options.add_zero_attn(),
             /*dropout_p=*/options.dropout(),
-            /*out_proj_weight=*/out_proj->weight,
-            /*out_proj_bias=*/out_proj->bias)
+            /*out_proj_weight=*/out_proj_weight,
+            /*out_proj_bias=*/out_proj_bias)
             .training(is_training())
             .key_padding_mask(key_padding_mask)
             .need_weights(need_weights)
@@ -521,13 +521,15 @@ void MultiheadAttentionImpl::reset() {
   if (options.bias()) {
     in_proj_bias = register_parameter(
         "in_proj_bias", torch::empty(3 * options.embed_dim()));
+    out_proj_bias = register_parameter(
+        "out_proj_bias", torch::empty(options.embed_dim()));
   } else {
     register_parameter("in_proj_bias", {}, /*requires_grad=*/false);
+    register_parameter("out_proj_bias", {}, /*requires_grad=*/false);
   }
-  out_proj = register_module(
-      "out_proj",
-      Linear(LinearOptions(options.embed_dim(), options.embed_dim())
-                 .bias(options.bias())));
+  out_proj_weight = register_parameter(
+        "out_proj_weight",
+        torch::empty({options.embed_dim(), options.embed_dim()}));
   if (options.add_bias_kv()) {
     bias_k =
         register_parameter("bias_k", torch::empty({1, 1, options.embed_dim()}));
@@ -549,9 +551,12 @@ void MultiheadAttentionImpl::_reset_parameters() {
     xavier_uniform_(k_proj_weight);
     xavier_uniform_(v_proj_weight);
   }
+  xavier_uniform_(out_proj_weight);
   if (in_proj_bias.defined()) {
     constant_(in_proj_bias, 0.);
-    constant_(out_proj->bias, 0.);
+  }
+  if (out_proj_bias.defined()) {
+    constant_(out_proj_bias, 0.);
   }
   if (bias_k.defined()) {
     xavier_normal_(bias_k);

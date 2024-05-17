@@ -671,7 +671,6 @@ class TestAutoWrap(TestCase):
         self.assertTrue(isinstance(model.module[0], FSDP))
         # Assert children of multihead attention are not wrapped
         self.assertTrue(isinstance(model.module[1], nn.MultiheadAttention))
-        self.assertTrue(isinstance(model.module[1].out_proj, nn.Linear))
 
     @unittest.skipIf(not TEST_MULTIGPU, "Requires at least 2 GPUs")
     def test_auto_wrap_preset_force_leaf_custom(self):

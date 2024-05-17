@@ -92,8 +92,8 @@ def run(
     ).eval()
     native_mha.in_proj_weight = qkv.weight
     native_mha.in_proj_bias = qkv.bias
-    native_mha.out_proj.weight = proj.weight
-    native_mha.out_proj.bias = proj.bias
+    native_mha.out_proj_weight = proj.weight
+    native_mha.out_proj_bias = proj.bias
 
     # Create query mask
     q_mask = torch.nested.to_padded_tensor(

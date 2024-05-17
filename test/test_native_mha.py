@@ -153,8 +153,8 @@ class TestMHADeviceType(TestCase):
 
         pt.in_proj_weight = qkv.weight
         pt.in_proj_bias = qkv.bias
-        pt.out_proj.weight = proj.weight
-        pt.out_proj.bias = proj.bias
+        pt.out_proj_weight = proj.weight
+        pt.out_proj_bias = proj.bias
 
         class NativeMHA(torch.nn.Module):
             def __init__(self, embed_dim, num_heads, qkv, proj):

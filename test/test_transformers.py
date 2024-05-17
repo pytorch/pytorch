@@ -1063,7 +1063,7 @@ class TestTransformers(NNTestCase):
 
             mha = nn.MultiheadAttention(E, H)
             mha.in_proj_weight = Parameter(torch.ones((E * 3, E)))
-            mha.out_proj.weight = Parameter(torch.ones((E, E)))
+            mha.out_proj_weight = Parameter(torch.ones((E, E)))
             qkv = qkv.to(float)
             kpm = ones_tensor(S, L) * float("-inf")
             am = ones_tensor(L, L).to(bool)
@@ -1224,7 +1224,7 @@ class TestTransformers(NNTestCase):
 
         mha = nn.MultiheadAttention(E, H).to(device)
         mha.in_proj_weight = Parameter(torch.ones((E * 3, E), device=device))
-        mha.out_proj.weight = Parameter(torch.ones((E, E), device=device))
+        mha.out_proj_weight = Parameter(torch.ones((E, E), device=device))
         expected = torch.ones(size=(S, L, E)).to(device) * 16
         mask = torch.nn.Transformer.generate_square_subsequent_mask(
             qkv.size(1), device=device

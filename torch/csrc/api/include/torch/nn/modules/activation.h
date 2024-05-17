@@ -857,7 +857,8 @@ class TORCH_API MultiheadAttentionImpl
   Tensor in_proj_bias;
   Tensor bias_k;
   Tensor bias_v;
-  Linear out_proj = nullptr;
+  Tensor out_proj_weight;
+  Tensor out_proj_bias;
   Tensor q_proj_weight;
   Tensor k_proj_weight;
   Tensor v_proj_weight;

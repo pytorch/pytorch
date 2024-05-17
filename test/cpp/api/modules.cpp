@@ -3596,9 +3596,7 @@ void _multihead_attn_test_helper(
         ASSERT_TRUE(named_parameters.contains("bias_k"));
         ASSERT_TRUE(named_parameters.contains("bias_v"));
       }
-      // make sure sub modules are all registered correctly
-      auto submodules = multihead_attn_module->named_children();
-      ASSERT_TRUE(submodules.contains("out_proj"));
+      ASSERT_TRUE(named_parameters.contains("out_proj_weight"));
       registration_checked = true;
     }
 
@@ -3634,8 +3632,8 @@ void _multihead_attn_test_helper(
               /*bias_v=*/multihead_attn_module->bias_v,
               /*add_zero_attn=*/multihead_attn_module->options.add_zero_attn(),
               /*dropout_p=*/multihead_attn_module->options.dropout(),
-              /*out_proj_weight=*/multihead_attn_module->out_proj->weight,
-              /*out_proj_bias=*/multihead_attn_module->out_proj->bias)
+              /*out_proj_weight=*/multihead_attn_module->out_proj_weight,
+              /*out_proj_bias=*/multihead_attn_module->out_proj_bias)
               .training(multihead_attn_module->is_training())
               .key_padding_mask(key_padding_mask_tensor)
               .need_weights(true)
@@ -3657,8 +3655,8 @@ void _multihead_attn_test_helper(
               /*bias_v=*/multihead_attn_module->bias_v,
               /*add_zero_attn=*/multihead_attn_module->options.add_zero_attn(),
               /*dropout_p=*/multihead_attn_module->options.dropout(),
-              /*out_proj_weight=*/multihead_attn_module->out_proj->weight,
-              /*out_proj_bias=*/multihead_attn_module->out_proj->bias)
+              /*out_proj_weight=*/multihead_attn_module->out_proj_weight,
+              /*out_proj_bias=*/multihead_attn_module->out_proj_bias)
               .training(multihead_attn_module->is_training())
               .key_padding_mask(key_padding_mask_tensor)
               .need_weights(true)
@@ -3769,8 +3767,8 @@ void _multihead_attn_test_helper(
         _combine_heads_ref(attn_heads, {batch_sz, 1}, nheads, d_head);
     auto reference =
         _fc(combined_attn_heads,
-            multihead_attn_module->out_proj->weight,
-            multihead_attn_module->out_proj->bias);
+            multihead_attn_module->out_proj_weight,
+            multihead_attn_module->out_proj_bias);
     // NOLINTNEXTLINE(bugprone-argument-comment)
     reference = torch::squeeze(reference, /*axis=*/1);
 
@@ -5510,11 +5508,11 @@ TEST_F(ModulesTest, PrettyPrintBCEWithLogitsLoss) {
 TEST_F(ModulesTest, PrettyPrintMultiheadAttention) {
   ASSERT_EQ(
       c10::str(MultiheadAttention(20, 10)),
-      "torch::nn::MultiheadAttention(\n  (out_proj): torch::nn::Linear(in_features=20, out_features=20, bias=true)\n)");
+      "torch::nn::MultiheadAttention()");
   ASSERT_EQ(
       c10::str(
           MultiheadAttention(MultiheadAttentionOptions(20, 10).bias(false))),
-      "torch::nn::MultiheadAttention(\n  (out_proj): torch::nn::Linear(in_features=20, out_features=20, bias=false)\n)");
+      "torch::nn::MultiheadAttention()");
 }
 
 TEST_F(ModulesTest, PrettyPrintRNNCell) {
