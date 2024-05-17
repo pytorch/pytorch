@@ -258,7 +258,7 @@ inline bool can_use_fast_route(
 using DeviceDtypeKey = std::pair<at::Device, at::ScalarType>;
 using IndicesT = std::vector<size_t>;
 using nested_optional_tensorvec_t =
-    std::vector<std::vector<c10::optional<at::Tensor>>>;
+    std::vector<std::vector<std::optional<at::Tensor>>>;
 using TensorsAndIndicesT = std::pair<nested_optional_tensorvec_t, IndicesT>;
 using FlatMap = std::unordered_map<
     DeviceDtypeKey,
@@ -339,7 +339,7 @@ inline FlatMap _group_tensors_by_first_tensors_device_and_dtype(
                  nested_optional_tensorvec_t nested_tensorvec;
                  nested_tensorvec.reserve(num_lists);
                  for (const auto& i : c10::irange(num_lists)) {
-                   std::vector<c10::optional<at::Tensor>> tensors;
+                   std::vector<std::optional<at::Tensor>> tensors;
                    if (!nested_tensorlist[i].empty()) {
                      // NB: num_tensors is the max possible length for any of
                      // the inner lists of tensor references. Reserving the max

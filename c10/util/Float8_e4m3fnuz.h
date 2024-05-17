@@ -22,7 +22,7 @@
 #include <c10/util/floating_point_utils.h>
 #include <type_traits>
 
-#if defined(__cplusplus) && (__cplusplus >= 201103L)
+#if defined(__cplusplus)
 #include <cstdint>
 #elif !defined(__OPENCL_VERSION__)
 #include <math.h>
@@ -121,7 +121,7 @@ struct alignas(1) Float8_e4m3fnuz {
   Float8_e4m3fnuz() = default;
 
   constexpr C10_HOST_DEVICE Float8_e4m3fnuz(uint8_t bits, from_bits_t)
-      : x(bits){};
+      : x(bits) {}
   inline C10_HOST_DEVICE Float8_e4m3fnuz(float value);
   inline C10_HOST_DEVICE operator float() const;
   inline C10_HOST_DEVICE bool isnan() const;
