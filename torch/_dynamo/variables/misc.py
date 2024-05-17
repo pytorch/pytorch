@@ -16,6 +16,7 @@ from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
+from ..mutation_guard import unpatched_nn_module_init
 from ..source import AttrSource, GetItemSource, ODictGetItemSource, TypeSource
 from ..utils import (
     check_unspec_or_constant_args,
@@ -133,12 +134,9 @@ class SuperVariable(VariableTracker):
                 and isinstance(objvar.mutable_local, AttributeMutationNew)
                 and not (args or kwargs)
             ):
-                tx.output.side_effects.store_attr(
-                    objvar,
-                    "__call_nn_module_init",
-                    variables.ConstantVariable.create(True),
-                )
-                return variables.ConstantVariable.create(None)
+                return variables.UserFunctionVariable(
+                    unpatched_nn_module_init, source=source
+                ).call_function(tx, [self.objvar] + args, kwargs)
             else:
                 unimplemented("super() nn.Module.__init__")
         elif isinstance(inner_fn, types.FunctionType):
