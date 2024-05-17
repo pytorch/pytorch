@@ -429,10 +429,14 @@ class Schedule1F1B(PipelineScheduleSingle):
             return not is_forward_step(i) and is_backward_step(i)
 
         def should_coalesce_fwd_send_bwd_recv(fwd_send_i):
-            return is_1f1b_step(fwd_send_i) or (
-                is_warmup_step(fwd_send_i) and is_cooldown_step(fwd_send_i + 1)
-            ) or (
-                fwd_send_i >= 1 and is_warmup_step(fwd_send_i - 1) and is_cooldown_step(fwd_send_i)
+            return (
+                is_1f1b_step(fwd_send_i)
+                or (is_warmup_step(fwd_send_i) and is_cooldown_step(fwd_send_i + 1))
+                or (
+                    fwd_send_i >= 1
+                    and is_warmup_step(fwd_send_i - 1)
+                    and is_cooldown_step(fwd_send_i)
+                )
             )
 
         def should_coalesce_bwd_send_fwd_recv(bwd_send_i):
