@@ -107,7 +107,7 @@ void RunDecompositions(std::shared_ptr<Graph> g) {
   }
 }
 
-c10::optional<std::shared_ptr<Graph>> GetDecomposition(
+std::optional<std::shared_ptr<Graph>> GetDecomposition(
     const FunctionSchema& schema) {
   loadDecompositionFunctions();
   GRAPH_DEBUG("Trying to find schema: ", schema);
@@ -120,7 +120,7 @@ c10::optional<std::shared_ptr<Graph>> GetDecomposition(
   return c10::nullopt;
 }
 
-c10::optional<GraphFunction*> GetDecompositionFunction(
+std::optional<GraphFunction*> GetDecompositionFunction(
     const FunctionSchema& schema) {
   loadDecompositionFunctions();
   auto cache_it = schema_to_function.find(&schema);

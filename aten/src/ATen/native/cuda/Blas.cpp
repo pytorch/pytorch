@@ -32,6 +32,7 @@
 #include <ATen/ops/mm_native.h>
 #include <ATen/ops/mul.h>
 #include <ATen/ops/relu.h>
+#include <ATen/ops/ones.h>
 #include <ATen/ops/scalar_tensor_native.h>
 #include <ATen/ops/vdot_native.h>
 #endif
@@ -839,11 +840,11 @@ static bool _scaled_mm_allowed_device() {
 
 std::tuple<Tensor&, Tensor&>
 _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
-          const c10::optional<at::Tensor>& bias,
-          c10::optional<c10::ScalarType> out_dtype,
-          const c10::optional<at::Tensor>& scale_a,
-          const c10::optional<at::Tensor>& scale_b,
-          const c10::optional<at::Tensor>& scale_result,
+          const std::optional<at::Tensor>& bias,
+          std::optional<c10::ScalarType> out_dtype,
+          const std::optional<at::Tensor>& scale_a,
+          const std::optional<at::Tensor>& scale_b,
+          const std::optional<at::Tensor>& scale_result,
           bool use_fast_accum,
           Tensor& out, Tensor& amax) {
   // Check sizes
@@ -988,6 +989,11 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   else
 #endif
   {
+#if defined(USE_ROCM) && ROCM_VERSION >= 60200
+  // hipBlasLT requires scaleD to be set to something in order to use AMAX
+    auto dummy_options = TensorOptions().dtype(kFloat).device(kCUDA);
+    auto dummy_scale = at::ones(1, dummy_options);
+#endif
     at::cuda::blas::scaled_gemm(
         args.transa,
         args.transb,
@@ -1005,15 +1011,19 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
         bias ? bias->data_ptr(): nullptr,
         bias ? bias->scalar_type() : isFloat8Type(out_dtype_) ? at::ScalarType::Half : out_dtype_,
         args.result->data_ptr(),
+#if defined(USE_ROCM) && ROCM_VERSION >= 60200
+        scale_result ? scale_result->data_ptr() : dummy_scale.data_ptr(),
+#else
         scale_result ? scale_result->data_ptr() : nullptr,
+#endif
         args.result_ld,
         out_dtype_,
         amax.data_ptr(),
         use_fast_accum);
   }
 
-#if defined(USE_ROCM)
-  // rocm's hipblaslt does not yet support amax, so calculate separately
+#if defined(USE_ROCM) && ROCM_VERSION >= 60000 && ROCM_VERSION < 60200
+  // ROCm's hipBLASLt does not support amax before 6.2, so calculate separately
   amax = at::max(at::abs(out.to(kFloat)));
 #endif
 
@@ -1022,11 +1032,11 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
 
 std::tuple<Tensor, Tensor>
 _scaled_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
-          const c10::optional<at::Tensor>& bias,
-          c10::optional<c10::ScalarType> out_dtype,
-          const c10::optional<at::Tensor>& scale_a,
-          const c10::optional<at::Tensor>& scale_b,
-          const c10::optional<at::Tensor>& scale_result,
+          const std::optional<at::Tensor>& bias,
+          std::optional<c10::ScalarType> out_dtype,
+          const std::optional<at::Tensor>& scale_a,
+          const std::optional<at::Tensor>& scale_b,
+          const std::optional<at::Tensor>& scale_result,
           bool use_fast_accum) {
   const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
   Tensor out = at::empty({0}, mat_a.options().dtype(out_dtype_));
