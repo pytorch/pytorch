@@ -29,6 +29,9 @@ class ConstantValueMap {
   static void SetAllGraphInputsStatic(bool all_static);
   static c10::optional<bool> GetAllGraphInputsStatic();
 
+  static void SetAllGraphInputsReliableComputed(bool computed);
+  static bool GetAllGraphInputsReliableComputed();
+
   static void SetShape(
       const std::string& tensorName,
       const c10::SymbolicShape& shapeValue);
@@ -108,6 +111,8 @@ class ConstantValueMap {
   DimSymbolMap dimSymbolMap;
   // Stores if all graph-level inputs have static shape
   c10::optional<bool> allGraphInputsStatic;
+  // True if reliable has been computed for all graph inputs
+  bool allGraphInputsReliableComputed;
 };
 
 } // namespace jit

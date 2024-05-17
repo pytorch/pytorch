@@ -1130,6 +1130,18 @@ def gen_pyi(
                     )
                 )
             ],
+            "xpu": [
+                "def xpu({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "self",
+                            "device: Optional[Union[_device, _int, str]] = None",
+                            "non_blocking: _bool = False",
+                            "memory_format: torch.memory_format = torch.preserve_format",
+                        ]
+                    )
+                )
+            ],
             "cpu": [
                 "def cpu(self, memory_format: torch.memory_format = torch.preserve_format) -> Tensor: ..."
             ],
