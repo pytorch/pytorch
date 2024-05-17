@@ -15,7 +15,7 @@ log = logging.getLogger(__name__)
 
 
 def get_kernel_argdefs(kernel):
-    arg_defs, _, _ = kernel.args.python_argdefs()
+    arg_defs, _, _, _ = kernel.args.python_argdefs()
     return arg_defs
 
 
@@ -228,7 +228,7 @@ class MultiKernel:
         wrapper = V.graph.wrapper_code
         seen = set()
         for k in self.kernels:
-            _, call_args, arg_types = k.args.python_argdefs()
+            _, call_args, arg_types, _ = k.args.python_argdefs()
             for arg, arg_type in zip(call_args, arg_types):
                 if arg in seen:
                     continue

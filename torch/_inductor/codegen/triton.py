@@ -2578,7 +2578,7 @@ class TritonKernel(Kernel):
 
     def codegen_kernel_benchmark(self, num_gb, grid=None):
         result = IndentedBuffer()
-        argdefs, call_args, signature = self.args.python_argdefs()
+        argdefs, call_args, signature, _ = self.args.python_argdefs()
 
         result.writelines(["", "", "def get_args():"])
         with result.indent():
@@ -2700,7 +2700,7 @@ class TritonKernel(Kernel):
         """
         nbytes = []
         ninplace_args = len(unique(self.args.inplace_buffers.values()))
-        _, call_args, _ = self.args.python_argdefs()
+        _, call_args, _, _ = self.args.python_argdefs()
 
         # For pointwise and reduction kernels, this is the upper-bound numels
         # for the output buffer.
@@ -2825,7 +2825,7 @@ class TritonKernel(Kernel):
             if config.benchmark_kernel:
                 code.splice(self.imports_for_benchmark_kernel())
 
-        argdefs, _, signature = self.args.python_argdefs()
+        argdefs, _, signature, _ = self.args.python_argdefs()
         # maps actual expression to SizeArg if it is in sizevars replacements
         for i, arg in enumerate(signature):
             if isinstance(arg, SizeArg):
@@ -3016,7 +3016,7 @@ class TritonKernel(Kernel):
     def _get_grid_fn(self):
         return "grid"
 
-    def add_numel_to_call_args_and_grid(self, name, call_args, grid):
+    def add_numel_to_call_args_and_grid(self, name, call_args, arg_types, grid):
         # TODO(jansel): if there are constants, we shouldn't bother passing them as args
         for tree in self.range_trees:
             if isinstance(tree.numel, (sympy.Integer, sympy.Symbol)):
@@ -3026,23 +3026,25 @@ class TritonKernel(Kernel):
 
             if tree.prefix != "r" or self.inside_reduction:
                 call_args.append(expr)
+                arg_types.append(type(expr))
             if tree.grid_dim is not None:
                 grid.append(expr)
 
     def get_call_args(self):
-        _, call_args, _ = self.args.python_argdefs()
+        # arg_types is needed for cpp wrapper codegen
+        _, call_args, _, arg_types = self.args.python_argdefs()
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
                 call_args[i] = call_args[i] + ".item()"
 
-        return call_args
+        return call_args, arg_types
 
     def call_kernel(self, name: str, node: Optional[IRNode] = None):
         wrapper = V.graph.wrapper_code
-        call_args = self.get_call_args()
+        call_args, arg_types = self.get_call_args()
         grid: List[Any] = []
-        self.add_numel_to_call_args_and_grid(name, call_args, grid)
+        self.add_numel_to_call_args_and_grid(name, call_args, arg_types, grid)
         current_device = V.graph.scheduler.current_device
 
         if self.args.workspace_arg is not None:
@@ -3059,6 +3061,7 @@ class TritonKernel(Kernel):
             current_device.index,
             cuda=True,
             triton=True,
+            arg_types=arg_types,
             grid_fn=self._get_grid_fn(),
             triton_meta=self.triton_meta,
         )
@@ -3068,7 +3071,7 @@ class TritonKernel(Kernel):
 
     def codegen_nan_check(self):
         wrapper = V.graph.wrapper_code
-        _, call_args, arg_types = self.args.python_argdefs()
+        _, call_args, arg_types, _ = self.args.python_argdefs()
         for arg, arg_type in zip(call_args, arg_types):
             if isinstance(arg_type, TensorArg):
                 line = f"assert not {arg}.isnan().any().item()"
@@ -3091,7 +3094,7 @@ class TritonKernel(Kernel):
             # the mix layouts.
             return
 
-        argdefs, call_args, signature = self.args.python_argdefs()
+        argdefs, call_args, signature, _ = self.args.python_argdefs()
         uniform_stride_order = None
         for arg_name in call_args:
             buf = V.graph.get_buffer(arg_name)

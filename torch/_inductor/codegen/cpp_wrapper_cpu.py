@@ -1265,9 +1265,19 @@ class CppWrapperCpu(WrapperCodeGen):
                     break
             assert grid_decision is not None
 
+        # cpp wrapper needs arg type info for codegen
+        arg_types = []
+        for arg in args:
+            try:
+                arg_types.append(V.graph.get_dtype(arg))
+            except KeyError:
+                # arg is not a tensor, generate_args_decl will further detect type
+                arg_types.append(None)
+
         self.generate_kernel_call(
             kernel_name,
             args,
+            arg_types=arg_types,
             grid=grid_decision,
             device_index=V.graph.scheduler.current_device.index,
             cuda=True,

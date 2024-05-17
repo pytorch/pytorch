@@ -5,6 +5,7 @@ from typing import Any, List, Optional, TYPE_CHECKING
 
 import sympy
 
+from torch import dtype as torch_dtype
 from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
 from torch._inductor.runtime.triton_heuristics import grid as default_grid
 
@@ -13,6 +14,7 @@ from ..codecache import CudaKernelParamCache
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .codegen_device_driver import cuda_kernel_driver, cuda_kernel_header
+from .cpp_utils import DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .wrapper import SymbolicCallArg
 
@@ -119,22 +121,48 @@ class CppWrapperCuda(CppWrapperCpu):
             )
             self.writeline("}")
 
-    def generate_args_decl(self, call_args):
+    def generate_args_decl(self, call_args, arg_types):
         dynamic_symbols = V.graph.sizevars.free_symbols()
         # TODO: only works for constant now, need type info
         new_args = []
-        for arg in call_args:
+        for arg, arg_type in zip(call_args, arg_types):
             var_name = f"var_{next(self.arg_var_id)}"
-            if isinstance(arg, (sympy.Integer, sympy.Symbol, SymbolicCallArg)):
+            if isinstance(arg_type, torch_dtype):
+                if arg.endswith(".item()"):
+                    # Need to declare a scalar in this case
+                    ctype = DTYPE_TO_CPP[arg_type]
+                    arg = arg.replace(".item()", "")
+                    if config.abi_compatible:
+                        self.codegen_tensor_item(
+                            arg_type,
+                            arg,
+                            var_name,
+                        )
+                    else:
+                        self.writeline(f"{ctype} {var_name} = {arg}.item<{ctype}>();")
+                else:
+                    if config.abi_compatible:
+                        self.writeline(
+                            maybe_hipify_code_wrapper(f"CUdeviceptr {var_name};")
+                        )
+                        self.writeline(
+                            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr({arg}, reinterpret_cast<void**>(&{var_name})));"
+                        )
+                    else:
+                        self.writeline(
+                            maybe_hipify_code_wrapper(
+                                f"CUdeviceptr {var_name} = reinterpret_cast<CUdeviceptr>({arg}.data_ptr());"
+                            )
+                        )
+            elif arg_type in (sympy.Integer, sympy.Symbol, SymbolicCallArg):
                 self.writeline(f"auto {var_name} = {arg};")
-            elif isinstance(arg, sympy.Float):
-                self.writeline(f"float {var_name} = {self.expr_printer(arg)};")
-            elif isinstance(arg, sympy.Expr):
-                self.writeline(f"auto {var_name} = {self.expr_printer(arg)};")
-            elif is_int(arg):
+            elif arg_type == int or is_int(arg):
                 self.writeline(f"int {var_name} = {arg};")
-            elif is_float(arg):
-                self.writeline(f"float {var_name} = {arg};")
+            elif arg_type in (sympy.Float, float) or is_float(arg):
+                self.writeline(f"float {var_name} = {self.expr_printer(arg)};")
+            elif arg_type == sympy.Expr:
+                self.writeline(f"auto {var_name} = {self.expr_printer(arg)};")
+            # TODO: the rest of the cases may be simplified since we have arg_type now
             elif any(str(arg) == s.name for s in dynamic_symbols):
                 self.writeline(f"auto {var_name} = {arg};")
             elif arg == "nullptr":
@@ -142,19 +170,7 @@ class CppWrapperCuda(CppWrapperCpu):
             elif arg == "c10::nullopt":
                 self.writeline(f"auto {var_name} = c10::nullopt;")
             else:
-                if config.abi_compatible:
-                    self.writeline(
-                        maybe_hipify_code_wrapper(f"CUdeviceptr {var_name};")
-                    )
-                    self.writeline(
-                        f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr({arg}, reinterpret_cast<void**>(&{var_name})));"
-                    )
-                else:
-                    self.writeline(
-                        maybe_hipify_code_wrapper(
-                            f"CUdeviceptr {var_name} = reinterpret_cast<CUdeviceptr>({arg}.data_ptr());"
-                        )
-                    )
+                raise AssertionError(f"unsupported arg type: {arg_type=}")
             new_args.append(f"&{var_name}")
 
         return ", ".join(new_args)
@@ -192,6 +208,10 @@ class CppWrapperCuda(CppWrapperCpu):
         grid_fn: str = "grid",
         triton_meta=None,
     ):
+        assert arg_types is not None and len(call_args) == len(
+            arg_types
+        ), "call_args and arg_types do not match"
+
         if not cuda:
             # Even in CppWrapperCuda, we may see cpp kernels
             return super().generate_kernel_call(
@@ -224,8 +244,9 @@ class CppWrapperCuda(CppWrapperCpu):
         ):
             equal_to_1 = triton_meta["configs"][0].equal_to_1
             call_args = [arg for i, arg in enumerate(call_args) if i not in equal_to_1]
+            arg_types = [t for i, t in enumerate(arg_types) if i not in equal_to_1]
 
-        call_args = self.generate_args_decl(call_args)
+        call_args = self.generate_args_decl(call_args, arg_types)
         kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
         self.writeline(f"void* {kernel_args_var}[] = {{{call_args}}};")
         stream = (
