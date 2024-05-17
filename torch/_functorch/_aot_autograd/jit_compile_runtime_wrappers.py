@@ -86,7 +86,7 @@ def aot_dispatch_export(
         aot_config,
         fw_metadata=fw_metadata,
     )
-    if needs_autograd:
+    if needs_autograd and not aot_config.pre_dispatch:
         graph, _, _ = aot_dispatch_autograd_graph(
             flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
         )
