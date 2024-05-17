@@ -416,17 +416,6 @@ PyObject* THPEngine_queue_callback(PyObject* self, PyObject* _callback) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPEngine__exec_final_callbacks_stub(
-    PyObject* self,
-    PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  C10_THROW_ERROR(
-      NotImplementedError,
-      "_exec_final_callbacks_stub is not implemented in the Eager autograd engine.");
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
 PyObject* THPEngine_is_checkpoint_valid(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto& engine = python::PythonEngine::get_python_engine();
@@ -449,10 +438,6 @@ static struct PyMethodDef THPEngine_methods[] = {
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {(char*)"queue_callback", THPEngine_queue_callback, METH_O, nullptr},
-    {(char*)"_exec_final_callbacks_stub",
-     THPEngine__exec_final_callbacks_stub,
-     METH_NOARGS,
-     nullptr},
     {(char*)"is_checkpoint_valid",
      THPEngine_is_checkpoint_valid,
      METH_NOARGS,

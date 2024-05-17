@@ -97,14 +97,19 @@ def untyped_storage_size(x: torch.Tensor):
     return x.untyped_storage().size()
 
 
-def queue_callback(final_callbacks, cb):
-    final_callbacks.append(cb)
+class CompiledAutogradEngine:
+    @staticmethod
+    def queue_callback(final_callbacks, cb):
+        final_callbacks.append(cb)
 
+    @staticmethod
+    def exec_final_callbacks(final_callbacks):
+        for cb in final_callbacks:
+            cb()
+        final_callbacks.clear()
 
-def exec_final_callbacks(final_callbacks):
-    for cb in final_callbacks:
-        cb()
-    final_callbacks.clear()
+    def _exec_final_callbacks_stub(self):
+        raise NotImplementedError
 
 
 def call_hook_from_backward_state(*args, bw_state, hook_name: str, **kwargs):

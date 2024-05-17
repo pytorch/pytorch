@@ -634,14 +634,38 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         if name == "queue_callback":
             return variables.UserFunctionVariable(
-                torch._dynamo.external_utils.queue_callback, source=self.source
-            ).call_function(tx, (tx.output.autograd_final_callbacks_var, *args), kwargs)
-        elif name == "_exec_final_callbacks_stub":
-            return variables.UserFunctionVariable(
-                torch._dynamo.external_utils.exec_final_callbacks, source=self.source
+                torch._dynamo.external_utils.CompiledAutogradEngine.queue_callback, source=self.source
             ).call_function(tx, (tx.output.autograd_final_callbacks_var, *args), kwargs)
         else:
             unimplemented(f"torch._C._ImperativeEngine method: {name}")
+
+
+class CompiledAutogradEngineVariable(UserDefinedObjectVariable):
+    """
+    Represents a torch._dynamo.external_utils.CompiledAutogradEngine instance.
+    """
+
+    def __init__(
+        self,
+        value,
+        value_type=None,
+        **kwargs,
+    ):
+        super().__init__(value=value, value_type=value_type, **kwargs)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "_exec_final_callbacks_stub":
+            return variables.UserFunctionVariable(
+                torch._dynamo.external_utils.CompiledAutogradEngine.exec_final_callbacks, source=self.source
+            ).call_function(tx, (tx.output.autograd_final_callbacks_var, *args), kwargs)
+        else:
+            unimplemented(f"torch._dynamo.external_utils.CompiledAutogradEngine method: {name}")
 
 
 class LambdaVariable(VariableTracker):
