@@ -748,6 +748,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // both timeout and other errors.
   dumpOnException_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
+  enableNanCheck_ = getCvarBool(TORCH_NCCL_NAN_CHECK, false);
   heartbeat_ = 1ULL;
   monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, true));
   heartbeatTimeoutInSec_ =
@@ -836,6 +837,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
             << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << ncclTraceBufferSize_
             << ", TORCH_NCCL_COORD_CHECK_MILSEC: " << coordCheckIntervalMilSec_
+            << ", TORCH_NCCL_NAN_CHECK: " << enableNanCheck_
             << ", PG Name: " << options_->group_name;
 
   if (options_->global_ranks_in_group.empty()) {
@@ -1565,6 +1567,8 @@ void ProcessGroupNCCL::watchdogHandler() {
       data.strings["last_enqueued_work_name"] = lastEnqueuedWorkName_;
       data.strings["last_started_work_name"] = lastStartedWorkName_;
       data.strings["last_completed_work_name"] = lastCompletedWorkName_;
+      data.strings["pg_name"] = pg_name_;
+      data.strings["pg_desc"] = pg_desc_;
       logger->log(data);
       lastStatusUpdateTime = std::chrono::steady_clock::now();
     }
@@ -2424,6 +2428,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     OpType opType,
     const char* profilingTitle,
     bool avoidRecordStreams) {
+  if (enableNanCheck_) {
+    checkForNan(input);
+  }
   // Environment setting by the user may add onto collective call's option
   avoidRecordStreams |= avoidRecordStreams_;
   c10::cuda::CaptureStatus capture_status =
@@ -2779,6 +2786,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     PreProcess pre,
     PostProcess post,
     const char* profilingTitle) {
+  if (enableNanCheck_) {
+    checkForNan(tensor);
+  }
   // avoidRecordStreams_ note:
   // send, recv, and irecv should be ok with avoidRecordStreams,
   // However, for isend, I don't think the API requires the user

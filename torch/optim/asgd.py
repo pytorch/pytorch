@@ -388,7 +388,7 @@ def _multi_tensor_asgd(
                 for step in grouped_state_steps
             ]
             new_mus = [
-                torch.as_tensor(1 / max(1, step - t0), device=device)
+                torch.as_tensor(1 / max(1, _get_value(step) - t0), device=device)
                 for step in grouped_state_steps
             ]
             torch._foreach_copy_(grouped_etas, new_etas)

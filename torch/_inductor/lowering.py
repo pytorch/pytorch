@@ -1788,7 +1788,12 @@ def bernoulli_(x, *args):
         "cpu"
     ), "this should be handled in decomps unless config.fallback_random or the device is CPU"
     x.realize()
-    ir.InplaceBernoulliFallback(x, *args)
+    op_overload = (
+        aten.bernoulli_.float
+        if len(args) == 0 or isinstance(args[0], float)
+        else aten.bernoulli_.Tensor
+    )
+    ir.InplaceBernoulliFallback(op_overload, x, *args)
     return x
 
 
@@ -5318,7 +5323,7 @@ def logcumsumexp(x, dim):
 def cummax(x, axis=None):
     if len(x.get_size()) == 0:
         assert axis in [0, -1]
-        return clone(x), torch.empty_like(x, dtype=torch.int64)
+        return clone(x), empty_like(x, dtype=torch.int64)
 
     dtype = x.get_dtype()
     combine_fn = ir.get_reduction_combine_fn(
@@ -5348,7 +5353,7 @@ def cummax(x, axis=None):
 def cummin(x, axis=None):
     if len(x.get_size()) == 0:
         assert axis in [0, -1]
-        return clone(x), torch.empty_like(x, dtype=torch.int64)
+        return clone(x), empty_like(x, dtype=torch.int64)
 
     dtype = x.get_dtype()
     combine_fn = ir.get_reduction_combine_fn(

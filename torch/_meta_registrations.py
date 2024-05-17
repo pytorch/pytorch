@@ -5495,6 +5495,8 @@ def meta__flash_attention_backward(
     philox_seed: Tensor,
     philox_offset: Tensor,
     scale: Optional[float] = None,
+    window_size_left: Optional[int] = None,
+    window_size_right: Optional[int] = None,
 ):
     grad_query = torch.empty_like(query)
     grad_key = torch.empty_like(key)
