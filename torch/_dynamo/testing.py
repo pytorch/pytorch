@@ -349,6 +349,12 @@ def xfailIfPy312(fn):
     return fn
 
 
+def skipIfPy312(fn):
+    if sys.version_info >= (3, 12):
+        return unittest.skip(fn)
+    return fn
+
+
 # Controls tests generated in test/inductor/test_torchinductor_dynamic_shapes.py
 # and test/dynamo/test_dynamic_shapes.py
 def expectedFailureDynamic(fn):
