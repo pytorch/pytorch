@@ -1,6 +1,9 @@
-set(Caffe2_PROTOBUF_FILES "${CMAKE_CURRENT_SOURCE_DIR}/torch.proto;${CMAKE_CURRENT_SOURCE_DIR}/caffe2.proto")
+set(Caffe2_PROTOBUF_FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/torch.proto;${CMAKE_CURRENT_SOURCE_DIR}/caffe2.proto"
+)
 
-caffe2_protobuf_generate_cpp_py(Caffe2_PROTO_SRCS Caffe2_PROTO_HEADERS Caffe2_PROTO_PY ${Caffe2_PROTOBUF_FILES})
+caffe2_protobuf_generate_cpp_py(Caffe2_PROTO_SRCS Caffe2_PROTO_HEADERS
+                                Caffe2_PROTO_PY ${Caffe2_PROTOBUF_FILES})
 
 add_library(Caffe2_PROTO OBJECT ${Caffe2_PROTO_HEADERS} ${Caffe2_PROTO_SRCS})
 
@@ -13,7 +16,6 @@ if(MSVC)
 else()
   set(TORCH_API_DEFINE "-DTORCH_API=")
 endif()
-target_compile_definitions(
-    Caffe2_PROTO PRIVATE ${TORCH_API_DEFINE})
+target_compile_definitions(Caffe2_PROTO PRIVATE ${TORCH_API_DEFINE})
 
 install(FILES ${Caffe2_PROTO_HEADERS} DESTINATION include/caffe2/proto)
