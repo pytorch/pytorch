@@ -2247,14 +2247,14 @@ Call this whenever a new thread is created in order to propagate values from
       [](bool mode) {
         c10::impl::cow::set_future_copy_instead_of_conditional_view(mode);
       },
-      (
-        "Enables future behavior to make operators always return a copy in "
-        "cases where they currently conditionally return a view or a copy"
-      ));
+      ("Enables future behavior to make operators always return a copy in "
+       "cases where they currently conditionally return a view or a copy"));
 
   py_module.def(
       "_get_future_copy_instead_of_conditional_view",
-      []() { return c10::impl::cow::get_future_copy_instead_of_conditional_view(); },
+      []() {
+        return c10::impl::cow::get_future_copy_instead_of_conditional_view();
+      },
       "Check if future behavior to make operators always return a copy is enabled.");
 
   py_module.def(
