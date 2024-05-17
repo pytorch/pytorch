@@ -517,10 +517,14 @@ class HalideCSEVariable(CSEVariable):
     def __str__(self):
         if self.used_dims is None:
             return f"{self.name}[?]"
+        if len(self.used_dims) == 0:
+            return self.name
         return f"{self.name}[{', '.join(self.used_dims)}]"
 
     def dom_str(self):
         assert self.used_dims is not None
+        if len(self.used_dims) == 0:
+            return self.name
         return f"{self.name}[{', '.join(map('{}_dom'.format, self.used_dims))}]"
 
     def reduction_str(self):
@@ -637,7 +641,9 @@ class HalideKernel(SIMDKernel):
         if has_tmpmask:
             raise Unsupported("has_tmpmask")
 
-        var = self.cse.generate(self.body, f"{var}[{indexing.index_str}]")
+        var = self.cse.generate(
+            self.body, f"{var}[{self.index_to_str(indexing.index)}]"
+        )
         assert isinstance(var, HalideCSEVariable)
         var.used_dims = self.used_dims_from_index(indexing.index)
         return var
@@ -649,17 +655,21 @@ class HalideKernel(SIMDKernel):
         indexing = self.indexing(index, dense_indexing=True, block_ptr=False)
         assert isinstance(indexing, IndexingOptions)
         assert not indexing.has_tmpmask()
-
-        # Halide requires the initial definition of an output to be done with a plain Var(),
-        # while subsequent updates can use Expr().  For us indexing.index may be an Expr.
-        # This line is a no-op to get that more flexible "update" handling.
-        # TODO(jansel): try removing this when indexing.index == xindex
-        line = f"{var}[hl.Var()] = hl.undef({var}.type())"
-        self.body.writeline(DeferredLine(name, line))
-
         assert isinstance(value, HalideCSEVariable)
-        value_str = value.dom_str()
-        index_str = self.index_to_str(self.index_to_dom(indexing.index))
+
+        rdom_store = False
+        if rdom_store:
+            # Halide requires the initial definition of an output to be done with a plain Var(),
+            # while subsequent updates can use Expr().  For us indexing.index may be an Expr.
+            # This line is a no-op to get that more flexible "update" handling.
+            # TODO(jansel): try removing this when indexing.index == xindex
+            line = f"{var}[hl.Var()] = hl.undef({var}.type())"
+            self.body.writeline(DeferredLine(name, line))
+            value_str = value.dom_str()
+            index_str = self.index_to_str(self.index_to_dom(indexing.index))
+        else:
+            value_str = str(value)
+            index_str = self.index_to_str(indexing.index)
 
         if mode is None:
             line = f"{var}[{index_str}] = {value_str}"
