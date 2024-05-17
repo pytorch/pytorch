@@ -458,6 +458,8 @@ def _size_of(node: fx.Node) -> int:
             return _tensor_nbytes(hint_int(val.numel(), fallback=4098), val.dtype)
 
         raise RuntimeError(f"Unknown metadata type {type(val)}")
+    if node.op == "get_attr":
+        return 0
     raise RuntimeError("We should always have `val` metadata on the nodes")
 
 
