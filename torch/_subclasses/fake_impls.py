@@ -258,9 +258,8 @@ def dyn_shape(fake_mode, func, *args, **kwargs):
     raise DynamicOutputShapeException(func)
 
 
-@register_op_impl(aten._unique2.default)
-def unique2(
-    fake_mode, func, arg, sorted=True, return_inverse=False, return_counts=False
+def _unique(
+    fake_mode, func, arg, dim, sorted=True, return_inverse=False, return_counts=False
 ):
     if (
         fake_mode.shape_env is None
@@ -268,6 +267,11 @@ def unique2(
     ):
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
+
+    if dim is None:
+        arg_dim = arg
+    else:
+        arg_dim = arg.new_empty((arg.shape[dim],))
 
     if (nnz := arg.unique_memo) is None:
         # Avoid importing sympy at a module level
@@ -291,26 +295,59 @@ def unique2(
 
             maxval = sys.maxsize - 1
 
-            if not has_free_symbols(arg.numel()):
-                maxval = int(arg.numel())
+            if not has_free_symbols(arg_dim.numel()):
+                maxval = int(arg_dim.numel())
 
             _constrain_range_for_size(nnz, max=maxval)
 
         arg.unique_memo = nnz
 
-    ret = [arg.new_empty((nnz,))]
+    if dim is None:
+        ret = [arg.new_empty((nnz,))]
+    else:
+        ret = [arg.new_empty(*arg.shape[:dim], nnz, *arg.shape[dim+1:])]
 
     if return_inverse:
-        ret.append(torch.empty_like(arg))
+        ret.append(torch.empty_like(arg_dim))
     else:
         ret.append(arg.new_empty(0))
 
     if return_counts:
-        ret.append(torch.empty_like(arg))
+        ret.append(torch.empty_like(arg_dim))
     else:
         ret.append(arg.new_empty(0))
 
     return tuple(ret)
+
+
+@register_op_impl(aten._unique2.default)
+def unique2(
+    fake_mode, func, arg, sorted=True, return_inverse=False, return_counts=False
+):
+    return _unique(
+        fake_mode,
+        func,
+        arg,
+        None,
+        sorted,
+        return_inverse,
+        return_counts
+    )
+
+
+@register_op_impl(aten.unique_dim.default)
+def unique_dim(
+    fake_mode, func, arg, dim, sorted=True, return_inverse=False, return_counts=False
+):
+    return _unique(
+        fake_mode,
+        func,
+        arg,
+        dim,
+        sorted,
+        return_inverse,
+        return_counts
+    )
 
 
 @register_op_impl(aten.repeat_interleave.Tensor)
