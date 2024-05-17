@@ -754,6 +754,30 @@ class MockHandler:
         for name, format_string in itertools.chain(
             magic_methods.items(), inplace_methods.items()
         ):
+            if name not in {
+                'add': '{} + {}',
+                'sub': '{} - {}',
+                'mul': '{} * {}',
+                'floordiv': '{} // {}',
+                'truediv': '{} / {}',
+                'mod': '{} % {}',
+                'pow': '{} ** {}',
+                'lshift': '{} << {}',
+                'rshift': '{} >> {}',
+                'and_': '{} & {}',
+                'or_': '{} | {}',
+                'xor': '{} ^ {}',
+                'eq': '{} == {}',
+                'ne': '{} != {}',
+                'lt': '{} < {}',
+                'gt': '{} > {}',
+                'le': '{} <= {}',
+                'ge': '{} >= {}',
+                'pos': '+{}',
+                'neg': '-{}',
+                'invert': '~{}',
+            }.keys():
+                continue
             setattr(cls, name, make_handler(format_string))
 
 
