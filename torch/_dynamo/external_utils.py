@@ -98,12 +98,19 @@ def untyped_storage_size(x: torch.Tensor):
     return x.untyped_storage().size()
 
 
-def exec_final_callbacks():
-    # TODO(yf225): use lock to be thread-safe (and local to the graph)
-    for cb in compiled_autograd_final_callbacks:
-        cb()
-    # TODO(yf225): does this work without `global` keyword?
-    compiled_autograd_final_callbacks.clear()
+class CompiledAutogradEngine:
+    @staticmethod
+    def queue_callback(final_callbacks, cb):
+        final_callbacks.append(cb)
+
+    @staticmethod
+    def exec_final_callbacks(final_callbacks):
+        for cb in final_callbacks:
+            cb()
+        final_callbacks.clear()
+
+    def _exec_final_callbacks_stub(self):
+        raise NotImplementedError
 
 
 def call_hook_from_backward_state(*args, bw_state, hook_name: str, **kwargs):
