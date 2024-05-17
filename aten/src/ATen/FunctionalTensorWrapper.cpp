@@ -137,7 +137,8 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& view_value, const
     ),
     value_(view_value),
     is_multi_output_view_(base->is_multi_output_view_ || meta.is_multi_output),
-    was_storage_changed_(base->was_storage_changed_)
+    was_storage_changed_(base->was_storage_changed_),
+    is_symbolic_(base->is_symbolic_)
 {
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(value_));
   TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
@@ -147,6 +148,7 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& view_value, const
       view_metas_ = base->view_metas_;  // copy
   }
   view_metas_.push_back(meta);
+  maybe_mark_symbolic(meta);
   storage_ = base->storage_; // alias this tensor's storage with the base tensor's
 }
 
@@ -178,6 +180,8 @@ void FunctionalTensorWrapper::mutate_view_meta(const at::functionalization::View
   view_metas_.push_back(meta);
   // Manually track the fact that this tensor recieved a metadata mutation!
   has_metadata_mutation_ = true;
+  // Mark this tensor as being symbolic if there are any symbolic inputs used by the view operation.
+  maybe_mark_symbolic(meta);
   // Note [Functionalization Pass - Inplace View Ops]
   // So, these ops are special - they're mutation AND view ops. They get special codegen.
   // An example is transpose_, e.g. `a.transpose_()`
@@ -257,6 +261,7 @@ void FunctionalTensorWrapper::set__impl(const FunctionalTensorWrapper* other) {
   value_ = other->value_;
   generation_ = other->generation_;
   view_metas_ = other->view_metas_;
+  is_symbolic_ = other->is_symbolic_;
   // FREEZE the old storage, preventing mutations to it.
   // this is a huge pain to handle properly in all cases, so we ban it.
   functional_storage_impl()->freeze();
@@ -414,6 +419,7 @@ void FunctionalTensorWrapper::copy_tensor_metadata(
     dest_impl->has_metadata_mutation_ = src_impl->has_metadata_mutation_;
     dest_impl->is_multi_output_view_ = src_impl->is_multi_output_view_;
     dest_impl->was_storage_changed_ = src_impl->was_storage_changed_;
+    dest_impl->is_symbolic_ = src_impl->is_symbolic_;
     dest_impl->generation_ = src_impl->generation_;
     dest_impl->view_metas_ = src_impl->view_metas_;
 }
@@ -520,7 +526,7 @@ Tensor to_functional_tensor(const Tensor& tensor) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!isFunctionalTensor(tensor));
   return at::detail::make_tensor<FunctionalTensorWrapper>(tensor);
 }
-c10::optional<Tensor> to_functional_tensor(const c10::optional<Tensor>& tensor) {
+std::optional<Tensor> to_functional_tensor(const c10::optional<Tensor>& tensor) {
   if (tensor.has_value()) {
     return c10::make_optional<Tensor>(to_functional_tensor(*tensor));
   }
@@ -558,7 +564,7 @@ Tensor from_functional_tensor(const Tensor& tensor, bool assert_functional) {
     return tensor;
   }
 }
-c10::optional<Tensor> from_functional_tensor(const c10::optional<Tensor>& t, bool assert_functional) {
+std::optional<Tensor> from_functional_tensor(const c10::optional<Tensor>& t, bool assert_functional) {
   if (t.has_value()) {
     return c10::make_optional<Tensor>(from_functional_tensor(*t, assert_functional));
   }
@@ -604,7 +610,7 @@ void sync(const Tensor& t) {
   auto functional_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
   functional_impl->sync_();
 }
-void sync(const c10::optional<Tensor>& t) {
+void sync(const std::optional<Tensor>& t) {
   if (t.has_value()) {
     sync(*t);
   }
@@ -686,7 +692,7 @@ bool isFunctionalTensor(const at::Tensor& tensor) {
   return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Functionalize);
 }
 
-bool isFunctionalTensor(const c10::optional<Tensor>& t) {
+bool isFunctionalTensor(const std::optional<Tensor>& t) {
   if (t.has_value()) {
     return isFunctionalTensor(*t);
   } else {

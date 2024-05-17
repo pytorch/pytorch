@@ -448,7 +448,7 @@ class ExportedProgram:
                 res = pytree.tree_unflatten(res, self.call_spec.out_spec)
             except Exception:
                 _, received_spec = pytree.tree_flatten(res)
-                raise error.InternalError(  # noqa: TRY200
+                raise error.InternalError(  # noqa: B904
                     "Trying to flatten user outputs with exported output tree spec: \n"
                     f"{self.call_spec.out_spec}\n"
                     "but actually got outputs with tree spec of: \n"
@@ -547,7 +547,8 @@ class ExportedProgram:
                 placeholders.append(node)
             return placeholders
 
-        decomp_table = decomp_table or core_aten_decompositions()
+        if decomp_table is None:
+            decomp_table = core_aten_decompositions()
 
         old_placeholders = _get_placeholders(self.graph_module)
         fake_args = [node.meta["val"] for node in old_placeholders]

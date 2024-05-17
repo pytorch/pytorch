@@ -1699,7 +1699,7 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
                     wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs))
                 )
                 logging.getLogger("NonWrapperSubclass").info(
-                    f"{func.__module__}.{func.__name__}", args, kwargs, rs
+                    f"{func.__module__}.{func.__name__}", args, kwargs, rs  # noqa: G004
                 )
                 return rs
 

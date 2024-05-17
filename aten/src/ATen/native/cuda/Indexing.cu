@@ -22,6 +22,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_assert_async.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/zeros_like.h>
@@ -334,14 +335,8 @@ static ReduceMaximum reduce_maximum;
 static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size, bool check_range=true) {
 //we don't need to check range in backward - if there were out of bounds indices forward should already have errored out
   if (index.numel() != 0 && check_range) {
-    auto max_idx = index.max().item<int64_t>();
-    auto min_idx = index.min().item<int64_t>();
-    if (max_idx >= dim_size) {
-      TORCH_CHECK_INDEX(false, "index ", max_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
-    }
-    if (min_idx < -dim_size) {
-      TORCH_CHECK_INDEX(false, "index ", min_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
-    }
+    at::_assert_async(index.max() < dim_size);
+    at::_assert_async(index.min() >= -dim_size);
   }
   return index.remainder(dim_size);
 }
@@ -431,7 +426,7 @@ int64_t largestIndex(const Tensor &self) {
   return result;
 }
 
-void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Tensor>>& indices, const Tensor & value, bool accumulate, bool unsafe) {
+void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Tensor>>& indices, const Tensor & value, bool accumulate, bool unsafe) {
   TORCH_CHECK(!indices.empty() || is_expandable_to(value.sizes(), self.sizes()), "shape mismatch: value tensor of shape ", value.sizes(),
              " cannot be broadcast to indexing result of shape ", self.sizes());
   if (indices.size() > (size_t)self.dim()) {
@@ -566,7 +561,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
 
 REGISTER_CUDA_DISPATCH(index_put_with_sort_stub, &index_put_with_sort_kernel);
 
-void index_put_with_sort_quantized(Tensor & self, const c10::List<c10::optional<Tensor>>& indices, const Tensor & value, double scale, int zero_point, bool unsafe) {
+void index_put_with_sort_quantized(Tensor & self, const c10::List<std::optional<Tensor>>& indices, const Tensor & value, double scale, int zero_point, bool unsafe) {
   if (indices.size() > (size_t)self.dim()) {
     TORCH_CHECK_INDEX(false, "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   }
@@ -866,7 +861,7 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
   TORCH_CHECK(index.dim() <= MAX_TENSORINFO_DIMS, "tensor has too many (>", MAX_TENSORINFO_DIMS, ") dims");
 
   if (globalContext().deterministicAlgorithms()){
-    torch::List<c10::optional<Tensor>> indices;
+    torch::List<std::optional<Tensor>> indices;
     indices.reserve(dim + 1);
     for (const auto i: c10::irange(dim)) {
       indices.emplace_back();
