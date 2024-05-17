@@ -71,7 +71,7 @@ on:
           By default this this behavior is disabled.
         required: false
         type: string
-        default: "false"
+        default: false
 
     secrets:
       HUGGING_FACE_HUB_TOKEN:

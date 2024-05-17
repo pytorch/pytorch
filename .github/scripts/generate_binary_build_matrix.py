@@ -240,7 +240,7 @@ def generate_conda_matrix(os: str) -> List[Dict[str, str]]:
                     "desired_cuda": translate_desired_cuda(
                         gpu_arch_type, gpu_arch_version
                     ),
-                    "use_split_build": "false",
+                    # "use_split_build": "false",
                     "container_image": CONDA_CONTAINER_IMAGES[arch_version],
                     "package_type": "conda",
                     "build_name": f"conda-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
@@ -303,7 +303,7 @@ def generate_libtorch_matrix(
                     "build_name": f"libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{abi_version}".replace(
                         ".", "_"
                     ),
-                    "use_split_build": "false",
+                    # "use_split_build": "false",
                 }
             )
     return ret
@@ -351,7 +351,7 @@ def generate_wheels_matrix(
                 else arch_version
             )
             for use_split_build in ["true", "false"]:
-                build_name = f"conda-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
+                build_name = f"manywheel-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
                     ".", "_"
                 )
                 if use_split_build == "true":

@@ -51,7 +51,6 @@ jobs:
       DOCKER_IMAGE: pytorch/conda-builder:cpu-main
       DESIRED_PYTHON: "3.8"
       build_name: conda-py3_8-cpu
-      use_split_build: false
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -113,7 +112,6 @@ jobs:
       DESIRED_PYTHON: "3.8"
       runs_on: linux.24xlarge
       build_name: conda-py3_8-cuda11_8
-      use_split_build: false
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -177,7 +175,6 @@ jobs:
       DESIRED_PYTHON: "3.8"
       runs_on: linux.24xlarge
       build_name: conda-py3_8-cuda12_1
-      use_split_build: false
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -241,7 +238,6 @@ jobs:
       DESIRED_PYTHON: "3.8"
       runs_on: linux.24xlarge
       build_name: conda-py3_8-cuda12_4
-      use_split_build: false
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -303,7 +299,6 @@ jobs:
       DOCKER_IMAGE: pytorch/conda-builder:cpu-main
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cpu
-      use_split_build: false
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -365,7 +360,6 @@ jobs:
       DESIRED_PYTHON: "3.9"
       runs_on: linux.24xlarge
       build_name: conda-py3_9-cuda11_8
-      use_split_build: false
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -429,7 +423,6 @@ jobs:
       DESIRED_PYTHON: "3.9"
       runs_on: linux.24xlarge
       build_name: conda-py3_9-cuda12_1
-      use_split_build: false
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -493,7 +486,6 @@ jobs:
       DESIRED_PYTHON: "3.9"
       runs_on: linux.24xlarge
       build_name: conda-py3_9-cuda12_4
-      use_split_build: false
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -555,7 +547,6 @@ jobs:
       DOCKER_IMAGE: pytorch/conda-builder:cpu-main
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cpu
-      use_split_build: false
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -617,7 +608,6 @@ jobs:
       DESIRED_PYTHON: "3.10"
       runs_on: linux.24xlarge
       build_name: conda-py3_10-cuda11_8
-      use_split_build: false
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -681,7 +671,6 @@ jobs:
       DESIRED_PYTHON: "3.10"
       runs_on: linux.24xlarge
       build_name: conda-py3_10-cuda12_1
-      use_split_build: false
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -745,7 +734,6 @@ jobs:
       DESIRED_PYTHON: "3.10"
       runs_on: linux.24xlarge
       build_name: conda-py3_10-cuda12_4
-      use_split_build: false
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -807,7 +795,6 @@ jobs:
       DOCKER_IMAGE: pytorch/conda-builder:cpu-main
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cpu
-      use_split_build: false
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -869,7 +856,6 @@ jobs:
       DESIRED_PYTHON: "3.11"
       runs_on: linux.24xlarge
       build_name: conda-py3_11-cuda11_8
-      use_split_build: false
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -933,7 +919,6 @@ jobs:
       DESIRED_PYTHON: "3.11"
       runs_on: linux.24xlarge
       build_name: conda-py3_11-cuda12_1
-      use_split_build: false
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -997,7 +982,6 @@ jobs:
       DESIRED_PYTHON: "3.11"
       runs_on: linux.24xlarge
       build_name: conda-py3_11-cuda12_4
-      use_split_build: false
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -1059,7 +1043,6 @@ jobs:
       DOCKER_IMAGE: pytorch/conda-builder:cpu-main
       DESIRED_PYTHON: "3.12"
       build_name: conda-py3_12-cpu
-      use_split_build: false
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -1121,7 +1104,6 @@ jobs:
       DESIRED_PYTHON: "3.12"
       runs_on: linux.24xlarge
       build_name: conda-py3_12-cuda11_8
-      use_split_build: false
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -1185,7 +1167,6 @@ jobs:
       DESIRED_PYTHON: "3.12"
       runs_on: linux.24xlarge
       build_name: conda-py3_12-cuda12_1
-      use_split_build: false
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -1249,7 +1230,6 @@ jobs:
       DESIRED_PYTHON: "3.12"
       runs_on: linux.24xlarge
       build_name: conda-py3_12-cuda12_4
-      use_split_build: false
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
