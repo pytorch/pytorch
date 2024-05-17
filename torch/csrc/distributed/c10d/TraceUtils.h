@@ -37,7 +37,9 @@ static c10::IValue is_p2p_key = "is_p2p";
 static c10::IValue op_id_key = "op_id";
 static c10::IValue profiling_name_key = "profiling_name";
 static c10::IValue input_sizes_key = "input_sizes";
+static c10::IValue input_dtypes_key = "input_dtypes";
 static c10::IValue output_sizes_key = "output_sizes";
+static c10::IValue output_dtypes_key = "output_dtypes";
 static c10::IValue time_created_key = "time_created_ns";
 static c10::IValue duration_key = "duration_ms";
 
@@ -475,7 +477,9 @@ struct NCCLTraceBuffer {
 
     // size information for input/output tensors
     c10::SmallVector<int, 4> input_dims_;
+    std::vector<std::string> input_dtypes_;
     c10::SmallVector<int, 4> output_dims_;
+    std::vector<std::string> output_dtypes_;
     c10::SmallVector<int64_t, 8> sizes_; // flattened from inputs, outputs
     bool retired_ = false; // is this work entry no longer in the workMetaList_?
                            // a retired but not completed event has timed out
@@ -526,12 +530,16 @@ struct NCCLTraceBuffer {
 
     for (const auto& input : inputs) {
       c10::IntArrayRef sizes = input.sizes();
+      te.input_dtypes_.emplace_back();
+      te.input_dtypes_.back().assign(std::string{input.dtype().name()});
       te.input_dims_.push_back(sizes.size());
       te.sizes_.insert(te.sizes_.end(), sizes.begin(), sizes.end());
     }
 
     for (const auto& output : outputs) {
       c10::IntArrayRef sizes = output.sizes();
+      te.output_dtypes_.emplace_back();
+      te.output_dtypes_.back().assign(std::string{output.dtype().name()});
       te.output_dims_.push_back(sizes.size());
       te.sizes_.insert(te.sizes_.end(), sizes.begin(), sizes.end());
     }
@@ -699,7 +707,9 @@ struct NCCLTraceBuffer {
       };
 
       dict.insert(input_sizes_key, read_sizes(e.input_dims_));
+      dict.insert(input_dtypes_key, e.input_dtypes_);
       dict.insert(output_sizes_key, read_sizes(e.output_dims_));
+      dict.insert(output_dtypes_key, e.output_dtypes_);
       if (e.time_discovered_completed_.has_value()) {
         dict.insert(state_key, "completed");
       } else if (e.time_discovered_started_.has_value()) {
