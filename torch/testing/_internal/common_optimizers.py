@@ -590,6 +590,7 @@ def optim_inputs_func_asgd(device, dtype=None):
     ]
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
+        OptimizerInput(params=None, kwargs={"lambd": 0.1}, desc="non-default lambd"),
         OptimizerInput(params=None, kwargs={"lr": 0.02}, desc="non-default lr"),
         OptimizerInput(params=None, kwargs={"t0": 100}, desc="t0"),
         OptimizerInput(params=None, kwargs={"maximize": True}, desc="maximize"),
@@ -1449,6 +1450,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_defaults_changed_to_foreach",
+            ),
+            DecorateInfo(
+                unittest.skip(
+                    "ASGD internally changes the weights even with zero grad"
+                ),
+                "TestOptimRenewed",
+                "test_step_is_noop_for_zero_grads",
             ),
         ),
     ),
