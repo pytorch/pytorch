@@ -910,7 +910,6 @@ def use_triton_template(layout, *, enable_int32=False, enable_float8=False):
             torch.float16,
             torch.bfloat16,
             torch.float32,
-            torch.int32,
             torch.float8_e4m3fn,
             torch.float8_e5m2,
         ]

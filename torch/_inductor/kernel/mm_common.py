@@ -147,6 +147,18 @@ int8_mm_kernel_configs = [
     {"config": (256, 128, 128, 3, 8), "cond": torch.version.hip is None},
 ]
 
+scaled_mm_kernel_configs = [
+    {"config": (64, 64, 32, 2, 4), "cond": True},
+    {"config": (64, 128, 32, 3, 4), "cond": True},
+    {"config": (128, 64, 32, 3, 4), "cond": True},
+    {"config": (64, 128, 32, 4, 8), "cond": True},
+    {"config": (128, 64, 32, 4, 8), "cond": True},
+    {"config": (64, 32, 32, 5, 8), "cond": True},
+    {"config": (32, 64, 32, 5, 8), "cond": True},
+    {"config": (128, 128, 32, 2, 8), "cond": True},
+    {"config": (64, 64, 64, 3, 8), "cond": True},
+]
+
 # Create filtered list of configs based on cond evaluation
 
 
@@ -158,6 +170,11 @@ mm_platform_configs = tuple(
 int8_platform_configs = tuple(
     cast(Tuple[int, int, int, int, int], config["config"])
     for config in int8_mm_kernel_configs
+    if config["cond"]
+)
+scaled_platform_configs = tuple(
+    cast(Tuple[int, int, int, int, int], config["config"])
+    for config in scaled_mm_kernel_configs
     if config["cond"]
 )
 
@@ -180,6 +197,11 @@ mm_configs = functools.partial(
 int8_mm_configs = functools.partial(
     filtered_configs,
     configs=int8_platform_configs,
+)
+
+scaled_mm_configs = functools.partial(
+    filtered_configs,
+    configs=scaled_platform_configs,
 )
 
 
