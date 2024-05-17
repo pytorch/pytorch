@@ -1424,6 +1424,7 @@ class CppWrapperCpu(WrapperCodeGen):
             return ""
         elif (
             isinstance(buffer, ir.ExternKernel)
+            and isinstance(buffer.op_overload, torch._ops.OpOverload)
             and isinstance(buffer.op_overload._schema.returns[0].type, torch.ListType)
             and isinstance(
                 buffer.op_overload._schema.returns[0].type.getElementType(),
