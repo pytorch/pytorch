@@ -259,8 +259,15 @@ static PyObject* is_cache_empty(PyObject* dummy, PyObject* args) {
 
 static PyObject* set_verbose_logger(PyObject* dummy, PyObject* args) {
   HANDLE_TH_ERRORS;
-  if (!PyArg_ParseTuple(args, "O", &python_verbose_logger)) {
+  PyObject* logger = nullptr;
+  if (!PyArg_ParseTuple(args, "O", &logger)) {
     Py_RETURN_FALSE;
+  }
+
+  if (logger == Py_None) {
+    python_verbose_logger = nullptr;
+  } else {
+    python_verbose_logger = logger;
   }
   Py_RETURN_TRUE;
   END_HANDLE_TH_ERRORS;
