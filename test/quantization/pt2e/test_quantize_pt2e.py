@@ -2278,5 +2278,46 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             node_list,
         )
 
+    def test_multi_users_without_output_observer(self):
+        """
+        Test the case in which a node is used by multiple users,
+        and had its output observer removed.
+        """
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+
+            def forward(self, x):
+                x = self.conv(x)
+                return x, x + 1
+
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+        m = M()
+        m = capture_pre_autograd_graph(m, example_inputs)
+        quantizer = XNNPACKQuantizer().set_global(
+            get_symmetric_quantization_config(),
+        )
+        m = prepare_pt2e(m, quantizer)
+        m(*example_inputs)
+
+        # Remove output observer
+        observer_to_remove = None
+        for n in m.graph.nodes:
+            if n.op == "output":
+                observer_to_remove = n.args[0][0]
+                assert observer_to_remove.op == "call_module"
+                assert observer_to_remove.target.startswith("activation_post_process_")
+                break
+        assert observer_to_remove is not None
+        observer_to_remove.replace_all_uses_with(observer_to_remove.args[0])
+        m.graph.erase_node(observer_to_remove)
+        m.recompile()
+
+        # Convert should succeed
+        m = convert_pt2e(m)
+        m(*example_inputs)
+
 
 instantiate_parametrized_tests(TestQuantizePT2E)
