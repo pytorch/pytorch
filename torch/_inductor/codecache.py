@@ -64,11 +64,7 @@ from torch._inductor.runtime.compile_tasks import (
 )
 from torch._inductor.runtime.hints import HalideMeta
 from torch._inductor.runtime.runtime_utils import cache_dir
-from torch._inductor.utils import (
-    clear_on_fresh_inductor_cache,
-    is_linux,
-    parallel_num_threads,
-)
+from torch._inductor.utils import clear_on_fresh_inductor_cache, is_linux
 
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
@@ -2616,8 +2612,12 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         except OSError:
             return 16777216
         m = re.search(r"cache size\s*: (\d+) KB", cpuinfo)
-        assert m
-        return int(m.group(1)) * 1024
+        if m:
+            return int(m.group(1)) * 1024
+        m = re.search(r"cache size\s*: (\d+) MB", cpuinfo)
+        if m:
+            return int(m.group(1)) * 1024 * 1024
+        raise RuntimeError("failed to find 'cache size: ... KB' in /proc/cpuinfo")
 
     @staticmethod
     def _search_for_file(suffix, errmsg):
@@ -2675,12 +2675,11 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
 
     @classmethod
     def generate_halide_async(cls, meta: HalideMeta, source_code: str, submit_fn=None):
-        num_threads = parallel_num_threads()
         dirpath = Path(
             get_path(
                 code_hash(
                     source_code,
-                    extra=cls.config_hash() + repr((meta, parallel_num_threads())),
+                    extra=repr((cls.config_hash(), meta)),
                 ),
                 "halide",
             )[2]
@@ -2690,14 +2689,13 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         genfile = str(dirpath / "generate_kernel.py")
         libfile = str(dirpath / "halide_kernel.a")
         headerfile = str(dirpath / "halide_kernel.h")
+        donefile = str(dirpath / "done")
         lockfile = str(dirpath / "lock")
+        need_compile = not os.path.exists(donefile)
         jobs = []
 
-        if not os.path.exists(genfile):
+        if need_compile:
             write_atomic(genfile, source_code)
-
-        scheduler = meta.scheduler
-        if not (os.path.exists(libfile) and os.path.exists(headerfile)):
             jobs.append(
                 functools.partial(
                     subprocess.check_call,
@@ -2713,13 +2711,8 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
                         "-e",
                         "static_library,h,schedule,pytorch_wrapper",
                         "-p",
-                        cls.find_libautoschedule(scheduler),
-                        # "target=host-cuda-user_context-no_runtime",
-                        "target=host",
-                        f"autoscheduler={scheduler}",
-                        f"autoscheduler.parallelism={num_threads}",
-                        f"autoscheduler.last_level_cache_size={cls.cpu_cache_size()}",
-                        "autoscheduler.balance=40",
+                        cls.find_libautoschedule(meta.scheduler),
+                        *meta.args(),
                     ],
                 )
             )
@@ -2728,14 +2721,16 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
             [arg.ctype for arg in meta.argtypes],
             cls._codegen_glue(meta.argtypes, headerfile),
             extra_flags=(libfile,),
-            submit_fn=jobs.append,
+            submit_fn=jobs.append if need_compile else None,
         )
 
-        task = functools.partial(_worker_task_halide, lockfile, jobs)
-        if submit_fn:
-            wait_for_compile = submit_fn(task).result
-        else:
-            task()
+        if need_compile:
+            jobs.append(functools.partial(touch, donefile))
+            task = functools.partial(_worker_task_halide, lockfile, jobs)
+            if submit_fn:
+                wait_for_compile = submit_fn(task).result
+            else:
+                task()
 
         def load():
             if wait_for_compile:
@@ -2755,6 +2750,10 @@ def _worker_task_halide(lockfile, jobs):
     with FileLock(lockfile, LOCK_TIMEOUT):
         for job in jobs:
             job()
+
+
+def touch(filename):
+    open(filename, "a").close()
 
 
 @clear_on_fresh_inductor_cache
