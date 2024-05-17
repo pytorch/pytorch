@@ -36,8 +36,8 @@ def optimize_templates(N, occurrence_count, benchmark_logs, verbose=False):
                 triton_templates.add(
                     (
                         timing["BLOCK_M"],
-                        timing["BLOCK_K"],
                         timing["BLOCK_N"],
+                        timing["BLOCK_K"],
                         timing["num_stages"],
                         timing["num_warps"],
                     )
@@ -105,8 +105,8 @@ def optimize_templates(N, occurrence_count, benchmark_logs, verbose=False):
                 if timing["type"] == "triton"
                 and (
                     timing["BLOCK_M"],
-                    timing["BLOCK_K"],
                     timing["BLOCK_N"],
+                    timing["BLOCK_K"],
                     timing["num_stages"],
                     timing["num_warps"],
                 )
