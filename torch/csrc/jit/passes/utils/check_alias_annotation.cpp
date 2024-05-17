@@ -188,7 +188,7 @@ const Node* findNodeForOp(
 // Handle a few special cases where we need to propagate constants
 // manually
 // TODO(suo): we should be able to move this stuff to constant prop
-c10::optional<IValue> toIValueProp(const Value* v) {
+std::optional<IValue> toIValueProp(const Value* v) {
   if (v->node()->kind() == prim::ListConstruct) {
     std::vector<IValue> genericList;
     for (auto input : v->node()->inputs()) {
