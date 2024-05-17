@@ -41,6 +41,8 @@ class HalideTests(TestCase):
             ),
             textwrap.dedent(
                 """
+                import halide as hl
+
                 @hl.generator(name="kernel")
                 class Kernel:
                     in_ptr0 = hl.InputBuffer(hl.Float(32), 1)
@@ -52,22 +54,21 @@ class HalideTests(TestCase):
                         in_ptr1 = g.in_ptr1
                         out_ptr0 = g.out_ptr0
                         xindex = hl.Var('xindex')
-                        xindex_dom = hl.RDom([hl.Range(0, 1024)], 'xindex').x
                         x0 = xindex
-                        x0_dom = xindex_dom
                         tmp0 = hl.Func()
                         tmp0[xindex] = in_ptr0[x0]
                         tmp1 = hl.Func()
                         tmp1[xindex] = in_ptr1[x0]
                         tmp2 = hl.Func()
                         tmp2[xindex] = tmp0[xindex] + tmp1[xindex]
-                        out_ptr0[hl.Var()] = hl.undef(out_ptr0.type())
-                        out_ptr0[x0_dom] = tmp2[xindex_dom]
+                        out_ptr0[x0] = tmp2[xindex]
 
                         assert g.using_autoscheduler()
                         in_ptr0.set_estimates([hl.Range(1024, 1024)])
                         in_ptr1.set_estimates([hl.Range(1024, 1024)])
                         out_ptr0.set_estimates([hl.Range(1024, 1024)])
+
+                __name__ == '__main__' and hl.main()
                 """
             ),
         )

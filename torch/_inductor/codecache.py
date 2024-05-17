@@ -2557,13 +2557,6 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
 class HalideCodeCache(CppPythonBindingsCodeCache):
     cache: Dict[str, Callable[[], Union[ModuleType, CDLL]]] = {}
     cache_clear = staticmethod(cache.clear)
-    generate_template = textwrap.dedent(
-        """
-        import halide as hl
-        {}
-        __name__ == "__main__" and hl.main()
-    """
-    )
     glue_template = textwrap.dedent(
         """
         #include "{halidebuffer_h}"
@@ -2608,7 +2601,6 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         return sha256_hash(
             "\n".join(
                 [
-                    cls.generate_template,
                     cls.glue_template,
                     f"{cls.cpu_cache_size()}",
                     cpp_compile_command("I", "O"),
@@ -2702,7 +2694,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         jobs = []
 
         if not os.path.exists(genfile):
-            write_atomic(genfile, cls.generate_template.format(source_code))
+            write_atomic(genfile, source_code)
 
         scheduler = meta.scheduler
         if not (os.path.exists(libfile) and os.path.exists(headerfile)):
