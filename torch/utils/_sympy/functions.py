@@ -1,11 +1,21 @@
+import math
+
 import sympy
 from sympy import S
 from sympy.core.logic import fuzzy_and, fuzzy_not, fuzzy_or
-import math
 
 __all__ = [
-    "FloorDiv", "ModularIndexing", "CleanDiv", "CeilDiv", "Pow", "TrueDiv",
-    "LShift", "RShift", "IsNonOverlappingAndDenseIndicator", "Round", "RoundDecimal",
+    "FloorDiv",
+    "ModularIndexing",
+    "CleanDiv",
+    "CeilDiv",
+    "Pow",
+    "TrueDiv",
+    "LShift",
+    "RShift",
+    "IsNonOverlappingAndDenseIndicator",
+    "Round",
+    "RoundDecimal",
 ]
 
 
@@ -21,6 +31,7 @@ class FloorDiv(sympy.Function):
     1. We can use divisibility guards to simplify FloorDiv(a, b) to a / b.
     2. Printing out the expression is nicer (compared to say, representing a//b as (a - a % b) / b)
     """
+
     nargs = (2,)
     precedence = 50  # precedence of mul  # noqa: F811
 
@@ -53,11 +64,14 @@ class FloorDiv(sympy.Function):
     @classmethod
     def eval(cls, base, divisor):
         def check_supported_type(x):
-            if (x.is_integer is False and x.is_real is False and x.is_complex) or x.is_Boolean:
+            if (
+                x.is_integer is False and x.is_real is False and x.is_complex
+            ) or x.is_Boolean:
                 raise TypeError(
                     f"unsupported operand type(s) for //: "
                     f"'{type(base).__name__}' and '{type(divisor).__name__}'"
-                    f", expected integer or real")
+                    f", expected integer or real"
+                )
 
         check_supported_type(base)
         check_supported_type(divisor)
@@ -77,7 +91,9 @@ class FloorDiv(sympy.Function):
             return sympy.Mul(base, -1)
         if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return base // divisor
-        if isinstance(base, (sympy.Integer, sympy.Float)) and isinstance(divisor, (sympy.Integer, sympy.Float)):
+        if isinstance(base, (sympy.Integer, sympy.Float)) and isinstance(
+            divisor, (sympy.Integer, sympy.Float)
+        ):
             return sympy.floor(base / divisor)
         if isinstance(base, FloorDiv):
             return FloorDiv(base.args[0], base.args[1] * divisor)
@@ -125,7 +141,9 @@ class ModularIndexing(sympy.Function):
                 gcd = sympy.gcd(base, divisor)
                 if gcd != 1:
                     return ModularIndexing(
-                        sympy.simplify(base / gcd), sympy.simplify(divisor / gcd), modulus
+                        sympy.simplify(base / gcd),
+                        sympy.simplify(divisor / gcd),
+                        modulus,
                     )
         except sympy.PolynomialError:
             pass  # https://github.com/pytorch/pytorch/issues/108276
@@ -177,6 +195,7 @@ class Where(sympy.Function):
             return p
         elif c == sympy.false:
             return q
+
 
 class Mod(sympy.Function):
     """
@@ -263,16 +282,17 @@ class LShift(sympy.Function):
     @classmethod
     def eval(cls, base, shift):
         if shift < 0:
-            raise ValueError('negative shift count')
-        return base * 2 ** shift
+            raise ValueError("negative shift count")
+        return base * 2**shift
 
 
 class RShift(sympy.Function):
     @classmethod
     def eval(cls, base, shift):
         if shift < 0:
-            raise ValueError('negative shift count')
-        return base // 2 ** shift
+            raise ValueError("negative shift count")
+        return base // 2**shift
+
 
 # Overloaded to be compatible with regular Python.
 # https://github.com/pytorch/pytorch/issues/90900
@@ -284,7 +304,8 @@ class Pow(sympy.Function):
         elif base.is_zero and exp < 0:
             raise ZeroDivisionError(f"{base} cannot be raised to a negative power")
         else:
-            return base ** exp
+            return base**exp
+
 
 # Overloaded to be compatible with regular Python.
 # https://github.com/pytorch/pytorch/issues/90900
@@ -317,13 +338,14 @@ class IsNonOverlappingAndDenseIndicator(sympy.Function):
         # in dim 0.
         if all(isinstance(a, sympy.Integer) for a in args):
             # sym_node imported in torch.__init__. Local import to avoid an import cycle
-            from torch.fx.experimental.symbolic_shapes import eval_is_non_overlapping_and_dense
+            from torch.fx.experimental.symbolic_shapes import (
+                eval_is_non_overlapping_and_dense,
+            )
 
             size_args = args[0:dim]
             stride_args = args[dim:]
             return eval_is_non_overlapping_and_dense(
-                [int(a) for a in size_args],
-                [int(a) for a in stride_args]
+                [int(a) for a in size_args], [int(a) for a in stride_args]
             )
         return None
 
@@ -361,7 +383,11 @@ class RoundDecimal(sympy.Function):
         if number.is_integer and ndigits >= 0:
             return number
         elif isinstance(number, sympy.Number) and isinstance(ndigits, sympy.Integer):
-            value_type, output_type = (int, sympy.Integer) if isinstance(number, sympy.Integer) else (float, sympy.Float)
+            value_type, output_type = (
+                (int, sympy.Integer)
+                if isinstance(number, sympy.Integer)
+                else (float, sympy.Float)
+            )
             return output_type(round(value_type(number), int(ndigits)))
 
 
@@ -400,6 +426,7 @@ def make_opaque_unary_fn(name):
     OpaqueUnaryFn.__name__ = "OpaqueUnaryFn_" + name
 
     return OpaqueUnaryFn
+
 
 # Keep in sync with math_op_names in torch/fx/experimental/sym_node.py
 OpaqueUnaryFn_sqrt = make_opaque_unary_fn("sqrt")

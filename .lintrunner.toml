@@ -1929,8 +1929,6 @@ exclude_patterns = [
     'torch/utils/_mode_utils.py',
     'torch/utils/_python_dispatch.py',
     'torch/utils/_stats.py',
-    'torch/utils/_sympy/__init__.py',
-    'torch/utils/_sympy/functions.py',
     'torch/utils/_traceback.py',
     'torch/utils/_zip.py',
     'torch/utils/backcompat/__init__.py',
