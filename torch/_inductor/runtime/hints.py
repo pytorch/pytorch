@@ -2,7 +2,7 @@ import collections
 import typing
 from dataclasses import fields
 from enum import auto, Enum
-from typing import Optional
+from typing import List, Optional
 
 
 # NOTE: if these fail asserts submit a PR to increase them
@@ -127,3 +127,15 @@ class DeviceProperties(typing.NamedTuple):
             index=device.index,
             cc=device_interface.get_compute_capability(device),
         )
+
+
+class HalideInputSpec(typing.NamedTuple):
+    ctype: str
+    name: str
+    numel: Optional[str] = None
+
+
+class HalideMeta(typing.NamedTuple):
+    argtypes: List[HalideInputSpec]
+    scheduler: str = "Mullapudi2016"
+    # TODO(jansel): gpu options
