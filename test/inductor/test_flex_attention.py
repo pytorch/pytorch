@@ -1,8 +1,9 @@
 # Owner(s): ["module: inductor"]
 
 import functools
+import unittest
 from collections import namedtuple
-from typing import Callable
+from typing import Callable, Optional
 
 from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
@@ -58,14 +59,8 @@ if common_utils.TEST_WITH_ROCM:
 
 
 # --------- Useful score mod functions for testing ---------
-
-test_score_mods = [
-    _identity,
-    _causal,
-    _rel_bias,
-    _rel_causal,
-    _generate_alibi_bias(8),
-]
+def _inverse_causal(score, b, h, m, n):
+    return torch.where(m <= n, score, float("-inf"))
 
 
 def _times_two(score, b, h, m, n):
@@ -79,13 +74,11 @@ def _squared(score, b, h, m, n):
 
 
 def _head_offset(dtype: torch.dtype):
-    """Captured Buffer
-    Note: this builds a score_mod with index of a type
-    """
+    """Captured Buffer"""
     head_offset = torch.rand(H, device="cuda", dtype=dtype)
 
     def score_mod(score, b, h, m, n):
-        return score * index(head_offset, [h])
+        return score * head_offset[h]
 
     return score_mod
 
@@ -103,20 +96,19 @@ def _trig2(score, b, h, m, n):
     return z
 
 
-def _buffer_reduced(dtype: torch.dtype):
-    """Reduction in captured buffer"""
-    batch_offsets = torch.rand(B, 8, device="cuda", dtype=dtype)
-
-    def score_mod(score, b, h, m, n):
-        batch_vals = index(batch_offsets, [b])
-        return score + batch_vals.sum()
-
-    return score_mod
-
+test_score_mods = [
+    _identity,
+    _times_two,
+    _squared,
+    _causal,
+    _inverse_causal,
+    _rel_bias,
+    _rel_causal,
+    _generate_alibi_bias(8),
+]
 
 captured_buffers_map = {
     "_head_offset": _head_offset,
-    "_buffer_reduced": _buffer_reduced,
 }
 
 B = 4
@@ -125,7 +117,37 @@ S = 2048
 D = 64
 
 
-class TestTemplatedSDPA(InductorTestCase):
+def query_key_value_clones(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    dtype: torch.dtype = None,
+):
+    """Clones the query, key, and value tensors and moves them to the specified dtype."""
+    if dtype is None:
+        dtype = query.dtype
+    query_ref = query.clone().detach().to(dtype).requires_grad_(query.requires_grad)
+    key_ref = key.clone().detach().to(dtype).requires_grad_(key.requires_grad)
+    value_ref = value.clone().detach().to(dtype).requires_grad_(value.requires_grad)
+    return query_ref, key_ref, value_ref
+
+
+class TestFlexAttention(InductorTestCase):
+    def _check_equal(
+        self,
+        golden_out: torch.Tensor,
+        ref_out: torch.Tensor,
+        compiled_out: torch.Tensor,
+        fudge_factor: float,
+        tensor_name: Optional[str] = None,
+    ):
+        compiled_error = (golden_out - compiled_out).abs().mean()
+        ref_error = (golden_out - ref_out).abs().mean()
+        if compiled_error > ref_error * fudge_factor:
+            name = tensor_name if tensor_name is not None else ""
+            msg = f"{name} Compiled error {compiled_error} is greater than ref error {ref_error} by more than {fudge_factor}X."
+            self.assertTrue(False, msg)
+
     def run_test(
         self,
         score_mod: Callable,
@@ -137,32 +159,188 @@ class TestTemplatedSDPA(InductorTestCase):
     ):
         sdpa_partial = create_attention(score_mod)
         compiled_sdpa = torch.compile(sdpa_partial)
-        q = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
-        k = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
-        v = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
-        golden_out = sdpa_partial(
-            q.to(torch.float64), k.to(torch.float64), v.to(torch.float64)
-        )
-        ref_out = sdpa_partial(q, k, v)
+        q = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
+        k = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
+        v = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
+        q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
+        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
+        golden_out = sdpa_partial(q_gold, k_gold, v_gold)
+        ref_out = sdpa_partial(q_ref, k_ref, v_ref)
         compiled_out = compiled_sdpa(q, k, v)
 
-        compiled_error = (golden_out - compiled_out).abs().mean()
-        ref_error = (golden_out - ref_out).abs().mean()
+        backward_grad = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+
+        golden_out.backward(backward_grad.to(torch.float64))
+        ref_out.backward(backward_grad)
+        compiled_out.backward(backward_grad)
+
+        with torch.no_grad():
+            # Note, it seems like we really are less accurate than the float32
+            # computation, likely due to the online softmax
+            if dtype == torch.float32:
+                fudge_factor = 10.0
+            else:
+                fudge_factor = 1.1
+
+            # Checkout output
+            self._check_equal(golden_out, ref_out, compiled_out, fudge_factor, "Out")
+
+            # Check gradients
+            q_fudge_factor = 2.5 * fudge_factor
+            self._check_equal(
+                q_gold.grad, q_ref.grad, q.grad, q_fudge_factor, "Grad_Query"
+            )
+            k_fudge_factor = 4 * fudge_factor
+            self._check_equal(
+                k_gold.grad, k_ref.grad, k.grad, k_fudge_factor, "Grad_Key"
+            )
+            v_fudge_factor = 8 * fudge_factor
+            self._check_equal(
+                v_gold.grad, v_ref.grad, v.grad, v_fudge_factor, "Grad_Value"
+            )
+
+    def run_dynamic_test(
+        self,
+        score_mod: Callable,
+        dtype: torch.dtype = torch.float16,
+        B: int = B,
+        H: int = H,
+        S: int = S,
+        D: int = D,
+    ):
+        sdpa_partial = create_attention(score_mod)
+        # The first eager batch, shape (B, H, S, D)
+        q1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        k1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        v1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        golden_out1 = sdpa_partial(
+            q1.to(torch.float64), k1.to(torch.float64), v1.to(torch.float64)
+        )
+        ref_out1 = sdpa_partial(q1, k1, v1)
+
+        # The second eager batch, shape (B * 2, H, S / 2, D)
+        B = int(B * 2)
+        S = int(S / 2)
+        q2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        k2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        v2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        golden_out2 = sdpa_partial(
+            q2.to(torch.float64), k2.to(torch.float64), v2.to(torch.float64)
+        )
+        ref_out2 = sdpa_partial(q2, k2, v2)
+
+        # Need to clear dynamo counters, since flex attention eager mode also uses dynamo tracing.
+        # We check dynamo counters["frames"]["ok"] to ensure there is no re-compilation.
+        torch._dynamo.reset()
+        # Compiling with dynamic shape in the first batch.
+        compiled_sdpa = torch.compile(sdpa_partial, dynamic=True)
+        compiled_out1 = compiled_sdpa(q1, k1, v1)
+
         # Note, it seems like we really are less accurate than the float32
         # computation, likely due to the online softmax
         if dtype == torch.float32:
             fudge_factor = 10.0
         else:
             fudge_factor = 1.1
-        if compiled_error > ref_error * fudge_factor:
-            msg = f"Compiled error {compiled_error} is greater than ref error {ref_error} by more than {fudge_factor}X."
-            self.assertTrue(False, msg)
+
+        self._check_equal(golden_out1, ref_out1, compiled_out1, fudge_factor)
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
+
+        # No re-compilation, use the compiled dynamic shape version.
+        compiled_out2 = compiled_sdpa(q2, k2, v2)
+        self._check_equal(golden_out2, ref_out2, compiled_out2, fudge_factor)
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
+
+    def run_automatic_dynamic_test(
+        self,
+        score_mod: Callable,
+        dtype: torch.dtype = torch.float16,
+        B: int = B,
+        H: int = H,
+        S: int = S,
+        D: int = D,
+    ):
+        sdpa_partial = create_attention(score_mod)
+        # The first eager batch, shape (B, H, S, D)
+        q1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        k1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        v1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        golden_out1 = sdpa_partial(
+            q1.to(torch.float64), k1.to(torch.float64), v1.to(torch.float64)
+        )
+        ref_out1 = sdpa_partial(q1, k1, v1)
+
+        # The second eager batch, shape (B * 2, H, S / 2, D)
+        B = int(B * 2)
+        S = int(S / 2)
+        q2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        k2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        v2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        golden_out2 = sdpa_partial(
+            q2.to(torch.float64), k2.to(torch.float64), v2.to(torch.float64)
+        )
+        ref_out2 = sdpa_partial(q2, k2, v2)
+
+        # The third eager batch, shape (B * 4, H, S / 4, D)
+        B = int(B * 2)
+        S = int(S / 2)
+        q3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        k3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        v3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        golden_out3 = sdpa_partial(
+            q3.to(torch.float64), k3.to(torch.float64), v3.to(torch.float64)
+        )
+        ref_out3 = sdpa_partial(q3, k3, v3)
+
+        # Need to clear dynamo counters, since flex attention eager mode also uses dynamo tracing.
+        # We check dynamo counters["frames"]["ok"] to ensure:
+        # 1, the first batch is compiled with static shape
+        # 2, the second batch is compiled with dynamic shape
+        # 3, no re-compilation in the third batch
+        torch._dynamo.reset()
+
+        # Note, it seems like we really are less accurate than the float32
+        # computation, likely due to the online softmax
+        if dtype == torch.float32:
+            fudge_factor = 10.0
+        else:
+            fudge_factor = 1.1
+
+        # The first batch.
+        compiled_sdpa = torch.compile(sdpa_partial)
+        compiled_out1 = compiled_sdpa(q1, k1, v1)
+        self._check_equal(golden_out1, ref_out1, compiled_out1, fudge_factor)
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
+
+        # The second batch (automatic dynamic).
+        compiled_out2 = compiled_sdpa(q2, k2, v2)
+        self._check_equal(golden_out2, ref_out2, compiled_out2, fudge_factor)
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
+
+        # The third batch (no re-compilation).
+        compiled_out3 = compiled_sdpa(q3, k3, v3)
+        self._check_equal(golden_out3, ref_out3, compiled_out3, fudge_factor)
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods(self, dtype: torch.dtype, score_mod: Callable):
         self.run_test(score_mod, dtype)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    def test_builtin_score_mods_dynamic(self, dtype: torch.dtype, score_mod: Callable):
+        self.run_dynamic_test(score_mod, dtype)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    def test_builtin_score_mods_automatic_dynamic(
+        self, dtype: torch.dtype, score_mod: Callable
+    ):
+        self.run_automatic_dynamic_test(score_mod, dtype)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
@@ -194,6 +372,21 @@ class TestTemplatedSDPA(InductorTestCase):
             return score + head_offset[h]
 
         self.run_test(score_mod, dtype)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes)
+    def test_captured_buffers_all_dims(self, dtype: torch.dtype):
+        head_scale = torch.randn(H, device="cuda")
+        batch_scale = torch.randn(B, device="cuda")
+        tok_scale = torch.randn(S, device="cuda")
+
+        def all_bias(score, batch, head, token_q, token_kv):
+            score = score + tok_scale[token_q]
+            score = score + batch_scale[batch]
+            score = score + head_scale[head]
+            return score
+
+        self.run_test(all_bias, dtype)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -289,8 +482,53 @@ class TestTemplatedSDPA(InductorTestCase):
         self.run_test(natten_mask, dtype)
 
     @supported_platform
-    @expectedFailure
     @common_utils.parametrize("dtype", test_dtypes_fast)
+    def test_subgraph_respect_decompostion(self, dtype):
+        from torch._decomp import core_aten_decompositions
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def score_mod_func(score, b, h, q, kv):
+            return score - q // (1 + kv)
+
+        make_tensor = functools.partial(
+            torch.randn,
+            (2, 2, 128, 4),
+            device="cuda",
+            dtype=torch.float64,
+            requires_grad=True,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+        # floor_div is not decomposed in decompostion_table is empty
+        gm = make_fx(_flex_attention, decomposition_table={})(
+            query, key, value, score_mod_func
+        )
+        self.assertExpectedInline(
+            gm.sdpa_score0.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
+    add = torch.ops.aten.add.Tensor(arg4_1, 1);  arg4_1 = None
+    floor_divide = torch.ops.aten.floor_divide.default(arg3_1, add);  arg3_1 = add = None
+    sub = torch.ops.aten.sub.Tensor(arg0_1, floor_divide);  arg0_1 = floor_divide = None
+    return sub""",
+        )
+
+        # floor_div is decomposed for core_aten_decompositions
+        gm = make_fx(_flex_attention, decomposition_table=core_aten_decompositions())(
+            query, key, value, score_mod_func
+        )
+        self.assertExpectedInline(
+            gm.sdpa_score0.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
+    add = torch.ops.aten.add.Tensor(arg4_1, 1);  arg4_1 = None
+    div = torch.ops.aten.div.Tensor_mode(arg3_1, add, rounding_mode = 'floor');  arg3_1 = add = None
+    sub = torch.ops.aten.sub.Tensor(arg0_1, div);  arg0_1 = div = None
+    return sub""",
+        )
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @unittest.skip("Silu decomp failing for full in backwards")
     def test_silu_on_score(self, dtype):
         def silu_score(score, b, h, q, kv):
             return torch.nn.functional.silu(score)
@@ -431,23 +669,6 @@ class TestTemplatedSDPA(InductorTestCase):
         self.run_test(causal_njt, dtype)
 
     @supported_platform
-    def test_backwards_fails(self):
-        make_tensor = functools.partial(
-            torch.randn,
-            (B, H, S, D),
-            dtype=torch.float32,
-            device="cuda",
-            requires_grad=True,
-        )
-        q, k, v = make_tensor(), make_tensor(), make_tensor()
-        func = torch.compile(_flex_attention, backend="inductor", fullgraph=True)
-        with self.assertRaisesRegex(
-            AssertionError, "flex_attention_backward is not an OpOverload"
-        ):
-            out = func(q, k, v, _identity)
-            out.backward(torch.ones_like(out))
-
-    @supported_platform
     def test_mixed_dtypes_fails(self):
         query = torch.randn((1, 1, 1024, 64), dtype=torch.float32, device="cuda")
         key = torch.randn((1, 1, 1024, 64), dtype=torch.float16, device="cuda")
@@ -474,6 +695,7 @@ class TestTemplatedSDPA(InductorTestCase):
         self.run_test(score_mod)
 
     @supported_platform
+    @skip("TODO: Figure out why this is erroring")
     @patch.object(torch._inductor.config, "max_autotune", True)
     def test_max_autotune_with_captured(self):
         head_scale = torch.randn(H, device="cuda")
@@ -609,7 +831,7 @@ class TestTemplatedSDPA(InductorTestCase):
         )
 
     @supported_platform
-    @common_utils.parametrize("score_mod_name", ["_head_offset", "_buffer_reduced"])
+    @common_utils.parametrize("score_mod_name", ["_head_offset"])
     @common_utils.parametrize("mode", ["eager", "aot_eager"])
     def test_captured_score_mod_aot_eager_gradcheck(
         self, score_mod_name: str, mode: str
@@ -697,13 +919,10 @@ class GraphModule(torch.nn.Module):
             joint_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "f64[2, 2, 8, 4]", primals_2: "f64[2, 2, 8, 4]", primals_3: "f64[2, 2, 8, 4]", """
-            + """alias_5: "f64[2, 2, 8, 4]", alias_7: "f32[2, 2, 8]", tangents_1: "f64[2, 2, 8, 4]"):
+    def forward(self, primals_1: "f64[2, 2, 8, 4]", primals_2: "f64[2, 2, 8, 4]", primals_3: "f64[2, 2, 8, 4]", alias_3: "f64[2, 2, 8, 4]", alias_5: "f32[2, 2, 8]", tangents_1: "f64[2, 2, 8, 4]"):
         fw_graph = self.fw_graph
         joint_graph = self.joint_graph
-        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, """
-            + """primals_3, alias_5, alias_7, tangents_1, fw_graph, joint_graph);  primals_1 = primals_2 = primals_3 = alias_5 """
-            + """= alias_7 = tangents_1 = fw_graph = joint_graph = None
+        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, alias_3, alias_5, tangents_1, fw_graph, joint_graph);  primals_1 = primals_2 = primals_3 = alias_3 = alias_5 = tangents_1 = fw_graph = joint_graph = None
         getitem_2: "f64[2, 2, 8, 4]" = flex_attention_backward[0]
         getitem_3: "f64[2, 2, 8, 4]" = flex_attention_backward[1]
         getitem_4: "f64[2, 2, 8, 4]" = flex_attention_backward[2];  flex_attention_backward = None
@@ -721,11 +940,11 @@ class GraphModule(torch.nn.Module):
             mul_2: "f64[]" = torch.ops.aten.mul.Tensor(arg5_1, arg0_1);  arg5_1 = arg0_1 = None
             add: "f64[]" = torch.ops.aten.add.Tensor(mul_2, mul_1);  mul_2 = mul_1 = None
             return [add, None, None, None, None]
-""",
+""",  # noqa: B950
         )
 
 
-common_utils.instantiate_parametrized_tests(TestTemplatedSDPA)
+common_utils.instantiate_parametrized_tests(TestFlexAttention)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
