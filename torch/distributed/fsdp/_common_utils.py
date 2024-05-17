@@ -421,29 +421,14 @@ def _apply_to_modules(
                     # ``named_children`` + `named_parameter(recurse=False)``.
                     # This hack is a must to make the traversal work.
                     # TODO: Remove this hack once DMP + FSDP is not supported.
+                    # It turns out that recursive wrapping may trigger this as
+                    # well.
                     if (
                         submodule_name == "_fsdp_wrapped_module"
                         or submodule_name == "_dmp_wrapped_module"
                     ):
-                        if (
-                            not torch.distributed._functional_collectives.is_torchdynamo_compiling()
-                        ):
-                            # TODO(voz): Don't graph break on this
-                            warnings.warn(
-                                "An unexpected prefix is detected. This case "
-                                " should only happen when using DMP with FSDP. "
-                                f"prefix = {prefix}, "
-                                f"submodule_name = {submodule_name}"
-                            )
                         new_prefix = prefix
                     elif submodule_name == "module":
-                        warnings.warn(
-                            "An unexpected prefix is detected. This case "
-                            " should only happen when DDP wraps the outer "
-                            " modules while FSDP wraps the inner ones."
-                            f"prefix = {prefix}, "
-                            f"submodule_name = {submodule_name}"
-                        )
                         new_prefix = prefix
             f(submodule, new_prefix, new_tree_level, *args, **kwargs)
 
