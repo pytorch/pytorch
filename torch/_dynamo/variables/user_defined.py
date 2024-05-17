@@ -38,7 +38,6 @@ from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource, ODictGetItemSource, RandomValueSource
 from ..utils import (
-    all_hook_names,
     build_checkpoint_variable,
     check_constant_args,
     get_custom_getattr,
@@ -480,6 +479,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self.value = value
         self.value_type = value_type or type(value)
         assert type(value) is self.value_type
+        # Caches vts for the mutable attrs
+        self.cached_mutable_attr_vts = {}
 
     def __str__(self):
         inner = self.value_type.__name__
@@ -928,6 +929,39 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
                 return SourcelessBuilder.create(tx, subobj)
 
+        if name in getattr(value, "__dict__", {}):
+            # These attributes are mutable and challenging to track because
+            # their changes don't go through STORE_ATTR. For instance, if an
+            # attribute is a dictionary, mutating it involves LOAD_ATTR and
+            # STORE_SUBSCR operations.
+            #
+            # We need to ensure that LOAD_ATTR, STORE_SUBSCR, and subsequent
+            # LOAD_ATTR operations are tracked by the same variable tracker.
+            # Therefore, we construct the variable tracker (vt) on the first
+            # LOAD_ATTR and cache it. On subsequent LOAD_ATTR operations, we
+            # check if the attribute's variable tracker (attr_vt) was mutated
+            # (e.g., by STORE_SUBSCR). If so, we mark the attribute as mutable
+            # to track STORE_ATTR mutations.
+            if id(subobj) in self.cached_mutable_attr_vts:
+                attr_vt = self.cached_mutable_attr_vts[id(subobj)]
+                if tx.output.side_effects.is_modified(attr_vt):
+                    tx.output.side_effects.store_attr(self, name, attr_vt)
+
+                return attr_vt
+
+            from .builder import VariableBuilder
+
+            if self.source:
+                attr_source = AttrSource(source, name)
+                attr_vt = VariableBuilder(tx, attr_source)(subobj)
+            else:
+                from .builder import SourcelessBuilder
+
+                attr_vt = SourcelessBuilder.create(tx, subobj)
+            self.cached_mutable_attr_vts[id(subobj)] = attr_vt
+
+            return attr_vt
+
         if (
             name not in getattr(value, "__dict__", {})
             and (
@@ -961,12 +995,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ),
         ):
             return UserDefinedObjectVariable(subobj, **options)
-        elif isinstance(self.value, torch.nn.Module) and name in all_hook_names:
-            assert isinstance(subobj, collections.OrderedDict)
-            if not subobj:
-                return variables.ConstDictVariable(
-                    subobj, collections.OrderedDict, **options
-                )
 
         if name == "__class__":
             return UserDefinedClassVariable(type(self.value), **options)

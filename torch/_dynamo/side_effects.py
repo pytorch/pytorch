@@ -17,6 +17,7 @@ from .source import GlobalSource, LocalSource, Source
 from .utils import nn_module_new, object_new
 from .variables.base import (
     is_side_effect_safe,
+    MutableLocal,
     MutableLocalBase,
     MutableLocalSource,
     VariableTracker,
@@ -33,6 +34,18 @@ class MutableSideEffects(MutableLocalBase):
     def __init__(self, source: Source, is_modified: bool = False):
         super().__init__(MutableLocalSource.Existing)
         self.source = source
+        self.is_modified = is_modified
+
+
+class MutableNewSideEffects(MutableLocalBase):
+    """
+    VariableTracker.mutable_local marker to indicate that a newly created local
+    is undergoing mutation, so that we can re-apply mutations if the newly
+    created local is returned from the function.
+    """
+
+    def __init__(self, is_modified: bool = False):
+        super().__init__(MutableLocalSource.Local)
         self.is_modified = is_modified
 
 
@@ -329,6 +342,8 @@ class SideEffects:
         self.check_allowed_side_effect(var)
         if isinstance(var.mutable_local, MutableSideEffects):
             var.mutable_local = MutableSideEffects(var.mutable_local.source, True)
+        elif isinstance(var.mutable_local, MutableLocal):
+            var.mutable_local = MutableNewSideEffects(True)
 
     def _get_modified_vars(self):
         return [var for var in self.id_to_variable.values() if self.is_modified(var)]
