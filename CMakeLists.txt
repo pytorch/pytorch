@@ -181,11 +181,7 @@ option(BUILD_BINARY "Build C++ binaries" OFF)
 option(BUILD_DOCS "Build Caffe2 documentation" OFF)
 option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_party" ON)
 option(BUILD_PYTHON "Build Python binaries" ON)
-option(BUILD_CAFFE2 "Master flag to build Caffe2" OFF)
 option(BUILD_LITE_INTERPRETER "Master flag to build Lite Interpreter" OFF)
-cmake_dependent_option(
-    BUILD_CAFFE2_OPS "Build Caffe2 operators" ON
-    "BUILD_CAFFE2" OFF)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 cmake_dependent_option(
     CAFFE2_LINK_LOCAL_PROTOBUF "If set, build protobuf inside libcaffe2.so." ON
@@ -281,13 +277,12 @@ if(NOT DEFINED USE_VULKAN)
 endif()
 
 option(USE_SLEEF_FOR_ARM_VEC256 "Use sleef for arm" OFF)
-option(USE_SOURCE_DEBUG_ON_MOBILE "Enable " ON)
-option(USE_LITE_INTERPRETER_PROFILER "Enable " ON)
+option(USE_SOURCE_DEBUG_ON_MOBILE "Enable" ON)
+option(USE_LITE_INTERPRETER_PROFILER "Enable" ON)
 option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference" OFF)
 option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
 # option USE_XNNPACK: try to enable xnnpack by default.
 option(USE_XNNPACK "Use XNNPACK" ON)
-option(USE_ZSTD "Use ZSTD" OFF)
 option(USE_ROCM_KERNEL_ASSERT "Use Kernel Assert for ROCm" OFF)
 # Ensure that an ITT build is the default for x86 CPUs
 cmake_dependent_option(
@@ -417,7 +412,6 @@ option(USE_SYSTEM_FXDIV "Use system-provided fxdiv." OFF)
 option(USE_SYSTEM_BENCHMARK "Use system-provided google benchmark." OFF)
 option(USE_SYSTEM_ONNX "Use system-provided onnx." OFF)
 option(USE_SYSTEM_XNNPACK "Use system-provided xnnpack." OFF)
-option(USE_SYSTEM_ZSTD "Use system-provided zstd." OFF)
 option(USE_GOLD_LINKER "Use ld.gold to link" OFF)
 if(USE_SYSTEM_LIBS)
   set(USE_SYSTEM_CPUINFO ON)
@@ -438,9 +432,6 @@ if(USE_SYSTEM_LIBS)
   endif()
   if(USE_TBB)
     set(USE_SYSTEM_TBB ON)
-  endif()
-  if(USE_ZSTD)
-    set(USE_SYSTEM_ZSTD ON)
   endif()
 endif()
 
@@ -635,7 +626,6 @@ if(INTERN_BUILD_MOBILE)
   endif()
   set(BUILD_PYTHON OFF)
   set(BUILD_FUNCTORCH OFF)
-  set(BUILD_CAFFE2_OPS OFF)
   set(USE_DISTRIBUTED OFF)
   set(NO_API ON)
   set(USE_FBGEMM OFF)
@@ -1206,13 +1196,6 @@ else()
   message(WARNING
       "Generated cmake files are only available when building "
       "shared libs.")
-endif()
-
-# ---[ Modules
-# If master flag for buildling Caffe2 is disabled, we also disable the
-# build for Caffe2 related operator modules.
-if(BUILD_CAFFE2)
-  add_subdirectory(modules)
 endif()
 
 # ---[ Binaries

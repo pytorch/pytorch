@@ -326,6 +326,7 @@ test_inductor_distributed() {
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_frozen.py --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_mixed_precision.py -k test_compute_dtype --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_mixed_precision.py -k test_reduce_dtype --verbose
+  python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_clip_grad_norm.py -k test_clip_grad_norm_2d --verbose
   python test/run_test.py -i distributed/fsdp/test_fsdp_tp_integration.py -k test_fsdp_tp_integration --verbose
 
   # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
@@ -523,8 +524,8 @@ test_single_dynamo_benchmark() {
 }
 
 test_inductor_micro_benchmark() {
-  TEST_REPORTS_DIR=$(pwd)/test/test-micro-reports
-  python benchmarks/gpt_fast/benchmark.py
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  python benchmarks/gpt_fast/benchmark.py --output "${TEST_REPORTS_DIR}/gpt_fast_benchmark.csv"
 }
 
 test_dynamo_benchmark() {
@@ -587,6 +588,15 @@ test_inductor_torchbench_smoketest_perf() {
     python benchmarks/dynamo/check_memory_compression_ratio.py --actual \
       "$TEST_REPORTS_DIR/inductor_training_smoketest_$test.csv" \
       --expected benchmarks/dynamo/expected_ci_perf_inductor_torchbench.csv
+  done
+
+  # Perform some "warm-start" runs for a few huggingface models.
+  for test in AlbertForQuestionAnswering AllenaiLongformerBase DistilBertForMaskedLM DistillGPT2 GoogleFnet YituTechConvBert; do
+    python benchmarks/dynamo/huggingface.py --accuracy --training --amp --inductor --device cuda --warm-start-latency \
+      --only $test --output "$TEST_REPORTS_DIR/inductor_warm_start_smoketest_$test.csv"
+    python benchmarks/dynamo/check_accuracy.py \
+      --actual "$TEST_REPORTS_DIR/inductor_warm_start_smoketest_$test.csv" \
+      --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_huggingface_training.csv"
   done
 }
 
@@ -1269,6 +1279,10 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHAR
 elif [[ "${TEST_CONFIG}" == *dynamo* && $SHARD_NUMBER -gt 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   test_dynamo_shard "${SHARD_NUMBER}"
+elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
+  install_torchvision
+  test_python_shard "$SHARD_NUMBER"
+  test_aten
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
@@ -1298,10 +1312,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
   test_libtorch
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
-elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
-  install_torchvision
-  test_python
-  test_aten
 elif [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
   install_torchvision
   test_python

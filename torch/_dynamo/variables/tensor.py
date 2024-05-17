@@ -149,6 +149,10 @@ class TensorVariable(VariableTracker):
             _is_name_set = self.proxy.node.op == "placeholder"
         self._is_name_set: bool = _is_name_set
 
+    def debug_repr(self):
+        # TODO: strip off fake tensor from repr here
+        return repr(self.proxy.node.meta["example_value"])
+
     def as_proxy(self):
         return self.proxy
 
@@ -969,6 +973,9 @@ class SymNodeVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
+    def debug_repr(self):
+        return repr(self.sym_num)
+
     @classmethod
     def create(cls, tx, proxy, sym_num=None, **options):
         if sym_num is None:
@@ -1012,7 +1019,7 @@ class SymNodeVariable(VariableTracker):
         try:
             return guard_scalar(self.sym_num)
         except GuardOnDataDependentSymNode as e:
-            raise UserError(  # noqa: TRY200
+            raise UserError(  # noqa: B904
                 UserErrorType.ANTI_PATTERN,
                 f"Consider annotating your code using torch._check*(). {str(e)}",
                 case_name="constrain_as_size_example",

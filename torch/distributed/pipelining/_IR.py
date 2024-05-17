@@ -324,6 +324,7 @@ def pipe_split():
     no-op if your annotated module is run eagerly.
 
     Example:
+    >>> # xdoctest: +SKIP
     >>> def forward(self, x):
     >>>     x = torch.mm(x, self.mm_param)
     >>>     x = torch.relu(x)
@@ -1280,7 +1281,7 @@ def annotate_split_points(mod: torch.nn.Module, spec: Dict[str, SplitPoint]):
             except AttributeError as e:
                 raise AttributeError(
                     f'Specified target {qualname} referenced nonexistent module {".".join(atoms[:i+1])}'
-                )
+                ) from e
 
         mod_to_wrap = getattr(predecessor_module, atoms[-1])
         mod_to_wrap._orig_forward = mod_to_wrap.forward

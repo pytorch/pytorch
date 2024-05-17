@@ -45,7 +45,7 @@ template <typename T>
 struct Welford {
   T mean = T(0);
   T m2 = T(0);
-  T weight = T(0);
+  int64_t index = 0;
 };
 
 
@@ -58,41 +58,57 @@ struct IsVecType<at::vec::Vectorized<T>>: std::true_type {};
 #endif
 
 template <typename T>
+struct WeightRecp {
+  using scalar_t = typename T::value_type;
+  int64_t N;
+  std::vector<scalar_t> weight_recps;
+  WeightRecp(int64_t N) : N(N) {
+    weight_recps.reserve(N);
+    for (const auto i : c10::irange(N)) {
+      weight_recps.push_back(
+          scalar_t(static_cast<double>(1) / static_cast<double>(i + 1)));
+    }
+  }
+};
+
+template <typename T>
 Welford<T> welford_combine(const Welford<T> &a, const Welford<T> &b) {
-  if constexpr (!IsVecType<T>::value) {
-    if (a.weight == 0) {
-      return b;
-    }
-    if (b.weight == 0) {
-      return a;
-    }
+  if (a.index == 0) {
+    return b;
+  }
+  if (b.index == 0) {
+    return a;
   }
   auto delta = b.mean - a.mean;
-  auto new_weight = a.weight + b.weight;
-  auto wb_over_w = b.weight / new_weight;
-  if constexpr (IsVecType<T>::value) {
-    // Guard against division by zero
-    wb_over_w = T::blendv(wb_over_w, T(0), new_weight == T(0));
-  }
+  auto new_index = a.index + b.index;
+  auto wb_over_w = T(b.index) / T(new_index);
   auto result = Welford<T>{
     a.mean + delta * wb_over_w,
-    a.m2 + b.m2 + delta * delta * a.weight * wb_over_w,
-    new_weight
+    a.m2 + b.m2 + delta * delta * T(a.index) * wb_over_w,
+    new_index,
   };
   return result;
 }
 
 template <typename T>
-Welford<T> welford_combine(const Welford<T> &acc, T data) {
+Welford<T> welford_combine(const Welford<T> &acc, T data, const WeightRecp<T>* w=nullptr) {
   // Add a single data point
+  int64_t index = acc.index + 1;
   auto delta = data - acc.mean;
-  auto new_weight = acc.weight + T(1);
-  auto new_mean = acc.mean + delta / new_weight;
+  T new_mean;
+  if constexpr (!IsVecType<T>::value) {
+    new_mean = acc.mean + delta / T(index);
+  } else {
+    new_mean = acc.mean +
+      ((w == nullptr || acc.index >= w->weight_recps.size())
+            ? delta / T(index)
+            : delta * T(w->weight_recps[acc.index]));
+  }
   auto new_delta = data - new_mean;
   auto result = Welford<T>{
     new_mean,
     acc.m2 + delta * new_delta,
-    new_weight
+    index
   };
   return result;
 }
@@ -151,14 +167,37 @@ inline at::vec::Vectorized<float> vec_shuffle_down(at::vec::Vectorized<float> x,
 }
 #endif
 
+#ifdef CPU_CAPABILITY_AVX512
+inline at::vec::Vectorized<float> vec_shuffle_down(at::vec::Vectorized<float> x, size_t n) {
+  using vec_t = at::vec::Vectorized<float>;
+#define SHUFFLE_MASK(z, y, x, w) ((z << 6) | (y << 4) | (x << 2) | w)
+  switch (n) {
+    case 1:
+      return vec_t(_mm512_permute_ps(x, SHUFFLE_MASK(1, 1, 3, 3)));
+    case 2:
+      return vec_t(_mm512_permute_ps(x, SHUFFLE_MASK(2, 2, 2, 2)));
+    case 4:
+      return vec_t(_mm512_permutexvar_ps(
+          _mm512_set_epi32(
+              12, 12, 12, 12, 12, 12, 12, 12, 4, 4, 4, 4, 4, 4, 4, 4),
+          x));
+    case 8:
+      return vec_t(_mm512_permutexvar_ps(
+          _mm512_set_epi32(8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8), x));
+  }
+  TORCH_CHECK(false, "Unhandled vec_shuffle_down value ", n);
+}
+#endif
+
 template <typename scalar_t>
 Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> acc) {
   using Vec = at::vec::Vectorized<scalar_t>;
   for (size_t n = 1; n < Vec::size(); n *= 2) {
+    auto index = acc.index;
     auto shuffled = Welford<Vec>{
       vec_shuffle_down(acc.mean, n),
       vec_shuffle_down(acc.m2, n),
-      vec_shuffle_down(acc.weight, n)
+      index,
     };
     acc = welford_combine(acc, shuffled);
   }
@@ -171,8 +210,7 @@ Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> 
   acc.m2.store(array);
   result.m2 = array[0];
 
-  acc.weight.store(array);
-  result.weight = array[0];
+  result.index = acc.index;
 
   return result;
 }

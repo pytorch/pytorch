@@ -49,7 +49,7 @@ from ..ir import IRNode, TritonTemplateBuffer
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..runtime.hints import ReductionHint, TRITON_MAX_BLOCK
 from ..runtime.runtime_utils import (
-    do_bench,
+    do_bench_gpu,
     get_max_y_grid,
     green_text,
     next_power_of_2,
@@ -1501,14 +1501,15 @@ class TritonKernel(Kernel):
                     return_getters.append(lambda _: sympy.Integer(0))
                     continue
 
-                while (
-                    current_group < len(remaining)
-                    and sv.size_hint(remaining[current_group]) == 1
+                while current_group < len(remaining) and sv.statically_known_equals(
+                    remaining[current_group], 1  # type: ignore[arg-type]
                 ):
                     # scroll to next group with remaining elements
                     current_group += 1
 
-                if sv.size_hint(size) > sv.size_hint(remaining[current_group]):
+                if current_group + 1 < len(remaining) and sv.statically_known_gt(
+                    size, remaining[current_group]
+                ):
                     # need to break size in two
                     if not sv.statically_known_multiple_of(
                         size, remaining[current_group]
@@ -1852,7 +1853,8 @@ class TritonKernel(Kernel):
             mask = (
                 f"{next(iter(mask_vars))}"
                 if len(mask_vars) == 1
-                else f"({' & '.join(str(v) for v in mask_vars)})"
+                # sorted for deterministic order
+                else f"({' & '.join(sorted(map(str, mask_vars)))})"
             )
         return mask
 
@@ -2762,6 +2764,7 @@ class TritonKernel(Kernel):
             "autotune_local_cache": config.autotune_local_cache,
             "autotune_pointwise": config.triton.autotune_pointwise,
             "autotune_remote_cache": config.autotune_remote_cache,
+            "force_disable_caches": config.force_disable_caches,
             "dynamic_scale_rblock": config.dynamic_scale_rblock,
             "max_autotune": config.max_autotune,
             "max_autotune_pointwise": config.max_autotune_pointwise,
@@ -4044,13 +4047,13 @@ class TritonScheduling(BaseScheduling):
         else:
             # We have to clone the inplace updated arguments to avoid earlier calls
             # generating out of range indices for later calls.
-            ms = do_bench(lambda: call(wrapped_jit_function.clone_args(*args)[0]))
+            ms = do_bench_gpu(lambda: call(wrapped_jit_function.clone_args(*args)[0]))
 
             # overhead of cloning args gives bias for fusing the kernel
             # in the case of mutating/in-placeable second fusion
             # TODO - would be better as a hook in triton do_bench that reset
             # the input values between benchmarking
-            ms = ms - do_bench(lambda: wrapped_jit_function.clone_args(*args))
+            ms = ms - do_bench_gpu(lambda: wrapped_jit_function.clone_args(*args))
 
         log.debug(
             "The fused kernel for %s took %.3f ms to run",

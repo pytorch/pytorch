@@ -52,11 +52,14 @@ from ..guards import GuardBuilder, install_guard, make_dupe_guard
 from ..side_effects import SideEffects
 from ..source import (
     AttrSource,
+    CallMethodItemSource,
     ConstantSource,
     ConstDictKeySource,
     ConvertIntSource,
+    FloatTensorSource,
     GetItemSource,
     GradSource,
+    is_cell_contents,
     is_constant_source,
     is_from_defaults,
     is_from_optimizer_source,
@@ -81,6 +84,7 @@ from ..utils import (
     is_utils_checkpoint,
     istype,
     odict_values,
+    proxy_args_kwargs,
     set_example_value,
     tensor_always_has_static_shape,
     tuple_iterator,
@@ -1165,6 +1169,7 @@ class VariableBuilder:
                 # NN modules on the fly)
                 or self.source.guard_source().is_nn_module()
                 or is_from_defaults(self.source)
+                or is_cell_contents(self.source)
             ):
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
                 return ConstantVariable.create(value=value, source=self.source)
@@ -1504,8 +1509,8 @@ class VariableBuilder:
         # SymFloat wrapping is special.  We first wrap it in the same way we
         # do an unspecialized primitive, and then we item() it into a
         # SymFloat.  Removal of the item() call is left to a later FX pass,
-        # mostly because that pass is more easily done after decomposition
-        # (Dynamo doesn't do decomposition right now).
+        # mostly because that pass is more easily done after we have lowered
+        # to ATen ops.  (Dynamo doesn't do decomposition right now).
 
         if self.name in self.tx.output.unspec_variable_map:
             return self.tx.output.unspec_variable_map[self.name]
@@ -1520,18 +1525,25 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value, source=self.source)
 
-        # NB: We don't do automatic dynamic.  Since we have a guard mechanism,
-        # there isn't really any downside to trying to be dynamic for float
-        # all the time.  Unlike ints, this won't make codegen perf worse.
-        # Modest cost to compile time.
+        # NB: At the point we've gotten here, we don't assume static by
+        # default.  Since we have a guard mechanism, there isn't really any
+        # downside to trying to be dynamic for float all the time.  Unlike
+        # ints, this won't make codegen perf worse.  Modest cost to compile
+        # time.
 
-        wrapped_value = torch.tensor(value)
+        wrapped_value = torch.tensor(value, dtype=torch.float64)
         # TODO: Switch RandomValueSource over to use this, this is more
         # accurate
         assert not isinstance(self.get_source(), RandomValueSource)
         install_guard(self.get_source().make_guard(GuardBuilder.TYPE_MATCH))
 
-        options = {"source": self.get_source(), "raw_value": value}
+        # The FloatTensorSource here is just for pedantic correctness: if you
+        # guard against an UnspecializedPythonVariable, you need to guard
+        # against the tensor-ified version of the local, otherwise it's not a
+        # Tensor.  However, we never let the UnspecializedPythonVariable escape
+        # here, so there should never actually be any guards against this
+        # source.
+        options = {"source": FloatTensorSource(self.get_source()), "raw_value": value}
 
         # TODO: Maybe the tensor-ification should be built into the source,
         # rather than by special pattern match
@@ -1550,11 +1562,6 @@ class VariableBuilder:
         )
         assert isinstance(unspec_var, UnspecializedPythonVariable)
         self.tx.output.unspec_variable_map[self.name] = unspec_var
-
-        # I guess hypothetically constant source could happen, I kind of want
-        # to handle this totally differently though... no reason to create the
-        # fake tensor in that case
-        assert not is_constant_source(self.get_source())
 
         if self.tx.export and not isinstance(self.get_source(), LocalSource):
             raise AssertionError(
@@ -1590,44 +1597,18 @@ class VariableBuilder:
             example_strong_ref=wrapped_value,
         )
 
-        # OK, now the crazy sauce.  We want to generate a SymNodeVariable to
-        # do the rest of our tracing, doing the equivalent of an item() call.
-        # But we don't /actually/ want to do an item() call, because that will
-        # give us an unbacked SymFloat, but this is really a backed SymFloat.
-
-        item_proxy = self.tx.output.create_proxy(
-            "call_method",
-            "item",
-            (proxy,),
-            {},
+        # Directly do item to bypass capture_scalar_outputs
+        r = wrap_fx_proxy(
+            self.tx,
+            self.tx.output.create_proxy(
+                "call_method",
+                "item",
+                *proxy_args_kwargs([unspec_var], {}),
+            ),
         )
-        # Do NOT do conventional fake tensor prop
+        self.tx.output.tracked_fakes.append(TrackedFake(r.sym_num, self.source, None))
 
-        shape_env = self.tx.output.shape_env
-        item_symbol = shape_env.create_unspecified_symbol(
-            value,
-            # !!! Interesting !!!
-            source=self.source,
-            # If we put in a Tensor input, definitely dynamic (if you wanted
-            # it to be static, gotta bail out earlier)
-            dynamic_dim=DimDynamic.DYNAMIC,
-        )
-        item_example_value = shape_env.create_symfloatnode(
-            item_symbol, hint=value, source=self.source
-        )
-        set_example_value(item_proxy.node, item_example_value)
-
-        self.tx.output.tracked_fakes.append(
-            TrackedFake(item_example_value, self.source, None)
-        )
-
-        item_unspec_var = SymNodeVariable(
-            item_proxy,
-            item_example_value,
-            source=self.get_source(),  # !!! Interesting !!!
-        )
-
-        return item_unspec_var
+        return r
 
     def wrap_unspecialized_primitive(self, value):
         if self.name in self.tx.output.unspec_variable_map:
@@ -2283,6 +2264,14 @@ def wrap_to_fake_tensor_and_record(
                 symbolic_context=symbolic_context,
             )
         )
+        if (
+            source is not None
+            and isinstance(fake_e, FakeTensor)
+            and (sym_val := fake_e.item_memo) is not None
+        ):
+            tx.output.tracked_fakes.append(
+                TrackedFake(sym_val, CallMethodItemSource(source), symbolic_context)
+            )
 
         if is_traceable_wrapper_subclass(fake_e):
             attrs, _ = fake_e.__tensor_flatten__()
