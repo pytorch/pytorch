@@ -1948,3 +1948,39 @@ class DebugAssertWrapper(CompilerWrapper):
             return compiled_fn(args)
 
         return debug_compiled_function
+
+
+def pre_compile(
+    wrappers: List[CompilerWrapper],
+    flat_fn: Callable,
+    flat_args: List[Any],
+    aot_config: AOTConfig,
+    *,
+    fw_metadata: ViewAndMutationMeta,
+) -> Tuple[Callable, List[Tensor], ViewAndMutationMeta]:
+    """
+    Runs a sequence of wrappers on the given function and arguments.
+    Mutates wrappers in place.
+    """
+    for wrapper in wrappers:
+        flat_fn, flat_args, fw_metadata = wrapper.pre_compile(
+            flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
+        )
+    return flat_fn, flat_args, fw_metadata
+
+
+def post_compile(
+    wrappers: List[CompilerWrapper],
+    compiled_fn: Callable,
+    aot_config: AOTConfig,
+    *,
+    runtime_metadata: ViewAndMutationMeta,
+) -> Tuple[Callable, ViewAndMutationMeta]:
+    """
+    Runs a sequence of wrappers on the given function. Should be called after pre_compile()
+    """
+    for wrapper in reversed(wrappers):
+        compiled_fn = wrapper.post_compile(
+            compiled_fn, aot_config, runtime_metadata=runtime_metadata
+        )
+    return compiled_fn, runtime_metadata
