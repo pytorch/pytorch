@@ -1,8 +1,11 @@
 # ---[ Test binaries.
 
 set(C10_XPU_ALL_TEST_FILES
-    impl/XPUCachingAllocatorTest.cpp impl/XPUDeviceTest.cpp
-    impl/XPUGuardTest.cpp impl/XPUStreamTest.cpp)
+    impl/XPUCachingAllocatorTest.cpp
+    impl/XPUDeviceTest.cpp
+    impl/XPUGuardTest.cpp
+    impl/XPUStreamTest.cpp
+)
 if(BUILD_TEST)
   foreach(test_src ${C10_XPU_ALL_TEST_FILES})
     get_filename_component(test_file_name ${test_src} NAME_WE)
