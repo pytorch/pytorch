@@ -105,9 +105,12 @@ class AOTInductorModelBase {
     parse_device_str(device_str, device_type_, device_idx_);
 
 #ifdef USE_CUDA
+    AOTI_RUNTIME_CHECK(device_type_ == aoti_torch_device_type_cuda());
     if (device_idx_ == -1) {
       AOTI_RUNTIME_DEVICE_CHECK(cudaGetDevice(&device_idx_));
     }
+#else
+    AOTI_RUNTIME_CHECK(device_type_ == aoti_torch_device_type_cpu());
 #endif // USE_CUDA
   }
 
