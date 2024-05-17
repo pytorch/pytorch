@@ -105,7 +105,7 @@ jobs:
         shell: bash
         run: |
           export NEW_TAG=${{ inputs.docker-image-tag }}
-          if[[ ${NEW_TAG} != '' ]]; then
+          if [[ ${NEW_TAG} != '' ]]; then
             IMAGE=${ECR_DOCKER_IMAGE%:*}
             echo "docker-image=${IMAGE}:${NEW_TAG}" >> "${GITHUB_OUTPUT}"
           else
