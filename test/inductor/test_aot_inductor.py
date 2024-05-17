@@ -2839,7 +2839,7 @@ def fail_cuda(is_skip=False):
         (
             "abi_compatible_cuda",
             "non_abi_compatible_cuda",
-            "package_abi_compatible_cuda",
+            "packaged_abi_compatible_cuda",
         ),
         is_skip=is_skip,
     )
@@ -2847,7 +2847,7 @@ def fail_cuda(is_skip=False):
 
 def fail_abi_compatible_cuda(is_skip=False):
     return TestFailure(
-        ("abi_compatible_cuda", "package_abi_compatible_cuda"),
+        ("abi_compatible_cuda", "packaged_abi_compatible_cuda"),
         is_skip=is_skip,
     )
 
@@ -2861,7 +2861,7 @@ def fail_non_abi_compatible_cuda(is_skip=False):
 
 def fail_package_abi_compatible_cuda(is_skip=False):
     return TestFailure(
-        ("package_abi_compatible_cuda",),
+        ("packaged_abi_compatible_cuda",),
         is_skip=is_skip,
     )
 

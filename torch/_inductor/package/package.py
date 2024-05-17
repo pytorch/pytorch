@@ -81,7 +81,7 @@ class PT2ArchiveReader:
         return data.decode()
 
     def get_file_names(self) -> List[str]:
-        return self.archive_file.get_all_records()
+        return self.archive_file.get_all_records()  # type: ignore[attr-defined]
 
 
 def _package_exported_program(
@@ -145,7 +145,7 @@ def _extract_exported_program(archive_reader: PT2ArchiveReader) -> ExportedProgr
     return deserialized_exported_program
 
 
-def _extract_so(archive_reader: PT2ArchiveReader, device: str) -> Callable:
+def _extract_so(archive_reader: PT2ArchiveReader, device: str) -> Callable:  # type: ignore[type-arg]
     tmp_output_dir = pathlib.Path("/tmp/aotinductor_loaded_model")
     tmp_output_dir.mkdir(exist_ok=True)
 
@@ -182,8 +182,7 @@ def _extract_so(archive_reader: PT2ArchiveReader, device: str) -> Callable:
 
 
 def save_package(
-    *,
-    so_path: Optional[str] = None,
+    so_path: str,
     exported_program: Optional[ExportedProgram] = None,
 ) -> str:
     """
@@ -211,7 +210,7 @@ def save_package(
     return archive_path
 
 
-def load_package(path: str, device: str) -> Callable:
+def load_package(path: str, device: str) -> Callable:  # type: ignore[type-arg]
     with PT2ArchiveReader(path) as archive_reader:
         optimized = _extract_so(archive_reader, device)
 

@@ -1174,7 +1174,7 @@ class AOTInductorModelCache:
                     options={"aot_inductor.package": True},
                 )  # type: ignore[arg-type]
 
-            cls.cache[key] = torch._inductor._aot_load(so_path, device)
+            cls.cache[key] = torch._inductor.aot_load(so_path, device)
 
         return cls.cache[key]
 
