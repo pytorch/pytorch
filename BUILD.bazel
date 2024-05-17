@@ -663,6 +663,7 @@ cu_library(
     name = "torch_cuda",
     srcs = [
         "torch/csrc/distributed/c10d/intra_node_comm.cu",
+        "torch/csrc/distributed/c10d/Utils.cu",
         "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
     ],
     copts = torch_cuda_half_options,
@@ -771,7 +772,7 @@ cc_library(
         [
             "torch/*.h",
             "torch/csrc/**/*.h",
-            "torch/csrc/distributed/c10d/*.hpp",
+            "torch/csrc/distributed/c10d/**/*.hpp",
             "torch/lib/libshm/*.h",
         ],
         exclude = [
@@ -830,6 +831,7 @@ cc_library(
             "torch/csrc/cuda/python_nccl.cpp",
             "torch/csrc/cuda/nccl.cpp",
             "torch/csrc/distributed/c10d/intra_node_comm.cu",
+            "torch/csrc/distributed/c10d/Utils.cu",
             "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
         ],
     )) + torch_sources,

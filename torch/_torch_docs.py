@@ -2195,13 +2195,13 @@ Example::
 add_docstr(
     torch.can_cast,
     r"""
-can_cast(from, to) -> bool
+can_cast(from_, to) -> bool
 
 Determines if a type conversion is allowed under PyTorch casting rules
 described in the type promotion :ref:`documentation <type-promotion-doc>`.
 
 Args:
-    from (dtype): The original :class:`torch.dtype`.
+    from\_ (dtype): The original :class:`torch.dtype`.
     to (dtype): The target :class:`torch.dtype`.
 
 Example::
