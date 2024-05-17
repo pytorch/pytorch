@@ -4,6 +4,8 @@ import dataclasses
 import functools
 import inspect
 import itertools
+
+import logging
 import re
 import sys
 import types
@@ -24,9 +26,11 @@ from ..utils import (
     proxy_args_kwargs,
     set_example_value,
 )
-from .base import VariableTracker, MutableLocal
+from .base import VariableTracker
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
 from .user_defined import is_standard_setattr, UserDefinedObjectVariable
+
+torch_log = logging.getLogger("torch")
 
 
 class SuperVariable(VariableTracker):
@@ -633,11 +637,15 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "queue_callback":
-            return variables.UserFunctionVariable(torch._dynamo.external_utils.queue_callback, source=self.source).call_function(
-                tx, args, kwargs
-            )
+            return variables.UserFunctionVariable(
+                torch._dynamo.external_utils.queue_callback, source=self.source
+            ).call_function(tx, (tx.output.autograd_final_callbacks_var, *args), kwargs)
+        elif name == "_exec_final_callbacks_stub":
+            return variables.UserFunctionVariable(
+                torch._dynamo.external_utils.exec_final_callbacks, source=self.source
+            ).call_function(tx, (tx.output.autograd_final_callbacks_var, *args), kwargs)
         else:
-            unimplemented(f"torch._C._EngineBase method: {name}")
+            unimplemented(f"torch._C._ImperativeEngine method: {name}")
 
 
 class LambdaVariable(VariableTracker):
