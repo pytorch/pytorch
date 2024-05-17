@@ -22,7 +22,7 @@ struct RAIIContextManager {
   }
 
  private:
-  c10::optional<GuardT> guard_;
+  std::optional<GuardT> guard_;
   std::tuple<Args...> args_;
 };
 
@@ -55,7 +55,7 @@ struct DeprecatedRAIIContextManager {
   }
 
  private:
-  c10::optional<GuardT> guard_;
+  std::optional<GuardT> guard_;
   std::tuple<Args...> args_;
 };
 
