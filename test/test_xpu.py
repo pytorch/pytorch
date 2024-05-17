@@ -1,6 +1,7 @@
 # Owner(s): ["module: intel"]
 
 import sys
+import tempfile
 import unittest
 
 import torch
@@ -269,6 +270,40 @@ if __name__ == "__main__":
             actual = op(transformed.input, *transformed.args, **transformed.kwargs)
 
             self.assertEqual(expect, actual)
+
+    def test_serialization_array_with_storage(self):
+        x = torch.randn(5, 5).xpu()
+        y = torch.zeros(2, 5, dtype=torch.int, device="xpu")
+        q = [x, y, x, y.storage()]
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(q, f)
+            f.seek(0)
+            q_copy = torch.load(f)
+        self.assertEqual(q_copy, q, atol=0, rtol=0)
+        q_copy[0].fill_(5)
+        self.assertEqual(q_copy[0], q_copy[2], atol=0, rtol=0)
+        self.assertEqual(q_copy[0].dtype, torch.float)
+        self.assertEqual(q_copy[1].dtype, torch.int)
+        self.assertEqual(q_copy[2].dtype, torch.float)
+        self.assertTrue(isinstance(q_copy[3], torch.storage.TypedStorage))
+        self.assertTrue(isinstance(q_copy[3]._untyped_storage, torch.UntypedStorage))
+        q_copy[1].fill_(10)
+        y.fill_(10)
+        self.assertEqual(q_copy[3], y.storage())
+
+    def test_serialization_array_with_empty(self):
+        x = [
+            torch.randn(4, 4).xpu(),
+            torch.tensor([], dtype=torch.float, device=torch.device("xpu")),
+        ]
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(x, f)
+            f.seek(0)
+            x_copy = torch.load(f)
+        for original, copy in zip(x, x_copy):
+            self.assertEqual(copy, original)
+            self.assertIs(type(copy), type(original))
+            self.assertEqual(copy.get_device(), original.get_device())
 
 
 instantiate_device_type_tests(TestXpu, globals(), only_for="xpu")
