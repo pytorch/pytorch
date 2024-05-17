@@ -2035,11 +2035,17 @@ void UpdateReliable(Node* n) {
   }
 }
 
+// Traverse the graph inputs and compute reliability (e.g., are shapes static).
+// Since the inputs do not change during export, we save computation time by
+// marking it as computed and subsequently skipping.
 void SetGraphInputTypeReliable(const Graph* g) {
-  for (auto graph_input : g->inputs()) {
-    if (!ConstantValueMap::HasTypeReliable(graph_input->debugName())) {
-      ConstantValueMap::SetTypeReliable(graph_input->debugName(), true);
+  if (!ConstantValueMap::GetAllGraphInputsReliableComputed()) {
+    for (auto graph_input : g->inputs()) {
+      if (!ConstantValueMap::HasTypeReliable(graph_input->debugName())) {
+        ConstantValueMap::SetTypeReliable(graph_input->debugName(), true);
+      }
     }
+    ConstantValueMap::SetAllGraphInputsReliableComputed(true);
   }
 }
 

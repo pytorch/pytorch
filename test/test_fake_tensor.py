@@ -868,9 +868,6 @@ class FakeTensorTest(TestCase):
                 == torch.channels_last
             )
 
-    # Propagate real tensors doesn't work when original input arguments are
-    # fake
-    @expectedFailurePropagateRealTensors
     def test_export_numpy(self):
         class MyNumpyModel(torch.nn.Module):
             def forward(self, input):
@@ -1477,7 +1474,6 @@ class FakeTensorPropTest(TestCase):
                     failed = True
                 self.assertTrue(failed)
 
-    @expectedFailurePropagateRealTensors  # Propagate real tensors doesn't work with fake-on-fake
     def test_fake_tensor_prop_on_nn_module_with_optional_args(self):
         class OptionalArgumentInBetween(torch.nn.Module):
             def __init__(self):
@@ -1510,7 +1506,6 @@ class FakeTensorPropTest(TestCase):
                 value, None, another_optional_value
             )
 
-    @expectedFailurePropagateRealTensors  # TODO: not sure about this one, kinda strange
     def test_unbacked_shape_realloc(self):
         def f(x):
             return x.nonzero()
