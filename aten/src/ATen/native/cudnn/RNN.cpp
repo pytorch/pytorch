@@ -51,9 +51,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     const Tensor& input_r,
     TensorList weight,
     int64_t weight_stride0,
-    const c10::optional<Tensor>& weight_buf_r_opt,
+    const std::optional<Tensor>& weight_buf_r_opt,
     const Tensor& hx,
-    const c10::optional<Tensor>& cx_opt,
+    const std::optional<Tensor>& cx_opt,
     int64_t fn_mode,
     int64_t fn_hidden_size,
     int64_t fn_proj_size,
@@ -63,7 +63,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     bool fn_train,
     bool fn_bidirectional,
     IntArrayRef fn_batch_sizes,
-    const c10::optional<Tensor>& fn_dropout_state_opt) {
+    const std::optional<Tensor>& fn_dropout_state_opt) {
   AT_ERROR("_cudnn_rnn: ATen not compiled with cuDNN support");
 }
 
@@ -73,11 +73,11 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     int64_t weight_stride0,
     const Tensor& weight_buf,
     const Tensor& hx,
-    const c10::optional<Tensor>& cx_opt,
+    const std::optional<Tensor>& cx_opt,
     const Tensor& output,
-    const c10::optional<Tensor>& grad_output_r_opt,
-    const c10::optional<Tensor>& grad_hy_r_opt,
-    const c10::optional<Tensor>& grad_cy_r_opt,
+    const std::optional<Tensor>& grad_output_r_opt,
+    const std::optional<Tensor>& grad_hy_r_opt,
+    const std::optional<Tensor>& grad_cy_r_opt,
     int64_t mode,
     int64_t hidden_size,
     int64_t proj_size,
@@ -87,7 +87,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     bool train,
     bool bidirectional,
     IntArrayRef batch_sizes,
-    const c10::optional<Tensor>& dropout_state_opt,
+    const std::optional<Tensor>& dropout_state_opt,
     const Tensor& reserve,
     std::array<bool, 4> output_mask) {
   AT_ERROR("_cudnn_rnn_backward: ATen not compiled with cuDNN support");
@@ -97,10 +97,10 @@ Tensor _cudnn_init_dropout_state(
     double dropout,
     bool train,
     int64_t dropout_seed,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
       pin_memory);
@@ -1396,9 +1396,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     const Tensor& input_r,
     TensorList weight,
     int64_t weight_stride0,
-    const c10::optional<Tensor>& weight_buf_r_opt,
+    const std::optional<Tensor>& weight_buf_r_opt,
     const Tensor& hx,
-    const c10::optional<Tensor>& cx_opt,
+    const std::optional<Tensor>& cx_opt,
     int64_t fn_mode,
     int64_t fn_hidden_size,
     int64_t fn_proj_size,
@@ -1408,7 +1408,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     bool fn_train,
     bool fn_bidirectional,
     IntArrayRef fn_batch_sizes,
-    const c10::optional<Tensor>& fn_dropout_state_opt) {
+    const std::optional<Tensor>& fn_dropout_state_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_buf_r_maybe_owned =
       at::borrow_from_optional_tensor(weight_buf_r_opt);
@@ -2105,11 +2105,11 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     int64_t weight_stride0,
     const Tensor& weight_buf,
     const Tensor& hx,
-    const c10::optional<Tensor>& cx_opt,
+    const std::optional<Tensor>& cx_opt,
     const Tensor& output,
-    const c10::optional<Tensor>& grad_output_r_opt,
-    const c10::optional<Tensor>& grad_hy_r_opt,
-    const c10::optional<Tensor>& grad_cy_r_opt,
+    const std::optional<Tensor>& grad_output_r_opt,
+    const std::optional<Tensor>& grad_hy_r_opt,
+    const std::optional<Tensor>& grad_cy_r_opt,
     int64_t mode,
     int64_t hidden_size,
     int64_t proj_size,
@@ -2119,7 +2119,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     bool train,
     bool bidirectional,
     IntArrayRef batch_sizes,
-    const c10::optional<Tensor>& dropout_state_opt,
+    const std::optional<Tensor>& dropout_state_opt,
     const Tensor& reserve,
     std::array<bool, 4> output_mask) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -2214,10 +2214,10 @@ Tensor _cudnn_init_dropout_state(
     double dropout,
     bool train,
     int64_t dropout_seed,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options =
       TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
@@ -2304,7 +2304,7 @@ struct DropoutState {
   // needed for the first time. Note that in this case needed != used, as we
   // don't need a buffer to e.g. run RNNs in test mode.
   at::Tensor buffer;
-  c10::optional<cuda::CUDAEvent> event;
+  std::optional<cuda::CUDAEvent> event;
   std::mutex mutex;
 #if !defined(USE_ROCM)
   // cudaStreamGetCaptureInfo will never give back a capture id of 0, so 0 can
@@ -2531,8 +2531,8 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   }
 
   // TODO:  try_get_weight_buf returns a Tensor, but _cudnn_rnn below takes a
-  // c10::optional<Tensor> in weight_buf's slot.  Do we want try_get_weight_buf
-  // to return a c10::optional<Tensor> instead of a defined or undefined Tensor?
+  // std::optional<Tensor> in weight_buf's slot.  Do we want try_get_weight_buf
+  // to return a std::optional<Tensor> instead of a defined or undefined Tensor?
   at::cuda::OptionalCUDAGuard guard(input.get_device());
   auto weight_buf = try_get_weight_buf(
       input,
