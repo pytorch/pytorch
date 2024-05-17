@@ -111,7 +111,7 @@ class TestClipGradNormWorldSize2(_TestClipGradNormBase):
                     fully_shard(module)
             fully_shard(model)
             optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-            inp = torch.randint(0, model.model_args.vocab_size, (1, 16), device="cuda")
+            inp = torch.randint(0, model.model_args.vocab_size, (3, 16), device="cuda")
             self._test_clip_grad_norm(
                 1, norm_type, ref_model, ref_optim, model, optim, inp
             )
