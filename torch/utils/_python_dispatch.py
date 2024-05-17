@@ -360,6 +360,23 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
     flat_outs = torch.utils._pytree.tree_leaves(outs)
 
     def alias_non_inplace_storage(arg, ret):
+        # This is hopefully a reasonable assert:
+        # subclasses that rely on this API for output aliasing
+        # should always return wrapper tensor subclasses for us to manually alias.
+        # in theory if a subclass that needs this API wants to sometimes return
+        # plain tensors, we could remove the assert and just not perform the aliasing,
+        # but it seems safer to learn more about this case first.
+        if is_traceable_wrapper_subclass(arg) or is_traceable_wrapper_subclass(ret):
+            ret_list = ret if isinstance(ret, list) else [ret]
+            for r in ret_list:
+                # NJTs have known dense -> subclass and subclass -> dense views, so
+                # skip the type check asserts for those
+                if arg.is_nested or r.is_nested:
+                    continue
+                assert type(arg) == type(
+                    r
+                ), f"""Called {str(func)} with input of type {type(arg)}
+-and output of type {type(ret)}. But expected types to match."""
         # Need to run under no_dispatch, because we explicitly do **not**
         # want our subclass to intercept the set_() call.
         # instead, our subclass should directly have its storage swapped out.
@@ -380,12 +397,10 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
 
                 if isinstance(ret, list):
                     for r in ret:
-                        if type(arg) == type(r):
-                            torch._C._set_storage(r, arg.untyped_storage())
+                        torch._C._set_storage(r, arg.untyped_storage())
                 else:
                     assert isinstance(ret, torch.Tensor), f"type: {type(ret)}"
-                    if type(arg) == type(ret):
-                        torch._C._set_storage(ret, arg.untyped_storage())
+                    torch._C._set_storage(ret, arg.untyped_storage())
             finally:
                 torch._C._set_meta_in_tls_dispatch_include(meta_in_tls)
 
