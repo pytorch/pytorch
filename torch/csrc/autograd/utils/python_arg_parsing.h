@@ -16,7 +16,8 @@ inline std::tuple<
     std::optional<at::ScalarType>,
     bool,
     bool,
-    std::optional<at::MemoryFormat>>
+    std::optional<at::MemoryFormat>,
+    std::optional<at::Layout>>
 parse_to_conversion(PythonArgs& r, bool allow_copy) {
   if (r.idx == 0) {
     if (!allow_copy && !r.isNone(3))
@@ -26,7 +27,8 @@ parse_to_conversion(PythonArgs& r, bool allow_copy) {
         r.scalartypeOptional(1),
         r.toBool(2),
         r.toBool(3),
-        r.memoryformatOptional(4));
+        r.memoryformatOptional(4),
+        r.layoutOptional(5));
   } else if (r.idx == 1) {
     if (!allow_copy && !r.isNone(2))
       throw std::runtime_error(".to() does not accept copy argument");
@@ -35,7 +37,8 @@ parse_to_conversion(PythonArgs& r, bool allow_copy) {
         r.scalartype(0),
         r.toBool(1),
         r.toBool(2),
-        r.memoryformatOptional(3));
+        r.memoryformatOptional(3),
+        r.layoutOptional(4));
   } else {
     auto tensor = r.tensor(0);
     if (!allow_copy && !r.isNone(2))
@@ -45,7 +48,8 @@ parse_to_conversion(PythonArgs& r, bool allow_copy) {
         tensor.scalar_type(),
         r.toBool(1),
         r.toBool(2),
-        r.memoryformatOptional(3));
+        r.memoryformatOptional(3),
+        tensor.layout());
   }
 }
 } // namespace utils

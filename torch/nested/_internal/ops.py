@@ -473,7 +473,7 @@ def _nested_jagged_to_strided(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    inp = new_kwargs.pop("input")
+    inp: NestedTensor = new_kwargs.pop("input")
 
     # Create a new C++ NT from the Python NestedTensor
     # Start by creating metadata needed by C++ NT

@@ -414,14 +414,32 @@ static Tensor dispatch_to(const Tensor & self, bool non_blocking, bool copy, std
 
 static Tensor dispatch_to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy, std::optional<c10::MemoryFormat> optional_memory_format) {
   pybind11::gil_scoped_release no_gil;
-  // TODO: Make this call the TensorOptions version, maybe?
-  return self.to(dtype, non_blocking, copy, optional_memory_format);
+  return self.to(self.options().dtype(dtype).memory_format(optional_memory_format), non_blocking, copy);
 }
 
 static Tensor dispatch_to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy, std::optional<c10::MemoryFormat> optional_memory_format) {
   pybind11::gil_scoped_release no_gil;
-  // TODO: Make this call the TensorOptions version, maybe?
-  return self.to(device, dtype, non_blocking, copy, optional_memory_format);
+  return self.to(self.options().device(device).dtype(dtype).memory_format(optional_memory_format), non_blocking, copy);
+}
+
+static Tensor dispatch_to(const Tensor & self, Device device, bool non_blocking, bool copy, std::optional<c10::MemoryFormat> optional_memory_format, std::optional<c10::Layout> optional_layout) {
+  pybind11::gil_scoped_release no_gil;
+  return self.to(self.options().device(device).memory_format(optional_memory_format).layout(optional_layout), non_blocking, copy);
+}
+
+static Tensor dispatch_to(const Tensor & self, bool non_blocking, bool copy, std::optional<c10::MemoryFormat> optional_memory_format, std::optional<c10::Layout> optional_layout) {
+  pybind11::gil_scoped_release no_gil;
+  return self.to(self.options().memory_format(optional_memory_format).layout(optional_layout), non_blocking, copy);
+}
+
+static Tensor dispatch_to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy, std::optional<c10::MemoryFormat> optional_memory_format, std::optional<c10::Layout> optional_layout) {
+  pybind11::gil_scoped_release no_gil;
+  return self.to(self.options().dtype(dtype).memory_format(optional_memory_format).layout(optional_layout), non_blocking, copy);
+}
+
+static Tensor dispatch_to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy, std::optional<c10::MemoryFormat> optional_memory_format, std::optional<c10::Layout> optional_layout) {
+  pybind11::gil_scoped_release no_gil;
+  return self.to(self.options().device(device).dtype(dtype).memory_format(optional_memory_format).layout(optional_layout), non_blocking, copy);
 }
 
 static PyObject * THPVariable_cpu(PyObject* self, PyObject* args, PyObject* kwargs)
@@ -959,11 +977,11 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "to(Device device=None, ScalarType dtype=None, bool non_blocking=False, bool copy=False, *, MemoryFormat? memory_format=None)",
-    "to(ScalarType dtype, bool non_blocking=False, bool copy=False, *, MemoryFormat? memory_format=None)",
-    "to(Tensor tensor, bool non_blocking=False, bool copy=False, *, MemoryFormat? memory_format=None)",
+    "to(Device device=None, ScalarType dtype=None, bool non_blocking=False, bool copy=False, *, MemoryFormat? memory_format=None, Layout? layout=None)",
+    "to(ScalarType dtype, bool non_blocking=False, bool copy=False, *, MemoryFormat? memory_format=None, Layout? layout=None)",
+    "to(Tensor tensor, bool non_blocking=False, bool copy=False, *, MemoryFormat? memory_format=None, Layout? layout=None)",
   });
-  ParsedArgs<5> parsed_args;
+  ParsedArgs<6> parsed_args;
   auto r = parser.parse(self, args, kwargs, parsed_args);
   if (r.has_torch_function()) {
     return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
@@ -974,23 +992,33 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
   auto non_blocking = std::get<2>(parsed);
   auto copy = std::get<3>(parsed);
   auto opt_memory_format = std::get<4>(parsed);
+  auto opt_layout = std::get<5>(parsed);
   auto& self_ = THPVariable_Unpack(self);
+
+  TORCH_CHECK(
+    !opt_layout.has_value() ||
+    (self_.is_nested() &&
+      *opt_layout == c10::Layout::Strided || *opt_layout == c10::Layout::Jagged),
+    ".to(layout=val) is only valid for converting Nested Tensors between strided <-> jagged layouts, ",
+    "self.is_nested()=", self_.is_nested(), " and layout is ", opt_layout.value_or(c10::Layout::NumOptions)
+  )
+
   torch::utils::maybe_initialize_device(device);
   if (device && device->is_privateuseone()) {
     at::globalContext().lazyInitPrivateUse1();
   }
-  if (!device && !scalarType && !copy && !opt_memory_format.has_value()) {
+  if (!device && !scalarType && !copy && !opt_memory_format.has_value() && !opt_layout.has_value()) {
     Py_INCREF(self);
     return self;
   } else if (!device && !scalarType) {
     return THPVariable_Wrap(
-        dispatch_to(self_, non_blocking, copy, opt_memory_format));
+        dispatch_to(self_, non_blocking, copy, opt_memory_format, opt_layout));
   } else if (!device) {
-    return THPVariable_Wrap(dispatch_to(self_, *scalarType, non_blocking, copy, opt_memory_format));
+    return THPVariable_Wrap(dispatch_to(self_, *scalarType, non_blocking, copy, opt_memory_format, opt_layout));
   } else if (!scalarType) {
-    return THPVariable_Wrap(dispatch_to(self_, *device, non_blocking, copy, opt_memory_format));
+    return THPVariable_Wrap(dispatch_to(self_, *device, non_blocking, copy, opt_memory_format, opt_layout));
   } else {
-    return THPVariable_Wrap(dispatch_to(self_, *device, *scalarType, non_blocking, copy, opt_memory_format));
+    return THPVariable_Wrap(dispatch_to(self_, *device, *scalarType, non_blocking, copy, opt_memory_format, opt_layout));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
