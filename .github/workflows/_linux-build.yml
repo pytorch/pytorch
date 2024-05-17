@@ -102,7 +102,8 @@ jobs:
         id: calculate-docker
         env:
           ECR_DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
-        shell: bash |
+        shell: bash
+        run: |
           export NEW_TAG=${{ inputs.docker-image-tag }}
           if[[ ${NEW_TAG} != '' ]]; then
             IMAGE=${ECR_DOCKER_IMAGE%:*}
