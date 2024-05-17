@@ -420,7 +420,7 @@ aot_autograd_decompositions = {}
 @dynamo_timed
 def create_aot_dispatcher_function(
     flat_fn, flat_args: List[Any], aot_config: AOTConfig
-):
+) -> Tuple[Callable, ViewAndMutationMeta]:
     """
     Traces the forward and backward graphs of the attr:`flat_fn` to generate a
     joint graph. The joint graph is an Fx graph with Aten ops. Please refer to
@@ -663,10 +663,10 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
 
         compiler_fn = choose_dispatcher(needs_autograd, aot_config)
 
-        compiled_fn = compiler_fn(
+        compiled_fn, fw_metadata = compiler_fn(
             flat_fn, fake_flat_args, aot_config, fw_metadata=fw_metadata
         )
-        return compiled_fn
+        return compiled_fn, fw_metadata
 
 
 def aot_function(
@@ -766,7 +766,7 @@ def aot_function(
         if cached_res is None:
             flat_fn, out_spec = create_tree_flattened_fn(fn, args, kwargs)
 
-            compiled_fn = create_aot_dispatcher_function(
+            compiled_fn, _ = create_aot_dispatcher_function(
                 flat_fn,
                 flat_args,
                 aot_config,
@@ -930,7 +930,7 @@ def aot_module_simplified(
     )
 
     with compiled_autograd.disable():
-        compiled_fn = create_aot_dispatcher_function(
+        compiled_fn, _ = create_aot_dispatcher_function(
             functional_call,
             full_args,
             aot_config,
