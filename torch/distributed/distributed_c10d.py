@@ -422,7 +422,7 @@ class P2POp:
         else:
             return super().__repr__()
 
-        return f"P2POp({op_name} pg={group_name}, s={s}, d={d},  numel={self.tensor.numel()}, {self.tensor.dtype})"
+        return f"P2POp({op_name} pg={group_name}, s={s}, d={d},  {self.tensor.shape}, {self.tensor.dtype})"
 
 class _CollOp:
     """
