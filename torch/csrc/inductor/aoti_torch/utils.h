@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/Generator.h>
 #include <ATen/Tensor.h>
 #include <ATen/core/List.h>
 #include <c10/core/DeviceType.h>
@@ -32,6 +33,16 @@ inline AtenTensorHandle tensor_pointer_to_tensor_handle(at::Tensor* tensor) {
   return reinterpret_cast<AtenTensorHandle>(tensor);
 }
 
+inline at::Generator* generator_handle_to_generator_pointer(
+    AtenGeneratorHandle handle) {
+  return reinterpret_cast<at::Generator*>(handle);
+}
+
+inline AtenGeneratorHandle generator_pointer_to_generator_handle(
+    at::Generator* generator) {
+  return reinterpret_cast<AtenGeneratorHandle>(generator);
+}
+
 inline AtenTensorHandle new_tensor_handle(at::Tensor&& tensor) {
   at::Tensor* new_tensor = new at::Tensor(std::move(tensor));
   return tensor_pointer_to_tensor_handle(new_tensor);
@@ -58,6 +69,13 @@ template <>
 inline std::optional<at::Tensor> pointer_to_optional(
     const AtenTensorHandle* ptr) {
   return ptr ? c10::make_optional(*tensor_handle_to_tensor_pointer(*ptr))
+             : c10::nullopt;
+}
+
+template <>
+inline std::optional<at::Generator> pointer_to_optional(
+    AtenGeneratorHandle* ptr) {
+  return ptr ? c10::make_optional(*generator_handle_to_generator_pointer(*ptr))
              : c10::nullopt;
 }
 

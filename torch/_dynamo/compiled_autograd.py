@@ -319,3 +319,11 @@ def disable():
         if prior:
             compiled_autograd_enabled = True
         torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
+
+
+# return to starting state of a new process
+def reset() -> None:
+    compiled_autograd_enable = False
+    assert compiled_autograd_enabled_count == 0
+    torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
+    torch._C._dynamo.compiled_autograd.set_verbose_logging(False)

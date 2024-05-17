@@ -239,9 +239,15 @@ force_same_precision = (
 # Triton: Triton templates defined in torch inductor (AMD and NVidia GPUs).
 # CUTLASS: Cutlass templates and kernels (NVidia GPUs only).
 # CK: Composable Kernel templates and kernels (AMD Instinct GPUs only).
-# CPP: CPP templates and kernels for CPU.
 max_autotune_gemm_backends = os.environ.get(
-    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP"
+    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON"
+).upper()
+
+# Specify the size of the search space for GEMM autotuning.
+# DEFAULT     - balance between compile time overhead and performance
+# EXHAUSTIVE  - maximize performance
+max_autotune_gemm_search_space = os.environ.get(
+    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_SEARCH_SPACE", "DEFAULT"
 ).upper()
 
 # the value used as a fallback for the unbacked SymInts
@@ -458,6 +464,9 @@ pad_channels_last = False
 # Whether to treat output of the backward graph as user visible.
 # For user visible outputs, inductor will make sure the stride matches with eager.
 bw_outputs_user_visible = True
+
+# Whether to always use shape padding if it is enabled and possible
+force_shape_pad: bool = False
 
 # Fx-based linear/matmul/bmm + permute/transpose vertical fusion
 permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
