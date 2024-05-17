@@ -3,7 +3,7 @@ from typing import List, Optional
 import torch
 import torch.utils._pytree as pytree
 from torch._inductor.kernel.mm_common import mm_args
-from . import ir
+from . import mkldnn_ir
 from .codegen.cpp_gemm_template import CppPackedGemmTemplate
 from .ir import TensorBox
 from .lowering import (
@@ -30,7 +30,7 @@ def register_onednn_fusion_ops():
             torch.ops.mkldnn._linear_pointwise,
             "mkldnn::_linear_pointwise",
             has_out_variant=False,
-            kernel_creator=ir.LinearUnary.create,
+            kernel_creator=mkldnn_ir.LinearUnary.create,
         )
         cpu_needs_realized_inputs = [
             torch.ops.mkldnn._convolution_pointwise,
@@ -55,7 +55,7 @@ def register_onednn_fusion_ops():
             algorithm,
         ):
             return TensorBox.create(
-                ir.ConvolutionUnary.create(
+                mkldnn_ir.ConvolutionUnary.create(
                     x,
                     weight,
                     bias,
@@ -86,7 +86,7 @@ def register_onednn_fusion_ops():
             unary_algorithm,
         ):
             return TensorBox.create(
-                ir.ConvolutionBinary.create(
+                mkldnn_ir.ConvolutionBinary.create(
                     x,
                     other,
                     weight,
@@ -120,7 +120,7 @@ def register_onednn_fusion_ops():
             unary_algorithm,
         ):
             return TensorBox.create(
-                ir.ConvolutionBinaryInplace.create(
+                mkldnn_ir.ConvolutionBinaryInplace.create(
                     x,
                     other,
                     weight,
@@ -211,7 +211,7 @@ def register_onednn_fusion_ops():
 
         @register_lowering(torch.ops.mkldnn._linear_pointwise.binary)
         def linear_binary(x: TensorBox, y: TensorBox, w: TensorBox, b: TensorBox, attr):
-            return TensorBox.create(ir.LinearBinary.create(x, y, w, b, attr))
+            return TensorBox.create(mkldnn_ir.LinearBinary.create(x, y, w, b, attr))
 
         @register_lowering(torch.ops.mkldnn._convolution_transpose_pointwise)
         def convolution_transpose_unary(
@@ -228,7 +228,7 @@ def register_onednn_fusion_ops():
             algorithm,
         ):
             return TensorBox.create(
-                ir.ConvolutionTransposeUnary.create(
+                mkldnn_ir.ConvolutionTransposeUnary.create(
                     x,
                     weight,
                     bias,
@@ -264,7 +264,7 @@ def register_onednn_fusion_ops():
         ):
             return pytree.tree_map(
                 TensorBox.create,
-                ir.MkldnnRnnLayer.create(
+                mkldnn_ir.MkldnnRnnLayer.create(
                     x,
                     w0,
                     w1,
@@ -305,7 +305,7 @@ def register_onednn_fusion_ops():
             algorithm,
         ):
             return TensorBox.create(
-                ir.QConvPointWisePT2E.create(
+                mkldnn_ir.QConvPointWisePT2E.create(
                     x,
                     x_scale,
                     x_zp,
@@ -365,7 +365,7 @@ def register_onednn_fusion_ops():
                 # we will do accum dtype convertion here.
                 accum = to_dtype(accum, output_dtype)
             return TensorBox.create(
-                ir.QConvPointWiseBinaryPT2E.create(
+                mkldnn_ir.QConvPointWiseBinaryPT2E.create(
                     x,
                     x_scale,
                     x_zp,
@@ -408,7 +408,7 @@ def register_onednn_fusion_ops():
             algorithm,
         ):
             return TensorBox.create(
-                ir.QLinearPointwisePT2E.create(
+                mkldnn_ir.QLinearPointwisePT2E.create(
                     x,
                     x_scale,
                     x_zp,
@@ -430,7 +430,7 @@ def register_onednn_fusion_ops():
                 torch.ops.mkl._mkl_linear,
                 "mkl::_mkl_linear",
                 has_out_variant=False,
-                kernel_creator=ir.MKLPackedLinear.create,
+                kernel_creator=mkldnn_ir.MKLPackedLinear.create,
             )
             cpu_needs_realized_inputs.append(torch.ops.mkl._mkl_linear)
 
