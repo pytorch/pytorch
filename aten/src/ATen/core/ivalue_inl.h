@@ -1589,7 +1589,7 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
       std::optional<at::Device> device = c10::nullopt) const;
 
   c10::intrusive_ptr<Object> deepcopy(
-      IValue::HashAliasedIValueMap& memo,
+      IValue::HashIdentityIValueMap& memo,
       std::optional<at::Device> device = c10::nullopt) const;
 
   bool is_weak_compilation_ref() const {
