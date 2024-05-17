@@ -485,9 +485,6 @@ class OpsHandler(Protocol[T]):
     # language actually supports the operator.  Keep this in sync with
     # pointwise_overrides_data.
 
-    def airy_ai(self, x0: T) -> T:
-        ...
-
     def airy_ai(self, x: T) -> T:
         ...
 
