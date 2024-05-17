@@ -92,7 +92,7 @@ bool _has_same_storage_numel(const at::Tensor& base, const at::Tensor& other) {
   return base.storage().sym_nbytes() / base.itemsize() == other.storage().sym_nbytes() / other.itemsize();
 }
 
-Tensor _lazy_clone_impl(Tensor const& self, bool simulate) {
+static Tensor _lazy_clone_impl(Tensor const& self, bool simulate) {
   c10::StorageImpl* self_storage = self.storage().unsafeGetStorageImpl();
   c10::intrusive_ptr<c10::StorageImpl> storage;
   if (simulate) {
