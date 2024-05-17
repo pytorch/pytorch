@@ -838,7 +838,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         # Walk all the nodes in fx graph.
         # Write the resulting ops to a table
         min_seq_nr = -1
-        seq_table = "SeqNr|OrigAten|SrcFn\n"
+        seq_table = "SeqNr|OrigAten|SrcFn|FwdSrcFn\n"
         for node in fx_g.graph.nodes:
             if "call_" in node.op and "getitem" not in str(node.target):
                 seq_nr = node.meta.get("seq_nr", -1)
@@ -853,51 +853,58 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
                     mod_name = source_fn_stack[-1][0]
                 # Make all seq_nr relative so it starts at 0
                 seq_nr = seq_nr - min_seq_nr
-                seq_table = seq_table + f"{seq_nr}|{orig_aten}|{mod_name}\n"
+                # For backward nodes, also test that metadata from the corresponding
+                # forward node is copied over.
+                fwd_source_fn_stack = node.meta.get("fwd_source_fn_stack", [])
+                fwd_mod_name = ""
+                if len(fwd_source_fn_stack):
+                    fwd_mod_name = fwd_source_fn_stack[-1][0]
+                seq_table = seq_table + f"{seq_nr}|{orig_aten}|{mod_name}|{fwd_mod_name}\n"
+
 
         self.maxDiff = None
         self.assertExpectedInline(
             seq_table,
             dedent(
                 """\
-SeqNr|OrigAten|SrcFn
-0|aten.convolution.default|l__self___conv1
-0|aten.add.Tensor|l__self___bn1
-1|aten._native_batch_norm_legit_functional.default|l__self___bn1
-2|aten.relu.default|l__self___relu1
-2|aten.detach.default|l__self___relu1
-2|aten.detach.default|l__self___relu1
-3|aten.add.Tensor|add
-4|aten.view.default|flatten
-5|aten.view.default|l__self___fc1
-6|aten.t.default|l__self___fc1
-7|aten.addmm.default|l__self___fc1
-8|aten.view.default|l__self___fc1
-9|aten.sub.Tensor|l__self___loss_fn
-10|aten.abs.default|l__self___loss_fn
-11|aten.mean.default|l__self___loss_fn
-11|aten.ones_like.default|
-11|aten.expand.default|
-11|aten.div.Scalar|
-10|aten.sgn.default|
-10|aten.mul.Tensor|
-8|aten.view.default|
-7|aten.t.default|
-7|aten.mm.default|
-7|aten.t.default|
-7|aten.mm.default|
-7|aten.t.default|
-7|aten.sum.dim_IntList|
-7|aten.view.default|
-6|aten.t.default|
-5|aten.view.default|
-4|aten.view.default|
-2|aten.detach.default|
-2|aten.detach.default|
-2|aten.threshold_backward.default|
-1|aten.native_batch_norm_backward.default|
-0|aten.convolution_backward.default|
-11|aten.add.Tensor|
+SeqNr|OrigAten|SrcFn|FwdSrcFn
+0|aten.convolution.default|l__self___conv1|
+0|aten.add.Tensor|l__self___bn1|
+1|aten._native_batch_norm_legit_functional.default|l__self___bn1|
+2|aten.relu.default|l__self___relu1|
+2|aten.detach.default|l__self___relu1|
+2|aten.detach.default|l__self___relu1|
+3|aten.add.Tensor|add|
+4|aten.view.default|flatten|
+5|aten.view.default|l__self___fc1|
+6|aten.t.default|l__self___fc1|
+7|aten.addmm.default|l__self___fc1|
+8|aten.view.default|l__self___fc1|
+9|aten.sub.Tensor|l__self___loss_fn|
+10|aten.abs.default|l__self___loss_fn|
+11|aten.mean.default|l__self___loss_fn|
+11|aten.ones_like.default||l__self___loss_fn
+11|aten.expand.default||l__self___loss_fn
+11|aten.div.Scalar||l__self___loss_fn
+10|aten.sgn.default||l__self___loss_fn
+10|aten.mul.Tensor||l__self___loss_fn
+8|aten.view.default||l__self___fc1
+7|aten.t.default||l__self___fc1
+7|aten.mm.default||l__self___fc1
+7|aten.t.default||l__self___fc1
+7|aten.mm.default||l__self___fc1
+7|aten.t.default||l__self___fc1
+7|aten.sum.dim_IntList||l__self___fc1
+7|aten.view.default||l__self___fc1
+6|aten.t.default||l__self___fc1
+5|aten.view.default||l__self___fc1
+4|aten.view.default||
+2|aten.detach.default||l__self___relu1
+2|aten.detach.default||l__self___relu1
+2|aten.threshold_backward.default||l__self___relu1
+1|aten.native_batch_norm_backward.default||l__self___bn1
+0|aten.convolution_backward.default||l__self___conv1
+11|aten.add.Tensor||l__self___loss_fn
 """
             ),
         )
