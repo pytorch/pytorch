@@ -422,6 +422,19 @@ PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPModule_check_tp_alloc_is_default(
+    PyObject* _unused,
+    PyObject* cls) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK_TYPE(
+      PyType_Check(cls),
+      "cls must be a type (got ",
+      Py_TYPE(cls)->tp_name,
+      ")");
+  return PyBool_FromLong(Py_TYPE(cls)->tp_alloc == PyType_GenericAlloc);
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPModule_addDocStr(PyObject* _unused, PyObject* args) {
   // adds a __doc__ string to a function, similar to numpy's arr_add_docstring
   static std::vector<std::string> all_docs;
@@ -1268,6 +1281,10 @@ static PyMethodDef TorchMethods[] = { // NOLINT
     {"_autograd_init", THPAutograd_initExtension, METH_NOARGS, nullptr},
     {"_add_docstr", THPModule_addDocStr, METH_VARARGS, nullptr},
     {"_swap_tensor_impl", THPModule_swap_tensor_impl, METH_VARARGS, nullptr},
+    {"_check_tp_alloc_is_default",
+     THPModule_check_tp_alloc_is_default,
+     METH_O,
+     nullptr},
     {"_init_names", THPModule_initNames, METH_O, nullptr},
     {"_has_distributed", THPModule_hasDistributed, METH_NOARGS, nullptr},
     {"_set_default_tensor_type",
@@ -2222,8 +2239,23 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def(
       "_get_extra_conditional_view_warnings",
-      []() { return c10::impl::cow::extra_conditional_view_warnings(); },
+      []() { return c10::impl::cow::get_extra_conditional_view_warnings(); },
       "Check if extra warnings related to deprecation of conditional views are enabled.");
+
+  py_module.def(
+      "_set_future_copy_instead_of_conditional_view",
+      [](bool mode) {
+        c10::impl::cow::set_future_copy_instead_of_conditional_view(mode);
+      },
+      (
+        "Enables future behavior to make operators always return a copy in "
+        "cases where they currently conditionally return a view or a copy"
+      ));
+
+  py_module.def(
+      "_get_future_copy_instead_of_conditional_view",
+      []() { return c10::impl::cow::get_future_copy_instead_of_conditional_view(); },
+      "Check if future behavior to make operators always return a copy is enabled.");
 
   py_module.def(
       "_get_cudnn_batch_norm_reserve_space_size",

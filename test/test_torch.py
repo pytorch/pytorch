@@ -5209,6 +5209,15 @@ else:
             b[b1_ind] += 1
 
     @assertNoWarning()
+    def test_simulate_lazy_clone_reshape(self, device):
+        a = torch.randn(10, device=device)
+        b = a.reshape(a.size())
+        a += 1
+
+        with self.assertWarnsRegex(UserWarning, "divergent behavior"):
+            b + 1
+
+    @assertNoWarning()
     @extraConditionalViewWarningsGuard()
     def test_simulate_lazy_clone_extra_warnings(self, device):
         for extra_warnings in [False, True]:

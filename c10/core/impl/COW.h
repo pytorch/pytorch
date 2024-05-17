@@ -42,4 +42,9 @@ C10_API void check_cowsim_write(StorageImpl& storage);
 
 C10_API void check_cowsim_read(const StorageImpl& storage);
 
+// Enables future behavior to make operators which currently conditionally
+// return either a copy or a view always return a copy instead.
+C10_API void set_future_copy_instead_of_conditional_view(bool mode);
+C10_API bool get_future_copy_instead_of_conditional_view();
+
 } // namespace c10::impl::cow

@@ -58,7 +58,7 @@ class C10_API COWDeleterContext {
 
 using COWSimAccessorID = std::uintptr_t;
 
-enum class AccessType { READ, WRITE };
+enum class AccessType;
 
 class C10_API COWSimDeleterContext : public COWDeleterContext {
  public:
@@ -70,7 +70,7 @@ class C10_API COWSimDeleterContext : public COWDeleterContext {
  private:
   void raise_warning(AccessType access_type);
 
-  bool has_first_writer_ = false;
+  bool has_first_writer_;
   bool has_raised_;
   COWSimAccessorID first_writer_;
 };
@@ -85,9 +85,9 @@ C10_API void cow_deleter(void* ctx);
 
 C10_API void cowsim_deleter(void* ctx);
 
-// Enables raising warnings upon conditional view creation and upon
-// the first write to a conditional view
+// Enables future behavior to make operators always return a copy in cases where
+// they currently conditionally return a view or a copy
 C10_API void set_extra_conditional_view_warnings(bool mode);
-C10_API bool extra_conditional_view_warnings();
+C10_API bool get_extra_conditional_view_warnings();
 
 } // namespace c10::impl::cow

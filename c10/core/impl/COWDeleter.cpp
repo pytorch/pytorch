@@ -57,6 +57,8 @@ COWSimDeleterContext::COWSimDeleterContext(
       has_raised_(false),
       first_writer_(0) {}
 
+enum class AccessType { READ, WRITE };
+
 void COWSimDeleterContext::raise_warning(AccessType access_type) {
   if (!has_raised_) {
     // TODO: Improve this message
@@ -69,7 +71,7 @@ void COWSimDeleterContext::raise_warning(AccessType access_type) {
 
 void COWSimDeleterContext::check_write(COWSimAccessorID writer) {
   if (!has_first_writer_) {
-    if (extra_conditional_view_warnings()) {
+    if (get_extra_conditional_view_warnings()) {
       TORCH_WARN("Detected first write to a deprecated conditional view")
     }
     has_first_writer_ = true;
@@ -91,7 +93,7 @@ C10_API void set_extra_conditional_view_warnings(bool mode) {
   _extra_conditional_view_warnings = mode;
 }
 
-C10_API bool extra_conditional_view_warnings() {
+C10_API bool get_extra_conditional_view_warnings() {
   return _extra_conditional_view_warnings;
 }
 

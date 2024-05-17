@@ -130,7 +130,7 @@ c10::intrusive_ptr<StorageImpl> simulate_lazy_clone_storage(
   std::optional<DataPtr> new_data_ptr; // must be set below
 
   if (has_simple_data_ptr(storage)) {
-    if (extra_conditional_view_warnings()) {
+    if (get_extra_conditional_view_warnings()) {
       TORCH_WARN(
           "This operation creates a conditional view. This behavior is ",
           "deprecated, and in the future it will unconditionally create a copy ",
@@ -228,6 +228,16 @@ C10_API void check_cowsim_read(const StorageImpl& storage) {
       data_ptr.cast_context<cow::COWSimDeleterContext>(cow::cowsim_deleter);
   TORCH_INTERNAL_ASSERT(ctx != nullptr);
   ctx->check_read(reinterpret_cast<std::uintptr_t>(&storage));
+}
+
+static bool _future_copy_instead_of_conditional_view = false;
+
+C10_API void set_future_copy_instead_of_conditional_view(bool mode) {
+  _future_copy_instead_of_conditional_view = mode;
+}
+
+C10_API bool get_future_copy_instead_of_conditional_view() {
+  return _future_copy_instead_of_conditional_view;
 }
 
 } // namespace c10::impl::cow
