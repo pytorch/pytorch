@@ -196,8 +196,8 @@ class PipelineSchedule(ABC):
 
 
 def batch_p2p(p2p_ops: List[dist.P2POp], desc: Optional[str] = None):
-    desc_str = f"desc {desc}, " if desc else ""
-    logger.debug(f"batch {desc_str}{p2p_ops}")  # noqa: G004
+    desc_str = f"{desc}, " if desc else ""
+    logger.debug(f"batch_p2p {desc_str}{p2p_ops}")  # noqa: G004
     return dist.batch_isend_irecv(p2p_ops).pop()
 
 
