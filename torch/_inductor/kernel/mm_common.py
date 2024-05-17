@@ -16,7 +16,7 @@ log = logging.getLogger(__name__)
 
 
 def triton_config(num_stages, num_warps, **kwargs):
-    from triton import Config  # type: ignore[attr-defined]
+    from triton import Config
 
     return Config(kwargs, num_stages=num_stages, num_warps=num_warps)
 
@@ -119,12 +119,7 @@ mm_kernel_configs = [
     {"config": (16, 32, 16, 3, 2), "cond": True},
     {"config": (16, 32, 32, 4, 2), "cond": True},
     {"config": (16, 32, 32, 5, 2), "cond": True},
-    {"config": (16, 32, 64, 5, 2), "cond": True},
-    {"config": (16, 32, 128, 4, 2), "cond": True},
-    {"config": (16, 32, 128, 5, 2), "cond": True},
-    {"config": (16, 64, 128, 5, 2), "cond": True},
     {"config": (32, 32, 16, 1, 2), "cond": True},
-    {"config": (32, 32, 64, 5, 2), "cond": True},
     {"config": (32, 32, 128, 2, 4), "cond": torch.version.hip is None},
     {"config": (32, 64, 32, 5, 8), "cond": True},
     {"config": (64, 32, 32, 5, 8), "cond": True},
@@ -132,16 +127,12 @@ mm_kernel_configs = [
     {"config": (64, 64, 16, 2, 4), "cond": True},
     {"config": (64, 64, 32, 2, 4), "cond": True},
     {"config": (64, 64, 64, 3, 8), "cond": True},
-    {"config": (64, 64, 64, 4, 4), "cond": True},
-    {"config": (64, 64, 64, 5, 4), "cond": True},
     {"config": (64, 64, 128, 3, 4), "cond": True},
     {"config": (64, 64, 128, 5, 4), "cond": True},
     {"config": (64, 128, 32, 3, 4), "cond": True},
     {"config": (64, 128, 32, 4, 8), "cond": True},
-    {"config": (64, 128, 64, 3, 4), "cond": True},
     {"config": (64, 128, 64, 4, 4), "cond": True},
     {"config": (64, 128, 128, 4, 4), "cond": True},
-    {"config": (128, 32, 128, 5, 4), "cond": True},
     {"config": (128, 64, 32, 2, 2), "cond": True},
     {"config": (128, 64, 32, 3, 4), "cond": True},
     {"config": (128, 64, 32, 4, 8), "cond": True},
