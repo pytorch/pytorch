@@ -634,7 +634,8 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         if name == "queue_callback":
             return variables.UserFunctionVariable(
-                torch._dynamo.external_utils.CompiledAutogradEngine.queue_callback, source=self.source
+                torch._dynamo.external_utils.CompiledAutogradEngine.queue_callback,
+                source=self.source,
             ).call_function(tx, (tx.output.get_ca_final_callbacks_var(), *args), kwargs)
         else:
             unimplemented(f"torch._C._ImperativeEngine method: {name}")
@@ -662,10 +663,13 @@ class CompiledAutogradEngineVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         if name == "_exec_final_callbacks_stub":
             return variables.UserFunctionVariable(
-                torch._dynamo.external_utils.CompiledAutogradEngine.exec_final_callbacks, source=self.source
+                torch._dynamo.external_utils.CompiledAutogradEngine.exec_final_callbacks,
+                source=self.source,
             ).call_function(tx, (tx.output.get_ca_final_callbacks_var(), *args), kwargs)
         else:
-            unimplemented(f"torch._dynamo.external_utils.CompiledAutogradEngine method: {name}")
+            unimplemented(
+                f"torch._dynamo.external_utils.CompiledAutogradEngine method: {name}"
+            )
 
 
 class LambdaVariable(VariableTracker):
