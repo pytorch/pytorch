@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
+from torch.autograd.variable import queue_callback
 from torch.autograd.graph import register_multi_grad_hook
 from torch.distributed._composable_state import (
     _get_module_state,
@@ -266,7 +267,14 @@ class FSDPState(_State):
         if self._state_ctx.post_backward_final_callback_queued:
             return
         self._state_ctx.post_backward_final_callback_queued = True
-        Variable._execution_engine.queue_callback(self._root_post_backward_final_callback)
+        if not torch._dynamo.compiled_autograd.compiled_autograd_enabled:
+            Variable._execution_engine.queue_callback(
+                functools.partial(FSDPState._root_post_backward_final_callback, self)
+            )
+        else:
+            queue_callback(
+                self._root_post_backward_final_callback
+            )
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[FSDPState]:

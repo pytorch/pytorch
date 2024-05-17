@@ -5,6 +5,7 @@ from typing import List
 
 import torch
 import torch.utils._pytree as pytree
+from torch.autograd.variable import compiled_autograd_final_callbacks
 
 try:
     import numpy as np
@@ -97,16 +98,12 @@ def untyped_storage_size(x: torch.Tensor):
     return x.untyped_storage().size()
 
 
-final_callbacks = []
-
-def queue_callback(cb):
-    final_callbacks.append(cb)
-
-
 def exec_final_callbacks():
-    for cb in final_callbacks:
+    # TODO(yf225): use lock to be thread-safe (and local to the graph)
+    for cb in compiled_autograd_final_callbacks:
         cb()
-    final_callbacks.clear()
+    # TODO(yf225): does this work without `global` keyword?
+    compiled_autograd_final_callbacks.clear()
 
 
 def call_hook_from_backward_state(*args, bw_state, hook_name: str, **kwargs):
