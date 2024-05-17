@@ -257,7 +257,6 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
       }
       AddHipblasltValidator();
     }
-#endif
 
     if (rocm_validators) {
       AddRocmValidator();
@@ -301,7 +300,6 @@ class GemmStridedBatchedTunableOp : public TunableOp<GemmStridedBatchedParams<T>
       }
       AddHipblasltValidator();
     }
-#endif
 
     if (rocm_validators) {
       AddRocmValidator();
