@@ -246,7 +246,7 @@ class DefaultLogsSpecs(LogsSpecs):
             if not log_dir:
                 log_dir = tempfile.mkdtemp(prefix="torchelastic_")
             elif not os.path.exists(log_dir):
-                os.makedirs(log_dir)
+                os.makedirs(log_dir, exist_ok=True)
             else:
                 if os.path.isfile(log_dir):
                     raise NotADirectoryError(f"log_dir: {log_dir} is a file")
