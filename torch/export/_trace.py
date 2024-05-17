@@ -246,6 +246,12 @@ def _get_param_buffer_mapping(
     for name, buffer in original_module.named_buffers(remove_duplicate=False):
         buffer_lookup.setdefault(id(buffer), []).append(name)
 
+    # reverse lists so FQN assignment is FIFO wrt model structure
+    for name, fqns in param_lookup.items():
+        param_lookup[name] = fqns[::-1]
+    for name, fqns in buffer_lookup.items():
+        buffer_lookup[name] = fqns[::-1]
+
     param_buffer_table: Dict[str, str] = {}
     for dynamo_name, dynamo_param in traced_module.named_parameters(
         remove_duplicate=False
@@ -409,6 +415,7 @@ def _export_to_torch_ir(
     disable_constraint_solver: bool = False,
     restore_fqn: bool = True,
     _log_export_usage: bool = True,
+    same_signature: bool = True,
 ) -> torch.fx.GraphModule:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -439,6 +446,7 @@ def _export_to_torch_ir(
                     tracing_mode="symbolic",
                     disable_constraint_solver=disable_constraint_solver,
                     _log_export_usage=_log_export_usage,
+                    same_signature=same_signature,
                 )(
                     *args,
                     **kwargs,
