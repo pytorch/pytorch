@@ -10,6 +10,8 @@ from torch.nn.modules.module import (
 )
 from torch.utils._pytree import tree_flatten
 
+__all__ = ["ModuleTracker"]
+
 
 class ModuleTracker:
     """
