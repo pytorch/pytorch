@@ -41,11 +41,17 @@
 namespace at::vec {
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2)
 
+#ifdef _MSC_VER
+__declspec(align(64)) struct Vectorizedqi {
+ protected:
+  __m256i vals;
+#else
 struct Vectorizedqi {
  protected:
   __m256i vals __attribute__((aligned(64)));
+#endif
 
  public:
   Vectorizedqi() {}
@@ -97,7 +103,7 @@ inline __m256i pack_saturate_and_clamp<uint8_t>(
 }
 
 template <typename T>
-typename std::enable_if<std::is_same<T, uint8_t>::value || std::is_same<T, int8_t>::value, at::vec::Vectorized<float>>::type
+typename std::enable_if_t<std::is_same_v<T, uint8_t> || std::is_same_v<T, int8_t>, at::vec::Vectorized<float>>
 inline convert_int8_to_float(at::vec::Vectorized<T> src) {
   // Note: this function only convert inputs number of elements equal to at::vec::Vectorized<float>.size()
   // Only handle first 8*8 bits
@@ -113,7 +119,7 @@ inline convert_int8_to_float(at::vec::Vectorized<T> src) {
 }
 
 template <typename T>
-typename std::enable_if<std::is_same<T, uint8_t>::value || std::is_same<T, int8_t>::value, at::vec::Vectorized<T>>::type
+typename std::enable_if_t<std::is_same_v<T, uint8_t> || std::is_same_v<T, int8_t>, at::vec::Vectorized<T>>
 inline convert_float_to_int8(at::vec::Vectorized<float> src) {
   // Convert from float32 to int32 with truncation
   __m256i x_values_int32 = _mm256_cvttps_epi32(src);
@@ -133,7 +139,7 @@ inline convert_float_to_int8(at::vec::Vectorized<float> src) {
 }
 
 template <typename T>
-inline void __attribute__((always_inline)) QuantizeAvx2(
+__FORCE_INLINE void QuantizeAvx2(
     const float* src,
     T* dst,
     int len,
@@ -402,7 +408,7 @@ __m256i RequantizeAvx2(
     __m256 multiplier,
     __m256i zp) {
   static_assert(
-      std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value,
+      std::is_same_v<T, int8_t> || std::is_same_v<T, uint8_t>,
       "Only int8_t/uint8_t are supported");
   constexpr auto min_val = std::numeric_limits<T>::min();
   constexpr auto max_val = std::numeric_limits<T>::max();
@@ -1331,5 +1337,5 @@ Vectorized<c10::quint8> inline maximum(const Vectorized<c10::quint8>& a, const V
   return a.maximum(b);
 }
 
-#endif // if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#endif // if defined(CPU_CAPABILITY_AVX2)
 }} // namespace at::vec::CPU_CAPABILITY

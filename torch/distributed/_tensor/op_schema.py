@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch._ops import OpOverload
@@ -8,9 +8,10 @@ from torch.distributed._tensor.placement_types import DTensorSpec
 from torch.distributed.device_mesh import DeviceMesh
 
 try:
-    from torch.utils._cxx_pytree import tree_map_only, TreeSpec
+    from torch.utils._cxx_pytree import tree_leaves, tree_map_only, TreeSpec
 except ImportError:
     from torch.utils._pytree import (  # type: ignore[no-redef, assignment]
+        tree_leaves,
         tree_map_only,
         TreeSpec,
     )
@@ -103,9 +104,12 @@ class PlacementStrategy:
         return self.input_specs[index]
 
     def __str__(self) -> str:
-        input_specs_str = _pretty_print_spec(self.input_specs)
+        if self.input_specs is not None:
+            input_specs_str = f"{_pretty_print_spec(self.input_specs)} -> "
+        else:
+            input_specs_str = ""
         output_spec_str = _pretty_print_spec(self.output_specs)
-        return f"{input_specs_str} -> {output_spec_str}"
+        return f"{input_specs_str}{output_spec_str}"
 
 
 class StrategyType:
@@ -129,13 +133,13 @@ class OpStrategy(StrategyType):
     def __str__(self) -> str:
         strategy_list_str = ", ".join([str(strategy) for strategy in self.strategies])
         mesh_shape = self.output_mesh_shape
-        return f"OpStrategy:[{strategy_list_str}] @ mesh: {mesh_shape}"
+        return f"[{strategy_list_str}] @ mesh: {mesh_shape}"
 
     def max_num_shards(self) -> int:
         """
         Returns the max number of shards across all placement strategies
         """
-        return max([strategy.output_spec.num_shards for strategy in self.strategies])
+        return max(strategy.output_spec.num_shards for strategy in self.strategies)
 
     @property
     def output_mesh_shape(self):
@@ -156,6 +160,14 @@ class OpStrategy(StrategyType):
     @property
     def output_shape(self):
         return self.strategies[0].output_spec.shape
+
+    @property
+    def ndim(self):
+        return self.output_ndim
+
+    @property
+    def shape(self):
+        return self.output_shape
 
 
 class TupleStrategy(StrategyType):
@@ -198,7 +210,7 @@ class RuntimeSchemaInfo:
     static_kwargkey: Optional[List[str]] = None
     # each op can decide if it wants to use pytree flatten/unflatten during operator
     # eager execution, by default we don't need to do flatten/unflatten, only if the
-    # op indicate it needs to, this is to accelate eager performance.
+    # op indicate it needs to, this is to accelerate eager performance.
     needs_pytree: bool = False
 
 
@@ -236,12 +248,19 @@ class OpSchema:
         """
         # filter out non-relevant values from args schema to get a clean spec list
         # this would mainly be used by sharding propagation rules
+        if self.schema_info is not None and self.schema_info.needs_pytree:
+            return tuple(
+                item
+                for item in tree_leaves(self.args_schema)
+                if isinstance(item, DTensorSpec)
+            )
         return tuple(item for item in self.args_schema if isinstance(item, DTensorSpec))
 
     def __repr__(self) -> str:
+        args_schema = ", ".join([str(arg_schema) for arg_schema in self.args_schema])
         return (
             f"OpSchema(op={self.op},"
-            f" args_schema={self.args_schema},"
+            f" args_schema=({args_schema}),"
             f" kwargs_schema={self.kwargs_schema})"
         )
 
@@ -382,7 +401,14 @@ class OpSchema:
         suggestion_args_spec = self.args_spec
         new_arg_schema: List[object] = []
         idx_of_args_spec = 0
-        for arg in origin_schema.args_schema:
+        if (
+            origin_schema.schema_info is not None
+            and origin_schema.schema_info.needs_pytree
+        ):
+            args_schema: Sequence[Any] = tree_leaves(origin_schema.args_schema)
+        else:
+            args_schema = origin_schema.args_schema
+        for arg in args_schema:
             if isinstance(arg, DTensorSpec):
                 new_arg_schema.append(suggestion_args_spec[idx_of_args_spec])
                 idx_of_args_spec += 1
@@ -405,7 +431,7 @@ class OutputSharding:
     """
 
     output_spec: OutputSpecType
-    schema_suggestions: Optional[List[OpSchema]] = None
+    redistribute_schema: Optional[OpSchema] = None
     failed_reason: Optional[str] = None
     needs_redistribute: bool = False
 

@@ -17,7 +17,7 @@ from torch.distributed._composable.fsdp._fsdp_param_group import (
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
-    check_1d_sharded_parity,
+    check_sharded_parity,
     FSDPTest,
     MLP,
     patch_reduce_scatter,
@@ -123,7 +123,7 @@ class TestFullyShardFrozen(FSDPTest):
                     losses.append(_model(inp).sum())
                     losses[-1].backward()
                     _optim.step()
-                check_1d_sharded_parity(self, ref_model, model)
+                check_sharded_parity(self, ref_model, model)
                 self.assertEqual(losses[0], losses[1])
                 # Check that the post-backward hooks ran through the autograd
                 # backward, not the final callback (except possibly that of the

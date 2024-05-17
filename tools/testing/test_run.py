@@ -293,8 +293,8 @@ class ShardedTest:
     def __str__(self) -> str:
         return f"{self.test} {self.shard}/{self.num_shards}"
 
-    def get_time(self) -> float:
-        return self.time or 0
+    def get_time(self, default: float = 0) -> float:
+        return self.time if self.time is not None else default
 
     def get_pytest_args(self) -> List[str]:
         filter = self.test.get_pytest_filter()

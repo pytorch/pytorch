@@ -33,7 +33,7 @@ void _segment_reduce_lengths_cpu_kernel1(
     const Tensor& data,
     const T* lengths_data,
     int64_t axis,
-    const c10::optional<Scalar>& initial,
+    const std::optional<Scalar>& initial,
     Tensor& output,
     int64_t segment_count,
     int64_t lengths_stride_axis) {
@@ -52,7 +52,7 @@ void _segment_reduce_lengths_cpu_kernel1(
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kBFloat16, kHalf, data.scalar_type(), "_segment_reduce_cpu", [&]() {
         auto* output_data = output.data_ptr<scalar_t>();
-        const auto* values_data = data.data_ptr<scalar_t>();
+        const auto* values_data = data.const_data_ptr<scalar_t>();
         for (const auto outer_idx : c10::irange(outer_offset)) {
           int64_t segment_start, segment_length;
           int64_t segment_end = is_offsets_like ?
@@ -132,7 +132,7 @@ Tensor _segment_reduce_lengths_cpu_kernel(
     const Tensor& data,
     const Tensor& lengths,
     int64_t axis,
-    const c10::optional<Scalar>& initial) {
+    const std::optional<Scalar>& initial) {
   // data and lengths should be contiguous from the call to .contiguous in segment_reduce_kernel
   TORCH_CHECK(data.is_contiguous(), "Expected data to be contiguous.");
   TORCH_CHECK(lengths.is_contiguous(), "Expected lengths to be contiguous.");
@@ -145,7 +145,7 @@ Tensor _segment_reduce_lengths_cpu_kernel(
   auto output = at::empty(output_shape, data.options());
 
   AT_DISPATCH_INDEX_TYPES(lengths.scalar_type(), "_segment_reduce_lengths_cpu_kernel1", [&]() {
-    const auto* lengths_data = lengths.data_ptr<index_t>();
+    const auto* lengths_data = lengths.const_data_ptr<index_t>();
     _segment_reduce_lengths_cpu_kernel1(
         reduction, data, lengths_data, axis, initial, output, segment_count, lengths_stride_axis);
   });
@@ -158,7 +158,7 @@ Tensor _segment_reduce_offsets_cpu_kernel(
     const Tensor& data,
     const Tensor& offsets,
     int64_t axis,
-    const c10::optional<Scalar>& initial) {
+    const std::optional<Scalar>& initial) {
   // data and lengths should be contiguous from the call to .contiguous in segment_reduce_kernel
   TORCH_CHECK(data.is_contiguous(), "Expected data to be contiguous.");
   TORCH_CHECK(offsets.is_contiguous(), "Expected offsets to be contiguous.");
@@ -171,7 +171,7 @@ Tensor _segment_reduce_offsets_cpu_kernel(
   auto output = at::empty(output_shape, data.options());
 
   AT_DISPATCH_INDEX_TYPES(offsets.scalar_type(), "_segment_reduce_offsets_cpu_kernel1", [&]() {
-    const auto* offsets_data = offsets.data_ptr<index_t>();
+    const auto* offsets_data = offsets.const_data_ptr<index_t>();
     _segment_reduce_lengths_cpu_kernel1<index_t, /*is_offsets_like=*/true>(
         reduction, data, offsets_data, axis, initial, output, segment_count, offsets_stride_axis);
   });
@@ -187,7 +187,7 @@ void _segment_reduce_cpu_lengths_backward_kernel1(
     ReductionType reduction,
     const T* lengths_data,
     int64_t axis,
-    const c10::optional<Scalar>& initial,
+    const std::optional<Scalar>& initial,
     Tensor& grad_input,
     int64_t segment_count,
     int64_t lengths_stride_axis) {
@@ -211,10 +211,10 @@ void _segment_reduce_cpu_lengths_backward_kernel1(
       data_contig.scalar_type(),
       "_segment_reduce_cpu",
       [&]() {
-        auto* output_data = output_contig.data_ptr<scalar_t>();
-        auto* grad_data = grad_contig.data_ptr<scalar_t>();
+        auto* output_data = output_contig.const_data_ptr<scalar_t>();
+        auto* grad_data = grad_contig.const_data_ptr<scalar_t>();
         auto* grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
-        const auto* values_data = data_contig.data_ptr<scalar_t>();
+        const auto* values_data = data_contig.const_data_ptr<scalar_t>();
         // Used to calculate exclusive prod
         scalar_t initial_prod_value;
         if (reduction == ReductionType::PROD) {
@@ -323,7 +323,7 @@ Tensor _segment_reduce_cpu_lengths_backward_kernel(
     ReductionType reduction,
     const Tensor& lengths_contig,
     int64_t axis,
-    const c10::optional<Scalar>& initial) {
+    const std::optional<Scalar>& initial) {
   axis = lengths_contig.dim() - 1;
   int64_t segment_count = lengths_contig.size(axis);
   int64_t lengths_stride_axis = lengths_contig.stride(axis);
@@ -331,7 +331,7 @@ Tensor _segment_reduce_cpu_lengths_backward_kernel(
 
   AT_DISPATCH_INDEX_TYPES(
       lengths_contig.scalar_type(), "_segment_reduce_cpu_lengths_backward_kernel1", [&] {
-        const auto* lengths_data = lengths_contig.data_ptr<index_t>();
+        const auto* lengths_data = lengths_contig.const_data_ptr<index_t>();
         _segment_reduce_cpu_lengths_backward_kernel1(
             grad_contig,
             output_contig,
@@ -356,7 +356,7 @@ Tensor _segment_reduce_cpu_offsets_backward_kernel(
     ReductionType reduction,
     const Tensor& offsets_contig,
     int64_t axis,
-    const c10::optional<Scalar>& initial) {
+    const std::optional<Scalar>& initial) {
   axis = offsets_contig.dim() - 1;
   int64_t segment_count = offsets_contig.size(axis) - 1;
   int64_t offsets_stride_axis = offsets_contig.stride(axis);
@@ -364,7 +364,7 @@ Tensor _segment_reduce_cpu_offsets_backward_kernel(
 
   AT_DISPATCH_INDEX_TYPES(
       offsets_contig.scalar_type(), "_segment_reduce_cpu_offsets_backward_kernel1", [&] {
-        const auto* offsets_data = offsets_contig.data_ptr<index_t>();
+        const auto* offsets_data = offsets_contig.const_data_ptr<index_t>();
         _segment_reduce_cpu_lengths_backward_kernel1<index_t, /*is_offsets_like=*/true>(
             grad_contig,
             output_contig,
@@ -386,12 +386,12 @@ Tensor _segment_reduce_cpu_offsets_backward_kernel(
 Tensor segment_reduce_kernel(
     const Tensor& data,
     c10::string_view reduce,
-    const c10::optional<Tensor>& lengths,
-    const c10::optional<Tensor>& indices,
-    const c10::optional<Tensor>& offsets,
+    const std::optional<Tensor>& lengths,
+    const std::optional<Tensor>& indices,
+    const std::optional<Tensor>& offsets,
     int64_t axis,
     bool unsafe,
-    const c10::optional<Scalar>& initial) {
+    const std::optional<Scalar>& initial) {
   axis = maybe_wrap_dim(axis, data.ndimension());
   TORCH_CHECK(data.numel() >= 0);
 
@@ -484,13 +484,13 @@ Tensor _segment_reduce_backward_kernel(
     const Tensor& output,
     const Tensor& data,
     c10::string_view reduce,
-    const c10::optional<Tensor>& lengths,
-    const c10::optional<Tensor>& offsets,
+    const std::optional<Tensor>& lengths,
+    const std::optional<Tensor>& offsets,
     int64_t axis,
-    const c10::optional<Scalar>& initial) {
+    const std::optional<Scalar>& initial) {
   axis = maybe_wrap_dim(axis, data.ndimension());
   // check that one of lengths or offsets is defined
-  // codegen for derivatives.yaml passes an undefined Tensor for None rather than a c10::optional
+  // codegen for derivatives.yaml passes an undefined Tensor for None rather than a std::optional
   // so checking .has_value() doesn't work unlike in the forward pass
   auto lengths_has_value = lengths.has_value() && lengths.value().defined();
   auto offsets_has_value = offsets.has_value() && offsets.value().defined();

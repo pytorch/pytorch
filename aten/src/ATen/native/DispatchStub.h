@@ -227,18 +227,18 @@ struct RegisterPRIVATEUSE1Dispatch {
 // adding parentheses and using helper struct to get rid of the parentheses, do
 // not work with MSVC. So do a `using`-declaration if you need to pass in such
 // `fn`, e.g., grid_sampler_2d_backward_cpu_kernel in GridSampleKernel.h.
-#define DECLARE_DISPATCH(fn, name)         \
-  struct name : DispatchStub<fn, name> {   \
-    name() = default;                      \
-    name(const name&) = delete;            \
-    name& operator=(const name&) = delete; \
-  };                                       \
-  extern TORCH_API struct name name
+#define DECLARE_DISPATCH(fn, name)                                                         \
+  struct name##_DECLARE_DISPATCH_type : DispatchStub<fn, name##_DECLARE_DISPATCH_type> {   \
+    name##_DECLARE_DISPATCH_type() = default;                                              \
+    name##_DECLARE_DISPATCH_type(const name##_DECLARE_DISPATCH_type&) = delete;            \
+    name##_DECLARE_DISPATCH_type& operator=(const name##_DECLARE_DISPATCH_type&) = delete; \
+  };                                                                                       \
+  extern TORCH_API struct name##_DECLARE_DISPATCH_type name;
 
-#define DEFINE_DISPATCH(name) struct name name
+#define DEFINE_DISPATCH(name) struct name##_DECLARE_DISPATCH_type name
 
 #define REGISTER_ARCH_DISPATCH(name, arch, fn) \
-  template <> name::FnPtr TORCH_API DispatchStub<name::FnPtr, struct name>::arch = fn;
+  template <> name##_DECLARE_DISPATCH_type::FnPtr TORCH_API DispatchStub<name##_DECLARE_DISPATCH_type::FnPtr, struct name##_DECLARE_DISPATCH_type>::arch = fn;
 
 #ifdef HAVE_AVX512_CPU_DEFINITION
 #define REGISTER_AVX512_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, AVX512, fn)
@@ -277,16 +277,16 @@ struct RegisterPRIVATEUSE1Dispatch {
   REGISTER_ALL_CPU_DISPATCH(name, nullptr)
 
 #define REGISTER_CUDA_DISPATCH(name, fn) \
-  static RegisterCUDADispatch<struct name> name ## __register(name, fn);
+  static RegisterCUDADispatch<struct name##_DECLARE_DISPATCH_type> name ## __register(name, fn);
 
 #define REGISTER_HIP_DISPATCH(name, fn) \
-  static RegisterHIPDispatch<struct name> name ## __register(name, fn);
+  static RegisterHIPDispatch<struct name##_DECLARE_DISPATCH_type> name ## __register(name, fn);
 
 #define REGISTER_MPS_DISPATCH(name, fn) \
-  static RegisterMPSDispatch<struct name> name ## __register(name, fn);
+  static RegisterMPSDispatch<struct name##_DECLARE_DISPATCH_type> name ## __register(name, fn);
 
 #define REGISTER_PRIVATEUSE1_DISPATCH(name, fn) \
-  static RegisterPRIVATEUSE1Dispatch<struct name> name ## __register(name, fn);
+  static RegisterPRIVATEUSE1Dispatch<struct name##_DECLARE_DISPATCH_type> name ## __register(name, fn);
 
 // NB: This macro must be used in an actual 'cu' file; if you try using
 // it from a 'cpp' file it will not work!

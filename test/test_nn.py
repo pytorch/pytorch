@@ -1699,14 +1699,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             # Applying weight norm on one of them causes it to become a tensor
             l = torch.nn.utils.weight_norm(l, name=name)
             self.assertEqual(
-                sum([isinstance(p, torch.nn.Parameter) for p in l._flat_weights]),
+                sum(isinstance(p, torch.nn.Parameter) for p in l._flat_weights),
                 num_params - 1,
             )
 
             # Removing the weight norm reparametrization restores the Parameter
             l = torch.nn.utils.remove_weight_norm(l, name=name)
             self.assertEqual(
-                sum([isinstance(p, torch.nn.Parameter) for p in l._flat_weights]),
+                sum(isinstance(p, torch.nn.Parameter) for p in l._flat_weights),
                 num_params,
             )
 
@@ -2643,20 +2643,20 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_CTCLoss_lengthchecks_cuda(self):
-        target_lengths = [30, 25, 20]
-        input_lengths = [50, 50, 50]
-        targets = torch.randint(1, 15, (3, 29), dtype=torch.long, device='cuda')
-        log_probs = torch.randn(50, 3, 15, dtype=torch.float, device='cuda').log_softmax(2)
-        with self.assertRaises(RuntimeError):
-            torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+        for target_lengths in [[30, 25, 20], [-1, -1, -1]]:
+            for input_lengths in [[50, 50, 50], [-1, -1, -1]]:
+                targets = torch.randint(1, 15, (3, 29), dtype=torch.long, device='cuda')
+                log_probs = torch.randn(50, 3, 15, dtype=torch.float, device='cuda').log_softmax(2)
+                with self.assertRaises(RuntimeError):
+                    torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
     def test_CTCLoss_lengthchecks_cpu(self):
-        target_lengths = [30, 25, 20]
-        input_lengths = [50, 50, 50]
-        targets = torch.randint(1, 15, (3, 29), dtype=torch.int)
-        log_probs = torch.randn(50, 3, 15, dtype=torch.float).log_softmax(2)
-        with self.assertRaises(RuntimeError):
-            torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+        for target_lengths in [[30, 25, 20], [-1, -1, -1]]:
+            for input_lengths in [[50, 50, 50], [-1, -1, -1]]:
+                targets = torch.randint(1, 15, (3, 29), dtype=torch.int)
+                log_probs = torch.randn(50, 3, 15, dtype=torch.float).log_softmax(2)
+                with self.assertRaises(RuntimeError):
+                    torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_CTCLoss_long_targets(self):
@@ -2697,6 +2697,30 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             res_gpu = torch.nn.functional.ctc_loss(inp, target, input_lengths, target_lengths, reduction='none')
         res_cpu = torch.nn.functional.ctc_loss(inp.cpu(), target, input_lengths, target_lengths, reduction='none')
         self.assertEqual(res_cpu, res_gpu, atol=1e-3, rtol=0)
+
+    def test_CTCLoss_zero_lengths(self):
+        devices = ['cpu']
+        devices += ['cuda'] if TEST_CUDA else []
+        N = 3
+        S = 2
+        C = 200
+        T = 1
+        target = torch.randint(low=1, high=C, size=(N, S), dtype=torch.int)
+        input_lengths = torch.full(size=(N,), fill_value=0, dtype=torch.int)
+        target_lengths = torch.full(size=(N,), fill_value=0, dtype=torch.int)
+        for device in devices:
+            inp = torch.randn(T, N, C, dtype=torch.float, device=device).log_softmax(2).requires_grad_()
+            res = torch.nn.functional.ctc_loss(inp, target, input_lengths, target_lengths, reduction='none')
+            self.assertTrue((res == 0).all().item())
+            res.sum().backward()
+            self.assertTrue((inp.grad == 0).all().item())
+        target_lengths = torch.full(size=(N,), fill_value=1, dtype=torch.int)
+        for device in devices:
+            inp = torch.randn(T, N, C, dtype=torch.float, device=device).log_softmax(2).requires_grad_()
+            res = torch.nn.functional.ctc_loss(inp, target, input_lengths, target_lengths, reduction='none')
+            self.assertTrue((res == torch.inf).all().item())
+            res.sum().backward()
+            self.assertTrue((inp.grad == 0).all().item())
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_CTCLoss_zero_infinity(self):
@@ -5473,6 +5497,30 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(NotImplementedError, "affine_grid only supports 4D and 5D sizes"):
             F.affine_grid(theta, torch.Size([1, 1, 2, 2, 2, 2]), align_corners=False)
 
+    @parametrize_test('device', ['cpu'] + (['cuda'] if TEST_CUDA else []))
+    @parametrize_test('nd', [2, 3])
+    def test_affine_grid_backward_cl_cf_consistency(self, device, nd):
+        # Test based on reported issue: https://github.com/pytorch/pytorch/issues/124154
+
+        theta = torch.rand([6, nd, nd + 1], requires_grad=True, device=device)
+        size = [6, 3, 4, 5] if nd == 2 else [6, 3, 4, 5, 5]
+        grid = torch.nn.functional.affine_grid(theta, size, align_corners=False)
+
+        grad_tensor = torch.rand(grid.shape, device=device)
+
+        memory_format_cl = torch.channels_last if nd == 2 else torch.channels_last_3d
+        grad_tensor_cl = grad_tensor.contiguous(memory_format=memory_format_cl)
+
+        assert theta.grad is None
+        grid.backward(grad_tensor_cl)
+        theta_grad_cl = theta.grad.clone().contiguous()
+
+        theta.grad.zero_()
+        grid.backward(grad_tensor)
+        theta_grad_cf = theta.grad
+
+        self.assertEqual(theta_grad_cf, theta_grad_cl)
+
     @set_default_dtype(torch.double)
     def test_grid_sample(self):
         # Backward pass of native C++ and CUDA kernels branch depending on whether input requires gradient,
@@ -6579,7 +6627,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         elif weight_layout == torch.sparse_coo:
             module.weight = nn.Parameter(module.weight.to_sparse_coo())
         else:
-            raise AssertionError()
+            raise AssertionError
 
         inp = torch.randn(4, requires_grad=True, device=device)
         res = module(inp)
@@ -9755,6 +9803,23 @@ class TestNNDeviceType(NNTestCase):
         del x
         self.assertTrue(torch.allclose(out, out_ref))
 
+    @onlyCUDA
+    @dtypes(torch.half)
+    @largeTensorTest('40GB')
+    def test_replicatepad_64bit_indexing(self, device, dtype):
+        conv = torch.nn.Conv1d(128, 128, 3, 1, 1, padding_mode="replicate", device=device, dtype=dtype)
+        x = torch.randn(size=(256 * 448 * 2, 128, 96), dtype=dtype, device=device)
+        y = conv(x)
+        torch.mean(y).backward()
+
+    @onlyCUDA
+    @dtypes(torch.half)
+    @largeTensorTest('40GB')
+    def test_upsamplingnearest2d_backward_64bit_indexing(self, device, dtype):
+        x = torch.randn(size=(36, 128, 512, 512), device=device, dtype=dtype).requires_grad_()
+        y = F.interpolate(x, scale_factor=2, mode="nearest")
+        y.backward(torch.randn_like(y))
+
     def _slow_masked_softmax(self, input, mask):
         exp = torch.exp(input)
         exp = exp * mask
@@ -11696,10 +11761,10 @@ if __name__ == '__main__':
                 # i.e. we don't count the ignored_idx at all.
                 check_equal(loss, (inp1, targ_positive_ignore_index), (inp2[1:], targ_positive_ignore_index[1:]))
 
-    # Ref: https://github.com/pytorch/pytorch/issue/85005
+    # Ref: https://github.com/pytorch/pytorch/issues/85005
     @onlyCUDA
     @largeTensorTest("45GB", "cpu")
-    @largeTensorTest("45GB", "cuda")
+    @largeTensorTest("70GB", "cuda")
     @parametrize_test("reduction", ("none", "mean", "sum"))
     def test_cross_entropy_large_tensor(self, device, reduction):
         logits = torch.randn(int(2 ** 16), int(2 ** 16) + 1, dtype=torch.float32, device='cuda', requires_grad=True)
@@ -12583,7 +12648,7 @@ if __name__ == '__main__':
 
     # reference issue: https://github.com/pytorch/pytorch/issues/111484
     @onlyCUDA
-    @largeTensorTest("41GB" if TEST_WITH_ROCM else "30GB", "cuda")
+    @largeTensorTest("42GB", "cuda")
     def test_softmax_forward_64bit_indexing(self, device):
         batch_size = 70
         seq_len = 2048

@@ -45,7 +45,7 @@ template <
 C10_LAUNCH_BOUNDS_2(256, 4)
 #endif
 __global__ void
-fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<scalar_t, IndexType> a,
+fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<const scalar_t, IndexType> a,
                          at::cuda::detail::TensorInfo<scalar_t, IndexType> b,
                          at::cuda::detail::TensorInfo<mask_t, IndexType> c,
                          IndexType totalElements, accscalar_t p,
@@ -103,7 +103,7 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<scalar_t, IndexType> a,
     // and replace IndexToOffset call with linearIndex to allow vectorization of NHWC (or other)
     // ordering.
     // Single vectorized load
-    *value = *reinterpret_cast<LoadT*>(&a.data[linearIndex]);
+    *value = *reinterpret_cast<const LoadT*>(&a.data[linearIndex]);
 
     scalar_t r[VEC];
     mask_t mask[VEC];
@@ -133,7 +133,7 @@ template <
 C10_LAUNCH_BOUNDS_2(256, 4)
 #endif
 __global__ void
-fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
+fused_dropout_kernel(cuda::detail::TensorInfo<const scalar_t, IndexType> a,
                      cuda::detail::TensorInfo<scalar_t, IndexType> b,
                      cuda::detail::TensorInfo<mask_t, IndexType> c,
                      IndexType totalElements, accscalar_t p,
@@ -164,7 +164,7 @@ fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
            if (li < totalElements) {
     // Convert `linearIndex` into an offset of `a`
                const IndexType aOffset =
-                   cuda::detail::IndexToOffset<scalar_t, IndexType, ADims>::get(li, a);
+                   cuda::detail::IndexToOffset<const scalar_t, IndexType, ADims>::get(li, a);
                src[ii] = a.data[aOffset];
            }
        }
@@ -187,8 +187,8 @@ void masked_scale_kernel(at::Tensor& ret, const at::Tensor& src, const at::Tenso
    auto iter = at::TensorIteratorConfig()
      .check_all_same_dtype(false)
      .add_output(ret)
-     .add_input(src)
-     .add_input(mask)
+     .add_const_input(src)
+     .add_const_input(mask)
      .build();
 
    at::native::gpu_kernel(
@@ -205,7 +205,7 @@ int get_vector_size(at::Tensor self, at::Tensor ret, at::Tensor mask) {
   if (!self.is_non_overlapping_and_dense() || !ret.is_non_overlapping_and_dense() || !mask.is_non_overlapping_and_dense()) {
     vec_size = 1;
   } else {
-    vec_size = memory::can_vectorize_up_to<scalar_t>((char*)self.data_ptr());
+    vec_size = memory::can_vectorize_up_to<scalar_t>((const char*)self.const_data_ptr());
   }
 
   // check that we'd have no remainders - prefer a smaller vector size with no remainders over a larger vector and remainder.
@@ -236,7 +236,7 @@ inline void launcher(
         using accscalar_t = acc_type<scalar_t, true>;
         accscalar_t pa = (accscalar_t)(p);
         auto self_info =
-            cuda::detail::getTensorInfo<scalar_t, index_type>(self);
+            cuda::detail::getTensorInfo<const scalar_t, index_type>(self);
         auto ret_info =
             cuda::detail::getTensorInfo<scalar_t, index_type>(ret);
         auto mask_info =
@@ -366,7 +366,7 @@ dropout_cuda(CUDAGeneratorImpl* gen, const Tensor& self, double p){
 }
 
 std::tuple<Tensor,Tensor>
-native_dropout_cuda(const Tensor& self, double p, c10::optional<bool> train){
+native_dropout_cuda(const Tensor& self, double p, std::optional<bool> train){
   // short-cut for train == false
   if (train.has_value() && !train.value()) {
     return std::make_tuple(self.clone(), at::ones_like(self, self.options().dtype(c10::CppTypeToScalarType<bool>::value)));
@@ -387,7 +387,7 @@ native_dropout_cuda(const Tensor& self, double p, c10::optional<bool> train){
 
 // TODO: _fused_dropout_cuda is to be removed, see PR #63937
 std::tuple<Tensor,Tensor>
-fused_dropout_cuda(const Tensor& self, double p, c10::optional<Generator> gen_){
+fused_dropout_cuda(const Tensor& self, double p, std::optional<Generator> gen_){
   auto gen = get_generator_or_default<CUDAGeneratorImpl>(gen_, cuda::detail::getDefaultCUDAGenerator());
   return dropout_cuda<uint8_t>(gen, self, p);
 }

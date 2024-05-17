@@ -88,6 +88,9 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
   Stream getDefaultStream(Device d) const override {
     return getDefaultHIPStreamMasqueradingAsCUDA(d.index());
   }
+  Stream getNewStream(Device d, int priority = 0) const override {
+    return getStreamFromPoolMasqueradingAsCUDA(priority, d.index());
+  }
   Stream getStreamFromGlobalPool(Device d, bool isHighPriority = false) const override {
     return getStreamFromPoolMasqueradingAsCUDA(isHighPriority, d.index());
   }
@@ -101,10 +104,6 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     int deviceCnt;
     hipError_t _err;
     _err = hipGetDeviceCount(&deviceCnt);
-#if defined(USE_ROCM) && (ROCM_VERSION < 50201)
-    if(_err == hipErrorInvalidDevice)
-        return 0;
-#endif
     if(_err != hipErrorNoDevice && _err != hipSuccess)
         C10_HIP_CHECK(_err);
     return deviceCnt;
@@ -120,11 +119,9 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     auto hip_flag = hipEventDefault;
     switch (flag) {
       case EventFlag::PYTORCH_DEFAULT:
-      case EventFlag::HIP_EVENT_DISABLE_TIMING:
         hip_flag = hipEventDisableTiming;
         break;
       case EventFlag::BACKEND_DEFAULT:
-      case EventFlag::HIP_EVENT_DEFAULT:
         hip_flag = hipEventDefault;
         break;
       default:
@@ -212,11 +209,35 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     hip_stream.synchronize();
   }
 
+  void synchronizeEvent(void* event) const override {
+    if (!event)
+      return;
+    hipEvent_t hip_event = static_cast<hipEvent_t>(event);
+    C10_HIP_CHECK(hipEventSynchronize(hip_event));
+  }
+
   void recordDataPtrOnStream(
     const c10::DataPtr& data_ptr,
     const Stream& stream) const override {
     HIPStreamMasqueradingAsCUDA hip_stream{stream};
     HIPCachingAllocatorMasqueradingAsCUDA::recordStreamMasqueradingAsCUDA(data_ptr, hip_stream);
+  }
+
+  double elapsedTime(void* event1, void* event2, const DeviceIndex device_index)
+      const override {
+    TORCH_CHECK(
+        event1 && event2,
+        "Both events must be recorded before calculating elapsed time.");
+    int orig_device;
+    C10_HIP_CHECK(hipGetDevice(&orig_device));
+    C10_HIP_CHECK(hipSetDevice(device_index));
+    hipEvent_t hip_event1 = static_cast<hipEvent_t>(event1);
+    hipEvent_t hip_event2 = static_cast<hipEvent_t>(event2);
+    float time_ms = 0;
+    // raise hipErrorNotReady if either event is recorded but not yet completed
+    C10_HIP_CHECK(hipEventElapsedTime(&time_ms, hip_event1, hip_event2));
+    C10_HIP_CHECK(hipSetDevice(orig_device));
+    return static_cast<double>(time_ms);
   }
 };
 

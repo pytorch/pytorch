@@ -17,6 +17,8 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.fsdp._common_utils import clean_tensor_name
 from torch.distributed.fsdp._flat_param import FlatParameter
+from torch.distributed.fsdp.fully_sharded_data_parallel import FLAT_PARAM
+from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -621,6 +623,19 @@ class TestUnshardParams(TestUnshardParamsBase):
         with FSDP.summon_full_params(fsdp_model, with_grads=True):
             for param in fsdp_model.parameters():
                 self.assertTrue(param.grad is None)
+
+    @skip_if_lt_x_gpu(2)
+    def test_unshard_submodule(self):
+        model = nn.Sequential(
+            nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 16)),
+            nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 16)),
+        ).cuda()
+        model = FSDP(model, auto_wrap_policy=ModuleWrapPolicy((nn.Sequential,)))
+        with FSDP.summon_full_params(model[0]):
+            # Check that the summoned module does not have its flat parameter
+            for param_name, param in model[0].named_parameters():
+                self.assertFalse(FLAT_PARAM in param_name)
+            self.assertGreater(len(list(model[0].parameters())), 1)
 
 
 class TestUnshardParamsNoShard(TestUnshardParamsBase):

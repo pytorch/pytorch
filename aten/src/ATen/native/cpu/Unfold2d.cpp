@@ -228,7 +228,7 @@ void unfolded2d_acc_kernel(
 
 template <typename scalar_t>
 static void unfolded2d_copy(
-    scalar_t* input_data,
+    const scalar_t* input_data,
     scalar_t* finput_data,
     int64_t kH,
     int64_t kW,
@@ -256,7 +256,7 @@ static void unfolded2d_copy(
               nip * ((size_t)kH * kW * output_height * output_width) +
               kh * ((size_t)kW * output_height * output_width) +
               kw * ((size_t)output_height * output_width);
-          scalar_t* src =
+          const scalar_t* src =
               input_data + nip * ((size_t)input_height * input_width);
           if (padW > 0 || padH > 0) {
             // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -335,7 +335,7 @@ static void unfolded2d_copy(
 
 template <typename scalar_t>
 static void unfolded2d_copy_channels_last(
-    scalar_t* input_data,
+    const scalar_t* input_data,
     scalar_t* finput_data,
     int64_t kH,
     int64_t kW,
@@ -355,7 +355,7 @@ static void unfolded2d_copy_channels_last(
 
     for (const auto k C10_UNUSED: c10::irange(start, end)) {
       scalar_t* dst = finput_data + y * output_width * kH * kW * n_input_plane + x * kH * kW * n_input_plane;
-      scalar_t* src = input_data;
+      const scalar_t* src = input_data;
 
       if (padW > 0 || padH > 0) {
         for (int64_t kh = 0; kh < kH; kh++) {
@@ -393,7 +393,7 @@ static void unfolded2d_copy_channels_last(
 void unfolded2d_copy_kernel(
     ScalarType dtype,
     void *finput_data,
-    void *input_data,
+    const void *input_data,
     int64_t kH,
     int64_t kW,
     int64_t dH,
@@ -415,7 +415,7 @@ void unfolded2d_copy_kernel(
   if (is_channels_last) {
     AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::BFloat16, at::ScalarType::Half, dtype, "unfolded2d_copy_channels_last", [&] {
       unfolded2d_copy_channels_last(
-          static_cast<scalar_t*>(input_data),
+          static_cast<const scalar_t*>(input_data),
           static_cast<scalar_t*>(finput_data),
             kH, kW,
             dH, dW,
@@ -429,7 +429,7 @@ void unfolded2d_copy_kernel(
   } else {
     AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::BFloat16, at::ScalarType::Half, dtype, "unfolded2d_copy", [&] {
       unfolded2d_copy(
-          static_cast<scalar_t*>(input_data),
+          static_cast<const scalar_t*>(input_data),
           static_cast<scalar_t*>(finput_data),
             kH, kW,
             dH, dW,

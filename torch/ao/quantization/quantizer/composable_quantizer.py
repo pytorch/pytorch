@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from typing import Dict, List
-
-import torch
-
-from torch.fx import Node
+from typing import Dict, List, TYPE_CHECKING
 
 from .quantizer import QuantizationAnnotation, Quantizer
+
+if TYPE_CHECKING:
+    import torch
+    from torch.fx import Node
 
 __all__ = [
     "ComposableQuantizer",
@@ -65,6 +65,13 @@ class ComposableQuantizer(Quantizer):
         for quantizer in self.quantizers:
             quantizer.annotate(model)
             self._record_and_validate_annotations(model, quantizer)
+        return model
+
+    def transform_for_annotation(
+        self, model: torch.fx.GraphModule
+    ) -> torch.fx.GraphModule:
+        for quantizer in self.quantizers:
+            model = quantizer.transform_for_annotation(model)
         return model
 
     def validate(self, model: torch.fx.GraphModule) -> None:

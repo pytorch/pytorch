@@ -339,7 +339,7 @@ c10::SmallVector<at::Tensor> CompileAndLaunchKernel(
     config.add_owned_output(outs[i]);
   }
   for (const auto& t: tensors) {
-    config.add_input(t);
+    config.add_const_input(t);
   }
   TensorIterator iter = config.build();
 

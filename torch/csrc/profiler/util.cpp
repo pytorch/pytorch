@@ -10,9 +10,7 @@
 #include <libkineto.h>
 #endif
 #ifdef USE_DISTRIBUTED
-#ifdef USE_C10D
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
-#endif // USE_C10D
 #endif // USE_DISTRIBUTED
 
 namespace torch {
@@ -20,10 +18,10 @@ namespace profiler {
 namespace impl {
 
 namespace {
-c10::optional<bool> soft_assert_raises_;
+std::optional<bool> soft_assert_raises_;
 } // namespace
 
-void setSoftAssertRaises(c10::optional<bool> value) {
+void setSoftAssertRaises(std::optional<bool> value) {
   soft_assert_raises_ = value;
 }
 
@@ -337,8 +335,7 @@ std::vector<std::string> inputTypes(const at::RecordFunction& fn) {
 // -- NCCL Metadata -----------------------------------------------------------
 // ----------------------------------------------------------------------------
 #ifdef USE_DISTRIBUTED
-#ifdef USE_C10D
-static constexpr auto kCommuName = "Collective name";
+static constexpr auto kCommsName = "Collective name";
 static constexpr auto kDtype = "dtype";
 static constexpr auto kInMsgNelems = "In msg nelems";
 static constexpr auto kOutMsgNelems = "Out msg nelems";
@@ -347,18 +344,17 @@ static constexpr auto kOutSplit = "Out split size";
 static constexpr auto kGlobalRankStart = "Global rank start";
 static constexpr auto kGlobalRankStride = "Global rank stride";
 static constexpr auto kGroupSize = "Group size";
-static constexpr auto kProcessGroupId = "Process Group ID";
+static constexpr auto kProcessGroupName = "Process Group Name";
+static constexpr auto kProcessGroupDesc = "Process Group Description";
 static constexpr auto kGroupRanks = "Process Group Ranks";
 
 static constexpr int32_t kTruncatLength = 30;
-#endif // USE_C10D
 #endif // USE_DISTRIBUTED
 
 std::unordered_map<std::string, std::string> saveNcclMeta(
     const at::RecordFunction& fn) {
   std::unordered_map<std::string, std::string> map;
 #ifdef USE_DISTRIBUTED
-#ifdef USE_C10D
   auto debugInfo = dynamic_cast<ParamCommsDebugInfo*>(
       c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PARAM_COMMS_INFO));
   if (debugInfo == nullptr) {
@@ -367,7 +363,8 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
     return map;
   }
 
-  map.emplace(kCommuName, fmt::format("\"{}\"", debugInfo->getColumnName()));
+  map.emplace(
+      kCommsName, fmt::format("\"{}\"", debugInfo->getCollectiveName()));
   map.emplace(
       kDtype, fmt::format("\"{}\"", c10::toString(debugInfo->getDType())));
   map.emplace(kInMsgNelems, std::to_string(debugInfo->getInMessageNelems()));
@@ -400,12 +397,23 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
                 outSplitSizes.begin() + kTruncatLength,
                 ", ")));
   }
-  map.emplace(
-      kGlobalRankStart, std::to_string(debugInfo->getGlobalRankStart()));
-  map.emplace(
-      kGlobalRankStride, std::to_string(debugInfo->getGlobalRankStride()));
+  auto globalRankStart = debugInfo->getGlobalRankStart();
+  if (globalRankStart >= 0) {
+    map.emplace(kGlobalRankStart, std::to_string(globalRankStart));
+  }
+  auto globalRankStride = debugInfo->getGlobalRankStride();
+  if (globalRankStride > 0) {
+    map.emplace(kGlobalRankStride, std::to_string(globalRankStride));
+  }
   map.emplace(kGroupSize, std::to_string(debugInfo->getWorldSize()));
-  map.emplace(kProcessGroupId, std::to_string(debugInfo->getProcessGroupId()));
+  auto& group_name = debugInfo->getProcessGroupName();
+  if (!group_name.empty()) {
+    map.emplace(kProcessGroupName, fmt::format("\"{}\"", group_name));
+  }
+  auto& group_desc = debugInfo->getProcessGroupDesc();
+  if (!group_desc.empty()) {
+    map.emplace(kProcessGroupDesc, fmt::format("\"{}\"", group_desc));
+  }
   auto& groupRanks = debugInfo->getGroupRanks();
   if (!groupRanks.empty() && groupRanks.size() <= kTruncatLength) {
     map.emplace(
@@ -421,7 +429,6 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
                 ", "),
             groupRanks.back()));
   }
-#endif // USE_C10D
 #endif // USE_DISTRIBUTED
   return map;
 }
