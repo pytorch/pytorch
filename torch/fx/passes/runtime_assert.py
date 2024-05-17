@@ -56,8 +56,8 @@ def insert_deferred_runtime_asserts(
         cast_symbool_to_symint_guardless,
         ConvertIntKey,
         DivideByKey,
-        InnerTensorKey,
         free_symbols,
+        InnerTensorKey,
     )
     from torch.utils._sympy.interp import sympy_interp
     from torch.utils._sympy.reference import PythonReferenceAnalysis
