@@ -1303,6 +1303,8 @@ class GraphLowering(torch.fx.Interpreter):
                                 torch.ops.aten.mkldnn_rnn_layer.default,
                                 torch.ops.onednn.qlinear_pointwise.default,
                                 torch.ops.onednn.qlinear_pointwise.tensor,
+                                torch.ops.onednn.qlinear_pointwise.binary,
+                                torch.ops.onednn.qlinear_pointwise.binary_tensor,
                             ]
                             need_fixed_channels_last_layout += [
                                 torch.ops.mkldnn._convolution_pointwise.default,
