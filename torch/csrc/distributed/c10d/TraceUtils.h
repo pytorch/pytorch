@@ -26,7 +26,7 @@ static c10::IValue nccl_comm_key = "nccl_comm_state";
 static c10::IValue version_key = "version";
 // Update whenever changing contents or formatting of the dump
 // (minor when adding fields, major when changing existing fields)
-static c10::IValue version_val = "2.6";
+static c10::IValue version_val = "2.0";
 static c10::IValue pg_config_key = "pg_config";
 static c10::IValue record_id_key = "record_id";
 static c10::IValue pg_id_key = "pg_id";
@@ -530,14 +530,16 @@ struct NCCLTraceBuffer {
 
     for (const auto& input : inputs) {
       c10::IntArrayRef sizes = input.sizes();
-      te.input_dtypes_.push_back(std::string{input.dtype().name()});
+      te.input_dtypes_.emplace_back();
+      te.input_dtypes_.back().assign(std::string{input.dtype().name()});
       te.input_dims_.push_back(sizes.size());
       te.sizes_.insert(te.sizes_.end(), sizes.begin(), sizes.end());
     }
 
     for (const auto& output : outputs) {
       c10::IntArrayRef sizes = output.sizes();
-      te.output_dtypes_.push_back(std::string{output.dtype().name()});
+      te.output_dtypes_.emplace_back();
+      te.output_dtypes_.back().assign(std::string{output.dtype().name()});
       te.output_dims_.push_back(sizes.size());
       te.sizes_.insert(te.sizes_.end(), sizes.begin(), sizes.end());
     }
