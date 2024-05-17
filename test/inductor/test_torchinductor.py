@@ -36,6 +36,8 @@ from torch._dynamo.testing import (
     expectedFailureCodegenDynamic,
     rand_strided,
     same,
+    skipIfPy312,
+    xfailIfPy312,
 )
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
 from torch._inductor.fx_passes import pad_mm
@@ -46,6 +48,7 @@ from torch._inductor.utils import (
     aoti_eager_cache_dir,
     load_aoti_eager_cache,
     run_and_get_code,
+    run_and_get_cpp_code,
     run_and_get_triton_code,
 )
 from torch._inductor.virtualized import V
@@ -340,29 +343,6 @@ def clone_preserve_strides(x, device=None):
         buffer = buffer.to(device, copy=True)
     out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
     return out
-
-
-def run_and_get_cpp_code(fn, *args, **kwargs):
-    # We use the patch context manager instead of using it as a decorator.
-    # In this way, we can ensure that the attribute is patched and unpatched correctly
-    # even if this run_and_get_cpp_code function is called multiple times.
-    with patch.object(config, "debug", True):
-        torch._dynamo.reset()
-        import io
-        import logging
-
-        log_capture_string = io.StringIO()
-        ch = logging.StreamHandler(log_capture_string)
-        from torch._inductor.graph import output_code_log
-
-        output_code_log.addHandler(ch)
-        prev_level = output_code_log.level
-        output_code_log.setLevel(logging.DEBUG)
-        result = fn(*args, **kwargs)
-        s = log_capture_string.getvalue()
-        output_code_log.setLevel(prev_level)
-        output_code_log.removeHandler(ch)
-    return result, s
 
 
 def check_model(
@@ -2743,6 +2723,7 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    @skipIfPy312  # segfaults
     @config.patch(force_mixed_mm=True)
     def test_mixed_mm(self):
         def fn(a, b):
@@ -2757,6 +2738,7 @@ class CommonTemplate:
             check_lowp=True,
         )
 
+    @skipIfPy312  # segfaults
     @config.patch(force_mixed_mm=True)
     def test_mixed_mm2(self):
         def fn(a, b, scale, bias):
@@ -9448,6 +9430,7 @@ class CommonTemplate:
 
         self.common(fn, (inp, offsets), check_lowp=False)
 
+    @xfailIfPy312
     @requires_gpu()
     @config.patch(assume_aligned_inputs=False)
     def test_config_option_dont_assume_alignment(self):
