@@ -47,12 +47,13 @@ NumberTypeType: TypeAlias = Union[Type[bool], Type[int], Type[float], Type[compl
 NumberType: TypeAlias = Union[bool, int, float, complex]
 RealNumberType: TypeAlias = Union[bool, int, float]
 
-Number = (bool, int, float, complex, torch.SymInt, torch.SymFloat)
+Number = (bool, int, float, complex, torch.SymInt, torch.SymFloat, torch.SymBool)
 # I don't call it Integral because numbers.Integral includes bool, but IntLike
 # does not
 Dim = int
 IntLike = (int, torch.SymInt)
 FloatLike = (float, torch.SymFloat)
+BoolLike = (bool, torch.SymBool)
 IntWithoutSymInt = int
 FloatWithoutSymFloat = float
 DeviceLikeType: TypeAlias = Union[str, torch.device, int]
@@ -1349,11 +1350,15 @@ class RETURN_TYPE(Enum):
 
 
 # TODO: when NumberType contains the sym types, can simplify this
-def number_type(x: Union[NumberType, torch.SymInt, torch.SymFloat]) -> Type:
+def number_type(
+    x: Union[NumberType, torch.SymInt, torch.SymFloat, torch.SymBool]
+) -> Type:
     if isinstance(x, torch.SymInt):
         return int
     elif isinstance(x, torch.SymFloat):
         return float
+    elif isinstance(x, torch.SymBool):
+        return bool
     else:
         return type(x)
 

@@ -301,18 +301,55 @@ bool check_all_tensors_on_device(sdp_params const& params, bool debug) {
 }
 
 bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
-  const auto num_heads{params.query.sym_size(1)},
-      query_lengths{params.query.sym_size(2)},
-      head_dim{params.query.sym_size(3)};
-  const bool ok = query_lengths % 64 == 0 && head_dim % 64 == 0;
-  if (!ok) {
+  const auto s_q = params.query.sym_size(2);
+  const auto s_k = params.key.sym_size(2);
+  const auto head_dim = params.query.sym_size(3);
+  long cudnn_version = at::detail::getCUDAHooks().versionCuDNN();
+  if (cudnn_version >= 90000) {
+    if (head_dim % 8 != 0 || head_dim > 256) {
+      if (debug) {
+        TORCH_WARN("head_dim should be a multiple of 8 and no more than 256");
+      }
+      return false;
+    }
+  } else {
+    if (head_dim % 8 != 0 || head_dim > 128) {
+      if (debug) {
+        TORCH_WARN("head_dim should be a multiple of 8 and no more than 128");
+      }
+      return false;
+    }
+  }
+  if (cudnn_version < 8903) {
     if (debug) {
-      TORCH_WARN(
-          "CuDNN requires sequence length and head dim to be divisible by 64. Got sequence length: ",
-          query_lengths,
-          ", head dim: ",
-          head_dim,
-          ".");
+      TORCH_WARN("SDPA fprop requires cudnn 8.9.3 or higher");
+    }
+    return false;
+  }
+  if (params.dropout != 0.0 && cudnn_version < 8906) {
+    if (debug) {
+      TORCH_WARN("Dropout reference is only supported on 8.9.6 onwards.");
+    }
+    return false;
+  }
+  if (cudnn_version < 90000) {
+    if (s_q < 64) {
+      if (debug) {
+        TORCH_WARN("s_q less than 64 is not supported before cudnn 9.0.0");
+      }
+      return false;
+    }
+    if ((s_q % 64 != 0 || s_k % 64 != 0) && params.dropout != 0.0) {
+      if (debug) {
+        TORCH_WARN(
+            "s_q not a multiple of 64 with padding/dropout is not supported with cudnn version 9.0.0");
+      }
+      return false;
+    }
+  }
+  if (s_k % 64 != 0 && cudnn_version < 8906) {
+    if (debug) {
+      TORCH_WARN("not-multiple-of-64 seq_kv is not supported below 8.9.6");
     }
     return false;
   }
@@ -326,24 +363,64 @@ bool check_cudnn_layout(sdp_params const& params, bool debug) {
   const int64_t s_k = params.key.size(2);
   const int64_t s_v = params.value.size(2);
   // corresponds to cuDNN's "packed QKV" layout
-  const bool query_layout_ok = (params.query.stride(0) == s_q * 3 * h * d) &&
+  const bool packed_query_layout_ok = (params.query.stride(0) == s_q * 3 * h * d) &&
                                  (params.query.stride(1) == d) &&
                                  (params.query.stride(2) == 3 * h * d) &&
                                  (params.query.stride(3) == 1);
-  const bool key_layout_ok = (params.key.stride(0) == s_k * 3 * h * d) &&
+  const bool packed_key_layout_ok = (params.key.stride(0) == s_k * 3 * h * d) &&
                                (params.key.stride(1) == d) &&
                                (params.key.stride(2) == 3 * h * d) &&
                                (params.key.stride(3) == 1);
-  const bool value_layout_ok = (params.value.stride(0) == s_v * 3 * h * d) &&
+  const bool packed_value_layout_ok = (params.value.stride(0) == s_v * 3 * h * d) &&
                                  (params.value.stride(1) == d) &&
                                  (params.value.stride(2) == 3 * h * d) &&
                                  (params.value.stride(3) == 1);
-  if (debug) {
-    if (!query_layout_ok) { TORCH_WARN("Query tensor was not in cuDNN-supported packed QKV layout", params.query.strides()); }
-    if (!key_layout_ok) { TORCH_WARN("Key tensor was not in cuDNN-supported packed QKV layout"); }
-    if (!value_layout_ok) { TORCH_WARN("Value tensor was not in cuDNN-supported packed QKV layout"); }
+
+  const bool packed_layout_ok = packed_query_layout_ok && packed_key_layout_ok && packed_value_layout_ok;
+
+  const bool query_layout_ok = (params.query.stride(0) == s_q * h * d) &&
+                               (params.query.stride(1) == d) &&
+                               (params.query.stride(2) == h * d) &&
+                               (params.query.stride(3) == 1);
+  const bool key_layout_ok = (params.key.stride(0) == s_k * h * d) &&
+                              (params.key.stride(1) == d) &&
+                              (params.key.stride(2) == h * d) &&
+                              (params.key.stride(3) == 1);
+  const bool value_layout_ok = (params.value.stride(0) == s_v * h * d) &&
+                               (params.value.stride(1) == d) &&
+                               (params.value.stride(2) == h * d) &&
+                               (params.value.stride(3) == 1);
+
+  const bool layout_ok = query_layout_ok && key_layout_ok && value_layout_ok;
+
+  if (!packed_value_layout_ok && !layout_ok) {
+    if (debug) {
+      if (!packed_layout_ok) {
+        if (!packed_query_layout_ok) {
+          TORCH_WARN("Query tensor was not in cuDNN-supported packed QKV layout", params.query.strides());
+        }
+        if (!packed_key_layout_ok) {
+          TORCH_WARN("Key tensor was not in cuDNN-supported packed QKV layout", params.key.strides());
+        }
+        if (!packed_value_layout_ok) {
+          TORCH_WARN("Value tensor was not in cuDNN-supported packed QKV layout", params.value.strides());
+        }
+      }
+      if (!layout_ok) {
+        if (!query_layout_ok) {
+          TORCH_WARN("Query tensor was not in cuDNN-supported unpacked QKV layout", params.query.strides());
+        }
+        if (!key_layout_ok) {
+          TORCH_WARN("Key tensor was not in cuDNN-supported unpacked QKV layout", params.key.strides());
+        }
+        if (!value_layout_ok) {
+          TORCH_WARN("Value tensor was not in cuDNN-supported unpacked QKV layout", params.value.strides());
+        }
+      }
+    }
+    return false;
   }
-  return query_layout_ok && key_layout_ok && value_layout_ok;
+  return true;
 }
 
 bool check_cudnn_hardware_support(sdp_params const& params, bool debug) {
@@ -434,14 +511,14 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
   constexpr auto general_constraints =
       array_of<bool (*)(sdp_params const&, bool)>(
           check_runtime_enabled_cudnn,
-          check_cudnn_hardware_support);
-          // check_all_tensors_on_device,
-          // check_cudnn_tensor_shapes,
-          // check_cudnn_layout,
+          check_cudnn_hardware_support,
+          check_all_tensors_on_device,
+          check_cudnn_tensor_shapes,
+          check_cudnn_layout,
           // check_is_causal,
-          // check_for_nested_inputs,
-          // check_cudnn_requires_grad,
-          // check_dtypes_low_precision
+          check_for_nested_inputs,
+          check_cudnn_requires_grad,
+          check_dtypes_low_precision);
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
       return false;

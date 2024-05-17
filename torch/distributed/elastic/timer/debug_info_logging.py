@@ -17,4 +17,5 @@ def log_debug_info_for_expired_timers(
     run_id: str,
     expired_timers: Dict[int, List[str]],
 ):
-    logger.info("Timers expired for run:[%s] [%s].", run_id, expired_timers)
+    if expired_timers:
+        logger.info("Timers expired for run:[%s] [%s].", run_id, expired_timers)

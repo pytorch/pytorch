@@ -520,7 +520,7 @@ class TestPatternMatcher(TestCase):
             torch.randn(16, 16, device="cuda"),
             torch.randn(16, 16, device="cuda"),
         ]
-        self.common(fn, args, 2, 5)
+        self.common(fn, args, 1, 4)
 
     def test_cat_addmm(self):
         def fn(a, b, c):
@@ -538,7 +538,7 @@ class TestPatternMatcher(TestCase):
             torch.randn(16, 16, device="cuda"),
             torch.randn(16, 16, device="cuda"),
         ]
-        self.common(fn, args, 2, 5)
+        self.common(fn, args, 1, 4)
 
     def test_cat_slice_cat_cuda(self):
         def fn(a, b):
@@ -839,7 +839,9 @@ class TestPatternMatcher(TestCase):
 
     def test_match_with_mutation(self):
         counter = 0
-        test_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+        test_pass = PatternMatcherPass(
+            prevent_match_across_mutations=True, pass_name="test"
+        )
 
         @register_graph_pattern(
             CallFunction(
@@ -892,7 +894,14 @@ class TestPatternMatcher(TestCase):
         ]
 
         with unittest.mock.patch(
-            "torch._inductor.fx_passes.pre_grad.pattern_matcher_passes", [test_pass]
+            "torch._inductor.fx_passes.pre_grad.config.pre_grad_fusion_options",
+            {"test": {}},
+        ), unittest.mock.patch(
+            "torch._inductor.fx_passes.pre_grad.PRE_GRAD_FUSIONS",
+            [],
+        ), unittest.mock.patch(
+            "torch._inductor.fx_passes.pre_grad.PRE_GRAD_PATTERNS",
+            {"test": test_pass},
         ):
             for fn in (fn0, fn1, fn2, fn3, fn4, fn5):
                 counter = 0

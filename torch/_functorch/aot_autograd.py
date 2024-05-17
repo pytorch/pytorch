@@ -2,7 +2,7 @@
 
 import itertools
 from contextlib import contextmanager, nullcontext
-from functools import partial, wraps
+from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from unittest.mock import patch
 
@@ -67,12 +67,8 @@ from ._aot_autograd.logging_utils import (  # noqa: F401
     track_graph_compiling,
 )
 from ._aot_autograd.runtime_wrappers import (  # noqa: F401
-    aot_dispatch_subclass_wrapper,
-    aot_wrapper_dedupe,
-    aot_wrapper_synthetic_base,
-    create_runtime_wrapper,
-    functionalized_rng_runtime_epilogue,
-    merge_view_inputs,
+    AOTDedupeWrapper,
+    AOTSyntheticBaseWrapper,
 )
 from ._aot_autograd.schemas import (  # noqa: F401
     AOTConfig,
@@ -674,17 +670,25 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
                 aot_dispatch_base_graph if aot_config.is_export else aot_dispatch_base
             )
 
-        compiler_fn = partial(
-            aot_wrapper_synthetic_base,
-            compiler_fn=compiler_fn,
-            needs_autograd=needs_autograd,
-        )
-        compiler_fn = partial(aot_wrapper_dedupe, compiler_fn=compiler_fn)
-        # You can put more passes here
+        wrappers = [
+            AOTDedupeWrapper(),
+            AOTSyntheticBaseWrapper(trace_joint=needs_autograd),
+            # Add more passes here
+        ]
+        for wrapper in wrappers:
+            flat_fn, fake_flat_args, aot_config, fw_metadata = wrapper.pre_compile(
+                flat_fn, fake_flat_args, aot_config, fw_metadata=fw_metadata
+            )
 
         compiled_fn = compiler_fn(
             flat_fn, fake_flat_args, aot_config, fw_metadata=fw_metadata
         )
+
+        for wrapper in reversed(wrappers):
+            compiled_fn = wrapper.post_compile(
+                compiled_fn, aot_config, fw_metadata=fw_metadata
+            )
+
         if aot_config.is_export:
             # During export, we don't get back a callable - we get back the raw fx graph
             # (either a joint or an inference-only graph)

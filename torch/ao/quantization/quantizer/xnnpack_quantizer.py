@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import functools
 
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
 
 import torch
 import torch._dynamo as torchdynamo
@@ -21,8 +21,6 @@ from torch.ao.quantization.observer import (
     PlaceholderObserver,
 )
 
-from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
-
 from torch.ao.quantization.quantizer import QuantizationSpec, Quantizer
 
 from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
@@ -34,7 +32,10 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
     QuantizationConfig,
 )
 
-from torch.fx import Node
+
+if TYPE_CHECKING:
+    from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
+    from torch.fx import Node
 
 
 __all__ = [

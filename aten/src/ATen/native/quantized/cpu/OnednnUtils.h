@@ -485,7 +485,7 @@ static at::Tensor _quantized_convolution_onednn(
     torch::List<int64_t> dilation,
     bool transposed,
     int64_t groups,
-    double inv_output_scale,
+    double output_scale,
     int64_t output_zero_point,
     c10::optional<at::Tensor> accum=c10::nullopt, // accum to fused with conv add
     double accum_scale=1.0,

@@ -1,4 +1,6 @@
-from typing import Callable
+import functools
+import itertools
+from typing import Callable, List
 
 import torch
 
@@ -10,9 +12,9 @@ import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._C._functorch import _add_batch_dim, get_unwrapped, maybe_get_bdim
 from torch._higher_order_ops.utils import (
-    _maybe_run_with_interpreter,
     _set_compilation_env,
     autograd_not_implemented,
+    reenter_make_fx,
     unique_graph_id,
 )
 
@@ -20,7 +22,6 @@ from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
-    make_fx,
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
@@ -28,9 +29,19 @@ from torch.fx.experimental.proxy_tensor import (
 aten = torch._ops.ops.aten
 
 
+def wrap_combine_fn_flat(*args, combine_fn, spec, num_leaves):
+    assert len(args) == 2 * num_leaves
+    lhs = pytree.tree_unflatten(args[:num_leaves], spec)
+    rhs = pytree.tree_unflatten(args[num_leaves:], spec)
+    combined = combine_fn(lhs, rhs)
+    combined_leaves = pytree.tree_leaves(combined)
+    assert num_leaves == len(combined_leaves)
+    return combined_leaves
+
+
 def associative_scan(
-    combine_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
-    input: torch.Tensor,
+    combine_fn: Callable[[pytree.PyTree, pytree.PyTree], pytree.PyTree],
+    input: pytree.PyTree,
     dim: int,
 ) -> torch.Tensor:
     r"""
@@ -46,11 +57,13 @@ def associative_scan(
     ``torch.compile``. Further, only CUDA device codegen is supported at the moment.
 
     Args:
-        combine_fn (Callable): A binary callable with type (Tensor, Tensor) -> Tensor,
-            which is pure, pointwise, and satisfies the associative property.
-            i.e. ``combine_fn(a, combine_fn(b, c)) == combine_fn(combine_fn(a, b), c)``
-        input (torch.Tensor): The input tensor
+        combine_fn (Callable): A binary callable with type ``(Tensor, Tensor) -> Tensor``,
+            or if input is a pytree ``(pytree, pytree) -> pytree``.
+            This function must be pure, pointwise, and satisfy the associative property.
+        input (torch.Tensor): The input tensor, or nested pytree of tensors.
+            All inputs are expected to have the same shape.
         dim (int): the dimension to scan over
+
 
     Example::
 
@@ -60,53 +73,75 @@ def associative_scan(
         cumsum = associative_scan(add, x, dim)
 
     """
+    assert callable(combine_fn), "combine_fn must be a callable, but got {combine_fn}"
+    assert isinstance(dim, int), "dim must be an int, but got {type(dim)}"
 
-    assert isinstance(input, torch.Tensor), "input must be a Tensor"
-    dim = utils.canonicalize_dim(input.ndim, dim)
-    assert callable(combine_fn), "combine_fn must be a callable"
+    if not torch._dynamo.is_compiling():
+        with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
+            return torch.compile(associative_scan, fullgraph=True)(
+                combine_fn, input, dim
+            )
 
-    if torch._dynamo.is_compiling():
-        return associative_scan_op(combine_fn, input, dim)
+    leaves, spec = pytree.tree_flatten(input)
 
-    if not torch._dynamo.is_dynamo_supported():
-        raise RuntimeError("associative_scan requires dynamo support.")
+    assert len(leaves) >= 1, "expected at least 1 input leaf"
+    assert all(
+        isinstance(x, torch.Tensor) for x in leaves
+    ), "input leaves must be a Tensor"
+    shape = leaves[0].shape
+    ndim = len(shape)
+    dim = utils.canonicalize_dim(ndim, dim)
 
-    with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
-        return torch.compile(associative_scan_op, fullgraph=True)(
-            combine_fn, input, dim
-        )
+    for x in leaves[1:]:
+        assert x.shape == shape, "All input tensors must have the same shape"
+
+    combine_fn = functools.partial(
+        wrap_combine_fn_flat, combine_fn=combine_fn, spec=spec, num_leaves=len(leaves)
+    )
+
+    result_flat = associative_scan_op(combine_fn, leaves, dim)
+
+    return pytree.tree_unflatten(result_flat, spec)
 
 
 associative_scan_op = HigherOrderOperator("associative_scan")
 
 
-def trace_associative_scan(proxy_mode, func_overload, combine_fn, input, dim):
+def trace_associative_scan(
+    proxy_mode, func_overload, combine_fn: Callable, input: List[torch.Tensor], dim: int
+):
     pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
 
     with disable_proxy_modes_tracing():
-        sample_inputs = (
-            torch.full((), False, dtype=input.dtype, device=input.device),
-            torch.full((), False, dtype=input.dtype, device=input.device),
+        sample_inputs = [
+            torch.full((), False, dtype=x.dtype, device=x.device)
+            for x in itertools.chain(input, input)
+        ]
+        combine_graph = reenter_make_fx(combine_fn, pre_dispatch=pre_dispatch)(
+            *sample_inputs
         )
-        combine_graph = make_fx(
-            _maybe_run_with_interpreter(combine_fn), pre_dispatch=pre_dispatch
-        )(*sample_inputs)
 
-    outputs = []
+    outputs = None
     for node in combine_graph.graph.nodes:
         if node.op == "output":
-            outputs.extend(node.args)
+            assert outputs is None
+            assert len(node.args) == 1
+            outputs = node.args[0]
 
-    assert (
-        len(outputs) == 1
-    ), f"expected combine_fn to have 1 output but got {len(outputs)}"
+    assert outputs is not None
+    assert len(outputs) == len(
+        input
+    ), f"expected combine_fn to return {len(input)} results but got {len(outputs)}"
 
-    for o in outputs:
+    for i, o in zip(input, outputs):
         o_meta = o.meta["tensor_meta"]
-        assert o_meta.dtype == input.dtype, (
-            f"combine_fn output type mismatch, expected {input.dtype} "
+        assert o_meta.dtype == i.dtype, (
+            f"combine_fn output type mismatch, expected {i.dtype} "
             + f"but got {o_meta.dtype}"
         )
+        assert (
+            o_meta.shape == ()
+        ), f"combine_fn must return a scalar tensor but got shape {o_meta.shape}"
         assert (
             o_meta.shape == ()
         ), f"combine_fn must return a scalar tensor but got shape {o_meta.shape}"
@@ -122,7 +157,7 @@ def trace_associative_scan(proxy_mode, func_overload, combine_fn, input, dim):
     )
 
     with disable_proxy_modes_tracing():
-        out = aten.clone(input)
+        out = [aten.clone(x) for x in input]
 
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
@@ -148,7 +183,7 @@ def associative_scan_proxy_mode(mode, combine_fn, input, dim):
 @associative_scan_op.py_impl(FakeTensorMode)
 def assoiciative_scan_fake_tensor_mode(mode, combine_fn, input, dim):
     with mode:
-        return input.clone()
+        return [x.clone() for x in input]
 
 
 @associative_scan_op.py_functionalize_impl
@@ -160,9 +195,25 @@ def associative_scan_functionalize(ctx, combine_fn, input, dim):
 
 
 @associative_scan_op.py_impl(torch._C._functorch.TransformType.Vmap)
-def associative_scan_batch_rule(interpreter, combine_fn, input, dim):
-    input_ = get_unwrapped(input)
-    bdim = maybe_get_bdim(input)
-    res = associative_scan_op(combine_fn, input_, dim + (dim >= bdim))
+def associative_scan_batch_rule(interpreter, input, dim, combine_fn):
+    input_ = [get_unwrapped(x) for x in input]
+    input_bdims = [maybe_get_bdim(x) for x in input]
+
+    batch_size = None
+    for inp, bdim in zip(input, input_bdims):
+        if bdim is not None:
+            batch_size = get_unwrapped(inp).shape[bdim]
+
+    assert batch_size
+    input_unwrapped = []
+    for x, bdim in zip(input, input_bdims):
+        unwrap = get_unwrapped(x)
+        if dim is None:
+            unwrap = unwrap.unsqueeze(0).expand(batch_size, *x.shape)
+        else:
+            unwrap = unwrap.movedim(bdim, 0)
+        input_unwrapped.append(unwrap)
+
+    res = associative_scan_op(combine_fn, input_unwrapped, dim + 1)
     lvl = interpreter.level()
-    return _add_batch_dim(res, bdim, lvl)
+    return [_add_batch_dim(x, 0, lvl) for x in res]

@@ -8,6 +8,7 @@ from typing import (
     Callable,
     cast,
     Dict,
+    Generator,
     Iterable,
     List,
     no_type_check,
@@ -22,8 +23,11 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._state_dict_utils import (
+    _broadcast_state_dict,
+    _flatten_state_dict,
     _gather_state_dict,
     _offload_state_dict_to_cpu,
+    _unflatten_state_dict,
 )
 from torch.distributed._tensor import DTensor
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
@@ -45,6 +49,7 @@ from torch.distributed.fsdp._common_utils import (
 )
 from torch.nn.modules.module import _IncompatibleKeys
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils._pytree import tree_map_only
 
 
 FLAT_PARAM = "_flat_param"
@@ -75,7 +80,6 @@ def gc_context():
         yield
     finally:
         # TODO: add logging for the gc details/time
-        gc.collect()
         if is_enabled:
             gc.enable()
 
@@ -110,6 +114,13 @@ class StateDictOptions:
     - ``strict``: the ``strict`` option when ``set_state_dict`` calls
       model.load_state_dict().
       The default value is False.
+
+    - ``broadcast_from_rank0``: when the option is True, rank0 should receive a
+       full state_dict and will broadcast the tensors in the state_dict/
+       optim_state_dict one by one to other ranks. Other ranks will receive
+       the tensors and shard according to the local shards in the model and
+       optimizer. ``full_state_dict`` must be set to True when using this option.
+       This option currently only supports DTensor, not the legacy ShardedTensor.
     """
 
     full_state_dict: bool = False
@@ -117,6 +128,7 @@ class StateDictOptions:
     ignore_frozen_params: bool = False
     keep_submodule_prefixes: bool = True
     strict: bool = True
+    broadcast_from_rank0: bool = False
 
 
 @dataclass
@@ -132,6 +144,7 @@ class _StateDictInfo(StateDictOptions):
     fsdp_modules: List[nn.Module] = field(default_factory=list)
 
 
+@functools.lru_cache(maxsize=None)
 def _get_fqns(
     model: nn.Module,
     name: str,
@@ -185,9 +198,48 @@ def _get_fqns(
                 fqn_obj_names.append(curr_obj_name)
         else:
             fqn_obj_names.append(curr_obj_name)
-            curr_obj = getattr(curr_obj, curr_obj_name)
+            if curr_obj_name == nn.modules.module._EXTRA_STATE_KEY_SUFFIX:
+                if i != len(obj_names) - 1:
+                    raise RuntimeError("Expect `_extra_state` to be the last obj name")
+            else:
+                curr_obj = getattr(curr_obj, curr_obj_name)
 
     return {".".join(fqn_obj_names).replace(_CHECKPOINT_PREFIX, "")}
+
+
+class _EXTRA_STATE:
+    pass
+
+
+def _iterate_valid_model_state(model):
+    visited_modules: Set[nn.Module] = set()
+
+    def recurse(module: nn.Module, curr_fqn: str) -> Generator:
+        visited_modules.add(module)
+
+        curr_fqn = f"{curr_fqn}." if curr_fqn else ""
+        for name, submodule in module.named_children():
+            if submodule in visited_modules:
+                continue
+            new_fqn = f"{curr_fqn}{name}"
+            yield from recurse(submodule, new_fqn)
+
+        for name, obj in chain(
+            module.named_buffers(recurse=False), module.named_parameters(recurse=False)
+        ):
+            if name in module._non_persistent_buffers_set:
+                continue
+            new_fqn = f"{curr_fqn}{name}"
+            yield new_fqn, obj
+
+        if (
+            getattr(module.__class__, "get_extra_state", nn.Module.get_extra_state)
+            != nn.Module.get_extra_state
+        ):
+            new_fqn = f"{curr_fqn}{nn.modules.module._EXTRA_STATE_KEY_SUFFIX}"
+            yield new_fqn, _EXTRA_STATE()
+
+    yield from recurse(model, "")
 
 
 def _verify_options(
@@ -212,11 +264,13 @@ def _verify_options(
         Union[str, torch.Tensor], Union[Set[str], torch.Tensor]
     ] = {}
     all_fqns = set()
-    for name, param in chain(model.named_parameters(), model.named_buffers()):
+    for name, param in _iterate_valid_model_state(model):
         fqns = _get_fqns(model, name)
-        fqn_param_mapping[param] = fqns
+        if not isinstance(param, _EXTRA_STATE):
+            fqn_param_mapping[param] = fqns
         for fqn in fqns:
-            fqn_param_mapping[fqn] = param
+            if not isinstance(param, _EXTRA_STATE):
+                fqn_param_mapping[fqn] = param
             all_fqns.add(fqn)
 
     submodule_prefixes: Set[str] = set()
@@ -229,6 +283,10 @@ def _verify_options(
             assert len(fqns) == 1, "Submodule FQN should only have 1 instance"
             submodule_prefixes.update(f"{fqn}." for fqn in fqns)
 
+    if options.broadcast_from_rank0 and not options.full_state_dict:
+        raise ValueError(
+            "full_state_dict must be True when broadcast_from_rank0 is True."
+        )
     fsdp_modules = FSDP.fsdp_modules(model)
     state_dict_config: StateDictConfig
     optim_state_dict_config: OptimStateDictConfig
@@ -240,7 +298,8 @@ def _verify_options(
                 offload_to_cpu=options.cpu_offload, rank0_only=options.cpu_offload
             )
             optim_state_dict_config = FullOptimStateDictConfig(
-                offload_to_cpu=options.cpu_offload, rank0_only=options.cpu_offload
+                offload_to_cpu=options.cpu_offload,
+                rank0_only=(options.cpu_offload or options.broadcast_from_rank0),
             )
             state_dict_type = StateDictType.FULL_STATE_DICT
         else:
@@ -292,6 +351,7 @@ def _verify_state_dict(
         and not info.ignore_frozen_params
         and not (info.cpu_offload and info.full_state_dict)
         and info.strict
+        and not info.broadcast_from_rank0
     ):
         raise RuntimeError(
             "The option indicates that model state_dict is required to save "
@@ -300,8 +360,10 @@ def _verify_state_dict(
         )
 
     if info.handle_optim:
-        if not (optim_state_dict and optim_state_dict[STATE]) and not (
-            info.cpu_offload and info.full_state_dict
+        if (
+            not (optim_state_dict and optim_state_dict[STATE])
+            and not (info.cpu_offload and info.full_state_dict)
+            and (not info.broadcast_from_rank0)
         ):
             raise RuntimeError(
                 "The option indicates that model state_dict is required to save, "
@@ -384,7 +446,7 @@ def _get_model_state_dict(
                 state_dict.pop(fqn)
 
     for key, p in list(state_dict.items()):
-        if p.is_meta:
+        if torch.is_tensor(p) and p.is_meta:
             state_dict.pop(key)
 
     if info.full_state_dict:
@@ -403,17 +465,35 @@ def _load_model_state_dict(
     state_dict: Dict[str, ValueType],
     info: _StateDictInfo,
 ) -> _IncompatibleKeys:
-    if not info.handle_model or not state_dict:
+    if not info.handle_model or (not state_dict and not info.broadcast_from_rank0):
         return _IncompatibleKeys({}, {})
 
-    for key, _ in chain(model.named_parameters(), model.named_buffers()):
+    local_state_dict = {}
+    for key, value in _iterate_valid_model_state(model):
         fqns = _get_fqns(model, key)
         fqns_with_prefix = _get_fqns(
             model, key, skip_ddp_prefix=False, skip_compiler_prefix=False
         )
+
         for fqn, fqn_with_prefix in zip(fqns, fqns_with_prefix):
-            if fqn != fqn_with_prefix:
+            if (
+                not info.broadcast_from_rank0 or dist.get_rank() == 0
+            ) and fqn != fqn_with_prefix:
                 state_dict[fqn_with_prefix] = state_dict.pop(fqn)
+            local_state_dict[fqn_with_prefix] = value
+
+    if info.broadcast_from_rank0:
+        device = None
+        for key, value in local_state_dict.items():
+            if torch.is_tensor(value) and value.dim() > 0:
+                if device is None:
+                    device = value.device
+                else:
+                    assert device == value.device
+        assert device is not None
+        _broadcast_state_dict(state_dict, local_state_dict, device=device)
+        for fqn, local_state in local_state_dict.items():
+            state_dict[fqn] = local_state
 
     with info.fsdp_context():
         return cast(
@@ -445,7 +525,20 @@ def _init_optim_state(optim: torch.optim.Optimizer) -> None:
                 )
             if param.requires_grad:
                 param.grad = torch.zeros_like(param)
+
+    # Some optimizers will update parameters regardless of grads due to lr, so
+    # make lr to zero when calling `step()`.
+    lrs = []
+    for param_group in optim.param_groups:
+        if "lr" in param_group:
+            lrs.append(param_group["lr"])
+            param_group["lr"] = 0.0
     optim.step(closure=None)
+    # Whether to recover the "lr" should not matter too much as we will
+    # restore checkpointing later.
+    for param_group in optim.param_groups:
+        if "lr" in param_group:
+            param_group["lr"] = lrs.pop(0)
     optim.zero_grad(set_to_none=True)
 
 
@@ -579,7 +672,11 @@ def _load_optim_state_dict(
         return
 
     for optim in optimizers:
-        optim_state_dict = _split_optim_state_dict(model, optim, state_dict, info)
+        _init_optim_state(optim)
+        if state_dict:
+            optim_state_dict = _split_optim_state_dict(model, optim, state_dict, info)
+        else:
+            optim_state_dict = {}
         if info.fsdp_modules:
             # We need to specially handle FlatParameter FSDP as
             # FlatParameter FSDP converts the FQNs.
@@ -609,11 +706,33 @@ def _load_optim_state_dict(
                 optim_state_dict = FSDP.optim_state_dict_to_load(
                     model, optim, optim_state_dict
                 )
+        elif info.broadcast_from_rank0:
+            info.full_state_dict = False
+            local_state_dict = _get_optim_state_dict(model, (optim,), info)
+            info.full_state_dict = True
+            device = None
+
+            def _device(t):
+                if t.dim() > 0:
+                    nonlocal device
+                    if device is None:
+                        device = t.device
+                    elif device != t.device:
+                        raise ValueError("Device mismatch")
+                return t
+
+            _ = tree_map_only(torch.Tensor, _device, local_state_dict)
+            assert device is not None
+            flatten_osd, osd_mapping = _flatten_state_dict(optim_state_dict)
+            flatten_local_osd, local_osd_mapping = _flatten_state_dict(local_state_dict)
+            _broadcast_state_dict(flatten_osd, flatten_local_osd, device=device)
+            optim_state_dict = _unflatten_state_dict(
+                flatten_local_osd, local_osd_mapping
+            )
 
         # Note that we do not have to convert the FQN back to param id here if
         # order in optim.param_groups[idx][PARAMS] is the same as the one in
         # optim_state_dict[PG][idx][PARAMS].
-        _init_optim_state(optim)
         _state_dict_fn(optim, "load_state_dict")(state_dict=optim_state_dict)
 
 

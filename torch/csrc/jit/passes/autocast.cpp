@@ -96,17 +96,19 @@ c10::optional<AutocastScope> parseAutocast(
           use.user->s(attr::name) == "fast_dtype") {
         // Search for `prim::SetAttr[name="fast_dtype"]`
         auto ret = constant_as<c10::ScalarType>(use.user->input(1));
-        TORCH_CHECK(
-            ret.has_value() && ret.value() != c10::ScalarType::Undefined,
-            "Autocast dtype argument must be a constant and defined");
-        dtype = ret.value();
+        if (ret.has_value()) {
+          dtype = ret.value();
+        }
       }
     }
     TORCH_CHECK(enabled.has_value(), "Autocast missing _enabled attribute");
+    TORCH_CHECK(!device.empty(), "Autocast missing device attribute");
+    if (dtype == c10::ScalarType::Undefined) {
+      dtype = at::autocast::get_autocast_dtype(c10::Device(device).type());
+    }
     TORCH_CHECK(
         dtype != c10::ScalarType::Undefined,
-        "Autocast missing fast_dtype attribute");
-    TORCH_CHECK(!device.empty(), "Autocast missing device attribute");
+        "Autocast has invalid fast_dtype attribute");
     if (device == "cuda") {
       scope.context.gpu_enabled = enabled.value();
       scope.context.gpu_scalar_type = dtype;

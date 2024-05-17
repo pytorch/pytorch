@@ -254,7 +254,7 @@ Module ScriptModuleDeserializer::deserialize(
   // we populate the upgraders map before any load starts
   populate_upgraders_graph_map();
 
-  C10_LOG_API_USAGE_ONCE("torch.script.load");
+  C10_LOG_API_USAGE_ONCE("torch.jit.load");
   device_ = device;
   // Load extra files.
   for (const auto& kv : extra_files) {

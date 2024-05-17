@@ -183,7 +183,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   return to_variable_list(r.get(), is_variable_input);
 }
 
-auto PyNode::compiled_apply(
+auto PyNode::defer_to_dynamo(
     variable_list&& inputs,
     std::optional<PyObject*> compiler) -> variable_list {
   pybind11::gil_scoped_acquire gil;
@@ -338,13 +338,11 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
   args.collect(f->output_info);
   args.collect(f->input_info);
 
-  static PyObject* forward_cls_name =
-      PyUnicode_InternFromString("_forward_cls");
-  THPObjectPtr forward_cls(PyObject_GetAttr(obj, forward_cls_name));
-  static PyObject* backward_name = PyUnicode_InternFromString("backward");
-  PyObject* backward(PyObject_GetAttr(forward_cls.get(), backward_name));
-  _backward_idx =
-      args.add_backward(c10::SafePyObject(backward, getPyInterpreter()));
+  if (compiled_autograd_should_lift()) {
+    Py_INCREF(obj);
+    _backward_idx =
+        args.add_backward(c10::SafePyObject(obj, getPyInterpreter()));
+  }
 
   PyObject* bw_state = f->compiled_autograd_backward_state;
   if (args.cond(bw_state != nullptr)) {
@@ -386,7 +384,7 @@ variable_list PyNode::apply_with_saved(
       result = apply(variable_list(inputs));
     }
   } else {
-    result = compiled_apply(variable_list(inputs), saved.get_py_compiler());
+    result = defer_to_dynamo(variable_list(inputs), saved.get_py_compiler());
   }
   f->compiled_autograd_tracing = false;
   saved.after(f->compiled_autograd_symints);

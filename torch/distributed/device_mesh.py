@@ -535,6 +535,7 @@ else:
 
         Args:
             device_type (str): The device type of the mesh. Currently supports: "cpu", "cuda/cuda-like".
+                Passing in a device type with a GPU index, such as "cuda:0", is not allowed.
             mesh_shape (Tuple[int]): A tuple defining the dimensions of the multi-dimensional array
                 describing the layout of devices.
             mesh_dim_names (Tuple[str], optional): A tuple of mesh dimension names to assign to each dimension
@@ -564,6 +565,13 @@ else:
                     "mesh_shape and mesh_dim_names should have same length!",
                     f"Found len(mesh_dim_names): {len(mesh_dim_names)} and len(mesh_shape):{len(mesh_shape)}.",
                 )
+
+        # assume valid device types are all letters
+        if device_type and not device_type.isalpha():
+            raise RuntimeError(
+                f"Device type with GPU index is not supported but got {device_type}. ",
+                "If you maintained a 'torch.device' object, it's recommended to pass in 'device.type'.",
+            )
 
         # Always initialize the mesh's tensor on CPU, regardless of what the
         # external device type has been set to be (e.g. meta)

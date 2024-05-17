@@ -14,9 +14,7 @@
 #include <c10/util/irange.h>
 
 #ifdef USE_ROCM
-#if ROCM_VERSION >= 60000
 #include <hipblaslt/hipblaslt-ext.hpp>
-#endif
 // until hipblas has an API to accept flags, we must use rocblas here
 #include <hipblas/hipblas.h>
 #include <rocblas/rocblas.h>
@@ -236,57 +234,6 @@ namespace at::cuda::blas {
     CUDABLAS_NONNEGINT_CHECK(bgemm<Dtype>, num_batches);  \
   } while (0)
 
-#if (!defined(USE_ROCM) && !defined(_MSC_VER)) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
-
-#if defined(USE_ROCM) && ROCM_VERSION >= 50700 && ROCM_VERSION < 60000
-// only for rocm 5.7 where we first supported hipblaslt, it was difficult
-// to hipify correctly without this change.
-#define hipDataType hipblasDatatype_t
-#endif
-
-// hipblaslt custom types were a temporary work-around
-#if defined(USE_ROCM) && ROCM_VERSION >= 60000 && defined(HIPBLASLT_CUSTOM_DATA_TYPE)
-hipblasltDatatype_t hipToLt(hipDataType type) {
-    switch (type) {
-        case HIP_R_32F: return HIPBLASLT_R_32F;
-        case HIP_R_64F: return HIPBLASLT_R_64F;
-        case HIP_R_16F: return HIPBLASLT_R_16F;
-        case HIP_R_8I: return HIPBLASLT_R_8I;
-        case HIP_C_32F: return HIPBLASLT_C_32F;
-        case HIP_C_64F: return HIPBLASLT_C_64F;
-        case HIP_C_16F: return HIPBLASLT_C_16F;
-        case HIP_C_8I: return HIPBLASLT_C_8I;
-        case HIP_R_8U: return HIPBLASLT_R_8U;
-        case HIP_C_8U: return HIPBLASLT_C_8U;
-        case HIP_R_32I: return HIPBLASLT_R_32I;
-        case HIP_C_32I: return HIPBLASLT_C_32I;
-        case HIP_R_32U: return HIPBLASLT_R_32U;
-        case HIP_C_32U: return HIPBLASLT_C_32U;
-        case HIP_R_16BF: return HIPBLASLT_R_16B;
-        case HIP_C_16BF: return HIPBLASLT_C_16B;
-        default: TORCH_CHECK(false, "unknown hipDataType");
-    }
-}
-#define HIPTOLT(type) hipToLt(type)
-#else
-#define HIPTOLT(type) type
-#endif
-
-#if defined(USE_ROCM) && ROCM_VERSION >= 60000 && defined(HIPBLASLT_CUSTOM_COMPUTE_TYPE)
-hipblasLtComputeType_t hipblasToLt(hipblasComputeType_t type) {
-    switch (type) {
-        case HIPBLAS_COMPUTE_32F: return HIPBLASLT_COMPUTE_F32;
-        case HIPBLAS_COMPUTE_32F_FAST_16F: return HIPBLASLT_COMPUTE_F32_FAST_F16;
-        case HIPBLAS_COMPUTE_32F_FAST_TF32: return HIPBLASLT_COMPUTE_F32_FAST_XF32;
-        case HIPBLAS_COMPUTE_64F: return HIPBLASLT_COMPUTE_F64;
-        case HIPBLAS_COMPUTE_32I: return HIPBLASLT_COMPUTE_I32;
-        default: TORCH_CHECK(false, "unknown hipblasComputeType_t");
-    }
-}
-#define HIPCOMPTOLT(type) hipblasToLt(type)
-#else
-#define HIPCOMPTOLT(type) type
-#endif
 
 namespace {
 // Following the pattern of CuSparseDescriptor
@@ -325,7 +272,7 @@ class CuBlasLtMatmulDescriptor : public CuBlasLtDescriptor<
       cudaDataType_t scale_type) {
     cublasLtMatmulDesc_t raw_descriptor = nullptr;
     TORCH_CUDABLAS_CHECK(
-        cublasLtMatmulDescCreate(&raw_descriptor, HIPCOMPTOLT(compute_type), HIPTOLT(scale_type)));
+        cublasLtMatmulDescCreate(&raw_descriptor, compute_type, scale_type));
     descriptor_.reset(raw_descriptor);
   }
   template <typename T>
@@ -346,7 +293,7 @@ class CuBlasLtMatrixLayout : public CuBlasLtDescriptor<
       bool t = false) {
     cublasLtMatrixLayout_t raw_descriptor = nullptr;
     TORCH_CUDABLAS_CHECK(
-        cublasLtMatrixLayoutCreate(&raw_descriptor, HIPTOLT(type), t ? cols : rows, t ? rows : cols, ld));
+        cublasLtMatrixLayoutCreate(&raw_descriptor, type, t ? cols : rows, t ? rows : cols, ld));
     descriptor_.reset(raw_descriptor);
   }
   template <typename T>
@@ -371,11 +318,9 @@ class CuBlasLtMatmulPreference : public CuBlasLtDescriptor<
 };
 } // namespace
 
-#endif
 
 template <typename Dtype>
 inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
-#if (!defined(USE_ROCM) && !defined(_MSC_VER)) || (defined(USE_ROCM) && ROCM_VERSION >= 60000)
   cudaDataType_t abcType = CUDA_R_32F;
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
   cudaDataType_t scaleType = CUDA_R_32F;
@@ -506,9 +451,6 @@ inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
       computeType,
       " scaleType ",
       scaleType);
-#else
-  AT_ERROR("at::cuda::blas::bgemm_internal_cublaslt: not implemented for ", typeid(Dtype).name());
-#endif
 }
 
 
@@ -632,7 +574,7 @@ void bgemm_internal_cublas<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) 
   const float fbeta = beta;
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
 
-#if defined(USE_ROCM) && ROCM_VERSION >= 60000
+#if defined(USE_ROCM)
   auto compute_type = CUBLAS_COMPUTE_32F;
 #else
   auto compute_type = CUDA_R_32F;
@@ -1018,7 +960,7 @@ void gemm_internal_cublas<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
     cublas_flags = static_cast<cublasMath_t>(cublas_flags | CUBLAS_MATH_DISALLOW_REDUCED_PRECISION_REDUCTION);
   }
 #endif
-#if defined(USE_ROCM) && ROCM_VERSION >= 60000
+#if defined(USE_ROCM)
   auto compute_type = CUBLAS_COMPUTE_32F;
 #else
   auto compute_type = CUDA_R_32F;
@@ -1235,7 +1177,6 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
   }
 }
 
-#if (!defined(USE_ROCM) && !defined(_MSC_VER)) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
 
 template <typename Dtype>
 void gemm_and_bias(
@@ -1260,13 +1201,9 @@ void gemm_and_bias(
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
   cudaDataType_t scaleType = CUDA_R_32F;
   if constexpr (std::is_same_v<Dtype, double>) {
-#if !defined(USE_ROCM) || (defined(USE_ROCM) && ROCM_VERSION >= 60000)
     abcType = CUDA_R_64F;
     computeType = CUBLAS_COMPUTE_64F;
     scaleType = CUDA_R_64F;
-#else
-    TORCH_CHECK(false, "gemm_and_bias is only supported for double type on ROCm 6.0 and above");
-#endif
   } else if constexpr (std::is_same_v<Dtype, float>) {
 #ifndef USE_ROCM
     if (at::globalContext().allowTF32CuBLAS()) {
@@ -1473,7 +1410,7 @@ void scaled_gemm(
     ScalarType result_dtype,
     void* amax_ptr,
     bool use_fast_accum) {
-#if CUDA_VERSION >= 11080 || (defined(USE_ROCM) && ROCM_VERSION >= 60000)
+#if CUDA_VERSION >= 11080 || defined(USE_ROCM)
   const auto computeType = CUBLAS_COMPUTE_32F;
   const auto scaleType = CUDA_R_32F;
   const int8_t fastAccuMode = use_fast_accum ? 1 : 0;
@@ -1537,13 +1474,13 @@ if (isFloat8Type(result_dtype)) {
         hipblaslt_ext::GemmType::HIPBLASLT_GEMM,
         _cublasOpFromChar(transa),
         _cublasOpFromChar(transb),
-        HIPTOLT(ScalarTypeToCudaDataType(mat1_dtype)),
-        HIPTOLT(ScalarTypeToCudaDataType(mat2_dtype)),
+        ScalarTypeToCudaDataType(mat1_dtype),
+        ScalarTypeToCudaDataType(mat2_dtype),
         // C is nullptr and beta=0, so set to something reasonable. See above.
-        //HIPTOLT(ScalarTypeToCudaDataType(bias_dtype)),
-        HIPTOLT(ScalarTypeToCudaDataType(result_dtype)),
-        HIPTOLT(ScalarTypeToCudaDataType(result_dtype)),
-        HIPCOMPTOLT(CUBLAS_COMPUTE_32F),
+        //ScalarTypeToCudaDataType(bias_dtype),
+        ScalarTypeToCudaDataType(result_dtype),
+        ScalarTypeToCudaDataType(result_dtype),
+        CUBLAS_COMPUTE_32F,
         all_algos));
     if (all_algos.size() == 0) {
       TORCH_CUDABLAS_CHECK(CUBLAS_STATUS_NOT_SUPPORTED);
@@ -1620,7 +1557,7 @@ if (isFloat8Type(result_dtype)) {
       " scaleType ",
       scaleType);
   return;
-#endif // CUDA_VERSION >= 11080 || (defined(USE_ROCM) && ROCM_VERSION >= 60000)
+#endif // CUDA_VERSION >= 11080 || defined(USE_ROCM)
   TORCH_CHECK(false, "scaled_gemm is only supported for CUDA 11.8 and above");
 }
 
@@ -1636,7 +1573,6 @@ void int8_gemm(
     int64_t mat2_ld,
     int32_t* result_ptr,
     int64_t result_ld) {
-#if !defined(USE_ROCM) || (defined(USE_ROCM) && ROCM_VERSION >= 60000)
 
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32I;
   cudaDataType_t scaleType = CUDA_R_32I;
@@ -1741,18 +1677,7 @@ void int8_gemm(
       computeType,
       " scaleType ",
       scaleType);
-#else
-  TORCH_CHECK(false, "int8_gemm is only supported for ROCm 6.0 and above");
-#endif // !defined(USE_ROCM) || (defined(USE_ROCM) && ROCM_VERSION >= 60000)
 }
-#endif // (!defined(USE_ROCM) && !defined(_MSC_VER)) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
-
-// ROCm 5.6 hipblas matches the const Dtype *A API, but prior hipblas does not.
-#if defined(USE_ROCM) && ROCM_VERSION < 50600
-#define ROCM_CONST_BUG_CAST(Type, Input) const_cast<Type>(reinterpret_cast<const Type>(Input))
-#else
-#define ROCM_CONST_BUG_CAST(Type, Input) reinterpret_cast<const Type>(Input)
-#endif
 
 template <>
 void trsm<float>(CUDABLAS_TRSM_ARGTYPES(float)) {
@@ -1777,7 +1702,7 @@ void trsm<c10::complex<float>>(CUDABLAS_TRSM_ARGTYPES(c10::complex<float>)) {
       m,
       n,
       reinterpret_cast<const cuComplex*>(alpha),
-      ROCM_CONST_BUG_CAST(cuComplex*, A),
+      reinterpret_cast<const cuComplex*>(A),
       lda,
       reinterpret_cast<cuComplex*>(B),
       ldb));
@@ -1794,7 +1719,7 @@ void trsm<c10::complex<double>>(CUDABLAS_TRSM_ARGTYPES(c10::complex<double>)) {
       m,
       n,
       reinterpret_cast<const cuDoubleComplex*>(alpha),
-      ROCM_CONST_BUG_CAST(cuDoubleComplex*, A),
+      reinterpret_cast<const cuDoubleComplex*>(A),
       lda,
       reinterpret_cast<cuDoubleComplex*>(B),
       ldb));

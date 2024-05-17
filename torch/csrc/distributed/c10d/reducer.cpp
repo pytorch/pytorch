@@ -646,14 +646,6 @@ void Reducer::autograd_hook(size_t index) {
     first_autograd_hook_called_ = true;
     num_bwd_calls_++;
   }
-  // Ignore if we don't expect to be called.
-  // This may be the case if the user wants to accumulate gradients
-  // for number of iterations before reducing them.
-  if (!expect_autograd_hooks_) {
-    return;
-  }
-
-  grad_ready_order_indices_.push_back(static_cast<int64_t>(index));
 
   // See Note [Skip allreducing local_used_map_dev]
   if (dynamic_graph_find_unused() || static_graph_first_iteration()) {
@@ -679,6 +671,15 @@ void Reducer::autograd_hook(size_t index) {
     numGradHooksTriggeredMap_[index] += 1;
     return;
   }
+
+  // Ignore if we don't expect to be called.
+  // This may be the case if the user wants to accumulate gradients
+  // for number of iterations before reducing them.
+  if (!expect_autograd_hooks_) {
+    return;
+  }
+
+  grad_ready_order_indices_.push_back(static_cast<int64_t>(index));
 
   // If `find_unused_parameters_` is true there may be model parameters that
   // went unused when computing the model output, they won't be part of the

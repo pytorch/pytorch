@@ -8,7 +8,7 @@ import torch.utils._pytree as pytree
 from torch._C import _functionalization_reapply_views_tls as _reapply_views
 from torch._ops import _get_dispatch_mode_pre_dispatch
 from torch.utils._python_dispatch import (
-    _detect_functional_mode,
+    _detect_infra_mode,
     _disable_infra_mode,
     return_and_correct_aliasing,
     TorchDispatchMode,
@@ -185,7 +185,7 @@ class FunctionalTensor(torch.Tensor):
         # and otherwise the sym_size() call will go to the proxy mode before hitting
         # FunctionalTensor.__torch_dispatch__
 
-        functional_mode = _detect_functional_mode()
+        functional_mode = _detect_infra_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL)
         assert functional_mode is not None
 
         with functional_mode:
@@ -219,7 +219,7 @@ class FunctionalTensor(torch.Tensor):
             return [elem.tolist() for elem in self.elem]
 
     def to(self, *args, **kwargs):
-        if _detect_functional_mode().export:
+        if _detect_infra_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL).export:
             # If copy is specified as pos arg, it's always the second one.
             if len([arg for arg in args if isinstance(arg, bool)]) <= 1:
                 return super().to(*args, **{**kwargs, "copy": True})

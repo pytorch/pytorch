@@ -6,6 +6,7 @@
 
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/WrapDimUtils.h>
+#include <torch/csrc/utils/python_raii.h>
 #include <torch/python.h>
 
 #include <ATen/functorch/BatchRulesHelper.h>
@@ -402,6 +403,41 @@ static void dump_local_tls() {
   std::cout << "[Local Exclude] " << tls.excluded_ << std::endl;
 }
 
+namespace {
+
+// An RAII to save and restore the DynamicLayer stack.
+struct PreserveDynamicLayerStack {
+  size_t m_oldDepth;
+
+  ~PreserveDynamicLayerStack() {
+    while (at::functorch::getDynamicLayerStack().size() > m_oldDepth) {
+      const auto& top = at::functorch::getDynamicLayerStack().back();
+      switch (top.key()) {
+        case at::functorch::TransformType::Vmap:
+          _vmap_decrement_nesting();
+          break;
+        case at::functorch::TransformType::Grad:
+          _grad_decrement_nesting();
+          break;
+        case at::functorch::TransformType::Jvp:
+          _jvp_decrement_nesting();
+          break;
+        case at::functorch::TransformType::Functionalize:
+          _func_decrement_nesting();
+          break;
+        case at::functorch::TransformType::Torch:
+          popDynamicLayerAndDeleteMetadata();
+          break;
+      }
+    }
+  }
+
+  PreserveDynamicLayerStack()
+      : m_oldDepth(at::functorch::getDynamicLayerStack().size()) {}
+};
+
+} // anonymous namespace
+
 static std::tuple<Tensor, c10::optional<int64_t>> unwrapBatched(
     const Tensor& tensor,
     int64_t level) {
@@ -562,6 +598,9 @@ void initFuncTorchBindings(PyObject* module) {
       .def(
           "functionalizeAddBackViews",
           &FunctionalizeInterpreterPtr::functionalizeAddBackViews);
+
+  torch::impl::py_context_manager<PreserveDynamicLayerStack>(
+      m, "_PreserveDynamicLayerStack");
 }
 
 } // namespace impl

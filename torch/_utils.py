@@ -356,6 +356,7 @@ def _rebuild_wrapper_subclass(
         cls,
         size,
         strides=stride,
+        dtype=dtype,
         storage_offset=storage_offset,
         layout=layout,
         device=device,

@@ -907,6 +907,18 @@ def patch_reduce_scatter(new_reduce_scatter_tensor: Callable):
         dist.reduce_scatter_tensor = orig_reduce_scatter
 
 
+@contextlib.contextmanager
+def patch_all_reduce(new_all_reduce: Callable):
+    orig_all_reduce = dist.all_reduce
+    dist.barrier()
+    dist.all_reduce = new_all_reduce
+    try:
+        yield
+    finally:
+        dist.barrier()
+        dist.all_reduce = orig_all_reduce
+
+
 @no_type_check
 @contextlib.contextmanager
 def patch_unshard(new_unshard: Callable):

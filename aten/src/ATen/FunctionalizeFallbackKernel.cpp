@@ -178,7 +178,8 @@ static const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatch
     },
     [size = size.vec()](const at::Tensor & base, const at::Tensor & mutated_view, int64_t mutated_view_idx) -> at::Tensor {
       return base.as_strided_scatter(mutated_view, size, c10::contiguous_strides(size));
-    }
+    },
+    /*has_symbolic_inputs=*/false
   );
   at::functionalization::impl::mutate_view_meta(self, view_meta);
   return self;
@@ -298,13 +299,16 @@ static at::Tensor _unsafe_view_functionalize(const at::Tensor & self, at::SymInt
     tmp_output = at::_unsafe_view_symint(self_, size);
   }
 
+  bool has_symbolic_inputs = std::any_of(size.begin(), size.end(), [=](auto& s) { return s.is_symbolic(); });
+
   at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
     [size = size.vec()](const at::Tensor & base, int64_t mutated_view_idx) -> at::Tensor {
       return at::_unsafe_view_symint(base, size);
     },
     [size = size.vec()](const at::Tensor & base, const at::Tensor & mutated_view, int64_t mutated_view_idx) -> at::Tensor {
       return at::_unsafe_view_symint(mutated_view, base.sym_sizes());
-    }
+    },
+    /*has_symbolic_inputs=*/has_symbolic_inputs
   );
 
   auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, self, std::move(view_meta));
@@ -335,6 +339,9 @@ static at::Tensor& set__functionalize(at::Tensor& self, const at::Tensor& src) {
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(src));
   auto self_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(self);
   auto src_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(src);
+  // See Note [Ordering of resize_() and set_()]
+  TORCH_CHECK(!self_impl->was_inductor_storage_resized(),
+    "storage_resize_() followed by set_() in torch.compile is not supported today");
   self_impl->set__impl(src_impl);
   return self;
 }

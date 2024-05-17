@@ -115,3 +115,8 @@ def sdpa_kernel(backends: Union[List[SDPBackend], SDPBackend]):
         enable_flash_sdp(previous_flash)
         enable_mem_efficient_sdp(previous_mem_efficient)
         enable_math_sdp(previous_math)
+
+
+def _get_flash_version() -> str:
+    """This returns the closest matching tag for the flash attention backend"""
+    return "2.5.6"

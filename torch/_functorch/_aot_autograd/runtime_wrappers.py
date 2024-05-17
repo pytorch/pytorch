@@ -8,13 +8,14 @@ This module defines runtime wrappers, which, based on previous analysis attempts
 
 import collections
 import pprint
+from dataclasses import dataclass, field
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.utils.dlpack
 from torch import Tensor
-from torch._guards import DuplicateInputs, TracingContext
+from torch._guards import detect_fake_mode, DuplicateInputs, TracingContext
 from torch._prims_common import CUDARngStateHelper
 from torch.multiprocessing.reductions import StorageWeakRef
 from .. import config
@@ -31,7 +32,7 @@ from .schemas import (
     AOTConfig,
     InputAliasInfo,
     OutputType,
-    SubclassCreationMeta,
+    SubclassMeta,
     TensorAlias,
     ViewAndMutationMeta,
 )
@@ -41,6 +42,8 @@ from .subclass_utils import (
     wrap_tensor_subclasses,
 )
 
+from .traced_function_transforms import aot_dispatch_subclass
+
 from .utils import (
     call_func_at_runtime_with_args,
     make_boxed_func,
@@ -48,8 +51,77 @@ from .utils import (
     strict_zip,
 )
 
-
 zip = strict_zip
+
+
+class CompilerWrapper:
+    """
+    A wrapper around the inputs and outputs to the compiler_fn. We separate these into two parts:
+
+    1. The prologue, which edits the input to the compiler_fn(flat_fn, flat_args, etc)
+    2. The epilogue, which edits the outputs of the compiler_fn (compiled_fn, real arguments)
+
+    Each wrapper below should be implemented as a CompilerWrapper, so that we can facilitate
+    caching on the compiled output, and re-wrapping the output via epilogues.
+    Extra metadata that is needed to compute pre or post compile can be passed in via attributes.
+    """
+
+    def pre_compile(
+        self,
+        flat_fn,
+        flat_args: List[Tensor],
+        aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+    ):
+        """
+        Process the inputs to the compiler_fn. You can pass in extra metadata via kwargs.
+        Args:
+        flat_fn: The function to compile
+        flat_args: Metadata from example inputs of the function to compile
+        aot_config: AOTConfig passed in at compile time
+        fw_metadata: ViewAndMutationMeta generated from flat_fn and flat_args
+        """
+        return flat_fn, flat_args, aot_config, fw_metadata
+
+    def post_compile(self, compiled_fn, aot_config, *, fw_metadata):
+        """
+        Given an output of the compiler, wrap it with information received from prologue.
+        Args:
+        compiled_fn: Callable after calling compiler_fn
+        aot_config: AOTConfig after calling prologue
+        fw_metadata: ViewAndMutationMeta after calling prologue
+        Example:
+
+        def wrapped_compiled_fn(args):
+            # do something with args, aot_config, fw_metadata
+            return compiled_fn(args)
+
+        return wrapped_compiled_fn
+        """
+        return compiled_fn
+
+    def create(
+        self,
+        flat_fn,
+        flat_args: List[Tensor],
+        aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+        compiler_fn,
+    ):
+        (
+            wrapped_flat_fn,
+            new_flat_args,
+            new_aot_config,
+            new_fw_metadata,
+        ) = self.pre_compile(flat_fn, flat_args, aot_config, fw_metadata=fw_metadata)
+        compiled_fn = compiler_fn(
+            wrapped_flat_fn, new_flat_args, new_aot_config, fw_metadata=new_fw_metadata
+        )
+        return self.post_compile(
+            compiled_fn, new_aot_config, fw_metadata=new_fw_metadata
+        )
 
 
 # The wrapper created by this function handles all of the runtime aliasing and mutation "epilogue" logic
@@ -60,7 +132,30 @@ zip = strict_zip
 # This is because there are some minor differences in how we treat these cases at runtime:
 # - resize_() is currently handled in the inference case, but not fully handled in the autograd case.
 # - the autograd cases inserts TensorAlias wrapper objects for outputs that alias inputs
-def create_runtime_wrapper(
+@dataclass
+class RuntimeWrapper(CompilerWrapper):
+    indices_of_inps_to_detach: List[int]
+    trace_joint: bool
+    disable_amp: bool
+
+    def post_compile(
+        self,
+        compiled_fn,
+        aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+    ):
+        return _create_runtime_wrapper(
+            compiled_fn,
+            runtime_metadata=fw_metadata,
+            indices_of_inps_to_detach=self.indices_of_inps_to_detach,
+            trace_joint=self.trace_joint,
+            keep_input_mutations=aot_config.keep_inference_input_mutations,
+            disable_amp=self.disable_amp,
+        )
+
+
+def _create_runtime_wrapper(
     compiled_fn,
     *,
     runtime_metadata: ViewAndMutationMeta,
@@ -308,49 +403,211 @@ def create_runtime_wrapper(
     return runtime_wrapper
 
 
-# Calling convention: If we are running functionalized RNG, then outs consists
-# of (user_outs, rng_offset)
-def functionalized_rng_runtime_epilogue(
-    metadata: ViewAndMutationMeta, outs, return_new_outs=True
-):
-    if metadata.is_rng_op_functionalized:
-        assert metadata.num_outputs_rng_offset == 1
-        new_rng_offset = outs[-1]
-        CUDARngStateHelper.set_new_offset(new_rng_offset)
-        if return_new_outs:
-            user_outs = outs[:-1]
-            return user_outs
+@dataclass
+class FunctionalizedRngRuntimeWrapper(CompilerWrapper):
+    # TODO: I would love to get rid of this argument, but it's
+    # Wrapped pretty tightly around our aot_dispatch_autograd logic.
+    # Specifically, tensors_saved_for_backwards_slice's value is both used for calculating indices
+    # for setting placeholder strides(which is done before runtime, before this wrapper runs)
+    # and for saving tensors for backward (which is done during runtime, after this wrapper runs)
+    # So in aot_dispatch_autograd, this wrapper can't edit the set of outs without making one
+    # of those two indices incorrect.
+    return_new_outs: bool = True
+
+    def pre_compile(
+        self,
+        flat_fn,
+        flat_args,
+        aot_config,
+        *,
+        fw_metadata,
+    ):
+        if config.functionalize_rng_ops:
+            # Update example inputs for the fw_compiler
+            fake_mode = detect_fake_mode()
+            seed, offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
+            flat_args.extend([seed, offset])
+            # We are not clearing flat_args here because
+            # 1) There is a check in the debug compiler at the end
+            # 2) It does not matter as these are fake tensors
+        return flat_fn, flat_args, aot_config, fw_metadata
+
+    def post_compile(
+        self,
+        compiled_fn,
+        aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+    ):
+        @wraps(compiled_fn)
+        def wrapper(runtime_args: List[Any]):
+            if fw_metadata.is_rng_op_functionalized:
+                # Add the seed and offset to args
+                seed, offset = CUDARngStateHelper.get_torch_state_as_tuple()
+                runtime_args.extend([seed, offset])
+                out = compiled_fn(runtime_args)
+                out = self._functionalized_rng_runtime_epilogue(
+                    fw_metadata,
+                    out,
+                    # TODO: this won't be right for the backward when we convert the call_compiled_backward to use the wrapper
+                    fw_metadata.num_forward_returns,
+                )
+                return out
+            return compiled_fn(runtime_args)
+
+        return wrapper
+
+    # Calling convention: If we are running functionalized RNG, then outs consists
+    # of (user_outs, rng_offset)
+    def _functionalized_rng_runtime_epilogue(
+        self,
+        metadata: ViewAndMutationMeta,
+        outs,
+        offset_index,
+    ):
+        if metadata.is_rng_op_functionalized:
+            assert metadata.num_outputs_rng_offset == 1
+            new_rng_offset = outs[offset_index]
+            CUDARngStateHelper.set_new_offset(new_rng_offset)
+            if self.return_new_outs:
+                user_outs = outs[:offset_index] + outs[offset_index + 1 :]
+                return user_outs
+            else:
+                return outs
+
+        return outs
+
+
+@dataclass
+class FakifiedOutWrapper(CompilerWrapper):
+    out_metas: List[torch.Tensor] = field(default_factory=list)
+    # TracingContext.fwd_output_strides
+    # Generated from actually doing compile
+    fwd_output_strides: Optional[List[List[int]]] = None
+    needs_post_compile: bool = True
+
+    def pre_compile(
+        self,
+        fw_module,  # Must be fw_module from aot_dispatch_*_graph
+        flat_args,
+        aot_config,
+        *,
+        fw_metadata,
+    ):
+        tracing_context = torch._guards.TracingContext.try_get()
+        if tracing_context and tracing_context.fakify_first_call:
+            self.out_metas = [
+                n.meta["val"] for n in (list(fw_module.graph.nodes)[-1].args[0])
+            ]
         else:
-            return None
-    return outs
+            self.needs_post_compile = False
+        return fw_module, flat_args, aot_config, fw_metadata
+
+    def _compute_output_meta_with_inductor_strides(self):
+        out = self.out_metas
+        fwd_output_strides = self.fwd_output_strides
+        if not fwd_output_strides:
+            return out
+        with TracingContext.get().fake_mode.shape_env.suppress_guards():
+            for i in range(len(out)):
+                if not isinstance(out[i], Tensor):
+                    continue
+                if all(
+                    s1 == s2 for s1, s2 in zip(out[i].stride(), fwd_output_strides[i])
+                ):
+                    continue
+                out[i] = out[i].as_strided(out[i].shape, fwd_output_strides[i])
+        return out
+
+    # To be called post compile
+    def set_fwd_output_strides(self, fwd_output_strides):
+        self.fwd_output_strides = fwd_output_strides
+
+    def post_compile(
+        self,
+        compiled_fn,
+        aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+    ):
+        if self.needs_post_compile:
+            assert self.fwd_output_strides is not None
+            fakified_out = self._compute_output_meta_with_inductor_strides()
+
+            @wraps(compiled_fn)
+            def wrapper(runtime_args):
+                nonlocal fakified_out
+                if fakified_out is not None:
+                    out = fakified_out
+                    fakified_out = None
+                    return out
+                return compiled_fn(runtime_args)
+
+            return wrapper
+        # If we don't need to fakify, we can just return the original compiled function
+        return compiled_fn
 
 
 # This wrapper handles the AOTDispatch runtime logic for tensor subclasses.
 # At runtime, we have a compiled function that knows how to operate on the domain of DenseTensor -> DenseTensor,
 # But the user might have passed us some tensor subclass inputs (or expect some subclass tensor outputs).
 # This function handles the wrapping and unwrapping of tensor subclasses at runtime.
-def aot_dispatch_subclass_wrapper(
-    runtime_fn: Callable,
-    *,
-    subclass_metas: List[Union[int, SubclassCreationMeta]],
-    num_fw_outs_saved_for_bw: Optional[int],
-) -> Callable:
-    def inner_fn(args: List[Any]):
-        unwrapped_args = unwrap_tensor_subclasses(args, is_joint_structure=False)
-        args.clear()
-        # expectation: runtime_fn is a boxed fn
-        unwrapped_outs = runtime_fn(unwrapped_args)
-        wrapped_outs = wrap_tensor_subclasses(
-            unwrapped_outs,
-            subclass_metas=subclass_metas,
-            num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw,
-            is_runtime=True,
-        )
-        return wrapped_outs
+@dataclass
+class AOTDispatchSubclassWrapper(CompilerWrapper):
+    trace_joint: bool
+    fw_only: Optional[Callable]  # Not cached, only used in pre_compile
+    maybe_subclass_meta: Optional[SubclassMeta]
+    num_fw_outs_saved_for_bw: Optional[int]
 
-    # box it
-    inner_fn._boxed_call = True  # type: ignore[attr-defined]
-    return inner_fn
+    def pre_compile(
+        self,
+        flat_fn,
+        flat_args: List[Tensor],
+        aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+    ):
+        (new_flat_fn, new_flat_args, subclass_meta) = aot_dispatch_subclass(
+            flat_fn,
+            flat_args,
+            is_joint_structure=self.trace_joint,
+            meta=fw_metadata,
+            fw_only=self.fw_only,  # type: ignore[arg-type]
+        )
+        self.maybe_subclass_meta = subclass_meta
+        return new_flat_fn, new_flat_args, aot_config, fw_metadata
+
+    def post_compile(
+        self,
+        compiled_fn,
+        _aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+    ):
+        if self.maybe_subclass_meta is None:
+            return compiled_fn
+
+        subclass_metas = fw_metadata.subclass_fw_graph_out_meta
+
+        @wraps(compiled_fn)
+        def inner_fn(args: List[Any]):
+            unwrapped_args = unwrap_tensor_subclasses(
+                args, is_joint_structure=self.trace_joint
+            )
+            args.clear()
+            # expectation: runtime_fn is a boxed fn
+            unwrapped_outs = compiled_fn(unwrapped_args)
+            wrapped_outs = wrap_tensor_subclasses(
+                unwrapped_outs,
+                subclass_metas=subclass_metas,
+                num_fw_outs_saved_for_bw=self.num_fw_outs_saved_for_bw,
+                is_runtime=True,
+            )
+            return wrapped_outs
+
+        # box it
+        inner_fn._boxed_call = True  # type: ignore[attr-defined]
+        return inner_fn
 
 
 # MOTIVATION:
@@ -434,370 +691,418 @@ def aot_dispatch_subclass_wrapper(
 # Dynamo's guards are not enough.  In practice, this seems to cover
 # everything.
 #
-def aot_wrapper_dedupe(
-    flat_fn,
-    flat_args: List[Tensor],
-    aot_config: AOTConfig,
-    *,
-    compiler_fn,
-    fw_metadata,
-):
-    # Use information about whether or not flat_fn mutates its arguments
-    # or not to handle dupe args
-
-    # Strategy 1: For any input that is not mutated, we can leafify it if we
-    # need to remove a duplicate.
-    leaf_flat_args = []
-    args_set = set()
-    ok = True
-
-    for i, a in enumerate(flat_args):
-        if not isinstance(a, torch.Tensor):
-            leaf_flat_args.append(a)
-        elif a not in args_set:
-            args_set.add(a)
-            leaf_flat_args.append(a)
-        elif (
-            not fw_metadata.input_info[i].mutates_data
-            and not fw_metadata.input_info[i].mutates_metadata
-        ):
-            leaf_flat_args.append(a.detach().requires_grad_(a.requires_grad))
-        else:
-            ok = False
-            break
-
-    if ok:
-        return compiler_fn(flat_fn, leaf_flat_args, aot_config, fw_metadata=fw_metadata)
-
-    if requires_subclass_dispatch(leaf_flat_args, fw_metadata):
-        raise RuntimeError(
-            """\
-Encountered duplicate inputs that are mutated in the graph, but at least one input/output
-to the graph is a tensor subclass. This is not supported today. You can try to
-remove the aliasing yourself as a workaround, or otherwise file an issue on github."""
-        )
-
-    # export path: ban duplicate inputs for now, add later if requested.
-    if aot_config.is_export:
-        raise RuntimeError(
-            f"""\
-Encountered duplicated inputs that are mutated in the graph you are trying to export.
-This functionality is currently not supported. If needed, please file a github issue.
-
-fw_metadata={str(fw_metadata)}
-        """
-        )
-
-    # Strategy 2: Duplicate specialize.
-    #
-    # In Haskell types, suppose you have:
-    #
-    #   add_dupe_args :: DedupedArgs -> Args
-    #   remove_dupe_args :: Args -> DedupedArgs
-    #
-    #   compiler_fn
-    #       :: (DedupedArgs -> R) -> DedupedArgs -> AOTConfig -> (DedupedArgs -> R)
-    #   deped_compiler_fn
-    #       :: (Args -> R) -> Args -> AOTConfig -> (Args -> R)
-    #
-    # Then the code below can be written in point-free style as:
-    #
-    #   deduped_compiler_fn f a c =
-    #       compiler_fn (f . add_dupe_args) (remove_dupe_args a) c . remove_dupe_args
-    #
-    # Suppose you have:
-    #
-    #   [a, b, a, c]
-    #
-    # We want:
-    #
-    #   remove_dupe_args([a, b, a, c]) == [a, b, c]
-    #   add_dupe_args([a, b, c]) == [a, b, a, c]
-    #
-    # This is done via (respectively):
-    #
-    #   seen_args = {a: 0, b: 1, c: 2}
-    #   enumerate(add_dupe_map) = [  # how to get args from the deduped list
-    #       (0, 0),
-    #       (1, 1),
-    #       (2, 0),
-    #       (3, 2),
-    #   ]
-    #   keep_arg_mask = [True, True, False, True]
-
-    seen_args: Dict[Tensor, int] = {}
-    keep_arg_mask = []
-    # Implicitly map duped arg position (list index) to de-duped arg position
-    add_dupe_map: List[int] = []
-    duped_arg_len = len(flat_args)
-
-    j = 0  # index into deduped_flat_args
-    for t in flat_args:
-        if isinstance(t, torch.Tensor):
-            if t in seen_args:
-                keep_arg_mask.append(False)
-                add_dupe_map.append(seen_args[t])
-                continue
-            seen_args[t] = j
-
-        keep_arg_mask.append(True)
-        add_dupe_map.append(j)
-        j += 1
-    assert (
-        len(add_dupe_map) == duped_arg_len
-    ), f"Expects add_dupe_map to have length {duped_arg_len} but got {len(add_dupe_map)}"
+@dataclass
+class AOTDedupeWrapper(CompilerWrapper):
+    keep_arg_mask: List[bool] = field(default_factory=list)
+    add_dupe_map: List[int] = field(default_factory=list)
+    old_input_metadata: List[InputAliasInfo] = field(default_factory=list)
+    needs_post_compile: bool = True
 
     # NB: Hot path, avoid set lookups here
     # TODO: Can avoid the zip here too, probably
-    def remove_dupe_args(args):
-        return [t for t, keep in zip(args, keep_arg_mask) if keep]
+    def remove_dupe_args(self, args):
+        return [t for t, keep in zip(args, self.keep_arg_mask) if keep]
 
-    def add_dupe_args(args):
-        return [args[add_dupe_map[i]] for i in range(duped_arg_len)]
+    def add_dupe_args(self, args):
+        return [args[i] for i in self.add_dupe_map]
 
-    deduped_flat_args = remove_dupe_args(flat_args)
-
-    # Update our input metadata to remove duped input metadata.
-    updated_fw_metadata = remove_dupe_metadata(fw_metadata, keep_arg_mask, add_dupe_map)
-
-    if (
-        tracing_context := TracingContext.try_get()
-        and aot_config.aot_autograd_arg_pos_to_source
+    def pre_compile(
+        self,
+        flat_fn,
+        flat_args: List[Tensor],
+        aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
     ):
-        # TODO(voz): This structure is 1:1, we could consider an alternate structure like
-        # kept_pos:[dupe_arg_pos], however, add_dupe_map is 1:1 so we would need a new structure there,
-        # which feels like needless complexity for a tiny bit of efficiency at this point.
-        for dupe_arg_pos, (kept_pos, keep_arg) in enumerate(
-            zip(add_dupe_map, keep_arg_mask)
-        ):
-            if not keep_arg:
-                dupe_arg_source = aot_config.aot_autograd_arg_pos_to_source[
-                    dupe_arg_pos
-                ]
-                kept_arg_source = aot_config.aot_autograd_arg_pos_to_source[kept_pos]
-                tracing_context.guards_context.aotautograd_guards.append(  # type: ignore[attr-defined]
-                    DuplicateInputs(kept_arg_source, dupe_arg_source)
-                )
+        # Use information about whether or not flat_fn mutates its arguments
+        # or not to handle dupe args
 
-    @wraps(flat_fn)
-    def wrapped_flat_fn(*args):
-        return flat_fn(*add_dupe_args(args))
+        # Strategy 1: For any input that is not mutated, we can leafify it if we
+        # need to remove a duplicate.
+        leaf_flat_args = []
+        args_set = set()
+        ok = True
 
-    if config.debug_assert:
-        ref_fw_metadata = run_functionalized_fw_and_collect_metadata(
-            wrapped_flat_fn,
-            keep_input_mutations=fw_metadata.keep_input_mutations,
-            is_train=fw_metadata.is_train,
-        )(*deduped_flat_args)
-        assert (
-            ref_fw_metadata == updated_fw_metadata
-        ), f"ref_metadata={str(ref_fw_metadata)}, actual_metadata={str(updated_fw_metadata)}"
+        for i, a in enumerate(flat_args):
+            if not isinstance(a, torch.Tensor):
+                leaf_flat_args.append(a)
+            elif a not in args_set:
+                args_set.add(a)
+                leaf_flat_args.append(a)
+            elif (
+                not fw_metadata.input_info[i].mutates_data
+                and not fw_metadata.input_info[i].mutates_metadata
+            ):
+                leaf_flat_args.append(a.detach().requires_grad_(a.requires_grad))
+            else:
+                ok = False
+                break
 
-    compiled_fn = compiler_fn(
-        wrapped_flat_fn, deduped_flat_args, aot_config, fw_metadata=updated_fw_metadata
-    )
+        if ok:
+            self.needs_post_compile = False
+            return flat_fn, leaf_flat_args, aot_config, fw_metadata
 
-    @wraps(compiled_fn)
-    def wrapped_compiled_fn(args: List[Any]):
-        deduped_args = remove_dupe_args(args)
-        args.clear()
-        return compiled_fn(deduped_args)
-
-    wrapped_compiled_fn._boxed_call = True  # type: ignore[attr-defined]
-
-    # This can be uncommented when we properly guard for duplicates,
-    # but right now we must not do it.
-    # if not config.debug_assert:
-    #     return wrapped_compiled_fn
-
-    @wraps(wrapped_compiled_fn)
-    def debugged_compiled_fn(args):
-        # Test that the computed remove/add arg functions are an inverse
-        new_args = add_dupe_args(remove_dupe_args(args))
-        seen: Dict[Any, None] = {}
-        for i, (x, y) in enumerate(zip(new_args, args)):
-            seen[y] = None
-            assert x is y, format_guard_bug_msg(
-                aot_config,
-                f"{describe_input(i, aot_config)} would be a duplicate of "
-                f"{describe_input(add_dupe_map[i], aot_config)}",
+        if requires_subclass_dispatch(leaf_flat_args, fw_metadata):
+            raise RuntimeError(
+                """\
+        Encountered duplicate inputs that are mutated in the graph, but at least one input/output
+        to the graph is a tensor subclass. This is not supported today. You can try to
+        remove the aliasing yourself as a workaround, or otherwise file an issue on github."""
             )
-        # This is only an error if there is metadata mutation on both of
-        # the duped arguments; in this case, we need to know what order
-        # the metadata mutation applies in.  You'll get the correct result
-        # otherwise, because a graph that assumes distinct inputs works if
-        # you dupe the inputs (the gradient contributions from each input
-        # will get summed up appropriately.)
+
+        # export path: ban duplicate inputs for now, add later if requested.
+        if aot_config.is_export:
+            raise RuntimeError(
+                f"""\
+        Encountered duplicated inputs that are mutated in the graph you are trying to export.
+        This functionality is currently not supported. If needed, please file a github issue.
+
+        fw_metadata={str(fw_metadata)}
+            """
+            )
+
+        # Strategy 2: Duplicate specialize.
         #
-        # TODO: work out how to setup this assert correctly
-        """
-        assert len(seen) == unique_args, format_guard_bug_msg(aot_config,
-            f"there would be {unique_args} distinct arguments"
+        # In Haskell types, suppose you have:
+        #
+        #   add_dupe_args :: DedupedArgs -> Args
+        #   remove_dupe_args :: Args -> DedupedArgs
+        #
+        #   compiler_fn
+        #       :: (DedupedArgs -> R) -> DedupedArgs -> AOTConfig -> (DedupedArgs -> R)
+        #   deped_compiler_fn
+        #       :: (Args -> R) -> Args -> AOTConfig -> (Args -> R)
+        #
+        # Then the code below can be written in point-free style as:
+        #
+        #   deduped_compiler_fn f a c =
+        #       compiler_fn (f . add_dupe_args) (remove_dupe_args a) c . remove_dupe_args
+        #
+        # Suppose you have:
+        #
+        #   [a, b, a, c]
+        #
+        # We want:
+        #
+        #   remove_dupe_args([a, b, a, c]) == [a, b, c]
+        #   add_dupe_args([a, b, c]) == [a, b, a, c]
+        #
+        # This is done via (respectively):
+        #
+        #   seen_args = {a: 0, b: 1, c: 2}
+        #   enumerate(add_dupe_map) = [  # how to get args from the deduped list
+        #       (0, 0),
+        #       (1, 1),
+        #       (2, 0),
+        #       (3, 2),
+        #   ]
+        #   keep_arg_mask = [True, True, False, True]
+
+        seen_args: Dict[Tensor, int] = {}
+        # Implicitly map duped arg position (list index) to de-duped arg position
+        keep_arg_mask: List[bool] = []
+        add_dupe_map: List[int] = []
+        duped_arg_len = len(flat_args)
+
+        j = 0  # index into deduped_flat_args
+        for t in flat_args:
+            if isinstance(t, torch.Tensor):
+                if t in seen_args:
+                    keep_arg_mask.append(False)
+                    add_dupe_map.append(seen_args[t])
+                    continue
+                seen_args[t] = j
+
+            keep_arg_mask.append(True)
+            add_dupe_map.append(j)
+            j += 1
+        assert (
+            len(add_dupe_map) == duped_arg_len
+        ), f"Expects add_dupe_map to have length {duped_arg_len} but got {len(add_dupe_map)}"
+
+        self.keep_arg_mask = keep_arg_mask
+        self.add_dupe_map = add_dupe_map
+
+        deduped_flat_args = self.remove_dupe_args(flat_args)
+
+        # Update our input metadata to remove duped input metadata.
+        updated_fw_metadata = remove_dupe_metadata(
+            fw_metadata, keep_arg_mask, add_dupe_map
         )
-        """
-        return wrapped_compiled_fn(args)
 
-    debugged_compiled_fn._boxed_call = True  # type: ignore[attr-defined]
+        if (
+            tracing_context := TracingContext.try_get()
+            and aot_config.aot_autograd_arg_pos_to_source
+        ):
+            # TODO(voz): This structure is 1:1, we could consider an alternate structure like
+            # kept_pos:[dupe_arg_pos], however, add_dupe_map is 1:1 so we would need a new structure there,
+            # which feels like needless complexity for a tiny bit of efficiency at this point.
+            for dupe_arg_pos, (kept_pos, keep_arg) in enumerate(
+                zip(add_dupe_map, keep_arg_mask)
+            ):
+                if not keep_arg:
+                    dupe_arg_source = aot_config.aot_autograd_arg_pos_to_source[
+                        dupe_arg_pos
+                    ]
+                    kept_arg_source = aot_config.aot_autograd_arg_pos_to_source[
+                        kept_pos
+                    ]
+                    tracing_context.guards_context.aotautograd_guards.append(  # type: ignore[attr-defined]
+                        DuplicateInputs(kept_arg_source, dupe_arg_source)
+                    )
 
-    return debugged_compiled_fn
+        @wraps(flat_fn)
+        def wrapped_flat_fn(*args):
+            return flat_fn(*self.add_dupe_args(args))
+
+        if config.debug_assert:
+            ref_fw_metadata = run_functionalized_fw_and_collect_metadata(
+                wrapped_flat_fn,
+                keep_input_mutations=fw_metadata.keep_input_mutations,
+                is_train=fw_metadata.is_train,
+            )(*deduped_flat_args)
+            assert (
+                ref_fw_metadata == updated_fw_metadata
+            ), f"ref_metadata={str(ref_fw_metadata)}, actual_metadata={str(updated_fw_metadata)}"
+
+        return wrapped_flat_fn, deduped_flat_args, aot_config, updated_fw_metadata
+
+    def post_compile(
+        self,
+        compiled_fn,
+        aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+    ):
+        if not self.needs_post_compile:
+            return compiled_fn
+
+        @wraps(compiled_fn)
+        def wrapped_compiled_fn(args: List[Any]):
+            deduped_args = self.remove_dupe_args(args)
+            args.clear()
+            return compiled_fn(deduped_args)
+
+        wrapped_compiled_fn._boxed_call = True  # type: ignore[attr-defined]
+
+        # This can be uncommented when we properly guard for duplicates,
+        # but right now we must not do it.
+        # if not config.debug_assert:
+        #     return wrapped_compiled_fn
+
+        @wraps(wrapped_compiled_fn)
+        def debugged_compiled_fn(args):
+            # Test that the computed remove/add arg functions are an inverse
+            new_args = self.add_dupe_args(self.remove_dupe_args(args))
+            seen: Dict[Any, None] = {}
+            for i, (x, y) in enumerate(zip(new_args, args)):
+                seen[y] = None
+                assert x is y, format_guard_bug_msg(
+                    aot_config,
+                    f"{describe_input(i, aot_config)} would be a duplicate of "
+                    f"{describe_input(self.add_dupe_map[i], aot_config)}",
+                )
+            # This is only an error if there is metadata mutation on both of
+            # the duped arguments; in this case, we need to know what order
+            # the metadata mutation applies in.  You'll get the correct result
+            # otherwise, because a graph that assumes distinct inputs works if
+            # you dupe the inputs (the gradient contributions from each input
+            # will get summed up appropriately.)
+            #
+            # TODO: work out how to setup this assert correctly
+            """
+            assert len(seen) == unique_args, format_guard_bug_msg(aot_config,
+                f"there would be {unique_args} distinct arguments"
+            )
+            """
+            return wrapped_compiled_fn(args)
+
+        debugged_compiled_fn._boxed_call = True  # type: ignore[attr-defined]
+
+        return debugged_compiled_fn
 
 
 # This layer handles the situation where you have two inputs that alias each other,
 # and one of the inputs is mutated.
 # We need to take special care to ensure that the mutation is applied to the other aliases in the graph.
 #
-# pre-condition: aot_wrapper_dedup has already run.
+# pre-condition: AOTDedupWrapper has already run.
 # (This function will in theory work if there are duplicate args.
 # However, the synthetic base code path is a bit sub-optimal, and running with dupe'd inputs
 # would cause us to hit that path more frequently).
-def aot_wrapper_synthetic_base(
-    flat_fn,
-    flat_args: List[Tensor],
-    aot_config: AOTConfig,
-    *,
-    fw_metadata: ViewAndMutationMeta,
-    # Currently, the only reason we need to plumb this bool is because
-    # the synthetic base code prohibits more cases in the autograd case than the inference case.
-    needs_autograd: bool,
-    compiler_fn,
-):
-    is_inference = not needs_autograd
-    flat_args_with_synthetic_bases, synthetic_base_info = merge_view_inputs(
-        flat_args,
-        fw_metadata.input_info,
-        is_inference=is_inference,
-    )
-    # Happy path: we don't need synthetic bases
-    if synthetic_base_info is None:
-        return compiler_fn(flat_fn, flat_args, aot_config, fw_metadata=fw_metadata)
+@dataclass
+class AOTSyntheticBaseWrapper(CompilerWrapper):
+    trace_joint: bool  # TODO: refactor trace_joint
+    needs_post_compile: bool = True
+    aliased_arg_idx_with_metadata_mutations: List[int] = field(default_factory=list)
 
-    # export path: ban synthetic bases for now, add later if requested.
-    if requires_subclass_dispatch(flat_args, fw_metadata):
-        raise RuntimeError(
-            """\
-Encountered aliased inputs that are mutated in the graph, but at least one input/output
-to the graph is a tensor subclass. This is not supported today. You can try to
-remove the aliasing yourself as a workaround, or otherwise file an issue on github."""
+    def pre_compile(
+        self,
+        flat_fn,
+        flat_args: List[Any],
+        aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+    ):
+        is_inference = not self.trace_joint
+        flat_args_with_synthetic_bases, synthetic_base_info = merge_view_inputs(
+            flat_args,
+            fw_metadata.input_info,
+            is_inference=is_inference,
         )
 
-    if aot_config.is_export:
-        raise RuntimeError(
-            f"""\
-Encountered aliased inputs that are mutated in the graph you are trying to export.
-This functionality is currently not supported. If needed, please file a github issue.
+        # Happy path: we don't need synthetic bases
+        if synthetic_base_info is None:
+            self.needs_post_compile = False
+            return flat_fn, flat_args, aot_config, fw_metadata
 
-synthetic_base_info={str(synthetic_base_info)}
+        # export path: ban synthetic bases for now, add later if requested.
+        if requires_subclass_dispatch(flat_args, fw_metadata):
+            raise RuntimeError(
+                """\
+        Encountered aliased inputs that are mutated in the graph, but at least one input/output
+        to the graph is a tensor subclass. This is not supported today. You can try to
+        remove the aliasing yourself as a workaround, or otherwise file an issue on github."""
+            )
 
-fw_metadata={str(fw_metadata)}
-        """
+        if aot_config.is_export:
+            raise RuntimeError(
+                f"""\
+        Encountered aliased inputs that are mutated in the graph you are trying to export.
+        This functionality is currently not supported. If needed, please file a github issue.
+
+        synthetic_base_info={str(synthetic_base_info)}
+
+        fw_metadata={str(fw_metadata)}
+                """
+            )
+
+        assert len(fw_metadata.input_info) == len(synthetic_base_info)
+
+        # Update our forward metadata to take synthetic bases into account
+        (
+            fw_metadata_updated,
+            aliased_arg_idx_with_metadata_mutations,
+        ) = create_synthetic_base_metadata(
+            fw_metadata, synthetic_base_info, flat_args, flat_args_with_synthetic_bases
+        )
+        # Save old input args for post-compile
+        self.old_input_info = fw_metadata.input_info
+
+        self.aliased_arg_idx_with_metadata_mutations = (
+            aliased_arg_idx_with_metadata_mutations
         )
 
-    assert len(fw_metadata.input_info) == len(synthetic_base_info)
+        num_aliased_args_with_metadata_mutations = len(
+            aliased_arg_idx_with_metadata_mutations
+        )
 
-    # Update our forward metadata to take synthetic bases into account
-    (
-        fw_metadata_updated,
-        aliased_arg_idx_with_metadata_mutations,
-    ) = create_synthetic_base_metadata(
-        fw_metadata, synthetic_base_info, flat_args, flat_args_with_synthetic_bases
-    )
+        def _unpack_synthetic_bases(primals: Tuple[Any, ...]) -> List[Any]:
+            f_args_inner = []
+            for inner_idx_or_tuple in synthetic_base_info:
+                if isinstance(inner_idx_or_tuple, int):
+                    f_args_inner.append(primals[inner_idx_or_tuple])
+                else:
+                    inner_base_idx, view_tensor = inner_idx_or_tuple
+                    base = primals[inner_base_idx]
+                    view_arg = gen_alias_from_base(
+                        base, view_tensor, view_tensor.requires_grad
+                    )
+                    f_args_inner.append(view_arg)
+            return f_args_inner
 
-    num_aliased_args_with_metadata_mutations = len(
-        aliased_arg_idx_with_metadata_mutations
-    )
-
-    def _unpack_synthetic_bases(primals: Tuple[Any, ...]) -> List[Any]:
-        f_args_inner = []
-        for inner_idx_or_tuple in synthetic_base_info:
-            if isinstance(inner_idx_or_tuple, int):
-                f_args_inner.append(primals[inner_idx_or_tuple])
+        @wraps(flat_fn)
+        def wrapped_flat_fn(*args):
+            unpacked_args = _unpack_synthetic_bases(args)
+            # This is a bit subtle. The goal of this entire function (aot_dispatch_synthetic_bases)
+            # is to relieve the downstream logic from having to reason about mutations on inputs that alias
+            # each other, by replacing aliased inputs with a synthetic base.
+            # One area where this breaks down a bit however is if one of those aliased inputs
+            # experienced a metadata mutation.
+            # We are now obligated to reapply the metadata mutation directly to the user's input;
+            # it isn't enough to apply mutations back to the synthetic base in the downstream logic.
+            #
+            # The way we handle this is by pretending that those aliased inputs that experience metadata mutations
+            # are additional outputs in the user's forward function.
+            # The downstream logic will just treat these as "user outputs that alias inputs".
+            # However, we will manually grab them at runtime here, use them to reapply the metadata mutation
+            # to the user inputs, and not return them to the user.
+            aliased_args_with_metadata_mutations = [
+                x
+                for i, x in enumerate(unpacked_args)
+                if i in self.aliased_arg_idx_with_metadata_mutations
+            ]
+            if len(aliased_args_with_metadata_mutations) > 0:
+                return *(flat_fn(*unpacked_args)), *aliased_args_with_metadata_mutations
             else:
-                inner_base_idx, view_tensor = inner_idx_or_tuple
-                base = primals[inner_base_idx]
-                view_arg = gen_alias_from_base(
-                    base, view_tensor, view_tensor.requires_grad
-                )
-                f_args_inner.append(view_arg)
-        return f_args_inner
+                return flat_fn(*unpacked_args)
 
-    @wraps(flat_fn)
-    def wrapped_flat_fn(*args):
-        unpacked_args = _unpack_synthetic_bases(args)
-        # This is a bit subtle. The goal of this entire function (aot_dispatch_synthetic_bases)
-        # is to relieve the downstream logic from having to reason about mutations on inputs that alias
-        # each other, by replacing aliased inputs with a synthetic base.
-        # One area where this breaks down a bit however is if one of those aliased inputs
-        # experienced a metadata mutation.
-        # We are now obligated to reapply the metadata mutation directly to the user's input;
-        # it isn't enough to apply mutations back to the synthetic base in the downstream logic.
-        #
-        # The way we handle this is by pretending that those aliased inputs that experience metadata mutations
-        # are additional outputs in the user's forward function.
-        # The downstream logic will just treat these as "user outputs that alias inputs".
-        # However, we will manually grab them at runtime here, use them to reapply the metadata mutation
-        # to the user inputs, and not return them to the user.
-        aliased_args_with_metadata_mutations = [
-            x
-            for i, x in enumerate(unpacked_args)
-            if i in aliased_arg_idx_with_metadata_mutations
-        ]
-        if len(aliased_args_with_metadata_mutations) > 0:
-            return *(flat_fn(*unpacked_args)), *aliased_args_with_metadata_mutations
-        else:
-            return flat_fn(*unpacked_args)
-
-    if config.debug_assert:
-        ref_fw_metadata = run_functionalized_fw_and_collect_metadata(
+        if config.debug_assert:
+            ref_fw_metadata = run_functionalized_fw_and_collect_metadata(
+                wrapped_flat_fn,
+                keep_input_mutations=fw_metadata.keep_input_mutations,
+                is_train=fw_metadata.is_train,
+            )(*flat_args_with_synthetic_bases)
+            assert ref_fw_metadata == fw_metadata_updated, (
+                f"ref_metadata={pprint.pformat(partial_flatten_asdict(ref_fw_metadata))}, "
+                f"\nactual_metadata={pprint.pformat(partial_flatten_asdict(fw_metadata_updated))}"
+            )
+        return (
             wrapped_flat_fn,
-            keep_input_mutations=fw_metadata.keep_input_mutations,
-            is_train=fw_metadata.is_train,
-        )(*flat_args_with_synthetic_bases)
-        assert ref_fw_metadata == fw_metadata_updated, (
-            f"ref_metadata={pprint.pformat(partial_flatten_asdict(ref_fw_metadata))}, "
-            f"\nactual_metadata={pprint.pformat(partial_flatten_asdict(fw_metadata_updated))}"
+            flat_args_with_synthetic_bases,
+            aot_config,
+            fw_metadata_updated,
         )
 
-    compiled_fn = compiler_fn(
-        wrapped_flat_fn,
-        flat_args_with_synthetic_bases,
-        aot_config,
-        fw_metadata=fw_metadata_updated,
-    )
+    def post_compile(
+        self,
+        compiled_fn,
+        aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+    ):
+        if not self.needs_post_compile:
+            return compiled_fn
 
-    @wraps(compiled_fn)
-    def wrapped_compiled_fn(args):
-        args_with_synthetic_bases, synthetic_base_info = merge_view_inputs(
-            args, fw_metadata.input_info, is_inference=is_inference
-        )
-        assert synthetic_base_info is not None
-        aliased_args_w_metadata_mutations = [
-            args[i] for i in aliased_arg_idx_with_metadata_mutations
-        ]
-        args.clear()
-        outs = compiled_fn(args_with_synthetic_bases)
-        if num_aliased_args_with_metadata_mutations > 0:
-            # This code does not handle **all** input metadata mutations.
-            # Instead, it only handles metadata mutations on inputs that were converted into synthetic bases
-            # (which only happens if at least one aliased input experienced a data mutation).
-            # e.g:
-            # def f(a, b):
-            #     a.mul_(2)
-            #     b.t_(1, 0)
-            # f(x.view(2, 2), x.view(2, 2))
-            mutated_metadata_inps = outs[-num_aliased_args_with_metadata_mutations:]
-            user_outs = outs[:-num_aliased_args_with_metadata_mutations]
-            for inp, mutated_inp in zip(
-                aliased_args_w_metadata_mutations, mutated_metadata_inps
-            ):
-                inp.as_strided_(
-                    mutated_inp.size(),
-                    mutated_inp.stride(),
-                    mutated_inp.storage_offset(),
-                )
-            return user_outs
-        return outs
+        is_inference = not self.trace_joint
 
-    return wrapped_compiled_fn
+        @wraps(compiled_fn)
+        def wrapped_compiled_fn(args):
+            args_with_synthetic_bases, synthetic_base_info = merge_view_inputs(
+                args, self.old_input_info, is_inference=is_inference
+            )
+            assert synthetic_base_info is not None
+            aliased_args_w_metadata_mutations = [
+                args[i] for i in self.aliased_arg_idx_with_metadata_mutations
+            ]
+            num_aliased_args_with_metadata_mutations = len(
+                aliased_args_w_metadata_mutations
+            )
+            args.clear()
+            outs = compiled_fn(args_with_synthetic_bases)
+            if num_aliased_args_with_metadata_mutations > 0:
+                # This code does not handle **all** input metadata mutations.
+                # Instead, it only handles metadata mutations on inputs that were converted into synthetic bases
+                # (which only happens if at least one aliased input experienced a data mutation).
+                # e.g:
+                # def f(a, b):
+                #     a.mul_(2)
+                #     b.t_(1, 0)
+                # f(x.view(2, 2), x.view(2, 2))
+                mutated_metadata_inps = outs[-num_aliased_args_with_metadata_mutations:]
+                user_outs = outs[:-num_aliased_args_with_metadata_mutations]
+                for inp, mutated_inp in zip(
+                    aliased_args_w_metadata_mutations, mutated_metadata_inps
+                ):
+                    inp.as_strided_(
+                        mutated_inp.size(),
+                        mutated_inp.stride(),
+                        mutated_inp.storage_offset(),
+                    )
+                return user_outs
+            return outs
+
+        return wrapped_compiled_fn
 
 
 # Note [Handling mutations on an input that aliases other inputs]

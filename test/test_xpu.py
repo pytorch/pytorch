@@ -167,6 +167,40 @@ if __name__ == "__main__":
         event.synchronize()
         self.assertTrue(event.query())
 
+    def test_generic_stream_event(self):
+        stream = torch.Stream("xpu")
+        self.assertEqual(stream.device_index, torch.xpu.current_device())
+        xpu_stream = torch.xpu.Stream(
+            stream_id=stream.stream_id,
+            device_index=stream.device_index,
+            device_type=stream.device_type,
+        )
+        self.assertEqual(stream.stream_id, xpu_stream.stream_id)
+        self.assertNotEqual(stream.stream_id, torch.xpu.current_stream().stream_id)
+
+        event1 = torch.Event("xpu")
+        event2 = torch.Event("xpu")
+        self.assertEqual(event1.event_id, 0)
+        a = torch.randn(1000)
+        b = torch.randn(1000)
+        with torch.xpu.stream(xpu_stream):
+            a_xpu = a.to("xpu", non_blocking=True)
+            b_xpu = b.to("xpu", non_blocking=True)
+            self.assertEqual(stream.stream_id, torch.xpu.current_stream().stream_id)
+        event1.record(stream)
+        event1.synchronize()
+        self.assertTrue(event1.query())
+        c_xpu = a_xpu + b_xpu
+        event2.record()
+        event2.synchronize()
+        self.assertTrue(event2.query())
+        self.assertNotEqual(event1.event_id, event2.event_id)
+        self.assertEqual(c_xpu.cpu(), a + b)
+        with self.assertRaisesRegex(
+            NotImplementedError, "elapsedTime is not supported by XPU backend."
+        ):
+            event1.elapsed_time(event2)
+
     def test_generator(self):
         torch.manual_seed(2024)
         g_state0 = torch.xpu.get_rng_state()

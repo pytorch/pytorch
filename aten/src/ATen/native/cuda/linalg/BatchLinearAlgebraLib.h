@@ -8,7 +8,7 @@
 #include <ATen/native/TransposeType.h>
 #include <ATen/native/cuda/MiscUtils.h>
 
-#if (defined(CUDART_VERSION) && defined(CUSOLVER_VERSION)) || (defined(USE_ROCM) && ROCM_VERSION >= 50300)
+#if (defined(CUDART_VERSION) && defined(CUSOLVER_VERSION)) || defined(USE_ROCM)
 #define USE_LINALG_SOLVER
 #endif
 

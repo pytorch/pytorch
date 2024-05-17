@@ -138,7 +138,7 @@ class ValueRanges(Generic[_T]):
             if not sympy_generic_le(lower, upper):
                 raise ValueRangeError(f"Invalid ranges [{lower}:{upper}]")
         except TypeError:
-            raise TypeError(f"Could not compare {lower} <= {upper}")
+            raise TypeError(f"Could not compare {lower} <= {upper}")  # noqa: TRY200
         # Because this is a frozen class
         object.__setattr__(self, "lower", lower)
         object.__setattr__(self, "upper", upper)
@@ -340,6 +340,9 @@ class SymPyValueRangeAnalysis:
 
     @staticmethod
     def constant(value, dtype):
+        if isinstance(value, ValueRanges):
+            assert value.is_singleton()
+            value = value.lower
         # NB: value is NOT a sympy expression, it's a constant!
         is_python = isinstance(value, (int, float, bool))
         assert is_python or isinstance(
@@ -663,7 +666,9 @@ class SymPyValueRangeAnalysis:
         b = ValueRanges.wrap(b)
         c = ValueRanges.wrap(c)
         a = a.boolify()
-        assert b.is_bool == c.is_bool
+        # We sometimes write unknown without specifying the type correctly
+        # In particular, we do that when initialising the bounds for loads in bounds.py
+        assert b.is_bool == c.is_bool or ValueRanges.unknown() in (b, c)
         if b.is_bool:
             return ValueRanges(sympy.And(b.lower, c.lower), sympy.Or(b.upper, c.upper))
         else:

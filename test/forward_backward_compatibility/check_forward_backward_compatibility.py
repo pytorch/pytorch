@@ -9,6 +9,9 @@ import torch
 from torch._C import parse_schema
 
 
+# Run by backwards_compat CI job
+
+
 # How to run this test locally:
 # 1 Have two virtual environments (eg conda env), one without PyTorch installed (venv_nightly)
 #   one with your local changes (venv_yours).
@@ -136,11 +139,14 @@ ALLOW_LIST = [
     ("aten::batch_norm_backward_elemt", datetime.date(2023, 12, 31)),
     ("aten::sym_constrain_range", datetime.date(2023, 12, 31)),
     ("aten::_efficient_attention_forward", datetime.date(2024, 1, 15)),
-    ("onednn::qconv1d_pointwise", datetime.date(2023, 12, 31)),
-    ("onednn::qconv2d_pointwise", datetime.date(2023, 12, 31)),
-    ("onednn::qconv3d_pointwise", datetime.date(2023, 12, 31)),
-    ("onednn::qconv2d_pointwise.binary", datetime.date(2023, 12, 31)),
-    ("onednn::qlinear_pointwise", datetime.date(2023, 12, 31)),
+    ("onednn::qconv1d_pointwise", datetime.date(2024, 12, 31)),
+    ("onednn::qconv2d_pointwise", datetime.date(2024, 12, 31)),
+    ("onednn::qconv3d_pointwise", datetime.date(2024, 12, 31)),
+    ("onednn::qconv2d_pointwise.binary", datetime.date(2024, 12, 31)),
+    ("aten::_aminmax", datetime.date(2024, 12, 31)),
+    ("aten::_aminmax.dim", datetime.date(2024, 12, 31)),
+    ("aten::_aminmax.out", datetime.date(2024, 12, 31)),
+    ("aten::_aminmax.dim_out", datetime.date(2024, 12, 31)),
 ]
 
 ALLOW_LIST_COMPILED = [
