@@ -533,12 +533,11 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
 
     # Populate depth for the nodes. Depth is the distance from the inputs.
     depths = {}
-    output_node = next(iter(gm.graph.find_nodes(op="output")))
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             depths[node] = 0
         else:
-            depths[node] = max([depths[arg] for arg in node.all_input_nodes], default=0)
+            depths[node] = max([depths[arg] for arg in node.all_input_nodes], default=0) + 1
 
     def insert_node_in_graph(node):
         if node in env:
