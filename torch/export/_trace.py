@@ -1206,7 +1206,7 @@ def _export(
         _verify_nn_module_stack(gm)
         _verify_stack_trace(gm)
         if not _is_torch_jit_trace:
-            _verify_placeholder_names(gm, ep_non_strict.sig)
+            _verify_placeholder_names(gm, aten_export_artifact.sig)
         exported_program = ExportedProgram(
             root=gm,
             graph=gm.graph,
