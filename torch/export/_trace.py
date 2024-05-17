@@ -415,6 +415,7 @@ def _export_to_torch_ir(
     disable_constraint_solver: bool = False,
     restore_fqn: bool = True,
     _log_export_usage: bool = True,
+    same_signature: bool = True,
 ) -> torch.fx.GraphModule:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -445,6 +446,7 @@ def _export_to_torch_ir(
                     tracing_mode="symbolic",
                     disable_constraint_solver=disable_constraint_solver,
                     _log_export_usage=_log_export_usage,
+                    same_signature=same_signature,
                 )(
                     *args,
                     **kwargs,

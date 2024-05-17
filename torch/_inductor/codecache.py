@@ -734,11 +734,12 @@ class FxGraphCache:
         return os.path.join(FxGraphCache._get_tmp_dir(), key[1:3], key)
 
     @staticmethod
-    def _filter_symints(inputs: List[Any]) -> List[torch.SymInt]:
+    def _filter_backed_symints(inputs: List[Any]) -> List[torch.SymInt]:
         """
-        Get the SymInt objects from the input list.
+        Get the backed SymInt objects from the input list. Note that we can never
+        have guards that depend on unbacked symint.
         """
-        return [s for s in inputs if isinstance(s, torch.SymInt)]
+        return [s for s in inputs if isinstance(s, torch.SymInt) and has_hint(s)]
 
     @staticmethod
     def _get_shape_env() -> Optional[ShapeEnv]:
@@ -764,8 +765,7 @@ class FxGraphCache:
         shape_env = FxGraphCache._get_shape_env()
         assert shape_env is not None
 
-        symints = FxGraphCache._filter_symints(example_inputs)
-        assert all(has_hint(s) for s in symints)
+        symints = FxGraphCache._filter_backed_symints(example_inputs)
         hints = [hint_int(s) for s in symints]
 
         def iterate_over_candidates() -> Generator[CompiledFxGraph, None, None]:
@@ -885,7 +885,7 @@ class FxGraphCache:
         # Tensor arg with a symbolic shape will have a SymInt arg for the graph.
         shape_env = FxGraphCache._get_shape_env()
         assert shape_env is not None
-        symints = FxGraphCache._filter_symints(example_inputs)
+        symints = FxGraphCache._filter_backed_symints(example_inputs)
         disk_compiled_graph.guards_expr = shape_env.produce_guards_expression(symints)
 
         try:
