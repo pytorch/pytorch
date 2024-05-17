@@ -3594,7 +3594,10 @@ class TritonTemplateBuffer(TemplateBuffer):
         self.mutated_inputs = mutated_inputs
         if mutated_inputs is not None:
             # Ensure that the mutated inputs are only allowed for certain nodes
-            allowed_set = {torch.ops.higher_order.flex_attention}
+            allowed_set = {
+                torch.ops.higher_order.flex_attention,
+                torch.ops.higher_order.flex_attention_backward,
+            }
             current_node = V.graph.current_node.target
             assert (
                 current_node in allowed_set
@@ -3715,13 +3718,6 @@ class CUDATemplateBuffer(TemplateBuffer):
 
     def get_workspace_size(self):
         return self.workspace_size if self.workspace_size is not None else 0
-
-
-class CppTemplateBuffer(TemplateBuffer):
-    def __init__(self, layout, inputs, make_kernel_render, template, choice):
-        super().__init__(layout, inputs, make_kernel_render)
-        self.template = template
-        self.choice = choice
 
 
 @dataclasses.dataclass
