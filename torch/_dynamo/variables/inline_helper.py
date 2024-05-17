@@ -163,12 +163,27 @@ def decompose_and_inline_function_with_makefx(tx, fn, args, kwargs):
 
     wrapped_fn = wrapper_fn(fn)
 
-    with decomp_for_pre_dispatch():
+    with decomp_for_pre_dispatch(True):
         with enable_python_dispatcher():
             with tx.fake_mode:
                 fx_g = make_fx(wrapped_fn, pre_dispatch=True)(
                     fake_value_args, fake_value_kwargs
                 )
+
+    def is_graph_empty_after_decomp(code):
+        split_code = code.split("forward")[1].split("\n")
+        return (
+            len(split_code) == 4
+            and "fx_pytree.tree_flatten_spec" in split_code[1]
+            and "pytree.tree_unflatten" in split_code[2]
+        )
+
+    # don't run CompositeImplicit if that will make graph empty
+    if is_graph_empty_after_decomp(fx_g.code):
+        with tx.fake_mode:
+            fx_g = make_fx(wrapped_fn, pre_dispatch=True)(
+                fake_value_args, fake_value_kwargs
+            )
 
     # this is a hack, we want to access `.code` here to trigger the `real_recompile`
     # in case this is `_lazy_graph_module`. This will avoid us trying to inline the
