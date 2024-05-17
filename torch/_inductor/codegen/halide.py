@@ -552,11 +552,11 @@ class HalideKernel(SIMDKernel):
             pid_cache=pid_cache,
             disable_persistent_reduction=disable_persistent_reduction,
         )
-        self.body = IndentedBuffer()
         # For halide, we just write directly to the body
         self.compute = self.body
         self.loads = self.body
         self.stores = self.body
+        self.indexing_code = self.body
 
     def create_cse_var(self, name, bounds=None):
         self.body.writeline(f"{name} = hl.Func()")

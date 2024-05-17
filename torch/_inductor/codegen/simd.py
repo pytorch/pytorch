@@ -42,6 +42,7 @@ from ..runtime.runtime_utils import get_max_y_grid, green_text, yellow_text
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..utils import (
     get_dtype_size,
+    IndentedBuffer,
     Placeholder,
     sympy_dot,
     sympy_index_symbol,
@@ -388,6 +389,8 @@ class SIMDKernel(Kernel):
         if pid_cache is None:
             pid_cache = {}
         super().__init__()
+        self.body = IndentedBuffer()
+        self.indexing_code = IndentedBuffer()
         self.numels = [V.graph.sizevars.simplify(s) for s in groups]
         self.mutations: Set[str] = mutations if mutations is not None else set()
         self.range_trees: List[IterationRangesRoot] = []

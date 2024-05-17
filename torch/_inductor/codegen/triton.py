@@ -962,8 +962,6 @@ class TritonKernel(SIMDKernel):
             pid_cache=pid_cache,
             disable_persistent_reduction=disable_persistent_reduction,
         )
-        self.body = IndentedBuffer()
-        self.indexing_code = IndentedBuffer()
         self.suffix: IndentedBuffer = IndentedBuffer()  # type: ignore[assignment]
         self.outside_loop_vars: Set[Any] = set()
         self.min_elem_per_thread = min_elem_per_thread
