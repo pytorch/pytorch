@@ -42,8 +42,8 @@ static std::unique_ptr<ViewFunc> create_view_func_matching(const Variable& t) {
 
 DifferentiableViewMeta::DifferentiableViewMeta(
     at::TensorImpl* self_impl,
-    c10::optional<ViewInfo> backward_info,
-    c10::optional<ViewInfo> forward_info,
+    std::optional<ViewInfo> backward_info,
+    std::optional<ViewInfo> forward_info,
     bool shared_view_info,
     CreationMeta creation_meta)
     : AutogradMeta(self_impl),
@@ -581,10 +581,10 @@ bool VariableHooks::retains_grad(const at::TensorBase& self) const {
 void VariableHooks::_backward(
     const Tensor& self,
     at::TensorList inputs,
-    const c10::optional<Tensor>& gradient,
-    c10::optional<bool> keep_graph,
+    const std::optional<Tensor>& gradient,
+    std::optional<bool> keep_graph,
     bool create_graph) const {
-  // TODO torch::autograd::backward should take the c10::optional<Tensor>
+  // TODO torch::autograd::backward should take the std::optional<Tensor>
   // gradient directly instead of us having to unwrap it to Tensor _gradient
   // here.
   Tensor _gradient = gradient.has_value() ? *gradient : Tensor();

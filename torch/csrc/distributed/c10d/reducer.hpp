@@ -261,10 +261,10 @@ class TORCH_API Reducer {
   std::weak_ptr<c10d::Logger> logger_;
   // List of futures installed by Reducer::install_futures that should be
   // awaited at the end of backwards pass.
-  c10::optional<c10::List<c10::intrusive_ptr<c10::ivalue::Future>>>
+  std::optional<c10::List<c10::intrusive_ptr<c10::ivalue::Future>>>
       installed_futures_{c10::nullopt};
   // Mixed precision parameter dtype for bucket type checking.
-  c10::optional<c10::ScalarType> mixed_precision_param_dtype_{c10::nullopt};
+  std::optional<c10::ScalarType> mixed_precision_param_dtype_{c10::nullopt};
 
   // Work handle for allreduce on local_used_map_
   c10::intrusive_ptr<c10d::Work> local_used_work_;
@@ -389,7 +389,7 @@ class TORCH_API Reducer {
     bool expect_sparse_gradient = false;
 
     // Sparse indices tensor
-    c10::optional<at::Tensor> sparse_tensor_indices = c10::nullopt;
+    std::optional<at::Tensor> sparse_tensor_indices = c10::nullopt;
 
     // TODO(@pietern)
     // Memory copies from gradient tensors into the bucket are potentially
@@ -576,12 +576,12 @@ compute_bucket_assignment_by_size(
     const std::vector<size_t>& bucket_size,
     const std::vector<bool>& expect_sparse_gradient = {},
     const std::vector<int64_t>& tensor_indices = {},
-    const c10::optional<std::weak_ptr<c10d::Logger>>& logger = {});
+    const std::optional<std::weak_ptr<c10d::Logger>>& logger = {});
 
 // Verify models across all processes are the same as model on rank 0 with
 // respect to no. of params and matching dtype/size/layout.
 TORCH_API void verify_params_across_processes(
     const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
     const std::vector<at::Tensor>& params,
-    const c10::optional<std::weak_ptr<c10d::Logger>>& logger);
+    const std::optional<std::weak_ptr<c10d::Logger>>& logger);
 } // namespace c10d

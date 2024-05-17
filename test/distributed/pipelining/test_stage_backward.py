@@ -3,26 +3,14 @@
 import copy
 
 import torch
+
+from model_registry import MLPModule
 from torch.distributed.pipelining._backward import stage_backward
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 d_hid = 512
 batch_size = 256
-
-
-class MLPModule(torch.nn.Module):
-    def __init__(self, d_hid):
-        super().__init__()
-        self.net1 = torch.nn.Linear(d_hid, d_hid)
-        self.relu = torch.nn.ReLU()
-        self.net2 = torch.nn.Linear(d_hid, d_hid)
-
-    def forward(self, x):
-        x = self.net1(x)
-        x = self.relu(x)
-        x = self.net2(x)
-        return x
 
 
 class StageBackwardTests(TestCase):
@@ -64,8 +52,6 @@ class StageBackwardTests(TestCase):
             except AssertionError:
                 print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
                 raise
-
-        print("Stage backward test passed")
 
 
 if __name__ == "__main__":

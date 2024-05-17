@@ -56,7 +56,7 @@ namespace detail {
     void operator()(const at::Tensor& x) {
       ts = ts | x.key_set();
     }
-    void operator()(const c10::optional<at::Tensor>& x) {
+    void operator()(const std::optional<at::Tensor>& x) {
       if (x.has_value()) {
         ts = ts | x->key_set();
       }
@@ -67,8 +67,8 @@ namespace detail {
       }
     }
     // Tensor?[] translates to this case.
-    void operator()(const c10::List<c10::optional<at::Tensor>>& xs) {
-      for (c10::optional<at::Tensor> x : xs) {
+    void operator()(const c10::List<std::optional<at::Tensor>>& xs) {
+      for (std::optional<at::Tensor> x : xs) {
         if (x.has_value()) {
           ts = ts | x.value().key_set();
         }
@@ -80,7 +80,7 @@ namespace detail {
         ts = ts | x.key_set();
       }
     }
-    [[noreturn]] void operator()(at::ArrayRef<c10::optional<at::Tensor>>) {
+    [[noreturn]] void operator()(at::ArrayRef<std::optional<at::Tensor>>) {
       // Just checking that the handling of Tensor?[] didn't change.
       TORCH_INTERNAL_ASSERT(false);
     }
@@ -89,7 +89,7 @@ namespace detail {
         ts = ts | gen.key_set();
       }
     }
-    void operator()(const c10::optional<at::Generator>& gen) {
+    void operator()(const std::optional<at::Generator>& gen) {
       if (gen.has_value() && gen->defined()) {
         ts = ts | gen->key_set();
       }

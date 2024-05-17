@@ -811,6 +811,9 @@ def gen_pyi(
             "_functionalize_apply_view_metas": [
                 "def _functionalize_apply_view_metas(tensor: Tensor,  base: Tensor) -> Tensor: ..."
             ],
+            "_functionalize_is_symbolic": [
+                "def _functionalize_is_symbolic(tensor: Tensor) -> _bool: ..."
+            ],
             "_enable_functionalization": [
                 "def _enable_functionalization(*, reapply_views: _bool = False): ..."
             ],
@@ -1117,6 +1120,18 @@ def gen_pyi(
             "nelement": ["def nelement(self) -> _int: ..."],
             "cuda": [
                 "def cuda({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "self",
+                            "device: Optional[Union[_device, _int, str]] = None",
+                            "non_blocking: _bool = False",
+                            "memory_format: torch.memory_format = torch.preserve_format",
+                        ]
+                    )
+                )
+            ],
+            "xpu": [
+                "def xpu({}) -> Tensor: ...".format(
                     ", ".join(
                         [
                             "self",
