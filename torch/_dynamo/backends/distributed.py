@@ -464,6 +464,14 @@ class DDPOptimizer:
     def _ignore_parameter(self, parameter):
         return hasattr(parameter, "_ddp_ignored") and parameter._ddp_ignored
 
+    def add_module_params_to_bucket(self, mod, bucket, processed_modules, prefix):
+        processed_modules.add(mod)
+        for name, param in mod.named_parameters():
+            if param.requires_grad and not self._ignore_parameter(param):
+                bucket.size += param.untyped_storage().nbytes()
+                bucket.params.append(f"{prefix}_{name}")
+                bucket.param_ids.append(id(param))
+
     def compile_fn(self, gm: fx.GraphModule, example_inputs: List[torch.Tensor]):
         """
         Implements graph splitting, first determining a set of of buckets by counting
@@ -490,6 +498,7 @@ class DDPOptimizer:
 
         # 1: compute the partition map according to DDP bucket logic
         buckets = [Bucket()]  # (size, param_names)
+        processed_modules = set()
         for node in reversed(gm.graph.nodes):
             if node.op in ("output", "placeholder"):
                 continue
@@ -509,18 +518,29 @@ class DDPOptimizer:
                     if buckets[0].opcount_increased_to_capture_external_output == 0:
                         buckets[0].paramsize_before_opcount_increase = buckets[0].size
                     buckets[0].opcount_increased_to_capture_external_output += 1
-
             if node.op == "call_module":
-                target = gm.get_submodule(node.target)
-                for name, param in target.named_parameters():
-                    if param.requires_grad and not self._ignore_parameter(param):
-                        buckets[0].size += param.untyped_storage().nbytes()
-                        buckets[0].params.append(f"{node.target}_{name}")
-                        buckets[0].param_ids.append(id(param))
+                target_mod = gm.get_submodule(node.target)
+                if target_mod not in processed_modules:
+                    self.add_module_params_to_bucket(
+                        target_mod, buckets[0], processed_modules, node.target
+                    )
+            elif node.op == "call_method":
+                if isinstance(node.args[0].target, str):
+                    target_mod = None
+                    try:
+                        target_mod = gm.get_submodule(node.args[0].target)
+                    except AttributeError:
+                        pass
+                    if target_mod is not None and target_mod not in processed_modules:
+                        self.add_module_params_to_bucket(
+                            target_mod, buckets[0], processed_modules, node.target
+                        )
             elif node.op == "get_attr":
                 maybe_param = getattr(gm, node.target)
-                if maybe_param.requires_grad and not self._ignore_parameter(
-                    maybe_param
+                if (
+                    isinstance(maybe_param, torch.nn.Parameter)
+                    and maybe_param.requires_grad
+                    and not self._ignore_parameter(maybe_param)
                 ):
                     buckets[0].size += maybe_param.untyped_storage().nbytes()
                     buckets[0].params.append(node.target)

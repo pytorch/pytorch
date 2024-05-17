@@ -16,7 +16,7 @@ from typing import Any, Dict, Optional
 
 __all__ = ['ErrorHandler']
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class ErrorHandler:
@@ -89,13 +89,13 @@ class ErrorHandler:
     ):
         """Modify the rootcause_error read from the file, to correctly set the exit code."""
         if "message" not in rootcause_error:
-            log.warning(
+            logger.warning(
                 "child error file (%s) does not have field `message`. \n"
                 "cannot override error code: %s",
                 rootcause_error_file, error_code
             )
         elif isinstance(rootcause_error["message"], str):
-            log.warning(
+            logger.warning(
                 "child error file (%s) has a new message format. \n"
                 "skipping error code override",
                 rootcause_error_file
@@ -111,7 +111,7 @@ class ErrorHandler:
             # is terminated by signals like SIGSEGV.
             if error_code:
                 self.override_error_code_in_rootcause_data(rootcause_error_file, rootcause_error, error_code)
-            log.debug(
+            logger.debug(
                 "child error file (%s) contents:\n"
                 "%s",
                 rootcause_error_file, json.dumps(rootcause_error, indent=2)
@@ -131,9 +131,9 @@ class ErrorHandler:
             # original error file contents and overwrite the error file.
             self._rm(my_error_file)
             self._write_error_file(my_error_file, json.dumps(rootcause_error))
-            log.info("dumped error file to parent's %s", my_error_file)
+            logger.info("dumped error file to parent's %s", my_error_file)
         else:
-            log.error(
+            logger.error(
                 "no error file defined for parent, to copy child error file (%s)", rootcause_error_file
             )
 
@@ -143,14 +143,14 @@ class ErrorHandler:
             with open(my_error_file) as fp:
                 try:
                     original = json.dumps(json.load(fp), indent=2)
-                    log.warning(
+                    logger.warning(
                         "%s already exists"
                         " and will be overwritten."
                         " Original contents:\n%s",
                         my_error_file, original
                     )
-                except json.decoder.JSONDecodeError as err:
-                    log.warning(
+                except json.decoder.JSONDecodeError:
+                    logger.warning(
                         "%s already exists"
                         " and will be overwritten."
                         " Unable to load original contents:\n",

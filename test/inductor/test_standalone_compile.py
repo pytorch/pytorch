@@ -1,7 +1,7 @@
 # Owner(s): ["module: inductor"]
 import torch
 from torch import _dynamo as dynamo, _inductor as inductor
-from torch._dynamo.test_case import run_tests, TestCase
+from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import gen_gm_and_inputs
 from torch.fx import symbolic_trace
 from torch.fx.experimental.proxy_tensor import make_fx

@@ -24,6 +24,9 @@ from .functional_sgd import _FunctionalSGD
 from .named_optimizer import _NamedOptimizer
 from .utils import as_functional_optim
 
+from warnings import warn
+warn("TorchScript support for functional optimizers is"
+     "deprecated and will be removed in a future PyTorch release. Consider using the torch.compile optimizer instead.")
 
 # DistributedOptimizer imports torch.distributed.rpc names, so gate availability
 # based on RPC being available.
@@ -32,3 +35,5 @@ if hasattr(torch._C, "_rpc_init"):
 
 from .post_localSGD_optimizer import PostLocalSGDOptimizer
 from .zero_redundancy_optimizer import ZeroRedundancyOptimizer
+
+__all__ = ["as_functional_optim", "DistributedOptimizer", "PostLocalSGDOptimizer", "ZeroRedundancyOptimizer"]

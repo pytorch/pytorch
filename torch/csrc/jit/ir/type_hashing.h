@@ -6,7 +6,7 @@
 namespace torch {
 namespace jit {
 
-struct HashType {
+struct TORCH_API HashType {
   size_t operator()(const TypePtr& type) const;
   size_t operator()(const c10::ConstTypePtr& type) const;
 };

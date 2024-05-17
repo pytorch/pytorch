@@ -151,8 +151,8 @@ void cpu_flash_attention(
     const at::Tensor& v,
     double dropout_p,
     bool is_causal,
-    c10::optional<Tensor> attn_mask,
-    c10::optional<double> scale) {
+    std::optional<Tensor> attn_mask,
+    std::optional<double> scale) {
   // Query (Batch x Num_heads  x Q_seq_len  x Dim_per_head)
   //    -> (Batch x Q_seq_len  x Num_heads  x Dim_per_head)
   // Key   (Batch x Num_heads  x KV_seq_len x Dim_per_head)
@@ -232,11 +232,11 @@ void cpu_flash_attention(
   at::Tensor buf_reduced = at::empty({num_thread, qSplitSize, is_reduced_type ? kvSplitSize : 0}, query.options());
 
   // Data ptrs
-  scalar_t* q_data = query.data_ptr<scalar_t>();
-  scalar_t* k_data = key.data_ptr<scalar_t>();
-  scalar_t* v_data = value.data_ptr<scalar_t>();
-  accum_t* mask_data = has_attn_mask
-      ? attn_mask.value().data_ptr<accum_t>()
+  const scalar_t* q_data = query.const_data_ptr<scalar_t>();
+  const scalar_t* k_data = key.const_data_ptr<scalar_t>();
+  const scalar_t* v_data = value.const_data_ptr<scalar_t>();
+  const accum_t* mask_data = has_attn_mask
+      ? attn_mask.value().const_data_ptr<accum_t>()
       : nullptr;
   scalar_t* out_data = output.data_ptr<scalar_t>();
   accum_t* lse_data = logsumexp.data_ptr<accum_t>();
@@ -400,8 +400,8 @@ void cpu_flash_attention_backward(
     const at::Tensor& logsumexp,
     double dropout_p,
     bool is_causal,
-    c10::optional<Tensor> attn_mask,
-    c10::optional<double> scale) {
+    std::optional<Tensor> attn_mask,
+    std::optional<double> scale) {
   constexpr bool is_reduced_type = is_reduced_floating_point_v<scalar_t>;
   using accum_t = at::opmath_type<scalar_t>;
   using Vec = vec::Vectorized<accum_t>;
@@ -493,15 +493,15 @@ void cpu_flash_attention_backward(
   scalar_t* grad_q_data = grad_q.data_ptr<scalar_t>();
   scalar_t* grad_k_data = grad_k.data_ptr<scalar_t>();
   scalar_t* grad_v_data = grad_v.data_ptr<scalar_t>();
-  scalar_t* grad_out_data = grad_out.data_ptr<scalar_t>();
-  scalar_t* q_data = query.data_ptr<scalar_t>();
-  scalar_t* k_data = key.data_ptr<scalar_t>();
-  scalar_t* v_data = value.data_ptr<scalar_t>();
-  accum_t* mask_data = has_attn_mask
-      ? attn_mask.value().data_ptr<accum_t>()
+  const scalar_t* grad_out_data = grad_out.const_data_ptr<scalar_t>();
+  const scalar_t* q_data = query.const_data_ptr<scalar_t>();
+  const scalar_t* k_data = key.const_data_ptr<scalar_t>();
+  const scalar_t* v_data = value.const_data_ptr<scalar_t>();
+  const accum_t* mask_data = has_attn_mask
+      ? attn_mask.value().const_data_ptr<accum_t>()
       : nullptr;
-  scalar_t* out_data = out.data_ptr<scalar_t>();
-  accum_t* lse_data = logsumexp.data_ptr<accum_t>();
+  const scalar_t* out_data = out.const_data_ptr<scalar_t>();
+  const accum_t* lse_data = logsumexp.const_data_ptr<accum_t>();
   accum_t* buf_data = buf.data_ptr<accum_t>();
   scalar_t* buf_reduced_data = is_reduced_type ? buf_reduced.data_ptr<scalar_t>() : nullptr;
 
@@ -694,8 +694,8 @@ void flash_attention_kernel_impl(
     const at::Tensor& value,
     double dropout_p,
     bool is_causal,
-    c10::optional<Tensor> attn_mask,
-    c10::optional<double> scale) {
+    std::optional<Tensor> attn_mask,
+    std::optional<double> scale) {
   auto q_seq_len = query.size(2);
 
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, query.scalar_type(), "flash_attention", [&] {
@@ -727,8 +727,8 @@ void flash_attention_backward_kernel_impl(
     const at::Tensor& logsumexp,
     double dropout_p,
     bool is_causal,
-    c10::optional<Tensor> attn_mask,
-    c10::optional<double> scale) {
+    std::optional<Tensor> attn_mask,
+    std::optional<double> scale) {
   // make sure grad_out has no zero strides (broadcasted dimensions)
   // since we are going to call gemm next
   // zero stride in leading dimension would lead to slow impl for gemm

@@ -13,6 +13,7 @@ from torch import Tensor, device, dtype
 from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict, List
 from typing_extensions import Self
 from ...utils.hooks import RemovableHandle
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 __all__ = ['register_module_forward_pre_hook', 'register_module_forward_hook',
            'register_module_full_backward_pre_hook', 'register_module_backward_hook',
@@ -430,8 +431,8 @@ class Module:
 
         # Backward compatibility: no args used to be allowed when call_super_init=False
         if self.call_super_init is False and bool(kwargs):
-            raise TypeError("{}.__init__() got an unexpected keyword argument '{}'"
-                            "".format(type(self).__name__, next(iter(kwargs))))
+            raise TypeError(f"{type(self).__name__}.__init__() got an unexpected keyword argument '{next(iter(kwargs))}'"
+                            "")
 
         if self.call_super_init is False and bool(args):
             raise TypeError(f"{type(self).__name__}.__init__() takes 1 positional argument but {len(args) + 1} were"
@@ -802,8 +803,12 @@ class Module:
             with torch.no_grad():
                 param_applied = fn(param)
             p_should_use_set_data = compute_should_use_set_data(param, param_applied)
+
+            # subclasses may have multiple child tensors so we need to use swap_tensors
+            p_should_use_swap_tensors = should_use_swap_tensors or is_traceable_wrapper_subclass(param_applied)
+
             param_grad = param.grad
-            if should_use_swap_tensors:
+            if p_should_use_swap_tensors:
                 try:
                     if param_grad is not None:
                         # Accessing param.grad makes its at::Tensor's use_count 2, which will prevent swapping.
@@ -829,7 +834,7 @@ class Module:
                 with torch.no_grad():
                     grad_applied = fn(param_grad)
                 g_should_use_set_data = compute_should_use_set_data(param_grad, grad_applied)
-                if should_use_swap_tensors:
+                if p_should_use_swap_tensors:
                     grad_applied.requires_grad_(param_grad.requires_grad)
                     try:
                         torch.utils.swap_tensors(param_grad, grad_applied)
@@ -1646,7 +1651,6 @@ class Module:
             # raise exception raised in try block
             raise
 
-
     __call__ : Callable[..., Any] = _wrapped_call_impl
 
     def __getstate__(self):
@@ -1892,7 +1896,7 @@ class Module:
             # DeprecationWarning is ignored by default
             warnings.warn(
                 "Positional args are being deprecated, use kwargs instead. Refer to "
-                "https://pytorch.org/docs/master/generated/torch.nn.Module.html#torch.nn.Module.state_dict"
+                "https://pytorch.org/docs/main/generated/torch.nn.Module.html#torch.nn.Module.state_dict"
                 " for details.")
 
         if destination is None:
@@ -1965,7 +1969,6 @@ class Module:
         self._load_state_dict_post_hooks[handle.id] = hook
         return handle
 
-
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
         r"""Copy parameters and buffers from :attr:`state_dict` into only this module, but not its descendants.
@@ -2033,9 +2036,8 @@ class Module:
 
                 if not is_param_lazy and input_param.shape != param.shape:
                     # local shape should match the one in checkpoint
-                    error_msgs.append('size mismatch for {}: copying a param with shape {} from checkpoint, '
-                                      'the shape in current model is {}.'
-                                      .format(key, input_param.shape, param.shape))
+                    error_msgs.append(f'size mismatch for {key}: copying a param with shape {input_param.shape} from checkpoint, '
+                                      f'the shape in current model is {param.shape}.')
                     continue
 
                 if param.is_meta and not input_param.is_meta and not assign_to_params_buffers:
@@ -2090,9 +2092,12 @@ class Module:
         if strict:
             for key in state_dict.keys():
                 if key.startswith(prefix) and key != extra_state_key:
-                    input_name = key[len(prefix):]
-                    input_name = input_name.split('.', 1)[0]  # get the name of param/buffer/child
-                    if input_name not in self._modules and input_name not in local_state:
+                    input_name = key[len(prefix):].split(".", 1)
+                    # Must be Module if it have attributes
+                    if len(input_name) > 1:
+                        if input_name[0] not in self._modules:
+                            unexpected_keys.append(key)
+                    elif input_name[0] not in local_state:
                         unexpected_keys.append(key)
 
     def load_state_dict(self, state_dict: Mapping[str, Any],
@@ -2123,8 +2128,10 @@ class Module:
 
         Returns:
             ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields:
-                * **missing_keys** is a list of str containing the missing keys
-                * **unexpected_keys** is a list of str containing the unexpected keys
+                * **missing_keys** is a list of str containing any keys that are expected
+                    by this module but missing from the provided ``state_dict``.
+                * **unexpected_keys** is a list of str containing the keys that are not
+                    expected by this module but present in the provided ``state_dict``.
 
         Note:
             If a parameter or buffer is registered as ``None`` and its corresponding key

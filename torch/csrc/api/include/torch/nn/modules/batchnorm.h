@@ -160,7 +160,7 @@ class BatchNormImplBase : public NormImplBase<D, Derived, BatchNormOptions> {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the BatchNorm1d function.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.BatchNorm1d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.BatchNorm1d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::BatchNorm1dOptions` class to learn
@@ -190,7 +190,7 @@ TORCH_MODULE(BatchNorm1d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the BatchNorm2d function.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.BatchNorm2d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.BatchNorm2d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::BatchNorm2dOptions` class to learn
@@ -220,7 +220,7 @@ TORCH_MODULE(BatchNorm2d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the BatchNorm3d function.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.BatchNorm3d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.BatchNorm3d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::BatchNorm3dOptions` class to learn

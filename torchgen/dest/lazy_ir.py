@@ -59,13 +59,13 @@ def node_ctor_arg_rvalue_string(arg: LazyArgument) -> str:
             if arg.is_symint_or_list:
                 # TODO: I don't understand when you should put lazy_ in the name
                 # or not
-                return f"{arg.name} ? c10::make_optional(GetSymIntValue(*{arg.name})) : c10::nullopt"
+                return f"{arg.name} ? std::make_optional(GetSymIntValue(*{arg.name})) : ::std::nullopt"
             elif arg.is_wrapped_scalar:
                 return f"node_{arg.name}"
             return (
                 f"lazy_{arg.name} ? "
-                f"c10::make_optional(lazy_{arg.name}->GetIrValue()) : "
-                "c10::nullopt"
+                f"std::make_optional(lazy_{arg.name}->GetIrValue()) : "
+                "::std::nullopt"
             )
         else:
             raise AssertionError(
@@ -242,7 +242,6 @@ class GenLazyIR(ABC):
         # for now, we just want one IR class decl and soon after also the method defs
         # and we use the functional version not out/inplace.
         all_args = schema.filtered_args()
-        value_args = schema.filtered_args(values=True, scalars=False)
         scalar_args = schema.filtered_args(values=False, scalars=True)
 
         ctor_args = [f"const {i.lazy_type.cpp_type()}& {i.name}" for i in all_args]
@@ -254,8 +253,8 @@ class GenLazyIR(ABC):
         scalar_initializers = ",\n        ".join(
             [
                 # This code is just special casing the mapping from string_view -> strings
-                f"{a.name}({a.name}.has_value() ? c10::make_optional(std::string(*{a.name})) : c10::nullopt)"
-                if a.lazy_type.cpp_type() == "c10::optional<c10::string_view>"
+                f"{a.name}({a.name}.has_value() ? ::std::make_optional(std::string(*{a.name})) : ::std::nullopt)"
+                if a.lazy_type.cpp_type() == "::std::optional<c10::string_view>"
                 else f"{a.name}({a.name})"
                 for a in scalar_args
             ]
@@ -266,8 +265,8 @@ class GenLazyIR(ABC):
             [
                 f"std::string {a.name};"
                 if a.lazy_type.cpp_type() == "c10::string_view"
-                else f"c10::optional<std::string> {a.name};"
-                if a.lazy_type.cpp_type() == "c10::optional<c10::string_view>"
+                else f"::std::optional<std::string> {a.name};"
+                if a.lazy_type.cpp_type() == "::std::optional<c10::string_view>"
                 else f"{a.lazy_type.cpp_type()} {a.name};"
                 for a in scalar_args
             ]
@@ -420,9 +419,9 @@ class GenLazyNativeFuncDefinition:
                 if isinstance(arg.lazy_type, OptionalCType):
                     lazy_tensor_decls.append(
                         f"""auto node_{arg.name} = {arg.name} ?
-                c10::make_optional(torch::lazy::LazyGraphExecutor::Get()->
+                std::make_optional(torch::lazy::LazyGraphExecutor::Get()->
                     GetIrValueForScalarFromCodegen(*{arg.name}, *common_device)):
-                c10::nullopt;"""
+                ::std::nullopt;"""
                     )
                 else:
                     lazy_tensor_decls.append(
@@ -672,7 +671,6 @@ class GenLazyShapeInferenceDefinition:
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> List[str]:
-        sig = kernel_signature(f, self.backend_index)
         metadata = self.backend_index.get_kernel(f)
         assert metadata is not None
 

@@ -1,4 +1,5 @@
 import re
+
 import torch
 
 """
@@ -8,11 +9,11 @@ Instructions:
 2. python test/xfail_suggester.py
 """
 
-with open('result.txt') as f:
+with open("result.txt") as f:
     lines = f.readlines()
 
-failed = [line for line in lines if line.startswith('FAILED')]
-p = re.compile('FAILED test/test_\w+.py::\w+::(\S+)')  # noqa: W605
+failed = [line for line in lines if line.startswith("FAILED")]
+p = re.compile("FAILED test/test_\w+.py::\w+::(\S+)")  # noqa: W605
 
 
 def get_failed_test(line):
@@ -23,22 +24,22 @@ def get_failed_test(line):
 
 
 base_names = {
-    'test_grad_',
-    'test_vjp_',
-    'test_vmapvjp_',
-    'test_vmapvjp_has_batch_rule_',
-    'test_vjpvmap_',
-    'test_jvp_',
-    'test_vmapjvp_',
-    'test_vmapjvpall_has_batch_rule_',
-    'test_vmapjvpall_',
-    'test_jvpvjp_',
-    'test_vjpvjp_',
-    'test_decomposition_',
-    'test_make_fx_exhaustive_',
-    'test_vmap_exhaustive_',
-    'test_op_has_batch_rule_',
-    'test_vmap_autograd_grad_',
+    "test_grad_",
+    "test_vjp_",
+    "test_vmapvjp_",
+    "test_vmapvjp_has_batch_rule_",
+    "test_vjpvmap_",
+    "test_jvp_",
+    "test_vmapjvp_",
+    "test_vmapjvpall_has_batch_rule_",
+    "test_vmapjvpall_",
+    "test_jvpvjp_",
+    "test_vjpvjp_",
+    "test_decomposition_",
+    "test_make_fx_exhaustive_",
+    "test_vmap_exhaustive_",
+    "test_op_has_batch_rule_",
+    "test_vmap_autograd_grad_",
 }
 
 failed_tests = [get_failed_test(line) for line in lines]
@@ -49,7 +50,7 @@ suggested_xfails = {}
 
 
 def remove_device_dtype(test):
-    return '_'.join(test.split('_')[:-2])
+    return "_".join(test.split("_")[:-2])
 
 
 def belongs_to_base(test, base):
@@ -64,23 +65,23 @@ def belongs_to_base(test, base):
 
 def parse_namespace(base):
     mappings = {
-        'nn_functional_': 'nn.functional',
-        'fft_': 'fft',
-        'linalg_': 'linalg',
-        '_masked_': '_masked',
-        'sparse_': 'sparse',
-        'special_': 'special',
+        "nn_functional_": "nn.functional",
+        "fft_": "fft",
+        "linalg_": "linalg",
+        "_masked_": "_masked",
+        "sparse_": "sparse",
+        "special_": "special",
     }
     for heading in mappings.keys():
         if base.startswith(heading):
-            return mappings[heading], base[len(heading):]
+            return mappings[heading], base[len(heading) :]
     return None, base
 
 
 def get_torch_module(namespace):
     if namespace is None:
         return torch
-    if namespace == 'nn.functional':
+    if namespace == "nn.functional":
         return torch.nn.functional
     return getattr(torch, namespace)
 
@@ -92,11 +93,11 @@ def parse_base(base):
     apis = sorted(apis, key=lambda x: -len(x))
 
     api = rest
-    variant = ''
+    variant = ""
     for candidate in apis:
         if rest.startswith(candidate):
             api = candidate
-            variant = rest[len(candidate) + 1:]
+            variant = rest[len(candidate) + 1 :]
             break
     print(base, namespace, api, variant)
     return namespace, api, variant
@@ -111,19 +112,18 @@ def any_starts_with(strs, thing):
 
 def get_suggested_xfails(base, tests):
     result = []
-    tests = [test[len(base):] for test in tests if
-             belongs_to_base(test, base)]
+    tests = [test[len(base) :] for test in tests if belongs_to_base(test, base)]
 
     base_tests = {remove_device_dtype(test) for test in tests}
     tests = set(tests)
     for base in base_tests:
-        cpu_variant = base + '_cpu_float32'
-        cuda_variant = base + '_cuda_float32'
+        cpu_variant = base + "_cpu_float32"
+        cuda_variant = base + "_cuda_float32"
         namespace, api, variant = parse_base(base)
         if namespace is None:
             api = api
         else:
-            api = f'{namespace}.{api}'
+            api = f"{namespace}.{api}"
         if cpu_variant in tests and cuda_variant in tests:
             result.append(f"xfail('{api}', '{variant}'),")
             continue
@@ -139,7 +139,7 @@ def get_suggested_xfails(base, tests):
 
 result = {base: get_suggested_xfails(base, failed_tests) for base in base_names}
 for k, v in result.items():
-    print('=' * 50)
+    print("=" * 50)
     print(k)
-    print('=' * 50)
-    print('\n'.join(v))
+    print("=" * 50)
+    print("\n".join(v))

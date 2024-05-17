@@ -95,6 +95,7 @@ class OperatingSystem:
     MACOS = "macos"
     MACOS_ARM64 = "macos-arm64"
     LINUX_AARCH64 = "linux-aarch64"
+    LINUX_S390X = "linux-s390x"
 
 
 LINUX_BINARY_BUILD_WORFKLOWS = [
@@ -275,42 +276,6 @@ WINDOWS_BINARY_SMOKE_WORKFLOWS = [
 
 MACOS_BINARY_BUILD_WORKFLOWS = [
     BinaryBuildWorkflow(
-        os=OperatingSystem.MACOS,
-        package_type="wheel",
-        build_configs=generate_binary_build_matrix.generate_wheels_matrix(
-            OperatingSystem.MACOS
-        ),
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
-            isolated_workflow=True,
-        ),
-    ),
-    BinaryBuildWorkflow(
-        os=OperatingSystem.MACOS,
-        package_type="conda",
-        build_configs=generate_binary_build_matrix.generate_conda_matrix(
-            OperatingSystem.MACOS
-        ),
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_CONDA},
-            isolated_workflow=True,
-        ),
-    ),
-    BinaryBuildWorkflow(
-        os=OperatingSystem.MACOS,
-        package_type="libtorch",
-        abi_version=generate_binary_build_matrix.CXX11_ABI,
-        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.MACOS,
-            generate_binary_build_matrix.CXX11_ABI,
-            libtorch_variants=["shared-with-deps"],
-        ),
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
-            isolated_workflow=True,
-        ),
-    ),
-    BinaryBuildWorkflow(
         os=OperatingSystem.MACOS_ARM64,
         package_type="libtorch",
         abi_version=generate_binary_build_matrix.CXX11_ABI,
@@ -368,6 +333,20 @@ AARCH64_BINARY_BUILD_WORKFLOWS = [
     ),
 ]
 
+S390X_BINARY_BUILD_WORKFLOWS = [
+    BinaryBuildWorkflow(
+        os=OperatingSystem.LINUX_S390X,
+        package_type="manywheel",
+        build_configs=generate_binary_build_matrix.generate_wheels_matrix(
+            OperatingSystem.LINUX_S390X
+        ),
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
+            isolated_workflow=True,
+        ),
+    ),
+]
+
 
 def main() -> None:
     jinja_env = jinja2.Environment(
@@ -385,6 +364,10 @@ def main() -> None:
         (
             jinja_env.get_template("linux_binary_build_workflow.yml.j2"),
             AARCH64_BINARY_BUILD_WORKFLOWS,
+        ),
+        (
+            jinja_env.get_template("linux_binary_build_workflow.yml.j2"),
+            S390X_BINARY_BUILD_WORKFLOWS,
         ),
         (
             jinja_env.get_template("linux_binary_build_workflow.yml.j2"),
@@ -414,7 +397,9 @@ def main() -> None:
     for template, workflows in template_and_workflows:
         # added Iterable check to appease the mypy gods
         if not isinstance(workflows, Iterable):
-            raise Exception(f"How is workflows not iterable? {workflows}")
+            raise Exception(  # noqa: TRY002
+                f"How is workflows not iterable? {workflows}"
+            )  # noqa: TRY002
         for workflow in workflows:
             workflow.generate_workflow_file(workflow_template=template)
 

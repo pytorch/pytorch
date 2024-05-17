@@ -94,6 +94,25 @@ class RedistributeTest(DTensorTestBase):
         self.assertEqual(comm_mode.get_total_counts(), 0)
 
     @with_comms
+    def test_replicate_to_local_partial_grad(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        replica_spec = [Replicate()]
+        local_tensor = torch.randn(12, 3, device=self.device_type, requires_grad=True)
+
+        replica_tensor = distribute_tensor(local_tensor, device_mesh, replica_spec)
+
+        comm_mode = CommDebugMode()
+
+        with comm_mode:
+            out = replica_tensor.redistribute(placements=[Replicate()]).to_local(
+                grad_placements=[_Partial()]
+            )
+            out.backward(torch.ones_like(out))
+
+        self.assertEqual(comm_mode.get_total_counts(), 1)
+        self.assertEqual(comm_mode.get_comm_counts()[funcol.all_reduce], 1)
+
+    @with_comms
     def test_replicate_to_shard_forward_backward(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         replica_spec = [Replicate()]
@@ -314,6 +333,89 @@ class RedistributeTest(DTensorTestBase):
                 dt = distribute_tensor(input_tensor, mesh, placements)
                 dt_full_tensor = dt.full_tensor()
                 self.assertEqual(dt_full_tensor, input_tensor)
+
+    @with_comms
+    def test_redistribute_shard_dim_change(self):
+        # test 1d device mesh
+        mesh_1d = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        data_to_test = [
+            # evenly sharded case
+            torch.randn((8, 8), device=self.device_type),
+            # 3d or more dims
+            torch.randn((8, 8, 8), device=self.device_type),
+            # uneven case 1
+            torch.randn((8, 5), device=self.device_type),
+            # uneven case 2
+            torch.randn((5, 8), device=self.device_type),
+            # uneven case 3
+            torch.randn((5, 5), device=self.device_type),
+        ]
+
+        sharding_src_dst_pairs = [([Shard(0)], [Shard(1)]), ([Shard(1)], [Shard(0)])]
+
+        comm_mode = CommDebugMode()
+
+        for input_data in data_to_test:
+            for src, dst in sharding_src_dst_pairs:
+                expected_dt = distribute_tensor(input_data.clone(), mesh_1d, dst)
+                sharded_dt = distribute_tensor(input_data, mesh_1d, src)
+                with comm_mode:
+                    out_dt = sharded_dt.redistribute(mesh_1d, dst)
+                self.assertEqual(out_dt.placements, expected_dt.placements)
+                local_out_dt = out_dt.to_local()
+                local_expected_dt = expected_dt.to_local()
+                self.assertEqual(out_dt.to_local(), expected_dt.to_local())
+                if self.device_type == "cuda":
+                    self.assertEqual(
+                        comm_mode.get_comm_counts()[
+                            torch.ops._dtensor.shard_dim_alltoall
+                        ],
+                        1,
+                    )
+                else:
+                    self.assertEqual(
+                        comm_mode.get_comm_counts()[funcol.all_gather_into_tensor],
+                        1,
+                    )
+
+        # test 2d device mesh
+        mesh_2d = DeviceMesh(
+            self.device_type, torch.arange(self.world_size).reshape(2, 2)
+        )
+        data_to_test_2d = [
+            # evenly sharded case
+            torch.randn((8, 8), device=self.device_type),
+            # 3d or more dims
+            torch.randn((8, 8, 8), device=self.device_type),
+            # uneven case 1
+            torch.randn((8, 5), device=self.device_type),
+            # uneven case 2
+            torch.randn((5, 8), device=self.device_type),
+            # uneven case 3
+            torch.randn((5, 5), device=self.device_type),
+        ]
+        sharding_src_dst_pairs_2d = [
+            ([Shard(0), Shard(1)], [Shard(0), Shard(0)]),
+            ([Shard(0), Shard(1)], [Shard(1), Shard(0)]),
+            ([Shard(0), Shard(0)], [Shard(1), Shard(1)]),
+        ]
+
+        for input_data in data_to_test_2d:
+            if input_data.ndim > 2:
+                sharding_spec_combs = sharding_src_dst_pairs_2d + [
+                    ([Shard(0), Shard(2)], [Shard(1), Shard(0)])
+                ]
+            else:
+                sharding_spec_combs = sharding_src_dst_pairs_2d
+            for src, dst in sharding_spec_combs:
+                expected_dt = distribute_tensor(input_data.clone(), mesh_2d, dst)
+                sharded_dt = distribute_tensor(input_data, mesh_2d, src)
+                out_dt = sharded_dt.redistribute(mesh_2d, dst)
+
+                self.assertEqual(out_dt.placements, expected_dt.placements)
+                local_out_dt = out_dt.to_local()
+                local_expected_dt = expected_dt.to_local()
+                self.assertEqual(out_dt.to_local(), expected_dt.to_local())
 
 
 class MultiDimRedistributeTest(DTensorTestBase):

@@ -118,7 +118,7 @@ TypePtr ScriptTypeParser::subscriptToType(
   }
 }
 
-c10::optional<std::pair<TypePtr, int32_t>> ScriptTypeParser::parseBroadcastList(
+std::optional<std::pair<TypePtr, int32_t>> ScriptTypeParser::parseBroadcastList(
     const Expr& expr) const {
   // Alias torch.nn._common_types._size_?_t to BroadcastingList?[int]
   if (expr.kind() == TK_VAR) {
@@ -191,7 +191,7 @@ c10::optional<std::pair<TypePtr, int32_t>> ScriptTypeParser::parseBroadcastList(
 
 // gets the base type name given namespaces where the types live
 // turns torch.Tensor -> Tensor, X -> X
-c10::optional<std::string> ScriptTypeParser::parseBaseTypeName(
+std::optional<std::string> ScriptTypeParser::parseBaseTypeName(
     const Expr& expr) const {
   switch (expr.kind()) {
     case TK_VAR: {
@@ -407,7 +407,7 @@ std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
     auto decl_arg = *it;
 
     TypePtr type;
-    c10::optional<int32_t> N = c10::nullopt;
+    std::optional<int32_t> N = c10::nullopt;
     if (!decl_arg.type().present()) {
       // If this param doesn't have a type, default to "tensor"
       type = TensorType::getInferred();
@@ -421,7 +421,7 @@ std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
         type = parseTypeFromExpr(decl_arg.type().get());
       }
     }
-    c10::optional<IValue> default_value = c10::nullopt;
+    std::optional<IValue> default_value = c10::nullopt;
     if (decl_arg.defaultValue().present()) {
       default_value = *defaults_it++;
     }

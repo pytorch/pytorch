@@ -1,4 +1,5 @@
 import torch
+
 # This file contains definitions of script classes.
 # They are used by test_jit.py to test ScriptClass imports
 

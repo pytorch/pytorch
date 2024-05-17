@@ -96,8 +96,6 @@ __all__ = [
     "to_map",
 ]
 
-log = get_logger(__name__)
-
 
 def start_processes(
     name: str,

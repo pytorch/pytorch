@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Set, Tuple, Union
 
 from torchgen.api import cpp
-
 from torchgen.api.types import Binding, CppSignature, CppSignatureGroup
 from torchgen.gen import pythonify_default
 from torchgen.model import (
@@ -62,9 +61,9 @@ from torchgen.model import (
 #    Note: the scattered TensorOptions fields are packed into 'options'.
 #
 #      auto dispatch_empty =
-#          [](IntArrayRef size, c10::optional<DimnameList> names,
+#          [](IntArrayRef size, std::optional<DimnameList> names,
 #             const TensorOptions & options,
-#             c10::optional<MemoryFormat> memory_format) -> Tensor {
+#             std::optional<MemoryFormat> memory_format) -> Tensor {
 #          pybind11::gil_scoped_release no_gil;
 #          return torch::empty(size, names, options, memory_format);
 #      };
@@ -93,9 +92,9 @@ from torchgen.model import (
 #    Where does 'names' come from? It involves special local init:
 #
 #      auto __names = _r.toDimnameListOptional(1);
-#      c10::optional<DimnameList> names =
-#          __names ? c10::make_optional(DimnameList(__names.value()))
-#                  : c10::nullopt;
+#      std::optional<DimnameList> names =
+#          __names ? std::make_optional(DimnameList(__names.value()))
+#                  : std::nullopt;
 #
 #    Where does 'options' come from? It involves special local init
 #    for TensorOptions. Note that Python side has the additional
@@ -235,6 +234,8 @@ class PythonArgument:
             default = {
                 "nullptr": "None",
                 "c10::nullopt": "None",
+                "::std::nullopt": "None",
+                "std::nullopt": "None",
                 "{}": "None",
             }.get(self.default, self.default)
             return f"{type_str} {name}={default}"
@@ -280,6 +281,8 @@ class PythonArgument:
                 default = {
                     "nullptr": "None",
                     "c10::nullopt": "None",
+                    "::std::nullopt": "None",
+                    "std::nullopt": "None",
                     "{}": "None",
                     "MemoryFormat::Contiguous": "contiguous_format",
                     "QScheme::PER_TENSOR_AFFINE": "per_tensor_affine",
@@ -697,9 +700,9 @@ def argument_type_str(
             return f"ScalarList[{size}]" if size is not None else "ScalarList"
         elif str(t.elem) == "Tensor?":
             if simple_type:
-                return "c10::List<c10::optional<Tensor>>"
+                return "c10::List<::std::optional<Tensor>>"
             else:
-                return "const c10::List<c10::optional<Tensor>> &"
+                return "const c10::List<::std::optional<Tensor>> &"
         elif str(t.elem) == "Dimname":
             return f"DimnameList[{size}]" if size is not None else "DimnameList"
         elem = argument_type_str(t.elem, simple_type=simple_type, symint=symint)
@@ -721,11 +724,11 @@ def argument(a: Argument) -> PythonArgument:
         name=a.name,
         type=a.type,
         # TODO: directly translate a.default to python default
-        default=str(
-            pythonify_default(cpp.default_expr(a.default, a.type, symint=False))
-        )
-        if a.default is not None
-        else None,
+        default=(
+            str(pythonify_default(cpp.default_expr(a.default, a.type, symint=False)))
+            if a.default is not None
+            else None
+        ),
         default_init=None,
     )
 
@@ -797,9 +800,10 @@ def signature_from_schema(
         or name.startswith("new_")
         or name.endswith("_like")
     )
+    is_dummy_function = category_override == "dummy"
 
     tensor_options_args: List[PythonArgument] = []
-    if is_factory_function or is_like_or_new_function:
+    if (is_factory_function or is_like_or_new_function) and not is_dummy_function:
 
         def topt_default_init(name: str) -> Optional[str]:
             topt_args = func.arguments.tensor_options
@@ -1001,7 +1005,6 @@ def returns_structseq_pyi(signature: PythonSignature) -> Optional[Tuple[str, str
         # These types are structseq objects which act like named NamedTuples, but
         # the constructor acts like the constructor of tuple. Using typing.NamedTuple
         # does not allow us to override __init__.
-        field_names_str = ", ".join(repr(name) for name in field_names)
         seq_type = f"Tuple[{', '.join(python_returns)}]"
         structseq_def_lines = [
             f"class {structseq_name}({seq_type}):",
@@ -1307,7 +1310,13 @@ def arg_parser_unpack_method(
             return "generator"
         elif str(t.elem) == "Dimname[]":
             return "toDimnameListOptional"
-        elif not has_default_init and default in (None, "None", "c10::nullopt"):
+        elif not has_default_init and default in (
+            None,
+            "None",
+            "c10::nullopt",
+            "::std::nullopt",
+            "std::nullopt",
+        ):
             # If default is None: append 'Optional' to elem's unpacking method
             return (
                 arg_parser_unpack_method(t.elem, None, None, symint=symint) + "Optional"
@@ -1429,7 +1438,7 @@ def dispatch_lambda_exprs(
             inits.extend(
                 [
                     f"auto __{name} = {arg_parser_expr};",
-                    f"c10::optional<DimnameList> {name} = __{name} ? c10::make_optional(DimnameList(__{name}.value())) : c10::nullopt;",  # noqa: B950
+                    f"::std::optional<DimnameList> {name} = __{name} ? ::std::make_optional(DimnameList(__{name}.value())) : ::std::nullopt;",  # noqa: B950
                 ]
             )
             lambda_args_exprs[name] = name
@@ -1455,9 +1464,7 @@ def dispatch_lambda_exprs(
                 raise RuntimeError(
                     f"{f.func}: unrecognized type '{str(a.type)}' for tensor options field '{a.name}'"
                 )
-        if not all(
-            a in tensor_options_args_names for a in TENSOR_OPTIONS_FIELDS.keys()
-        ):
+        if not all(a in tensor_options_args_names for a in TENSOR_OPTIONS_FIELDS):
             raise RuntimeError(
                 f"{f.func}: incomplete tensor options args: {tensor_options_args_names}"
             )
@@ -1482,7 +1489,7 @@ torch::utils::maybe_initialize_device(options);
             # we're an output-arg variant, check these args against output tensor
             if not f.func.is_out_fn():
                 raise RuntimeError(
-                    f"{f.func}: dtype in tensor_options_args without output arg"
+                    f"{f.func}: dtype in tensor_options_args without output arg, {ps} {ps.arguments}"
                 )
             if not all(a in tensor_options_args_names for a in ("layout", "device")):
                 raise RuntimeError(

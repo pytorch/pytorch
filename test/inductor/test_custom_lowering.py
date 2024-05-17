@@ -6,14 +6,14 @@ import torch
 
 from torch._inductor.ir import Pointwise
 from torch._inductor.lowering import register_lowering
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.virtualized import ops
 
-from torch.testing._internal.common_utils import TestCase as TorchTestCase
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 
 # These tests check issues for lowerings that aren't in the main pytorch repo
-class TestCustomLowering(TorchTestCase):
+class TestCustomLowering(InductorTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -145,7 +145,7 @@ class TestCustomLowering(TorchTestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if HAS_CPU or HAS_CUDA:
         run_tests(needs="filelock")
