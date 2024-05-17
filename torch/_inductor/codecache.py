@@ -2673,6 +2673,9 @@ def validate_new_cpp_commands():
                     )
 
 
+validate_new_cpp_commands()
+
+
 @clear_on_fresh_inductor_cache
 class PyCodeCache:
     cache: Dict[str, ModuleType] = dict()
