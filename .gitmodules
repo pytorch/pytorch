@@ -155,3 +155,4 @@
 [submodule "third_party/cpp-httplib"]
 	path = third_party/cpp-httplib
 	url = git@github.com:yhirose/cpp-httplib.git
+	branch = v0.15.3
