@@ -24,11 +24,11 @@ log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
 
-scaled_mm_template = TritonTemplate(
-    name="scaled_mm",
+scaled_mm_w_bias_template = TritonTemplate(
+    name="scaled_mm_w_bias",
     grid=mm_grid,
     source=r"""
-{{def_kernel("A", "B", "A_inverse_scale", "B_inverse_scale")}}
+{{def_kernel("A", "B", "A_inverse_scale", "B_inverse_scale", "bias_ptr")}}
     M = {{size("A", 0)}}
     N = {{size("B", 1)}}
     K = {{size("A", 1)}}
@@ -94,9 +94,9 @@ scaled_mm_template = TritonTemplate(
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
 
-    # if HAS_BIAS:
-    #     bias = tl.load(bias_ptr + rn, mask=rn < N)
-    #     acc += bias
+    if HAS_BIAS:
+        bias = tl.load(bias_ptr + rn, mask=rn < N)
+        acc += bias
 
     idx_m = rm[:, None]
     idx_n = rn[None, :]
@@ -160,7 +160,7 @@ def scaled_mm_options(
     )
 
 
-# @register_lowering(aten._scaled_mm.default, type_promotion_kind=None)
+@register_lowering(aten._scaled_mm.default, type_promotion_kind=None)
 def tuned_scaled_mm(
     mat_a,
     mat_b,
@@ -190,18 +190,23 @@ def tuned_scaled_mm(
             kwargs = scaled_mm_options(
                 config, m, n, k, layout, bias, scale_a, scale_b, use_fast_accum
             )
+            log.info(f"Siyu DEBUG scaled_mm_options output {kwargs}")
+
+            if bias is None:
+                bias_placeholder = empty((), dtype=torch.float32, device=mat_a.get_device())
 
             # possibly appends a TritonTemplateCaller to choices
-            scaled_mm_template.maybe_append_choice(
+            scaled_mm_w_bias_template.maybe_append_choice(
                 choices,
-                # No bias, scale_result for now
-                input_nodes=(mat_a, mat_b, scale_a, scale_b),
+                input_nodes=(mat_a, mat_b, scale_a, scale_b, bias_placeholder if bias is None else bias),
                 layout=layout,
                 **kwargs,
             )
 
-    input_nodes = [mat_a, mat_b, scale_a, scale_b]
-    output = autotune_select_algorithm("scaled_mm", choices, input_nodes, layout)
+    if bias is None:
+        bias_placeholder = empty((), dtype=torch.float32, device=mat_a.get_device())
+    input_nodes = [mat_a, mat_b, scale_a, scale_b, bias_placeholder if bias is None else bias]
+    output = autotune_select_algorithm("scaled_mm_w_bias", choices, input_nodes, layout)
 
     output_amax_placeholder = empty((1), dtype=torch.float32, device=mat_a.get_device())
     return output, output_amax_placeholder
