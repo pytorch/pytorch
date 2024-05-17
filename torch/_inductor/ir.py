@@ -3029,7 +3029,7 @@ class Buffer(IRNode):
         assert self.name, self
         return self.name
 
-    def get_device(self):
+    def get_device(self) -> torch.device:
         return self.layout.device
 
     def get_origin_node(self):
