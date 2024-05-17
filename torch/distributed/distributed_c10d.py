@@ -66,7 +66,7 @@ __all__ = [
     'ProcessGroup', 'ReduceOp', 'ReduceOptions', 'ReduceScatterOptions',
     'ScatterOptions', 'Store', 'DebugLevel', 'get_debug_level', 'Work',
     'default_pg_timeout', 'get_group_rank', 'get_global_rank', 'get_process_group_ranks',
-    'reduce_op', 'all_gather_into_tensor', 'reduce_scatter_tensor',
+    'reduce_op', 'all_gather_into_tensor', 'reduce_scatter_tensor', 'get_node_local_rank',
 ]
 
 _MPI_AVAILABLE = True
@@ -737,7 +737,7 @@ def _store_based_barrier(rank, store, group_name, rendezvous_count, timeout, log
             )
 
             if timedelta(seconds=(time.time() - start)) > timeout:
-                raise DistStoreError(  # noqa: TRY200
+                raise DistStoreError(  # noqa: B904
                     "Timed out initializing process group in store based barrier on "
                     f"rank {rank}, for key: {store_key} (world_size={world_size}, "
                     f"num_workers_joined={worker_count}, timeout={timeout} error={e})"
