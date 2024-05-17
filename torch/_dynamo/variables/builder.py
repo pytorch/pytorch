@@ -687,16 +687,6 @@ class VariableBuilder:
         elif isinstance(value, torch._C._ImperativeEngine):
             self.install_guards(GuardBuilder.ID_MATCH)
             return AutogradEngineVariable(value, source=self.source)
-        elif isinstance(value, types.BuiltinFunctionType) and isinstance(
-            getattr(value, "__self__", None), torch._C._ImperativeEngine
-        ):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return GetAttrVariable(
-                AutogradEngineVariable(
-                    value.__self__, source=AttrSource(self.source, member="__self__")
-                ),
-                value.__name__,
-            )
         elif isinstance(value, types.MethodType) and isinstance(
             getattr(value, "__self__", None), torch._dynamo.external_utils.CompiledAutogradEngine
         ):
