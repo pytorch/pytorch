@@ -10,12 +10,12 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import sympy_index_symbol
 from torch._inductor.virtualized import ops, V
 
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 
 class TestDependencies(InductorTestCase):
     def _create_buffer(self, name, shape, dtype=torch.float32):
-        return Buffer(name, FixedLayout(torch.device("cuda:0"), dtype, shape))
+        return Buffer(name, FixedLayout(torch.device(GPU_TYPE), dtype, shape))
 
     def setUp(self):
         super().setUp()
@@ -48,7 +48,7 @@ class TestDependencies(InductorTestCase):
             )
 
         pointwise = Pointwise.create(
-            device=torch.device("cuda:0"),
+            device=torch.device(GPU_TYPE),
             dtype=torch.int32,
             inner_fn=inner_fn,
             ranges=[1024 * 4],
@@ -133,5 +133,5 @@ class TestDependencies(InductorTestCase):
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU and HAS_CUDA:
+    if HAS_CPU and HAS_GPU:
         run_tests("sympy")
