@@ -1,4 +1,3 @@
-
 #ifdef USE_C10D_NCCL
 
 #include <exception>
@@ -64,6 +63,10 @@ std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
     {at::kLong, ncclInt64},
     {at::kHalf, ncclHalf},
     {at::kBool, ncclUint8},
+    {at::kFloat8_e5m2, ncclUint8},
+    {at::kFloat8_e4m3fn, ncclUint8},
+    {at::kFloat8_e4m3fnuz, ncclUint8},
+    {at::kFloat8_e5m2fnuz, ncclUint8},
 #if HAS_NCCL_BF16_DATATYPE
     {at::kBFloat16, ncclBfloat16},
 #endif
