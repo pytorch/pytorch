@@ -1598,6 +1598,12 @@ def cast_to_fp32(model, inputs):
     return cast_to(torch.float32, model, inputs)
 
 
+def cast_to_device(device, model, inputs):
+    model = model.to(device=device)
+    inputs = tree_map_only(torch.Tensor, lambda x: x.to(device=device), inputs)
+    return model, inputs
+
+
 class DummyGradScaler:
     def scale(self, loss):
         return loss
@@ -2099,11 +2105,23 @@ class BenchmarkRunner:
             model_ref = None
             inputs_ref = None
             try:
-                model_ref, inputs_ref = cast_to(
-                    ref_dtype,
-                    self.deepcopy_and_maybe_parallelize(model),
-                    clone_inputs(example_inputs),
-                )
+                # Currently, XPU GEMM FP64 support is WIP. Therefore, we explicitly fallback to
+                # CPU to execute FP64 and take the result as the gold reference.
+                if current_device == "xpu":
+                    model_ref, inputs_ref = cast_to(
+                        ref_dtype,
+                        *cast_to_device(
+                            "cpu",
+                            self.deepcopy_and_maybe_parallelize(model),
+                            clone_inputs(example_inputs),
+                        )
+                    )
+                else:
+                    model_ref, inputs_ref = cast_to(
+                        ref_dtype,
+                        self.deepcopy_and_maybe_parallelize(model),
+                        clone_inputs(example_inputs),
+                    )
                 self.init_optimizer(name, current_device, model_ref.parameters())
                 ref_outputs = self.run_n_iterations(
                     model_ref, inputs_ref, self.model_iter_fn
@@ -2114,12 +2132,20 @@ class BenchmarkRunner:
                     else x,
                     ref_outputs,
                 )
-            except Exception:
+                if current_device == "xpu":
+                    ref_outputs = tree_map_only(
+                        torch.Tensor,
+                        lambda x: x.to(device=current_device),
+                        ref_outputs,
+                    )
+            except Exception as e:
                 log.warning(
                     "%s golden ref were not generated for %s. Setting accuracy check to cosine",
                     ref_dtype.__name__,
                     name,
                 )
+                error_msg = f"current_device={current_device}; error:{str(e)}"
+                log.warning(error_msg)
                 self.args.cosine = True
                 ref_outputs = None
             finally:
