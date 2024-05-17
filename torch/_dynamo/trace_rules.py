@@ -2331,6 +2331,8 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.amp.autocast_mode._enter_autocast",
         "torch.amp.autocast_mode._exit_autocast",
         "torch.amp.autocast_mode.autocast_decorator",
+        "torch.amp.autocast_mode.custom_bwd",
+        "torch.amp.autocast_mode.custom_fwd",
         "torch.are_deterministic_algorithms_enabled",
         "torch.atleast_1d",
         "torch.atleast_2d",
