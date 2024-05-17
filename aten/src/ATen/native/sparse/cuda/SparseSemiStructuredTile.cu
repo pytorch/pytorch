@@ -207,7 +207,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> sparse_semi_structured_tile_t
         std::string algorithm)
 {
   using KT = KernelTypes<Element>;
-  c10::optional<at::cuda::CUDAGuard> device_guard;
+  std::optional<at::cuda::CUDAGuard> device_guard;
   if (!input.is_meta()) {
     device_guard.emplace(input.device());
   }

@@ -55,9 +55,9 @@ namespace upsample {
 TORCH_API c10::SmallVector<int64_t, 3> compute_output_size(
     c10::IntArrayRef input_size,  // Full input tensor size.
     at::OptionalIntArrayRef output_size,
-    c10::optional<c10::ArrayRef<double>> scale_factors);
+    std::optional<c10::ArrayRef<double>> scale_factors);
 
-inline c10::optional<double> get_scale_value(c10::optional<c10::ArrayRef<double>> scales, int idx) {
+inline std::optional<double> get_scale_value(c10::optional<c10::ArrayRef<double>> scales, int idx) {
   if (!scales) {
     return c10::nullopt;
   }
@@ -66,7 +66,7 @@ inline c10::optional<double> get_scale_value(c10::optional<c10::ArrayRef<double>
 
 } // namespace upsample
 
-using scale_t = c10::optional<double>;
+using scale_t = std::optional<double>;
 using upsampling_nearest1d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_w);
 using _upsampling_nearest_exact1d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_w);
 using upsampling_nearest2d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_h, scale_t scales_w);
@@ -252,7 +252,7 @@ static inline void upsample_2d_shape_check(
 
 template <typename scalar_t>
 static inline scalar_t compute_scales_value(
-    const c10::optional<double> scale,
+    const std::optional<double> scale,
     int64_t input_size,
     int64_t output_size) {
       // see Note [compute_scales_value]
@@ -267,7 +267,7 @@ static inline scalar_t area_pixel_compute_scale(
     int64_t input_size,
     int64_t output_size,
     bool align_corners,
-    const c10::optional<double> scale) {
+    const std::optional<double> scale) {
   // see Note [area_pixel_compute_scale]
   if(align_corners) {
     if(output_size > 1) {
@@ -335,7 +335,7 @@ static inline int64_t nearest_idx(
     int64_t output_index,
     int64_t input_size,
     int64_t output_size,
-    c10::optional<double> scales) {
+    std::optional<double> scales) {
   // This method specificly treats cases: output_size == input_size or
   // output_size == 2 * input_size, that we would like to get rid of
   // We keep this method for BC and consider as deprecated.
@@ -356,13 +356,13 @@ static inline int64_t nearest_exact_idx(
     int64_t output_index,
     int64_t input_size,
     int64_t output_size,
-    c10::optional<double> scales) {
+    std::optional<double> scales) {
   float scale = compute_scales_value<float>(scales, input_size, output_size);
     return nearest_neighbor_exact_compute_source_index(scale, output_index, input_size);
 }
 
 // Define a typedef to dispatch to nearest_idx or nearest_exact_idx
-typedef int64_t (*nearest_idx_fn_t)(int64_t, int64_t, int64_t, c10::optional<double>);
+typedef int64_t (*nearest_idx_fn_t)(int64_t, int64_t, int64_t, std::optional<double>);
 
 template <typename scalar_t>
 static scalar_t upsample_get_value_bounded(

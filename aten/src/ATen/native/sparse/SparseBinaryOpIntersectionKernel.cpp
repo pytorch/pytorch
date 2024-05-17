@@ -119,7 +119,7 @@ struct CPUValueSelectionIntersectionKernel {
   }
 };
 
-using OptTensor = c10::optional<Tensor>;
+using OptTensor = std::optional<Tensor>;
 
 void mul_sparse_sparse_out_cpu_kernel(
     Tensor& result,
