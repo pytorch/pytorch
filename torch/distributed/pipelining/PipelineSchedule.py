@@ -198,7 +198,8 @@ class PipelineSchedule(ABC):
 def _batch_p2p(p2p_ops: List[dist.P2POp], desc: Optional[str] = None):
     """
     Simple wrapper over batch_isend_irecv from torch.distributed, which just adds a descriptive logger on top.
-    """    desc_str = f"{desc}, " if desc else ""
+    """
+    desc_str = f"{desc}, " if desc else ""
     logger.debug(f"batch_p2p {desc_str}{p2p_ops}")  # noqa: G004
     return dist.batch_isend_irecv(p2p_ops).pop()
 
