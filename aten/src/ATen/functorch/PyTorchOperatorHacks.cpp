@@ -73,7 +73,7 @@ static bool can_perform_inplace(const Tensor& a, const Tensor& b) {
 
 // TODO: linear is pretty important for performance, but I'm not sure how to work
 // around the in-place.
-Tensor linear_hack(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
+Tensor linear_hack(const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
   auto bias = bias_opt.has_value()
     ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
@@ -123,8 +123,8 @@ static inline at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64
 Tensor binary_cross_entropy_with_logits_hack(
     const Tensor& input,
     const Tensor& target,
-    const c10::optional<Tensor>& weight_opt,
-    const c10::optional<Tensor>& pos_weight_opt,
+    const std::optional<Tensor>& weight_opt,
+    const std::optional<Tensor>& pos_weight_opt,
     int64_t reduction) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);

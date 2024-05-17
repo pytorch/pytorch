@@ -237,24 +237,24 @@ class Unpickler:
                             "user-defined tensor subclass not defined in the `torch` package, this error might arise "
                             f"as we expect `{module}` to be present in `sys.modules` (i.e. it "
                             "must be imported in the current environment), but this was not the case. "
-                            f"If you intend to unpickle a tensor subclass`{full_path}` please import `{name}` from `{module}`. "
-                            f"Note that having this imported will *only* allow the type `{full_path}` to be passed "
-                            "as the second argument to `torch._tensor._rebuild_from_type_v2`, which should enable "
-                            "the tensor subclass to be unpickled without any arbitrary code execution as long as "
+                            f"If you intend to unpickle a tensor subclass `{full_path}` please import `{name}` from "
+                            f"`{module}`. Note that having this imported will *only* allow the type `{full_path}` to "
+                            "be passed as the second argument to `torch._tensor._rebuild_from_type_v2`, which should "
+                            "enable the tensor subclass to be unpickled without any arbitrary code execution as long "
                             # If the user imports and these are overridden the next error will prompt them to use
                             # torch.serialization.add_safe_globals.
-                            "a pre-defined list of methods called when unpickling are not overridden. In particular, "
-                            "the methods are `__getattr__`, `__get__`, `__getattribute__`, `__setstate__`, `__set__`, "
-                            "as well as the implementation of `tp_alloc`."
+                            "a sa pre-defined list of methods called when unpickling are not overridden. In "
+                            "particular, the methods are `__getattr__`, `__get__`, `__getattribute__`, `__setstate__`, "
+                            "`__set__`, as well as the implementation of `tp_alloc`."
                         )
                     else:
                         try:
                             class_type = getattr_static(modules[module], name)
                         except AttributeError as e:
                             raise AttributeError(
-                                f"For safety, we use inspect.getattr_state to get {name} from {module} "
-                                f"if {module} implements the descriptor protocol, __getattr__ or __getattribute__ "
-                                "these will not be called."
+                                "For safety during weights_only loading, we use inspect.getattr_state to "
+                                f"get {name} from {module}, if {module} implements the descriptor protocol, "
+                                "__getattr__ or __getattribute__ these will not be called."
                             ) from e
                         # None of the objects here contain any data from the pickle so this is safe
                         if isinstance(class_type, type) and issubclass(
