@@ -510,8 +510,6 @@ class TestNestedTensor(TestCase):
 
     @parametrize("layout", [torch.strided, torch.jagged], name_fn=layout_name)
     def test_to(self, layout):
-        import torch.nested._internal.ops
-
         ntensors = 4
         nt = random_nt_from_dims((7, None, 10), torch.device('cpu'), torch.float32, layout=layout)
 
