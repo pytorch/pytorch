@@ -1263,7 +1263,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
                     timing = float("inf")
                 except AssertionError as e:
-                    raise AssertionError(  # noqa: TRY200
+                    raise AssertionError(  # noqa: B904
                         f"Incorrect result from choice {choice}\n\n{e}"
                     )
                 except Exception as e:
@@ -1276,7 +1276,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         else:
                             raise e
                     except ImportError:
-                        raise e
+                        raise e from None
 
                 timings[choice] = timing
 
