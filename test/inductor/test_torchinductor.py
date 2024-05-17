@@ -760,6 +760,11 @@ class CommonTemplate:
             ),
         )
 
+    def test_new_cpp_build_logical(self):
+        from torch._inductor.codecache import validate_new_cpp_commands
+
+        validate_new_cpp_commands()
+
     def test_add_const_int(self):
         def fn(a):
             return (a + 1, torch.add(a, 1, alpha=2))
@@ -6259,11 +6264,6 @@ class CommonTemplate:
             )
 
         self.common(fn, [torch.randn(64, 64)])
-
-    def test_new_cpp_build_logical(self):
-        from torch._inductor.codecache import validate_new_cpp_commands
-
-        validate_new_cpp_commands()
 
     def test_as_strided(self):
         def fn(x):
