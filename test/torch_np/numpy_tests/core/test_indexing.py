@@ -740,7 +740,7 @@ class TestMultiIndexingAutomated(TestCase):
                 try:
                     indx = np.array(indx, dtype=np.intp)
                 except ValueError:
-                    raise IndexError
+                    raise IndexError from None
                 in_indices[i] = indx
             elif indx.dtype.kind != "b" and indx.dtype.kind != "i":
                 raise IndexError(
@@ -902,7 +902,7 @@ class TestMultiIndexingAutomated(TestCase):
                     arr = arr.reshape(arr.shape[:ax] + mi.shape + arr.shape[ax + 1 :])
                 except ValueError:
                     # too many dimensions, probably
-                    raise IndexError
+                    raise IndexError from None
                 ax += mi.ndim
                 continue
 

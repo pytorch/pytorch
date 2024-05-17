@@ -310,7 +310,7 @@ class _WrappedCall:
                     _WrappedCall._generate_error_message(topmost_framesummary),
                     file=sys.stderr,
                 )
-                raise e.with_traceback(None)  # noqa: TRY200
+                raise e.with_traceback(None)  # noqa: B904
             else:
                 raise e
 

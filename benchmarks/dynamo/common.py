@@ -108,6 +108,7 @@ current_device = ""
 current_onnx_compiler = ""
 current_batch_size = None
 output_filename = None
+disable_output = False
 
 MAX_DOWNLOAD_ATTEMPTS = 5
 
@@ -306,6 +307,9 @@ def load_model_from_path(path_and_class_str):
 
 
 def output_csv(filename, headers, row):
+    global disable_output
+    if disable_output:
+        return
     if os.path.exists(filename):
         with open(filename) as fd:
             lines = list(csv.reader(fd)) or [[]]
@@ -348,6 +352,24 @@ def patch_torch_manual_seed():
         return default_generator.manual_seed(seed)
 
     torch.manual_seed = deterministic_torch_manual_seed
+
+
+def empty_gpu_cache(device):
+    """
+    Explicitly empty gpu cache to avoid OOM in subsequent run.
+    """
+
+    if device not in ["cuda", "xpu"]:
+        log.warning(
+            "Trying to call the empty_gpu_cache for device: %s, which is not in list [cuda, xpu]",
+            device,
+        )
+        return
+
+    if device == "cuda":
+        torch.cuda.empty_cache()
+    elif device == "xpu":
+        torch.xpu.empty_cache()
 
 
 def synchronize():
@@ -1230,7 +1252,7 @@ def download_retry_decorator(download_fn):
                     )
                     time.sleep(wait)
                 else:
-                    raise RuntimeError(  # noqa: TRY200
+                    raise RuntimeError(  # noqa: B904
                         f"Failed to load model '{args}' with following error(s): {str(e)}."
                     )
 
@@ -2274,7 +2296,7 @@ class BenchmarkRunner:
     def batch_size_finder(self, device, model_name, initial_batch_size=1024):
         batch_size = initial_batch_size
         while batch_size >= 1:
-            torch.cuda.empty_cache()
+            empty_gpu_cache(current_device)
             try:
                 device, name, model, example_inputs, _ = self.load_model(
                     device,
@@ -2464,7 +2486,7 @@ class BenchmarkRunner:
                 fp64_outputs = None
             finally:
                 del model_fp64, inputs_fp64
-                torch.cuda.empty_cache()
+                empty_gpu_cache(current_device)
 
             tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
                 self.args.training, current_device, name
@@ -2493,7 +2515,7 @@ class BenchmarkRunner:
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
-                torch.cuda.empty_cache()
+                empty_gpu_cache(current_device)
 
             # Rerun native pytorch
             reset_rng_state()
@@ -2514,7 +2536,7 @@ class BenchmarkRunner:
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
-                torch.cuda.empty_cache()
+                empty_gpu_cache(current_device)
 
             # Two eager runs should have exactly same result
             is_same = True
@@ -2715,7 +2737,7 @@ class BenchmarkRunner:
             try:
                 if current_device == "cuda":
                     torch.cuda.reset_peak_memory_stats()
-                    torch.cuda.empty_cache()
+                    empty_gpu_cache(current_device)
                 t0 = time.perf_counter()
                 for _ in range(niters):
                     fn(model, example_inputs)
@@ -2945,7 +2967,7 @@ class BenchmarkRunner:
                 name, model, example_inputs, optimize_ctx, experiment, tag
             )
             print(status)
-        torch.cuda.empty_cache()
+        empty_gpu_cache(current_device)
 
         self.maybe_preserve_compile_debug(name, status)
 
@@ -3213,6 +3235,11 @@ def parse_args(args=None):
         help="Overrides the directory to place output files.",
     )
     parser.add_argument(
+        "--disable-output",
+        action="store_true",
+        help="Disable writing of output files, e.g., for warm-up runs",
+    )
+    parser.add_argument(
         "--baseline",
         help="Compare with a prior --output",
     )
@@ -3391,6 +3418,7 @@ def parse_args(args=None):
     )
     group_latency.add_argument(
         "--warm-start-latency",
+        "--warm_start_latency",
         action="store_true",
         help="Run model(s) twice and preseve caches in between to enable a 'warm start' on the 2nd run",
     )
@@ -3610,10 +3638,11 @@ def main(runner, original_dir=None, args=None):
             cmd = [sys.executable] + sys.argv
             cmd.remove("--warm-start-latency")
 
-            print(f"Executing cold-start run for {args.only}")
-            subprocess.check_call(cmd, timeout=args.timeout, env=env)
+            print(f"Performing cold-start run for {args.only}")
+            warmup_cmd = cmd + ["--repeat=1", "--disable-output"]
+            subprocess.check_call(warmup_cmd, timeout=args.timeout, env=env)
 
-            print(f"Executing warm-start run for {args.only}")
+            print(f"Performing warm-start run for {args.only}")
             subprocess.check_call(cmd, timeout=args.timeout, env=env)
         else:
             # single process path just uses the main process
@@ -3666,7 +3695,7 @@ def run(runner, args, original_dir=None):
     if args.ci:
         if args.accuracy:
             # Run fewer iterations when checking accuracy
-            args.repeat = 2
+            args.repeat = min(args.repeat, 2)
 
             # Set translation validation on by default on CI accuracy runs.
             torch.fx.experimental._config.translation_validation = True
@@ -3820,8 +3849,11 @@ def run(runner, args, original_dir=None):
         runner.skip_models.clear()
 
     experiment = null_experiment
-    global current_name, current_device, current_batch_size, output_filename, optimize_ctx, current_onnx_compiler
+    global current_name, current_device, current_batch_size, output_filename, disable_output, optimize_ctx, current_onnx_compiler
     optimize_ctx = contextlib.nullcontext()
+
+    if args.disable_output:
+        disable_output = True
 
     if args.overhead:
         optimize_ctx = torch._dynamo.optimize(dummy_fx_compile, nopython=args.nopython)

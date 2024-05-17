@@ -83,21 +83,6 @@ def _force_contiguous(x):
     return x
 
 
-def _compute_output_meta_with_inductor_strides(fw_module, fwd_output_strides):
-    out = [n.meta["val"] for n in (list(fw_module.graph.nodes)[-1].args[0])]
-    # will only be set for inductor
-    if not fwd_output_strides:
-        return out
-    with TracingContext.get().fake_mode.shape_env.suppress_guards():
-        for i in range(len(out)):
-            if not isinstance(out[i], Tensor):
-                continue
-            if all(s1 == s2 for s1, s2 in zip(out[i].stride(), fwd_output_strides[i])):
-                continue
-            out[i] = out[i].as_strided(out[i].shape, fwd_output_strides[i])
-    return out
-
-
 # See Note [Tangents must be contiguous, Part 2]
 def coerce_runtime_tangent(x, metadata_tensor):
     if not isinstance(x, torch.Tensor):
@@ -141,7 +126,6 @@ def aot_dispatch_base(
     (
         fw_module,
         updated_flat_args,
-        aot_config,
         fw_metadata,
     ) = fakified_out_wrapper.pre_compile(
         fw_module, updated_flat_args, aot_config, fw_metadata=fw_metadata
@@ -150,7 +134,6 @@ def aot_dispatch_base(
     (
         fw_module,
         updated_flat_args,
-        aot_config,
         fw_metadata,
     ) = functionalized_rng_wrapper.pre_compile(
         fw_module, updated_flat_args, aot_config, fw_metadata=fw_metadata
@@ -187,12 +170,12 @@ def aot_dispatch_base(
 
     # Create a wrapper to set up the rng functionalize and fakified out bits
     compiled_fw = functionalized_rng_wrapper.post_compile(
-        compiled_fw, aot_config, fw_metadata=fw_metadata
+        compiled_fw, aot_config, runtime_metadata=fw_metadata
     )
     compiled_fw = fakified_out_wrapper.post_compile(
         compiled_fw,
         aot_config,
-        fw_metadata=fw_metadata,
+        runtime_metadata=fw_metadata,
     )
     # Why do we need to pass in num_fw_outs_saved_for_bw?
     # See Note: [Partitioner handling for Subclasses, Part 2]
@@ -205,7 +188,7 @@ def aot_dispatch_base(
     ).post_compile(
         compiled_fw,
         aot_config,  # not used
-        fw_metadata=fw_metadata,
+        runtime_metadata=fw_metadata,
     )
 
     if not hasattr(compiled_fw_func, "_boxed_call"):
@@ -218,7 +201,7 @@ def aot_dispatch_base(
     ).post_compile(
         compiled_fw_func,
         aot_config,
-        fw_metadata=fw_metadata,
+        runtime_metadata=fw_metadata,
     )
 
     return compiled_fn
@@ -420,7 +403,6 @@ def aot_dispatch_autograd(
             (
                 fw_module,
                 adjusted_flat_args,
-                aot_config,
                 fw_metadata,
             ) = fakified_out_wrapper.pre_compile(
                 fw_module, adjusted_flat_args, aot_config, fw_metadata=fw_metadata
@@ -432,7 +414,6 @@ def aot_dispatch_autograd(
             (
                 fw_module,
                 adjusted_flat_args,
-                aot_config,
                 fw_metadata,
             ) = functionalized_rng_wrapper.pre_compile(
                 fw_module, adjusted_flat_args, aot_config, fw_metadata=fw_metadata
@@ -457,16 +438,16 @@ def aot_dispatch_autograd(
             ).post_compile(
                 compiled_fw_func,
                 aot_config,  # not used
-                fw_metadata=fw_metadata,
+                runtime_metadata=fw_metadata,
             )
 
             compiled_fw_func = functionalized_rng_wrapper.post_compile(
-                compiled_fw_func, aot_config, fw_metadata=fw_metadata
+                compiled_fw_func, aot_config, runtime_metadata=fw_metadata
             )
             compiled_fw_func = fakified_out_wrapper.post_compile(
                 compiled_fw_func,
                 aot_config,
-                fw_metadata=fw_metadata,
+                runtime_metadata=fw_metadata,
             )
 
         # NB: It's important to compile backwards ahead of time, as this may
@@ -1032,7 +1013,7 @@ Got grad_output types: {str(grad_output_types)}"""
     ).post_compile(
         CompiledFunction.apply,
         aot_config,
-        fw_metadata=fw_metadata,
+        runtime_metadata=fw_metadata,
     )
 
     if not config.debug_assert:

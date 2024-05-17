@@ -38,7 +38,7 @@ def linalg_errors(func):
         try:
             return func(*args, **kwds)
         except torch._C._LinAlgError as e:
-            raise LinAlgError(*e.args)  # noqa: TRY200
+            raise LinAlgError(*e.args)  # noqa: B904
 
     return wrapped
 
