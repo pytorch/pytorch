@@ -378,15 +378,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 else UserDefinedObjectVariable,
                 {},
             )
-            if (
-                inspect.getattr_static(self.value, "__init__", None)
-                is torch.nn.Module.__init__
-            ):
-                var.call_method(tx, "__init__", args, kwargs)
-                return var
-            else:
-                var.call_method(tx, "__init__", args, kwargs)
-                return var
+            var.call_method(tx, "__init__", args, kwargs)
+            return var
         elif variables.CustomizedDictVariable.is_matching_cls(self.value):
             options = {"mutable_local": MutableLocal()}
             return variables.CustomizedDictVariable.create(
