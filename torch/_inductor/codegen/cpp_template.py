@@ -39,7 +39,7 @@ class CppTemplate(KernelTemplate):
         ), CppTemplateKernel(
             kernel_name=kernel_name,
         ) as kernel:
-            code = kernel.render(self, **kwargs)
+            code = self.render(kernel=kernel, **kwargs)
             _, call_args, _ = kernel.args.python_argdefs()
             log.debug("Generated Code:\n%s", code)
             log.debug(
@@ -79,8 +79,8 @@ class CppTemplate(KernelTemplate):
                 kernel_name=str(Placeholder.KERNEL_NAME),
             )
             render = functools.partial(
-                kernel.render,
-                self,
+                self.render,
+                kernel=kernel,
                 template_buffer_node=template_node,
                 epilogue_nodes=epilogue_nodes,
                 **kwargs,
