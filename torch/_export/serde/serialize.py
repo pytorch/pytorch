@@ -416,6 +416,15 @@ class GraphModuleSerializer(metaclass=Final):
         self.module_call_graph = module_call_graph
         self.custom_objs: Dict[str, torch._C.ScriptObject] = {}
 
+        self._register_serialization_fn()
+
+    def _register_serialization_fn(self):
+        # Register default serialization automatically.
+        for func in dir(self):
+            # Rely on assumption that all serialization starts with "handle_".
+            if "handle_" in func and "_handle_" not in func:
+                _register_node_serialization(self, func.lstrip("handle_"), getattr(self, func))
+
     @contextmanager
     def save_graph_state(self):
         saved = self.graph_state
@@ -1273,7 +1282,7 @@ class GraphModuleSerializer(metaclass=Final):
         assert isinstance(graph_module, torch.fx.GraphModule)
         for node in graph_module.graph.nodes:
             try:
-                getattr(self, f"handle_{node.op}")(node)
+                serialization_registry[self][str(node.op)](node)
             except Exception as e:
                 raise SerializeError(
                     f"Failed serializing node {node} in graph: {node.format_node()}"
@@ -2779,3 +2788,33 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
         schema_version=ep.schema_version,
         dialect=ep.dialect
     )
+
+
+def _register_node_serialization(
+    gm_serializer: GraphModuleSerializer,
+    op_name: str,
+    serialization_fn: Callable[[Tuple[GraphModuleSerializer, torch.fx.Node], Node], Node],
+):
+    """Register serialization method for a node. It is supposed to be called internally for this module."""
+    if gm_serializer not in serialization_registry:
+        serialization_registry[gm_serializer] = {}
+    if op_name not in serialization_registry[gm_serializer]:
+        serialization_registry[gm_serializer][op_name] = serialization_fn
+
+
+def register_custom_node_serialization(
+    gm_serializer: GraphModuleSerializer,
+    op_name: str,
+    serialization_fn: Callable[[Tuple[GraphModuleSerializer, torch.fx.Node], Node], Node],
+):
+    """Register custom serialization method for a node."""
+    if gm_serializer in serialization_registry:
+        assert op_name not in serialization_registry[gm_serializer], \
+            f"{op_name} is already registered by default serialization methods."
+    _register_node_serialization(gm_serializer, op_name, serialization_fn)
+
+
+# Registry to store all (default or custom) serialization implementations.
+# Because the GraphModuleSerializer is stateful, we need to store per instance
+# callback serialization function in the registry.
+serialization_registry: Dict[GraphModuleSerializer, Dict[str, Callable]] = {}
