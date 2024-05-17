@@ -1501,14 +1501,15 @@ class TritonKernel(Kernel):
                     return_getters.append(lambda _: sympy.Integer(0))
                     continue
 
-                while (
-                    current_group < len(remaining)
-                    and sv.size_hint(remaining[current_group]) == 1
+                while current_group < len(remaining) and sv.statically_known_equals(
+                    remaining[current_group], 1  # type: ignore[arg-type]
                 ):
                     # scroll to next group with remaining elements
                     current_group += 1
 
-                if sv.size_hint(size) > sv.size_hint(remaining[current_group]):
+                if current_group + 1 < len(remaining) and sv.statically_known_gt(
+                    size, remaining[current_group]
+                ):
                     # need to break size in two
                     if not sv.statically_known_multiple_of(
                         size, remaining[current_group]
