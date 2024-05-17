@@ -16,6 +16,7 @@ for deep learning applications.
   torch.backends.mkldnn.enabled = True
 
 Users can disable MKLDNN backend by:
+
 .. code:: python
 
   torch.backends.mkldnn.enabled = False
@@ -91,6 +92,7 @@ To toggle the TF32 flags off in C++, you can do
 We can override a generic setting for a specific operator or backend if the fp32_precision is set to `default`.
 
 .. code:: python
+
   torch.backends.fp32_precision = "bf16"
   torch.backends.mkldnn.fp32_precision = "default"
   torch.backends.mkldnn.matmul.fp32_precision = "default"
