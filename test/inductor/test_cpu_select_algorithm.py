@@ -160,7 +160,7 @@ class TestSelectAlgorithm(TestCase):
             "div",
         ),
     )
-    @dtypes(torch.float)
+    @dtypes(torch.float, torch.bfloat16, torch.half)
     def test_linear_with_pointwise(self, bias, epilogue, dtype):
         batch_size = 384
         in_features = 196
@@ -204,16 +204,25 @@ class TestSelectAlgorithm(TestCase):
         v = torch.randn(batch_size, in_features).to(dtype=dtype)
         u = torch.randn(batch_size, out_features).to(dtype=dtype)
         mod = M(bias=bias, epilogue=epilogue, other=u).to(dtype=dtype).eval()
-        self.common(mod, (v,))
+        atol, rtol = 1e-4, 1e-4
+        if dtype == torch.half or dtype == torch.bfloat16:
+            atol, rtol = 1e-2, 1e-2
+        with patch.object(select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
-        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+        if dtype == torch.half or dtype == torch.bfloat16:
+            # For half and bfloat16, the epilogue fusion is part of the template,
+            # not fused via scheduler.
+            self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
+        else:
+            self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @parametrize("bias", (True, False))
-    @dtypes(torch.float)
+    @dtypes(torch.float, torch.bfloat16, torch.half)
     def test_linear_with_transpose(self, bias, dtype):
         batch_size = 384
         in_features = 196
@@ -231,7 +240,65 @@ class TestSelectAlgorithm(TestCase):
         mod = M(bias=bias).to(dtype=dtype).eval()
         v = torch.randn(batch_size, in_features).to(dtype=dtype)
         u = torch.randn(out_features, batch_size).to(dtype=dtype)
-        self.common(mod, (v, u))
+        atol, rtol = 1e-4, 1e-4
+        if dtype == torch.half or dtype == torch.bfloat16:
+            atol, rtol = 1e-2, 1e-2
+        with patch.object(select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)):
+            self.common(mod, (v, u), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("bias", (True, False))
+    @parametrize(
+        "unary",
+        ("relu",),
+    )
+    @parametrize(
+        "binary",
+        (
+            "add",
+            "sub",
+            "mul",
+            "div",
+        ),
+    )
+    @dtypes(torch.float, torch.bfloat16, torch.half)
+    def test_linear_with_unary_binary(self, bias, unary, binary, dtype):
+        batch_size = 384
+        in_features = 196
+        out_features = 384
+
+        class M(torch.nn.Module):
+            def __init__(self, bias, unary, binary, other):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+                if unary == "relu":
+                    self.unary = torch.nn.ReLU()
+                if binary == "add":
+                    self.binary = lambda x: x + other
+                elif binary == "sub":
+                    self.binary = lambda x: x - other
+                elif binary == "mul":
+                    self.binary = lambda x: x * other
+                elif binary == "div":
+                    self.binary = lambda x: x / other
+
+            def forward(self, x):
+                return self.binary(self.unary(self.linear(x)))
+
+        counters.clear()
+        v = torch.randn(batch_size, in_features).to(dtype=dtype)
+        u = torch.randn(batch_size, out_features).to(dtype=dtype)
+        mod = M(bias=bias, unary=unary, binary=binary, other=u).to(dtype=dtype).eval()
+        atol, rtol = 1e-4, 1e-4
+        if dtype == torch.half or dtype == torch.bfloat16:
+            atol, rtol = 1e-2, 1e-2
+        with patch.object(select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 

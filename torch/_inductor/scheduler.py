@@ -385,7 +385,7 @@ class BaseSchedulerNode:
                             # if there isn't a triton kernel, then we don't need to call triton-specific things.
                             # but TODO this might be a convenient place to signal to the Collective kernels to inplace
                             # (and, can we make "kernel" less generic of a name?)
-                            V.kernel.args.make_inplace(
+                            V.kernel.make_inplace(
                                 input_node.get_name(), self.get_name()
                             )
                             # mutations not tracked in cpp kernels
@@ -397,10 +397,6 @@ class BaseSchedulerNode:
 
                             # update last usage of reused node
                             self.last_usage.discard(input_node.get_name())
-
-                            V.kernel.inplace_update_buffers[
-                                self.get_name()
-                            ] = input_node.get_name()
                         break
 
     def allocate(self):

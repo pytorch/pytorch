@@ -3,7 +3,7 @@ from typing import List, Optional
 import torch
 import torch.utils._pytree as pytree
 from torch._inductor.kernel.mm_common import mm_args
-from . import ir
+from . import ir, lowering as L
 from .codegen.cpp_gemm_template import CppPackedGemmTemplate
 from .ir import TensorBox
 from .lowering import (
@@ -21,7 +21,27 @@ from .select_algorithm import (
     ExternKernelChoice,
 )
 from .utils import use_aten_gemm_kernels, use_cpp_packed_gemm_template, use_max_autotune
-from .virtualized import V
+from .virtualized import ops, V
+
+
+def create_epilogue_with_attr(input_buffer, attr, **kwargs):
+    input_loader = input_buffer.make_loader()
+    dtype = input_buffer.get_dtype()
+    if attr == "relu":
+
+        def inner_fn(index):
+            input = input_loader(index)
+            zero = L._create_constants(0, dtype=dtype)[0]
+            return ops.maximum(input, zero)
+
+    else:
+        raise ValueError(f"Unsupported epilogue attribute: {attr}")
+    return ir.Pointwise(
+        device=input_buffer.get_device(),
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=input_buffer.get_size(),
+    )
 
 
 def register_onednn_fusion_ops():
@@ -31,6 +51,12 @@ def register_onednn_fusion_ops():
             "mkldnn::_linear_pointwise",
             has_out_variant=False,
             kernel_creator=ir.LinearUnary.create,
+        )
+        aten_mkldnn_linear_binary = ExternKernelChoice(
+            torch.ops.mkldnn._linear_pointwise.binary,
+            "mkldnn::_linear_pointwise",
+            has_out_variant=False,
+            kernel_creator=ir.LinearBinary.create,
         )
         cpu_needs_realized_inputs = [
             torch.ops.mkldnn._convolution_pointwise,
@@ -174,17 +200,22 @@ def register_onednn_fusion_ops():
             if use_max_autotune():
                 transposed_w = permute(w, [1, 0])
                 *_, layout, x, transposed_w = mm_args(x, transposed_w, layout=layout)
-                # TODO(jgong5): support epilogue fusion
-                if (
-                    use_cpp_packed_gemm_template(layout, x, transposed_w)
-                    and attr == "none"
-                ):
+                if use_cpp_packed_gemm_template(layout, x, transposed_w):
+
+                    def epilogue_creator(buf):
+                        return create_epilogue_with_attr(
+                            buf, attr, scalars=scalars, algorithm=algorithm
+                        )
+
                     if b is None:
                         CppPackedGemmTemplate.add_choices(
                             choices,
                             layout,
                             [x, w],
                             trans_w=True,
+                            epilogue_creator=None
+                            if attr == "none"
+                            else epilogue_creator,
                         )
                     else:
                         CppPackedGemmTemplate.add_choices(
@@ -193,6 +224,9 @@ def register_onednn_fusion_ops():
                             [x, w, b],
                             trans_w=True,
                             input_indices=[2, 0, 1],
+                            epilogue_creator=None
+                            if attr == "none"
+                            else epilogue_creator,
                         )
             assert w.get_name() in V.graph.constants
             input_gen_fns = {

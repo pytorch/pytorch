@@ -1731,6 +1731,10 @@ class Kernel(CodeGen):
     def create_cse_var(self, *args, **kwargs):
         return CSEVariable(*args, **kwargs)
 
+    def make_inplace(self, input_name, output_name):
+        self.args.make_inplace(input_name, output_name)
+        self.inplace_update_buffers[output_name] = input_name
+
 
 @dataclasses.dataclass
 class OptimizationContext:

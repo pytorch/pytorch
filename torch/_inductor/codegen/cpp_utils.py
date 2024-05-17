@@ -1,11 +1,15 @@
 import contextlib
+import copy
 import math
 
 from collections import namedtuple
-from typing import Dict
+from typing import Dict, List
 from unittest.mock import patch
 
+import sympy
+
 import torch
+from torch.utils._sympy.symbol import symbol_is_type, SymT
 from .. import ir
 from ..virtualized import V
 
@@ -243,6 +247,19 @@ def value_to_cpp(value, cpp_type):
         return f"static_cast<{cpp_type}>({repr(value)})"
 
 
+def wrap_inner_fn_for_node(node: ir.IRNode, inner_fn_wrapper):
+    loops = node.data if isinstance(node, ir.ComputedBuffer) else node
+    assert isinstance(loops, ir.Loops)
+    new_loops = copy.copy(loops)
+    if isinstance(node, ir.ComputedBuffer):
+        new_node = ir.ComputedBuffer(node.get_name(), node.get_layout(), new_loops)
+    else:
+        new_node = new_loops  # type: ignore[assignment]
+
+    new_loops.inner_fn = inner_fn_wrapper(new_loops.inner_fn)
+    return new_node
+
+
 class LocalBufferScope:
     """
     This class creates a context that helps to generate code involving Inductor IR with
@@ -296,3 +313,46 @@ class LocalBufferScope:
     def add_local_buffer(self, buffer: ir.Buffer):
         assert buffer.get_name() not in self.local_buffers
         self.local_buffers[buffer.get_name()] = buffer
+
+    def localize_buffer(
+        self, global_buf: ir.Buffer, local_buf: ir.Buffer, nodes: List[ir.IRNode]
+    ) -> List[ir.IRNode]:
+        assert local_buf.get_name() in self.local_buffers
+        assert len(global_buf.get_size()) == len(local_buf.get_size())
+        assert len(nodes) > 0
+
+        class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
+            def __init__(self, inner):
+                super().__init__(inner)
+
+            def localize(self, name: str, index: sympy.Expr):
+                if name == global_buf.get_name():
+                    name = local_buf.get_name()
+                    index_vars = sorted(
+                        [
+                            s
+                            for s in index.free_symbols
+                            if symbol_is_type(s, SymT.INDEX)
+                        ],
+                        key=str,
+                    )
+                    index = local_buf.layout.make_indexer()(index_vars)
+                return name, index
+
+            def load(self, name: str, index: sympy.Expr):
+                return self._inner.load(*self.localize(name, index))
+
+            def store(self, name, index, value, mode=None):
+                return self._inner.store(*self.localize(name, index), value, mode)
+
+            def store_reduction(self, name, index, value):
+                return self._inner.store_reduction(*self.localize(name, index), value)
+
+        def inner_fn_wrapper(inner_fn):
+            def inner(index):
+                with V.set_ops_handler(LocalizeBufferHandler(V.get_ops_handler())):
+                    return inner_fn(index)
+
+            return inner
+
+        return [wrap_inner_fn_for_node(node, inner_fn_wrapper) for node in nodes]

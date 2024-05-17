@@ -1,4 +1,4 @@
-from typing import cast, List, Optional
+from typing import Callable, cast, List, Optional
 
 import torch
 import torch.utils
@@ -20,7 +20,7 @@ GEMM_TEMPLATE = r"""
 {{micro_gemm.codegen_define(kernel)}}
 
 extern "C"
-{{kernel.def_kernel(inputs={"X": X, "W": W, "inp": inp}, outputs={"Y": Y})}}
+{{kernel.def_kernel(inputs={"X": X, "W": W, "inp": inp}, outputs={"Y": Y}, aliases=buffer_aliases)}}
 {
     {{kernel.maybe_codegen_profile()}}
     constexpr int64_t num_threads = {{num_threads}};
@@ -90,8 +90,8 @@ extern "C"
                 const int64_t n_start = nc * N0;
                 const int64_t n_size = N0;
                 {%- if use_local_acc %}
-                {{ kernel.define_buffer("acc_local_buf", ["m_end - m_start", "N0"]) }}
-                {%- set acc = kernel.local_buffers["acc_local_buf"] %}
+                {{ kernel.define_buffer(acc_buf_name, ["m_end - m_start", "N0"]) }}
+                {%- set acc = kernel.local_buffers[acc_buf_name] %}
                 {%- else %}
                 {%- set acc = kernel.slice_nd(GemmOut, [("m_start", "m_end"), ("n_start", "n_start + N0")]) %}
                 {%- endif %}
@@ -126,7 +126,7 @@ extern "C"
                 {%- endif %}
                 {%- set tile_Y = kernel.slice_nd(Y_maybe_transposed, [("m_start", "m_end"), ("n_start", "n_start + N0")]) %}
                 {{ kernel.store_output(
-                      tile_Y, acc, epilogue_nodes, offsets=("m_start", "n_start"), reindexer=reindexer
+                      tile_Y, acc, GemmOut, epilogue_nodes, offsets=("m_start", "n_start"), reindexer=reindexer
                    )|indent(16, false)
                 }}
             }
@@ -145,9 +145,12 @@ class CppPackedGemmTemplate(CppTemplate):
         register_blocking: GemmBlocking,
         beta=1,
         alpha=1,
+        epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
     ):
         assert layout.dtype in [torch.float, torch.bfloat16, torch.half]
-        super().__init__("packed_gemm", input_nodes, layout)
+        super().__init__(
+            "packed_gemm", input_nodes, layout, epilogue_creator=epilogue_creator
+        )
         self.beta = beta
         self.alpha = alpha
         self.num_threads = num_threads
@@ -219,6 +222,7 @@ class CppPackedGemmTemplate(CppTemplate):
         alpha=1,
         trans_w=False,
         input_indices=None,
+        epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
     ):
         if input_indices is None:
             input_indices = list(range(len(input_nodes)))
@@ -372,6 +376,7 @@ class CppPackedGemmTemplate(CppTemplate):
             register_blocking=micro_gemm.register_blocking,
             beta=beta,
             alpha=alpha,
+            epilogue_creator=epilogue_creator,
         )
         template.maybe_append_choice(choices)
         return template
@@ -395,11 +400,36 @@ class CppPackedGemmTemplate(CppTemplate):
             Y = template_buffer_node
 
         template_buffer = Y
+        gemm_output_buffer = template_buffer
+
+        epilogues: List[ir.IRNode] = []
+        if self.epilogue_creator is not None:
+            # We assume the epilogues are computed with fp32 before storing back to Y,
+            # so we set fp32 data type for input and output of the epilogue.
+            # In the codegen, they would be either replaced with Y for fp32 output or
+            # replaced with acc for bf16/fp16 output. In either case, they are fp32.
+            gemm_layout = ir.FixedLayout(
+                template_buffer.layout.device,
+                torch.float,
+                template_buffer.layout.size,
+                template_buffer.layout.stride,
+            )
+            gemm_output_name = "GemmOut"
+            gemm_output_buffer = ir.Buffer(gemm_output_name, gemm_layout)
+            epilogues.append(
+                ir.ComputedBuffer(
+                    name=template_buffer.get_name(),
+                    layout=gemm_layout if epilogue_nodes else template_buffer.layout,
+                    data=self.epilogue_creator(gemm_output_buffer),
+                )
+            )
+
         Y_is_transposed = False
         use_local_acc = self.layout.dtype != torch.float
+        acc_buf_name = "local_acc_buf"
         if epilogue_nodes:
+            epilogues.extend(epilogue_nodes)
             Y = cast(ir.Buffer, epilogue_nodes[-1])
-            assert Y.get_name() in V.kernel.inplace_update_buffers
             if Y.get_stride() == list(reversed(template_buffer.get_stride())):
                 Y_is_transposed = True
 
@@ -421,7 +451,10 @@ class CppPackedGemmTemplate(CppTemplate):
             W=W,
             inp=inp,
             Y=Y,
-            GemmOut=template_buffer,
+            GemmOut=gemm_output_buffer,
+            buffer_aliases=[(gemm_output_buffer, Y)]
+            if gemm_output_buffer is not Y
+            else None,
             beta=self.beta,
             alpha=self.alpha,
             num_threads=self.num_threads,
@@ -429,8 +462,9 @@ class CppPackedGemmTemplate(CppTemplate):
             is_dynamic_M=self.is_dynamic_M,
             template=self,
             kernel=kernel,
-            epilogue_nodes=epilogue_nodes,
+            epilogue_nodes=epilogues,
             reindexer=(lambda x: list(reversed(x))) if Y_is_transposed else None,
             use_local_acc=use_local_acc,
+            acc_buf_name=acc_buf_name,
         )
         return self._template_from_string(GEMM_TEMPLATE).render(**options)
