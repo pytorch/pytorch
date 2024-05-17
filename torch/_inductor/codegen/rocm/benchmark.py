@@ -2,6 +2,7 @@ import logging
 import sys
 
 import pandas  # type: ignore[import-untyped]
+from tqdm import tqdm  # type: ignore[import-untyped]
 
 import torch
 from torch._dynamo import config as dynconfig
@@ -47,13 +48,16 @@ def main(gemm_shape_csv, layout, dtype):
     def mm(a, b, out):
         return torch.mm(a, b, out=out)
 
-    for M, K, N in problem_instances:
+    for M, K, N in (pbar := tqdm(problem_instances)):
+        pbar.set_description(f"{M=} {N=} {K=}")
         with config.patch(
             {
                 "max_autotune": True,
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": "CK,Triton,ATen",
                 "compile_threads": 64,
+                "trace.enabled": True,
+                "trace.log_autotuning_results": True,
             }
         ), dynconfig.patch(
             {"cache_size_limit": len(problem_instances) + 1}

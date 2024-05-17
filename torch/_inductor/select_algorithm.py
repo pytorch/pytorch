@@ -1374,7 +1374,9 @@ class AlgorithmSelectorCache(PersistentCache):
         elapse: float,
         precompile_elapse: float,
     ):
-        V.debug.log_autotuning_results(name, input_nodes, timings, elapse)
+        V.debug.log_autotuning_results(
+            name, input_nodes, timings, elapse, precompile_elapse
+        )
         if not (config.max_autotune or config.max_autotune_gemm) or not PRINT_AUTOTUNE:
             return
         sizes = ", ".join(
