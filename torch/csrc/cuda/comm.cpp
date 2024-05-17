@@ -37,7 +37,7 @@ struct unique_type_checker {
     unique = type_id_.value() == type_id;
   }
 
-  c10::optional<size_t> type_id_;
+  std::optional<size_t> type_id_;
   bool unique = true;
 };
 
@@ -232,7 +232,7 @@ std::vector<at::Tensor>& scatter_out(
     const at::Tensor& tensor,
     std::vector<at::Tensor>& out_tensors,
     int64_t dim,
-    const c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>&
+    const std::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>&
         streams) {
   TORCH_CHECK(
       !out_tensors.empty(),
@@ -313,9 +313,9 @@ std::vector<at::Tensor>& scatter_out(
 std::vector<at::Tensor> scatter(
     const at::Tensor& tensor,
     at::IntArrayRef devices,
-    const c10::optional<std::vector<int64_t>>& chunk_sizes,
+    const std::optional<std::vector<int64_t>>& chunk_sizes,
     int64_t dim,
-    const c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>&
+    const std::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>&
         streams) {
   TORCH_CHECK(!devices.empty(), "Expected at least one device to scatter to");
   if (chunk_sizes.has_value()) {
@@ -446,7 +446,7 @@ at::Tensor& gather_out(
 at::Tensor gather(
     at::TensorList tensors,
     int64_t dim,
-    c10::optional<int32_t> destination_index) {
+    std::optional<int32_t> destination_index) {
   TORCH_CHECK(!tensors.empty(), "Expected at least one tensor to gather from");
   int64_t total_size = 0;
   auto& first = tensors.front();
