@@ -412,9 +412,11 @@ class Schedule1F1B(PipelineScheduleSingle):
         bwd_sends_to_wait: List[dist.Work] = []
 
         def is_forward_step(i):
+            assert i >= 0, i
             return i < self._n_microbatches
 
         def is_backward_step(i):
+            assert i < total_steps, i
             return i >= warmup_steps and self._has_backward
 
         def is_1f1b_step(i):
@@ -429,6 +431,8 @@ class Schedule1F1B(PipelineScheduleSingle):
         def should_coalesce_fwd_send_bwd_recv(fwd_send_i):
             return is_1f1b_step(fwd_send_i) or (
                 is_warmup_step(fwd_send_i) and is_cooldown_step(fwd_send_i + 1)
+            ) or (
+                fwd_send_i >= 1 and is_warmup_step(fwd_send_i - 1) and is_cooldown_step(fwd_send_i)
             )
 
         def should_coalesce_bwd_send_fwd_recv(bwd_send_i):
