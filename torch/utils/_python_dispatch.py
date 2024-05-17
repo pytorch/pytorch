@@ -205,6 +205,7 @@ def _disable_current_modes():
     )
     from torch._subclasses.functional_tensor import FunctionalTensorMode
     from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
+    from torch._subclasses.schema_check_mode import SchemaCheckMode
 
     mode_len_pre_dispatch = _len_torch_dispatch_stack_pre_dispatch()
     old_pre_dispatch_modes = [
@@ -213,12 +214,15 @@ def _disable_current_modes():
 
     has_proxy_mode_in_pre_dispatch = False
     has_functional_mode_in_pre_dispatch = False
+    has_schema_check_mode_in_pre_dispatch = False
 
     for i in old_pre_dispatch_modes:
         if isinstance(i, ProxyTorchDispatchMode):
             has_proxy_mode_in_pre_dispatch = True
         if isinstance(i, FunctionalTensorMode):
             has_functional_mode_in_pre_dispatch = True
+        if isinstance(i, SchemaCheckMode):
+            has_schema_check_mode_in_pre_dispatch = True
 
     mode_len = _len_torch_dispatch_stack()
     old_modes = [_pop_mode() for _ in range(mode_len)]
@@ -234,6 +238,13 @@ def _disable_current_modes():
         if isinstance(old, ProxyTorchDispatchMode) and has_proxy_mode_in_pre_dispatch:
             raise AssertionError(
                 "Can't have ProxyTorchDispatchMode available both in PreDispatch and Python Key"
+            )
+        if (
+            isinstance(old, SchemaCheckMode)
+            and has_schema_check_mode_in_pre_dispatch
+        ):
+            raise AssertionError(
+                "Can't have SchemaCheckMode available both in PreDispatch and Python Key"
             )
 
     # Manually disable proxy and fake modes, if any are active
@@ -349,19 +360,6 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
     flat_outs = torch.utils._pytree.tree_leaves(outs)
 
     def alias_non_inplace_storage(arg, ret):
-        # This is hopefully a reasonable assert:
-        # subclasses that rely on this API for output aliasing
-        # should always return wrapper tensor subclasses for us to manually alias.
-        # in theory if a subclass that needs this API wants to sometimes return
-        # plain tensors, we could remove the assert and just not perform the aliasing,
-        # but it seems safer to learn more about this case first.
-        if is_traceable_wrapper_subclass(arg) or is_traceable_wrapper_subclass(ret):
-            ret_list = ret if isinstance(ret, list) else [ret]
-            for r in ret_list:
-                assert type(arg) == type(
-                    r
-                ), f"""Called {str(func)} with input of type {type(arg)}
-and output of type {type(ret)}. But expected types to match."""
         # Need to run under no_dispatch, because we explicitly do **not**
         # want our subclass to intercept the set_() call.
         # instead, our subclass should directly have its storage swapped out.
@@ -382,22 +380,12 @@ and output of type {type(ret)}. But expected types to match."""
 
                 if isinstance(ret, list):
                     for r in ret:
-                        torch.ops.aten.set_.source_Storage_storage_offset(
-                            r,
-                            arg.untyped_storage(),
-                            r.storage_offset(),
-                            r.shape,
-                            r.stride(),
-                        )
+                        if type(arg) == type(r):
+                            torch._C._set_storage(r, arg.untyped_storage())
                 else:
                     assert isinstance(ret, torch.Tensor), f"type: {type(ret)}"
-                    torch.ops.aten.set_.source_Storage_storage_offset(
-                        ret,
-                        arg.untyped_storage(),
-                        ret.storage_offset(),
-                        ret.shape,
-                        ret.stride(),
-                    )
+                    if type(arg) == type(ret):
+                        torch._C._set_storage(ret, arg.untyped_storage())
             finally:
                 torch._C._set_meta_in_tls_dispatch_include(meta_in_tls)
 
