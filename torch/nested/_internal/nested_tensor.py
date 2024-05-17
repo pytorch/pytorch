@@ -4,6 +4,7 @@ import torch
 from torch._C import DispatchKey, DispatchKeySet
 from torch._prims_common import is_expandable_to
 from torch.fx.experimental.symbolic_shapes import has_free_symbols
+from torch.utils._python_dispatch import return_and_correct_aliasing
 from torch.utils.weak import WeakTensorKeyDictionary
 from typing import *  # noqa: F403
 
@@ -222,7 +223,8 @@ class NestedTensor(torch.Tensor):
 
         fn = lookup_jagged(func, *args, **kwargs)
         if fn is not None:
-            return fn(*args, **kwargs)
+            out = fn(*args, **kwargs)
+            return return_and_correct_aliasing(func, args, kwargs, out)
 
         raise NotImplementedError(func)
 

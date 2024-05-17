@@ -1,22 +1,10 @@
-from typing import List, Optional
+from typing import List
 
 import torch
 import torch.utils._pytree as pytree
-from torch._inductor.kernel.mm_common import mm_args
 from . import ir
-from .codegen.cpp_gemm_template import CppPackedGemmTemplate
 from .ir import TensorBox
-from .lowering import (
-    add,
-    add_needs_realized_inputs,
-    aten,
-    permute,
-    register_lowering,
-    to_dtype,
-)
-from .select_algorithm import autotune_select_algorithm, ExternKernelChoice
-from .utils import use_aten_gemm_kernels, use_cpp_packed_gemm_template, use_max_autotune
-from .virtualized import V
+from .lowering import add, add_needs_realized_inputs, aten, register_lowering, to_dtype
 
 
 def register_onednn_fusion_ops():
@@ -350,13 +338,71 @@ def register_onednn_fusion_ops():
                 )
             )
 
-        if torch._C.has_mkl:
-            aten_mkl_linear = ExternKernelChoice(
-                torch.ops.mkl._mkl_linear,
-                "mkl::_mkl_linear",
-                has_out_variant=False,
-                kernel_creator=ir.MKLPackedLinear.create,
+        @register_lowering(
+            torch.ops.onednn.qlinear_pointwise.binary, type_promotion_kind=None
+        )
+        @register_lowering(
+            torch.ops.onednn.qlinear_pointwise.binary_tensor, type_promotion_kind=None
+        )
+        def qlinear_binary(
+            x: TensorBox,
+            x_scale,
+            x_zp,
+            packed_weight: TensorBox,
+            w_scale: TensorBox,
+            w_zp: TensorBox,
+            bias: TensorBox,
+            o_inv_scale,
+            o_zero_point,
+            output_dtype,
+            x2: TensorBox,
+            x2_scale,
+            x2_zp,
+            binary_attr,
+            alpha,
+            unary_attr,
+            unary_scalars,
+            unary_algorithmm,
+        ):
+            if binary_attr == "sum":
+                if output_dtype in [
+                    torch.float32,
+                    torch.bfloat16,
+                ] and x2.get_dtype() in [torch.float32, torch.bfloat16]:
+                    if x2.get_dtype() != output_dtype:
+                        # For int8-mixed-bf16 quantization and inplace add,
+                        # there is case when accum dtype is float32 but output dtype is bfloat16.
+                        # Since the accum will be inplaced changed with post op sum,
+                        # we will do accum dtype convertion here.
+                        x2 = to_dtype(x2, output_dtype)
+                else:
+                    assert (
+                        x2.get_dtype() == output_dtype
+                    ), "dtype of accum for qlinear post op sum should be the same as output"
+            return TensorBox.create(
+                ir.QLinearPointwiseBinaryPT2E.create(
+                    x,
+                    x_scale,
+                    x_zp,
+                    packed_weight,
+                    w_scale,
+                    w_zp,
+                    bias,
+                    o_inv_scale,
+                    o_zero_point,
+                    output_dtype,
+                    x2,
+                    x2_scale,
+                    x2_zp,
+                    binary_attr,
+                    alpha,
+                    unary_attr,
+                    unary_scalars,
+                    unary_algorithmm,
+                )
             )
+
+        if torch._C.has_mkl:
             cpu_needs_realized_inputs.append(torch.ops.mkl._mkl_linear)
 
             @register_lowering(torch.ops.mkl._mkl_linear)
@@ -364,48 +410,11 @@ def register_onednn_fusion_ops():
                 x: TensorBox,
                 packed_w: TensorBox,
                 orig_w: TensorBox,
-                b: Optional[TensorBox],
+                b: TensorBox,
                 batch_size,
-                *,
-                layout=None,
             ):
-                choices = (
-                    [
-                        aten_mkl_linear.bind(
-                            (x, packed_w, orig_w), layout, B=None, batch_size=batch_size
-                        )
-                    ]
-                    if use_aten_gemm_kernels()
-                    else []
-                )
-                if use_max_autotune():
-                    transposed_w = permute(orig_w, [1, 0])
-                    *_, layout, x, transposed_w = mm_args(
-                        x, transposed_w, layout=layout
-                    )
-                    if use_cpp_packed_gemm_template(layout, x, transposed_w):
-                        CppPackedGemmTemplate.add_choices(
-                            choices,
-                            layout,
-                            [x, packed_w, orig_w],
-                            trans_w=True,
-                            input_indices=[0, 2],
-                        )
-
-                assert packed_w.get_name() in V.graph.constants
-                assert orig_w.get_name() in V.graph.constants
-                # packed_w is a mkldnn tensor which we can't generate directly
-                # so we use the weights from the original tensor in autotune.
-                input_gen_fns = {
-                    1: lambda x: V.graph.constants[x.get_name()],
-                    2: lambda x: V.graph.constants[x.get_name()],
-                }
-                result: TensorBox = autotune_select_algorithm(
-                    "packed_linear",
-                    choices,
-                    [x, packed_w, orig_w],
-                    layout,
-                    input_gen_fns=input_gen_fns,
+                result = TensorBox.create(
+                    ir.MKLPackedLinear.create(x, packed_w, orig_w, batch_size)
                 )
                 if b is not None:
                     result = add(result, b)
