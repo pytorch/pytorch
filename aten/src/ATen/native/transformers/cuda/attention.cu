@@ -761,8 +761,52 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
 
   Tensor attention, log_sumexp;
 
-  auto cudnn_seed = at::zeros({1}, query.options().dtype(kLong));
-  auto cudnn_offset = at::zeros({1}, query.options().dtype(kLong));
+  //auto cudnn_seed = at::zeros({1}, query.options().dtype(kLong));
+  //auto cudnn_offset = at::zeros({1}, query.options().dtype(kLong));
+  at::Tensor cudnn_seed, cudnn_offset;
+  const bool use_dropout = std::fpclassify(dropout_p) != FP_ZERO;
+
+  // Note [Seed and Offset Device]
+  // If we are currently in graph capture mode, we need to create the seed and offset tensors on the device.
+  // This is necessary for CUDA graph-safe random number generation, which requires the seed and offset tensors
+  // to be single element tensors on device. During graph capture, when the seed and offset tensors are passed
+  // the pointers act as scratch space for storing the RNG state for the backwards pass.
+  // When calling backwards, we either construct a PhiloxState with the pointers or the actual values.
+  // For more information on CUDA graph-safe RNG states, see Note [CUDA Graph-safe RNG states].
+
+  at::PhiloxCudaState philox_state;
+  const bool in_capture_stream =
+      at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None;
+  auto device = at::kCUDA;
+  if (use_dropout) {
+    auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
+        c10::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
+
+    // See Note [Acquire lock when using random generators]
+    std::lock_guard<std::mutex> lock(gen->mutex_);
+    // if using dropout, we produce 1 random number for each element of the
+    // attention tensor
+    philox_state = gen->philox_cuda_state(batch_size * num_heads * max_seqlen_batch_q * max_seqlen_batch_k);
+
+    if (in_capture_stream) {
+      // The seed and offset will be populated by the kernel
+      cudnn_seed = at::empty({}, at::dtype(at::kLong).device(device));
+      cudnn_offset = at::empty({}, at::dtype(at::kLong).device(device));
+    } else {
+      auto [seed, offset] = at::cuda::philox::unpack(philox_state);
+      cudnn_seed= at::scalar_tensor(
+          at::Scalar(static_cast<int64_t>(seed)), at::dtype(at::kLong).device(device));
+      cudnn_offset= at::scalar_tensor(
+          at::Scalar(static_cast<int64_t>(offset)), at::dtype(at::kLong).device(device));
+    }
+  } else {
+    // Not using dropout
+    cudnn_seed = at::empty({}, at::dtype(at::kLong).device(device));
+    cudnn_offset= at::empty({}, at::dtype(at::kLong).device(device));
+  }
+
+
+
   const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
   Tensor debugmask;
   bool compute_logsumexp =
