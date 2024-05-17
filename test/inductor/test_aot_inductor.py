@@ -2854,7 +2854,9 @@ CPU_TEST_FAILURES = {
         is_skip=True
     ),
     "test_dup_unbacked_sym_decl": fail_minimal_arrayref_interface(is_skip=True),
-    "test_dup_unbacked_sym_decl_with_refinement": fail_minimal_arrayref_interface(is_skip=True),
+    "test_dup_unbacked_sym_decl_with_refinement": fail_minimal_arrayref_interface(
+        is_skip=True
+    ),
     "test_dynamic_cat": fail_minimal_arrayref_interface(),
     # https://github.com/pytorch/pytorch/issues/122978
     "test_dynamic_scalar": fail_stack_allocation(is_skip=True),
