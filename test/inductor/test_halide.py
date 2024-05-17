@@ -6,6 +6,7 @@ import torch
 from torch._inductor.codecache import HalideCodeCache
 from torch._inductor.runtime.hints import HalideInputSpec, HalideMeta
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import parallel_num_threads
 
 from torch.testing._internal.common_utils import IS_MACOS
 from torch.testing._internal.inductor_utils import HAS_CPU
@@ -25,19 +26,20 @@ class HalideTests(TestCase):
         fn = HalideCodeCache.generate_halide(
             HalideMeta(
                 argtypes=[
-                    HalideInputSpec(
-                        ctype="float*", name="in_ptr0", numel="static_cast<long>(1024L)"
-                    ),
-                    HalideInputSpec(
-                        ctype="float*", name="in_ptr1", numel="static_cast<long>(1024L)"
-                    ),
+                    HalideInputSpec(ctype="float*", name="in_ptr0", numel="1024L"),
+                    HalideInputSpec(ctype="float*", name="in_ptr1", numel="1024L"),
                     HalideInputSpec(
                         ctype="float*",
                         name="out_ptr0",
-                        numel="static_cast<long>(1024L)",
+                        numel="1024L",
                     ),
                 ],
+                target="host",
                 scheduler="Mullapudi2016",
+                scheduler_flags={
+                    "parallelism": parallel_num_threads(),
+                    "last_level_cache_size": HalideCodeCache.cpu_cache_size(),
+                },
             ),
             textwrap.dedent(
                 """
