@@ -478,7 +478,7 @@ def custom_fwd(
 # Autograd ensures incoming gradients are the same type as forward outputs.  Allowing a separate
 # cast_inputs argument on custom_bwd is unnecessary and could cause errors if it doesn't match
 # cast_inputs supplied to custom_fwd.
-def custom_bwd(bwd, *, device_type: str):
+def custom_bwd(bwd=None, *, device_type: str):
     """Create a helper decorator for backward methods of custom autograd functions.
 
     Autograd functions are subclasses of :class:`torch.autograd.Function`.
@@ -495,6 +495,8 @@ def custom_bwd(bwd, *, device_type: str):
         raise ValueError(
             f"Expected `device_type` of type `str`, got: `{type(device_type)}`"
         )
+    if bwd is None:
+        return functools.partial(custom_bwd, device_type=device_type)
 
     @functools.wraps(bwd)
     def decorate_bwd(*args, **kwargs):
