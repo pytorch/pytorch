@@ -2,10 +2,12 @@ import builtins
 import functools
 import inspect
 import itertools
+import json
 import logging
 
 import math
 import operator
+import os
 import sys
 import textwrap
 import time
@@ -16,6 +18,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from unittest.mock import patch
 
 import sympy
+from filelock import FileLock
 
 import torch
 from torch._dynamo.testing import rand_strided
@@ -490,9 +493,6 @@ class TritonTemplateKernel(TritonKernel):
             )
 
 
-mm_log_filename = "mm_logs_10.json"
-
-
 @functools.lru_cache(None)
 def _jinja2_env():
     try:
@@ -902,16 +902,21 @@ class ExternKernelCaller(ChoiceCaller):
         }
 
 
-import json
+@functools.lru_cache(None)
+def get_mm_log_filename() -> Optional[str]:
+    mm_file_name = os.environ.get("TORCHINDUCTOR_MM_LOGGING_FILE", None)
+    if not mm_file_name:
+        return None
 
-from filelock import FileLock
+    if "json" not in mm_file_name:
+        mm_file_name = f"{mm_file_name}.json"
 
-mm_log_filename = "mm_logs_10.json"
-mm_log_lockfile = mm_log_filename + ".lock"
+    return mm_file_name
 
 
 def append_to_log(filename, data):
-    lock = FileLock(mm_log_lockfile)
+    lock_file = filename.replace(".json", ".lock")
+    lock = FileLock(lock_file)
     with lock:
         try:
             with open(filename) as f:
@@ -1053,12 +1058,10 @@ class AlgorithmSelectorCache(PersistentCache):
         # TODO(nmacchioni): remove once CI tests are fixed
         choices = [choice for choice in choices if choice is not None]
 
-        import os
-
-        if os.environ.get("ELIAS_WRITE_MATMUL", "1") == "1" and "mm" in name:
+        if mm_file_name := get_mm_log_filename():
             M, K = input_nodes[-2].get_size()[:2]
             N = input_nodes[-1].get_size()[-1]
-            append_to_log(mm_log_filename, {"invoke": str((M, K, N))})
+            append_to_log(mm_file_name, {"invoke": str((M, K, N))})
 
         if len(choices) == 0:
             raise NoValidChoicesError(
@@ -1444,7 +1447,6 @@ class AlgorithmSelectorCache(PersistentCache):
                 for n in input_nodes
             ]
         )
-        import os
 
         n = None if log.getEffectiveLevel() == logging.DEBUG else 10
         top_k = sorted(timings, key=timings.__getitem__)[:n]
@@ -1461,7 +1463,7 @@ class AlgorithmSelectorCache(PersistentCache):
             info = choice.info_dict()
             tile = info["tile_shape"]
 
-            tile_vals = eval(tile)
+            tile_vals = eval(tile)  # type: ignore[arg-type]
             BLOCK_M = tile_vals[0]
             BLOCK_K = tile_vals[1]
             BLOCK_N = tile_vals[2]
@@ -1476,20 +1478,16 @@ class AlgorithmSelectorCache(PersistentCache):
                 "num_warps": info["num_warps"],
             }
 
-        if os.environ.get("ELIAS_WRITE_MATMUL", "1") == "1" and "mm" in name:
+        mm_filename = get_mm_log_filename()
+        if mm_filename and "mm" in name:
             M, K = input_nodes[-2].get_size()[:2]
             N = input_nodes[-1].get_size()[-1]
-            # assert M == 256
-            # assert K == 512
-            # assert N == 1024
 
             out_dict = {
-                str((M, K, N)): list(
-                    get_choice_info(choice) for choice in timings.keys()
-                )
+                str((M, K, N)): [get_choice_info(choice) for choice in timings.keys()]
             }
 
-            append_to_log(mm_log_filename, out_dict)
+            append_to_log(mm_filename, out_dict)
 
         best_time = timings[best]
         sys.stderr.write(f"AUTOTUNE {name}({sizes})\n")
