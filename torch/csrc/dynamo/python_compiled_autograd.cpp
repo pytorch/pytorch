@@ -50,14 +50,6 @@ Notes:
 namespace torch::dynamo::autograd {
 using c10::SymInt;
 
-// snapshot of python verbose logging toggle
-static bool is_verbose_logging_enabled;
-static constexpr std::string_view VLOG_PREFIX =
-    "[python_compiled_autograd.cpp] ";
-std::ostream& vcout() {
-  return std::cout << VLOG_PREFIX;
-}
-
 static PyObject* wrap_int_list(const std::vector<int64_t>& inputs) {
   PyObject* pyinput = PyTuple_New(static_cast<Py_ssize_t>(inputs.size()));
   for (const auto i : c10::irange(inputs.size())) {
@@ -89,6 +81,13 @@ static PyObject* check(PyObject* pyresult) {
 static void check(bool result) {
   if (C10_UNLIKELY(!result))
     check(nullptr);
+}
+
+// snapshot of python verbose logging toggle
+static PyObject* python_verbose_logger = nullptr;
+void verbose_log_fn(std::string_view msg) {
+  TORCH_CHECK(python_verbose_logger != nullptr);
+  check(PyObject_CallFunction(python_verbose_logger, "s", msg.data()));
 }
 
 struct CacheNode {
@@ -161,9 +160,10 @@ struct CacheNode {
       if (changed_value) {
         if (!was_dynamic) {
           cache_hit = false;
-          if (is_verbose_logging_enabled) {
-            vcout() << "cache miss: marking sizes[" << i << "] as dynamic"
-                    << std::endl;
+          if (python_verbose_logger != nullptr) {
+            verbose_log_fn(
+                "cache miss: marking sizes[" + std::to_string(i) +
+                "] as dynamic");
           }
         }
         expected = SizeInput(SizeInput::DYNAMIC, data[i].value);
@@ -257,10 +257,17 @@ static PyObject* is_cache_empty(PyObject* dummy, PyObject* args) {
   END_HANDLE_TH_ERRORS;
 }
 
-static PyObject* set_verbose_logging(PyObject* dummy, PyObject* args) {
+static PyObject* set_verbose_logger(PyObject* dummy, PyObject* args) {
   HANDLE_TH_ERRORS;
-  if (!PyArg_ParseTuple(args, "p", &is_verbose_logging_enabled)) {
+  PyObject* logger = nullptr;
+  if (!PyArg_ParseTuple(args, "O", &logger)) {
     Py_RETURN_FALSE;
+  }
+
+  if (logger == Py_None) {
+    python_verbose_logger = nullptr;
+  } else {
+    python_verbose_logger = logger;
   }
   Py_RETURN_TRUE;
   END_HANDLE_TH_ERRORS;
@@ -271,7 +278,7 @@ static PyMethodDef _methods[] = {
     {"set_autograd_compiler", set_autograd_compiler, METH_VARARGS, nullptr},
     {"clear_cache", clear_cache, METH_NOARGS, nullptr},
     {"is_cache_empty", is_cache_empty, METH_NOARGS, nullptr},
-    {"set_verbose_logging", set_verbose_logging, METH_VARARGS, nullptr},
+    {"set_verbose_logger", set_verbose_logger, METH_VARARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 static struct PyModuleDef _module = {
@@ -367,10 +374,11 @@ CacheNode* _compiled_autograd_impl(
         node_args.collect(call.node->next_edges());
       }
       CacheKey key = node_args.key();
-      if (is_verbose_logging_enabled &&
+      if (python_verbose_logger != nullptr &&
           cache->lookup(key, /*create=*/false) == nullptr) {
-        vcout() << "Creating cache entry for " << fn->name()
-                << ", with key of size " << key.key_size << std::endl;
+        verbose_log_fn(
+            "Creating cache entry for " + fn->name() + ", with key of size " +
+            std::to_string(key.key_size));
       }
       cache = cache->lookup(key);
     }
@@ -454,7 +462,7 @@ CacheNode* _compiled_autograd_impl(
         inputs = THPVariable_UnpackList(pyinputs);
       }
 
-      if (is_verbose_logging_enabled) {
+      if (python_verbose_logger != nullptr) {
         std::string _node_name = call.node->name();
         THPObjectPtr node_name(PyUnicode_FromString(_node_name.data()));
         TORCH_INTERNAL_ASSERT(node_name != nullptr);
