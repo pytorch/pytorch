@@ -1575,13 +1575,6 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
 
         # recompile
         patterns2 = [
-            r".*Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
-            r".*Creating cache entry for ReluBackward0, with key of size (\d+)\n",
-            r".*Creating cache entry for AddmmBackward0, with key of size (\d+)\n",
-            r".*Creating cache entry for TBackward0, with key of size (\d+)\n",
-            r".*Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
-            r".*Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
-            r".*Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
             r".*cache miss: marking sizes\[(\d+)\] as dynamic\n",
             r".*cache miss: marking sizes\[(\d+)\] as dynamic\n",
             r".*cache miss: marking sizes\[(\d+)\] as dynamic\n",
