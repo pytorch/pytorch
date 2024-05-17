@@ -22,13 +22,14 @@ from typing import List, Optional, Sequence, Tuple
 
 import torch
 from torch import _C
-from torch.onnx import _type_utils, symbolic_helper, symbolic_opset9 as opset9
+from torch.onnx import symbolic_helper, _type_utils, symbolic_opset9 as opset9
 from torch.onnx._internal import _beartype, jit_utils, registration
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
 
 __all__ = [
+    "bitwise_and",
     "col2im",
 ]
 
