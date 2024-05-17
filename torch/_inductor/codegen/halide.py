@@ -772,6 +772,8 @@ class HalideKernel(SIMDKernel):
         code = IndentedBuffer()
         code.splice(
             """
+            import halide as hl
+
             @hl.generator(name="kernel")
             class Kernel:
         """,
@@ -826,6 +828,10 @@ class HalideKernel(SIMDKernel):
             except TypeError:
                 low, high = 0, 8192  # arbitrary range for unbacked symints
             code.writeline(f"{arg.name}.set_estimates([hl.Range({low}, {high})])")
+
+        code.do_unindent(2)
+        code.writeline("")
+        code.writeline("__name__ == '__main__' and hl.main()")
         return code.getvalue()
 
     def call_kernel(self, name: str, node=None):
