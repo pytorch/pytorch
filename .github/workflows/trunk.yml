@@ -232,24 +232,6 @@ jobs:
           { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge.nonephemeral" },
         ]}
 
-  win-vs2019-cuda12_1-py3-build:
-    name: win-vs2019-cuda12.1-py3
-    uses: ./.github/workflows/_win-build.yml
-    with:
-      build-environment: win-vs2019-cuda12.1-py3
-      cuda-version: "12.1"
-      sync-tag: win-cuda-build
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 6, runner: "windows.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 6, runner: "windows.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 6, runner: "windows.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 6, runner: "windows.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 5, num_shards: 6, runner: "windows.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 6, num_shards: 6, runner: "windows.g5.4xlarge.nvidia.gpu" },
-          { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge.nonephemeral" },
-        ]}
-
   linux-focal-rocm6_1-py3_8-build:
     name: linux-focal-rocm6.1-py3.8
     uses: ./.github/workflows/_linux-build-label.yml

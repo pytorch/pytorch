@@ -336,17 +336,6 @@ jobs:
           { config: "default", shard: 1, num_shards: 1 },
         ]}
 
-  linux-jammy-cuda-12_1-cudnn8-py3_8-clang12-build:
-    name: linux-jammy-cuda12.1-cudnn8-py3.8-clang12
-    uses: ./.github/workflows/_linux-build-label.yml
-    with:
-      build-environment: linux-jammy-cuda12.1-cudnn8-py3.8-clang12
-      docker-image-name: pytorch-linux-jammy-cuda12.1-cudnn8-py3.8-clang12
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1 },
-        ]}
-
   linux-focal-py3-clang9-mobile-custom-build-static:
     name: linux-focal-py3-clang9-mobile-custom-build-static
     uses: ./.github/workflows/_linux-build-label.yml
