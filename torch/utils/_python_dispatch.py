@@ -376,7 +376,7 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
                 assert type(arg) == type(
                     r
                 ), f"""Called {str(func)} with input of type {type(arg)}
--and output of type {type(ret)}. But expected types to match."""
+and output of type {type(ret)}. But expected types to match."""
         # Need to run under no_dispatch, because we explicitly do **not**
         # want our subclass to intercept the set_() call.
         # instead, our subclass should directly have its storage swapped out.
@@ -397,10 +397,10 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
 
                 if isinstance(ret, list):
                     for r in ret:
-                        torch._C._set_storage(r, arg.untyped_storage())
+                        torch._C._unsafe_set_storage(r, arg.untyped_storage())
                 else:
                     assert isinstance(ret, torch.Tensor), f"type: {type(ret)}"
-                    torch._C._set_storage(ret, arg.untyped_storage())
+                    torch._C._unsafe_set_storage(ret, arg.untyped_storage())
             finally:
                 torch._C._set_meta_in_tls_dispatch_include(meta_in_tls)
 
