@@ -139,47 +139,22 @@ def _get_operator_type_filter(operator_type: Callable, module_name_list):
 def _x86_get_not_module_type_or_name_filter(
     tp_list: List[torch._ops.OpOverloadPacket], module_name_list: List[str]
 ) -> Callable[[Node], bool]:
-    # Check if the node is 1) belong to the `default_quantizable_ops` and 2) not be marked
-    # by `set_module_name_qconfig`, or `set_module_type_qconfig` `set_function_type_qconfig`.
+    # Check if the node is 1) belong to the `default_quantizable_ops` and 2) not be marked by `set_module_name_qconfig`,
+    # or `set_module_type_qconfig` `set_function_type_qconfig`.
 
+    # Only call the `operator_type_filters` is enough, since each filter of `operator_type_filters` will check
+    # the `module_name_list_filters`.
     operator_type_filters = [
         _get_operator_type_filter(tp, module_name_list) for tp in tp_list
     ]
-    module_name_list_filters: List[
-        Callable
-    ] = []  # [_get_module_name_filter(m) for m in module_name_list]
 
     def not_module_type_or_name_filter(n: Node) -> bool:
         # For global_config, only quantize the `default_quantizable_ops`
         belong_to_default_quantizable_ops = n.target in default_quantizable_ops
-        # if n.target not in default_quantizable_ops:
-        #     result1 = False
-        # for f in module_name_list_filters:
-        #     log.warning(f"not module_name for node: {n}, (name: {n.name}, target:{n.target}), f:{f} f(n) is {f(n)}")
-
-        # for f in operator_type_filters:
-        #     log.warning(f"not module type: {n}, (name: {n.name}, target:{n.target}), f:{f} f(n) is {f(n)}")
-
         not_module_type_or_module_name_node = not any(
-            f(n) for f in operator_type_filters + module_name_list_filters
+            f(n) for f in operator_type_filters
         )
-        final_result = (
-            belong_to_default_quantizable_ops and not_module_type_or_module_name_node
-        )
-
-        # rewrite it not use the f-string
-        log.warning(
-            (
-                "for node: %s, (name: %s, target:%s), node in default_quantizable_ops? %s;"
-                "node is not used by operator_type_filters or module_name_list_filters? %s"
-            ),
-            n,
-            n.name,
-            n.target,
-            belong_to_default_quantizable_ops,
-            not_module_type_or_module_name_node,
-        )
-        return final_result
+        return belong_to_default_quantizable_ops and not_module_type_or_module_name_node
 
     return not_module_type_or_name_filter
 
@@ -387,7 +362,6 @@ class X86InductorQuantizer(Quantizer):
             torch._ops.OpOverloadPacket, Optional[QuantizationConfig]
         ] = {}
         self.module_name_qconfig: Dict[str, Optional[QuantizationConfig]] = {}
-        self._module_type_qconfig = {}
 
     @classmethod
     def get_supported_quantization_configs(cls) -> List[QuantizationConfig]:
@@ -428,7 +402,6 @@ class X86InductorQuantizer(Quantizer):
         function_type: Callable,
         quantization_config: Optional[QuantizationConfig],
     ) -> "X86InductorQuantizer":
-        self._module_type_qconfig[function_type] = quantization_config
         if function_type in X86InductorQuantizer.module_function_to_aten_operator_type:
             self._set_aten_operator_qconfig(
                 X86InductorQuantizer.module_function_to_aten_operator_type[
@@ -447,7 +420,6 @@ class X86InductorQuantizer(Quantizer):
         module_type: torch.nn.Module,
         quantization_config: Optional[QuantizationConfig],
     ) -> "X86InductorQuantizer":
-        self._module_type_qconfig[module_type] = quantization_config
         if module_type in X86InductorQuantizer.module_function_to_aten_operator_type:
             self._set_aten_operator_qconfig(
                 X86InductorQuantizer.module_function_to_aten_operator_type[module_type],
@@ -466,9 +438,6 @@ class X86InductorQuantizer(Quantizer):
         quantizer.set_module_name_qconfig("blocks.sub"), it will quantize all supported operator/operator
         patterns in the submodule with this module name with the given `quantization_config`
         """
-        # assert (
-        #     quantization_config is not None
-        # ), " quantization_config == None is not supported yet"
         self.module_name_qconfig[module_name] = quantization_config
         return self
 
