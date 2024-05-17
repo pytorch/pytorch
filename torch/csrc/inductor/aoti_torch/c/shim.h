@@ -72,6 +72,9 @@ extern "C" {
 struct AtenTensorOpaque;
 using AtenTensorHandle = AtenTensorOpaque*;
 
+struct AtenGeneratorOpaque;
+using AtenGeneratorHandle = AtenGeneratorOpaque*;
+
 struct AOTIProxyExecutorOpaque;
 using AOTIProxyExecutorHandle = AOTIProxyExecutorOpaque*;
 
