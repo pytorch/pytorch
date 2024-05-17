@@ -3454,8 +3454,10 @@ class NCCLTraceTest(NCCLTraceTestBase):
             self.assertTrue(s <= f)
         self.assertIn("test_c10d_nccl.py", str(last["frames"]))
         self.assertEqual(last["input_sizes"], ((3, 4),))
+        # 6 corresponds to torch.float32 below
         self.assertEqual(last["input_dtypes"], [6])
         self.assertEqual(last["output_sizes"], ((3, 4),))
+        # 6 corresponds to torch.float32 below
         self.assertEqual(last["output_dtypes"], [6])
         self.assertEqual(last["collective_seq_id"], 2)
         now = datetime.now()
