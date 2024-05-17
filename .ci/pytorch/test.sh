@@ -1278,6 +1278,10 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHAR
 elif [[ "${TEST_CONFIG}" == *dynamo* && $SHARD_NUMBER -gt 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   test_dynamo_shard "${SHARD_NUMBER}"
+elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
+  install_torchvision
+  test_python_shard "$SHARD_NUMBER"
+  test_aten
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
@@ -1307,10 +1311,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
   test_libtorch
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
-elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
-  install_torchvision
-  test_python
-  test_aten
 elif [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
   install_torchvision
   test_python

@@ -1,14 +1,37 @@
-from typing import List
+from typing import List, Optional
 
 import torch
 import torch.utils._pytree as pytree
+from torch._inductor.kernel.mm_common import mm_args
 from . import ir
+from .codegen.cpp_gemm_template import CppPackedGemmTemplate
 from .ir import TensorBox
-from .lowering import add, add_needs_realized_inputs, aten, register_lowering, to_dtype
+from .lowering import (
+    add,
+    add_needs_realized_inputs,
+    aten,
+    permute,
+    register_lowering,
+    to_dtype,
+    view,
+)
+from .select_algorithm import (
+    autotune_select_algorithm,
+    ChoiceCaller,
+    ExternKernelChoice,
+)
+from .utils import use_aten_gemm_kernels, use_cpp_packed_gemm_template, use_max_autotune
+from .virtualized import V
 
 
 def register_onednn_fusion_ops():
     if torch._C._has_mkldnn:
+        aten_mkldnn_linear_unary = ExternKernelChoice(
+            torch.ops.mkldnn._linear_pointwise,
+            "mkldnn::_linear_pointwise",
+            has_out_variant=False,
+            kernel_creator=ir.LinearUnary.create,
+        )
         cpu_needs_realized_inputs = [
             torch.ops.mkldnn._convolution_pointwise,
             torch.ops.mkldnn._convolution_pointwise_,
@@ -116,11 +139,75 @@ def register_onednn_fusion_ops():
 
         @register_lowering(torch.ops.mkldnn._linear_pointwise)
         def linear_unary(
-            x: TensorBox, w: TensorBox, b: TensorBox, attr, scalars, algorithm
+            x: TensorBox,
+            w: TensorBox,
+            b: TensorBox,
+            attr,
+            scalars,
+            algorithm,
+            layout=None,
         ):
-            return TensorBox.create(
-                ir.LinearUnary.create(x, w, b, attr, scalars, algorithm)
+            x_size = x.get_size()
+            if len(x_size) > 2:
+                # GEMM template needs 2D input, normalize input shape here
+                x = view(x, [-1, x_size[-1]])
+            choices: List[ChoiceCaller] = []
+            if len(choices) == 0 or use_aten_gemm_kernels():
+                choices.append(
+                    aten_mkldnn_linear_unary.bind(
+                        (x, w),
+                        layout,
+                        B=None,
+                        attr=attr,
+                        scalars=scalars,
+                        algorithm=algorithm,
+                    )
+                    if b is None
+                    else aten_mkldnn_linear_unary.bind(
+                        (x, w, b),
+                        layout,
+                        attr=attr,
+                        scalars=scalars,
+                        algorithm=algorithm,
+                    )
+                )
+            if use_max_autotune():
+                transposed_w = permute(w, [1, 0])
+                *_, layout, x, transposed_w = mm_args(x, transposed_w, layout=layout)
+                # TODO(jgong5): support epilogue fusion
+                if (
+                    use_cpp_packed_gemm_template(layout, x, transposed_w)
+                    and attr == "none"
+                ):
+                    if b is None:
+                        CppPackedGemmTemplate.add_choices(
+                            choices,
+                            layout,
+                            [x, w],
+                            trans_w=True,
+                        )
+                    else:
+                        CppPackedGemmTemplate.add_choices(
+                            choices,
+                            layout,
+                            [x, w, b],
+                            trans_w=True,
+                            input_indices=[2, 0, 1],
+                        )
+            assert w.get_name() in V.graph.constants
+            input_gen_fns = {
+                1: lambda x: V.graph.constants[x.get_name()],
+            }
+            result = autotune_select_algorithm(
+                "linear_unary",
+                choices,
+                [x, w] if b is None else [x, w, b],
+                layout,
+                input_gen_fns=input_gen_fns,
             )
+            if len(x_size) > 2:
+                result = view(result, (*x_size[:-1], result.get_size()[-1]))
+            return result
 
         @register_lowering(torch.ops.mkldnn._linear_pointwise.binary)
         def linear_binary(x: TensorBox, y: TensorBox, w: TensorBox, b: TensorBox, attr):
@@ -339,6 +426,12 @@ def register_onednn_fusion_ops():
             )
 
         if torch._C.has_mkl:
+            aten_mkl_linear = ExternKernelChoice(
+                torch.ops.mkl._mkl_linear,
+                "mkl::_mkl_linear",
+                has_out_variant=False,
+                kernel_creator=ir.MKLPackedLinear.create,
+            )
             cpu_needs_realized_inputs.append(torch.ops.mkl._mkl_linear)
 
             @register_lowering(torch.ops.mkl._mkl_linear)
@@ -346,11 +439,47 @@ def register_onednn_fusion_ops():
                 x: TensorBox,
                 packed_w: TensorBox,
                 orig_w: TensorBox,
-                b: TensorBox,
+                b: Optional[TensorBox],
                 batch_size,
+                *,
+                layout=None,
             ):
-                result = TensorBox.create(
-                    ir.MKLPackedLinear.create(x, packed_w, orig_w, batch_size)
+                choices: List[ChoiceCaller] = []
+                if use_max_autotune():
+                    transposed_w = permute(orig_w, [1, 0])
+                    *_, layout, x, transposed_w = mm_args(
+                        x, transposed_w, layout=layout
+                    )
+                    if use_cpp_packed_gemm_template(layout, x, transposed_w):
+                        CppPackedGemmTemplate.add_choices(
+                            choices,
+                            layout,
+                            [x, packed_w, orig_w],
+                            trans_w=True,
+                            input_indices=[0, 2],
+                        )
+
+                if len(choices) == 0 or use_aten_gemm_kernels():
+                    choices.append(
+                        aten_mkl_linear.bind(
+                            (x, packed_w, orig_w), layout, B=None, batch_size=batch_size
+                        )
+                    )
+
+                assert packed_w.get_name() in V.graph.constants
+                assert orig_w.get_name() in V.graph.constants
+                # packed_w is a mkldnn tensor which we can't generate directly
+                # so we use the weights from the original tensor in autotune.
+                input_gen_fns = {
+                    1: lambda x: V.graph.constants[x.get_name()],
+                    2: lambda x: V.graph.constants[x.get_name()],
+                }
+                result: TensorBox = autotune_select_algorithm(
+                    "packed_linear",
+                    choices,
+                    [x, packed_w, orig_w],
+                    layout,
+                    input_gen_fns=input_gen_fns,
                 )
                 if b is not None:
                     result = add(result, b)
