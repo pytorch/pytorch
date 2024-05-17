@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import functools
+import logging
 import re
 import sys
 import unittest
@@ -51,6 +52,14 @@ def hook3(gI, gO):
 
 
 class TestCompiledAutograd(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        compiled_autograd.reset()
+
+    def tearDown(self) -> None:
+        super().tearDown()
+        compiled_autograd.reset()
+
     def check_output_and_recompiles(
         self, fn, count=1, compiler_fn=compiler_fn, compile_fn=False
     ):
@@ -322,6 +331,7 @@ main()
             handle.remove()
 
     def test_inputs_aliasing_bytecode_stack_restore(self):
+        logging.getLogger().setLevel(logging.WARNING)
         from torch.testing._internal.logging_tensor import LoggingTensor
 
         # Create a graph that allows inputs stealing
@@ -751,6 +761,52 @@ main()
                 yield z
 
         self.check_output_and_recompiles(fn, count=2)
+
+    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    def test_logging_tensor_flaky(self) -> None:
+        # when you first run some test using triton and then run test_inputs_aliasing_bytecode_stack_restore
+        # resulting in:
+        #   - pytest: `TypeError: unsupported operand type(s) for +: 'Tensor' and 'LoggingTensor'`
+        #   - python: `TypeError: not all arguments converted during string formatting`
+
+        # 1. some triton involving test
+        def fn():
+            def _fn(x):
+                return x
+
+            x = torch.arange(
+                1, 10, requires_grad=True, dtype=torch.float16, device="cuda"
+            )
+            out = _fn(x)
+            loss = out.sum()
+            loss.backward()
+
+        with compiled_autograd.enable(compiler_fn):
+            fn()
+
+        logging.getLogger().setLevel(
+            logging.WARNING
+        )  # triton setup overwrote it to INFO
+        # 2. test_inputs_aliasing_bytecode_stack_restore
+        from torch.testing._internal.logging_tensor import LoggingTensor
+
+        def forward(inputs):
+            add = inputs[0] + 1
+            add_1 = add + inputs[1]
+            out = add_1.cpu()
+            return (out,)
+
+        gm = torch.fx.symbolic_trace(forward)
+        print(gm.print_readable())
+        torch._dynamo.utils.set_locals_to_steal(gm, ["inputs"])
+        compiled_fn = torch.compile(gm)
+
+        inputs = [
+            torch.ones(1000000, dtype=torch.float32),
+            LoggingTensor(torch.ones(1)),
+        ]
+
+        compiled_fn(inputs)
 
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
     def test_custom_fn_output_metadata(self):

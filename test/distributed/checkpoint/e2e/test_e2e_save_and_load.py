@@ -21,6 +21,7 @@ from torch.distributed.checkpoint.state_dict import (
     get_state_dict,
 )
 from torch.distributed.checkpoint.state_dict_loader import _load_state_dict_from_keys
+from torch.distributed.checkpoint.utils import CheckpointException
 from torch.distributed.distributed_c10d import ReduceOp
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.api import ShardingStrategy
@@ -376,6 +377,30 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
                 self._compare_tensor(
                     loaded_optim_state[k][optim_key], v[optim_key], offload_to_cpu=True
                 )
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @with_temp_dir
+    def test_overwrite(self):
+        t1, t2 = torch.randn(10), torch.randn(10)
+        DCP.save({"random": t1}, checkpoint_id=self.temp_dir)
+        DCP.save(
+            {"random": t2},
+            storage_writer=DCP.FileSystemWriter(self.temp_dir, overwrite=True),
+        )
+
+        sd = {"random": torch.zeros(10)}
+        DCP.load(sd, checkpoint_id=self.temp_dir)
+
+        self.assertTrue(torch.allclose(sd["random"], t2))
+
+        with self.assertRaisesRegex(
+            CheckpointException, ".*Checkpoint already exists.*"
+        ):
+            DCP.save(
+                {"random": t2},
+                storage_writer=DCP.FileSystemWriter(self.temp_dir, overwrite=False),
+            )
 
 
 class TestNoCPU(DTensorTestBase):
