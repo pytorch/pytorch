@@ -50,6 +50,8 @@ __all__ = [
     "get_std_cm",
     "MultiprocessContext",
     "SubprocessContext",
+    "LogsDest",
+    "LogsSpecs",
 ]
 
 class SignalException(Exception):

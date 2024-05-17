@@ -2097,6 +2097,32 @@ class TestExport(TestCase):
         ):
             export(Module(), (torch.tensor(1, device="cpu"),))
 
+    def test_float_conversion(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return x.float()
+
+        ep = export(Module(), (torch.tensor(1, dtype=torch.float),))
+        ops = []
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+        self.assertGreater(len(ops), 0)
+        for op in ops:
+            self.assertIn(op, (torch.ops.aten._to_copy.default,))
+
+    def test_device_to_mutation_float(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                y = x.float()
+                y.add_(1)
+                return y, x
+
+        with self.assertRaisesRegex(
+            RuntimeError, "cannot mutate tensors with frozen storage"
+        ):
+            export(Module(), (torch.tensor(1, dtype=torch.float),))
+
     def test_module(self):
         class MyLinear(torch.nn.Module):
             def __init__(self):
