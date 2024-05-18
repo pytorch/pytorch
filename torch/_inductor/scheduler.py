@@ -155,23 +155,18 @@ kernel_name_to_op = {
 # This is the base class for both NodeSchedulerNode (where self.node is actually
 # meaningful) and FusedSchedulerNode (where self.node is not meaningful).
 class BaseSchedulerNode:
-    def __init__(self, scheduler: "Scheduler", node: ir.Buffer):
-        self.scheduler: Scheduler = scheduler
-        self.node: ir.Buffer = node
-        self.users: List[NodeUser] = []
-        self.inverse_users: List[BaseSchedulerNode] = []
-        self.node_users: List[BaseSchedulerNode] = []
-        self.set_read_writes(node.get_read_writes())
-        self.ancestors: Set[str] = set()
-        self.min_order: int
-        self.max_order: int
-        self.last_usage: Set[str] = (
-            set()
-        )  # buffers that won't be used after this kernel
-        self.written = False
+    ancestors: Set[Any]
+    inverse_users: List["BaseSchedulerNode"]
+    last_usage: Set[str]
+    max_order: int
+    min_order: int
+    node: ir.Buffer
+    node_users: List["BaseSchedulerNode"]
+    scheduler: "Scheduler"
+    users: List["NodeUser"]
 
     @abstractmethod
-    def debug_str(self) -> str: ...
+    def debug_str(self) -> str: ...  # noqa: E704
 
     def log_details(self):
         log.info(
@@ -182,30 +177,30 @@ class BaseSchedulerNode:
         )
 
     @abstractmethod
-    def update_mutated_names(self, renames: Dict[str, str]): ...
+    def update_mutated_names(self, renames: Dict[str, str]): ...  # noqa: E704
 
     @abstractmethod
-    def add_mutation_dep(self, dep): ...
+    def add_mutation_dep(self, dep): ...  # noqa: E704
 
     def add_fake_dep(self, dep):
         self.set_read_writes(self.read_writes.with_read(dep))
 
     @abstractmethod
-    def set_users(self, users: List["NodeUser"]): ...
+    def set_users(self, users: List["NodeUser"]): ...  # noqa: E704
 
     @abstractmethod
-    def set_last_usage(
+    def set_last_usage(  # noqa: E704
         self, future_used_buffers: Set[str], mutation_real_name: Dict[str, str]
     ): ...
 
     @abstractmethod
-    def get_aliases(self): ...
+    def get_aliases(self): ...  # noqa: E704
 
     @abstractmethod
-    def get_mutations(self): ...
+    def get_mutations(self): ...  # noqa: E704
 
     @abstractmethod
-    def has_aliasing_or_mutation(self): ...
+    def has_aliasing_or_mutation(self): ...  # noqa: E704
 
     def set_read_writes(self, rw: dependencies.ReadWrites):
         self.read_writes: dependencies.ReadWrites = rw
@@ -213,13 +208,13 @@ class BaseSchedulerNode:
         self.prune_deps()
 
     @abstractmethod
-    def op_counts(self): ...
+    def op_counts(self): ...  # noqa: E704
 
     @abstractmethod
-    def used_buffer_names(self) -> Set[str]: ...
+    def used_buffer_names(self) -> Set[str]: ...  # noqa: E704
 
     @abstractmethod
-    def used_or_aliased_buffer_names(self) -> Set[str]: ...
+    def used_or_aliased_buffer_names(self) -> Set[str]: ...  # noqa: E704
 
     def prune_deps(self):
         self.unmet_dependencies = {
@@ -237,46 +232,46 @@ class BaseSchedulerNode:
         self.set_read_writes(self.read_writes.remove_reads(to_remove))
 
     @abstractmethod
-    def prune_redundant_deps(self, name_to_fused_node): ...
+    def prune_redundant_deps(self, name_to_fused_node): ...  # noqa: E704
 
     @abstractmethod
-    def get_name(self) -> str: ...
+    def get_name(self) -> str: ...  # noqa: E704
 
     @abstractmethod
-    def get_first_name(self) -> str: ...
+    def get_first_name(self) -> str: ...  # noqa: E704
 
     @abstractmethod
-    def get_names(self) -> Set[str]: ...
+    def get_names(self) -> Set[str]: ...  # noqa: E704
 
     @abstractmethod
-    def get_nodes(self) -> Sequence["BaseSchedulerNode"]: ...
+    def get_nodes(self) -> Sequence["BaseSchedulerNode"]: ...  # noqa: E704
 
     @abstractmethod
-    def get_device(self): ...
+    def get_device(self): ...  # noqa: E704
 
-    @abstractmethod
-    def is_reduction(self): ...
+    def is_reduction(self):
+        return False
 
-    @abstractmethod
-    def is_split_scan(self): ...
+    def is_split_scan(self):
+        return False
 
-    @abstractmethod
-    def is_template(self): ...
+    def is_template(self):
+        return False
 
     def is_extern(self):
         return False
 
-    @abstractmethod
-    def is_foreach(self): ...
+    def is_foreach(self):
+        return False
 
-    @abstractmethod
-    def can_inplace(self, read_dep: dependencies.MemoryDep): ...
+    def can_inplace(self, read_dep: dependencies.MemoryDep):
+        return False
 
     def has_side_effects(self):
         return False
 
     @abstractmethod
-    def can_free(self): ...
+    def can_free(self): ...  # noqa: E704
 
     def get_read_write_buffers_sizes(self) -> int:
         """
@@ -450,6 +445,21 @@ class BaseSchedulerNode:
 
 
 class NodeSchedulerNode(BaseSchedulerNode):
+    def __init__(self, scheduler: "Scheduler", node: ir.Buffer):
+        self.scheduler: Scheduler = scheduler
+        self.node: ir.Buffer = node
+        self.users: List[NodeUser] = []
+        self.inverse_users: List[BaseSchedulerNode] = []
+        self.node_users: List[BaseSchedulerNode] = []
+        self.set_read_writes(node.get_read_writes())
+        self.ancestors: Set[str] = set()
+        self.min_order: int
+        self.max_order: int
+        self.last_usage: Set[str] = (
+            set()
+        )  # buffers that won't be used after this kernel
+        self.written = False
+
     def __repr__(self):
         return f"{type(self).__name__}(name={self.get_name()!r})"
 
@@ -550,21 +560,6 @@ class NodeSchedulerNode(BaseSchedulerNode):
     def get_device(self):
         return self.node.get_device()
 
-    def is_reduction(self):
-        return False
-
-    def is_split_scan(self):
-        return False
-
-    def is_template(self):
-        return False
-
-    def is_foreach(self):
-        return False
-
-    def can_inplace(self, read_dep: dependencies.MemoryDep):
-        return False
-
     def decide_inplace_update(self):
         """
         Decide if there should be inplace updates for the node
@@ -582,7 +577,7 @@ class NodeSchedulerNode(BaseSchedulerNode):
             isinstance(self, (SchedulerNode,))
             and config.inplace_buffers
             and (
-                not isinstance(V.kernel, torch._inductor.codegen.triton.TritonKernel)
+                not isinstance(V.kernel, torch._inductor.codegen.simd.SIMDKernel)
                 or getattr(V.kernel, "mutations", None) is not None
             )
         ):
@@ -636,7 +631,7 @@ class NodeSchedulerNode(BaseSchedulerNode):
                             )
                             # mutations not tracked in cpp kernels
                             if isinstance(
-                                V.kernel, torch._inductor.codegen.triton.TritonKernel
+                                V.kernel, torch._inductor.codegen.simd.SIMDKernel
                             ):
                                 V.kernel.mutations.add(input_node.get_name())
                                 V.kernel.mutations.add(self.get_name())
@@ -722,6 +717,7 @@ class NodeSchedulerNode(BaseSchedulerNode):
         # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
         buffer.writelines(out_lines)
         self.written = True
+
 
 class ExternKernelSchedulerNode(NodeSchedulerNode):
     def debug_str_extra(self) -> str:
