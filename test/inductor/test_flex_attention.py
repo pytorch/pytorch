@@ -13,6 +13,7 @@ import torch
 
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
 from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
+from torch._inductor import metrics
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn.attention._flex_attention import (
@@ -645,6 +646,43 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out = f(query, *keys, *values)
         out2 = torch.compile(f)(query, *keys, *values)
         self.assertTrue((out - out2).abs().mean() < 1e-2)
+
+    @supported_platform
+    def test_inputs_are_realized(self):
+        def f(q, k, v):
+            x = torch.randn(1024, device="cuda")
+            x = x * 2
+
+            def func(qk, b, h, q, kv):
+                return qk + x[q]
+
+            return _flex_attention(q.sin(), k, v, score_mod=func).cos()
+
+        q, k, v = (
+            torch.randn(1, 8, 1024, 64, device="cuda", requires_grad=True)
+            for _ in range(3)
+        )
+        ref = f(q, k, v)
+        out = torch.compile(f)(q, k, v)
+        self.assertTrue((ref - out).abs().mean() < 1e-2)
+        gradOut = torch.randn_like(q)
+
+        ref_grads = torch.autograd.grad(ref, (q, k, v), gradOut)
+        out_grads = torch.autograd.grad(out, (q, k, v), gradOut)
+        for ref, out in zip(ref_grads, out_grads):
+            self.assertTrue((ref - out).abs().mean() < 1e-2)
+
+    @supported_platform
+    def test_epilogue_fused(self):
+        @torch.compile
+        def f(q, k, v):
+            return _flex_attention(q, k, v).cos()
+
+        q, k, v = (torch.randn(1, 8, 1024, 64, device="cuda") for _ in range(3))
+        metrics.reset()
+        f(q, k, v)
+        accessed_bytes_when_fused = 1 * 8 * 1024 * 64 * torch.float32.itemsize * 4
+        self.assertEqual(metrics.num_bytes_accessed, accessed_bytes_when_fused)
 
     @supported_platform
     @skip("Triton bug ")  # https://github.com/pytorch/pytorch/issues/124571
