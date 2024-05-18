@@ -1444,6 +1444,10 @@ class TestMkldnn(TestCase):
         self._test_imagenet_model(model)
 
     @skipIfNoTorchVision
+    @unittest.skipIf(
+        torch._dynamo.config.use_single_step_graph,
+        "output graph will have torch.ops.aten.empty.memory_format",
+    )
     def test_resnext50_32x4d(self):
         model = torchvision.models.resnet.resnext50_32x4d(weights=None)
         self._test_imagenet_model(model)

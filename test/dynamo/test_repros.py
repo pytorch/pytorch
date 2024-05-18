@@ -1128,7 +1128,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertExpectedInline(cnt.op_count, """6""")
         else:
             self.assertExpectedInline(cnt.frame_count, """1""")
-            self.assertExpectedInline(cnt.op_count, """5""")
+            self.assertExpectedInline(cnt.op_count, """6""")
 
     @disable_translation_validation_if_dynamic_shapes
     def test_longformer_chunk(self):

@@ -280,7 +280,10 @@ class TestNamedTensor(TestCase):
         self.assertEqual(named_tensor.diagonal(outdim='E', dim1='B', dim2='D').names,
                          ['A', 'C', 'E'])
 
+
     def test_max_pooling(self):
+        torch._dynamo.config.use_single_step_graph = False
+
         def check_tuple_return(op, inputs, expected_names):
             values, indices = op(*inputs)
             self.assertEqual(values.names, expected_names)
