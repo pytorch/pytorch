@@ -22,6 +22,9 @@ from .cpp_utils import cexpr, CppPrinter, DEVICE_TO_ATEN, DTYPE_TO_ATEN, DTYPE_T
 from .wrapper import EnterSubgraphLine, ExitSubgraphLine, WrapperCodeGen
 
 
+import logging
+torch_log = logging.getLogger("torch")
+
 class CppWrapperCpu(WrapperCodeGen):
     """
     Generates cpp wrapper for running on CPU and calls cpp kernels
@@ -1432,18 +1435,16 @@ class CppWrapperCpu(WrapperCodeGen):
             )
         ):
             return ""
-        elif (
-            isinstance(buffer, ir.ExternKernel)
-            and isinstance(buffer.op_overload, torch._ops.OpOverload)
-            and isinstance(buffer.op_overload._schema.returns[0].type, torch.ListType)
-            and isinstance(
-                buffer.op_overload._schema.returns[0].type.getElementType(),
-                torch.TensorType,
-            )
-        ):
-            return f"for (auto& t : {buffer.get_name()}) {{t.reset();}};"
-        else:
-            return f"{buffer.get_name()}.reset();"
+        elif isinstance(buffer, ir.ExternKernel) and isinstance(buffer.op_overload, torch._ops.OpOverload):
+            if len(buffer.op_overload._schema.returns) == 1:
+                if isinstance(buffer.op_overload._schema.returns[0].type, torch.TensorType):
+                    return f"{buffer.get_name()}.reset();"
+                elif (
+                    isinstance(buffer.op_overload._schema.returns[0].type, torch.ListType)
+                    and isinstance(buffer.op_overload._schema.returns[0].type.getElementType(), torch.TensorType)
+                ):
+                    return f"for (auto& t : {buffer.get_name()}) {{t.reset();}};"
+        return f"{buffer.get_name()}.reset();"
 
     def make_free_by_names(self, names_to_del: List[str]):
         return " ".join(f"{name}.reset();" for name in names_to_del)
