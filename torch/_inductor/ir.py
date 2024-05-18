@@ -7992,23 +7992,23 @@ class _CollectiveKernel(FallbackKernel):
         cpp_kernel_name = kernel._name
         python_kernel_name = cpp_kernel_name.replace("::", ".")
         with V.graph.fake_mode:
-            if kernel is torch.ops._c10d_functional.all_gather_into_tensor_out.default:
-                (
-                    example_output,
-                    tensor_args,
-                    non_tensor_args,
-                    unflatten_args,
-                    unbacked_bindings,
-                ) = cls.process_kernel(kernel, *mutated_inputs, *args, **kwargs)
-            else:
-                (
-                    example_output,
-                    tensor_args,
-                    non_tensor_args,
-                    unflatten_args,
-                    unbacked_bindings,
-                ) = cls.process_kernel(kernel, mutated_inputs, *args, **kwargs)
-                assert not unbacked_bindings, f"{kernel} {unbacked_bindings}"
+            # if kernel is torch.ops._c10d_functional.all_gather_into_tensor_out.default:
+            #     (
+            #         example_output,
+            #         tensor_args,
+            #         non_tensor_args,
+            #         unflatten_args,
+            #         unbacked_bindings,
+            #     ) = cls.process_kernel(kernel, *mutated_inputs, *args, **kwargs)
+            # else:
+            (
+                example_output,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+                unbacked_bindings,
+            ) = cls.process_kernel(kernel, mutated_inputs, *args, **kwargs)
+            assert not unbacked_bindings, f"{kernel} {unbacked_bindings}"
         for tensor_arg in tensor_args:
             tensor_arg.realize()
 

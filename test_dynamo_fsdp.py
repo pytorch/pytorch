@@ -603,7 +603,7 @@ if __name__ == "__main__":
     if dist.get_rank() == 0:
         start_record_memory_history()
     ac_test_order = [False]
-    backends = ["aot_eager"]
+    backends = ["inductor"]
 
     def test_eager(activation_checkpoint):
         losses_eager = execute_and_profile(
