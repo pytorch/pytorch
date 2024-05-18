@@ -1449,7 +1449,8 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
           "Process group watchdog thread terminated with exception: ",
           e.what());
       LOG(ERROR) << exitMsg;
-      if (C10_LIKELY(rethrowCUDAErrors_) || !(std::string(e.what()).find("CUDA Error"))) {
+      if (C10_LIKELY(rethrowCUDAErrors_) ||
+          !(std::string(e.what()).find("CUDA Error"))) {
         // TODO(whc) clean up the rethrow - why is it stored in a class var and
         // rethrown?
         watchDogException_ =
