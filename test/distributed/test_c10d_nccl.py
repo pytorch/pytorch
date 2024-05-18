@@ -3539,9 +3539,11 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertEqual(last["state"], "completed")
         self.assertIn("test_c10d_nccl.py", str(last["frames"]))
         self.assertEqual(last["input_sizes"], ((3, 4),))
-        self.assertEqual(last["input_dtypes"], ['float'])
+        # 6 corresponds to torch.float32 below
+        self.assertEqual(last["input_dtypes"], [6])
         self.assertEqual(last["output_sizes"], ((3, 4),))
-        self.assertEqual(last["output_dtypes"], ['float'])
+        # 6 corresponds to torch.float32 below
+        self.assertEqual(last["output_dtypes"], [6])
         self.assertEqual(last["collective_seq_id"] - first["collective_seq_id"], 9)
 
     @requires_nccl()
