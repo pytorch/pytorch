@@ -540,7 +540,7 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
             depths[node] = 0
         else:
             depths[node] = (
-                max([depths[arg] for arg in node.all_input_nodes], default=0) + 1
+                max((depths[arg] for arg in node.all_input_nodes), default=0) + 1
             )
 
     def insert_node_in_graph(node):
