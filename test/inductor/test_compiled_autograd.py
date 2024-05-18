@@ -1565,13 +1565,14 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
 
         # recompile
         patterns2 = [
-            r".*Cache miss due to dynamic shapes: collected size idx (\d+) of torch::autograd::GraphRoot \(NodeCall 0\)\n",
-            r".*Cache miss due to dynamic shapes: collected size idx (\d+) of SumBackward0 \(NodeCall 1\)\n",
-            r".*Cache miss due to dynamic shapes: collected size idx (\d+) of SumBackward0 \(NodeCall 1\)\n",
-            r".*Cache miss due to dynamic shapes: collected size idx (\d+) of ReluBackward0 \(NodeCall 2\)\n",
-            r".*Cache miss due to dynamic shapes: collected size idx (\d+) of AddmmBackward0 \(NodeCall 3\)\n",
-            r".*Cache miss due to dynamic shapes: collected size idx (\d+) of torch::autograd::AccumulateGrad \(NodeCall 5\)\n",
-            r".*Cache miss due to dynamic shapes: collected size idx (\d+) of ReluBackward0 \(NodeCall 6\)\n",
+            r".*Cache miss due to changed shapes: marking size idx (\d+) of torch::autograd::GraphRoot \(NodeCall 0\) as dynamic\n",
+            r".*Cache miss due to changed shapes: marking size idx (\d+) of SumBackward0 \(NodeCall 1\) as dynamic\n",
+            r".*Cache miss due to changed shapes: marking size idx (\d+) of SumBackward0 \(NodeCall 1\) as dynamic\n",
+            r".*Cache miss due to changed shapes: marking size idx (\d+) of ReluBackward0 \(NodeCall 2\) as dynamic\n",
+            r".*Cache miss due to changed shapes: marking size idx (\d+) of AddmmBackward0 \(NodeCall 3\) as dynamic\n",
+            r".*Cache miss due to changed shapes: marking size idx (\d+) of torch::autograd::AccumulateGrad "
+            r"\(NodeCall 5\) as dynamic\n",
+            r".*Cache miss due to changed shapes: marking size idx (\d+) of ReluBackward0 \(NodeCall 6\) as dynamic\n",
         ]
 
         all_logs = logs.getvalue()

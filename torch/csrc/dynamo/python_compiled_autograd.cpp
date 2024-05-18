@@ -149,8 +149,9 @@ struct VerboseLogger {
     size_t start_idx =
         it == cumulative_sizes_per_node.begin() ? 0 : std::prev(it)->first;
     verbose_log_fn(
-        "Cache miss due to dynamic shapes: collected size idx " +
-        std::to_string(size_idx - start_idx) + " of " + it->second);
+        "Cache miss due to changed shapes: marking size idx " +
+        std::to_string(size_idx - start_idx) + " of " + it->second +
+        " as dynamic");
   }
 
   // track which size index belongs to which node
