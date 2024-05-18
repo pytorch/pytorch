@@ -9,7 +9,6 @@ import os
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from typing import Callable, Dict, List, Optional, Set, Tuple, Union
-import functools
 
 import sympy
 
