@@ -3070,6 +3070,7 @@ class TestNestedTensorSubclass(TestCase):
             torch.ops.aten.is_non_overlapping_and_dense.default,
             torch.ops.aten.sym_size.default,
             torch.ops.aten.dim.default,
+            torch.ops.aten.numel.default,
             torch.ops.aten.sym_numel.default,
             torch.ops.aten.sym_stride.default,
             torch.ops.aten.sym_storage_offset.default,
@@ -3877,6 +3878,14 @@ class TestNestedTensorSubclass(TestCase):
         self.assertTrue(nt_contiguous.is_contiguous(memory_format=torch.contiguous_format))
         self.assertTrue(not nt_noncontiguous.is_contiguous(memory_format=torch.contiguous_format))
         self.assertTrue(nt_contiguous_narrow.is_contiguous(memory_format=torch.contiguous_format))
+
+    def test_layout_under_torch_dispatch_mode(self):
+        from torch.testing._internal.logging_tensor import capture_logs_with_logging_tensor_mode
+
+        nt = random_nt_from_dims([2, None, 3], torch.device('cpu'), torch.float32, layout=torch.jagged)
+
+        with capture_logs_with_logging_tensor_mode():
+            self.assertEqual(nt.layout, torch.jagged)
 
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     @parametrize("func", [torch.empty_like, torch.randn_like],

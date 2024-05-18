@@ -33,7 +33,7 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
       c10::intrusive_ptr<c10d::Store> store,
       size_t rank,
       size_t worldSize,
-      c10::optional<size_t> bufferSize = c10::nullopt);
+      std::optional<size_t> bufferSize = c10::nullopt);
 
   ~IntraNodeComm() override;
 
@@ -45,6 +45,10 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
    * state and it is the caller's responsibility to dispose it.
    */
   bool rendezvous();
+
+  Topology getTopology() {
+    return topology_;
+  }
 
   size_t getBufferSize() {
     return bufferSize_;
@@ -61,13 +65,13 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
   /**
    * Perform a barrier among the specified ranks.
    */
-  void barrier(c10::optional<std::vector<int64_t>> ranks = c10::nullopt);
+  void barrier(std::optional<std::vector<int64_t>> ranks = c10::nullopt);
 
-  at::Tensor get_buffer(
+  at::Tensor getBuffer(
       size_t rank,
       const std::vector<int64_t>& sizes,
       c10::ScalarType dtype,
-      int64_t storage_offset);
+      int64_t storageOffset);
 
  private:
   at::Tensor oneShotAllReduce(

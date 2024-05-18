@@ -31,6 +31,7 @@ register_log(
 register_log(
     "dist_ddp", ["torch.nn.parallel.distributed", "torch._dynamo.backends.distributed"]
 )
+register_log("dist_pp", ["torch.distributed.pipelining"])
 register_log("dist_fsdp", ["torch.distributed.fsdp"])
 register_log("onnx", "torch.onnx")
 register_log("export", ["torch._dynamo", "torch.export", *DYNAMIC])
@@ -61,6 +62,10 @@ register_artifact(
 register_artifact(
     "trace_call",
     "Like trace_source, but it will give you the per-expression blow-by-blow if your Python is recent enough.",
+)
+register_artifact(
+    "trace_bytecode",
+    "As we trace bytecode, prints the instruction and the current stack.",
 )
 register_artifact(
     "aot_graphs",

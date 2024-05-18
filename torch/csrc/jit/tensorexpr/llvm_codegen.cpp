@@ -84,16 +84,16 @@ C10_DEFINE_bool(
 
 namespace torch::jit::tensorexpr {
 
-c10::optional<std::string>& LLVMTargetTriple() {
-  static c10::optional<std::string> triple = c10::nullopt;
+std::optional<std::string>& LLVMTargetTriple() {
+  static std::optional<std::string> triple = c10::nullopt;
   return triple;
 }
-c10::optional<std::string>& LLVMTargetCPU() {
-  static c10::optional<std::string> cpu = c10::nullopt;
+std::optional<std::string>& LLVMTargetCPU() {
+  static std::optional<std::string> cpu = c10::nullopt;
   return cpu;
 }
-c10::optional<std::string>& LLVMTargetAttrs() {
-  static c10::optional<std::string> attrs = c10::nullopt;
+std::optional<std::string>& LLVMTargetAttrs() {
+  static std::optional<std::string> attrs = c10::nullopt;
   return attrs;
 }
 bool& LLVMAOTWorkflow() {
@@ -306,9 +306,9 @@ class LLVMCodeGenImpl : public IRVisitor {
       at::Device device,
       Dtype dtype,
       std::string kernel_func_name,
-      c10::optional<std::string> triple,
-      c10::optional<std::string> cpu,
-      c10::optional<std::string> attrs);
+      std::optional<std::string> triple,
+      std::optional<std::string> cpu,
+      std::optional<std::string> attrs);
   ~LLVMCodeGenImpl() = default;
 
   llvm::JITTargetAddress getKernelAddress() const;
@@ -397,9 +397,9 @@ LLVMCodeGen::LLVMCodeGen(
     at::Device device,
     const std::string& kernel_func_name,
     Dtype dtype,
-    c10::optional<std::string> triple,
-    c10::optional<std::string> cpu,
-    c10::optional<std::string> attrs)
+    std::optional<std::string> triple,
+    std::optional<std::string> cpu,
+    std::optional<std::string> attrs)
     : CodeGen(stmt, args, device, kernel_func_name) {
   impl_ = std::make_unique<LLVMCodeGenImpl>(
       this->stmt(),
@@ -446,10 +446,10 @@ void LLVMCodeGen::call(const std::vector<CallArg>& args) {
 at::Tensor LLVMCodeGen::empty_strided(
     c10::IntArrayRef size,
     c10::IntArrayRef stride,
-    c10::optional<c10::ScalarType> dtype_opt,
-    c10::optional<c10::Layout> layout_opt,
-    c10::optional<c10::Device> device_opt,
-    c10::optional<bool> pin_memory_opt) {
+    std::optional<c10::ScalarType> dtype_opt,
+    std::optional<c10::Layout> layout_opt,
+    std::optional<c10::Device> device_opt,
+    std::optional<bool> pin_memory_opt) {
   return at::native::empty_strided_cpu(
       size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 }
@@ -489,9 +489,9 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
     at::Device device,
     Dtype dtype,
     std::string kernel_func_name,
-    c10::optional<std::string> triple,
-    c10::optional<std::string> cpu,
-    c10::optional<std::string> attrs)
+    std::optional<std::string> triple,
+    std::optional<std::string> cpu,
+    std::optional<std::string> attrs)
     : context_(std::make_unique<llvm::LLVMContext>()),
       irb_(getContext()),
       kernel_func_name_(std::move(kernel_func_name)),

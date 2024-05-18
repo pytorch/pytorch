@@ -1,15 +1,18 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import copy
+from typing import TYPE_CHECKING
 
 import torch.distributed as dist
 from torch.distributed._shard.sharded_tensor import Shard, ShardedTensor, ShardMetadata
-from torch.distributed._shard.sharded_tensor.metadata import ShardedTensorMetadata
 from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 from torch.distributed.remote_device import _remote_device
 
 from ._traverse import OBJ_PATH, set_element, STATE_DICT_ITEM, traverse_state_dict
 from .utils import _element_wise_add, _normalize_device_info
+
+if TYPE_CHECKING:
+    from torch.distributed._shard.sharded_tensor.metadata import ShardedTensorMetadata
 
 
 # TODO: We need to refactor this code.

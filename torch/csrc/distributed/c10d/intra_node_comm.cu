@@ -733,7 +733,7 @@ static __global__ void barrierKernel(
   }
 }
 
-void IntraNodeComm::barrier(c10::optional<std::vector<int64_t>> ranks) {
+void IntraNodeComm::barrier(std::optional<std::vector<int64_t>> ranks) {
   barrierReady_.block(at::cuda::getCurrentCUDAStream());
   if (!ranks.has_value()) {
     ranks = std::vector<int64_t>(worldSize_);
@@ -750,15 +750,18 @@ void IntraNodeComm::barrier(c10::optional<std::vector<int64_t>> ranks) {
   barrierReady_.record();
 }
 
-at::Tensor IntraNodeComm::get_buffer(
+at::Tensor IntraNodeComm::getBuffer(
     size_t rank,
     const std::vector<int64_t>& sizes,
     c10::ScalarType dtype,
-    int64_t storage_offset) {
+    int64_t storageOffset) {
+  const auto numel = std::accumulate(sizes.begin(), sizes.end(), 0);
+  const auto elementSize = c10::elementSize(dtype);
+  TORCH_CHECK((numel + storageOffset) * elementSize <= bufferSize_);
   auto options = at::TensorOptions().dtype(dtype).device(
       at::kCUDA, at::cuda::current_device());
   return at::for_blob(buffers_[rank], sizes)
-      .storage_offset(storage_offset)
+      .storage_offset(storageOffset)
       .options(options)
       .make_tensor();
 }

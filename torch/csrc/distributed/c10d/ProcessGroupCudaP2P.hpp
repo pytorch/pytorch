@@ -12,15 +12,15 @@ namespace c10d {
 class TORCH_API ProcessGroupCudaP2P : public Backend {
  public:
   struct Options : Backend::Options {
-    c10::intrusive_ptr<ProcessGroupNCCL::Options> ncclOptions;
-    c10::optional<size_t> bufferSize;
+    c10::intrusive_ptr<ProcessGroupNCCL::Options> nccl_options;
+    c10::optional<size_t> buffer_size;
 
     explicit Options()
         : Backend::Options("cuda_p2p", kProcessGroupCudaP2PDefaultTimeout) {}
   };
 
-  // TODO: lower case
-  bool isP2PAvailable();
+  bool is_p2p_available();
+  size_t get_buffer_size();
 
   c10::Stream stream();
 
@@ -138,8 +138,8 @@ class TORCH_API ProcessGroupCudaP2P : public Backend {
   void shutdown(c10::optional<std::string> reason = c10::nullopt);
 
  private:
-  c10::intrusive_ptr<ProcessGroupNCCL> ncclBackend_;
-  c10::intrusive_ptr<c10d::intra_node_comm::IntraNodeComm> p2pBackend_;
+  c10::intrusive_ptr<ProcessGroupNCCL> nccl_backend_;
+  c10::intrusive_ptr<c10d::intra_node_comm::IntraNodeComm> p2p_backend_;
   c10::Stream stream_;
 };
 

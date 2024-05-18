@@ -1,6 +1,5 @@
 import sys
 import warnings
-from dataclasses import dataclass
 from typing import cast, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
@@ -556,95 +555,6 @@ def permute_tensor(
     return all_to_all_single(self, output_split_sizes, input_split_sizes, group, tag)
 
 
-@dataclass
-class _CollectivePermuteSchedule:
-    dst_ranks: List[int]
-    src_ranks: List[int]
-    tensor_ranks: List[int]
-
-
-def _make_ring_sched(group_size) -> List[_CollectivePermuteSchedule]:
-    sched = []
-    for step in range(group_size - 1):
-        dst_ranks = [(r + 1) % group_size for r in range(group_size)]
-        src_ranks = [(r - 1) % group_size for r in range(group_size)]
-        tensor_ranks = [(r - 1 - step) % group_size for r in range(group_size)]
-        sched.append(
-            _CollectivePermuteSchedule(
-                dst_ranks=dst_ranks,
-                src_ranks=src_ranks,
-                tensor_ranks=tensor_ranks,
-            )
-        )
-    return sched
-
-
-def _collective_permute_eager(
-    input: torch.Tensor,
-    group: RANK_TYPES,
-):
-    group_name = _resolve_group_name(group, "")
-    group_size = c10d._get_group_size_by_name(group_name)
-    group_rank = c10d._get_group_rank_by_name(group_name)
-
-    # TODO: toplogy aware scheduling
-    sched = _make_ring_sched(group_size)
-    last_received = input.contiguous()
-    last_received_rank = group_rank
-    for step_sched in sched:
-        received = torch.ops._c10d_functional.ppermute(
-            last_received,
-            step_sched.dst_ranks,
-            step_sched.src_ranks,
-            group_name,
-        )
-        yield (last_received_rank, last_received)
-        last_received = torch.ops._c10d_functional.wait_tensor(received)
-        last_received_rank = step_sched.tensor_ranks[group_rank]
-    yield (last_received_rank, last_received)
-
-
-def _collective_permute_compiled(
-    input: torch.Tensor,
-    group: RANK_TYPES,
-):
-    group_name = _resolve_group_name(group, "")
-    group_size = c10d._get_group_size_by_name(group_name)
-    group_rank = c10d._get_group_rank_by_name(group_name)
-
-    # TODO: toplogy aware scheduling
-    sched = _make_ring_sched(group_size)
-    last_received = input.contiguous()
-    last_received_rank = group_rank
-    ret = []
-    for step_sched in sched:
-        received = torch.ops._c10d_functional.ppermute(
-            last_received,
-            step_sched.dst_ranks,
-            step_sched.src_ranks,
-            group_name,
-        )
-        ret.append((last_received_rank, last_received))
-        last_received = torch.ops._c10d_functional.wait_tensor(received)
-        last_received_rank = step_sched.tensor_ranks[group_rank]
-    ret.append((last_received_rank, last_received))
-    return ret
-
-
-def collective_permute(
-    input: torch.Tensor,
-    group: RANK_TYPES,
-):
-    group_name = _resolve_group_name(group, "")
-    group_size = c10d._get_group_size_by_name(group_name)
-    group_rank = c10d._get_group_rank_by_name(group_name)
-
-    if _are_we_tracing():
-        return _collective_permute_compiled(input, group)
-    else:
-        return _collective_permute_eager(input, group)
-
-
 class AsyncCollectiveTensor(torch.Tensor):
     r"""
     A Tensor wrapper subclass that is used to trigger a call to wait
@@ -680,8 +590,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         return ["elem"], None
 
     def tolist(self):
-        self.trigger_wait()
-        return self.elem.tolist()
+        return self.trigger_wait().tolist()
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
@@ -690,18 +599,18 @@ class AsyncCollectiveTensor(torch.Tensor):
         return AsyncCollectiveTensor(elem)
 
     def __repr__(self):
-        self.trigger_wait()
-        return f"AsyncCollectiveTensor({self.elem})"
+        return f"AsyncCollectiveTensor({self.trigger_wait()})"
 
     def trigger_wait(self):
         if not self.completed:
-            wait_tensor(self.elem)
+            out = wait_tensor(self.elem)
             self.completed = True
-        return self.elem
+            return out
+        else:
+            return self.elem
 
     def wait(self) -> torch.Tensor:
-        wait_tensor(self.elem)
-        return self.elem
+        return wait_tensor(self.elem)
 
     def _get_acs_underlying_tensor(self):
         """This method enables  _functional_collectives_impl to test if a tensor is an ACS"""
@@ -721,7 +630,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         def unwrap(e: AsyncCollectiveTensor):
             # wait_tensor is idepotent and will do stream sync only once
             if not is_view_op:
-                e.trigger_wait()
+                return e.trigger_wait()
             return e.elem
 
         def wrap(e: torch.Tensor):
@@ -985,6 +894,12 @@ def _all_to_all_single_meta(
         return input.new_empty(out_size)
 
 
+def _all_gather_into_tensor_out_native_meta(input, group_size, group_name, *, out):
+    shape = list(input.size())
+    shape[0] *= group_size
+    return input.new_empty(shape)
+
+
 def _all_gather_into_tensor_native_meta(input, group_size, group_name):
     shape = list(input.size())
     shape[0] *= group_size
@@ -1013,15 +928,6 @@ def _reduce_scatter_tensor_coalesced_native_meta(
     ]
 
 
-def ppermute_meta(
-    input: torch.Tensor,
-    dst_ranks: List[int],
-    src_ranks: List[int],
-    group_name: str,
-) -> torch.Tensor:
-    return torch.empty_like(input)
-
-
 if not torch._running_with_deploy():
     # Library MUST be defined at module scope or it doesn't work
     # Creating a "DEF" Library always crashes torch::deploy so we create our
@@ -1032,6 +938,9 @@ if not torch._running_with_deploy():
     lib_impl.impl("all_reduce_coalesced", _all_reduce_coalesced_meta, "Meta")
     lib_impl.impl("all_reduce_coalesced_", _all_reduce_coalesced__meta, "Meta")
     lib_impl.impl("wait_tensor", _wait_tensor_meta, "Meta")
+    lib_impl.impl(
+        "all_gather_into_tensor_out", _all_gather_into_tensor_out_native_meta, "Meta"
+    )
     lib_impl.impl("all_gather_into_tensor", _all_gather_into_tensor_native_meta, "Meta")
     lib_impl.impl(
         "all_gather_into_tensor_coalesced",

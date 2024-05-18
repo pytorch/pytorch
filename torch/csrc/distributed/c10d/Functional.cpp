@@ -196,6 +196,19 @@ at::Tensor all_gather_into_tensor(
       inputs, group_size, std::move(group_name))[0];
 }
 
+at::Tensor& all_gather_into_tensor_out(
+    at::Tensor& input,
+    int64_t group_size,
+    std::string group_name,
+    at::Tensor& output) {
+  c10d::AllgatherOptions opts;
+
+  auto group = c10d::resolve_process_group(group_name);
+  auto work = group->_allgather_base(output, input, opts);
+  c10d::RankLocal<WorkRegistry>::get().register_work(output, work);
+  return output;
+}
+
 at::Tensor allocate_reduce_scatter_output(
     const at::Tensor& input,
     const int64_t group_size) {
@@ -286,45 +299,6 @@ at::Tensor broadcast(
   return broadcast_(output, src, std::move(group_name));
 }
 
-at::Tensor ppermute(
-    const at::Tensor& input,
-    std::vector<int64_t> dst_ranks,
-    std::vector<int64_t> src_ranks,
-    std::string group_name) {
-  auto group = c10d::resolve_process_group(group_name);
-  auto rank = group->getRank();
-  auto group_size = group->getSize();
-
-  TORCH_CHECK(input.is_contiguous());
-  TORCH_CHECK(dst_ranks.size() == static_cast<size_t>(group_size));
-  TORCH_CHECK(src_ranks.size() == static_cast<size_t>(group_size));
-  for (auto i : c10::irange(group_size)) {
-    TORCH_CHECK(
-        dst_ranks[i] >= 0 && dst_ranks[i] < static_cast<int64_t>(group_size));
-    TORCH_CHECK(
-        src_ranks[i] >= 0 && src_ranks[i] < static_cast<int64_t>(group_size));
-  }
-  TORCH_CHECK(
-      std::unique(dst_ranks.begin(), dst_ranks.end()) == dst_ranks.end());
-  TORCH_CHECK(
-      std::unique(src_ranks.begin(), src_ranks.end()) == src_ranks.end());
-
-  std::vector<int64_t> output_split_sizes(group_size, 0);
-  std::vector<int64_t> input_split_sizes(group_size, 0);
-  output_split_sizes[src_ranks[rank]] = input.sizes()[0];
-  input_split_sizes[dst_ranks[rank]] = input.sizes()[0];
-
-  auto output = at::empty_like(input);
-  auto work = group->alltoall_base(
-      output,
-      const_cast<at::Tensor&>(input),
-      output_split_sizes,
-      input_split_sizes);
-
-  c10d::RankLocal<WorkRegistry>::get().register_work(output, work);
-  return output;
-}
-
 at::Tensor wait_tensor(const at::Tensor& tensor) {
   auto work = c10d::RankLocal<WorkRegistry>::get().pop_work(tensor);
   if (work != nullptr) {
@@ -358,6 +332,13 @@ TORCH_LIBRARY(_c10d_functional, m) {
       "all_reduce_coalesced_(Tensor[](a!) inputs, str reduce_op, str group_name) -> Tensor[](a!)",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd, ::all_reduce_coalesced_),
+      {at::Tag::pt2_compliant_tag});
+
+  m.def(
+      "all_gather_into_tensor_out(Tensor input, int group_size, str group_name, *, Tensor(a!) out) -> Tensor(a!)",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd,
+          ::all_gather_into_tensor_out),
       {at::Tag::pt2_compliant_tag});
 
   m.def(
@@ -406,11 +387,6 @@ TORCH_LIBRARY(_c10d_functional, m) {
       "broadcast_(Tensor(a!) input, int src, str group_name) -> Tensor(a!)",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd, ::broadcast_),
-      {at::Tag::pt2_compliant_tag});
-
-  m.def(
-      "ppermute(Tensor input, int[] dst_ranks, int[] src_ranks, str group_name) -> Tensor",
-      torch::dispatch(c10::DispatchKey::CompositeExplicitAutograd, ::ppermute),
       {at::Tag::pt2_compliant_tag});
 
   m.def(

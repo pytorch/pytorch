@@ -207,7 +207,7 @@ IntraNodeComm::IntraNodeComm(
     c10::intrusive_ptr<c10d::Store> store,
     size_t rank,
     size_t worldSize,
-    c10::optional<size_t> bufferSize)
+    std::optional<size_t> bufferSize)
     : store_(std::move(store)),
       rank_(rank),
       worldSize_(worldSize),

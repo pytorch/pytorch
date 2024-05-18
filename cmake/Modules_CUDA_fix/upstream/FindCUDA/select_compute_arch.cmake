@@ -242,8 +242,8 @@ function(CUDA_SELECT_NVCC_ARCH_FLAGS out_variable)
   # remove dots and convert to lists
   string(REGEX REPLACE "\\." "" cuda_arch_bin "${cuda_arch_bin}")
   string(REGEX REPLACE "\\." "" cuda_arch_ptx "${cuda_arch_ptx}")
-  string(REGEX MATCHALL "[0-9()]+" cuda_arch_bin "${cuda_arch_bin}")
-  string(REGEX MATCHALL "[0-9]+"   cuda_arch_ptx "${cuda_arch_ptx}")
+  string(REGEX MATCHALL "[0-9()]+a?" cuda_arch_bin "${cuda_arch_bin}")
+  string(REGEX MATCHALL "[0-9]+a?"   cuda_arch_ptx "${cuda_arch_ptx}")
 
   if(cuda_arch_bin)
     list(REMOVE_DUPLICATES cuda_arch_bin)

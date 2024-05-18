@@ -5,9 +5,9 @@ from typing import Any, cast, List, NamedTuple, Optional, Tuple
 
 import torch
 import torch.distributed._functional_collectives as funcol
-import torch.distributed.distributed_c10d as c10d
 
 from torch.distributed._tensor._collective_utils import (
+    fill_empty_tensor_to_shards,
     mesh_broadcast,
     mesh_scatter,
     pad_tensor,
@@ -61,9 +61,21 @@ class Shard(Placement):
             self.dim <= tensor.ndim
         ), f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
 
-        # chunk tensor over dimension `dim` into n slices with padding if necessary
+        # chunk tensor over dimension `dim` into n slices
         tensor_list = list(torch.chunk(tensor, num_chunks, dim=self.dim))
-        # compute the chunk size inline with ``torch.chunk``
+        num_empty_tensors = num_chunks - len(tensor_list)
+
+        # if no need to have padding or tensor dim size is evenly sharded already
+        # we can return early.
+        if not with_padding or tensor.size(self.dim) % num_chunks == 0:
+            if contiguous:
+                tensor_list = [t.contiguous() for t in tensor_list]
+            return (
+                fill_empty_tensor_to_shards(tensor_list, self.dim, num_empty_tensors),
+                [],
+            )
+
+        # compute the chunk size inline with ``torch.chunk`` to calculate padding
         full_chunk_size = (tensor.size(self.dim) + num_chunks - 1) // num_chunks
 
         # Compute chunk size for each chunk for ``self.dim``
@@ -75,26 +87,17 @@ class Shard(Placement):
         pad_sizes = [full_chunk_size - chunk_size for chunk_size in chunk_sizes]
 
         # Reuse tensor to fill empty chunk with empty tensor
-        num_empty_tensors = num_chunks - len(tensor_list)
-        tensor_size = list(tensor_list[0].size())
-        tensor_size = [
-            size if idx != self.dim else 0 for idx, size in enumerate(tensor_size)
-        ]
-        tensor = tensor.new_zeros(tensor_size)
-        for _ in range(num_empty_tensors):
-            tensor_list.append(tensor)
-
-        if with_padding or contiguous:
-            shard_list = []
-            for shard, pad_size in zip(tensor_list, pad_sizes):
-                # Fill the empty tensor with zeroes with padding.
-                if with_padding and pad_size > 0:
-                    shard = pad_tensor(shard, self.dim, pad_size)
-                shard = shard.contiguous() if contiguous else shard
-                shard_list.append(shard)
-            return shard_list, pad_sizes
-        else:
-            return tensor_list, pad_sizes
+        tensor_list = fill_empty_tensor_to_shards(
+            tensor_list, self.dim, num_empty_tensors
+        )
+        shard_list = []
+        for shard, pad_size in zip(tensor_list, pad_sizes):
+            # Fill the empty tensor with zeroes with padding.
+            if with_padding and pad_size > 0:
+                shard = pad_tensor(shard, self.dim, pad_size)
+            shard = shard.contiguous() if contiguous else shard
+            shard_list.append(shard)
+        return shard_list, pad_sizes
 
     @staticmethod
     def _local_shard_size_on_dim(
@@ -142,20 +145,20 @@ class Shard(Placement):
             tensor, num_chunks, with_padding=True, contiguous=True
         )
 
-        output = torch.empty_like(scatter_list[my_coordinate[mesh_dim]])
+        mesh_dim_local_rank = my_coordinate[mesh_dim]
+        output = torch.empty_like(scatter_list[mesh_dim_local_rank])
         mesh_scatter(output, scatter_list, mesh, mesh_dim=mesh_dim)
 
         # Only unpad if the local_tensor was padded on the dimension.
-        pad_size = pad_sizes[my_coordinate[mesh_dim]]
-        if pad_size > 0:
-            output = unpad_tensor(output, self.dim, pad_size)
+        if pad_sizes and pad_sizes[mesh_dim_local_rank] > 0:
+            output = unpad_tensor(output, self.dim, pad_sizes[mesh_dim_local_rank])
         return output
 
     def _reduce_shard_tensor(
         self,
         tensor: torch.Tensor,
         mesh: DeviceMesh,
-        reduce_op: c10d.ReduceOp.RedOpType,
+        reduce_op: str,
         mesh_dim: int,
     ) -> torch.Tensor:
         """
@@ -179,7 +182,7 @@ class Shard(Placement):
             tensor = tensor.contiguous()
 
         output = funcol.reduce_scatter_tensor(
-            tensor, reduce_op.name, scatter_dim=self.dim, group=(mesh, mesh_dim)
+            tensor, reduce_op, scatter_dim=self.dim, group=(mesh, mesh_dim)
         )
 
         if is_padded:
@@ -372,13 +375,13 @@ class _Partial(Placement):
     # 3. _partition_value: partition the value of a replicated tensor on the mesh dimension
     # We can implement custom reductions as needed by subclassing this
     # class and override those contracts.
-    reduce_op: c10d.ReduceOp.RedOpType = c10d.ReduceOp.SUM
+    reduce_op: str = "sum"
 
     def _reduce_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
         return funcol.all_reduce(
-            tensor, reduceOp=self.reduce_op.name, group=(mesh, mesh_dim)
+            tensor, reduceOp=self.reduce_op, group=(mesh, mesh_dim)
         )
 
     def _reduce_shard_value(
@@ -400,9 +403,7 @@ class _Partial(Placement):
         # - the _reduce_value on a sum reduce op would just be a sum(allreduce) operation
         # TODO: if the reduce_op is min/max, etc. the _partition_value should be a
         # different operation
-        assert (
-            self.reduce_op == c10d.ReduceOp.SUM
-        ), "only support replicate to PartialSUM for now!"
+        assert self.reduce_op == "sum", "only support replicate to PartialSUM for now!"
         num_chunks = mesh.size(mesh_dim=mesh_dim)
         return tensor / num_chunks
 
@@ -418,7 +419,7 @@ class _Partial(Placement):
         """
         machine readable representation of the Partial placement
         """
-        return f"_Partial(reduce_op={self.reduce_op})"
+        return f"_Partial({self.reduce_op})"
 
     def __str__(self) -> str:
         """
@@ -648,6 +649,12 @@ class DTensorSpec:
         return True if the current DTensorSpec replicates on all mesh dims (devices)
         """
         return all(placement.is_replicate() for placement in self.placements)
+
+    def is_sharded(self):
+        """
+        return True if the current DTensorSpec is sharded on any mesh dims (devices)
+        """
+        return any(placement.is_shard() for placement in self.placements)
 
     def shallow_copy_with_tensor_meta(
         self, tensor_meta: Optional[TensorMeta]

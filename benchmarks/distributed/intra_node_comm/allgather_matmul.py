@@ -49,7 +49,6 @@ def allgather_matmul_p2p(A_shard: torch.Tensor, B: torch.Tensor) -> torch.Tensor
     torch.matmul(A_shard, B, out=out_shards[rank])
 
     with torch.cuda.stream(backend.stream()):
-        # backend.put(A_shard)
         local_p2p_buf.copy_(A_shard)
         work = backend.intra_node_barrier()
     work.wait()
@@ -68,7 +67,6 @@ def allgather_matmul_p2p(A_shard: torch.Tensor, B: torch.Tensor) -> torch.Tensor
             remote_rank, A_shard.shape, A_shard.dtype
         )
         with torch.cuda.stream(stream):
-            # backend.get(remote, buf)
             buf.copy_(remote_p2p_buf)
             torch.matmul(buf, B, out=out_shards[remote_rank])
 
