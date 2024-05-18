@@ -1404,7 +1404,7 @@ def min_cut_rematerialization_partition(
     for node in reversed(joint_module.graph.nodes):
         if node.op == "output":
             node.dist_from_bw = int(1e9)
-        elif node_info.is_required_fw(node):
+        elif not node_info.is_required_fw(node):
             node.dist_from_bw = 0
         else:
             node.dist_from_bw = int(1e9)
