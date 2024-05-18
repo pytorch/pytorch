@@ -185,6 +185,15 @@ def print_time_report():
     print(out)
 
 
+def _add_time_spent(key, phase_name, time_spent):
+    if key not in frame_phase_timing:
+        frame_phase_timing[key] = {}
+    if phase_name not in frame_phase_timing[key]:
+        frame_phase_timing[key][phase_name] = time_spent
+    else:
+        frame_phase_timing[key][phase_name] += time_spent
+
+
 # dynamo_timed API works as a function decorator
 # By wrapping a function in dynamo_timed, we can store a record in compilation_time_metrics
 # where the key is the functions name.
@@ -203,7 +212,7 @@ def print_time_report():
 # The frame is incremented outside of this function, in def increment_frame() above.
 
 
-def dynamo_timed(original_function=None, phase_name=None):
+def dynamo_timed(original_function=None, phase_name=None, fwd_only=True):
     def dynamo_timed_inner(func):
         if config.cprofile:
             return func
@@ -220,12 +229,42 @@ def dynamo_timed(original_function=None, phase_name=None):
             compilation_time_metrics[key].append(time_spent)
             if phase_name:
                 frame_key = str(curr_frame)
-                if frame_key not in frame_phase_timing:
-                    frame_phase_timing[frame_key] = {}
-                if phase_name not in frame_phase_timing[frame_key]:
-                    frame_phase_timing[frame_key][phase_name] = time_spent
+                # fwd only compilation stages: entire_frame_compile, backend_compile_time.
+                # use frame_key as time aggregation key.
+                if fwd_only:
+                    _add_time_spent(frame_key, phase_name, time_spent)
                 else:
-                    frame_phase_timing[frame_key][phase_name] += time_spent
+                    # fwd + bwd compilation stages: inductor_compile, code_gen.
+                    # use frame_key as time aggregation key for fwd graphs;
+                    # use compile_id as time aggregation key for bwd graphs.
+                    aot_graph_name = torch._guards.TracingContext.get().aot_graph_name[
+                        0
+                    ]
+                    if "forward" in aot_graph_name:
+                        _add_time_spent(frame_key, phase_name, time_spent)
+                    else:
+                        assert "backward" in aot_graph_name
+                        compile_id = str(
+                            torch._guards.CompileContext.current_compile_id()
+                        )
+                        _add_time_spent(compile_id, phase_name, time_spent)
+
+                        # log backward compilation metrics at the end of `inductor_compile` of bwd graph,
+                        # one record for one bwd graph.
+                        if phase_name == "inductor_compile":
+                            inductor_compile_time = frame_phase_timing[compile_id].get(
+                                "inductor_compile", None
+                            )
+                            code_gen_time = frame_phase_timing[compile_id].get(
+                                "code_gen", None
+                            )
+                            metrics = BwdCompilationMetrics(
+                                compile_id,
+                                inductor_compile_time,
+                                code_gen_time,
+                            )
+                            record_compilation_metrics(metrics)
+
             return r
 
         return time_wrapper
@@ -597,7 +636,8 @@ def proxy_args_kwargs(args, kwargs):
 
 
 @dataclasses.dataclass
-class CompilationMetrics:
+class FwdCompilationMetrics:
+    compile_id: str
     frame_key: str
     co_name: str
     co_filename: str
@@ -628,19 +668,32 @@ class CompilationMetrics:
     has_guarded_code: bool
 
 
+@dataclasses.dataclass
+class BwdCompilationMetrics:
+    compile_id: str
+    inductor_compile_time_s: Optional[float]
+    code_gen_time_s: Optional[float]
+
+
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
 
 
-_compilation_metrics: Deque[CompilationMetrics] = collections.deque(
-    maxlen=DEFAULT_COMPILATION_METRICS_LIMIT
-)
+_compilation_metrics: Deque[
+    Union[FwdCompilationMetrics, BwdCompilationMetrics]
+] = collections.deque(maxlen=DEFAULT_COMPILATION_METRICS_LIMIT)
 
 
-def record_compilation_metrics(compilation_metrics: CompilationMetrics):
+def record_compilation_metrics(
+    compilation_metrics: Union[FwdCompilationMetrics, BwdCompilationMetrics]
+):
     global _compilation_metrics
     _compilation_metrics.append(compilation_metrics)
+    if isinstance(compilation_metrics, FwdCompilationMetrics):
+        name = "fwd_compilation_metrics"
+    else:
+        name = "bwd_compilation_metrics"
     torch._logging.trace_structured(
-        "compilation_metrics",
+        name,
         lambda: {
             k: list(v) if isinstance(v, set) else v
             for k, v in dataclasses.asdict(compilation_metrics).items()
@@ -663,7 +716,9 @@ def clear_compilation_metrics() -> None:
     _compilation_metrics.clear()
 
 
-def get_compilation_metrics() -> List[CompilationMetrics]:
+def get_compilation_metrics() -> (
+    List[Union[FwdCompilationMetrics, BwdCompilationMetrics]]
+):
     return list(_compilation_metrics)
 
 
