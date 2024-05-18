@@ -203,7 +203,7 @@ jobs:
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         uses: pytorch/test-infra/.github/actions/setup-nvidia@main
-        if: ${{ inputs.GPU_ARCH_TYPE == 'cuda' && steps.filter.outputs.is-test-matrix-empty == 'False' }}
+        if: ${{ contains(inputs.GPU_ARCH_TYPE, 'cuda') && steps.filter.outputs.is-test-matrix-empty == 'False' }}
 
       - name: Pull Docker image
         if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' && inputs.build_environment != 'linux-s390x-binary-manywheel' }}
