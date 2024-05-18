@@ -63,6 +63,10 @@ std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
     {at::kLong, ncclInt64},
     {at::kHalf, ncclHalf},
     {at::kBool, ncclUint8},
+    {at::kFloat8_e5m2, ncclUint8},
+    {at::kFloat8_e4m3fn, ncclUint8},
+    {at::kFloat8_e4m3fnuz, ncclUint8},
+    {at::kFloat8_e5m2fnuz, ncclUint8},
 #if HAS_NCCL_BF16_DATATYPE
     {at::kBFloat16, ncclBfloat16},
 #endif
@@ -3051,6 +3055,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_sparse(
     const AllreduceOptions& opts) {
   TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   auto tensor = tensors.back();
+  TORCH_CHECK(
+      !isFloat8Type(tensor.scalar_type()),
+      "Float8 dtypes are not currenlty supported for NCCL reductions");
 #ifdef IS_NCCLX
   tensor = tensor.coalesce();
   at::Tensor outputTensor =
@@ -3165,7 +3172,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
       return c10::make_intrusive<IntraNodeCommWork>();
     }
   }
-
+  TORCH_CHECK(
+      !isFloat8Type(tensor.scalar_type()),
+      "Float8 dtypes are not currenlty supported for NCCL reductions");
   // @lint-ignore CLANGTIDY
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
@@ -3192,6 +3201,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
     std::vector<at::Tensor>& tensors,
     const AllreduceCoalescedOptions& opts) {
   auto total_numel = check_gpu_tensors_same_device(tensors);
+  TORCH_CHECK(
+      !isFloat8Type(tensors.back().scalar_type()),
+      "Float8 dtypes are not currenlty supported for NCCL reductions");
 
   // @lint-ignore CLANGTIDY
   RECORD_PARAM_COMMS_DATA(
@@ -3564,6 +3576,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
   check_gpu_single_tensor(outputTensor);
   // @lint-ignore CLANGTIDY
   auto inputTensors_ = inputTensors.back();
+  TORCH_CHECK(
+      !isFloat8Type(outputTensor.scalar_type()),
+      "Float8 dtypes are not currenlty supported for NCCL reductions");
 
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
@@ -3675,6 +3690,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
 
   // @lint-ignore CLANGTIDY
   const auto& tensor = outputTensor;
+  TORCH_CHECK(
+      !isFloat8Type(tensor.scalar_type()),
+      "Float8 dtypes are not currenlty supported for NCCL reductions");
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
@@ -3735,6 +3753,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_tensor_coalesced(
     std::vector<at::Tensor>& outputs,
     std::vector<at::Tensor>& inputs,
     const ReduceScatterOptions& opts) {
+  TORCH_CHECK(
+      !isFloat8Type(inputs.back().scalar_type()),
+      "Float8 dtypes are not currenlty supported for NCCL reductions");
   return collectiveCoalesced(
       inputs,
       outputs,
