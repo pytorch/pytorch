@@ -505,12 +505,16 @@ class BaseSchedulerNode:
         if isinstance(self, ExternKernelSchedulerNode) and isinstance(
             self.node, MultiOutput
         ):
+            # todo: Calculate this - it's kinda annoying.
             return 0
 
+        def try_size_hint(s):
+            return V.graph.sizevars.size_hint(s, fallback=0)
+
         if isinstance(self, SchedulerNode):
-            node_numel = V.graph.sizevars.size_hint(
+            node_numel = try_size_hint(
                 sympy_product(self.get_ranges()[0])
-                * sympy_product(self.get_ranges()[1])
+                * sympy_product(self.get_ranges()[1]),
             )
         else:
             node_numel = int(1e9)
@@ -545,16 +549,20 @@ class BaseSchedulerNode:
                 continue
 
             def get_buf_elems(buf):
-                return V.graph.sizevars.size_hint(sympy_product(buf.get_size()))
+                # Kind of a lazy way to get the MultiOutput nodes corresponding to
+                # a MultiOutputLayout
+                if isinstance(buf.layout, MultiOutputLayout):
+                    if isinstance(buf, MultiOutput):
+                        users = self.scheduler.name_to_node[buf.get_name()].users
+                        return sum(get_buf_elems(user.node.node) for user in users)
+                    else:
+                        # TODO: If a buffer has a multioutputlayout but isn't a
+                        # multioutput, I'm not sure how to get its size :think:
+                        return 0
+                else:
+                    return try_size_hint(sympy_product(buf.get_size()))
 
-            # Kind of a lazy way to get the MultiOutput nodes corresponding to
-            # a MultiOutputLayout
-            if isinstance(buf.layout, MultiOutputLayout):
-                users = self.scheduler.name_to_node[buf.get_name()].users
-                buf_elems = sum(get_buf_elems(user.node.node) for user in users)
-            else:
-                buf_elems = get_buf_elems(buf)
-
+            buf_elems = get_buf_elems(buf)
             node_bytes += min(buf_elems, buf_accessed_elems) * get_dtype_size(
                 buf.get_dtype()
             )
