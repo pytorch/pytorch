@@ -1436,14 +1436,16 @@ class CppWrapperCpu(WrapperCodeGen):
         ):
             return ""
         elif isinstance(buffer, ir.ExternKernel) and isinstance(buffer.op_overload, torch._ops.OpOverload):
-            if len(buffer.op_overload._schema.returns) == 1:
-                if isinstance(buffer.op_overload._schema.returns[0].type, torch.TensorType):
-                    return f"{buffer.get_name()}.reset();"
-                elif (
-                    isinstance(buffer.op_overload._schema.returns[0].type, torch.ListType)
-                    and isinstance(buffer.op_overload._schema.returns[0].type.getElementType(), torch.TensorType)
-                ):
-                    return f"for (auto& t : {buffer.get_name()}) {{t.reset();}};"
+            # NOTE: len(returns) > 1 is the MultiOutputLayout case and we explicitly
+            # don't generate buffer free code for it (see above branch).
+            assert len(buffer.op_overload._schema.returns) == 1:
+            if isinstance(buffer.op_overload._schema.returns[0].type, torch.TensorType):
+                return f"{buffer.get_name()}.reset();"
+            elif (
+                isinstance(buffer.op_overload._schema.returns[0].type, torch.ListType)
+                and isinstance(buffer.op_overload._schema.returns[0].type.getElementType(), torch.TensorType)
+            ):
+                return f"for (auto& t : {buffer.get_name()}) {{t.reset();}};"
         return f"{buffer.get_name()}.reset();"
 
     def make_free_by_names(self, names_to_del: List[str]):
