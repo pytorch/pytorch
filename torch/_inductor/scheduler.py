@@ -600,7 +600,7 @@ class NodeSchedulerNode(BaseSchedulerNode):
             isinstance(self, (SchedulerNode,))
             and config.inplace_buffers
             and (
-                not isinstance(V.kernel, torch._inductor.codegen.triton.TritonKernel)
+                not isinstance(V.kernel, torch._inductor.codegen.simd.SIMDKernel)
                 or getattr(V.kernel, "mutations", None) is not None
             )
         ):
@@ -654,7 +654,7 @@ class NodeSchedulerNode(BaseSchedulerNode):
                             )
                             # mutations not tracked in cpp kernels
                             if isinstance(
-                                V.kernel, torch._inductor.codegen.triton.TritonKernel
+                                V.kernel, torch._inductor.codegen.simd.SIMDKernel
                             ):
                                 V.kernel.mutations.add(input_node.get_name())
                                 V.kernel.mutations.add(self.get_name())
@@ -777,10 +777,11 @@ def debug_triton_code(node: Union["SchedulerNode", "FusedSchedulerNode"]) -> Lis
     if template is not None and template.make_kernel_render is None:
         lines.append(f"{node.get_name()} Unfinalized multi template buffer")
     else:
+        from torch._inductor.codegen.triton import TritonScheduling
+
         snodes = (node,) if isinstance(node, SchedulerNode) else node.snodes
         device: torch.device = snodes[0].get_device()
         backend = node.scheduler.get_backend(device)
-        from torch._inductor.codegen.triton import TritonScheduling
         backend = typing.cast(TritonScheduling, backend)
         V.graph.scheduler.current_device = device
 
