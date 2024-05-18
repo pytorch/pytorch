@@ -87,7 +87,7 @@ static void check(bool result) {
 // snapshot of python verbose logging toggle
 static PyObject* python_verbose_logger = nullptr;
 struct VerboseLogger {
-  static std::optional<VerboseLogger> create() {
+  static std::optional<VerboseLogger> maybe_create() {
     if (python_verbose_logger == nullptr) {
       return std::nullopt;
     }
@@ -430,7 +430,7 @@ CacheNode* _compiled_autograd_impl(
       check_exec_info ? graph_task.exec_info_.size() : dependencies.size() + 1);
 
   int i = 0;
-  std::optional<VerboseLogger> vlogger = VerboseLogger::create();
+  std::optional<VerboseLogger> vlogger = VerboseLogger::maybe_create();
   while (!worklist.empty()) {
     std::shared_ptr<Node> fn = std::move(worklist.back());
     worklist.pop_back();
