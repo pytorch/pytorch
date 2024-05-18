@@ -90,6 +90,8 @@ def _create_cuda_p2p_group(
 
 
 def is_cuda_p2p_group(group: c10d.ProcessGroup) -> bool:
+    if _test_with_non_cuda_p2p_group:
+        return True
     try:
         backend = group._get_backend(torch.device("cuda"))
     except Exception:
