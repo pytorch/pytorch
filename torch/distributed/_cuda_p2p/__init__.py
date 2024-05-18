@@ -14,7 +14,7 @@ try:
         ProcessGroupNCCL,
     )
 except ImportError:
-    _CUDA_P2P_AVAILABLE = False
+    pass
 
 """
 This file contains the registration logic and Python APIs for
@@ -63,14 +63,10 @@ Usage:
 """
 
 
-def is_cuda_p2p_available() -> bool:
-    return _CUDA_P2P_AVAILABLE
-
-
 def _create_cuda_p2p_group(
     dist_backend_opts: "_DistributedBackendOptions",
     options: Union["ProcessGroupCudaP2P.Options", "ProcessGroupNCCL.Options", None],
-) -> Backend:
+) -> "Backend":
     if options is None:
         options = ProcessGroupCudaP2P.Options()
         options.nccl_options = ProcessGroupNCCL.Options()

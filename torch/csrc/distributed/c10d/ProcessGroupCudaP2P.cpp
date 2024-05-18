@@ -1,3 +1,4 @@
+#ifdef USE_C10D_NCCL
 #include <torch/csrc/distributed/c10d/ProcessGroupCudaP2P.hpp>
 
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
@@ -202,3 +203,4 @@ void ProcessGroupCudaP2P::shutdown(c10::optional<std::string> reason) {
 }
 
 } // namespace c10d
+#endif // USE_C10D_NCCL
