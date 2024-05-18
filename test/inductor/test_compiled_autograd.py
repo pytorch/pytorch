@@ -1559,29 +1559,20 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
             self.check_output_and_recompiles(fn, count=2)
 
         patterns1 = [
-            r".*Creating cache entry for torch::autograd::GraphRoot, with key of size (\d+)\n",
-            r".*Creating cache entry for SumBackward0, with key of size (\d+)\n",
-            r".*Creating cache entry for ReluBackward0, with key of size (\d+)\n",
-            r".*Creating cache entry for AddmmBackward0, with key of size 1(\d+)\n",
-            r".*Creating cache entry for TBackward0, with key of size (\d+)\n",
-            r".*Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
-            r".*Creating cache entry for ReluBackward0, with key of size (\d+)\n",
-            r".*Creating cache entry for AddmmBackward0, with key of size (\d+)\n",
-            r".*Creating cache entry for TBackward0, with key of size (\d+)\n",
-            r".*Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
-            r".*Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
-            r".*Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
+            r".*Cache miss due to new autograd node: torch::autograd::GraphRoot \(NodeCall 0\) with key size (\d+), "
+            r"previous key sizes=\[\]\n",
         ]
 
         # recompile
         patterns2 = [
-            r".*cache miss: marking sizes\[(\d+)\] as dynamic\n",
-            r".*cache miss: marking sizes\[(\d+)\] as dynamic\n",
-            r".*cache miss: marking sizes\[(\d+)\] as dynamic\n",
-            r".*cache miss: marking sizes\[(\d+)\] as dynamic\n",
-            r".*cache miss: marking sizes\[(\d+)\] as dynamic\n",
-            r".*cache miss: marking sizes\[(\d+)\] as dynamic\n",
-            r".*cache miss: marking sizes\[(\d+)\] as dynamic\n",
+            r".*Cache miss due to changed shapes: marking size idx (\d+) of torch::autograd::GraphRoot \(NodeCall 0\) as dynamic\n",
+            r".*Cache miss due to changed shapes: marking size idx (\d+) of SumBackward0 \(NodeCall 1\) as dynamic\n",
+            r".*Cache miss due to changed shapes: marking size idx (\d+) of SumBackward0 \(NodeCall 1\) as dynamic\n",
+            r".*Cache miss due to changed shapes: marking size idx (\d+) of ReluBackward0 \(NodeCall 2\) as dynamic\n",
+            r".*Cache miss due to changed shapes: marking size idx (\d+) of AddmmBackward0 \(NodeCall 3\) as dynamic\n",
+            r".*Cache miss due to changed shapes: marking size idx (\d+) of torch::autograd::AccumulateGrad "
+            r"\(NodeCall 5\) as dynamic\n",
+            r".*Cache miss due to changed shapes: marking size idx (\d+) of ReluBackward0 \(NodeCall 6\) as dynamic\n",
         ]
 
         all_logs = logs.getvalue()
@@ -1589,7 +1580,10 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
         pattern1 = r"".join(patterns1)
         matches1 = re.findall(pattern1, all_logs)
         self.assertEqual(len(matches1), 1)
-        self.assertEqual(len(matches1[0]), len(patterns1))
+        assert isinstance(
+            matches1[0], str
+        )  # for a single match: matches1=['match'], for multiple matches: matches1=[('match1', 'match2')]...
+        self.assertEqual(len(matches1), len(patterns1))
 
         pattern2 = r"".join(patterns2)
         matches2 = re.findall(pattern2, all_logs)
