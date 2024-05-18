@@ -192,11 +192,12 @@ class BaseSchedulerNode:
     def set_users(self, users: List["NodeUser"]):
         ...
 
-    @abstractmethod
     def set_last_usage(
         self, future_used_buffers: Set[str], mutation_real_name: Dict[str, str]
     ):
-        ...
+        used_buffers = self.used_or_aliased_buffer_names()
+        used_buffers = {mutation_real_name.get(k, k) for k in used_buffers}
+        self.last_usage = used_buffers - future_used_buffers
 
     @abstractmethod
     def get_aliases(self):
@@ -242,9 +243,8 @@ class BaseSchedulerNode:
         to_remove = {dep for dep in self.read_writes.reads if should_prune(dep)}
         self.set_read_writes(self.read_writes.remove_reads(to_remove))
 
-    @abstractmethod
     def prune_redundant_deps(self, name_to_fused_node):
-        ...
+        _prune_redundant_deps(self, name_to_fused_node)
 
     @abstractmethod
     def get_name(self) -> str:
@@ -519,13 +519,6 @@ class NodeSchedulerNode(BaseSchedulerNode):
                 result[id(use.node)] = use
         self.users = list(result.values())
 
-    def set_last_usage(
-        self, future_used_buffers: Set[str], mutation_real_name: Dict[str, str]
-    ):
-        used_buffers = self.used_or_aliased_buffer_names()
-        used_buffers = {mutation_real_name.get(k, k) for k in used_buffers}
-        self.last_usage = used_buffers - future_used_buffers
-
     def get_aliases(self):
         return self.node.get_inputs_that_alias_output()
 
@@ -559,9 +552,6 @@ class NodeSchedulerNode(BaseSchedulerNode):
                     if alias not in used_names:
                         deps.append(alias)
         return used_names
-
-    def prune_redundant_deps(self, name_to_fused_node):
-        _prune_redundant_deps(self, name_to_fused_node)
 
     def get_name(self) -> str:
         return self.node.get_name()
