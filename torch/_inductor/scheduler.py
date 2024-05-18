@@ -1276,6 +1276,8 @@ class Scheduler:
             *V.graph.torchbind_constants.keys(),
         }
 
+        sort_by_name = lambda n: n.get_name()
+        nodes = sorted(nodes, key=sort_by_name)
         self.nodes = [self.create_scheduler_node(n) for n in nodes]
 
         # some new constants could have been created above
@@ -1752,6 +1754,9 @@ class Scheduler:
             del V.graph.name_to_buffer[replaced_name]
             new_node.name = orig_name
 
+            # V.graph.buffers.remove(new_node)
+            # idx = V.graph.buffers.index(orig_node)
+            # V.graph.buffers[idx] = new_node
             V.graph.buffers.remove(orig_node)
             V.graph.name_to_buffer[orig_name] = new_node
 
