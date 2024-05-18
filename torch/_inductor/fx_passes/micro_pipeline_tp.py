@@ -1,6 +1,6 @@
 import operator
 from dataclasses import dataclass
-from typing import cast, List, Set, Tuple
+from typing import cast, List, Set, Tuple, Union
 
 import torch
 
@@ -112,12 +112,12 @@ class _NDMatmul:
             mm_node.replace_all_uses_with(new_mm_node)
 
 
-def _find_consumer_matmuls(node: torch.fx.Node) -> List[_2DMatmul | _NDMatmul]:
+def _find_consumer_matmuls(node: torch.fx.Node) -> List[Union[_2DMatmul, _NDMatmul]]:
     """
     Find the matmuls that use `node` as the lhs argument.
     This function effective normalizes 2D and ND matmuls.
     """
-    matmuls: List[_2DMatmul | _NDMatmul] = []
+    matmuls: List[Union[_2DMatmul, _NDMatmul]] = []
 
     for user in node.users:
         # ND matmuls

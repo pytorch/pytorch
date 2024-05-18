@@ -1,5 +1,6 @@
 #pragma once
 
+#ifdef USE_C10D_NCCL
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/intra_node_comm.hpp>
@@ -144,3 +145,4 @@ class TORCH_API ProcessGroupCudaP2P : public Backend {
 };
 
 } // namespace c10d
+#endif // USE_C10D_NCCL

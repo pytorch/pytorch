@@ -42,7 +42,7 @@ from ..pattern_matcher import (
 from ..utils import decode_device, is_pointwise_use
 from ..virtualized import V
 from .ddp_fusion import fuse_ddp_communication
-from .group_batch_fusion import group_batch_fusion_passes
+from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
 from .micro_pipeline_tp import patterns as micro_pipeline_tp_patterns
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reinplace import reinplace_inplaceable_ops
