@@ -166,7 +166,8 @@ class BaseSchedulerNode:
     users: List["NodeUser"]
 
     @abstractmethod
-    def debug_str(self) -> str: ...  # noqa: E704
+    def debug_str(self) -> str:
+        ...
 
     def log_details(self):
         log.info(
@@ -177,30 +178,37 @@ class BaseSchedulerNode:
         )
 
     @abstractmethod
-    def update_mutated_names(self, renames: Dict[str, str]): ...  # noqa: E704
+    def update_mutated_names(self, renames: Dict[str, str]):
+        ...
 
     @abstractmethod
-    def add_mutation_dep(self, dep): ...  # noqa: E704
+    def add_mutation_dep(self, dep):
+        ...
 
     def add_fake_dep(self, dep):
         self.set_read_writes(self.read_writes.with_read(dep))
 
     @abstractmethod
-    def set_users(self, users: List["NodeUser"]): ...  # noqa: E704
+    def set_users(self, users: List["NodeUser"]):
+        ...
 
     @abstractmethod
-    def set_last_usage(  # noqa: E704
+    def set_last_usage(
         self, future_used_buffers: Set[str], mutation_real_name: Dict[str, str]
-    ): ...
+    ):
+        ...
 
     @abstractmethod
-    def get_aliases(self): ...  # noqa: E704
+    def get_aliases(self):
+        ...
 
     @abstractmethod
-    def get_mutations(self): ...  # noqa: E704
+    def get_mutations(self):
+        ...
 
     @abstractmethod
-    def has_aliasing_or_mutation(self): ...  # noqa: E704
+    def has_aliasing_or_mutation(self):
+        ...
 
     def set_read_writes(self, rw: dependencies.ReadWrites):
         self.read_writes: dependencies.ReadWrites = rw
@@ -208,13 +216,16 @@ class BaseSchedulerNode:
         self.prune_deps()
 
     @abstractmethod
-    def op_counts(self): ...  # noqa: E704
+    def op_counts(self):
+        ...
 
     @abstractmethod
-    def used_buffer_names(self) -> Set[str]: ...  # noqa: E704
+    def used_buffer_names(self) -> Set[str]:
+        ...
 
     @abstractmethod
-    def used_or_aliased_buffer_names(self) -> Set[str]: ...  # noqa: E704
+    def used_or_aliased_buffer_names(self) -> Set[str]:
+        ...
 
     def prune_deps(self):
         self.unmet_dependencies = {
@@ -232,22 +243,28 @@ class BaseSchedulerNode:
         self.set_read_writes(self.read_writes.remove_reads(to_remove))
 
     @abstractmethod
-    def prune_redundant_deps(self, name_to_fused_node): ...  # noqa: E704
+    def prune_redundant_deps(self, name_to_fused_node):
+        ...
 
     @abstractmethod
-    def get_name(self) -> str: ...  # noqa: E704
+    def get_name(self) -> str:
+        ...
 
     @abstractmethod
-    def get_first_name(self) -> str: ...  # noqa: E704
+    def get_first_name(self) -> str:
+        ...
 
     @abstractmethod
-    def get_names(self) -> Set[str]: ...  # noqa: E704
+    def get_names(self) -> Set[str]:
+        ...
 
     @abstractmethod
-    def get_nodes(self) -> Sequence["BaseSchedulerNode"]: ...  # noqa: E704
+    def get_nodes(self) -> Sequence["BaseSchedulerNode"]:
+        ...
 
     @abstractmethod
-    def get_device(self): ...  # noqa: E704
+    def get_device(self):
+        ...
 
     def is_reduction(self):
         return False
@@ -271,7 +288,8 @@ class BaseSchedulerNode:
         return False
 
     @abstractmethod
-    def can_free(self): ...  # noqa: E704
+    def can_free(self):
+        ...
 
     def get_read_write_buffers_sizes(self) -> int:
         """
@@ -455,9 +473,9 @@ class NodeSchedulerNode(BaseSchedulerNode):
         self.ancestors: Set[str] = set()
         self.min_order: int
         self.max_order: int
-        self.last_usage: Set[str] = (
-            set()
-        )  # buffers that won't be used after this kernel
+        self.last_usage: Set[
+            str
+        ] = set()  # buffers that won't be used after this kernel
         self.written = False
 
     def __repr__(self):
@@ -586,9 +604,9 @@ class NodeSchedulerNode(BaseSchedulerNode):
             ordered_reads = sorted(self.read_writes.reads, key=lambda x: x.name)
 
             for read in ordered_reads:
-                input_node: Optional[BaseSchedulerNode] = (
-                    self.scheduler.name_to_node.get(read.name)
-                )
+                input_node: Optional[
+                    BaseSchedulerNode
+                ] = self.scheduler.name_to_node.get(read.name)
                 if (
                     input_node
                     and V.graph.wrapper_code.can_reuse(input_node, self)
@@ -639,9 +657,9 @@ class NodeSchedulerNode(BaseSchedulerNode):
                             # update last usage of reused node
                             self.last_usage.discard(input_node.get_name())
 
-                            V.kernel.inplace_update_buffers[self.get_name()] = (
-                                input_node.get_name()
-                            )
+                            V.kernel.inplace_update_buffers[
+                                self.get_name()
+                            ] = input_node.get_name()
                         break
 
     def allocate(self):
@@ -938,6 +956,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
         self.inverse_users = []
         self.node_users = []
         self.group = max(snodes, key=lambda x: int(x.is_reduction())).group
+        self.last_usage = set()
         self.ancestors = set.union(
             *[x.ancestors for x in snodes if x.ancestors is not None]
         )
@@ -1357,9 +1376,9 @@ class Scheduler:
         self.name_to_node: Dict[str, BaseSchedulerNode] = {
             n.get_name(): n for n in self.nodes
         }
-        self.name_to_fused_node: Dict[str, BaseSchedulerNode] = (
-            dict()
-        )  # set in fuse_nodes()
+        self.name_to_fused_node: Dict[
+            str, BaseSchedulerNode
+        ] = dict()  # set in fuse_nodes()
 
         # mutation_real_name: Maps back to the original name for codegen
         # Example:
@@ -2172,9 +2191,9 @@ class Scheduler:
             rhs_dep = node2_name2dep[buf_name]
 
             if lhs_dep.get_numel() != rhs_dep.get_numel():
-                reasons[buf_name] = (
-                    f"different numel: {lhs_dep.get_numel()} v.s. {rhs_dep.get_numel()}"
-                )
+                reasons[
+                    buf_name
+                ] = f"different numel: {lhs_dep.get_numel()} v.s. {rhs_dep.get_numel()}"
                 continue
 
             # same numel but different MemoryDep.size. Should be broadcasting
@@ -2183,9 +2202,9 @@ class Scheduler:
                 continue
 
             if not isinstance(lhs_dep, MemoryDep) or not isinstance(rhs_dep, MemoryDep):
-                reasons[buf_name] = (
-                    f"not MemoryDep: {type(lhs_dep)} v.s. {type(rhs_dep)}"
-                )
+                reasons[
+                    buf_name
+                ] = f"not MemoryDep: {type(lhs_dep)} v.s. {type(rhs_dep)}"
                 continue
 
             lhs_off = lhs_dep.get_offset()
@@ -2205,9 +2224,9 @@ class Scheduler:
                 continue
 
             # Add more rules here
-            reasons[buf_name] = (
-                f"Unknown reason: {lhs_dep} v.s. {rhs_dep}. Layout: {buf.layout}"
-            )
+            reasons[
+                buf_name
+            ] = f"Unknown reason: {lhs_dep} v.s. {rhs_dep}. Layout: {buf.layout}"
 
         return str(reasons)
 
