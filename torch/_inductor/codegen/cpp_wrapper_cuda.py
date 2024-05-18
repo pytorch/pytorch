@@ -120,7 +120,7 @@ class CppWrapperCuda(CppWrapperCpu):
             self.writeline("}")
 
     def generate_args_decl(self, call_args, arg_types):
-        dynamic_symbols = set(s.name for s in V.graph.sizevars.free_symbols())
+        dynamic_symbols = {s.name for s in V.graph.sizevars.free_symbols()}
         # TODO: only works for constant now, need type info
         new_args = []
         for arg, arg_type in zip(call_args, arg_types):
@@ -152,7 +152,10 @@ class CppWrapperCuda(CppWrapperCpu):
                                 f"CUdeviceptr {var_name} = reinterpret_cast<CUdeviceptr>({arg}.data_ptr());"
                             )
                         )
-            elif arg_type in (sympy.Integer, sympy.Symbol, SymbolicCallArg) or str(arg) in dynamic_symbols:
+            elif (
+                arg_type in (sympy.Integer, sympy.Symbol, SymbolicCallArg)
+                or str(arg) in dynamic_symbols
+            ):
                 self.writeline(f"auto {var_name} = {arg};")
             elif arg_type == sympy.Expr:
                 self.writeline(f"auto {var_name} = {self.expr_printer(arg)};")
