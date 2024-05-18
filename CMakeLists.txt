@@ -840,8 +840,14 @@ include(cmake/Allowlist.cmake)
 
 # ---[ Set link flag, handle additional deps for gcc 4.8 and above
 if(CMAKE_COMPILER_IS_GNUCXX AND NOT ANDROID)
-  message(STATUS "GCC ${CMAKE_CXX_COMPILER_VERSION}: Adding gcc and gcc_s libs to link line")
-  list(APPEND Caffe2_DEPENDENCY_LIBS gcc_s gcc)
+  message(STATUS "GCC ${CMAKE_CXX_COMPILER_VERSION}: Adding gcc lib to link line")
+  list(APPEND Caffe2_DEPENDENCY_LIBS gcc)
+
+  # gcc_s is a shared library. If we are building a static executable, we cannot link it
+  if(BUILD_SHARED_LIBS)
+    message(STATUS "GCC ${CMAKE_CXX_COMPILER_VERSION}: Adding gcc_s lib to link line")
+    list(APPEND Caffe2_DEPENDENCY_LIBS gcc_s)
+  endif()
 endif()
 
 # ---[ Build flags
