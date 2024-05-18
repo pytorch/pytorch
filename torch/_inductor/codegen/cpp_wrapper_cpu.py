@@ -1441,7 +1441,7 @@ class CppWrapperCpu(WrapperCodeGen):
                 torch.TensorType,
             )
         ):
-            return f"for (auto t : {buffer.get_name()}) t.reset();"
+            return f"for (auto& t : {buffer.get_name()}) {{t.reset();}};"
         else:
             return f"{buffer.get_name()}.reset();"
 

@@ -7958,6 +7958,29 @@ class LoopBodyBlock:
 
 
 class _CollectiveKernel(FallbackKernel):
+    def __init__(
+        self,
+        layout,
+        kernel,
+        tensor_args,
+        nontensor_args,
+        unflatten_args,
+        kwargs=None,
+        *,
+        unbacked_bindings=None,
+        inplace=False,
+    ):
+        super().__init__(
+            layout,
+            kernel,
+            tensor_args,
+            nontensor_args,
+            unflatten_args,
+            kwargs=None,
+            unbacked_bindings=None,
+        )
+        self.inplace = inplace
+
     def should_allocate(self):
         return False
 
@@ -8008,6 +8031,7 @@ class _CollectiveKernel(FallbackKernel):
             tensor_args,
             non_tensor_args,
             unflatten_args,
+            inplace=True,
         )
         packed.cpp_kernel_name = cpp_kernel_name
         packed.python_kernel_name = python_kernel_name
@@ -8067,6 +8091,7 @@ class _CollectiveKernel(FallbackKernel):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
+                inplace=False,
             )
             packed.cpp_kernel_name = cpp_kernel_name
             packed.python_kernel_name = python_kernel_name
@@ -8086,6 +8111,7 @@ class _CollectiveKernel(FallbackKernel):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
+                inplace=False,
             )
             packed.cpp_kernel_name = cpp_kernel_name
             packed.python_kernel_name = python_kernel_name
@@ -8098,7 +8124,7 @@ class _CollectiveKernel(FallbackKernel):
         # because downstream should depend on the input (instead of the output) of the op.
         # This is important for being able to release collective output memory as soon as possible
         # (by decreasing the collective output tensor's refcount whenever possible).
-        if isinstance(self.layout, NoneLayout):
+        if self.inplace:
             from .codegen.wrapper import FreeIfNotReusedLine
 
             wrapper.writeline(FreeIfNotReusedLine(wrapper, self))
@@ -8143,6 +8169,7 @@ class _WaitKernel(_CollectiveKernel):
             tensor_args,
             non_tensor_args,
             unflatten_args,
+            inplace=True,
         )
         if isinstance(inp.data, BaseView):
             inp = inp.data.unwrap_view()
