@@ -28,11 +28,21 @@ _score_mod_signature = Callable[
 ]
 
 
+def _identity(
+    score: torch.Tensor,
+    batch: torch.Tensor,
+    head: torch.Tensor,
+    token_q: torch.Tensor,
+    token_kv: torch.Tensor,
+) -> torch.Tensor:
+    return score
+
+
 def _flex_attention(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
-    score_mod: _score_mod_signature,
+    score_mod: _score_mod_signature = _identity,
 ) -> torch.Tensor:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
 
@@ -112,16 +122,6 @@ def _flex_attention(
 
 
 """Some common used score_mod functions for flex_attention in PyTorch."""
-
-
-def _identity(
-    score: torch.Tensor,
-    batch: torch.Tensor,
-    head: torch.Tensor,
-    token_q: torch.Tensor,
-    token_kv: torch.Tensor,
-) -> torch.Tensor:
-    return score
 
 
 def _causal(
