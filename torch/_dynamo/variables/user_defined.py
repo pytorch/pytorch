@@ -554,6 +554,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if method is object.__init__:
                 return ConstantVariable.create(None)
 
+            # TODO(anijain2305) - There seems to be some bug in handing
+            # DeletedVariable. Since this is not very common user scenario,
+            # graph break is fine for now. Check for test -
+            # test_Sequential_delitem
+            if method is torch.nn.Module.__setattr__ and isinstance(
+                args[1], variables.DeletedVariable
+            ):
+                unimplemented(f"nn module delattr({self}, {name}, ...)")
+
             if is_standard_setattr(method):
                 return self.method_setattr_standard(tx, *args, **kwargs)
 
