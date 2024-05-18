@@ -1045,7 +1045,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether or not TORCH_NCCL_AVOID_RECORD_STREAMS was set
   bool avoidRecordStreams_ = false;
 
-  // Whether the  NCCL watchdog should rethrow CUDA errors.
+  // Whether the NCCL watchdog should rethrow CUDA errors.
   bool rethrowCUDAErrors_ = false;
 
   // Set of communicators that this process group has aborted and their
