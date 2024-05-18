@@ -155,20 +155,15 @@ kernel_name_to_op = {
 # This is the base class for both NodeSchedulerNode (where self.node is actually
 # meaningful) and FusedSchedulerNode (where self.node is not meaningful).
 class BaseSchedulerNode:
-    def __init__(self, scheduler: "Scheduler", node: ir.Buffer):
-        self.scheduler: Scheduler = scheduler
-        self.node: ir.Buffer = node
-        self.users: List[NodeUser] = []
-        self.inverse_users: List[BaseSchedulerNode] = []
-        self.node_users: List[BaseSchedulerNode] = []
-        self.set_read_writes(node.get_read_writes())
-        self.ancestors: Set[str] = set()
-        self.min_order: int
-        self.max_order: int
-        self.last_usage: Set[str] = (
-            set()
-        )  # buffers that won't be used after this kernel
-        self.written = False
+    ancestors: Set[Any]
+    inverse_users: List["BaseSchedulerNode"]
+    last_usage: Set[str]
+    max_order: int
+    min_order: int
+    node: ir.Buffer
+    node_users: List["BaseSchedulerNode"]
+    scheduler: "Scheduler"
+    users: List["NodeUser"]
 
     @abstractmethod
     def debug_str(self) -> str: ...  # noqa: E704
@@ -450,6 +445,21 @@ class BaseSchedulerNode:
 
 
 class NodeSchedulerNode(BaseSchedulerNode):
+    def __init__(self, scheduler: "Scheduler", node: ir.Buffer):
+        self.scheduler: Scheduler = scheduler
+        self.node: ir.Buffer = node
+        self.users: List[NodeUser] = []
+        self.inverse_users: List[BaseSchedulerNode] = []
+        self.node_users: List[BaseSchedulerNode] = []
+        self.set_read_writes(node.get_read_writes())
+        self.ancestors: Set[str] = set()
+        self.min_order: int
+        self.max_order: int
+        self.last_usage: Set[str] = (
+            set()
+        )  # buffers that won't be used after this kernel
+        self.written = False
+
     def __repr__(self):
         return f"{type(self).__name__}(name={self.get_name()!r})"
 
@@ -567,7 +577,7 @@ class NodeSchedulerNode(BaseSchedulerNode):
             isinstance(self, (SchedulerNode,))
             and config.inplace_buffers
             and (
-                not isinstance(V.kernel, torch._inductor.codegen.triton.TritonKernel)
+                not isinstance(V.kernel, torch._inductor.codegen.simd.SIMDKernel)
                 or getattr(V.kernel, "mutations", None) is not None
             )
         ):
@@ -621,7 +631,7 @@ class NodeSchedulerNode(BaseSchedulerNode):
                             )
                             # mutations not tracked in cpp kernels
                             if isinstance(
-                                V.kernel, torch._inductor.codegen.triton.TritonKernel
+                                V.kernel, torch._inductor.codegen.simd.SIMDKernel
                             ):
                                 V.kernel.mutations.add(input_node.get_name())
                                 V.kernel.mutations.add(self.get_name())
