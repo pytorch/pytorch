@@ -7,12 +7,18 @@ import torch
 import torch.distributed._functional_collectives as funcol
 
 import torch.distributed.distributed_c10d as c10d
-from torch._C._distributed_c10d import (
-    _DistributedBackendOptions,
-    Backend,
-    ProcessGroupCudaP2P,
-    ProcessGroupNCCL,
-)
+
+_CUDA_P2P_AVAILABLE = True
+
+try:
+    from torch._C._distributed_c10d import (
+        _DistributedBackendOptions,
+        Backend,
+        ProcessGroupCudaP2P,
+        ProcessGroupNCCL,
+    )
+except ImportError:
+    _CUDA_P2P_AVAILABLE = False
 
 """
 This file contains the registration logic and Python APIs for
@@ -61,9 +67,13 @@ Usage:
 """
 
 
+def is_cuda_p2p_available() -> bool:
+    return _CUDA_P2P_AVAILABLE
+
+
 def _create_cuda_p2p_group(
-    dist_backend_opts: _DistributedBackendOptions,
-    options: Union[ProcessGroupCudaP2P.Options, ProcessGroupNCCL.Options, None],
+    dist_backend_opts: "_DistributedBackendOptions",
+    options: Union["ProcessGroupCudaP2P.Options", "ProcessGroupNCCL.Options", None],
 ) -> Backend:
     if options is None:
         options = ProcessGroupCudaP2P.Options()
@@ -99,7 +109,7 @@ def is_cuda_p2p_group(group: c10d.ProcessGroup) -> bool:
     return isinstance(backend, ProcessGroupCudaP2P) and backend.is_p2p_available()
 
 
-def get_cuda_p2p_backend(group: c10d.ProcessGroup) -> ProcessGroupCudaP2P:
+def get_cuda_p2p_backend(group: c10d.ProcessGroup) -> "ProcessGroupCudaP2P":
     if not is_cuda_p2p_group(group):
         raise TypeError("group is not a cuda_p2p process group.")
     return cast(
