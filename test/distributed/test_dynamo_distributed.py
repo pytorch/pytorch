@@ -1086,9 +1086,9 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             ).check(f"""{expected_guard_source} "L['self'].net" TYPE_MATCH""").check(
                 f"""{expected_guard_source} "L['self'].net" ID_MATCH"""
             ).check(
-                f"""{expected_guard_source} "L['self'].net[0]" TYPE_MATCH"""
+                f"""{expected_guard_source} "L['self'].net._modules['0']" TYPE_MATCH"""
             ).check(
-                f"""{expected_guard_source} "L['self'].net[0]" ID_MATCH"""
+                f"""{expected_guard_source} "L['self'].net._modules['1']" ID_MATCH"""
             ).run(
                 GUARDS_FILE.getvalue()
             )
