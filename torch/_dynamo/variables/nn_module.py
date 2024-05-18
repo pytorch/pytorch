@@ -627,7 +627,6 @@ class NNModuleVariable(VariableTracker):
             if isinstance(args[0], SliceVariable):
                 # Build a TupleVariable of NNModules
                 result = []
-                submods = []
 
                 # Turn the slice into the list of integers
                 keys = list(range(len(module)))[args[0].as_python_constant()]
@@ -641,9 +640,8 @@ class NNModuleVariable(VariableTracker):
                             source=src,
                         )
                     )
-                    submods.append(submod)
 
-                new_module = torch.nn.Sequential(*submods)
+                new_module = module[args[0].as_python_constant()]
                 new_module_variable = tx.output.register_attr_or_module(
                     new_module,
                     f"{self}.__getitem__(slice)",
