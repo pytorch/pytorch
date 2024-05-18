@@ -420,7 +420,7 @@ public:
     return map(calc_erfinv);
   }
 
-#if defined(__ARM_NEON)
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
   // Copy from https://github.com/ARM-software/optimized-routines/blob/master/math/aarch64/v_expf.c with minor changes:
   // 1. Assume WANT_SIMD_EXCEPT in the original code is 0
   // 2. Use vector registers to hold the const values
@@ -482,17 +482,17 @@ public:
 
     return vfmaq_f32(scale, poly, scale);
   }
-#endif // defined(__ARM_NEON)
+#endif // defined(__ARM_NEON__) || defined(__ARM_NEON)
 
   Vectorized<float> exp() const {
-#if defined(__ARM_NEON)
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
     return Vectorized<float>(neon_exp(values.val[0]), neon_exp(values.val[1]));
 #else
     return USE_SLEEF(
       Vectorized<float>(Sleef_expf4_u10(values.val[0]), Sleef_expf4_u10(values.val[1])),
       map(std::exp)
     );
-#endif // defined(__ARM_NEON)
+#endif // defined(__ARM_NEON__) || defined(__ARM_NEON)
   }
   Vectorized<float> exp2() const {
     return USE_SLEEF(
