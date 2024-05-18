@@ -279,6 +279,7 @@ test_case = "toy_transformer"  # "simple_mlp" / "simple_seq_module" / "nested_fu
 balanced = True
 mixed_precision = False  # TODO(yf225): when True, fails accuracy test, needs debugging
 apply_fsdp = True
+enable_1st_eager_run = False
 
 def create_input(hidden_dim):
     torch.manual_seed(0)
@@ -472,21 +473,41 @@ local_rank = int(os.environ["LOCAL_RANK"])
 world_size = int(os.environ["WORLD_SIZE"])
 
 
-def run(model, optim, n_iter, hidden_dim):
+def compiler_fn(backend):
+    def _fn(gm):
+        # if dist.get_rank() == 0:
+        #     # HACK: delay rank 0 by X seconds, so that rank 1 will always fail first.
+        #     import time
+        #     time.sleep(600)
+        torch_log.warning("Compiling autograd?")
+        return torch.compile(gm, backend=backend, fullgraph=False)
+    return _fn
+
+
+def run(model, optim, n_iter, hidden_dim, use_compiled_autograd=False):
     torch.manual_seed(42)
     losses = []
     for i in range(n_iter):
+        if i == 0:
+            backend = "eager"
+        else:
+            backend = "inductor"
         torch_log.warning(f"Starting iteration: {i}")
         optim.zero_grad(set_to_none=True)
         inp = create_input(hidden_dim)
-        torch_log.warning("FORWARD")
-        out = model(inp)
-        torch_log.warning("END FORWARD")
-        loss = out.sum()
-        losses.append(loss.item())
-        torch_log.warning("BACKWARD")
-        # torch_log.warning("OUT GRAPH\n%s", make_dot(loss))
-        loss.backward()
+        if use_compiled_autograd:
+            compiled_autograd_ctx = compiled_autograd.enable(compiler_fn(backend))
+        else:
+            compiled_autograd_ctx = contextlib.nullcontext()
+        with compiled_autograd_ctx:
+            torch_log.warning("FORWARD")
+            out = model(inp)
+            torch_log.warning("END FORWARD")
+            loss = out.sum()
+            losses.append(loss.item())
+            torch_log.warning("BACKWARD")
+            # torch_log.warning("OUT GRAPH\n%s", make_dot(loss))
+            loss.backward()
         torch_log.warning("END BACKWARD")
         optim.step()
         del loss
@@ -500,17 +521,10 @@ def run(model, optim, n_iter, hidden_dim):
 
 def main_compiled(n_iter, activation_checkpoint, backend):
     model, optim, hidden_dim = init(activation_checkpoint=activation_checkpoint)
-    # per-param FSDP does lazy init using 1st run, so run it once to init using eager mode
-    run(model, optim, 1, hidden_dim)
-    print("done eager 1st run for compiled!")
-
-    def compiler_fn(gm):
-        # if dist.get_rank() == 0:
-        #     # HACK: delay rank 0 by X seconds, so that rank 1 will always fail first.
-        #     import time
-        #     time.sleep(600)
-        torch_log.warning("Compiling autograd?")
-        return torch.compile(gm, backend=backend, fullgraph=False)
+    if enable_1st_eager_run:
+        # per-param FSDP does lazy init using 1st run, so run it once to init using eager mode
+        run(model, optim, 1, hidden_dim)
+        print("done eager 1st run for compiled!")
 
     if apply_fsdp:
         torch._dynamo.config.trace_distributed = True
@@ -523,8 +537,7 @@ def main_compiled(n_iter, activation_checkpoint, backend):
     #     import time
     #     time.sleep(600)
     model_compiled = torch.compile(model, backend=backend, fullgraph=False)
-    with compiled_autograd.enable(compiler_fn):
-        res = run(model_compiled, optim, n_iter, hidden_dim)
+    res = run(model_compiled, optim, n_iter, hidden_dim, use_compiled_autograd=True)
     print(f"res: {res}")
     torch._dynamo.reset()
     for state in torch.distributed._composable_state._module_state_mapping.values():
@@ -548,9 +561,10 @@ def main_compiled(n_iter, activation_checkpoint, backend):
 
 def main_eager(n_iter, activation_checkpoint):
     model, optim, hidden_dim = init(activation_checkpoint=activation_checkpoint)
-    # per-param FSDP does lazy init using 1st run, so run it once to init using eager mode
-    run(model, optim, 1, hidden_dim)
-    print("done eager 1st run for eager!")
+    if enable_1st_eager_run:
+        # per-param FSDP does lazy init using 1st run, so run it once to init using eager mode
+        run(model, optim, 1, hidden_dim)
+        print("done eager 1st run for eager!")
 
     res = run(model, optim, n_iter, hidden_dim)
     for state in torch.distributed._composable_state._module_state_mapping.values():
