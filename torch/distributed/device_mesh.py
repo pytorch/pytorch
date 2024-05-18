@@ -151,6 +151,14 @@ else:
         """
         return getattr(torch, device_type, None)
 
+    _mesh_dim_group_options: Dict[int, Tuple[str, ProcessGroup.Options]] = {}
+
+    def _set_mesh_dim_group_options(
+        dim: int, backend: str, pg_options: ProcessGroup.Options
+    ) -> None:
+        global _mesh_dim_group_options
+        _mesh_dim_group_options[dim] = (backend, pg_options)
+
     class DeviceMesh:
         """
         DeviceMesh represents a mesh of devices, where layout of devices could be
@@ -300,7 +308,15 @@ else:
                         # We temporarily revert the re-use subgroup, since it breaks two internal tests.
                         # Temporarily reverting to resolve test timeout while root-causing.
                         # TODO: Add two tests to cover internal tests scenarios and re-enable reuse subgroup if exists.
-                        dim_group = new_group(ranks=subgroup_ranks)
+                        if dim in _mesh_dim_group_options:
+                            backend, pg_options = _mesh_dim_group_options[dim]
+                        else:
+                            backend, pg_options = None, None
+                        dim_group = new_group(
+                            ranks=subgroup_ranks,
+                            backend=backend,
+                            pg_options=pg_options,
+                        )
 
                         # only add to dim_groups if the current rank in the subgroup
                         if self.get_rank() in subgroup_ranks:
