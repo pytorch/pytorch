@@ -240,9 +240,8 @@ class NumBytesMetricTests(TestCase):
         def f(a, b):
             return torch.cat([torch.softmax(a, dim=-1), torch.softmax(b, dim=-1)]).cos()
 
-        # potentially beneficial to fuse but we exclude reductions from pointwise cat
         inp = (T(10, 10), T(10, 10))
-        self.assertExpectedInline(count_numel(f, *inp), """800""")
+        self.assertExpectedInline(count_numel(f, *inp), """680""")
 
         # Should turn into pointwise even if only some of inputs are pointwise.
         def f(a, b):
@@ -263,6 +262,13 @@ class NumBytesMetricTests(TestCase):
         def f(a, b):
             out = torch.cat([a, b])
             return out.cos()
+
+        inp = (T(10, 10), T(10, 10))
+        self.assertExpectedInline(count_numel(f, *inp), """400""")
+
+        def f(a, b):
+            b = b.cos()
+            return torch.cat([a, b])
 
         inp = (T(10, 10), T(10, 10))
         self.assertExpectedInline(count_numel(f, *inp), """400""")

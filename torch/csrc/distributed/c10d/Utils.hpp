@@ -4,7 +4,6 @@
 #include <c10/util/Exception.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
-#include <fmt/format.h>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 
 #ifdef _WIN32
@@ -67,7 +66,8 @@ inline void assertSameType(
       const std::string expected = type.toString();
       const std::string actual = tensors[i].toString();
       throw std::invalid_argument(
-          fmt::format("mixed types ({} and {})", expected, actual));
+          // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
+          "mixed types (" + expected + " and " + actual + ")");
     }
   }
 }
@@ -195,7 +195,8 @@ inline void assertSameSizes(
       const auto expected = toString(sizes);
       const auto actual = toString(tensors[i].sizes());
       throw std::invalid_argument(
-          fmt::format("mixed sizes ({} and {})", expected, actual));
+          // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
+          "mixed sizes (" + expected + " and " + actual + ")");
     }
   }
 }
@@ -213,14 +214,18 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
     if (!tensors[i].options().type_equal(options)) {
       const auto expected = toString(options);
       const auto actual = toString(tensors[i].options());
-      throw std::invalid_argument(fmt::format(
-          "argument contains mixed types ({} and {})", expected, actual));
+      throw std::invalid_argument(
+          // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
+          "argument contains mixed types (" + expected + " and " + actual +
+          ")");
     }
     if (!tensors[i].sizes().equals(sizes)) {
       const auto expected = toString(sizes);
       const auto actual = toString(tensors[i].sizes());
-      throw std::invalid_argument(fmt::format(
-          "argument contains mixed types ({} and {})", expected, actual));
+      throw std::invalid_argument(
+          // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
+          "argument contains mixed types (" + expected + " and " + actual +
+          ")");
     }
   }
 }
@@ -606,6 +611,8 @@ using SizeType = uint64_t;
 // this common case with `SYSCHECK`.
 // Since SOCKET_ERROR = -1 in MSVC, so also leverage SYSCHECK_ERR_RETURN_NEG1
 #define SYSCHECK_ERR_RETURN_NEG1(expr) SYSCHECK(expr, __output != -1)
+
+void checkForNan(const at::Tensor& tensor);
 
 namespace tcputil {
 

@@ -55,7 +55,6 @@ def is_constant_pg_functions(value):
         return False
 
     from torch.distributed.distributed_c10d import (
-        _get_group_rank_by_name,
         _get_group_size_by_name,
         _get_group_tag,
         _rank_not_in_group,
@@ -64,7 +63,6 @@ def is_constant_pg_functions(value):
     )
 
     constant_processgroup_functions = [
-        _get_group_rank_by_name,
         _get_group_size_by_name,
         _get_group_tag,
         _rank_not_in_group,
@@ -108,6 +106,9 @@ class PlacementClassVariable(DistributedVariable):
         from torch.distributed._tensor.placement_types import Placement
 
         return type(value) is type and issubclass(value, Placement)
+
+    def as_python_constant(self):
+        return self.value
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"

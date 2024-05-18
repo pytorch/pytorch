@@ -63,23 +63,23 @@ class TORCH_API CPUContext final : public BaseContext {
       return (static_cast<uint64_t>(random1) << 32) | random2;
     }
 
-    c10::optional<float> next_float_normal_sample() {
+    std::optional<float> next_float_normal_sample() {
       return next_float_normal_sample_;
     }
-    c10::optional<double> next_double_normal_sample() {
+    std::optional<double> next_double_normal_sample() {
       return next_double_normal_sample_;
     }
-    void set_next_float_normal_sample(c10::optional<float> randn) {
+    void set_next_float_normal_sample(std::optional<float> randn) {
       next_float_normal_sample_ = randn;
     }
-    void set_next_double_normal_sample(c10::optional<double> randn) {
+    void set_next_double_normal_sample(std::optional<double> randn) {
       next_double_normal_sample_ = randn;
     }
 
    private:
     at::mt19937 engine_;
-    c10::optional<float> next_float_normal_sample_;
-    c10::optional<double> next_double_normal_sample_;
+    std::optional<float> next_float_normal_sample_;
+    std::optional<double> next_double_normal_sample_;
   };
 #else
   typedef std::mt19937 rand_gen_type;

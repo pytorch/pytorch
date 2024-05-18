@@ -59,7 +59,6 @@ from torch.testing._internal.common_utils import (
     markDynamoStrictTest,
     parametrize,
     run_tests,
-    skipIfRocm,
     skipIfTorchDynamo,
     subtest,
     TEST_WITH_TORCHDYNAMO,
@@ -4200,8 +4199,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("tril"),  # Exception not raised on error input
                 xfail("triu"),  # Exception not raised on error input
                 xfail("as_strided", "partial_views"),
-                # https://github.com/pytorch/pytorch/issues/96560
-                decorate("nn.functional.batch_norm", decorator=skipIfRocm),
                 # RuntimeError: output with shape [4, 4] doesn't match the broadcast shape [1, 4, 4]
                 xfail("addcdiv"),
                 xfail("addcmul"),
@@ -4375,8 +4372,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("linalg.lu", ""),
                 skip("linalg.ldl_solve", ""),
                 skip("_softmax_backward_data"),
-                # https://github.com/pytorch/pytorch/issues/96560
-                decorate("nn.functional.batch_norm", decorator=skipIfRocm),
                 # One or more of the overload doesn't have a Batch rule.
                 xfail("bincount"),
                 # RuntimeError: Expected all tensors to be on the same device,
