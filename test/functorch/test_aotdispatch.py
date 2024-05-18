@@ -103,7 +103,12 @@ except ImportError:
 
 class AOTTestCase(TestCase):
     def setUp(self):
+        self.prev_grad_state = torch.is_grad_enabled()
         super().setUp()
+
+    def tearDown(self):
+        torch.set_grad_enabled(self.prev_grad_state)
+        super().tearDown()
 
 
 class TestPythonKey(AOTTestCase):

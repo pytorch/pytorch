@@ -1,3 +1,4 @@
+import argparse
 import itertools
 from collections import defaultdict
 from dataclasses import asdict, dataclass
@@ -98,7 +99,7 @@ def generate_inputs(
     return query, key, value
 
 
-def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
+def run_single_experiment(config: ExperimentConfig, dynamic=False) -> ExperimentResults:
     device = torch.device("cuda")
     query, key, value = generate_inputs(
         config.batch_size,
@@ -113,7 +114,7 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
     def eager_sdpa(query, key, value, _):
         return F.scaled_dot_product_attention(query, key, value)
 
-    compiled_sdpa = torch.compile(_flex_attention)
+    compiled_sdpa = torch.compile(_flex_attention, dynamic=dynamic)
 
     score_mod = config.score_mod
 
@@ -242,16 +243,26 @@ def generate_experiment_configs() -> List[ExperimentConfig]:
     return all_configs
 
 
-def main():
+def main(dynamic=False):
     seed = 123
     np.random.seed(seed)
     torch.manual_seed(seed)
     results = []
     for config in tqdm(generate_experiment_configs()):
-        results.append(Experiment(config, run_single_experiment(config)))
+        results.append(
+            Experiment(config, run_single_experiment(config, dynamic=dynamic))
+        )
 
     print_results(results)
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--dynamic",
+        action="store_true",
+        help="Runs a dynamic shapes version of compiled flex attention.",
+    )
+
+    args = parser.parse_args()
+    main(args.dynamic)

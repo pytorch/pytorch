@@ -588,6 +588,15 @@ test_inductor_torchbench_smoketest_perf() {
       "$TEST_REPORTS_DIR/inductor_training_smoketest_$test.csv" \
       --expected benchmarks/dynamo/expected_ci_perf_inductor_torchbench.csv
   done
+
+  # Perform some "warm-start" runs for a few huggingface models.
+  for test in AlbertForQuestionAnswering AllenaiLongformerBase DistilBertForMaskedLM DistillGPT2 GoogleFnet YituTechConvBert; do
+    python benchmarks/dynamo/huggingface.py --accuracy --training --amp --inductor --device cuda --warm-start-latency \
+      --only $test --output "$TEST_REPORTS_DIR/inductor_warm_start_smoketest_$test.csv"
+    python benchmarks/dynamo/check_accuracy.py \
+      --actual "$TEST_REPORTS_DIR/inductor_warm_start_smoketest_$test.csv" \
+      --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_huggingface_training.csv"
+  done
 }
 
 test_inductor_torchbench_cpu_smoketest_perf(){
@@ -1269,6 +1278,10 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHAR
 elif [[ "${TEST_CONFIG}" == *dynamo* && $SHARD_NUMBER -gt 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   test_dynamo_shard "${SHARD_NUMBER}"
+elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
+  install_torchvision
+  test_python_shard "$SHARD_NUMBER"
+  test_aten
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
@@ -1298,10 +1311,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
   test_libtorch
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
-elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
-  install_torchvision
-  test_python
-  test_aten
 elif [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
   install_torchvision
   test_python

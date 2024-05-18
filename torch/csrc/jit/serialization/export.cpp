@@ -189,7 +189,7 @@ std::string GetFileRootPath(const std::string& rootPath) {
 }
 
 std::string GetExternalFileName(
-    const c10::optional<std::string>& external_ref) {
+    const std::optional<std::string>& external_ref) {
   auto tensorName = external_ref.value();
   const std::string illegalChars = "\\/:?\"<>|";
   for (char& i : tensorName) {
@@ -343,7 +343,7 @@ class GraphEncoder {
   void EncodeTensor(
       onnx::TensorProto* tensor_proto,
       const at::Tensor& tensor,
-      const c10::optional<std::string> external_ref = {},
+      const std::optional<std::string> external_ref = {},
       const bool use_external_data_format = false,
       const std::string& onnx_file_path = std::string());
 
@@ -1280,7 +1280,7 @@ void GraphEncoder::EncodeTypeProto(
 void GraphEncoder::EncodeTensor(
     onnx::TensorProto* tensor_proto,
     const at::Tensor& tensor,
-    const c10::optional<std::string> external_ref,
+    const std::optional<std::string> external_ref,
     const bool use_external_data_format,
     const std::string& onnx_file_path) {
   for (auto d : tensor.sizes()) {

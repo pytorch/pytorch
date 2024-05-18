@@ -25,7 +25,7 @@ TORCH_META_FUNC(avg_pool3d) (
   IntArrayRef padding,
   bool ceil_mode,
   bool count_include_pad,
-  c10::optional<int64_t> divisor_override
+  std::optional<int64_t> divisor_override
 ) {
   // #20866, #22032: Guarantee this for the official C++ API?
   TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 3,
@@ -94,7 +94,7 @@ TORCH_META_FUNC(avg_pool3d_backward) (
   IntArrayRef padding,
   bool ceil_mode,
   bool count_include_pad,
-  c10::optional<int64_t> divisor_override
+  std::optional<int64_t> divisor_override
 ) {
   // #20866, #22032: Guarantee this for the official C++ API?
   TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 3,
@@ -174,7 +174,7 @@ static void avg_pool3d_out_frame(
           int padW,
           int padH,
           bool count_include_pad,
-          c10::optional<int64_t> divisor_override)
+          std::optional<int64_t> divisor_override)
 {
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
     for (const auto k : c10::irange(start, end)) {
@@ -261,7 +261,7 @@ TORCH_IMPL_FUNC(avg_pool3d_out_cpu) (
   IntArrayRef padding,
   bool ceil_mode,
   bool count_include_pad,
-  c10::optional<int64_t> divisor_override,
+  std::optional<int64_t> divisor_override,
   const Tensor& output
 ) {
   const int kT = safe_downcast<int, int64_t>(kernel_size[0]);
@@ -362,7 +362,7 @@ static void avg_pool3d_backward_out_frame(
           int padW,
           int padH,
           bool count_include_pad,
-          c10::optional<int64_t> divisor_override)
+          std::optional<int64_t> divisor_override)
 {
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
     for (const auto k : c10::irange(start, end)) {
@@ -441,7 +441,7 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_cpu) (
   IntArrayRef padding,
   bool ceil_mode,
   bool count_include_pad,
-  c10::optional<int64_t> divisor_override,
+  std::optional<int64_t> divisor_override,
   const Tensor& gradInput
 ) {
   const int kT = safe_downcast<int, int64_t>(kernel_size[0]);

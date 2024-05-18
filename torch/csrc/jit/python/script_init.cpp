@@ -207,7 +207,7 @@ void checkOverloadDecl(const Decl& new_decl, const Decl& old_decl) {
   }
 }
 
-c10::optional<IValue> tryCalculateDefaultParam(
+std::optional<IValue> tryCalculateDefaultParam(
     const Argument& arg,
     const py::object& def_value) {
   auto n = arg.N();
@@ -287,7 +287,7 @@ FunctionSchema getSchemaWithNameAndDefaults(
     auto it = default_args.find(arg.name());
     if (it != default_args.end()) {
       checkMutableFunctionDefault(range, arg, it->second);
-      c10::optional<IValue> value = tryCalculateDefaultParam(arg, it->second);
+      std::optional<IValue> value = tryCalculateDefaultParam(arg, it->second);
       if (!value) {
         ErrorReport error(range);
         error << "Expected a default value of type " << arg.type()->repr_str()
@@ -1369,10 +1369,10 @@ void initJitScriptBindings(PyObject* module) {
           [](std::shared_ptr<CompilationUnit> self, const std::string& name) {
             auto fn = self->find_function(QualifiedName(name));
             if (fn) {
-              return c10::optional<StrongFunctionPtr>(
+              return std::optional<StrongFunctionPtr>(
                   StrongFunctionPtr(std::move(self), fn));
             } else {
-              return c10::optional<StrongFunctionPtr>(c10::nullopt);
+              return std::optional<StrongFunctionPtr>(c10::nullopt);
             }
           })
       .def(
@@ -1852,7 +1852,7 @@ void initJitScriptBindings(PyObject* module) {
          py::object map_location,
          const py::dict& extra_files,
          bool restore_shapes = false) {
-        c10::optional<at::Device> optional_device;
+        std::optional<at::Device> optional_device;
         if (!map_location.is_none()) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
@@ -1877,7 +1877,7 @@ void initJitScriptBindings(PyObject* module) {
              storage_context,
          py::object map_location,
          std::string ts_id) {
-        c10::optional<at::Device> optional_device;
+        std::optional<at::Device> optional_device;
         if (!map_location.is_none()) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
@@ -1898,7 +1898,7 @@ void initJitScriptBindings(PyObject* module) {
          const py::dict& extra_files,
          bool restore_shapes = false) {
         std::istringstream in(buffer);
-        c10::optional<at::Device> optional_device;
+        std::optional<at::Device> optional_device;
         if (!map_location.is_none()) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
@@ -1918,7 +1918,7 @@ void initJitScriptBindings(PyObject* module) {
   m.def(
       "_load_for_lite_interpreter",
       [](const std::string& filename, py::object map_location) {
-        c10::optional<at::Device> optional_device;
+        std::optional<at::Device> optional_device;
         if (!map_location.is_none()) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
@@ -1930,7 +1930,7 @@ void initJitScriptBindings(PyObject* module) {
       "_load_for_lite_interpreter_from_buffer",
       [](const std::string& buffer, py::object map_location) {
         std::istringstream in(buffer);
-        c10::optional<at::Device> optional_device;
+        std::optional<at::Device> optional_device;
         if (!map_location.is_none()) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
@@ -1975,7 +1975,7 @@ void initJitScriptBindings(PyObject* module) {
   m.def(
       "_get_model_extra_files",
       [](const std::string& filename, const py::dict& py_extra_files) {
-        c10::optional<at::Device> optional_device;
+        std::optional<at::Device> optional_device;
         ExtraFilesMap cpp_extra_files = ExtraFilesMap();
         _load_for_mobile(filename, optional_device, cpp_extra_files);
         extra_files_to_python(cpp_extra_files, py_extra_files);
@@ -1990,7 +1990,7 @@ void initJitScriptBindings(PyObject* module) {
   m.def(
       "_get_model_extra_files_from_buffer",
       [](const std::string& buffer, const py::dict& py_extra_files) {
-        c10::optional<at::Device> optional_device;
+        std::optional<at::Device> optional_device;
         ExtraFilesMap cpp_extra_files = ExtraFilesMap();
         std::istringstream in(buffer);
         _load_for_mobile(in, optional_device, cpp_extra_files);
@@ -2124,7 +2124,7 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def(
       "_get_graph_executor_optimize",
-      [](c10::optional<bool> new_setting = c10::nullopt) {
+      [](std::optional<bool> new_setting = c10::nullopt) {
         bool old_value = getGraphExecutorOptimize();
         if (new_setting) {
           setGraphExecutorOptimize(*new_setting);

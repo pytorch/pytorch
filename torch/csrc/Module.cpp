@@ -168,12 +168,14 @@ static PyObject* THPModule_initExtension(
     PyObject* shm_manager_path) {
   HANDLE_TH_ERRORS
 #if !defined(FBCODE_CAFFE2)
-  if (torch::get_cpp_stacktraces_enabled() && !torch::get_disable_addr2line()) {
+  if (torch::get_cpp_stacktraces_enabled()) {
     c10::SetStackTraceFetcher([]() -> std::string {
       auto tb = torch::CapturedTraceback::gather(false, false, true);
-      LOG(WARNING)
-          << "symbolizing C++ stack trace for exception; if this hangs, rerun with TORCH_DISABLE_ADDR2LINE=1..."
-          << std::endl;
+      if (torch::get_symbolize_mode() == torch::unwind::Mode::addr2line) {
+        LOG(WARNING)
+            << "symbolizing C++ stack trace for exception; if this hangs, rerun with TORCH_DISABLE_ADDR2LINE=1..."
+            << std::endl;
+      }
       auto s_tbs = torch::symbolize({tb.get()});
       std::stringstream oss;
       oss << "C++ CapturedTraceback:" << std::endl;
@@ -396,10 +398,10 @@ PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
 
   // The TensorImpls contain PyObjectSlots that have a reference to the PyObject
   // associated with the TensorImpl. Swap this field as well.
-  c10::optional<PyObject*> mb_obj_a =
+  std::optional<PyObject*> mb_obj_a =
       a->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
           getPyInterpreter(), /*ignore_hermetic_tls=*/false);
-  c10::optional<PyObject*> mb_obj_b =
+  std::optional<PyObject*> mb_obj_b =
       b->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
           getPyInterpreter(), /*ignore_hermetic_tls=*/false);
   TORCH_INTERNAL_ASSERT(
@@ -1803,7 +1805,7 @@ Call this whenever a new thread is created in order to propagate values from
       "_select_conv_backend",
       [](const at::Tensor& input,
          const at::Tensor& weight,
-         const c10::optional<at::Tensor>& bias_opt,
+         const std::optional<at::Tensor>& bias_opt,
          at::SymIntArrayRef stride_,
          at::SymIntArrayRef padding_,
          at::SymIntArrayRef dilation_,
@@ -1837,14 +1839,14 @@ Call this whenever a new thread is created in order to propagate values from
       "_select_conv_backend",
       [](const at::Tensor& input,
          const at::Tensor& weight,
-         const c10::optional<at::Tensor>& bias,
+         const std::optional<at::Tensor>& bias,
          at::SymIntArrayRef stride_,
          at::SymIntArrayRef padding_,
          at::SymIntArrayRef dilation_,
          bool transposed_,
          at::SymIntArrayRef output_padding_,
          c10::SymInt groups_,
-         c10::optional<std::vector<c10::SymInt>> bias_sizes_opt) {
+         std::optional<std::vector<c10::SymInt>> bias_sizes_opt) {
         c10::OptionalArrayRef<c10::SymInt> ref = c10::nullopt;
         if (bias_sizes_opt) {
           ref = (*bias_sizes_opt);
@@ -1883,7 +1885,7 @@ Call this whenever a new thread is created in order to propagate values from
       .def(py::init([](at::Tensor const& query,
                        at::Tensor const& key,
                        at::Tensor const& value,
-                       c10::optional<at::Tensor> attn_mask,
+                       std::optional<at::Tensor> attn_mask,
                        double dropout,
                        bool is_causal) {
         return sdp::sdp_params{
@@ -2034,7 +2036,7 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def(
       "_get_accelerator",
-      [](c10::optional<bool> check = c10::nullopt) {
+      [](std::optional<bool> check = c10::nullopt) {
         return c10::Device(
             at::getAccelerator(check.value_or(false))
                 .value_or(c10::DeviceType::CPU),
@@ -2175,7 +2177,7 @@ Call this whenever a new thread is created in order to propagate values from
       _DeviceDtypeHasher>;
   py_module.def(
       "_group_tensors_by_device_and_dtype",
-      [](const std::vector<std::vector<c10::optional<at::Tensor>>>&
+      [](const std::vector<std::vector<std::optional<at::Tensor>>>&
              nested_tensorlist,
          const bool with_indices) {
         _FlatMap map;

@@ -162,7 +162,7 @@ sdpa_template = TritonTemplate(
 
     # TODO generalize and add proper mask support
     mask = (idx_m != -1) & (idx_d != -1)
-    {{store_output(("idx_z", "idx_h", "idx_m", "idx_d"), "acc")}}
+    {{store_output(("idx_z", "idx_h", "idx_m", "idx_d"), "acc", "mask")}}
 
     # TODO dont want to write this if we dont require grad
     if OUTPUT_LOGSUMEXP:

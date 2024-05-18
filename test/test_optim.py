@@ -699,8 +699,8 @@ class TestOptimRenewed(TestCase):
         assert impl in ("foreach", "fused")
         if impl == "foreach" and "foreach" not in optim_info.supported_impls:
             return unittest.skip(f"foreach not supported for {optim_info.optim_cls.__name__}")
-        elif impl == "fused" and "fused" not in optim_info.supported_impls:
-            return unittest.skip(f"fused not supported for {optim_info.optim_cls.__name__}")
+        elif impl == "fused" and "cuda" not in optim_info.supports_fused_on:
+            return unittest.skip(f"fused not supported for {optim_info.optim_cls.__name__} on cuda")
 
         params = [
             torch.rand(2, 3, dtype=torch.float64, device='cuda:0', requires_grad=True),
@@ -911,6 +911,8 @@ class TestOptimRenewed(TestCase):
     @onlyCUDA
     @optims([optim for optim in optim_db if "fused" in optim.supported_impls], dtypes=[torch.float32])
     def test_fused_does_not_step_if_foundinf(self, device, dtype, optim_info):
+        if device not in optim_info.supports_fused_on:
+            self.skipTest(f"{device} is not supported for fused on {optim_info.optim_cls.__name__}")
         optim_cls = optim_info.optim_cls
         optim_inputs = optim_info.optim_inputs_func(device=device)
         num_params = 5
@@ -940,9 +942,12 @@ class TestOptimRenewed(TestCase):
         # Since this is a unit test, it is more expedient to simulate what the state_dict
         # would look like, which is basically CPU tensors with fused/capturable flag = True.
         optim_cls = optim_info.optim_cls
-        if optim_cls.__name__ == "SGD" and impl == "capturable":
-            # Capturable SGD does not exist
+        opt_name = optim_cls.__name__
+        if opt_name in ("SGD", "Adagrad", ) and impl == "capturable":
+            # Capturable SGD/Adagrad does not exist
             self.skipTest("SGD does not currently support capturable")
+        if impl == "fused" and device not in optim_info.supports_fused_on:
+            self.skipTest(f"{device} is not supported for fused on {opt_name}")
 
         cpu_optim_inputs = optim_info.optim_inputs_func(device="cpu")
         for optim_input in cpu_optim_inputs:
@@ -1318,6 +1323,8 @@ class TestOptimRenewed(TestCase):
             return closure_loss if optim_info.step_requires_closure else None
 
         for optim_input in cpu_optim_inputs:
+            if "fused" in optim_input.kwargs and "cuda" not in optim_info.supports_fused_on:
+                self.skipTest(f"cuda is not supported for fused on {optim_cls.__name__}")
             params = [Parameter(torch.randn(2, 3, device="cpu", dtype=dtype)) for _ in range(2)]
             for p in params:
                 p.grad = torch.randn_like(p)
