@@ -131,7 +131,7 @@ struct VerboseLogger {
         continue;
       }
       oss << it->key_size;
-      if (std::next(it) == cached_keys.end()) {
+      if (std::next(it) != cached_keys.end()) {
         oss << ",";
       }
     }
