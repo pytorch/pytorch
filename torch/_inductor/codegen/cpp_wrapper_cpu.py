@@ -1270,7 +1270,7 @@ class CppWrapperCpu(WrapperCodeGen):
         for arg in args:
             try:
                 arg_types.append(V.graph.get_dtype(arg))
-            except KeyError:
+            except (KeyError, TypeError):
                 # arg is not a tensor, generate_args_decl will further detect type
                 arg_types.append(None)
 

@@ -30,9 +30,7 @@ def is_int(s: str) -> bool:
         s = s[:-1]
     try:
         int(s)
-    except ValueError:
-        return False
-    except TypeError:
+    except (ValueError, TypeError):
         return False
     return True
 
@@ -40,7 +38,7 @@ def is_int(s: str) -> bool:
 def is_float(s: str) -> bool:
     try:
         float(s)
-    except ValueError:
+    except (ValueError, TypeError):
         return False
     return True
 
@@ -122,7 +120,7 @@ class CppWrapperCuda(CppWrapperCpu):
             self.writeline("}")
 
     def generate_args_decl(self, call_args, arg_types):
-        dynamic_symbols = V.graph.sizevars.free_symbols()
+        dynamic_symbols = set(s.name for s in V.graph.sizevars.free_symbols())
         # TODO: only works for constant now, need type info
         new_args = []
         for arg, arg_type in zip(call_args, arg_types):
@@ -154,17 +152,14 @@ class CppWrapperCuda(CppWrapperCpu):
                                 f"CUdeviceptr {var_name} = reinterpret_cast<CUdeviceptr>({arg}.data_ptr());"
                             )
                         )
-            elif arg_type in (sympy.Integer, sympy.Symbol, SymbolicCallArg):
+            elif arg_type in (sympy.Integer, sympy.Symbol, SymbolicCallArg) or str(arg) in dynamic_symbols:
                 self.writeline(f"auto {var_name} = {arg};")
+            elif arg_type == sympy.Expr:
+                self.writeline(f"auto {var_name} = {self.expr_printer(arg)};")
             elif arg_type == int or is_int(arg):
                 self.writeline(f"int {var_name} = {arg};")
             elif arg_type in (sympy.Float, float) or is_float(arg):
                 self.writeline(f"float {var_name} = {self.expr_printer(arg)};")
-            elif arg_type == sympy.Expr:
-                self.writeline(f"auto {var_name} = {self.expr_printer(arg)};")
-            # TODO: the rest of the cases may be simplified since we have arg_type now
-            elif any(str(arg) == s.name for s in dynamic_symbols):
-                self.writeline(f"auto {var_name} = {arg};")
             elif arg == "nullptr":
                 self.writeline(f"auto {var_name} = nullptr;")
             elif arg == "c10::nullopt":
