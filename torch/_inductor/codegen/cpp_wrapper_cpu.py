@@ -1435,7 +1435,7 @@ class CppWrapperCpu(WrapperCodeGen):
         elif isinstance(buffer, ir.ExternKernel) and isinstance(buffer.op_overload, torch._ops.OpOverload):
             # NOTE: len(returns) > 1 is the MultiOutputLayout case and we explicitly
             # don't generate buffer free code for it (see above branch).
-            assert len(buffer.op_overload._schema.returns) == 1:
+            assert len(buffer.op_overload._schema.returns) == 1
             if isinstance(buffer.op_overload._schema.returns[0].type, torch.TensorType):
                 return f"{buffer.get_name()}.reset();"
             elif (
