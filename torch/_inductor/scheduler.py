@@ -160,134 +160,21 @@ kernel_name_to_op = {
 # This is the base class for both NodeSchedulerNode (where self.node is actually
 # meaningful) and FusedSchedulerNode (where self.node is not meaningful).
 class BaseSchedulerNode:
-    unmet_dependencies: Set[Dep]
-    read_writes: dependencies.ReadWrites
-    users: List["NodeUser"]
-    node: ir.Buffer
-    scheduler: "Scheduler"
-    inverse_users: List["BaseSchedulerNode"]
-    node_users: List["BaseSchedulerNode"]
-    group: Tuple[torch.device, Union[Sequence[Sequence[sympy.Expr]], str]]
     ancestors: Set[Any]
-    min_order: int
-    max_order: int
+    group: Tuple[torch.device, Union[Sequence[Sequence[sympy.Expr]], str]]
+    inverse_users: List["BaseSchedulerNode"]
     last_usage: Set[str]
+    max_order: int
+    min_order: int
+    node: ir.Buffer
+    node_users: List["BaseSchedulerNode"]
+    read_writes: dependencies.ReadWrites
+    scheduler: "Scheduler"
+    unmet_dependencies: Set[Dep]
+    users: List["NodeUser"]
 
-    @abstractmethod
-    def add_fake_dep(self, dep: Dep) -> None: ...  # noqa: E704
-    @abstractmethod
-    def add_mutation_dep(self, name: Dep) -> None: ...  # noqa: E704
-    @abstractmethod
-    def can_free(self) -> bool: ...  # noqa: E704
-    @abstractmethod
-    def can_inplace(self, read_dep: dependencies.Dep) -> bool: ...  # noqa: E704
     @abstractmethod
     def debug_str(self) -> str: ...  # noqa: E704
-    @abstractmethod
-    def get_aliases(self) -> Sequence[str]: ...  # noqa: E704
-    @abstractmethod
-    def get_device(self) -> torch.device: ...  # noqa: E704
-    @abstractmethod
-    def get_estimated_runtime(self) -> float: ...  # noqa: E704
-    @abstractmethod
-    def get_first_name(self) -> str: ...  # noqa: E704
-    @abstractmethod
-    def get_mutations(self) -> List[str]: ...  # noqa: E704
-    @abstractmethod
-    def get_name(self) -> str: ...  # noqa: E704
-    @abstractmethod
-    def get_names(self) -> Set[str]: ...  # noqa: E704
-    @abstractmethod
-    def get_nodes(self) -> Sequence["BaseSchedulerNode"]: ...  # noqa: E704
-    @abstractmethod
-    def get_template_node(self) -> Optional[ir.TemplateBuffer]: ...  # noqa: E704
-    @abstractmethod
-    def has_aliasing_or_mutation(self) -> bool: ...  # noqa: E704
-    @abstractmethod
-    def has_side_effects(self) -> bool: ...  # noqa: E704
-    @abstractmethod
-    def is_extern(self) -> bool: ...  # noqa: E704
-    @abstractmethod
-    def is_foreach(self) -> bool: ...  # noqa: E704
-    @abstractmethod
-    def is_reduction(self) -> bool: ...  # noqa: E704
-    @abstractmethod
-    def is_split_scan(self) -> bool: ...  # noqa: E704
-    @abstractmethod
-    def is_template(self) -> bool: ...  # noqa: E704
-    @abstractmethod
-    def log_details(self) -> None: ...  # noqa: E704
-    @abstractmethod
-    def op_counts(self) -> Counter[str]: ...  # noqa: E704
-    @abstractmethod
-    def prune_deps(self) -> None: ...  # noqa: E704
-
-    @abstractmethod
-    def prune_redundant_deps(  # noqa: E704
-        self, name_to_fused_node: Dict[str, "BaseSchedulerNode"]
-    ) -> None: ...
-
-    @abstractmethod
-    def prune_weak_deps(self) -> None: ...  # noqa: E704
-
-    @abstractmethod
-    def set_last_usage(  # noqa: E704
-        self, future_used_buffers: Set[str], mutation_real_name: Dict[str, str]
-    ) -> None: ...
-
-    @abstractmethod
-    def set_read_writes(self, rw: dependencies.ReadWrites) -> None: ...  # noqa: E704
-    @abstractmethod
-    def set_users(self, users: List["NodeUser"]) -> None: ...  # noqa: E704
-    @abstractmethod
-    def used_buffer_names(self) -> Set[str]: ...  # noqa: E704
-    @abstractmethod
-    def used_or_aliased_buffer_names(self) -> Set[str]: ...  # noqa: E704
-    @abstractmethod
-    def update_mutated_names(self, renames: Dict[str, str]) -> None: ...  # noqa: E704
-
-
-class NodeSchedulerNode(BaseSchedulerNode):
-    def __init__(self, scheduler: "Scheduler", node: ir.Buffer) -> None:
-        self.scheduler: Scheduler = scheduler
-        self.node = node
-        self.users: List[NodeUser] = []
-        self.inverse_users: List[BaseSchedulerNode] = []
-        self.node_users: List[BaseSchedulerNode] = []
-        self.set_read_writes(node.get_read_writes())
-        self.ancestors: Set[str] = set()
-        self.min_order: int
-        self.max_order: int
-        self.last_usage: Set[str] = (
-            set()
-        )  # buffers that won't be used after this kernel
-        self.written = False
-        self.group: Tuple[torch.device, Union[Sequence[Sequence[sympy.Expr]], str]]
-
-    def __repr__(self) -> str:
-        return f"{type(self).__name__}(name={self.get_name()!r})"
-
-    def debug_str(self) -> str:
-        """Longer form printout for trace logs"""
-        name = self.get_name()
-        lines = [
-            f"{name}: {type(self).__name__}({type(getattr(self, 'node', None)).__name__})",
-            f"{name}.writes = {pformat(self.read_writes.writes)}",
-            f"{name}.unmet_dependencies = {pformat(self.unmet_dependencies)}",
-            f"{name}.met_dependencies = {pformat(self.read_writes.reads - self.unmet_dependencies)}",
-            f"{name}.users = {self.users}",
-        ]
-        try:
-            lines += [
-                self.debug_str_extra(),
-            ]
-        except Exception:
-            log.warning("Ignoring error in debug_str()", exc_info=True)
-
-        return "\n".join(lines).rstrip()
-
-    def debug_str_extra(self) -> str:
-        return ""
 
     def log_details(self) -> None:
         log.info(
@@ -297,70 +184,45 @@ class NodeSchedulerNode(BaseSchedulerNode):
             self.read_writes.writes,
         )
 
-    def update_mutated_names(self, renames: Dict[str, str]) -> None:
-        self.set_read_writes(self.read_writes.rename(renames))
+    @abstractmethod
+    def update_mutated_names(self, renames: Dict[str, str]) -> None: ...  # noqa: E704
 
-    def add_mutation_dep(self, dep: Dep) -> None:
-        self.set_read_writes(self.read_writes.with_read(dep))
+    @abstractmethod
+    def add_mutation_dep(self, name: Dep) -> None: ...  # noqa: E704
 
     def add_fake_dep(self, dep: Dep) -> None:
         self.set_read_writes(self.read_writes.with_read(dep))
 
-    def set_users(self, users: List["NodeUser"]) -> None:
-        # deduplicate
-        result: Dict[int, NodeUser] = {}
-        for use in users:
-            if id(use.node) in result:
-                result[id(use.node)] = use.merge(result[id(use.node)])
-            else:
-                result[id(use.node)] = use
-        self.users = list(result.values())
+    @abstractmethod
+    def set_users(self, users: List["NodeUser"]) -> None: ...  # noqa: E704
 
-    def set_last_usage(
+    @abstractmethod
+    def set_last_usage(  # noqa: E704
         self, future_used_buffers: Set[str], mutation_real_name: Dict[str, str]
-    ) -> None:
-        used_buffers = self.used_or_aliased_buffer_names()
-        used_buffers = {mutation_real_name.get(k, k) for k in used_buffers}
-        self.last_usage = used_buffers - future_used_buffers
+    ) -> None: ...
 
-    def get_aliases(self) -> Sequence[str]:
-        return self.node.get_inputs_that_alias_output()
+    @abstractmethod
+    def get_aliases(self) -> Sequence[str]: ...  # noqa: E704
 
-    def get_mutations(self) -> List[str]:
-        return self.node.get_mutation_names()
+    @abstractmethod
+    def get_mutations(self) -> List[str]: ...  # noqa: E704
 
-    def has_aliasing_or_mutation(self) -> bool:
-        return bool(self.get_aliases() or self.get_mutations())
+    @abstractmethod
+    def has_aliasing_or_mutation(self) -> bool: ...  # noqa: E704
 
     def set_read_writes(self, rw: dependencies.ReadWrites) -> None:
         self.read_writes: dependencies.ReadWrites = rw
         self.unmet_dependencies = self.read_writes.reads
         self.prune_deps()
 
-    def op_counts(self) -> Counter[str]:
-        return self.read_writes.op_counts
+    @abstractmethod
+    def op_counts(self) -> Counter[str]: ...  # noqa: E704
 
-    def used_buffer_names(self) -> Set[str]:
-        return {
-            dep.name
-            for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes)
-        }
+    @abstractmethod
+    def used_buffer_names(self) -> Set[str]: ...  # noqa: E704
 
-    def used_or_aliased_buffer_names(self) -> Set[str]:
-        used_names = set()
-
-        deps = [
-            dep.name
-            for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes)
-        ]
-        while len(deps) > 0:
-            dep = deps.pop()
-            used_names.add(dep)
-            if V.graph.name_to_buffer.get(dep):
-                for alias in V.graph.name_to_buffer[dep].get_inputs_that_alias_output():
-                    if alias not in used_names:
-                        deps.append(alias)
-        return used_names
+    @abstractmethod
+    def used_or_aliased_buffer_names(self) -> Set[str]: ...  # noqa: E704
 
     def prune_deps(self) -> None:
         self.unmet_dependencies = {
@@ -377,25 +239,25 @@ class NodeSchedulerNode(BaseSchedulerNode):
         to_remove = {dep for dep in self.read_writes.reads if should_prune(dep)}
         self.set_read_writes(self.read_writes.remove_reads(to_remove))
 
-    def prune_redundant_deps(
+    @abstractmethod
+    def prune_redundant_deps(  # noqa: E704
         self, name_to_fused_node: Dict[str, "BaseSchedulerNode"]
-    ) -> None:
-        _prune_redundant_deps(self, name_to_fused_node)
+    ) -> None: ...  # noqa: E704
 
-    def get_name(self) -> str:
-        return self.node.get_name()
+    @abstractmethod
+    def get_name(self) -> str: ...  # noqa: E704
 
-    def get_first_name(self) -> str:
-        return self.get_name()
+    @abstractmethod
+    def get_first_name(self) -> str: ...  # noqa: E704
 
-    def get_names(self) -> Set[str]:
-        return {self.get_name()}
+    @abstractmethod
+    def get_names(self) -> Set[str]: ...  # noqa: E704
 
-    def get_nodes(self) -> Sequence["BaseSchedulerNode"]:
-        return [self]
+    @abstractmethod
+    def get_nodes(self) -> Sequence["BaseSchedulerNode"]: ...  # noqa: E704
 
-    def get_device(self) -> torch.device:
-        return self.node.get_device()
+    @abstractmethod
+    def get_device(self) -> torch.device: ...  # noqa: E704
 
     def is_reduction(self) -> bool:
         return False
@@ -418,168 +280,8 @@ class NodeSchedulerNode(BaseSchedulerNode):
     def has_side_effects(self) -> bool:
         return False
 
-    def get_template_node(self) -> Optional[ir.TemplateBuffer]:
-        return None
-
-    def decide_inplace_update(self) -> None:
-        """
-        Decide if there should be inplace updates for the node
-        and record the decision in the active kernel.
-        """
-        if not self.node.should_allocate():
-            return
-
-        if isinstance(self, (SchedulerNode,)) and (
-            self.node.get_inputs_that_alias_output() or self.node.get_mutation_names()
-        ):
-            return
-
-        if (
-            isinstance(self, (SchedulerNode,))
-            and config.inplace_buffers
-            and (
-                not isinstance(V.kernel, torch._inductor.codegen.triton.TritonKernel)
-                or getattr(V.kernel, "mutations", None) is not None
-            )
-        ):
-            from .codegen.wrapper import buffer_reuse_key
-
-            ordered_reads = sorted(self.read_writes.reads, key=lambda x: x.name)
-
-            for read in ordered_reads:
-                input_node: Optional[BaseSchedulerNode] = (
-                    self.scheduler.name_to_node.get(read.name)
-                )
-                if (
-                    input_node
-                    and V.graph.wrapper_code.can_reuse(input_node, self)
-                    and not isinstance(input_node, NopKernelSchedulerNode)
-                ):
-                    assert input_node.users is not None
-                    remaining_uses = [
-                        x
-                        for x in input_node.users
-                        if x.node.get_name()
-                        not in self.scheduler.available_buffer_names
-                    ]
-                    if (
-                        len(remaining_uses) == 1
-                        and remaining_uses[0].can_inplace
-                        and remaining_uses[0].node is self
-                        and not isinstance(
-                            input_node.node.get_layout(),
-                            (
-                                ir.MultiOutputLayout,
-                                ir.MutationLayoutSHOULDREMOVE,
-                            ),
-                        )
-                        and not (
-                            isinstance(
-                                input_node.node, (ir.FallbackKernel, ir.MultiOutput)
-                            )
-                            and len(input_node.node.get_inputs_that_alias_output()) > 0
-                        )
-                        and buffer_reuse_key(input_node.node)
-                        == buffer_reuse_key(self.node)
-                    ):
-                        # hacky check for if V.kernel is a real kernel or NullHandler
-                        if hasattr(V.kernel, "args"):
-                            # if there isn't a triton kernel, then we don't need to call triton-specific things.
-                            # but TODO this might be a convenient place to signal to the Collective kernels to inplace
-                            # (and, can we make "kernel" less generic of a name?)
-                            V.kernel.args.make_inplace(
-                                input_node.get_name(), self.get_name()
-                            )
-                            # mutations not tracked in cpp kernels
-                            if isinstance(
-                                V.kernel, torch._inductor.codegen.triton.TritonKernel
-                            ):
-                                V.kernel.mutations.add(input_node.get_name())
-                                V.kernel.mutations.add(self.get_name())
-
-                            # update last usage of reused node
-                            self.last_usage.discard(input_node.get_name())
-
-                            V.kernel.inplace_update_buffers[self.get_name()] = (
-                                input_node.get_name()
-                            )
-                        break
-
-    def allocate(self) -> None:
-        if not self.node.should_allocate():
-            return
-
-        if isinstance(self, (SchedulerNode,)) and (
-            self.node.get_inputs_that_alias_output() or self.node.get_mutation_names()
-        ):
-            V.graph.wrapper_code.codegen_allocation(self.node)
-            return
-
-        # hacky check for if V.kernel is a real kernel or NullHandler
-        if (
-            hasattr(V.kernel, "args")
-            and self.get_name() in V.kernel.inplace_update_buffers
-        ):
-            V.graph.wrapper_code.codegen_inplace_reuse(
-                self.scheduler.name_to_node[
-                    V.kernel.inplace_update_buffers[self.get_name()]
-                ].node,
-                self.node,
-            )
-        else:
-            V.graph.wrapper_code.codegen_allocation(self.node)
-
-    def can_free(self) -> bool:
-        # There's no real allocated buffer, no need to free it
-        if isinstance(self.node.layout, ir.NoneLayout):
-            return False
-        for use in self.users:
-            if isinstance(use.node, OutputNode):
-                return False
-        return True
-
-    def codegen_originating_info(
-        self, buffer: IndentedBuffer, only_once: bool = True
-    ) -> None:
-        if not config.comment_origin:
-            return
-
-        if only_once and self.written:
-            return
-        origins = self.node.origins
-        out_lines = []
-
-        for o in origins:
-            if o.op == "output":
-                # These are boring and samey
-                continue
-
-            out_lines.append("")
-            # TODO(voz): Should the pragma be constant somewhere?
-            out_lines.append("#pragma CMT ORIGIN:")
-            op_info_str = f"#pragma CMT {o.op} {o.target}"
-            if "seq_nr" in o.meta:
-                op_info_str = op_info_str + f" seq_nr:{o.meta['seq_nr']}"
-            out_lines.append(op_info_str)
-            if "stack_trace" in o.meta:
-                stack_trace = f"{o.meta['stack_trace']}"
-                stack_trace_last_line = stack_trace.split("|")[-1]
-                out_lines.append(
-                    "#pragma CMT "
-                    + stack_trace_last_line.replace("{", "{{")
-                    .replace("}", "}}")
-                    .replace("\n", "\\")
-                )
-                out_lines.append("#pragma CMT END ORIGIN")
-                out_lines.append("")
-
-        if len(out_lines) == 0:
-            return
-
-        # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
-        # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
-        buffer.writelines(out_lines)
-        self.written = True
+    @abstractmethod
+    def can_free(self) -> bool: ...  # noqa: E704
 
     def get_read_write_buffers_sizes(self) -> int:
         """
@@ -755,6 +457,292 @@ class NodeSchedulerNode(BaseSchedulerNode):
 
         return 0
 
+    @abstractmethod
+    def get_template_node(self) -> Optional[ir.TemplateBuffer]: ...  # noqa: E704
+
+
+class NodeSchedulerNode(BaseSchedulerNode):
+    def __init__(self, scheduler: "Scheduler", node: ir.Buffer) -> None:
+        self.scheduler: Scheduler = scheduler
+        self.node = node
+        self.users: List[NodeUser] = []
+        self.inverse_users: List[BaseSchedulerNode] = []
+        self.node_users: List[BaseSchedulerNode] = []
+        self.set_read_writes(node.get_read_writes())
+        self.ancestors: Set[str] = set()
+        self.min_order: int
+        self.max_order: int
+        self.last_usage: Set[str] = (
+            set()
+        )  # buffers that won't be used after this kernel
+        self.written = False
+        self.group: Tuple[torch.device, Union[Sequence[Sequence[sympy.Expr]], str]]
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}(name={self.get_name()!r})"
+
+    def debug_str(self) -> str:
+        """Longer form printout for trace logs"""
+        name = self.get_name()
+        lines = [
+            f"{name}: {type(self).__name__}({type(getattr(self, 'node', None)).__name__})",
+            f"{name}.writes = {pformat(self.read_writes.writes)}",
+            f"{name}.unmet_dependencies = {pformat(self.unmet_dependencies)}",
+            f"{name}.met_dependencies = {pformat(self.read_writes.reads - self.unmet_dependencies)}",
+            f"{name}.users = {self.users}",
+        ]
+        try:
+            lines += [
+                self.debug_str_extra(),
+            ]
+        except Exception:
+            log.warning("Ignoring error in debug_str()", exc_info=True)
+
+        return "\n".join(lines).rstrip()
+
+    def debug_str_extra(self) -> str:
+        return ""
+
+    def update_mutated_names(self, renames: Dict[str, str]) -> None:
+        self.set_read_writes(self.read_writes.rename(renames))
+
+    def add_mutation_dep(self, dep: Dep) -> None:
+        self.set_read_writes(self.read_writes.with_read(dep))
+
+    def set_users(self, users: List["NodeUser"]) -> None:
+        # deduplicate
+        result: Dict[int, NodeUser] = {}
+        for use in users:
+            if id(use.node) in result:
+                result[id(use.node)] = use.merge(result[id(use.node)])
+            else:
+                result[id(use.node)] = use
+        self.users = list(result.values())
+
+    def set_last_usage(
+        self, future_used_buffers: Set[str], mutation_real_name: Dict[str, str]
+    ) -> None:
+        used_buffers = self.used_or_aliased_buffer_names()
+        used_buffers = {mutation_real_name.get(k, k) for k in used_buffers}
+        self.last_usage = used_buffers - future_used_buffers
+
+    def get_aliases(self) -> Sequence[str]:
+        return self.node.get_inputs_that_alias_output()
+
+    def get_mutations(self) -> List[str]:
+        return self.node.get_mutation_names()
+
+    def has_aliasing_or_mutation(self) -> bool:
+        return bool(self.get_aliases() or self.get_mutations())
+
+    def op_counts(self) -> Counter[str]:
+        return self.read_writes.op_counts
+
+    def used_buffer_names(self) -> Set[str]:
+        return {
+            dep.name
+            for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes)
+        }
+
+    def used_or_aliased_buffer_names(self) -> Set[str]:
+        used_names = set()
+
+        deps = [
+            dep.name
+            for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes)
+        ]
+        while len(deps) > 0:
+            dep = deps.pop()
+            used_names.add(dep)
+            if V.graph.name_to_buffer.get(dep):
+                for alias in V.graph.name_to_buffer[dep].get_inputs_that_alias_output():
+                    if alias not in used_names:
+                        deps.append(alias)
+        return used_names
+
+    def prune_redundant_deps(
+        self, name_to_fused_node: Dict[str, "BaseSchedulerNode"]
+    ) -> None:
+        _prune_redundant_deps(self, name_to_fused_node)
+
+    def get_name(self) -> str:
+        return self.node.get_name()
+
+    def get_first_name(self) -> str:
+        return self.get_name()
+
+    def get_names(self) -> Set[str]:
+        return {self.get_name()}
+
+    def get_nodes(self) -> Sequence["BaseSchedulerNode"]:
+        return [self]
+
+    def get_device(self) -> torch.device:
+        return self.node.get_device()
+
+    def get_template_node(self) -> Optional[ir.TemplateBuffer]:
+        return None
+
+    def decide_inplace_update(self) -> None:
+        """
+        Decide if there should be inplace updates for the node
+        and record the decision in the active kernel.
+        """
+        if not self.node.should_allocate():
+            return
+
+        if isinstance(self, (SchedulerNode,)) and (
+            self.node.get_inputs_that_alias_output() or self.node.get_mutation_names()
+        ):
+            return
+
+        if (
+            isinstance(self, (SchedulerNode,))
+            and config.inplace_buffers
+            and (
+                not isinstance(V.kernel, torch._inductor.codegen.triton.TritonKernel)
+                or getattr(V.kernel, "mutations", None) is not None
+            )
+        ):
+            from .codegen.wrapper import buffer_reuse_key
+
+            ordered_reads = sorted(self.read_writes.reads, key=lambda x: x.name)
+
+            for read in ordered_reads:
+                input_node: Optional[BaseSchedulerNode] = (
+                    self.scheduler.name_to_node.get(read.name)
+                )
+                if (
+                    input_node
+                    and V.graph.wrapper_code.can_reuse(input_node, self)
+                    and not isinstance(input_node, NopKernelSchedulerNode)
+                ):
+                    assert input_node.users is not None
+                    remaining_uses = [
+                        x
+                        for x in input_node.users
+                        if x.node.get_name()
+                        not in self.scheduler.available_buffer_names
+                    ]
+                    if (
+                        len(remaining_uses) == 1
+                        and remaining_uses[0].can_inplace
+                        and remaining_uses[0].node is self
+                        and not isinstance(
+                            input_node.node.get_layout(),
+                            (
+                                ir.MultiOutputLayout,
+                                ir.MutationLayoutSHOULDREMOVE,
+                            ),
+                        )
+                        and not (
+                            isinstance(
+                                input_node.node, (ir.FallbackKernel, ir.MultiOutput)
+                            )
+                            and len(input_node.node.get_inputs_that_alias_output()) > 0
+                        )
+                        and buffer_reuse_key(input_node.node)
+                        == buffer_reuse_key(self.node)
+                    ):
+                        # hacky check for if V.kernel is a real kernel or NullHandler
+                        if hasattr(V.kernel, "args"):
+                            # if there isn't a triton kernel, then we don't need to call triton-specific things.
+                            # but TODO this might be a convenient place to signal to the Collective kernels to inplace
+                            # (and, can we make "kernel" less generic of a name?)
+                            V.kernel.args.make_inplace(
+                                input_node.get_name(), self.get_name()
+                            )
+                            # mutations not tracked in cpp kernels
+                            if isinstance(
+                                V.kernel, torch._inductor.codegen.triton.TritonKernel
+                            ):
+                                V.kernel.mutations.add(input_node.get_name())
+                                V.kernel.mutations.add(self.get_name())
+
+                            # update last usage of reused node
+                            self.last_usage.discard(input_node.get_name())
+
+                            V.kernel.inplace_update_buffers[self.get_name()] = (
+                                input_node.get_name()
+                            )
+                        break
+
+    def allocate(self) -> None:
+        if not self.node.should_allocate():
+            return
+
+        if isinstance(self, (SchedulerNode,)) and (
+            self.node.get_inputs_that_alias_output() or self.node.get_mutation_names()
+        ):
+            V.graph.wrapper_code.codegen_allocation(self.node)
+            return
+
+        # hacky check for if V.kernel is a real kernel or NullHandler
+        if (
+            hasattr(V.kernel, "args")
+            and self.get_name() in V.kernel.inplace_update_buffers
+        ):
+            V.graph.wrapper_code.codegen_inplace_reuse(
+                self.scheduler.name_to_node[
+                    V.kernel.inplace_update_buffers[self.get_name()]
+                ].node,
+                self.node,
+            )
+        else:
+            V.graph.wrapper_code.codegen_allocation(self.node)
+
+    def can_free(self) -> bool:
+        # There's no real allocated buffer, no need to free it
+        if isinstance(self.node.layout, ir.NoneLayout):
+            return False
+        for use in self.users:
+            if isinstance(use.node, OutputNode):
+                return False
+        return True
+
+    def codegen_originating_info(
+        self, buffer: IndentedBuffer, only_once: bool = True
+    ) -> None:
+        if not config.comment_origin:
+            return
+
+        if only_once and self.written:
+            return
+        origins = self.node.origins
+        out_lines = []
+
+        for o in origins:
+            if o.op == "output":
+                # These are boring and samey
+                continue
+
+            out_lines.append("")
+            # TODO(voz): Should the pragma be constant somewhere?
+            out_lines.append("#pragma CMT ORIGIN:")
+            op_info_str = f"#pragma CMT {o.op} {o.target}"
+            if "seq_nr" in o.meta:
+                op_info_str = op_info_str + f" seq_nr:{o.meta['seq_nr']}"
+            out_lines.append(op_info_str)
+            if "stack_trace" in o.meta:
+                stack_trace = f"{o.meta['stack_trace']}"
+                stack_trace_last_line = stack_trace.split("|")[-1]
+                out_lines.append(
+                    "#pragma CMT "
+                    + stack_trace_last_line.replace("{", "{{")
+                    .replace("}", "}}")
+                    .replace("\n", "\\")
+                )
+                out_lines.append("#pragma CMT END ORIGIN")
+                out_lines.append("")
+
+        if len(out_lines) == 0:
+            return
+
+        # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
+        # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
+        buffer.writelines(out_lines)
+        self.written = True
+
 
 class ExternKernelSchedulerNode(NodeSchedulerNode):
     def debug_str_extra(self) -> str:
@@ -792,9 +780,8 @@ def debug_triton_code(node: Union["SchedulerNode", "FusedSchedulerNode"]) -> Lis
         snodes = (node,) if isinstance(node, SchedulerNode) else node.snodes
         device: torch.device = snodes[0].get_device()
         backend = node.scheduler.get_backend(device)
-        backend = typing.cast(
-            "torch._inductor.codegen.triton.TritonScheduling", backend
-        )
+        from torch._inductor.codegen.triton import TritonScheduling
+        backend = typing.cast(TritonScheduling, backend)
         V.graph.scheduler.current_device = device
 
         # Don't increment kernel count when generating debug string.
@@ -931,8 +918,7 @@ class SchedulerNode(NodeSchedulerNode):
         sizes, reduction_sizes = self._sizes
 
         def fn(index: Sequence[sympy.Symbol]) -> str:
-            res = self._body(index, [sympy.Integer(0) for _ in reduction_sizes])
-            return res
+            return self._body(index, [sympy.Integer(0) for _ in reduction_sizes])
 
         return dependencies.extract_read_writes(fn, sizes)
 
@@ -1134,30 +1120,6 @@ class FusedSchedulerNode(BaseSchedulerNode):
             log.warning("Ignoring error in debug_str()", exc_info=True)
 
         return "\n".join(lines).rstrip()
-
-    def add_fake_dep(self, dep: Dep) -> None:
-        raise NotImplementedError
-
-    def get_estimated_runtime(self) -> float:
-        raise NotImplementedError
-
-    def has_side_effects(self) -> bool:
-        raise NotImplementedError
-
-    def is_extern(self) -> bool:
-        raise NotImplementedError
-
-    def log_details(self) -> None:
-        raise NotImplementedError
-
-    def prune_deps(self) -> None:
-        raise NotImplementedError
-
-    def prune_weak_deps(self) -> None:
-        raise NotImplementedError
-
-    def set_read_writes(self, rw: dependencies.ReadWrites) -> None:
-        raise NotImplementedError
 
 
 class ForeachKernelSchedulerNode(FusedSchedulerNode):

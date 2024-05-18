@@ -3312,7 +3312,7 @@ class ComputedBuffer(Buffer):
                 stride_lengths = [
                     V.graph.sizevars.stride_hints(expr, indices) for expr in reads  # type: ignore[arg-type]
                 ]
-                from .scheduler import pick_loop_order  # type: ignore[attr-defined]
+                from .scheduler import pick_loop_order
 
                 return pick_loop_order(stride_lengths, self.get_size())
 
