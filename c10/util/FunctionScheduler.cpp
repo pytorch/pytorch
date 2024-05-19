@@ -11,7 +11,7 @@ namespace c10 {
 Job::Job(std::function<void()> function, std::chrono::microseconds interval)
     : _function(function), _interval(interval) {}
 
-std::chrono::microseconds Job::delta() const {
+std::chrono::microseconds Job::interval() const {
   return _interval;
 }
 

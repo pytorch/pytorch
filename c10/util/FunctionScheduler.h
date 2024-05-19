@@ -15,7 +15,7 @@ class Job {
 public:
     Job(std::function<void()> function, std::chrono::microseconds interval);
 
-    std::chrono::microseconds delta() const;
+    std::chrono::microseconds interval() const;
     void run();
 };
 
