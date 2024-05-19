@@ -477,14 +477,11 @@ class TestMaxAutotune(TestCase):
             buf0 = x + x
             buf1 = number.item()
             buf2 = x * x
-            buf3 = (x @ x)  # MultiTemplateBuffer
-            buf4 = x ** 2
+            buf3 = x @ x  # MultiTemplateBuffer
+            buf4 = x**2
             return buf0, buf1, buf2, buf3, buf4
 
-        inputs = (
-            torch.rand([256, 256], device="cuda"),
-            torch.tensor(3, device="cuda")
-        )
+        inputs = (torch.rand([256, 256], device="cuda"), torch.tensor(3, device="cuda"))
         torch._export.aot_compile(fn, args=inputs)
 
     @config.patch(autotune_local_cache=False, autotune_remote_cache=False)
