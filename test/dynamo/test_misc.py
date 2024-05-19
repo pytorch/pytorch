@@ -10371,6 +10371,7 @@ fn
         c2 = _debug_get_cache_entry_list(fn.__code__)
         self.assertIs(c1[1], c2[0])
 
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
     def test_dynamo_cache_invalidate(self):
         class Mod(torch.nn.Module):
             def __init__(self):

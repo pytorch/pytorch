@@ -11,12 +11,13 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import torch
 import torch.fx as fx
 from torch.export import ExportedProgram
+from torch.export.unflatten import _assign_attr, _AttrKind, _sink_params
 from torch.fx.node import map_aggregate
 from torch.fx.passes.split_module import split_module
 
 from ._backward import _null_coalesce_accumulate, stage_backward
 from ._debug import PIPPY_VERBOSITY
-from ._unflatten import _assign_attr, _AttrKind, _outline_submodules, _sink_params
+from ._unflatten import _outline_submodules
 from ._utils import QualnameMapMixin
 from .microbatch import split_args_kwargs_into_chunks, TensorChunkSpec
 
@@ -869,8 +870,8 @@ class Pipe(QualnameMapMixin, torch.nn.Module):
         # After moving the params to their corresponding hierarchies, we also
         # need to move the `get_attr` nodes from the root of the graph to those
         # hierarchies.
-        inputs_to_state: Dict[str, str] = {
-            attr.name: attr.target for attr in attr_nodes
+        inputs_to_state: Dict[str, List[str]] = {
+            attr.name: [attr.target] for attr in attr_nodes
         }
         # This is done by (1) `_sind_params` at each submodule;
         for name, submod in split.named_children():
@@ -1281,7 +1282,7 @@ def annotate_split_points(mod: torch.nn.Module, spec: Dict[str, SplitPoint]):
             except AttributeError as e:
                 raise AttributeError(
                     f'Specified target {qualname} referenced nonexistent module {".".join(atoms[:i+1])}'
-                )
+                ) from e
 
         mod_to_wrap = getattr(predecessor_module, atoms[-1])
         mod_to_wrap._orig_forward = mod_to_wrap.forward
