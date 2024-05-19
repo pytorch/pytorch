@@ -7,18 +7,8 @@ import torch
 import torch.distributed._functional_collectives as funcol
 
 import torch.distributed.distributed_c10d as c10d
+from torch._C._distributed_c10d import _DistributedBackendOptions, Backend
 
-_CUDA_P2P_AVAILABLE = True
-
-try:
-    from torch._C._distributed_c10d import (
-        _DistributedBackendOptions,
-        Backend,
-        ProcessGroupCudaP2P,
-        ProcessGroupNCCL,
-    )
-except ImportError:
-    pass
 
 """
 This file contains the registration logic and Python APIs for
@@ -69,25 +59,29 @@ Usage:
 
 def _create_cuda_p2p_group(
     dist_backend_opts: "_DistributedBackendOptions",
-    options: Union["ProcessGroupCudaP2P.Options", "ProcessGroupNCCL.Options", None],
+    options: Union[
+        "c10d.ProcessGroupCudaP2P.Options", "c10d.ProcessGroupNCCL.Options", None
+    ],
 ) -> "Backend":
+    if not c10d.is_nccl_available():
+        raise RuntimeError("The cuda_p2p backend is not available")
     if options is None:
-        options = ProcessGroupCudaP2P.Options()
-        options.nccl_options = ProcessGroupNCCL.Options()
-    elif isinstance(options, ProcessGroupNCCL.Options):
+        options = c10d.ProcessGroupCudaP2P.Options()
+        options.nccl_options = c10d.ProcessGroupNCCL.Options()
+    elif isinstance(options, c10d.ProcessGroupNCCL.Options):
         nccl_options = options
-        options = ProcessGroupCudaP2P.Options()
+        options = c10d.ProcessGroupCudaP2P.Options()
         options.nccl_options = nccl_options
-    elif isinstance(options, ProcessGroupCudaP2P.Options):
+    elif isinstance(options, c10d.ProcessGroupCudaP2P.Options):
         if options.nccl_options is None:
-            options.nccl_options = ProcessGroupNCCL.Options()
+            options.nccl_options = c10d.ProcessGroupNCCL.Options()
     else:
         raise TypeError(
             "options for cuda_p2p must be ProcessGroupCudaP2P.Options "
             f"or ProcessGroupNCCL.Options (got: {type(options)})"
         )
 
-    return ProcessGroupCudaP2P(
+    return c10d.ProcessGroupCudaP2P(
         dist_backend_opts.store,
         dist_backend_opts.group_rank,
         dist_backend_opts.group_size,
@@ -98,18 +92,20 @@ def _create_cuda_p2p_group(
 def is_cuda_p2p_group(group: c10d.ProcessGroup) -> bool:
     if _test_with_non_cuda_p2p_group:
         return True
+    if not c10d.is_nccl_available():
+        return False
     try:
         backend = group._get_backend(torch.device("cuda"))
     except Exception:
         return False
-    return isinstance(backend, ProcessGroupCudaP2P) and backend.is_p2p_available()
+    return isinstance(backend, c10d.ProcessGroupCudaP2P) and backend.is_p2p_available()
 
 
-def get_cuda_p2p_backend(group: c10d.ProcessGroup) -> "ProcessGroupCudaP2P":
+def get_cuda_p2p_backend(group: c10d.ProcessGroup) -> "c10d.ProcessGroupCudaP2P":
     if not is_cuda_p2p_group(group):
         raise TypeError("group is not a cuda_p2p process group.")
     return cast(
-        ProcessGroupCudaP2P,
+        c10d.ProcessGroupCudaP2P,
         group._get_backend(torch.device("cuda")),
     )
 

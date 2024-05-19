@@ -112,7 +112,7 @@ try:
     from torch._C._distributed_c10d import ProcessGroupCudaP2P
     from torch._C._distributed_c10d import ProcessGroupNCCL
     ProcessGroupNCCL.__module__ = "torch.distributed.distributed_c10d"
-    __all__ += ["ProcessGroupNCCL"]
+    __all__ += ["ProcessGroupCudaP2P", "ProcessGroupNCCL"]
 except ImportError:
     _NCCL_AVAILABLE = False
 
