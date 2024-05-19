@@ -1508,6 +1508,8 @@ class BuiltinVariable(VariableTracker):
                         "buffers",
                         "named_modules",
                         "modules",
+                        "_modules",
+                        "_parameters",
                     )
                     and obj.is_state_mutated
                     and tx.output.side_effects.has_pending_mutation(obj)
