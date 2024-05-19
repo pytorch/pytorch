@@ -73,7 +73,7 @@ def _flex_attention(
         query (Tensor): Query tensor; shape :math:`(B, H, L, E)`.
         key (Tensor): Key tensor; shape :math:`(B, H, S, E)`.
         value (Tensor): Value tensor; shape :math:`(B, H, S, Ev)`.
-        score_mod (Callable): Function to modify attention scores
+        score_mod (Callable): Function to modify attention scores. By default no score_mod is applied.
 
     Returns:
         output (Tensor): Attention output; shape :math:`(B, H, L, Ev)`.

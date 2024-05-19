@@ -449,7 +449,6 @@ class SizeVarAllocator:
         try:
             return int(out)
         except Exception:
-            breakpoint()
             log.debug("failed on: %s", out)
             raise
 
