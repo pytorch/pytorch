@@ -230,19 +230,19 @@ class ForeachKernel(Kernel):
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
                 call_args[i] = call_args[i] + ".item()"
+        current_device = V.graph.scheduler.current_device
+        assert current_device is not None
         if V.graph.cpp_wrapper:
             V.graph.wrapper_code.generate_kernel_call(
                 name,
                 call_args,
-                device_index=V.graph.scheduler.current_device.index,
+                device_index=current_device.index,
                 grid=self.grid(),
             )
         else:
             # TODO: refactor generate_kernel_call
             call_args_str = ", ".join(call_args)
-            stream_name = code.write_get_raw_stream(
-                V.graph.scheduler.current_device.index
-            )
+            stream_name = code.write_get_raw_stream(current_device.index)
             code.writeline(
                 f"{name}.run({call_args_str}, grid=({self.grid()}), stream={stream_name})"
             )

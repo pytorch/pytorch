@@ -685,9 +685,9 @@ class WrapperCodeGen(CodeGen):
         for line in code.split("\n"):
             self.writeline(line)
 
-        stream_name = self.write_get_raw_stream(
-            V.graph.scheduler.current_device.index, V.graph
-        )
+        current_device = V.graph.scheduler.current_device
+        assert current_device is not None
+        stream_name = self.write_get_raw_stream(current_device.index, V.graph)
         self.writeline(
             f"{kernel_name}.run({', '.join(args)}, grid={grid}, stream={stream_name})"
         )
@@ -1270,9 +1270,9 @@ class WrapperCodeGen(CodeGen):
 
         traverse(kernel)
 
-        compile_wrapper.writeline(
-            f"''', device_str='{V.graph.scheduler.current_device.type}')"
-        )
+        current_device = V.graph.scheduler.current_device
+        assert current_device is not None
+        compile_wrapper.writeline(f"''', device_str='{current_device.type}')")
         _, lineno = inspect.getsourcelines(kernel.fn)
         srcfile = inspect.getsourcefile(kernel.fn)
         metadata = f"# Original path: {srcfile}:{lineno}"
@@ -1387,9 +1387,9 @@ class WrapperCodeGen(CodeGen):
         """
         if cuda:
             call_args_str = ", ".join(pexpr(item) for item in call_args)
-            stream_name = self.write_get_raw_stream(
-                V.graph.scheduler.current_device.index, V.graph
-            )
+            current_device = V.graph.scheduler.current_device
+            assert current_device is not None
+            stream_name = self.write_get_raw_stream(current_device.index, V.graph)
             if triton:
                 grid_str = ", ".join(pexpr(item) for item in grid)
                 grid_str = f"{grid_fn}({grid_str})"

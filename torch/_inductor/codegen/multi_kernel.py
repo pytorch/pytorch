@@ -217,11 +217,13 @@ class MultiKernel:
 
         grid = V.graph.wrapper_code.generate_default_grid(kernel_name, grid)
 
+        current_device = V.graph.scheduler.current_device
+        assert current_device is not None
         V.graph.wrapper_code.generate_kernel_call(
             kernel_name,
             final_call_args,
             grid,
-            V.graph.scheduler.current_device.index,
+            current_device.index,
         )
 
     def codegen_nan_check(self):

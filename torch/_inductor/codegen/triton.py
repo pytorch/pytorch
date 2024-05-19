@@ -1776,7 +1776,9 @@ class TritonKernel(SIMDKernel):
             grid_arg = f"{extra_args_str}grid=grid({', '.join(grid)})"
         else:
             grid_arg = f"grid={grid}"
-        index = V.graph.scheduler.current_device.index
+        current_device = V.graph.scheduler.current_device
+        assert current_device is not None
+        index = current_device.index
         with result.indent():
             result.writeline(f"with {V.graph.device_ops.device_guard(index)}:")
             with result.indent():
@@ -2106,6 +2108,7 @@ class TritonKernel(SIMDKernel):
         grid: List[Any] = []
         self.add_numel_to_call_args_and_grid(name, call_args, grid)
         current_device = V.graph.scheduler.current_device
+        assert current_device is not None
 
         if self.args.workspace_arg is not None:
             ws = self.args.workspace_arg
@@ -2214,9 +2217,9 @@ class TritonScheduling(SIMDScheduling):
             compile_wrapper = IndentedBuffer()
             compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
             compile_wrapper.splice(src_code, strip=True)
-            compile_wrapper.writeline(
-                f"''', device_str='{V.graph.scheduler.current_device.type}')"
-            )
+            current_device = V.graph.scheduler.current_device
+            assert current_device is not None
+            compile_wrapper.writeline(f"''', device_str='{current_device.type}')")
 
             metadata_comment = f"# kernel path: {kernel_path}"
             origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
