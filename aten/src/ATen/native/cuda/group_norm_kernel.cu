@@ -685,12 +685,17 @@ void GroupNormKernelImplInternal(
       width = X.size(3);
       RowwiseMomentsCUDAKernel<T><<<N * G, num_threads, 0, cuda_stream>>>(
           D * HxW, eps, X_data, mean_data, rstd_data, height, width, C);
+      break;
     }
     case MemoryFormat::ChannelsLast: {
       height = X.size(1);
       width = X.size(2);
       RowWiseNHWC<T><<<N * G, num_threads, 0, cuda_stream>>>(
       HxW, height, width, C, D, eps, X_data, mean_data, rstd_data);
+      break;
+    }
+    default: {
+      break; // is this okay?
     }
   }
   C10_CUDA_KERNEL_LAUNCH_CHECK();
