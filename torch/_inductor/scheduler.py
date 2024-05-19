@@ -336,7 +336,7 @@ class BaseSchedulerNode:
             isinstance(self, (SchedulerNode,))
             and config.inplace_buffers
             and (
-                not isinstance(V.kernel, torch._inductor.codegen.triton.TritonKernel)
+                not isinstance(V.kernel, torch._inductor.codegen.simd.SIMDKernel)
                 or getattr(V.kernel, "mutations", None) is not None
             )
         ):
@@ -390,7 +390,7 @@ class BaseSchedulerNode:
                             )
                             # mutations not tracked in cpp kernels
                             if isinstance(
-                                V.kernel, torch._inductor.codegen.triton.TritonKernel
+                                V.kernel, torch._inductor.codegen.simd.SIMDKernel
                             ):
                                 V.kernel.mutations.add(input_node.get_name())
                                 V.kernel.mutations.add(self.get_name())
@@ -552,13 +552,14 @@ class BaseSchedulerNode:
                 # Kind of a lazy way to get the MultiOutput nodes corresponding to
                 # a MultiOutputLayout
                 if isinstance(buf.layout, MultiOutputLayout):
-                    if isinstance(buf, MultiOutput):
-                        users = self.scheduler.name_to_node[buf.get_name()].users
-                        return sum(get_buf_elems(user.node.node) for user in users)
-                    else:
-                        # TODO: If a buffer has a multioutputlayout but isn't a
-                        # multioutput, I'm not sure how to get its size :think:
-                        return 0
+                    users = self.scheduler.name_to_node[buf.get_name()].users
+                    tot = 0
+                    for user in users:
+                        if isinstance(user.node.node, MultiOutput):
+                            tot += get_buf_elems(user.node.node)
+                        else:
+                            raise RuntimeError("When does this happen...")
+                    return tot
                 else:
                     return try_size_hint(sympy_product(buf.get_size()))
 
