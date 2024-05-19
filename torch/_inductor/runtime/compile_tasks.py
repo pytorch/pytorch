@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import functools
+import importlib
 import os
 import sys
 import warnings
-from types import ModuleType
 from typing import Any, Callable
 
 
@@ -31,19 +31,20 @@ def _reload_python_module_in_subproc(key, path):
 
 
 def _reload_python_module(key, path):
-    with open(path) as f:
-        try:
-            code = compile(f.read(), path, "exec")
-        except Exception as e:
-            raise RuntimeError(
-                f"Failed to import {path}\n{type(e).__name__}: {e}"
-            ) from None
-        mod = ModuleType(f"{__name__}.{key}")
-        mod.__file__ = path
-        mod.key = key  # type: ignore[attr-defined]
-        exec(code, mod.__dict__, mod.__dict__)
-        sys.modules[mod.__name__] = mod
-        return mod
+    spec = importlib.util.spec_from_file_location(f"{__name__}.{key}", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Failed to import {path}: path not found")
+    module = importlib.util.module_from_spec(spec)
+    module.key = key  # type: ignore[attr-defined]
+    try:
+        spec.loader.exec_module(module)
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to import {path}\n{type(e).__name__}: {e}"
+        ) from None
+
+    sys.modules[module.__name__] = module
+    return module
 
 
 @functools.lru_cache(None)
