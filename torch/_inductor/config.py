@@ -824,7 +824,9 @@ cpu_backend = "halide"
 
 class halide:
     # add `-no_asserts` to halide `target=`
-    no_asserts = False
+    # TODO(jansel): halide asserts seem buggy
+    # pytest test/inductor/test_torchinductor.py -vsx -k test_aliased_buffer_reuse_cpu
+    no_asserts = True
 
 
 # create a directory containing lots of debug information

@@ -50,6 +50,19 @@ from .simd import (
 log = logging.getLogger(__name__)
 
 
+def halide_constant(val):
+    if isinstance(val, int) and not (-2147483648 <= val <= 2147483647):
+        # workaround https://github.com/halide/Halide/issues/8224
+        info = torch.iinfo(torch.int64)
+        if val == info.min:
+            return "hl.Int(64).min()"
+        if val == info.max:
+            return "hl.Int(64).max()"
+        raise Unsupported("int64 constant")
+
+    return triton_constant(val)
+
+
 class Unsupported(RuntimeError):
     def __init__(self, thing):
         super().__init__(f"halide backend does not support: {thing}")
@@ -183,6 +196,8 @@ _halide_type = {
 
 
 def halide_type(dtype):
+    if dtype == torch.bfloat16:
+        raise Unsupported("torch.bfloat16")
     return _halide_type[dtype]
 
 
@@ -205,7 +220,7 @@ class HalideOverrides(OpOverrides):
 
     @classmethod
     def constant(cls, value, dtype):
-        return cls.to_dtype(triton_constant(value), dtype)
+        return cls.to_dtype(halide_constant(value), dtype)
 
     @staticmethod
     def abs(x):
@@ -445,11 +460,11 @@ class HalideOverrides(OpOverrides):
 
     @staticmethod
     def isinf(x):
-        raise Unsupported("isinf")
+        return f"hl.is_inf({x})"
 
     @staticmethod
     def isnan(x):
-        raise Unsupported("isnan")
+        return f"hl.is_nan({x})"
 
     @staticmethod
     def round(x):
@@ -499,7 +514,7 @@ class HalideOverrides(OpOverrides):
             bounds=get_bounds_index_expr(expr),
         )
         if dtype not in {torch.int32, torch.int64}:
-            return ops.to_dtpye(var, dtype)
+            return ops.to_dtype(var, dtype)
         return var
 
     @staticmethod
@@ -512,7 +527,7 @@ class HalideOverrides(OpOverrides):
 
         # Take dtype from result to prevent accidental promotion
         other = V.kernel.genfunc(
-            f"hl.cast({result.name}.type(), {triton_constant(other)})",
+            f"hl.cast({result.name}.type(), {halide_constant(other)})",
             [],
             bounds=ValueRanges.wrap(other),
         )
@@ -776,7 +791,7 @@ class HalideKernel(SIMDKernel):
         )
 
         if mode is None:
-            line = f"{var}[{index_str}] = {value_str}"
+            line = f"{var}[{index_str}] = hl.cast({var}.type(), {value_str})"
         elif mode == "atomic_add":
             line = f"{var}[{index_str}] += {value_str}"
         else:
@@ -811,7 +826,7 @@ class HalideKernel(SIMDKernel):
 
         if reduction_type not in {"argmax", "argmin"}:
             self.body.writeline(
-                f"{result_var} = hl.cast({acc_type}, {triton_constant(default)})"
+                f"{result_var} = hl.cast({acc_type}, {halide_constant(default)})"
             )
 
         if reduction_type in {"argmax", "argmin"}:
@@ -821,7 +836,7 @@ class HalideKernel(SIMDKernel):
 
             tuple_var = self.newfunc(result_var.used_dims)
             self.body.writeline(
-                f"{tuple_var} = {cast_tuple(triton_constant(default), 0)}"
+                f"{tuple_var} = {cast_tuple(halide_constant(default), 0)}"
             )
             cmp = ">" if reduction_type == "argmax" else "<"
             better = f"{value_str} {cmp} {tuple_var}[0]"

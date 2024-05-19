@@ -725,6 +725,20 @@ def is_cpp_backend(device):
     return getattr(device, "type", device) == "cpu" and config.cpu_backend == "cpp"
 
 
+def is_halide_backend(device):
+    return getattr(device, "type", device) == "cpu" and config.cpu_backend == "halide"
+
+
+def skip_if_halide(fn):
+    @functools.wraps(fn)
+    def wrapper(self):
+        if is_halide_backend(self.device):
+            raise unittest.SkipTest("halide not supported")
+        return fn(self)
+
+    return wrapper
+
+
 @instantiate_parametrized_tests
 class CommonTemplate:
     def test_bool(self):
@@ -750,6 +764,7 @@ class CommonTemplate:
         )
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    @skip_if_halide
     def test_eager_aoti_cache_hit(self):
         ns = "aten"
         op_name = "abs"
@@ -802,6 +817,7 @@ class CommonTemplate:
                 self.assertEqual(ref_value, res_value)
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    @skip_if_halide
     def test_aoti_compile_with_persistent_cache(self):
         def fn(a):
             return torch.abs(a)
@@ -846,6 +862,7 @@ class CommonTemplate:
         self.assertTrue(kernel_lib_path in kernel_libs_abs_path)
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    @skip_if_halide
     def test_eager_aoti_with_scalar(self):
         namespace_name = "aten"
         op_name = "add"
@@ -3792,9 +3809,11 @@ class CommonTemplate:
                 x = self.avgpool(x)
                 return x
 
-        mod = Model()
+        mod = Model().to(self.device)
         for dtype in [torch.half, torch.bfloat16]:
-            x = torch.randn(4, 3, 7, 7).to(dtype=dtype)
+            if dtype == torch.bfloat16 and is_halide_backend(self.device):
+                continue
+            x = torch.randn(4, 3, 7, 7, device=self.device).to(dtype=dtype)
             opt_mod = torch.compile(mod)
             res = opt_mod(x)
             expected = mod(x)
