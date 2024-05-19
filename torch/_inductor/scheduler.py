@@ -558,7 +558,10 @@ class BaseSchedulerNode:
                         if isinstance(user.node.node, MultiOutput):
                             tot += get_buf_elems(user.node.node)
                         else:
-                            raise RuntimeError("When does this happen...")
+                            # Buf is a MultiOutputLayout but not all of its
+                            # users are MultiOutputs...
+                            # TODO: Figure out what's going on
+                            return 0
                     return tot
                 else:
                     return try_size_hint(sympy_product(buf.get_size()))
