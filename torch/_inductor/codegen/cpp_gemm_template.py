@@ -145,6 +145,7 @@ class CppPackedGemmTemplate(CppTemplate):
         register_blocking: GemmBlocking,
         beta=1,
         alpha=1,
+        has_bias=False,
         epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
     ):
         assert layout.dtype in [torch.float, torch.bfloat16, torch.half]
@@ -153,6 +154,7 @@ class CppPackedGemmTemplate(CppTemplate):
         )
         self.beta = beta
         self.alpha = alpha
+        self.has_bias = has_bias
         self.num_threads = num_threads
         self.register_blocking = register_blocking
         m, n = layout.size
@@ -220,6 +222,7 @@ class CppPackedGemmTemplate(CppTemplate):
         input_nodes,
         beta=1,
         alpha=1,
+        has_bias=False,
         trans_w=False,
         input_indices=None,
         epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
@@ -228,19 +231,21 @@ class CppPackedGemmTemplate(CppTemplate):
             input_indices = list(range(len(input_nodes)))
 
         def reorder_and_filter(inputs, layout_or_out):
-            if len(input_indices) == 2:
-                x_idx = input_indices[0]
-                w_idx = input_indices[1]
-                return [inputs[x_idx], inputs[w_idx]], layout_or_out
-            else:
-                assert (
-                    len(input_indices) == 3
-                ), "Cpp Packed GEMM template requires 2 or 3 input nodes."
+            if has_bias:
+                assert len(input_indices) >= 3
                 # assume the input order is [inp, x, w] and we reorder it to [x, w, inp]
                 inp_idx = input_indices[0]
                 x_idx = input_indices[1]
                 w_idx = input_indices[2]
-                return [inputs[x_idx], inputs[w_idx], inputs[inp_idx]], layout_or_out
+                return [
+                    inputs[x_idx],
+                    inputs[w_idx],
+                    inputs[inp_idx],
+                    *[inputs[idx] for idx in input_indices[3:]],
+                ], layout_or_out
+            else:
+                assert len(input_indices) >= 2
+                return [inputs[idx] for idx in input_indices], layout_or_out
 
         def maybe_to_dense(inputs, layout_or_out):
             new_inputs = list(inputs)
@@ -376,6 +381,7 @@ class CppPackedGemmTemplate(CppTemplate):
             register_blocking=micro_gemm.register_blocking,
             beta=beta,
             alpha=alpha,
+            has_bias=has_bias,
             epilogue_creator=epilogue_creator,
         )
         template.maybe_append_choice(choices)
@@ -391,7 +397,7 @@ class CppPackedGemmTemplate(CppTemplate):
         assert len(self.input_nodes) >= 2
 
         X, W = self.input_nodes[0], self.input_nodes[1]
-        inp = self.input_nodes[2] if len(self.input_nodes) > 2 else None
+        inp = self.input_nodes[2] if self.has_bias else None
         Y = self.output_node
 
         if template_buffer_node is not None:
@@ -404,22 +410,12 @@ class CppPackedGemmTemplate(CppTemplate):
 
         epilogues: List[ir.IRNode] = []
         if self.epilogue_creator is not None:
-            # We assume the epilogues are computed with fp32 before storing back to Y,
-            # so we set fp32 data type for input and output of the epilogue.
-            # In the codegen, they would be either replaced with Y for fp32 output or
-            # replaced with acc for bf16/fp16 output. In either case, they are fp32.
-            gemm_layout = ir.FixedLayout(
-                template_buffer.layout.device,
-                torch.float,
-                template_buffer.layout.size,
-                template_buffer.layout.stride,
-            )
             gemm_output_name = "GemmOut"
-            gemm_output_buffer = ir.Buffer(gemm_output_name, gemm_layout)
+            gemm_output_buffer = ir.Buffer(gemm_output_name, template_buffer.layout)
             epilogues.append(
                 ir.ComputedBuffer(
                     name=template_buffer.get_name(),
-                    layout=gemm_layout if epilogue_nodes else template_buffer.layout,
+                    layout=template_buffer.layout,
                     data=self.epilogue_creator(gemm_output_buffer),
                 )
             )

@@ -233,7 +233,7 @@ class CppTemplateKernel(Kernel):
                 assert len(args[0]) == len(var_sizes[0])
                 assert len(args[1]) == 0
                 new_args = [arg + offset for arg, offset in zip(args[0], offsets)]  # type: ignore[arg-type]
-                if reindexer is not None:
+                if reindexer is not None and i == len(nodes) - 1:
                     new_args = reindexer(new_args)
                 V.ops.store(
                     output_name,

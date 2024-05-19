@@ -3,7 +3,7 @@ from typing import List, Optional
 import torch
 import torch.utils._pytree as pytree
 from torch._inductor.kernel.mm_common import mm_args
-from . import ir, lowering as L
+from . import ir
 from .codegen.cpp_gemm_template import CppPackedGemmTemplate
 from .ir import TensorBox
 from .lowering import (
@@ -31,8 +31,130 @@ def create_epilogue_with_attr(input_buffer, attr, **kwargs):
 
         def inner_fn(index):
             input = input_loader(index)
-            zero = L._create_constants(0, dtype=dtype)[0]
+            zero = ops.constant(0, dtype)
             return ops.maximum(input, zero)
+
+    elif attr == "gelu":
+        assert "algorithm" in kwargs
+        if kwargs["algorithm"] == "none":
+
+            def inner_fn(index):
+                input = input_loader(index)
+                if dtype != torch.float:
+                    input = ops.to_dtype(input, torch.float)
+                half = ops.constant(0.5, torch.float)
+                one = ops.constant(1.0, torch.float)
+                const = ops.constant(0.7071067811865476, torch.float)
+                result = input * half * (ops.erf(input * const) + one)
+                if dtype != torch.float:
+                    result = ops.to_dtype(result, dtype)
+                return result
+
+        else:
+            assert kwargs["algorithm"] == "tanh"
+
+            def inner_fn(index):
+                input = input_loader(index)
+                if dtype != torch.float:
+                    input = ops.to_dtype(input, torch.float)
+                half = ops.constant(0.5, torch.float)
+                one = ops.constant(1.0, torch.float)
+                const1 = ops.constant(0.7978845608028654, torch.float)
+                const2 = ops.constant(0.044715, torch.float)
+                result = (
+                    half
+                    * input
+                    * (
+                        one
+                        + ops.tanh(const1 * (input + const2 * input * input * input))
+                    )
+                )
+                if dtype != torch.float:
+                    result = ops.to_dtype(result, dtype)
+                return result
+
+    elif attr == "swish":
+
+        def inner_fn(index):
+            input = input_loader(index)
+            result = input * ops.sigmoid(input)
+            return result
+
+    elif attr == "sigmoid":
+
+        def inner_fn(index):
+            return ops.sigmoid(input_loader(index))
+
+    elif attr == "tanh":
+
+        def inner_fn(index):
+            return ops.tanh(input_loader(index))
+
+    elif attr == "hardswish" or attr == "hardsigmoid":
+
+        def hardsigmoid_float(input):
+            zero = ops.constant(0, torch.float)
+            six = ops.constant(6, torch.float)
+            three = ops.constant(3, torch.float)
+            one_over_six = ops.constant(0.16666666666666666, torch.float)
+            max = ops.maximum(input + three, zero)
+            min = ops.minimum(max, six)
+            return min * one_over_six
+
+        def inner_fn(index):
+            input = input_loader(index)
+            if dtype != torch.float:
+                input = ops.to_dtype(input, torch.float)
+            result = hardsigmoid_float(input)
+            if attr == "hardswish":
+                result = input * result
+            if dtype != torch.float:
+                result = ops.to_dtype(result, dtype)
+            return result
+
+    elif attr == "leaky_relu":
+        assert "scalars" in kwargs
+        assert len(kwargs["scalars"]) == 1
+        negative_slope = kwargs["scalars"][0]
+
+        def inner_fn(index):
+            input = input_loader(index)
+            if dtype != torch.float:
+                input = ops.to_dtype(input, torch.float)
+            zero = ops.constant(0, torch.float)
+            result = ops.where(
+                input > zero, input, input * ops.constant(negative_slope, torch.float)
+            )
+            if dtype != torch.float:
+                result = ops.to_dtype(result, dtype)
+            return result
+
+    elif attr == "hardtanh":
+        assert "scalars" in kwargs
+        assert len(kwargs["scalars"]) == 2
+        min_value = kwargs["scalars"][0]
+        max_value = kwargs["scalars"][1]
+
+        def inner_fn(index):
+            input = input_loader(index)
+            if dtype != torch.float:
+                input = ops.to_dtype(input, torch.float)
+            result = ops.minimum(
+                ops.maximum(input, ops.constant(min_value, torch.float)),
+                ops.constant(max_value, torch.float),
+            )
+            if dtype != torch.float:
+                result = ops.to_dtype(result, dtype)
+            return result
+
+    elif attr == "add" or attr == "sub":
+        assert "other" in kwargs
+        other = kwargs["other"]
+        other_loader = other.make_loader()
+
+        def inner_fn(index):
+            op = getattr(ops, attr)
+            return op(input_loader(index), other_loader(index))
 
     else:
         raise ValueError(f"Unsupported epilogue attribute: {attr}")
@@ -177,24 +299,17 @@ def register_onednn_fusion_ops():
             if len(x_size) > 2:
                 # GEMM template needs 2D input, normalize input shape here
                 x = view(x, [-1, x_size[-1]])
+            inputs = [x, w] if b is None else [x, w, b]
             choices: List[ChoiceCaller] = []
             if len(choices) == 0 or use_aten_gemm_kernels():
+                kwargs = dict(attr=attr, scalars=scalars, algorithm=algorithm)
+                if b is None:
+                    kwargs["B"] = None
                 choices.append(
                     aten_mkldnn_linear_unary.bind(
-                        (x, w),
+                        inputs,
                         layout,
-                        B=None,
-                        attr=attr,
-                        scalars=scalars,
-                        algorithm=algorithm,
-                    )
-                    if b is None
-                    else aten_mkldnn_linear_unary.bind(
-                        (x, w, b),
-                        layout,
-                        attr=attr,
-                        scalars=scalars,
-                        algorithm=algorithm,
+                        **kwargs,
                     )
                 )
             if use_max_autotune():
@@ -207,27 +322,19 @@ def register_onednn_fusion_ops():
                             buf, attr, scalars=scalars, algorithm=algorithm
                         )
 
-                    if b is None:
-                        CppPackedGemmTemplate.add_choices(
-                            choices,
-                            layout,
-                            [x, w],
-                            trans_w=True,
-                            epilogue_creator=None
-                            if attr == "none"
-                            else epilogue_creator,
-                        )
-                    else:
-                        CppPackedGemmTemplate.add_choices(
-                            choices,
-                            layout,
-                            [x, w, b],
-                            trans_w=True,
-                            input_indices=[2, 0, 1],
-                            epilogue_creator=None
-                            if attr == "none"
-                            else epilogue_creator,
-                        )
+                    kwargs = dict(
+                        has_bias=b is not None,
+                        trans_w=True,
+                        epilogue_creator=None if attr == "none" else epilogue_creator,
+                    )
+                    if b is not None:
+                        kwargs["input_indices"] = [2, 0, 1]
+                    CppPackedGemmTemplate.add_choices(
+                        choices,
+                        layout,
+                        inputs,
+                        **kwargs,
+                    )
             assert w.get_name() in V.graph.constants
             input_gen_fns = {
                 1: lambda x: V.graph.constants[x.get_name()],
@@ -235,7 +342,7 @@ def register_onednn_fusion_ops():
             result = autotune_select_algorithm(
                 "linear_unary",
                 choices,
-                [x, w] if b is None else [x, w, b],
+                inputs,
                 layout,
                 input_gen_fns=input_gen_fns,
             )
@@ -244,8 +351,65 @@ def register_onednn_fusion_ops():
             return result
 
         @register_lowering(torch.ops.mkldnn._linear_pointwise.binary)
-        def linear_binary(x: TensorBox, y: TensorBox, w: TensorBox, b: TensorBox, attr):
-            return TensorBox.create(ir.LinearBinary.create(x, y, w, b, attr))
+        def linear_binary(
+            x: TensorBox, y: TensorBox, w: TensorBox, b: TensorBox, attr, layout=None
+        ):
+            x_size = x.get_size()
+            if len(x_size) > 2:
+                # GEMM template needs 2D input, normalize input shape here
+                x = view(x, [-1, x_size[-1]])
+            y_size = y.get_size()
+            if len(y_size) > 2:
+                y = view(y, [-1, y_size[-1]])
+            inputs = [x, y, w] if b is None else [x, y, w, b]
+            choices: List[ChoiceCaller] = []
+            if len(choices) == 0 or use_aten_gemm_kernels():
+                kwargs = dict(attr=attr)
+                if b is None:
+                    kwargs["B"] = None
+                choices.append(
+                    aten_mkldnn_linear_binary.bind(
+                        inputs,
+                        layout,
+                        **kwargs,
+                    )
+                )
+            if use_max_autotune():
+                transposed_w = permute(w, [1, 0])
+                *_, layout, x, transposed_w, y = mm_args(
+                    x, transposed_w, y, layout=layout
+                )
+                if use_cpp_packed_gemm_template(layout, x, transposed_w):
+
+                    def epilogue_creator(buf):
+                        return create_epilogue_with_attr(buf, attr, other=y)
+
+                    kwargs = dict(
+                        has_bias=b is not None,
+                        trans_w=True,
+                        epilogue_creator=epilogue_creator,
+                    )
+                    kwargs["input_indices"] = [0, 2, 1] if b is None else [3, 0, 2, 1]
+                    CppPackedGemmTemplate.add_choices(
+                        choices,
+                        layout,
+                        inputs,
+                        **kwargs,
+                    )
+            assert w.get_name() in V.graph.constants
+            input_gen_fns = {
+                2: lambda x: V.graph.constants[x.get_name()],
+            }
+            result = autotune_select_algorithm(
+                "linear_binary",
+                choices,
+                inputs,
+                layout,
+                input_gen_fns=input_gen_fns,
+            )
+            if len(x_size) > 2:
+                result = view(result, (*x_size[:-1], result.get_size()[-1]))
+            return result
 
         @register_lowering(torch.ops.mkldnn._convolution_transpose_pointwise)
         def convolution_transpose_unary(
