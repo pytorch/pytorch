@@ -237,33 +237,33 @@ def dynamo_timed(original_function=None, phase_name=None, fwd_only=True):
                     # fwd + bwd compilation stages: inductor_compile, code_gen.
                     # use frame_key as time aggregation key for fwd graphs;
                     # use compile_id as time aggregation key for bwd graphs.
-                    aot_graph_name = torch._guards.TracingContext.get().aot_graph_name[
-                        0
-                    ]
-                    if "forward" in aot_graph_name:
-                        _add_time_spent(frame_key, phase_name, time_spent)
-                    else:
-                        assert "backward" in aot_graph_name
-                        compile_id = str(
-                            torch._guards.CompileContext.current_compile_id()
+                    if torch._guards.TracingContext.get().aot_graph_name is not None:
+                        aot_graph_name = str(
+                            torch._guards.TracingContext.get().aot_graph_name
                         )
-                        _add_time_spent(compile_id, phase_name, time_spent)
+                        if "forward" or "inference" in aot_graph_name:
+                            _add_time_spent(frame_key, phase_name, time_spent)
+                        elif aot_graph_name is not None:
+                            compile_id = str(
+                                torch._guards.CompileContext.current_compile_id()
+                            )
+                            _add_time_spent(compile_id, phase_name, time_spent)
 
-                        # log backward compilation metrics at the end of `inductor_compile` of bwd graph,
-                        # one record for one bwd graph.
-                        if phase_name == "inductor_compile":
-                            inductor_compile_time = frame_phase_timing[compile_id].get(
-                                "inductor_compile", None
-                            )
-                            code_gen_time = frame_phase_timing[compile_id].get(
-                                "code_gen", None
-                            )
-                            metrics = BwdCompilationMetrics(
-                                compile_id,
-                                inductor_compile_time,
-                                code_gen_time,
-                            )
-                            record_compilation_metrics(metrics)
+                            # log backward compilation metrics at the end of `inductor_compile` of bwd graph,
+                            # one record for one bwd graph.
+                            if phase_name == "inductor_compile":
+                                inductor_compile_time = frame_phase_timing[
+                                    compile_id
+                                ].get("inductor_compile", None)
+                                code_gen_time = frame_phase_timing[compile_id].get(
+                                    "code_gen", None
+                                )
+                                metrics = BwdCompilationMetrics(
+                                    compile_id,
+                                    inductor_compile_time,
+                                    code_gen_time,
+                                )
+                                record_compilation_metrics(metrics)
 
             return r
 
