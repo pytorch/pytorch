@@ -247,19 +247,6 @@ def value_to_cpp(value, cpp_type):
         return f"static_cast<{cpp_type}>({repr(value)})"
 
 
-def wrap_inner_fn_for_node(node: ir.IRNode, inner_fn_wrapper):
-    loops = node.data if isinstance(node, ir.ComputedBuffer) else node
-    assert isinstance(loops, ir.Loops)
-    new_loops = copy.copy(loops)
-    if isinstance(node, ir.ComputedBuffer):
-        new_node = ir.ComputedBuffer(node.get_name(), node.get_layout(), new_loops)
-    else:
-        new_node = new_loops  # type: ignore[assignment]
-
-    new_loops.inner_fn = inner_fn_wrapper(new_loops.inner_fn)
-    return new_node
-
-
 class LocalBufferScope:
     """
     This class creates a context that helps to generate code involving Inductor IR with
@@ -317,6 +304,15 @@ class LocalBufferScope:
     def localize_buffer(
         self, global_buf: ir.Buffer, local_buf: ir.Buffer, nodes: List[ir.IRNode]
     ) -> List[ir.IRNode]:
+        """
+        Localizes the buffer `global_buf` to `local_buf` in the given `nodes` and returns
+        a new list of IR nodes that work on `local_buf` instead of `global_buf`, i.e., all
+        the loads and stores are redirected to `local_buf`. This helps the fused loops to
+        work on smaller-sized local buffers for better data locality.
+
+        The `local_buf` should already be registered in the local scope and the data access
+        is assumed to be contiguous with the same order as the `global_buf`.
+        """
         assert local_buf.get_name() in self.local_buffers
         assert len(global_buf.get_size()) == len(local_buf.get_size())
         assert len(nodes) > 0
@@ -347,6 +343,20 @@ class LocalBufferScope:
 
             def store_reduction(self, name, index, value):
                 return self._inner.store_reduction(*self.localize(name, index), value)
+
+        def wrap_inner_fn_for_node(node: ir.IRNode, inner_fn_wrapper):
+            loops = node.data if isinstance(node, ir.ComputedBuffer) else node
+            assert isinstance(loops, ir.Loops)
+            new_loops = copy.copy(loops)
+            if isinstance(node, ir.ComputedBuffer):
+                new_node = ir.ComputedBuffer(
+                    node.get_name(), node.get_layout(), new_loops
+                )
+            else:
+                new_node = new_loops  # type: ignore[assignment]
+
+            new_loops.inner_fn = inner_fn_wrapper(new_loops.inner_fn)
+            return new_node
 
         def inner_fn_wrapper(inner_fn):
             def inner(index):

@@ -248,7 +248,7 @@ class CppTemplateKernel(Kernel):
         self,
         dst: ir.Buffer,
         src: ir.Buffer,
-        orig_src: ir.Buffer,
+        orig_src: Optional[ir.Buffer] = None,
         epilogue_nodes: Optional[List[ir.IRNode]] = None,
         offsets: Optional[List[Any]] = None,
         reindexer: Optional[Callable[[List[Any]], List[Any]]] = None,
@@ -270,12 +270,15 @@ class CppTemplateKernel(Kernel):
               the sizes of `src` and `dst`.
            b) `dst` might be indexed in a different way as the `epilogue_nodes`, hence a `reindexer` is
               needed on the indices to `epilogue_nodes` to match the indexing of `dst`.
+           c) If `src` is local, we need to add a local buffer for it and localize the `orig_src` buffer
+              in `epilogue_nodes` with `src`.
         """
         assert dst.get_size() == src.get_size()
         if offsets:
             offsets = parse_expr_with_index_symbols(offsets)
         if epilogue_nodes:
             with LocalBufferScope(self) as scope:
+                assert orig_src is not None
                 if orig_src.get_name() != src.get_name():
                     scope.add_local_buffer(src)
                     epilogue_nodes = scope.localize_buffer(
