@@ -2585,8 +2585,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
             if arg.numel:
                 buffer_names.append(f"hl_buf_{i}")
                 buffers.append(
-                    f"    Halide::Runtime::Buffer<{arg.ctype.replace('*', '')}> "
-                    f"{buffer_names[-1]}({arg.name}, {{{arg.numel}}});"
+                    f"    Halide::Runtime::Buffer {buffer_names[-1]}({arg.halide_type()}, {arg.name}, {arg.numel});"
                 )
             else:
                 assert "*" not in arg.ctype
@@ -2594,7 +2593,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         glue_code = cls.glue_template.format(
             halidebuffer_h=cls.find_header("HalideBuffer.h"),
             headerfile=headerfile,
-            argdefs=", ".join(f"{a.ctype} {a.name}" for a in argtypes),
+            argdefs=", ".join(f"{a.bindings_type()} {a.name}" for a in argtypes),
             buffers="\n".join(buffers).lstrip(),
             buffer_names=", ".join(buffer_names),
         )
@@ -2727,7 +2726,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
             )
 
         bindings_future = cls.load_pybinding_async(
-            [arg.ctype for arg in meta.argtypes],
+            [arg.bindings_type() for arg in meta.argtypes],
             cls._codegen_glue(meta.argtypes, headerfile),
             extra_flags=(libfile,),
             submit_fn=jobs.append if need_compile else None,
