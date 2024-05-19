@@ -501,9 +501,8 @@ class TestFlexAttention(InductorTestCase):
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
         # floor_div is not decomposed in decompostion_table is empty
-        gm = make_fx(_flex_attention, decomposition_table={})(
-            query, key, value, score_mod_func
-        )
+        flex_attention = functools.partial(_flex_attention, score_mod=score_mod_func)
+        gm = make_fx(flex_attention, decomposition_table={})(query, key, value)
         self.assertExpectedInline(
             gm.sdpa_score0.code.strip(),
             """\
@@ -515,8 +514,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
         # floor_div is decomposed for core_aten_decompositions
-        gm = make_fx(_flex_attention, decomposition_table=core_aten_decompositions())(
-            query, key, value, score_mod_func
+        gm = make_fx(flex_attention, decomposition_table=core_aten_decompositions())(
+            query, key, value
         )
         self.assertExpectedInline(
             gm.sdpa_score0.code.strip(),
