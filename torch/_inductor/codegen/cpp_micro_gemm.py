@@ -330,7 +330,7 @@ def create_micro_gemm(
     compute_dtype=None,
     alpha=1,
     num_threads=-1,
-    use_ref=False,
+    use_ref=True,
 ) -> Optional[CppMicroGemm]:
     def create_from_config(cls, config: CppMicroGemmConfig):
         return cls(
