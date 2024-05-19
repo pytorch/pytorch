@@ -134,6 +134,16 @@ class HalideInputSpec(typing.NamedTuple):
     name: str
     numel: Optional[str] = None
 
+    def bindings_type(self):
+        if self.ctype == "half*":
+            return "void*"  # half not defined
+        return self.ctype
+
+    def halide_type(self):
+        if self.ctype == "half*":
+            return "halide_type_t(halide_type_float, 16)"  # half not defined
+        return f"halide_type_of<{self.ctype.replace('*', '')}>()"
+
 
 class HalideMeta(typing.NamedTuple):
     argtypes: List[HalideInputSpec]
