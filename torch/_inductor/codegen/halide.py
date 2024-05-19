@@ -23,7 +23,9 @@ from ..utils import (
     get_kernel_metadata,
     is_welford_reduction,
     parallel_num_threads,
+    sympy_dot,
     sympy_index_symbol,
+    sympy_product,
     sympy_subs,
 )
 from ..virtualized import _ops as ops, OpsHandler, V
@@ -34,7 +36,8 @@ from .common import (
     OpOverrides,
     PythonPrinter,
 )
-from .cpp import cexpr_index, DTYPE_TO_CPP
+from .cpp import DTYPE_TO_CPP
+from .cpp_utils import cexpr
 from .simd import (
     IndexingOptions,
     IterationRangesEntry,
@@ -516,25 +519,27 @@ class HalideCSEVariable(CSEVariable):
         self.used_dims = [t.name for t in V.kernel.range_trees if t.name in used]
         assert len(self.used_dims) == len(used)
 
+    def index_str(self, dims):
+        if len(dims) == 0:
+            return self.name
+        return f"{self.name}[{', '.join(map(str, dims))}]"
+
     def __str__(self):
         if self.used_dims is None:
+            # This will get recomputed and replaced in codegen_kernel()
             return f"{self.name}[?]"
-        if len(self.used_dims) == 0:
-            return self.name
-        return f"{self.name}[{', '.join(self.used_dims)}]"
+        return self.index_str(self.used_dims)
 
     def dom_str(self):
         assert self.used_dims is not None
-        if len(self.used_dims) == 0:
-            return self.name
-        return f"{self.name}[{', '.join(map('{}_dom'.format, self.used_dims))}]"
+        return self.index_str([f"{d}_dom" for d in self.used_dims])
 
     def reduction_str(self):
         assert self.used_dims is not None
         dims = [*self.used_dims]
         assert dims[-1] == "rindex"
         dims[-1] = "rindex_dom"
-        return f"{self.name}[{', '.join(dims)}]"
+        return self.index_str(dims)
 
 
 class HalideKernel(SIMDKernel):
@@ -582,6 +587,7 @@ class HalideKernel(SIMDKernel):
         self.body.writeline(f"{entry.name}_dom = {self.kexpr(expr_dom)}")
 
     def used_dims_from_index(self, index: sympy.Expr):
+        """Detect which range trees are used to populate HalideCSEVariable.used_dims"""
         used_dims = set()
         for sym in index.free_symbols:
             assert isinstance(sym, sympy.Symbol)
@@ -608,28 +614,8 @@ class HalideKernel(SIMDKernel):
         assert len(ordered) == len(used_dims)
         return ordered
 
-    def index_to_dom(self, index: sympy.Expr):
-        replacements: Dict[sympy.Expr, Any] = {}
-        for sym in index.free_symbols:
-            assert isinstance(sym, sympy.Symbol)
-            if symbol_is_type(sym, SymT.TMP):
-                # indirect indexing
-                cse_var = self.cse.varname_map[sym.name]
-                assert isinstance(cse_var, HalideCSEVariable)
-                replacements[sym] = sympy.Symbol(cse_var.dom_str())
-            elif symbol_is_type(
-                sym, (SymT.UNBACKED_INT, SymT.SIZE, SymT.PRECOMPUTED_SIZE, SymT.INDEX)
-            ):
-                pass
-            else:
-                # sym is one of xN, yN or rN
-                assert symbol_is_type(
-                    sym, (SymT.RINDEX, SymT.XBLOCK, SymT.YBLOCK)
-                ), sym.name
-                replacements[sym] = sympy.Symbol(f"{sym.name}_dom")
-        return sympy_subs(index, replacements)
-
     def load(self, name: str, index: sympy.Expr):
+        """Codegen a load from an InputBuffer"""
         var = self.args.input(name)
 
         indirect_indexing = self.is_indirect_indexing(index)
@@ -650,28 +636,106 @@ class HalideKernel(SIMDKernel):
         var.used_dims = self.used_dims_from_index(indexing.index)
         return var
 
+    def index_to_dom(self, index: sympy.Expr):
+        """Replace xindex => xindex_dom, x0 => x0_dom, etc for update-style indexing"""
+        replacements: Dict[sympy.Expr, Any] = {}
+        for sym in index.free_symbols:
+            assert isinstance(sym, sympy.Symbol)
+            if symbol_is_type(sym, SymT.TMP):
+                # indirect indexing
+                cse_var = self.cse.varname_map[sym.name]
+                assert isinstance(cse_var, HalideCSEVariable)
+                replacements[sym] = sympy.Symbol(cse_var.dom_str())
+            elif symbol_is_type(
+                sym, (SymT.UNBACKED_INT, SymT.SIZE, SymT.PRECOMPUTED_SIZE, SymT.INDEX)
+            ):
+                pass
+            else:
+                # sym is one of xN, yN or rN
+                assert symbol_is_type(
+                    sym, (SymT.RINDEX, SymT.XBLOCK, SymT.YBLOCK)
+                ), sym.name
+                replacements[sym] = sympy.Symbol(f"{sym.name}_dom")
+        return sympy_subs(index, replacements)
+
+    def determine_store_indexing(
+        self, name: str, index: sympy.Expr, value: HalideCSEVariable, var: str
+    ):
+        """
+        Halide requires the initial definition of an output to be done with a plain Var(), while subsequent updates
+        can use Expr().  For us index may be an Expr.
+
+        This function tries to make the output index a var, and if that fails switches to the more flexible
+        hl.RDom()-update codegen.        .
+        """
+        assert value.used_dims is not None
+        eq = V.graph.sizevars.statically_known_equals
+        if index == 0 and eq(self.halide_buffer_numel(name), 1):
+            # 1-element case
+            index_str = "hl.Var()"  # halide requires storage dst to be a Var
+            value_str = value.index_str([0 for _ in value.used_dims])
+            return index_str, value_str
+
+        var_ranges = self.var_ranges()
+        range_trees = self.active_range_trees()
+        numel = self.halide_buffer_numel(name)
+
+        if isinstance(index, sympy.Symbol) and eq(var_ranges[index], numel):
+            value_str = str(value)
+            index_str = self.index_to_str(index)
+            return index_str, value_str
+
+        # collapse 2D tile into 1D output
+        if len(range_trees) == 2:
+            used_vars = set(index.free_symbols)
+            var_ranges = {s: v for s, v in var_ranges.items() if s in used_vars}
+            if len(var_ranges) == 2 and eq(sympy_product(var_ranges.values()), numel):
+                strides = V.graph.sizevars.stride_vars(index, var_ranges)
+                if eq(sympy_dot(var_ranges, strides), index):
+                    index_str = f"{var}_index"
+                    self.body.writeline(
+                        DeferredLine(name, f"{index_str} = hl.Var({index_str!r})")
+                    )
+                    v0, v1 = var_ranges
+                    assert v0.name[0] == range_trees[0].prefix
+                    assert v1.name[0] == range_trees[1].prefix
+                    assert eq(var_ranges[v0], range_trees[0].numel)
+                    assert eq(var_ranges[v1], range_trees[1].numel)
+
+                    if eq(strides[0], 1):
+                        div = self.kexpr(strides[1])
+                        value_str = (
+                            f"{value.name}[{index_str} % {div}, {index_str} // {div}]"
+                        )
+                    else:
+                        assert eq(strides[1], 1)
+                        div = self.kexpr(strides[0])
+                        value_str = (
+                            f"{value.name}[{index_str} // {div}, {index_str} % {div}]"
+                        )
+                    return index_str, value_str
+
+        # Fall back to using RDom-style store
+        self.body.writeline(
+            DeferredLine(name, f"{var}[hl.Var()] = hl.undef({var}.type())")
+        )
+        value_str = value.dom_str()
+        index_str = self.index_to_str(self.index_to_dom(index))
+        return index_str, value_str
+
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
     ) -> None:
+        """Codegen a store to an OutputBuffer"""
         var = self.args.output(name)
         indexing = self.indexing(index, dense_indexing=True, block_ptr=False)
         assert isinstance(indexing, IndexingOptions)
         assert not indexing.has_tmpmask()
         assert isinstance(value, HalideCSEVariable)
 
-        rdom_store = False
-        if rdom_store:
-            # Halide requires the initial definition of an output to be done with a plain Var(),
-            # while subsequent updates can use Expr().  For us indexing.index may be an Expr.
-            # This line is a no-op to get that more flexible "update" handling.
-            # TODO(jansel): try removing this when indexing.index == xindex
-            line = f"{var}[hl.Var()] = hl.undef({var}.type())"
-            self.body.writeline(DeferredLine(name, line))
-            value_str = value.dom_str()
-            index_str = self.index_to_str(self.index_to_dom(indexing.index))
-        else:
-            value_str = str(value)
-            index_str = self.index_to_str(indexing.index)
+        index_str, value_str = self.determine_store_indexing(
+            name, indexing.index, value, var
+        )
 
         if mode is None:
             line = f"{var}[{index_str}] = {value_str}"
@@ -688,6 +752,7 @@ class HalideKernel(SIMDKernel):
         reduction_type: ReductionType,
         value: Union[CSEVariable, Tuple[CSEVariable, ...]],
     ) -> Union[CSEVariable, Tuple[CSEVariable, ...]]:
+        """Codegen a reduction operation"""
         assert self.inside_reduction
         assert not self._load_mask
 
@@ -743,10 +808,7 @@ class HalideKernel(SIMDKernel):
         return result_var
 
     def wrap_in_dense_index(self, var: HalideCSEVariable) -> HalideCSEVariable:
-        dense = [tree.name for tree in self.range_trees]
-        if not self.inside_reduction:
-            removed = dense.pop()
-            assert removed == "rindex"
+        dense = [tree.name for tree in self.active_range_trees()]
         if var.used_dims == dense:
             return var
         newvar = self.cse.generate(self.body, f"{var}")
@@ -754,11 +816,20 @@ class HalideKernel(SIMDKernel):
         newvar.used_dims = dense
         return newvar
 
-    def halide_kernel_meta(self):
+    def halide_buffer_numel(self, name: str):
+        """
+        We map all tensors to 1D buffers in Halide since Halide has trouble representing some strides that PyTorch
+        supports.  If there are gaps in the underlying layout the numel we pass to Halide includes the gaps while
+        PyTorch's numel excludes them.
+        """
+        return V.graph.get_buffer(name).get_layout().storage_size()
+
+    def halide_kernel_meta(self) -> HalideMeta:
+        """Compute metadata required by codecache.py"""
         _, _, signature = self.args.python_argdefs()
         argtypes = []
         for arg in signature:
-            numel = cexpr_index(self.rename_indexing(V.graph.get_numel(arg.buffer)))
+            numel = cexpr(self.rename_indexing(self.halide_buffer_numel(arg.buffer)))
             dtype = f"{DTYPE_TO_CPP[arg.dtype]}*"
             argtypes.append(
                 HalideInputSpec(
@@ -784,6 +855,7 @@ class HalideKernel(SIMDKernel):
         )
 
     def codegen_kernel(self, name=None):
+        """Called at the end to generate a final kernel string"""
         self.halide_kernel_meta()  # ensure needed args are added
         code = IndentedBuffer()
         code.splice(
@@ -811,14 +883,17 @@ class HalideKernel(SIMDKernel):
         code.do_indent()
         for arg in signature:
             code.writeline(f"{arg.name} = g.{arg.name}")
-        for tree in self.range_trees:
-            if tree.prefix != "r" or self.inside_reduction:
-                code.writeline(f"{tree.name} = hl.Var({tree.name!r})")
-                # Use this version for stores
-                length = self.kexpr(self.rename_indexing(tree.numel))
-                code.writeline(
-                    f"{tree.name}_dom = hl.RDom([hl.Range(0, {length})], {tree.name!r}).x"
-                )
+        rdom_size_str = {}
+        for tree in self.active_range_trees(reorder=True):
+            code.writeline(f"{tree.name} = hl.Var({tree.name!r})")
+            length = self.kexpr(self.rename_indexing(tree.numel))
+            rdom_size_str[f"{tree.name}_dom"] = f"hl.Range(0, {length})"
+
+        assert len(rdom_size_str) <= 3
+        code.writeline(f"rdom = hl.RDom([{', '.join(rdom_size_str.values())}])")
+        for name, xyz in zip(rdom_size_str.keys(), "xyz"):
+            code.writeline(f"{name} = rdom.{xyz}")
+
         for old, new in self.args.aliases():
             code.writeline(f"{old} = {new}")
 
@@ -851,6 +926,7 @@ class HalideKernel(SIMDKernel):
         return code.getvalue()
 
     def call_kernel(self, name: str, node=None):
+        """Codegen a call to this kernel"""
         wrapper = V.graph.wrapper_code
         _, _, signature = self.args.python_argdefs()
         call_args = []
@@ -872,6 +948,7 @@ class HalideScheduling(SIMDScheduling):
     kernel_type = HalideKernel
 
     def define_kernel(self, src_code, node_schedule, kernel):
+        """Codegen kernel definition to go in output wrapper code"""
         wrapper = V.graph.wrapper_code
         if src_code in wrapper.src_to_kernel:
             kernel_name = wrapper.src_to_kernel[src_code]
