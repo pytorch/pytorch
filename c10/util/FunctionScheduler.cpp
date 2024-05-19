@@ -19,4 +19,22 @@ void Job::run() {
   _function();
 }
 
+FunctionScheduler::FunctionScheduler() : _running(false) {}
+
+FunctionScheduler::~FunctionScheduler() {
+  stop();
+}
+
+void FunctionScheduler::runNextJob() {}
+
+int FunctionScheduler::scheduleJob(
+    std::function<void()> function,
+    std::chrono::microseconds interval) {}
+
+int FunctionScheduler::removeJob(int id) {}
+
+void FunctionScheduler::start() {}
+
+void FunctionScheduler::stop() {}
+
 } // namespace c10
