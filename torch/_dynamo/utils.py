@@ -241,9 +241,9 @@ def dynamo_timed(original_function=None, phase_name=None, fwd_only=True):
                         aot_graph_name = str(
                             torch._guards.TracingContext.get().aot_graph_name
                         )
-                        if "forward" or "inference" in aot_graph_name:
+                        if "forward" in aot_graph_name or "inference" in aot_graph_name:
                             _add_time_spent(frame_key, phase_name, time_spent)
-                        elif aot_graph_name is not None:
+                        else:
                             compile_id = str(
                                 torch._guards.CompileContext.current_compile_id()
                             )
