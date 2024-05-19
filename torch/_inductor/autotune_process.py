@@ -24,6 +24,8 @@ from typing import (
     Union,
 )
 
+import numpy as np
+
 import torch
 from torch import multiprocessing
 from torch._dynamo.testing import rand_strided
@@ -672,6 +674,157 @@ class TritonBenchmarkRequest(GPUDeviceBenchmarkRequest):
 
     def __str__(self) -> str:
         return f"{self.kernel_name=}, {self.module_path=}, {self.module_cache_key=}"
+
+
+class GroupedTritonBenchmarkRequest:
+    def __init__(self, choices):
+        super().__init__()
+        self.choices = choices
+
+    def do_benchmark(
+        self,
+        choice_to_callable: Dict[TritonTemplateCaller, Callable[[], Any]],
+        target: float,
+    ) -> Dict[TritonTemplateCaller, float]:
+        timings: Dict[TritonTemplateCaller, float] = {}
+
+        for choice, _callable in choice_to_callable.items():
+            # backout of invalid choices. this covers choices
+            # that crash during ptx generation, or choices that
+            # are not supported on the current device.
+            if not choice.valid:
+                timings[choice] = float("inf")
+                continue
+
+            # initialize the choices before benchmarking, and
+            # backout of choices that crash during compile time
+            try:
+                _ = _callable()
+            except Exception:
+                timings[choice] = float("inf")
+
+        # TODO(nmacchioni): flush the exact L2 cache size
+        if torch.version.hip:
+            cache = torch.empty(int(256e6 // 4), dtype=torch.int, device="cuda")
+        else:
+            # 50MB seems to be enough for H100
+            cache = torch.empty(int(50e6 // 4), dtype=torch.int, device="cuda")
+
+        # estimate the runtime of each choice
+        estimations = {}
+        estimation_iterations = 5
+        for choice, _callable in choice_to_callable.items():
+            if choice in timings:
+                continue
+
+            event_pairs = [
+                (
+                    torch.cuda.Event(enable_timing=True),
+                    torch.cuda.Event(enable_timing=True),
+                )
+                for _ in range(estimation_iterations)
+            ]
+
+            for idx in range(5):
+                cache.zero_()
+                event_pairs[idx][0].record()
+                _ = _callable()
+                event_pairs[idx][1].record()
+            torch.cuda.synchronize()
+
+            estimate = (
+                sum(
+                    [
+                        start_event.elapsed_time(end_event)
+                        for start_event, end_event in event_pairs
+                    ]
+                )
+                / estimation_iterations
+            )
+            estimations[choice] = estimate
+
+        # backout of choices that are more than 2.5% slower than the
+        # fastest choice available. testing shows that this is a large
+        # enough margin of error to prevent performance regression
+        target = min(target, estimations[min(estimations, key=estimations.__getitem__)])
+        for choice, estimate in estimations.items():
+            if estimate * 0.975 > target:
+                timings[choice] = estimate
+
+        # benchmark the choices. run 5ms of warmup and 15ms of benchmarking.
+        # testing shows that this reduction in warmup/benchmarking iterations
+        # does not cause performance regression
+        warmup_ms = 5
+        repeat_ms = 15
+        for choice, _callable in choice_to_callable.items():
+            if choice in timings:
+                continue
+
+            estimate_ms = estimations[choice]
+            n_warmup = max(1, int(warmup_ms / estimate_ms))
+            n_repeat = max(1, int(repeat_ms / estimate_ms))
+
+            for _ in range(n_warmup):
+                _ = _callable()
+            torch.cuda.synchronize()
+
+            event_pairs = [
+                (
+                    torch.cuda.Event(enable_timing=True),
+                    torch.cuda.Event(enable_timing=True),
+                )
+                for _ in range(n_repeat)
+            ]
+
+            for idx in range(n_repeat):
+                cache.zero_()
+                event_pairs[idx][0].record()
+                _ = _callable()
+                event_pairs[idx][1].record()
+            torch.cuda.synchronize()
+
+            timing = np.quantile(
+                [
+                    start_event.elapsed_time(end_event)
+                    for start_event, end_event in event_pairs
+                ],
+                0.5,
+            )
+            timings[choice] = timing
+
+        return timings
+
+    def benchmark(
+        self,
+        *input_tensors: torch.Tensor,
+        output_tensor: Optional[torch.Tensor] = None,
+        target: float = float("inf"),
+    ) -> Dict[TritonTemplateCaller, float]:
+        timings: Dict[TritonTemplateCaller, float] = {}
+
+        if self.choices == []:
+            return timings
+
+        # generate inputs/output tensors using choices[0] as
+        # the default. every choice should take the same exact
+        # inputs/outputs
+        if output_tensor is None:
+            assert len(input_tensors) == 0
+            example_bmreq = self.choices[0].bmreq
+            input_tensors = tuple(
+                x.to_tensor() for x in example_bmreq.input_tensor_meta
+            )
+            output_tensor = example_bmreq.output_tensor_meta.to_tensor()
+
+        choice_to_callable = {}
+        for choice in self.choices:
+            _callable = choice.bmreq.make_run_fn(
+                *input_tensors, output_tensor=output_tensor
+            )
+            choice_to_callable[choice] = _callable
+
+        timings.update(self.do_benchmark(choice_to_callable, target))
+        return timings
 
 
 class CUDABenchmarkRequest(GPUDeviceBenchmarkRequest):
