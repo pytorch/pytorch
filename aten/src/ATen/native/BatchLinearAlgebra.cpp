@@ -117,6 +117,8 @@
 #include <ATen/ops/triu.h>
 #include <ATen/ops/vdot.h>
 #include <ATen/ops/zeros.h>
+#include <ATen/ops/matmul.h>
+#include <ATen/ops/narrow.h>
 #endif
 
 // First the required LAPACK implementations are registered here.
@@ -1556,7 +1558,7 @@ void _linalg_check_errors(
           ": The algorithm failed to converge because the input matrix is ill-conditioned or has too many repeated eigenvalues (error code: ", info, ").");
     } else if (api_name.find("lstsq") != api_name.npos) {
       TORCH_CHECK_LINALG(false, api_name, batch_str,
-          ": The least squares solution could not be computed because the input matrix does not have full rank (error code: ", info, ").");
+          ": The least squares solution could not be computed because the input matrix does not have full rank (error code: ", info, "). Specify SVD in the driver if you would like to do this.");
     } else if (api_name.find("lu_factor") != api_name.npos) {
       TORCH_CHECK(false, api_name, batch_str,
           ": U[", info, ",", info, "] is zero and using it on lu_solve would result in a division by zero. "
@@ -3427,8 +3429,30 @@ static void linalg_lstsq_out_info(
   auto input_working_copy = copyBatchedColumnMajor(input);
 
   // now the actual call that computes the result in-place (apply_lstsq)
-  lstsq_stub(input.device().type(), input_working_copy, solution, rank, singular_values, infos, rcond, driver);
+  if (driver == "gelss" && input.device() != at::kCPU) {
+    if (input.numel() == 0) {
+        auto output_shape = input.sizes().vec();
+        output_shape.back() = other.size(-1);
+        solution.zero_();
+    } else {
+        auto [U, S, Vh] = at::_linalg_svd(input, false, true, "gesvd");
+        rank = at::zeros({1}, at::kLong);
 
+        auto S_pinv = S.reciprocal();
+        auto s1 = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);  // singular values are sorted in descending order
+        S_pinv.masked_fill_(S < rcond * s1, 0);
+        rank[0] = (S_pinv > (rcond * s1)).sum();
+        auto uhOther = at::matmul(U.adjoint(), other);
+        if(S_pinv.dim() != uhOther.dim()) {
+          S_pinv = S_pinv.unsqueeze(-1);
+        }
+        auto S_pinv_other = S_pinv * uhOther;
+        solution = at::matmul(Vh.adjoint(), S_pinv_other);
+    }
+  }
+  else {
+    lstsq_stub(input.device().type(), input_working_copy, solution, rank, singular_values, infos, rcond, driver);
+  }
   // residuals are available only if m > n and drivers other than gelsy used
   if (m > n && driver != "gelsy") {
     // if the driver is gelss or gelsd then the residuals are available only if rank == n
@@ -3456,9 +3480,15 @@ static void linalg_lstsq_out_info(
       at::sum_out(residuals, raw_residuals, /*dim=*/-2, /*keepdim=*/false, /*dtype*/real_dtype);
     }
   }
-  auto solution_view = solution.narrow(/*dim=*/-2, /*start=*/0, /*length*/n);
-  // manually restride original
-  solution.set_(solution.storage(), solution_view.storage_offset(), solution_view.sizes(), solution_view.strides());
+  if (solution.size(-2) >= n) {
+    auto solution_view = solution.narrow(/*dim=*/-2, /*start=*/0, /*length*/n);
+
+    // manually restride original
+    solution.set_(solution.storage(), solution_view.storage_offset(),
+                  solution_view.sizes(), solution_view.strides());
+  } else {
+    solution = at::zeros({solution.size(-1), n}, solution.options());
+  }
   if (m == 0) {
     solution.zero_();
   }
@@ -3490,8 +3520,8 @@ static std::string get_default_lstsq_driver(std::optional<c10::string_view> driv
       );
     } else { // else if (input.is_cuda())
       TORCH_CHECK(
-        driver_str == "gels",
-        "torch.linalg.lstsq: `driver` other than `gels` is not supported on CUDA"
+        (driver_str == "gelss" || driver_str == "gels"),
+        "torch.linalg.lstsq: `driver` other than `gels` or `gelss` is not supported on CUDA"
       );
     }
   } else {
