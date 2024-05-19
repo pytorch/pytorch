@@ -50,9 +50,10 @@ from ..utils import (
     sympy_subs,
     unique,
 )
-from ..virtualized import V
+from ..virtualized import ops, V
 from .common import CSEVariable, index_prevent_reordering, Kernel, PythonPrinter
 from .multi_kernel import MultiKernel
+
 
 if TYPE_CHECKING:
     pass
@@ -900,9 +901,9 @@ class SIMDKernel(Kernel):
         """Context manager to add an additional mask to tl.load/store"""
         prior = self._load_mask
         if prior:
-            mask = self.cse.generate(self.compute, f"{mask} & {prior}")
+            mask = ops.logical_and(mask, prior)
 
-        self._load_mask = mask
+        self._load_mask = str(mask)
         try:
             # TODO(jansel): do we need a reshape here?
             yield mask

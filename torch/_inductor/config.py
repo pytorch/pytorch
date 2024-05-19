@@ -62,7 +62,7 @@ nan_asserts = os.environ.get("TORCHINDUCTOR_NAN_ASSERTS") == "1"
 pick_loop_orders = True
 
 # reuse a kernel input as the output
-inplace_buffers = True
+inplace_buffers = False  # TODO(jansel): support this with halide
 
 # reuse a buffer for an unrelated purpose
 allow_buffer_reuse = True
@@ -819,7 +819,7 @@ class cuda:
 
 
 # Backend to use for CPU codegen either "cpp" or "halide" (experimental)
-cpu_backend = "cpp"
+cpu_backend = "halide"
 
 
 class halide:
