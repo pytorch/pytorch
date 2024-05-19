@@ -61,9 +61,9 @@ struct TORCH_API RawTensorMetadata : RawTensorMetadataBase {
   RawTensorMetadata& operator=(RawTensorMetadata&&) noexcept = default;
   explicit RawTensorMetadata(const at::Tensor& t);
 
-  // Wrap `weak_self_` in `c10::optional` and split device into components to
+  // Wrap `weak_self_` in `std::optional` and split device into components to
   // keep struct default constructable. (which the std::array initializer needs)
-  c10::optional<WeakTensor> weak_self_;
+  std::optional<WeakTensor> weak_self_;
   c10::DeviceType device_type_{c10::DeviceType::CPU};
   c10::DeviceIndex device_index_{-1};
 };
@@ -85,8 +85,8 @@ struct TORCH_API TensorMetadata : public RawTensorMetadataBase {
   std::vector<int64_t> strides_;
 
   // Set during `calculateUniqueTensorIDs`.
-  c10::optional<TensorID> id_;
-  c10::optional<AllocationID> allocation_id_;
+  std::optional<TensorID> id_;
+  std::optional<AllocationID> allocation_id_;
 };
 
 using op_input_t = std::variant<
@@ -207,8 +207,8 @@ struct ExtraFields<EventType::Allocation> : RawAllocation {
     return {device_type_, device_index_};
   }
 
-  c10::optional<TensorID> id_;
-  c10::optional<AllocationID> allocation_id_;
+  std::optional<TensorID> id_;
+  std::optional<AllocationID> allocation_id_;
 };
 
 template <>
@@ -246,7 +246,7 @@ struct NNModuleInfo {
   struct ParameterInfo {
     std::string name_;
     TensorMetadata metadata_;
-    c10::optional<TensorMetadata> grad_metadata_;
+    std::optional<TensorMetadata> grad_metadata_;
   };
 
   PyModuleSelf self_;
@@ -261,7 +261,7 @@ struct NNModuleInfo {
 struct OptimizerInfo {
   struct ParameterInfo {
     TensorMetadata metadata_;
-    c10::optional<TensorMetadata> grad_metadata_;
+    std::optional<TensorMetadata> grad_metadata_;
     std::vector<std::pair<std::string, TensorMetadata>> state_;
   };
 
@@ -293,8 +293,8 @@ template <>
 struct ExtraFields<EventType::PyCall> : public PyExtraFieldsBase {
   struct args_t {
     PyFrameState frame_state_;
-    c10::optional<NNModuleInfo> module_info_;
-    c10::optional<OptimizerInfo> optimizer_info_;
+    std::optional<NNModuleInfo> module_info_;
+    std::optional<OptimizerInfo> optimizer_info_;
   };
 
   ExtraFields(
@@ -308,8 +308,8 @@ struct ExtraFields<EventType::PyCall> : public PyExtraFieldsBase {
         optimizer_{std::move(args.optimizer_info_)} {}
 
   PyFrameState callsite_;
-  c10::optional<NNModuleInfo> module_;
-  c10::optional<OptimizerInfo> optimizer_;
+  std::optional<NNModuleInfo> module_;
+  std::optional<OptimizerInfo> optimizer_;
 };
 
 template <>

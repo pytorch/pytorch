@@ -2,10 +2,6 @@
     ignore = dirty
     path = third_party/pybind11
     url = https://github.com/pybind/pybind11.git
-[submodule "third_party/cub"]
-    ignore = dirty
-    path = third_party/cub
-    url = https://github.com/NVlabs/cub.git
 [submodule "third_party/eigen"]
     ignore = dirty
     path = third_party/eigen
@@ -50,10 +46,6 @@
     ignore = dirty
     path = third_party/psimd
     url = https://github.com/Maratyszcza/psimd.git
-[submodule "third_party/zstd"]
-    ignore = dirty
-    path = third_party/zstd
-    url = https://github.com/facebook/zstd.git
 [submodule "third_party/cpuinfo"]
     ignore = dirty
     path = third_party/cpuinfo
@@ -152,3 +144,7 @@
 [submodule "third_party/opentelemetry-cpp"]
 	path = third_party/opentelemetry-cpp
 	url = https://github.com/open-telemetry/opentelemetry-cpp.git
+[submodule "third_party/cpp-httplib"]
+	path = third_party/cpp-httplib
+	url = https://github.com/yhirose/cpp-httplib.git
+	branch = v0.15.3

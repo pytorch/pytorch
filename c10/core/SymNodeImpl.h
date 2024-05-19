@@ -30,61 +30,61 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   // these could be pure virtual when we implement LTC versions
   virtual bool is_int() {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual bool is_bool() {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual bool is_float() {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual bool is_nested_int() const {
     return false;
-  };
+  }
   virtual SymNode add(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode sub(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode mul(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode truediv(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode pow(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode floordiv(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode mod(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode eq(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode ne(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode gt(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode lt(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode le(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode ge(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode ceil() {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode floor() {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode neg() {
     TORCH_CHECK(false, "NYI");
   };
@@ -188,19 +188,19 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual std::string str() {
     TORCH_CHECK(false, "NYI");
   };
-  virtual c10::optional<int64_t> nested_int() {
+  virtual std::optional<int64_t> nested_int() {
     return c10::nullopt;
   }
-  virtual c10::optional<int64_t> nested_int_coeff() {
+  virtual std::optional<int64_t> nested_int_coeff() {
     return c10::nullopt;
   }
-  virtual c10::optional<int64_t> constant_int() {
+  virtual std::optional<int64_t> constant_int() {
     return c10::nullopt;
   }
-  virtual c10::optional<bool> constant_bool() {
+  virtual std::optional<bool> constant_bool() {
     return c10::nullopt;
   }
-  virtual c10::optional<int64_t> maybe_as_int() {
+  virtual std::optional<int64_t> maybe_as_int() {
     return c10::nullopt;
   }
   virtual bool is_constant() {

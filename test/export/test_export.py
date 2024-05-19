@@ -576,7 +576,6 @@ class TestExport(TestCase):
         )
 
     # Predispatch has different expected results
-    @testing.expectedFailureSerDerPreDispatch
     def test_torch_fn(self):
         class M1(torch.nn.Module):
             def __init__(self):
@@ -591,7 +590,7 @@ class TestExport(TestCase):
                 x = x + x
                 return x
 
-        ep1 = export(M1(), (torch.randn(3, 3),))
+        ep1 = export(M1(), (torch.randn(3, 3),)).run_decompositions()
         expected_result = [
             ("linear_1", "builtin_function_or_method.linear"),
             ("linear_1", "builtin_function_or_method.linear"),
@@ -616,7 +615,9 @@ class TestExport(TestCase):
                 x = torch.add(x, x)
                 return x
 
-        ep2 = export(M2(), (torch.randn(3, 3), torch.randn(3, 3), torch.randn(3)))
+        ep2 = export(
+            M2(), (torch.randn(3, 3), torch.randn(3, 3), torch.randn(3))
+        ).run_decompositions()
         expected_result = [
             ("linear_1", "builtin_function_or_method.linear"),
             ("linear_1", "builtin_function_or_method.linear"),
@@ -630,7 +631,13 @@ class TestExport(TestCase):
         self.assertEqual(actual_result, expected_result)
 
     # TODO(yidi)
-    @unittest.expectedFailure
+    # Expected failure for test cases that calls run_decomposition().
+    # The top-level cond node has pre-existing metadata,
+    # which overrides the metadata for operators in subgraph due to interpreter.run(),
+    # where cond is a single node in the interpreter.run(). And we preserve metadata
+    # by copying current node's metadata for all nodes created during interpreting.
+    @testing.expectedFailurePreDispatchRunDecomp
+    @testing.expectedFailureRetraceability
     def test_export_cond_preserve_torch_fn_for_subgraphs(self):
         class MySubModule(torch.nn.Module):
             def foo(self, x):
@@ -1515,7 +1522,6 @@ class TestExport(TestCase):
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
     @testing.expectedFailureSerDer  # we don't save placeholder metadata
-    @testing.expectedFailureSerDerPreDispatch
     @testing.expectedFailureNonStrict
     def test_linear_conv(self):
         class MyLinear(torch.nn.Module):
@@ -2089,6 +2095,32 @@ class TestExport(TestCase):
             RuntimeError, "cannot mutate tensors with frozen storage"
         ):
             export(Module(), (torch.tensor(1, device="cpu"),))
+
+    def test_float_conversion(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return x.float()
+
+        ep = export(Module(), (torch.tensor(1, dtype=torch.float),))
+        ops = []
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+        self.assertGreater(len(ops), 0)
+        for op in ops:
+            self.assertIn(op, (torch.ops.aten._to_copy.default,))
+
+    def test_device_to_mutation_float(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                y = x.float()
+                y.add_(1)
+                return y, x
+
+        with self.assertRaisesRegex(
+            RuntimeError, "cannot mutate tensors with frozen storage"
+        ):
+            export(Module(), (torch.tensor(1, dtype=torch.float),))
 
     def test_module(self):
         class MyLinear(torch.nn.Module):
@@ -2869,7 +2901,6 @@ def forward(self, x):
             )
 
     @testing.expectedFailureSerDer  # We don't preserve metadata on graph module
-    @testing.expectedFailureSerDerPreDispatch
     @testing.expectedFailureNonStrict
     def test_retrace_graph_level_meta_preservation(self):
         class Foo(torch.nn.Module):
@@ -3061,8 +3092,6 @@ def forward(self, x):
         with self.assertRaisesRegex(ValueError, "Trying to flatten user inputs"):
             exported_program.module()(torch.rand(2, 3), torch.rand(2, 3))
 
-    @testing.expectedFailureSerDerPreDispatch  # linear shouldn't decompose
-    @testing.expectedFailurePreDispatchRunDecomp  # no action needed here
     def test_export_decomps_simple(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -3077,9 +3106,6 @@ def forward(self, x):
         ep = export(m, inp)
         state_dict = ep.state_dict
 
-        FileCheck().check_count("torch.ops.aten.t.default", 1, exactly=True).run(
-            ep.graph_module.code
-        )
         self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
 
         core_aten_ep = ep.run_decompositions()
@@ -3304,6 +3330,23 @@ def forward(self, x):
 
         test_inp = torch.ones(8, 4)
         self.assertTrue(torch.allclose(ep.module()(test_inp), Foo().forward(test_inp)))
+
+    @testing.expectedFailureRetraceability
+    def test_runtime_assert_with_size(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                a = x.item()
+                torch._check_is_size(a)
+                torch._check(a <= y.size(0))
+                return y[:a]
+
+        ep = export(
+            M(),
+            (torch.tensor(5), torch.ones(10)),
+            dynamic_shapes={"x": None, "y": {0: torch.export.Dim("t")}},
+        )
+        inp = (torch.tensor(6), torch.randn(13))
+        self.assertTrue(torch.allclose(ep.module()(*inp), M()(*inp)))
 
     def test_issue_113041(self):
         class TestModule(torch.nn.Module):
@@ -3647,7 +3690,6 @@ def forward(self, x):
         self.assertEqual(ep.module()(*inputs), m(*inputs))
 
     @testing.expectedFailureSerDer  # symfloat nyi
-    @testing.expectedFailureSerDerPreDispatch  # symfloat nyi
     def test_sym_sqrt(self):
         import math
 
@@ -3786,8 +3828,8 @@ def forward(self, x):
 
         inp = (torch.randn(4, 4),)
         mod = Foo()
-        ep_strict = torch.export.export(mod, inp)
-        ep_non_strict = torch.export.export(mod, inp, strict=False)
+        ep_strict = torch.export.export(mod, inp).run_decompositions()
+        ep_non_strict = torch.export.export(mod, inp, strict=False).run_decompositions()
 
         gm_unflat_non_strict = unflatten(ep_non_strict)
         self.assertTrue(hasattr(gm_unflat_non_strict, "bar"))
@@ -3804,8 +3846,8 @@ graph():
     %x : [num_users=1] = placeholder[target=x]
     %weight : [num_users=1] = get_attr[target=weight]
     %bias : [num_users=1] = get_attr[target=bias]
-    %t : [num_users=1] = call_function[target=torch.ops.aten.t.default](args = (%weight,), kwargs = {})
-    %addmm : [num_users=1] = call_function[target=torch.ops.aten.addmm.default](args = (%bias, %x, %t), kwargs = {})
+    %permute : [num_users=1] = call_function[target=torch.ops.aten.permute.default](args = (%weight, [1, 0]), kwargs = {})
+    %addmm : [num_users=1] = call_function[target=torch.ops.aten.addmm.default](args = (%bias, %x, %permute), kwargs = {})
     return addmm""",
         )
 
@@ -3876,9 +3918,8 @@ graph():
     %x : [num_users=1] = placeholder[target=x]
     %weight : [num_users=1] = get_attr[target=weight]
     %bias : [num_users=1] = get_attr[target=bias]
-    %t : [num_users=1] = call_function[target=torch.ops.aten.t.default](args = (%weight,), kwargs = {})
-    %addmm : [num_users=1] = call_function[target=torch.ops.aten.addmm.default](args = (%bias, %x, %t), kwargs = {})
-    return addmm""",
+    %linear : [num_users=1] = call_function[target=torch.ops.aten.linear.default](args = (%x, %weight, %bias), kwargs = {})
+    return linear""",
         )
         self.assertExpectedInline(
             str(gm_unflat_non_strict.bar_different.leaf.linear.graph).strip(),
@@ -3887,9 +3928,8 @@ graph():
     %add_2 : [num_users=1] = placeholder[target=add_2]
     %weight : [num_users=1] = get_attr[target=weight]
     %bias : [num_users=1] = get_attr[target=bias]
-    %t_1 : [num_users=1] = call_function[target=torch.ops.aten.t.default](args = (%weight,), kwargs = {})
-    %addmm_1 : [num_users=1] = call_function[target=torch.ops.aten.addmm.default](args = (%bias, %add_2, %t_1), kwargs = {})
-    return addmm_1""",
+    %linear_1 : [num_users=1] = call_function[target=torch.ops.aten.linear.default](args = (%add_2, %weight, %bias), kwargs = {})
+    return linear_1""",
         )
 
         gm_flat_non_strict = ep_non_strict.module()
@@ -4434,7 +4474,7 @@ def forward(self, x):
 
         inps = (torch.ones(5),)
 
-        ep = torch.export.export(M(), inps)
+        ep = torch.export.export(M(), inps).run_decompositions()
         self.assertExpectedInline(
             str(ep.graph_module.code.strip()),
             """\
@@ -4879,6 +4919,31 @@ def forward(self, x, y):
         unflattened = unflatten(ep)
         self.assertTrue(torch.allclose(m1(*inps), unflattened(*inps)))
 
+    @testing.expectedFailureRetraceability
+    def test_unused_aliases(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # param
+                self.alpha = torch.nn.Parameter(torch.randn(4))
+                self.beta = self.alpha
+                self.gamma = self.alpha
+
+            def forward(self, x):
+                return x + self.gamma
+
+        inps = (torch.randn(4),)
+        ep = export(Foo(), inps)
+        # placeholder nodes will be deduplicated in strict-mode,
+        # but check that all params still appear in state dict
+        for param in ["alpha", "beta", "gamma"]:
+            self.assertTrue(param in ep.state_dict)
+
+        # check that they also appear in unflattened state dict
+        unep = unflatten(ep)
+        for param in ["alpha", "beta", "gamma"]:
+            self.assertTrue(param in unep.state_dict())
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
@@ -4952,7 +5017,9 @@ class TestOneOffModelExportResult(TestCase):
         k = torch.randn(1, 16, 16, 64, dtype=torch.bfloat16, device="cuda")
         v = torch.randn(1, 16, 16, 64, dtype=torch.bfloat16, device="cuda")
 
-        ep = torch.export.export(ScaledDotProductAttention(), (q, k, v))
+        ep = torch.export.export(
+            ScaledDotProductAttention(), (q, k, v)
+        ).run_decompositions()
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
             """\

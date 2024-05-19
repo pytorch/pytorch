@@ -61,7 +61,7 @@ class LinearPackedContext final : virtual public VulkanPackedContext,
  public:
   LinearPackedContext(
       const Tensor& weight,
-      const c10::optional<Tensor>& bias,
+      const std::optional<Tensor>& bias,
       const bool use_batch = false);
 
   /*
@@ -97,7 +97,7 @@ class LinearPackedContext final : virtual public VulkanPackedContext,
 
 c10::intrusive_ptr<LinearPackedContext> create_linear_context(
     Tensor&& weight,
-    c10::optional<Tensor>&& bias);
+    std::optional<Tensor>&& bias);
 
 Tensor run_linear_context(
     const Tensor& input,
