@@ -14,12 +14,7 @@ from ..utils import sympy_index_symbol, sympy_index_symbol_with_prefix
 from ..virtualized import V
 from .common import Kernel, OpOverrides
 from .cpp import CppKernelProxy, KernelGroup
-from .cpp_utils import (
-    cexpr_index,
-    DTYPE_TO_CPP,
-    LocalBufferScope,
-    wrap_inner_fn_for_node,
-)
+from .cpp_utils import cexpr_index, DTYPE_TO_CPP, LocalBufferScope
 
 
 def parse_expr_with_index_symbols(expr):
@@ -285,20 +280,6 @@ class CppTemplateKernel(Kernel):
                     scope.add_local_buffer(src)
                     epilogue_nodes = scope.localize_buffer(
                         orig_src, src, epilogue_nodes
-                    )
-                if dst.get_dtype() != src.get_dtype():
-
-                    def inner_fn_wrapper(inner_fn):
-                        def inner(index):
-                            return V.ops.to_dtype(
-                                inner_fn(index).value, dst.get_dtype()
-                            )
-
-                        return inner
-
-                    epilogue_nodes = list(epilogue_nodes)  # type: ignore[arg-type]
-                    epilogue_nodes[-1] = wrap_inner_fn_for_node(
-                        epilogue_nodes[-1], inner_fn_wrapper
                     )
                 return self.store_pointwise_nodes(
                     dst, epilogue_nodes, offsets, reindexer  # type: ignore[arg-type]
