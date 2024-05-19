@@ -5,7 +5,12 @@ from typing import List
 import torch
 
 import torch.distributed as dist
-from torch.distributed._cuda_p2p import get_cuda_p2p_backend, is_cuda_p2p_group
+from torch.distributed._cuda_p2p import (
+    _fused_all_gather_matmul_fallback,
+    _fused_matmul_reduce_scatter_fallback,
+    get_cuda_p2p_backend,
+    is_cuda_p2p_group,
+)
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_nccl,
@@ -122,6 +127,68 @@ class ProcessGroupCudaP2PTest(MultiProcessTestCase):
         local_buffer.fill_(rank)
         backend.intra_node_barrier()
         assert remote_buffer.eq((rank + 1) % world_size).all()
+
+        dist.barrier()
+        torch.cuda.synchronize()
+        dist.destroy_process_group()
+
+    @skip_if_lt_x_gpu(2)
+    def test_fused_all_gather_matmul(self) -> None:
+        B = 8
+        M = 64
+        N = 16
+        K = 32
+        BUFFER_SIZE = B * M * K // self.world_size * 4
+
+        self._init_process_group(BUFFER_SIZE)
+        group = dist.group.WORLD
+        rank = self.rank
+        world_size = self.world_size
+
+        torch.manual_seed(42 + rank)
+        A_shard = torch.rand(B, M // self.world_size, K, device="cuda")
+        Bs = [torch.rand(K, N, device="cuda") for _ in range(3)]
+
+        ag_output_0, mm_outputs_0 = _fused_all_gather_matmul_fallback(
+            A_shard, Bs, gather_dim=0, group_name=group.group_name
+        )
+        ag_output_1, mm_outputs_1 = torch.ops.cuda_p2p.fused_all_gather_matmul(
+            A_shard, Bs, gather_dim=0, group_name=group.group_name
+        )
+
+        assert torch.allclose(ag_output_0, ag_output_1)
+        for mm_output_0, mm_output_1 in zip(mm_outputs_0, mm_outputs_1):
+            assert torch.allclose(mm_output_0, mm_output_1)
+
+        dist.barrier()
+        torch.cuda.synchronize()
+        dist.destroy_process_group()
+
+    @skip_if_lt_x_gpu(2)
+    def test_fused_matmul_reduce_scatter(self) -> None:
+        B = 8
+        M = 64
+        N = 16
+        K = 32
+        BUFFER_SIZE = B * M * N // self.world_size * 4 * 2
+
+        self._init_process_group(BUFFER_SIZE)
+        group = dist.group.WORLD
+        rank = self.rank
+        world_size = self.world_size
+
+        torch.manual_seed(42 + rank)
+        A = torch.rand(B, M, K, device="cuda")
+        B = torch.rand(K, N, device="cuda")
+
+        output_0 = _fused_matmul_reduce_scatter_fallback(
+            A, B, "avg", scatter_dim=0, group_name=group.group_name
+        )
+        output_1 = torch.ops.cuda_p2p.fused_matmul_reduce_scatter(
+            A, B, "avg", scatter_dim=0, group_name=group.group_name
+        )
+
+        assert torch.allclose(output_0, output_1)
 
         dist.barrier()
         torch.cuda.synchronize()
