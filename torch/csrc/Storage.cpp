@@ -108,7 +108,7 @@ PyObject* THPStorage_Wrap(c10::Storage storage) {
         c10::newStorageImplFromRefcountedDataPtr(storage),
         c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
   }
-  c10::optional<PyObject*> maybe_pyobj = pyobj_slot->check_pyobj(
+  std::optional<PyObject*> maybe_pyobj = pyobj_slot->check_pyobj(
       getPyInterpreter(), /*ignore_hermetic_tls=*/false);
   c10::impl::PyInterpreterStatus status =
       c10::impl::PyInterpreterStatus::TAGGED_BY_US;
@@ -236,7 +236,7 @@ static void THPStorage_subclass_dealloc(PyObject* self) {
   if (type->tp_del) {
     PyObject_GC_Track(self);
     type->tp_del(self);
-    if (self->ob_refcnt > 0) {
+    if (Py_REFCNT(self) > 0) {
       // Resurrected (see above comment about resurrection from `__del__`)
       return;
     }
@@ -316,8 +316,8 @@ static PyObject* THPStorage_pynew(
     device_arg_idx = 2;
   }
 
-  c10::optional<int64_t> allocator_opt = r.toInt64Optional(allocator_arg_idx);
-  c10::optional<at::Device> device_opt = r.deviceOptional(device_arg_idx);
+  std::optional<int64_t> allocator_opt = r.toInt64Optional(allocator_arg_idx);
+  std::optional<at::Device> device_opt = r.deviceOptional(device_arg_idx);
 
   TORCH_CHECK(
       !allocator_opt.has_value() || !device_opt.has_value(),
@@ -498,7 +498,7 @@ static PyObject* THPStorage_get(THPStorage* self, PyObject* index) {
 
     at::StorageImpl* old_storage_impl = storage.unsafeGetStorageImpl();
     c10::raw::intrusive_ptr::incref(old_storage_impl);
-    c10::optional<at::Device> device_opt = old_storage_impl->device();
+    std::optional<at::Device> device_opt = old_storage_impl->device();
     auto new_storage_impl = make_storage_impl(
         c10::StorageImpl::use_byte_size_t(),
 #ifdef THQUANTIZED
