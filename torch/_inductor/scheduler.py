@@ -639,7 +639,6 @@ class BaseSchedulerNode:
                     # runtime for that today
                     return 0
 
-                assert self.node.fx_node is not None
                 with FakeTensorMode() as fake_mode, FlopCounterMode(
                     display=False
                 ) as flop_counter_mode, V.set_current_node(
