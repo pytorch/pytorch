@@ -47,7 +47,7 @@ def _create_immutable_container_class(
 
 immutable_list = _create_immutable_container_class(
     list,
-    (
+    mutable_methods=(
         "__delitem__",
         "__iadd__",
         "__imul__",
@@ -71,7 +71,7 @@ immutable_list = compatibility(is_backward_compatible=True)(immutable_list)
 
 immutable_dict = _create_immutable_container_class(
     dict,
-    (
+    mutable_methods=(
         "__delitem__",
         "__ior__",
         "__setitem__",

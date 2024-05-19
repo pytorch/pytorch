@@ -61,7 +61,7 @@ struct TORCH_API SchemaInfo {
   void addArgumentValue(const std::string& name, const at::IValue& value);
 
   void addArgumentValues(
-      const std::vector<c10::optional<at::IValue>>& value_list);
+      const std::vector<std::optional<at::IValue>>& value_list);
 
   void addArgumentValues(
       const std::unordered_map<std::string, at::IValue>& values);
