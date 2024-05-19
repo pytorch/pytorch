@@ -2687,6 +2687,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         else:
             maybe_sym_local = self.symbolic_locals.get(inst.argval, None)
             if isinstance(maybe_sym_local, variables.NewCellVariable):
+                assert False
                 self.push(self.output.side_effects.load_cell(maybe_sym_local))
             else:
                 super().LOAD_DEREF(inst)
