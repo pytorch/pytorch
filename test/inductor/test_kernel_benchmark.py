@@ -285,7 +285,7 @@ class TestKernelBenchmark(TestCase):
         # num_gp = size_a + size_slice_b + size_c + size_out
         # num_gb = (5 * 1000000 + 5 * 2000000 + 1000000 + 5 * 2000000) * 2 / 1e9
         #        = 0.052
-        self.check_bandwidth(compiled_module, "0.020")
+        self.check_bandwidth(compiled_module, "0.052")
 
     def test_slice_add_bandwidth_computation(self):
         M, N = 5, 1000000

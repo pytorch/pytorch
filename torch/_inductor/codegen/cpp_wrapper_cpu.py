@@ -552,10 +552,8 @@ class CppWrapperCpu(WrapperCodeGen):
                         ), "Fails to get the dtype of the sympy.Expr"
                         cpp_dtype = DTYPE_TO_CPP[dtype]
                         if config.abi_compatible:
-                            self.prefix.writeline(f"{cpp_dtype} {input_key};")
-                            dtype_str = str(dtype).split(".")[-1]
-                            self.prefix.writeline(
-                                f"aoti_torch_item_{dtype_str}(inputs[{idx}], &{input_key});"
+                            self.codegen_tensor_item(
+                                dtype, f"inputs[{idx}]", input_key, self.prefix
                             )
                         else:
                             self.prefix.writeline(
@@ -890,6 +888,19 @@ class CppWrapperCpu(WrapperCodeGen):
         )
         return name
 
+    def codegen_tensor_item(
+        self, dtype: torch.dtype, tensor: str, scalar: str, indented_buffer=None
+    ):
+        assert (
+            config.abi_compatible
+        ), "codegen_tensor_item is only used for the ABI-compatible mode"
+        dtype_str = str(dtype).split(".")[-1]
+        writer = indented_buffer or self
+        writer.writeline(f"{DTYPE_TO_CPP[dtype]} {scalar};")
+        writer.writeline(
+            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_{dtype_str}({tensor}, &{scalar}));"
+        )
+
     @cache_on_self
     def get_output_refs(self):
         return [
@@ -1120,7 +1131,7 @@ class CppWrapperCpu(WrapperCodeGen):
         )
 
     def get_c_shim_func_name(self, kernel):
-        if not config.abi_compatible:
+        if not config.abi_compatible or kernel.startswith("aoti_torch_"):
             return kernel
 
         assert "::" in kernel, "Cpp kernel name: " + kernel + " does not contain '::'"
@@ -1148,22 +1159,6 @@ class CppWrapperCpu(WrapperCodeGen):
         # ArrayRefTensor and at::Tensor is still fragile.
         self.allow_stack_allocation = False
 
-        # HACK: val_to_arg_str jams multiple arguments together using a comma. If that
-        # ever breaks, it needs to be reworked to be able to return multiple arguments,
-        # and the split-on-comma code here needs to be removed.
-        def is_number(s: str):
-            try:
-                int(s)
-                return True
-            except ValueError:
-                pass
-
-            try:
-                float(s)
-                return True
-            except ValueError:
-                return False
-
         wrapped_args = []
         for x in args:
             pieces = x.split(", ")
@@ -1172,7 +1167,11 @@ class CppWrapperCpu(WrapperCodeGen):
                 # ArrayRefTensors. The code flowing into here uses `0` for nullptr,
                 # which convert_arrayref_tensor_to_tensor would blindly coerce to int,
                 # so just avoid wrapping integers.
-                if not is_number(piece):
+                # Name matching is to find tensor is hacky, but fixing all the
+                # ArrayRefTensor issues is not a priority for now.
+                if isinstance(piece, str) and piece.startswith(
+                    ("buf", "arg", "wrap_with_raii_handle_if_needed")
+                ):
                     piece = f"convert_arrayref_tensor_to_tensor({piece})"
                 wrapped_args.append(piece)
 
@@ -1388,10 +1387,9 @@ class CppWrapperCpu(WrapperCodeGen):
     def codegen_dynamic_scalar(self, node):
         (data,) = (t.codegen_reference() for t in node.inputs)
         if config.abi_compatible:
-            dtype = node.inputs[0].get_dtype()
-            dtype_str = str(dtype).split(".")[-1]
-            self.writeline(f"{DTYPE_TO_CPP[dtype]} {node.sym}_raw;")
-            self.writeline(f"aoti_torch_item_{dtype_str}({data}, &{node.sym}_raw);")
+            self.codegen_tensor_item(
+                node.inputs[0].get_dtype(), data, f"{node.sym}_raw"
+            )
         else:
             convert_type = DTYPE_TO_ATEN[node.inputs[0].get_dtype()].replace(
                 "at::k", "to"
@@ -1492,6 +1490,7 @@ class CppWrapperCpu(WrapperCodeGen):
         writer=None,
         known_statically=False,
         graph=None,  # for per-graph caching
+        is_bool=False,
     ):
         # Because the memory planning is done in two passes (see the implementation
         # of self.generate), the writeline behavior is different in the two passes.
@@ -1503,12 +1502,13 @@ class CppWrapperCpu(WrapperCodeGen):
             writer = self
 
         var = f"int_array_{next(self.int_array_id)}"
+        ctype = "int32_t" if is_bool else "int64_t"
         if var not in self.declared_int_array_vars:
             self.declared_int_array_vars.add(var)
             if known_statically:
-                writer.writeline(f"static constexpr int64_t {var}[] = {int_array};")
+                writer.writeline(f"static constexpr {ctype} {var}[] = {int_array};")
             else:
-                writer.writeline(f"int64_t {var}[] = {int_array};")
+                writer.writeline(f"const {ctype} {var}[] = {int_array};")
         return var
 
     def make_buffer_allocation(self, buffer):
@@ -1773,12 +1773,13 @@ class CppWrapperCpu(WrapperCodeGen):
                 outer_outputs.append(out.get_name())
 
             if not isinstance(conditional.predicate, ir.ShapeAsConstantBuffer):
-                predicate = f"{conditional.predicate.get_name()}_scalar"
-                self.writeline(f"bool {predicate};")
                 # in ABI-compatible mode, we need to use the ABI shim function
                 # to extract a C++ bool from the unrelying scalar bool Tensor
-                self.writeline(
-                    f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_bool({conditional.predicate.codegen_reference()}, &{predicate}));"
+                predicate = f"{conditional.predicate.get_name()}_scalar"
+                self.codegen_tensor_item(
+                    torch.bool,
+                    conditional.predicate.codegen_reference(),
+                    predicate,
                 )
             else:
                 # the predicate is not a Tensor: SymBool or Python bool
@@ -1857,12 +1858,7 @@ class CppWrapperCpu(WrapperCodeGen):
 
         if config.abi_compatible:
             cond_result = f"{cond_result_name}_scalar"
-            self.writeline(f"bool {cond_result};")
-            # in ABI-compatible mode, we need to use the ABI shim function
-            # to extract a C++ bool from the unrelying scalar bool Tensor
-            self.writeline(
-                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_bool({cond_result_name}, &{cond_result}));"
-            )
+            self.codegen_tensor_item(torch.bool, cond_result_name, cond_result)
         else:
             cond_result = f"{cond_result_name}.item<bool>()"
         self.writeline(f"if (!{cond_result}) break;")
@@ -2319,12 +2315,14 @@ if (py_{buf_name}.get() == NULL) {{
             # FIXME handle embedded optional types?
             result = f"{{{', '.join(self.val_to_arg_str(x) for x in val)}}}"
             if config.abi_compatible:
+                assert len(val) > 0, "Empty array is not supported in C"
                 static = self.is_statically_known_list_of_ints(val)
                 # Need to pass the array length because we can't use std::vector
                 int_var_array = self.codegen_int_array_var(
                     result,
                     known_statically=static,
                     graph=self.get_codegened_graph(),
+                    is_bool=isinstance(val[0], bool),
                 )
                 return f"{int_var_array}, {len(val)}"
             else:

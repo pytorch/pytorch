@@ -1184,12 +1184,14 @@ class FlatParamHandle:
         flat_param._local_shard = flat_param.data
         if self._offload_params:
             # Pin the memory for faster H2D transfer
-            flat_param._local_shard = flat_param._local_shard.pin_memory()
+            flat_param._local_shard = flat_param._local_shard.pin_memory(
+                device=self.device
+            )
             # Pre-allocate the sharded gradient on CPU to enable non-blocking
             # D2H transfer during the backward pass
             flat_param._cpu_grad = torch.zeros_like(
                 flat_param._local_shard, device=cpu_device
-            ).pin_memory()
+            ).pin_memory(device=self.device)
         if self._uses_param_mixed_precision:
             # For parameter mixed precision, we maintain a low precision
             # sharded tensor on the compute device to be all-gathered (for

@@ -59,7 +59,7 @@ inline void check_nested_tensor_matrix_constraints(
 Tensor nested_linear(
     const Tensor& input,
     const Tensor& weight,
-    const c10::optional<Tensor>& bias_opt) {
+    const std::optional<Tensor>& bias_opt) {
   check_nested_tensor_matrix_constraints(input, weight, c10::string_view{"Linear"});
   auto* nt_input = get_nested_tensor_impl(input);
   const Tensor& input_buffer = nt_input->get_buffer();
@@ -93,7 +93,7 @@ Tensor NestedTensor_times_Tensor_plus_Tensor_addmm(
     const Tensor& mat2,
     const c10::Scalar& beta,
     const c10::Scalar& alpha,
-    c10::optional<bool> use_gelu) {
+    std::optional<bool> use_gelu) {
   // Interesting case: alpha * NT * T + beta * T
   const auto* nt_mat1 = get_nested_tensor_impl_or_null(mat1);
   TORCH_INTERNAL_ASSERT(nt_mat1 != nullptr);
@@ -184,7 +184,7 @@ Tensor NestedTensor_softmax_dropout(const Tensor& self, const Tensor& query) {
 }
 
 Tensor NestedTensor_softmax_dropout_cuda(const Tensor& self, const Tensor& query) {
-  c10::optional<Tensor> attn_mask;
+  std::optional<Tensor> attn_mask;
 
   attn_mask = NestedTensor_to_mask(query, 2, self.size(2));
   attn_mask = attn_mask->to(query.device(), /*non-blocking=*/true);
@@ -211,7 +211,7 @@ Tensor NestedTensor_batch_offsets_from_size_tensor(
 }
 
 
-Tensor NestedTensor_to_mask(const Tensor& nt, c10::optional<int64_t> mask_dim, c10::optional<int64_t> mask_dim_length) {
+Tensor NestedTensor_to_mask(const Tensor& nt, std::optional<int64_t> mask_dim, c10::optional<int64_t> mask_dim_length) {
   auto* nt_impl = get_nested_tensor_impl(nt);
   TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_impl), "to_mask only works on contiguous NestedTensors.");
   TORCH_CHECK(

@@ -427,8 +427,8 @@ at::Tensor interpolate(
     const IValue& size,
     const IValue& scale_factors,
     const std::string& mode,
-    c10::optional<bool> align_corners,
-    c10::optional<bool> recompute_scale_factor) {
+    std::optional<bool> align_corners,
+    std::optional<bool> recompute_scale_factor) {
   if ((mode == "nearest" || mode == "area")) {
     if (align_corners != c10::nullopt) {
       throw std::runtime_error(
