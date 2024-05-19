@@ -638,6 +638,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void performNocolorSplit(at::Device device);
 
+  c10::StreamId getStreamId(
+      OpType opType,
+      std::optional<int> peer = c10::nullopt,
+      std::optional<at::Device> device = c10::nullopt);
+
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store
   void broadcastUniqueNCCLID(

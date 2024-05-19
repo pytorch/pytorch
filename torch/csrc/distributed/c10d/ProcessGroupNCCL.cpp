@@ -193,7 +193,7 @@ ncclRedOpRAII getNcclReduceOp(
 }
 
 // Get a key string from device
-inline std::string getKeyFromDevice(at::Device& device) {
+inline std::string getKeyFromDevice(const at::Device& device) {
   return std::to_string(device.index());
 }
 
@@ -203,6 +203,19 @@ std::string getKeySendRecv(int myRank, int peer) {
   std::string sendRecvPair =
       std::to_string(lowRank) + ":" + std::to_string(highRank);
   return sendRecvPair;
+}
+
+std::string getKeyFromOp(
+    int myRank,
+    int peer,
+    const at::Device& device,
+    OpType opType,
+    bool batchP2P) {
+  bool isP2P = isP2POp(opType, batchP2P);
+  if (!isP2P) {
+    return getKeyFromDevice(device);
+  }
+  return getKeySendRecv(myRank, peer);
 }
 
 // Get device from tensor
@@ -910,6 +923,37 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
   auto comm = getNCCLComm(key, device, OpType::ALLREDUCE);
   NCCLComm::split(comm.get(), NCCL_SPLIT_NOCOLOR, rank_, options_->config);
 #endif
+}
+
+c10::StreamId ProcessGroupNCCL::getStreamId(
+    OpType opType,
+    std::optional<int> peer,
+    std::optional<at::Device> device) {
+  bool batchP2P = ncclActiveGroupCounter_ > 0;
+  auto cudaDevice = c10::value_or_else(device, [] {
+    auto curDeviceIndex = c10::cuda::current_device();
+    return at::Device(at::kCUDA, curDeviceIndex);
+  });
+  if (!batchP2P && isP2POp(opType)) {
+    TORCH_CHECK(peer.has_value(), "peer must be set for P2P ops");
+  }
+  int peerRank = peer.value_or(-1);
+  auto key = getKeyFromOp(rank_, peerRank, cudaDevice, opType, batchP2P);
+  auto streamIter = ncclStreams_.find(key);
+  TORCH_CHECK(
+      streamIter != ncclStreams_.end(),
+      "Unable to find the stream for peer rank ",
+      std::to_string(peerRank),
+      " with opType=",
+      opTypeToString(opType),
+      " it's possible that the NCCL communicator has not been initialized yet"
+      " for rank ",
+      std::to_string(rank_),
+      " <-> ",
+      std::to_string(peerRank),
+      ". Please make sure this method is only invoked after the corresponding call ",
+      " (peer rank is -1 if the op is a collective call).");
+  return streamIter->second.id();
 }
 
 c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
@@ -2806,21 +2850,19 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   }
 
   auto device = getDevice(tensor);
-  std::string key;
   int p2pRank = 0, p2pTargetRank = 0;
   bool isSendRecvSelf = false;
   // For batch_isend_irecv, ncclGroupStart() would be called upfront
   bool batchP2P = ncclActiveGroupCounter_ > 0;
+  std::string key = getKeyFromOp(rank_, peer, device, opType, batchP2P);
   if (batchP2P) {
     // For batch P2P, we need to treat it like a collective when selecting
     // communicator, because other ranks can call into this batch other than my
     // rank and my peer
-    key = getKeyFromDevice(device);
     p2pRank = rank_;
     p2pTargetRank = peer;
   } else {
     // For single P2P, preserve the old two-rank behavior (to avoid perf diff)
-    key = getKeySendRecv(rank_, peer);
     p2pRank = rank_ <= peer ? 0 : 1;
     isSendRecvSelf = rank_ == peer;
     p2pTargetRank = isSendRecvSelf ? 0 : 1 - p2pRank;
