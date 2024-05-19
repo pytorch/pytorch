@@ -5,11 +5,11 @@
 
 #include <thrust/tuple.h>
 
-#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/TensorIterator.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/cuda/CUDAMathCompat.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/cuda/Loops.cuh>
@@ -29,8 +29,41 @@ constexpr int kCUDANumThreads = 256;
 constexpr int kReduceTileSize = 32;
 
 template <typename T>
-__global__ void RowwiseMomentsCUDAKernel(
-    int64_t N,
+__global__ void ApplyScaleBiasNHWCKernel(const T* X,
+  T* Y,
+  int64_t N,
+  int64_t H,
+  int64_t W,
+  int64_t C,
+  int64_t group_span,
+  acc_type<T, true>* a,
+  acc_type<T, true>* b) {
+  using T_ACC = acc_type<T, true>;
+  const int64_t i = blockIdx.x;
+  const int64_t tx = threadIdx.x;
+
+  for(int j = tx; j < group_span; j += blockDim.x) {
+    const int64_t index = i * group_span + j;
+    const int64_t cur_sample = index / (H*W*C);
+    int64_t remainder = index % (H*W*C);
+    const int64_t cur_h = remainder / (W*C);
+    remainder = remainder % (W * C);
+    const int64_t cur_w = remainder / (C);
+    const int64_t cur_channel = remainder % C;
+
+    auto cur_a = a[cur_sample * C + cur_channel];
+    auto cur_b = b[cur_sample * C + cur_channel];
+    Y[index] = (static_cast<T_ACC>(X[index]) + cur_b) * cur_a;
+  }
+}
+
+template <typename T>
+__global__ void RowWiseNHWC(
+    int64_t group_span,
+    int64_t H,
+    int64_t W,
+    int64_t C,
+    int64_t num_ch_group,
     T eps,
     const T* X,
     T* mean,
@@ -40,11 +73,70 @@ __global__ void RowwiseMomentsCUDAKernel(
   using WelfordOp =
       WelfordOps<T_ACC, T_ACC, int64_t, thrust::pair<T_ACC, T_ACC>>;
 
+  const int G = C / num_ch_group;
+
+  const int64_t i = blockIdx.x;
+  const int64_t group_channels = C / G;
+  const int64_t group_idx = i % G;
+  const int64_t group_offset = group_idx * group_channels;
+  const int64_t batch_idx = i / G;
+
+  const int64_t batch_offset = batch_idx * H * W * C;
+
+  WelfordOp welford_op = {/*correction=*/0, /*take_sqrt=*/false};
+  WelfordType val(0, 0, 0, 0);
+  for (int64_t j = threadIdx.x; j < group_span; j += blockDim.x) {
+    const int64_t hw_idx = j;
+    const int64_t hw_offset = hw_idx * C;
+    const int64_t index = batch_offset + hw_offset + group_offset;
+
+    for (int64_t c = 0; c < group_channels; c++) {
+      val = welford_op.reduce(val, static_cast<T_ACC>(X[index + c]), index + c);
+    }
+  }
+  if (blockDim.x <= C10_WARP_SIZE) {
+    val = cuda_utils::WarpReduce(val, welford_op);
+  } else {
+    __shared__ typename std::aligned_storage<
+        sizeof(WelfordType),
+        alignof(WelfordType)>::type val_shared[C10_WARP_SIZE];
+    WelfordType* val_shared_ptr = reinterpret_cast<WelfordType*>(val_shared);
+    val = cuda_utils::BlockReduce(
+        val,
+        welford_op,
+        /*identity_element=*/WelfordType(0, 0, 0, 0),
+        val_shared_ptr);
+  }
+  if (threadIdx.x == 0) {
+    T_ACC m1;
+    T_ACC m2;
+    thrust::tie(m2, m1) = welford_op.project(val);
+    mean[i] = m1;
+    rstd[i] = c10::cuda::compat::rsqrt(m2 + static_cast<T_ACC>(eps));
+  }
+}
+
+template <typename T>
+__global__ void RowwiseMomentsCUDAKernel(
+    int64_t group_span,
+    T eps,
+    const T* X,
+    T* mean,
+    T* rstd,
+    int64_t H,
+    int64_t W,
+    int64_t C) {
+  using T_ACC = acc_type<T, true>;
+  using WelfordType = WelfordData<T_ACC, int64_t>;
+  using WelfordOp =
+      WelfordOps<T_ACC, T_ACC, int64_t, thrust::pair<T_ACC, T_ACC>>;
+
   const int64_t i = blockIdx.x;
   WelfordOp welford_op = {/*correction=*/0, /*take_sqrt=*/false};
   WelfordType val(0, 0, 0, 0);
-  for (int64_t j = threadIdx.x; j < N; j += blockDim.x) {
-    const int64_t index = i * N + j;
+  for (int64_t j = threadIdx.x; j < group_span; j += blockDim.x) {
+    const int64_t index = i * group_span + j;
+
     val = welford_op.reduce(val, static_cast<T_ACC>(X[index]), index);
   }
   if (blockDim.x <= C10_WARP_SIZE) {
@@ -570,20 +662,38 @@ void GroupNormKernelImplInternal(
   if (N == 0) {
     return;
   }
+
   const int64_t G = group;
   const int64_t D = C / G;
   const T* X_data = X.const_data_ptr<T>();
+  T* Y_data = Y.mutable_data_ptr<T>();
   T* mean_data = mean.mutable_data_ptr<T>();
   T* rstd_data = rstd.mutable_data_ptr<T>();
+
+  at::MemoryFormat x_format = X.suggest_memory_format();
 
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   const int64_t num_threads = D * HxW < cuda_utils::kCUDABlockReduceNumThreads
       ? at::cuda::warp_size()
       : cuda_utils::kCUDABlockReduceNumThreads;
-  RowwiseMomentsCUDAKernel<T><<<N * G, num_threads, 0, cuda_stream>>>(
-      D * HxW, eps, X_data, mean_data, rstd_data);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
+  int height;
+  int width;
+  switch(x_format) {
+    case MemoryFormat::Contiguous: {
+      height = X.size(2);
+      width = X.size(3);
+      RowwiseMomentsCUDAKernel<T><<<N * G, num_threads, 0, cuda_stream>>>(
+          D * HxW, eps, X_data, mean_data, rstd_data, height, width, C);
+    }
+    case MemoryFormat::ChannelsLast: {
+      height = X.size(1);
+      width = X.size(2);
+      RowWiseNHWC<T><<<N * G, num_threads, 0, cuda_stream>>>(
+      HxW, height, width, C, D, eps, X_data, mean_data, rstd_data);
+    }
+  }
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
   if (HxW == 1) {
     GroupNorm1dForward<T>(X, mean, rstd, gamma, beta, N, C, G, Y);
   } else if (!gamma.defined() && !beta.defined()) {
@@ -594,6 +704,7 @@ void GroupNormKernelImplInternal(
                     .add_owned_input(mean.view({N * G, 1}))
                     .add_owned_input(rstd.view({N * G, 1}))
                     .build();
+
     gpu_kernel(iter, [] GPU_LAMBDA(T x, T mean, T rstd) -> T {
       return (static_cast<T_ACC>(x) - static_cast<T_ACC>(mean)) *
           static_cast<T_ACC>(rstd);
@@ -605,6 +716,7 @@ void GroupNormKernelImplInternal(
         : X.scalar_type();
     Tensor a = at::empty({N, C}, X.options().dtype(kAccType));
     Tensor b = at::empty({N, C}, X.options().dtype(kAccType));
+
     const T* gamma_data = gamma.defined() ? gamma.const_data_ptr<T>() : nullptr;
     const T* beta_data = beta.defined() ? beta.const_data_ptr<T>() : nullptr;
     T_ACC* a_data = a.mutable_data_ptr<T_ACC>();
@@ -614,21 +726,35 @@ void GroupNormKernelImplInternal(
     // using manual kernel here. Make it using gpu_kernel_multiple_outputs once
     // the issue fixed.
     const int64_t B = (N * C + kCUDANumThreads - 1) / kCUDANumThreads;
+
     ComputeFusedParamsCUDAKernel<T><<<B, kCUDANumThreads, 0, cuda_stream>>>(
         N, C, G, mean_data, rstd_data, gamma_data, beta_data, a_data, b_data);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-    auto iter = TensorIteratorConfig()
-                    .check_all_same_dtype(std::is_same<T, T_ACC>::value)
-                    .resize_outputs(false)
-                    .add_owned_output(Y.view({N * C, HxW}))
-                    .add_owned_const_input(X.view({N * C, HxW}))
-                    .add_owned_input(a.view({N * C, 1}))
-                    .add_owned_input(b.view({N * C, 1}))
-                    .build();
-    gpu_kernel(iter, [] GPU_LAMBDA(T x, T_ACC a, T_ACC b) -> T {
-      return a * static_cast<T_ACC>(x) + b;
-    });
+    switch(x_format) {
+      case MemoryFormat::Contiguous: {
+          TensorIterator iter = TensorIteratorConfig()
+                      .check_all_same_dtype(std::is_same<T, T_ACC>::value)
+                      .resize_outputs(false)
+                      .add_owned_output(Y.view({N * C, HxW}))
+                      .add_owned_const_input(X.view({N * C, HxW}))
+                      .add_owned_input(a.view({N * C, 1}))
+                      .add_owned_input(b.view({N * C, 1}))
+                      .build();
+          gpu_kernel(iter, [] GPU_LAMBDA(T x, T_ACC a, T_ACC b) -> T {
+            return a * static_cast<T_ACC>(x) + b;
+          });
+          break;
+      }
+      case MemoryFormat::ChannelsLast: {
+            ApplyScaleBiasNHWCKernel<T><<<N * G, num_threads, 0, cuda_stream>>>(X_data, Y_data, N, height, width, C, D*HxW, a_data, b_data);
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
+            break;
+      }
+      default:
+          break; // shouldn't hit this
+    }
+
   }
   AT_CUDA_CHECK(cudaGetLastError());
 }
