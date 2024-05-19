@@ -76,7 +76,11 @@ class TestSelectAlgorithm(TestCase):
         B = (2, batch_size) if input_3d else (batch_size,)
         v = torch.randn(*B, in_features).to(dtype=dtype)
         mod(v)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        if batch_size == 1 and out_features == 1 and not input_3d:
+            # This is a special case where we go directly with vectorized codegen
+            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 0)
+        else:
+            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @inductor_config.patch({"freezing": True})
     @patches
