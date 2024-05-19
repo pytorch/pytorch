@@ -199,6 +199,61 @@ class TestFlexAttention(InductorTestCase):
                 v_gold.grad, v_ref.grad, v.grad, v_fudge_factor, "Grad_Value"
             )
 
+    def run_test_different_seqlen(
+        self,
+        score_mod: Callable,
+        dtype: torch.dtype = torch.float16,
+        B: int = B,
+        H: int = H,
+        S: int = S,
+        D: int = D,
+    ):
+        sdpa_partial = create_attention(score_mod)
+        compiled_sdpa = torch.compile(sdpa_partial)
+        # Seqlen of Q is different from seqlen of K/V
+        q = torch.randn(
+            (B, H, S // 2, D), dtype=dtype, device="cuda", requires_grad=True
+        )
+        k = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
+        v = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
+        q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
+        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
+        golden_out = sdpa_partial(q_gold, k_gold, v_gold)
+        ref_out = sdpa_partial(q_ref, k_ref, v_ref)
+        compiled_out = compiled_sdpa(q, k, v)
+
+        # backward grad has the same shape as Q.
+        backward_grad = torch.randn((B, H, S // 2, D), dtype=dtype, device="cuda")
+
+        golden_out.backward(backward_grad.to(torch.float64))
+        ref_out.backward(backward_grad)
+        compiled_out.backward(backward_grad)
+
+        with torch.no_grad():
+            # Note, it seems like we really are less accurate than the float32
+            # computation, likely due to the online softmax
+            if dtype == torch.float32:
+                fudge_factor = 10.0
+            else:
+                fudge_factor = 1.1
+
+            # Checkout output
+            self._check_equal(golden_out, ref_out, compiled_out, fudge_factor, "Out")
+
+            # Check gradients
+            q_fudge_factor = 2.5 * fudge_factor
+            self._check_equal(
+                q_gold.grad, q_ref.grad, q.grad, q_fudge_factor, "Grad_Query"
+            )
+            k_fudge_factor = 4 * fudge_factor
+            self._check_equal(
+                k_gold.grad, k_ref.grad, k.grad, k_fudge_factor, "Grad_Key"
+            )
+            v_fudge_factor = 8 * fudge_factor
+            self._check_equal(
+                v_gold.grad, v_ref.grad, v.grad, v_fudge_factor, "Grad_Value"
+            )
+
     def run_dynamic_test(
         self,
         score_mod: Callable,
@@ -327,6 +382,14 @@ class TestFlexAttention(InductorTestCase):
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods(self, dtype: torch.dtype, score_mod: Callable):
         self.run_test(score_mod, dtype)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    def test_builtin_score_mods_different_seqlen(
+        self, dtype: torch.dtype, score_mod: Callable
+    ):
+        self.run_test_different_seqlen(score_mod, dtype)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
