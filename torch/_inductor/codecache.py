@@ -110,6 +110,7 @@ else:
 
 
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
+kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
 
 LOCK_TIMEOUT = 600
 
@@ -3294,6 +3295,7 @@ class AsyncCompile:
         return cls.pool().submit(task)
 
     def triton(self, kernel_name: str, source_code: str, device_str: str = "cuda"):
+        kernel_code_log.info("Triton Kernel:\n%s", source_code)
         _compile_start()
         _set_triton_ptxas_path()
 
@@ -3317,6 +3319,7 @@ class AsyncCompile:
         return MultiKernelCall(*args, **kwargs)
 
     def cpp(self, source_code: str):
+        kernel_code_log.info("CPP Kernel:\n%s", source_code)
         if config.compile_threads <= 1:
             return CppCodeCache.load(source_code).kernel
         else:
@@ -3324,6 +3327,7 @@ class AsyncCompile:
             return LambdaFuture(lambda: get_result().kernel)
 
     def cpp_pybinding(self, argtypes: List[str], source_code: str):
+        kernel_code_log.info("CPP+Bindings Kernel:\n%s", source_code)
         if config.compile_threads <= 1:
             return CppPythonBindingsCodeCache.load_pybinding(argtypes, source_code)
         else:
@@ -3333,12 +3337,15 @@ class AsyncCompile:
             return LambdaFuture(get_result)
 
     def cuda(self, source_code, dst_file_ext):
+        kernel_code_log.info("CUDA Kernel:\n%s", source_code)
+
         def task():
             return CUDACodeCache.load(source_code, dst_file_ext)[0]
 
         return self.submit(task)
 
     def halide(self, meta: HalideMeta, source_code: str):
+        kernel_code_log.info("Halide Kernel:\n%s", source_code)
         if config.compile_threads <= 1:
             return HalideCodeCache.generate_halide(meta, source_code)
         else:
