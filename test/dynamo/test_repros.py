@@ -33,6 +33,7 @@ import torch.library
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import CompileCounter, rand_strided, same
+from torch._inductor.utils import fresh_inductor_cache
 from torch.nn import functional as F
 
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
@@ -4982,7 +4983,7 @@ def forward(self, primals_1, primals_2):
             y = torch.randn(100, 10)
             return torch.mm(x, y).sum()
 
-        with torch._inductor.utils.fresh_inductor_cache():
+        with fresh_inductor_cache():
             torch.compile(fn)()
 
         torch.compile(fn2)()
