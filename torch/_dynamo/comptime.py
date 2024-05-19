@@ -150,7 +150,7 @@ class ComptimeContext:
         tx = self.__get_tx(stacklevel)
 
         # This is analogous to LOAD_DEREF
-        if hasattr(tx, 'closure_cells') and name in tx.closure_cells:
+        if hasattr(tx, "closure_cells") and name in tx.closure_cells:
             cell = tx.closure_cells[name]
             if isinstance(cell, ClosureVariable):
                 return ComptimeVar(tx.output.root_tx.symbolic_locals[cell.name])
