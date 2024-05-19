@@ -115,8 +115,9 @@ def build_subgraph_buffer(
             # already created TensorBoxes as args
             from torch.utils._pytree import tree_map
 
+            args, kwargs = tree_map(lambda x: env[x] if x in env else x, (node.args, node.kwargs))
             env[node] = lowerings[node.target](
-                *tree_map(lambda x: env[x] if x in env else x, node.args)
+                *args, **kwargs
             )
         elif node.op == "output":
             # For the output node we need to create a ComputedBuffer
