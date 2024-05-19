@@ -588,7 +588,7 @@ class BaseSchedulerNode:
             layout = self.node.get_layout()
             dtype = self.node.get_dtype()
 
-        if not is_gpu(layout.device.type):
+        if layout.device is not None and not is_gpu(layout.device.type):
             # default to no reordering based on runtime
             return 0
 
