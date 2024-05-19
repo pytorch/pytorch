@@ -28,6 +28,7 @@ import sympy
 import torch
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._sympy.symbol import free_symbol_is_type, SymT
 from torch.utils._triton import has_triton
 
@@ -598,7 +599,14 @@ class BaseSchedulerNode:
 
         # Collective kernels
         if is_collective(self.node):
-            return estimate_nccl_collective_runtime(self.node)
+            try:
+                return estimate_nccl_collective_runtime(self.node)
+            except ValueError as e:
+                # We don't know how to estimate runtime for this collective,
+                # falling back to 0
+                log.info(e)
+                return 0
+
         elif is_wait(self.node):
             # ir.Wait is only used for collective ops.
             # The time needed for the collective op is already estimated and considered
@@ -622,6 +630,14 @@ class BaseSchedulerNode:
             if op is not None:
                 from torch._subclasses.fake_tensor import FakeTensorMode
                 from torch.utils.flop_counter import FlopCounterMode
+
+                if any(
+                    len(free_unbacked_symbols(n.get_numel())) > 0
+                    for n in self.node.inputs
+                ):
+                    # Tensor has unbacked symints, we don't know how to estimate
+                    # runtime for that today
+                    return 0
 
                 assert self.node.fx_node is not None
                 with FakeTensorMode() as fake_mode, FlopCounterMode(
