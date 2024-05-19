@@ -468,7 +468,7 @@ def _export_to_torch_ir(
     return gm_torch_level
 
 
-def _export_non_strict(
+def _export_to_aten_ir(
     mod: torch.nn.Module,
     fake_args,
     fake_kwargs,
@@ -647,7 +647,7 @@ def _export_non_strict(
         )
 
     @dataclasses.dataclass
-    class _ExportedProgramNonStrict:
+    class _ExportedArtifact:
         gm: torch.fx.GraphModule
         sig: ExportGraphSignature
         constants: Dict[
@@ -659,7 +659,7 @@ def _export_non_strict(
             ],
         ]
 
-    return _ExportedProgramNonStrict(
+    return _ExportedArtifact(
         gm,
         export_graph_signature,
         constants,
@@ -1113,7 +1113,7 @@ def _export(
                 new_fake_constant_attrs,
                 map_fake_to_real,
             ):
-                ep_non_strict = _export_non_strict(
+                aten_export_artifact = _export_to_aten_ir(
                     patched_mod,
                     new_fake_args,
                     new_fake_kwargs,
@@ -1124,15 +1124,15 @@ def _export(
                     should_insert_runtime_assertion=not strict,
                     _is_torch_jit_trace=_is_torch_jit_trace,
                 )
-                # ep_non_strict.constants contains only fake script objects, we need to map them back
-                ep_non_strict.constants = {
+                # aten_export_artifact.constants contains only fake script objects, we need to map them back
+                aten_export_artifact.constants = {
                     fqn: map_fake_to_real[obj]
                     if isinstance(obj, FakeScriptObject)
                     else obj
-                    for fqn, obj in ep_non_strict.constants.items()
+                    for fqn, obj in aten_export_artifact.constants.items()
                 }
 
-        ep_non_strict.gm.meta["inline_constraints"] = {
+        aten_export_artifact.gm.meta["inline_constraints"] = {
             k: v
             for k, v in fake_mode.shape_env.var_to_range.items()
             if free_unbacked_symbols(k)
@@ -1140,14 +1140,14 @@ def _export(
         num_lifted = len(
             [
                 spec
-                for spec in ep_non_strict.sig.input_specs
+                for spec in aten_export_artifact.sig.input_specs
                 if spec.kind != InputKind.USER_INPUT
             ]
         )
         try:
             produce_guards_and_solve_constraints(
                 fake_mode,
-                ep_non_strict.gm,
+                aten_export_artifact.gm,
                 equalities_inputs,
                 original_signature,
                 _disable_forced_specializations=_disable_forced_specializations,
@@ -1159,7 +1159,7 @@ def _export(
         combined_args = _combine_args(mod, args, kwargs)
         range_constraints = make_constraints(
             fake_mode,
-            ep_non_strict.gm,
+            aten_export_artifact.gm,
             combined_args,
             dynamic_shapes,
             num_lifted,
@@ -1167,7 +1167,7 @@ def _export(
 
         assert out_spec is not None
 
-        gm = ep_non_strict.gm
+        gm = aten_export_artifact.gm
 
         gm.meta["forward_arg_names"] = forward_arg_names
         module_call_signatures = {
@@ -1194,26 +1194,30 @@ def _export(
                             node.replace_all_uses_with(new_node)
                             gm.graph.erase_node(node)
 
-            res = CollectTracepointsPass(module_call_signatures, ep_non_strict.sig)(gm)
+            res = CollectTracepointsPass(
+                module_call_signatures, aten_export_artifact.sig
+            )(gm)
             assert res is not None
             gm = res.graph_module
 
-        _rewrite_non_persistent_buffers(mod, ep_non_strict.sig, ep_non_strict.constants)
+        _rewrite_non_persistent_buffers(
+            mod, aten_export_artifact.sig, aten_export_artifact.constants
+        )
         _verify_nn_module_stack(gm)
         _verify_stack_trace(gm)
         if not _is_torch_jit_trace:
-            _verify_placeholder_names(gm, ep_non_strict.sig)
+            _verify_placeholder_names(gm, aten_export_artifact.sig)
         exported_program = ExportedProgram(
             root=gm,
             graph=gm.graph,
-            graph_signature=ep_non_strict.sig,
+            graph_signature=aten_export_artifact.sig,
             state_dict=original_state_dict,
             range_constraints=range_constraints,
             module_call_graph=_make_module_call_graph(
                 _EXPORT_MODULE_HIERARCHY, orig_in_spec, out_spec, module_call_signatures
             ),
             example_inputs=(args, kwargs),
-            constants=ep_non_strict.constants,
+            constants=aten_export_artifact.constants,
         )
         return exported_program
 
@@ -1310,7 +1314,7 @@ def _export(
 
     # NOTE: graph module expects only positional args
     constant_attrs = _gather_constant_attrs(mod)
-    ep_non_strict = _export_non_strict(
+    aten_export_artifact = _export_to_aten_ir(
         gm_torch_level,
         _convert_to_positional_args(orig_arg_names, fake_args, fake_kwargs),
         {},
@@ -1320,9 +1324,9 @@ def _export(
         should_insert_runtime_assertion=not strict,
     )
 
-    gm = ep_non_strict.gm
-    export_graph_signature = ep_non_strict.sig
-    constants = ep_non_strict.constants
+    gm = aten_export_artifact.gm
+    export_graph_signature = aten_export_artifact.sig
+    constants = aten_export_artifact.constants
 
     # Don't copy over nn_module_stack, stack_trace metadata for params/buffers nodes
     for metadata in params_buffers_to_node_meta.values():
@@ -1378,15 +1382,17 @@ def _export(
     _rewrite_dynamo_tensor_constants(
         orig_mod_buffers=set(mod.buffers()),
         traced_mod_buffers=dict(gm_torch_level.named_buffers()),
-        graph_signature=ep_non_strict.sig,
-        constants=ep_non_strict.constants,
+        graph_signature=aten_export_artifact.sig,
+        constants=aten_export_artifact.constants,
     )
     # 2. Restore FQN of param/buffers
     param_buffer_table: Dict[str, str] = _get_param_buffer_mapping(mod, gm_torch_level)
     _replace_param_buffer_names(param_buffer_table, export_graph_signature)
 
     # 3. Remove non-persistent buffers from the graph signature
-    _rewrite_non_persistent_buffers(mod, ep_non_strict.sig, ep_non_strict.constants)
+    _rewrite_non_persistent_buffers(
+        mod, aten_export_artifact.sig, aten_export_artifact.constants
+    )
 
     # 4. Rewrite constants to have the same FQN as the original module.
     _remap_constants(constant_attrs, export_graph_signature, constants)
