@@ -120,6 +120,30 @@ def insert_deferred_runtime_asserts(
                     ),
                 )
 
+    def emit_value_range_check(s):
+        vr = shape_env.var_to_range[s]
+        if not shape_env._default_unspecified_value_range().issubset(vr):
+            res_lower = sympy_interp(
+                PythonReferenceAnalysis, symbol_to_proxy, s >= vr.lower
+            ).node
+            graph.call_function(
+                torch.ops.aten._assert_scalar.default,
+                (
+                    res_lower,
+                    "lower",
+                ),
+            )
+            res_upper = sympy_interp(
+                PythonReferenceAnalysis, symbol_to_proxy, s <= vr.upper
+            ).node
+            graph.call_function(
+                torch.ops.aten._assert_scalar.default,
+                (
+                    res_upper,
+                    "upper",
+                ),
+            )
+
     nodes = list(graph.nodes)
     for i, node in enumerate(nodes[:-1]):
         # Placeholders can match symbols, but when we destructure them
@@ -290,29 +314,6 @@ def insert_deferred_runtime_asserts(
                     # assert and also explicitly refine the range
                     # (refinement should not be necessary once runtime
                     # asserts cause refinement, but that's NYI)
-                    def convert(s):
-                        try:
-                            return int(s)
-                        except TypeError:
-                            return None
-
-                    if export:
-                        graph.call_function(
-                            torch.ops.aten.sym_constrain_range.default,
-                            (symbol_to_proxy[i0].node,),
-                            {
-                                "min": convert(vr.lower),
-                                "max": convert(vr.upper),
-                            },
-                        )
-                    else:
-                        graph.call_function(
-                            torch._constrain_as_value,
-                            (
-                                symbol_to_proxy[i0].node,
-                                convert(vr.lower),
-                                convert(vr.upper),
-                            ),
-                        )
+                    emit_value_range_check(i0)
 
                 add_runtime_asserts(ras)
