@@ -83,26 +83,6 @@ def _force_contiguous(x):
     return x
 
 
-def _compute_output_meta_with_inductor_strides(fw_module, fwd_output_strides):
-    out = [n.meta["val"] for n in (list(fw_module.graph.nodes)[-1].args[0])]
-    # will only be set for inductor
-    if not fwd_output_strides:
-        return out
-
-    from torch.fx.experimental.symbolic_shapes import statically_known_true
-
-    for i in range(len(out)):
-        if not isinstance(out[i], Tensor):
-            continue
-        if all(
-            statically_known_true(s1 == s2)
-            for s1, s2 in zip(out[i].stride(), fwd_output_strides[i])
-        ):
-            continue
-        out[i] = out[i].as_strided(out[i].shape, fwd_output_strides[i])
-    return out
-
-
 # See Note [Tangents must be contiguous, Part 2]
 def coerce_runtime_tangent(x, metadata_tensor):
     if not isinstance(x, torch.Tensor):
