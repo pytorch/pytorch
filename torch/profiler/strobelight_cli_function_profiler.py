@@ -78,7 +78,7 @@ class StrobelightCLIFunctionProfiler:
     Check function_profiler_example.py for an example.
     """
 
-    # This lock is used to make sure only one thread is running the profiler at any point
+    # This lock is used to make sure only one thread is running the profiler at any point.
     lock = Lock()
 
     def __init__(
@@ -102,7 +102,6 @@ class StrobelightCLIFunctionProfiler:
         self.timeout_wait_for_running_sec = timeout_wait_for_running_sec
         self.timeout_wait_for_finished_sec = timeout_wait_for_finished_sec
         # Results of the most recent run.
-        self.profile_result: Optional[RunResult] = None
         # Tracks the strobelight run id of the most recent run
         self.current_run_id = None
         self.sample_tags = sample_tags
