@@ -3721,13 +3721,6 @@ class CUDATemplateBuffer(TemplateBuffer):
         return self.workspace_size if self.workspace_size is not None else 0
 
 
-class CppTemplateBuffer(TemplateBuffer):
-    def __init__(self, layout, inputs, make_kernel_render, template, choice):
-        super().__init__(layout, inputs, make_kernel_render)
-        self.template = template
-        self.choice = choice
-
-
 @dataclasses.dataclass
 class InputsKernel(Buffer):
     inputs: List[Buffer]
@@ -3933,6 +3926,21 @@ class ConcatKernel(NopKernel):
         return True
 
 
+def get_aten_cpp_kernel_name(kernel):
+    # Calling with the default kernel name can lead to ambiguous behavior like the following example.
+    # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
+    # repeat_interleave(const at::Tensor & self, int64_t repeats,
+    #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
+    if not isinstance(kernel, torch._ops.OpOverload) or kernel.namespace != "aten":
+        return None
+    opname = (
+        kernel.__name__.split(".")[0]
+        if kernel._overloadname == "default"
+        else kernel.__name__.replace(".", "_")
+    )
+    return f"at::_ops::{opname}::call"
+
+
 @dataclasses.dataclass
 class ExternKernel(InputsKernel):
     constant_args: Tuple[Any, ...] = ()
@@ -3976,7 +3984,8 @@ class ExternKernel(InputsKernel):
         self.kwargs = kwargs if kwargs else {}
         self.output_view = output_view
         self.python_kernel_name = python_kernel_name
-        self.cpp_kernel_name = cpp_kernel_name
+        # If cpp_kernel_name is None, we will try to construct it from op_overload
+        self.cpp_kernel_name = cpp_kernel_name or get_aten_cpp_kernel_name(op_overload)
         self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
         self.op_overload = op_overload
         self.collect_arg_kwarg_properties()
@@ -4019,6 +4028,40 @@ class ExternKernel(InputsKernel):
             else {}
         )
 
+    def fill_non_provided_args(self, args, kwargs, convert_val_to_str=False):
+        # Previously, we want to maintain forward-compatibility by skipping
+        # default args in the serialized artifacts in fbcode. However,
+        # some of our shim interfaces require default values being set.
+        # Discussed with Sherlock offline and we decided to allow serializing
+        # default args into the C++ wrapper code for now. We will refine this
+        # part if we see real FC requirement. More details related to FC
+        # can be found at:
+        # https://docs.google.com/document/d/1FzWm-sHYwmRi3x_g036kOxd99KaYquUsA-L5JwOn8ys/edit?usp=sharing
+        assert isinstance(args, (list, tuple))
+        if isinstance(args, tuple):
+            args = list(args)
+        assert self.arg_properties, "ExternKernel.arg_properties should not be empty"
+
+        n_args = len(args)
+        n_pos_args = len(self.arg_properties)
+        # For cpp wrapper, if some positional args are not provided, we need to check
+        # if they're in the kwargs or use their default value
+        if n_args < n_pos_args:
+            log.debug(
+                "%s has %d unprovided positional arguments. "
+                "Will check if they are in the keyword arguments or will use default values.",
+                self.op_overload,
+                n_pos_args - n_args,
+            )
+            for i in range(n_args, n_pos_args):
+                arg_name = self.arg_properties[i]["name"]
+                args.append(
+                    kwargs[arg_name]
+                    if arg_name in kwargs
+                    else self.arg_properties[i]["default_value"]
+                )
+        return args
+
     def decide_layout(self):
         if isinstance(self.layout, FlexibleLayout):
             self.apply_constraint()
@@ -4033,7 +4076,15 @@ class ExternKernel(InputsKernel):
         raise NotImplementedError
 
     def get_kernel_name(self):
-        return self.cpp_kernel_name if V.graph.cpp_wrapper else self.python_kernel_name
+        return (
+            (
+                V.graph.wrapper_code.get_c_shim_func_name(self.cpp_kernel_name)  # type: ignore[attr-defined]
+                if config.abi_compatible
+                else self.cpp_kernel_name
+            )
+            if V.graph.cpp_wrapper
+            else self.python_kernel_name
+        )
 
     @staticmethod
     def copy_input(x):
@@ -4729,9 +4780,17 @@ class InplaceBernoulliFallback(ExternKernel):
 
     def codegen(self, wrapper):
         (x,) = (t.codegen_reference() for t in self.inputs)
-        wrapper.writeline(
-            f"{self.get_kernel_name()}({x}, {', '.join(map(repr, self.constant_args))}){wrapper.ending}"
-        )
+
+        if V.graph.cpp_wrapper and config.abi_compatible:
+            # Inductor doesn't really support aten Generator, so the Generator kwarg is always NULL here,
+            # which needs to be explicitly generated for cpp wrapper
+            wrapper.writeline(
+                f"{self.get_kernel_name()}({x}, {', '.join(map(repr, self.constant_args))}, NULL){wrapper.ending}"
+            )
+        else:
+            wrapper.writeline(
+                f"{self.get_kernel_name()}({x}, {', '.join(map(repr, self.constant_args))}){wrapper.ending}"
+            )
 
     def should_allocate(self):
         return False
@@ -4742,20 +4801,19 @@ class InplaceBernoulliFallback(ExternKernel):
     def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return set()
 
-    def __init__(self, x, *constant_args):
+    def __init__(self, op_overload, x, *constant_args):
         super().__init__(
             None,
             NoneLayout(x.get_device()),  # type: ignore[arg-type]
             self.unwrap_storage([x]),
             constant_args,
+            op_overload=op_overload,
         )
         self.name = V.graph.register_buffer(self)
         self.python_kernel_name = "aten.bernoulli_"
-        self.cpp_kernel_name = (
-            "aoti_torch_bernoulli_"
-            if config.abi_compatible
-            else "at::native::bernoulli_"
-        )
+        if not config.abi_compatible:
+            # TODO: this should be simplified once we switch to ABI-compatible only
+            self.cpp_kernel_name = "at::native::bernoulli_"
         mark_node_as_mutating(self, x)
 
 
@@ -5131,25 +5189,7 @@ has_c_shim = {
 }
 
 
-def get_aten_cpp_kernel_name(kernel):
-    # Calling with the default kernel name can lead to ambiguous behavior like the following example.
-    # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
-    # repeat_interleave(const at::Tensor & self, int64_t repeats,
-    #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
-    assert (
-        isinstance(kernel, torch._ops.OpOverload) and kernel.namespace == "aten"
-    ), "Invalid aten kernel"
-    opname = (
-        kernel.__name__.split(".")[0]
-        if kernel._overloadname == "default"
-        else kernel.__name__.replace(".", "_")
-    )
-    return f"at::_ops::{opname}::call"
-
-
 class FallbackKernel(ExternKernelAlloc):
-    args_default_value: List[Dict[str, Any]]
-
     def __init__(
         self,
         layout,
@@ -5161,12 +5201,23 @@ class FallbackKernel(ExternKernelAlloc):
         *,
         unbacked_bindings=None,
     ):
+        if (
+            kernel == aten.mul.Tensor
+            and len(tensor_args) == 1
+            and len(nontensor_args) == 1
+        ):
+            # When aten.mul.Tensor's second arg is constant, cpp wrapper expects
+            # to call mul_Scalar. A more proper fix is to do it in decomposition.
+            # See https://github.com/pytorch/pytorch/issues/123478
+            kernel = aten.mul.Scalar
+
         super().__init__(
             layout,
             tuple(tensor_args),
             tuple(nontensor_args),
             op_overload=kernel,
         )
+
         # We need output buffers for generating kernel arguments in the
         # abi-compatible mode, where we retrieve outputs by pass each individual
         # output through the abi-compatible interface.
@@ -5182,7 +5233,6 @@ class FallbackKernel(ExternKernelAlloc):
             ),
         ), f"Fails to create FallbackKernel for {kernel}: {type(kernel)} not supported"
         self.op_overload = kernel
-
         self.unflatten_args = unflatten_args
         self.kwargs = {} if kwargs is None else kwargs
         V.graph.warn_fallback(self.python_kernel_name)
@@ -5344,41 +5394,6 @@ class FallbackKernel(ExternKernelAlloc):
         self.cpp_kernel_key = f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"  # type: ignore[union-attr]
 
         self.cpp_op_schema = get_cpp_op_schema(kernel)
-        self.init_args_default_value(kernel._schema)
-
-    def init_args_default_value(self, schema):
-        self.args_default_value = [
-            {
-                "name": x.name,
-                "type": x.real_type,
-                "value": x.default_value,
-            }
-            for x in schema.arguments
-            if not x.kwarg_only
-        ]
-
-    def get_pos_arg_value(self, pos, kwargs):
-        # positional args may be provided in kwargs
-        pos_arg_name = self.args_default_value[pos]["name"]
-        if pos_arg_name in kwargs:
-            log.debug(
-                "Found argument %s with value %s from kwargs",
-                pos_arg_name,
-                kwargs[pos_arg_name],
-            )
-            return kwargs[pos_arg_name]
-
-        assert hasattr(
-            self, "args_default_value"
-        ), "self.args_default_value has to be provided"
-        assert pos < len(
-            self.args_default_value
-        ), f"expected the index {pos} to be smaller than len(self.args_default_value): {len(self.args_default_value)}"
-        arg_default_value = self.args_default_value[pos]["value"]
-        log.debug(
-            "Use default value %s for argument %s", arg_default_value, pos_arg_name
-        )
-        return arg_default_value
 
     def codegen_args(self):
         @dataclasses.dataclass
@@ -5391,23 +5406,13 @@ class FallbackKernel(ExternKernelAlloc):
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
         args, kwargs = self.unflatten_args(tensor_args, self.constant_args)
         if V.graph.cpp_wrapper and isinstance(self.op_overload, torch._ops.OpOverload):
+            args = self.fill_non_provided_args(args, kwargs)
             args = [
                 V.graph.wrapper_code.val_to_cpp_arg_str(param.real_type, x)
                 for param, x in zip(self.op_overload._schema.arguments, args)
             ]
         else:
             args = [V.graph.wrapper_code.val_to_arg_str(x) for x in args]
-
-        # Previously, we want to maintain forward-compatibility by skipping
-        # default args in the serialized artifacts in fbcode. However,
-        # some of our shim interfaces require default values being set.
-        # Discussed with Sherlock offline and we decided to allow serializing
-        # default args into the C++ wrapper code for now. We will refine this
-        # part if we see real FC requirement. More details related to FC
-        # can be found at:
-        # https://docs.google.com/document/d/1FzWm-sHYwmRi3x_g036kOxd99KaYquUsA-L5JwOn8ys/edit?usp=sharing
-        if V.graph.cpp_wrapper and hasattr(self, "args_default_value"):
-            self.fill_non_provided_args(args, kwargs, convert_val_to_str=True)
 
         # let self.codegen_kwargs handle kwargs
         self.kwargs.update(kwargs)
@@ -5443,30 +5448,6 @@ class FallbackKernel(ExternKernelAlloc):
     def get_mutation_names(self):
         assert len(self.mutation_names) <= 1
         return self.mutation_names
-
-    def fill_non_provided_args(self, args, kwargs, convert_val_to_str=False):
-        assert isinstance(args, (list, tuple))
-        if isinstance(args, tuple):
-            args = list(args)
-        assert hasattr(self, "args_default_value")
-        n_args = len(args)
-        n_pos_args = len(self.args_default_value)
-        # For cpp wrapper, if some positional args are not provided, we need to check
-        # if they're in the kwargs or use their default value
-        if n_args < n_pos_args:
-            log.debug(
-                "%s has %d unprovided positional arguments. "
-                "Will check if they are in the keyword arguments or will use default values.",
-                self.op_overload,
-                n_pos_args - n_args,
-            )
-            pos_args = [
-                self.get_pos_arg_value(i, kwargs) for i in range(n_args, n_pos_args)
-            ]
-            if convert_val_to_str:
-                pos_args = [V.graph.wrapper_code.val_to_arg_str(x) for x in pos_args]
-            args.extend(pos_args)
-        return args
 
     # ProxyExecutor Design Note
     # We export the ExternFallbackNodes (for custom ops) into a serialized file
@@ -5542,15 +5523,6 @@ class FallbackKernel(ExternKernelAlloc):
         if kernel.namespace == "aten":  # type: ignore[union-attr]
             # Aten Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload)
-
-            if (
-                kernel == aten.mul.Tensor
-                and len(self.inputs) == 1
-                and len(self.constant_args) == 1
-            ):
-                # When aten.mul.Tensor's second arg is constant, cpp wrapper expects to call mul_Scalar
-                kernel = aten.mul.Scalar
-
             if V.graph.cpp_wrapper:
                 if (
                     config.is_fbcode()
@@ -5565,10 +5537,6 @@ class FallbackKernel(ExternKernelAlloc):
                     )
                     self.use_runtime_dispatch = True
                     self.set_cpp_kernel(kernel)
-                else:
-                    self.cpp_kernel_name = get_aten_cpp_kernel_name(kernel)
-                    schema = kernel._schema  # type: ignore[union-attr]
-                    self.init_args_default_value(schema)
             else:
                 self.python_kernel_name = str(kernel)
         elif kernel.namespace == "_quantized":  # type: ignore[union-attr]
@@ -6283,7 +6251,7 @@ class MKLPackedLinear(ExternKernelAlloc):
         )
 
     @classmethod
-    def create(cls, x, packed_w, orig_w, B, batch_size):
+    def create(cls, x, packed_w, orig_w, batch_size):
         x = cls.require_stride1(cls.realize_input(x))
         orig_w = cls.require_stride1(cls.realize_input(orig_w))
         *m, _ = x.get_size()
@@ -6291,11 +6259,7 @@ class MKLPackedLinear(ExternKernelAlloc):
         output_size = list(m) + [oc]
         output_stride = make_contiguous_strides_for(output_size)
         inputs = [x, packed_w, orig_w]
-        constant_args = [batch_size]
-        if B is not None:
-            inputs += [B]
-        else:
-            constant_args.insert(0, None)
+        constant_args = [None, batch_size]
 
         return MKLPackedLinear(
             layout=FixedLayout(
@@ -6342,7 +6306,7 @@ class LinearUnary(ExternKernelAlloc):
         )
 
     @classmethod
-    def create(cls, x, w, B, attr, scalars, algorithm):
+    def create(cls, x, w, b, attr, scalars, algorithm):
         x = cls.require_contiguous(cls.realize_input(x))
         w = cls.require_contiguous(cls.realize_input(w))
 
@@ -6350,9 +6314,9 @@ class LinearUnary(ExternKernelAlloc):
         oc, ic = w.get_size()
         inputs = [x, w]
         constant_args = [attr, scalars if scalars else [-1], algorithm]
-        if B is not None:
-            B = cls.require_contiguous(cls.realize_input(B))
-            inputs.append(B)
+        if b is not None:
+            b = cls.require_contiguous(cls.realize_input(b))
+            inputs.append(b)
         else:
             constant_args.insert(0, None)
 

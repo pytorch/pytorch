@@ -100,7 +100,7 @@ TORCH_API std::vector<std::string> inputTypes(const at::RecordFunction& fn);
 std::unordered_map<std::string, c10::IValue> TORCH_API
 saveExtraArgs(const at::RecordFunction& fn);
 std::unordered_map<std::string, std::string> TORCH_API
-saveNcclMeta(const at::RecordFunction& fn);
+saveNcclMeta(const at::RecordFunction& fn, bool truncate = true);
 
 uint64_t TORCH_API computeFlops(
     const std::string& op_name,
@@ -156,6 +156,21 @@ struct HashCombine {
     return c10::get_hash(i);
   }
 };
+
+#ifdef USE_DISTRIBUTED
+constexpr auto kCommsName = "Collective name";
+constexpr auto kDtype = "dtype";
+constexpr auto kInMsgNelems = "In msg nelems";
+constexpr auto kOutMsgNelems = "Out msg nelems";
+constexpr auto kInSplit = "In split size";
+constexpr auto kOutSplit = "Out split size";
+constexpr auto kGlobalRankStart = "Global rank start";
+constexpr auto kGlobalRankStride = "Global rank stride";
+constexpr auto kGroupSize = "Group size";
+constexpr auto kProcessGroupName = "Process Group Name";
+constexpr auto kProcessGroupDesc = "Process Group Description";
+constexpr auto kGroupRanks = "Process Group Ranks";
+#endif // USE_DISTRIBUTED
 
 } // namespace impl
 } // namespace profiler

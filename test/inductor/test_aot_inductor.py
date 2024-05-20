@@ -9,6 +9,7 @@ from typing import Dict, Tuple
 from unittest import skip
 
 import torch
+import torch._export
 import torch._inductor
 import torch.nn as nn
 from torch._dynamo.testing import rand_strided, same
@@ -1209,6 +1210,24 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.rand(4, 4, device=self.device),)
         torch._export.aot_compile(Model(self.device), example_inputs)
         self.check_model(Model(self.device), example_inputs)
+
+    def test_non_tensor_input(self):
+        def fn(a, b, alpha=1.0):
+            return torch.add(a, b, alpha=alpha)
+
+        a = torch.randn(10, device=self.device)
+        b = torch.randn(10, device=self.device)
+        with self.assertRaises(RuntimeError):
+            torch._export.aot_compile(fn, args=(a, b), kwargs={"alpha": 2.0})
+
+        so_path = torch._export.aot_compile(
+            torch.ops.aten.add, args=(a, b), kwargs={"alpha": 2.0}, same_signature=False
+        )
+        kernel_runner = AOTIRunnerUtil.load_runner(self.device, so_path)
+        res = kernel_runner.run([a, b])
+        self.assertTrue(isinstance(res, list))
+        self.assertTrue(len(res) == 1)
+        self.assertEqual(fn(a, b, alpha=2.0), res[0])
 
     def test_buffer_mutation_2(self):
         class Model(torch.nn.Module):

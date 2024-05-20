@@ -6,6 +6,7 @@ import logging
 
 import math
 import operator
+import os
 import sys
 import textwrap
 import time
@@ -453,11 +454,8 @@ class TritonTemplateKernel(TritonKernel):
             block_ptr=block_ptr,
         )
 
-    def initialize_range_tree(self, pid_cache):
-        super().initialize_range_tree(pid_cache)
-        # ignore default codegen
-        self.body.clear()
-        self.indexing_code.clear()
+    def codegen_range_tree(self):
+        pass  # ignore default codegen
 
     def call_kernel(self, name: str, node: Optional[ir.IRNode] = None):
         wrapper = V.graph.wrapper_code
@@ -711,19 +709,17 @@ class ExternKernelChoice:
         has_out_variant=True,
         op_overload=None,
         use_fallback_kernel=False,
-        kernel_creator=None,
     ):
         super().__init__()
         name = name or kernel.__name__
         assert callable(kernel)
-        assert not hasattr(extern_kernels, name), f"duplicate extern kernel: {name}"
+        assert not hasattr(extern_kernels, name), "duplicate extern kernel"
         self.name = name
         self.cpp_kernel_name = cpp_kernel
         self.has_out_variant = has_out_variant
         setattr(extern_kernels, name, kernel)
         self.op_overload = op_overload
         self.use_fallback_kernel = use_fallback_kernel
-        self.kernel_creator = kernel_creator
 
     def to_callable(self):
         return getattr(extern_kernels, self.name)
@@ -890,8 +886,6 @@ class ExternKernelCaller(ChoiceCaller):
             inner = ir.FallbackKernel.create(
                 self.choice.op_overload, *self.input_nodes, **self.kwargs
             )
-        elif self.choice.kernel_creator is not None:
-            inner = self.choice.kernel_creator(*self.input_nodes, **self.kwargs)
         else:
             cls = ir.ExternKernelOut if self.has_out_variant else ir.ExternKernelAlloc
             inner = cls(
@@ -914,86 +908,6 @@ class ExternKernelCaller(ChoiceCaller):
         }
 
 
-class DataProcessorChoiceCallerWrapper:
-    def __init__(self, wrapped, preprocessor, postprocessor):
-        self._wrapped = wrapped
-        if preprocessor is not None:
-            self._preprocessor = preprocessor
-        else:
-            self._preprocessor = lambda x, y: (x, y)
-        if postprocessor is not None:
-            self._postprocessor = postprocessor
-        else:
-            self._postprocessor = lambda x: x
-
-    def __getattr__(self, name):
-        return getattr(self._wrapped, name)
-
-    def benchmark(self, *args, out) -> float:
-        new_args, new_out = self._preprocessor(args, out)
-        result = self._wrapped.benchmark(*new_args, out=new_out)
-        new_out = self._postprocessor(new_out)
-        if out is not new_out:
-            out.copy_(new_out)
-        return result
-
-    def output_node(self) -> ir.TensorBox:
-        result = self._wrapped.output_node()
-        return self._postprocessor(result)
-
-    def __repr__(self) -> str:
-        return f"DataProcessorChoiceCallerWrapper({self._wrapped})"
-
-
-class DataProcessorTemplateWrapper:
-    """
-    A wrapper class for a kernel template.
-
-    This class together with `DataProcessorChoiceCallerWrapper` provides a convenient way to
-    preprocess and postprocess data before and after using the wrapped template. A typical
-    usage is to reorder or filter the input nodes in order to match the expected input of other
-    kernel choices like a ATen kernel. A more complicated usage is to prepack the weights.
-    See the example from :mod:`cpp_gemm_template` for more details.
-    """
-
-    def __init__(
-        self,
-        wrapped_template_cls,
-        preprocessor,
-        postprocessor,
-        **kwargs,
-    ):
-        if preprocessor is not None:
-            self._preprocessor = preprocessor
-        else:
-            self._preprocessor = lambda x, y: (x, y)
-        if postprocessor is not None:
-            self._postprocessor = postprocessor
-        else:
-            self._postprocessor = lambda x: x
-        assert "input_nodes" in kwargs
-        assert "layout" in kwargs
-        kwargs["input_nodes"], kwargs["layout"] = preprocessor(
-            kwargs["input_nodes"], kwargs["layout"]
-        )
-        self._wrapped = wrapped_template_cls(**kwargs)
-
-    def __getattr__(self, name):
-        return getattr(self._wrapped, name)
-
-    def maybe_append_choice(self, choices, **kwargs):
-        return type(self._wrapped).maybe_append_choice(self, choices, **kwargs)
-
-    def generate(self, **kwargs):
-        choice_caller = self._wrapped.generate(**kwargs)
-        return DataProcessorChoiceCallerWrapper(
-            choice_caller, self._preprocessor, self._postprocessor
-        )
-
-    def __repr__(self) -> str:
-        return f"DataProcessorTemplateWrapper({self._wrapped})"
-
-
 class ErrorFromChoice(RuntimeError):
     def __init__(self, msg, choice: ChoiceCaller, inputs_str):
         msg += f"\nFrom choice {choice}\n{inputs_str}"
@@ -1003,6 +917,13 @@ class ErrorFromChoice(RuntimeError):
 
 class NoValidChoicesError(RuntimeError):
     pass
+
+
+@functools.lru_cache(None)
+def get_env_num_workers() -> Optional[int]:
+    if "TORCHINDUCTOR_COMPILE_THREADS" in os.environ:
+        return int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
+    return None
 
 
 class AlgorithmSelectorCache(PersistentCache):
@@ -1034,8 +955,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # Templates selected with input_gen_fns require specific input data to avoid IMA
         # Passing custom input gen fns to benchmark_fusion NYI, so skip deferred template selection
-        # TODO(jgong5): support multi-template on CPU
-        if input_gen_fns is not None or layout.device.type == "cpu":
+        if input_gen_fns is not None:
             return_multi_template = False
 
         # TODO - assert that we have not mutating kernels here
@@ -1070,11 +990,10 @@ class AlgorithmSelectorCache(PersistentCache):
                 or precompilation_timeout_seconds <= 0
             ):
                 return no_op
-            num_workers = min(
-                config.compile_threads,
-                torch.get_num_threads(),
-                len(choices),
-            )
+
+            env_workers = get_env_num_workers()
+            num_workers = env_workers if env_workers is not None else (len(choices))
+
             if num_workers <= 0:
                 return no_op
 
@@ -1166,7 +1085,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         else:
                             raise e
                     except ImportError:
-                        raise e
+                        raise e from None
 
                 executor.shutdown(wait=True)
 
@@ -1273,9 +1192,7 @@ class AlgorithmSelectorCache(PersistentCache):
             }
             example_inputs = list(unique_example_inputs.values())
             example_inputs_extern = [
-                unique_example_inputs[input_node.get_name()]
-                if unique_example_inputs[input_node.get_name()].is_mkldnn
-                else torch.as_strided(
+                torch.as_strided(
                     unique_example_inputs[input_node.get_name()],
                     V.graph.sizevars.size_hints(
                         input_node.get_size(),
@@ -1364,7 +1281,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
                     timing = float("inf")
                 except AssertionError as e:
-                    raise AssertionError(  # noqa: TRY200
+                    raise AssertionError(  # noqa: B904
                         f"Incorrect result from choice {choice}\n\n{e}"
                     )
                 except Exception as e:
@@ -1377,7 +1294,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         else:
                             raise e
                     except ImportError:
-                        raise e
+                        raise e from None
 
                 timings[choice] = timing
 
