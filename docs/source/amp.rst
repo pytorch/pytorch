@@ -10,6 +10,8 @@ Automatic Mixed Precision package - torch.amp
 .. automodule:: torch.amp
 .. currentmodule:: torch.amp
 
+.. autofunction::  is_autocast_available
+
 :class:`torch.amp` provides convenience methods for mixed precision,
 where some operations use the ``torch.float32`` (``float``) datatype and other operations
 use lower precision floating point datatype (``lower_precision_fp``): ``torch.float16`` (``half``) or ``torch.bfloat16``. Some ops, like linear layers and convolutions,
@@ -42,10 +44,6 @@ Autocasting
 
 .. autoclass:: autocast
     :members:
-
-.. currentmodule:: torch.amp
-
-.. autofunction::  is_autocast_available
 
 .. currentmodule:: torch.cuda.amp
 
