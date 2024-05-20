@@ -31,14 +31,7 @@ def check_node_safe(node: Node):
     """
 
     def is_torch_function(target):
-        if isinstance(target, str):
-            name = target
-        elif callable(target):
-            name = target.__name__
-        else:
-            return False
-        # TODO: is this the right check?
-        return name.startswith("torch.")
+        return type(target).__name__.startswith("builtin")
 
     def is_tensor(target):
         # Tensors always have example values in meta field

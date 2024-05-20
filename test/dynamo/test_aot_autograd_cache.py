@@ -117,6 +117,18 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             BypassAOTAutogradCache, lambda: self.gen_cache_key(fn, config)
         )
 
+    def test_normal_torch_function(self):
+        @torch._dynamo.allow_in_graph
+        def fn(x):
+            y = torch.sin(x)
+            z = torch.cos(x)
+            w = y + z
+            w.abs()
+            return w
+
+        config = self.default_config()
+        self.gen_cache_key(fn, config)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
