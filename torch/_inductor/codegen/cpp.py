@@ -1419,13 +1419,20 @@ class CppVecOverrides(CppOverrides):
             code = BracesBuffer()
             code.writeline("[&]")
             with V.kernel.swap_buffers(code), code.indent():
+                if dtype == torch.bool and result.is_vec:
+                    # Unify blendv to use the VecMask<float, N>, since loading bool as VecMask<float> by default
+                    dtype = torch.float
+                    num_vectors = V.kernel._get_num_vectors(dtype)
+                    other_code_vec = f"at::vec::VecMask<{DTYPE_TO_CPP[dtype]}, {num_vectors}>::from({other_code})"
+
                 code.writeline(f"if ({new_mask}.all_zero())")
                 with code.indent():
                     code.writeline(f"return {other_code_vec};")
                 code.writeline("else")
                 with code.indent():
+                    new_mask_cast = V.kernel._get_mask_cast(new_mask, dtype)
                     code.writeline(
-                        f"return {type}::blendv({other_code_vec}, {body_code_vec}, {V.kernel._get_mask_cast(new_mask, dtype)});"
+                        f"return {type}::blendv({other_code_vec}, {body_code_vec}, {new_mask_cast});"
                     )
             code.writeline("()")
             csevar = V.kernel.cse.generate(
