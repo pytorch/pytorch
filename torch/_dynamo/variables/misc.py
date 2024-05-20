@@ -173,6 +173,19 @@ class SuperVariable(VariableTracker):
             self.objvar, UserDefinedObjectVariable
         ):
             return self.objvar.method_setattr_standard(tx, *args, **kwargs)
+        elif inner_fn is object.__delattr__:
+            attr = args[0]
+            try:
+                attr = attr.as_python_constant()
+            except NotImplementedError:
+                unimplemented(f"non-const delattr attr: {attr}")
+            if not tx.output.side_effects.is_attribute_mutation(self.objvar):
+                unimplemented(f"delattr({self.objvar}, {attr}, ...)")
+
+            tx.output.side_effects.store_attr(
+                self.objvar, attr, variables.DeletedVariable()
+            )
+            return variables.ConstantVariable(None)
 
         unimplemented(f"non-function or method super: {inner_fn}")
 
