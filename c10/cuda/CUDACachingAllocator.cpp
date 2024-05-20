@@ -204,6 +204,8 @@ struct Block {
   c10::DeviceIndex device; // gpu
   cudaStream_t stream; // allocation stream
   stream_set stream_uses; // streams on which the block was used
+  stream_set cudagraph_stream_uses; // streams on which the block was
+                                    // used while cudagraph capturing
   size_t size; // block size in bytes
   size_t requested_size; // memory originally requested
   BlockPool* pool{nullptr}; // owning memory pool
@@ -1362,9 +1364,9 @@ class DeviceCachingAllocator {
       return;
     }
     block->stream_uses.insert(stream);
-    // check if cudagraph capture => add stream to some data structure (block->cudagraph_stream)
-    // if in capture, we want to log that block as a stream_use that we want to later remove if it doesn't already have the stream uses
-    // instead, we don't add insert_deferred_events_until_no_capture
+    if (C10_UNLIKELY(!captures_underway.empty())) {
+      block->cudagraph_stream_uses.insert(stream);
+    }
   }
 
   /** set memory fraction to limit maximum allocated memory **/
@@ -1899,6 +1901,12 @@ class DeviceCachingAllocator {
     return !expandable_segments_.empty();
   }
 
+  void remove_cudagraph_stream_uses_and_free_blocks() {
+    auto context = maybeGatherContext(RecordContext::ALL);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    insert_events_deferred_until_no_capture(context);
+  }
+
  private:
   // All private methods do not acquire the allocator mutex.
 
@@ -2093,6 +2101,10 @@ class DeviceCachingAllocator {
   void free_block(
       Block* block,
       const std::shared_ptr<GatheredContext>& context) {
+    TORCH_INTERNAL_ASSERT(!block->allocated);
+    TORCH_INTERNAL_ASSERT(block->event_count == 0);
+    TORCH_INTERNAL_ASSERT(block->stream_uses.empty());
+
     TORCH_INTERNAL_ASSERT(
         !block->allocated && block->event_count == 0 &&
         block->stream_uses.empty());
@@ -2708,7 +2720,7 @@ class DeviceCachingAllocator {
     // This function syncs, so capture should not be underway. Might as well
     // make sure capture-deferred end of life events get processed too.
     TORCH_INTERNAL_ASSERT(captures_underway.empty());
-    insert_events_deferred_until_no_capture();
+    insert_events_deferred_until_no_capture(context);
 
     for (auto& st : cuda_events) {
       for (auto& e : st.second) {
@@ -2725,6 +2737,19 @@ class DeviceCachingAllocator {
     }
 
     cuda_events.clear();
+  }
+
+  void remove_cudagraph_stream_uses(Block *block) {
+    // remove stream uses added during cudagraph capture
+    // (i.e., block->stream_uses - block->cudagraph_stream_uses)
+    stream_set streams(std::move(block->stream_uses));
+    AT_ASSERT(block->stream_uses.empty());
+    for (auto& stream : streams) {
+      if (block->cudagraph_stream_uses.find(stream) == block->cudagraph_stream_uses.end()) {
+        block->stream_uses.insert(stream);
+      }
+    }
+    block->cudagraph_stream_uses.clear();
   }
 
   void insert_events(Block* block) {
@@ -2746,23 +2771,41 @@ class DeviceCachingAllocator {
     C10_CUDA_CHECK(c10::cuda::MaybeSetDevice(prev_device));
   }
 
-  void insert_events_deferred_until_no_capture() {
-    // if (C10_UNLIKELY(!needs_events_deferred_until_no_capture.empty())) {
-    //   for (auto* block : needs_events_deferred_until_no_capture) {
-    //     TORCH_INTERNAL_ASSERT(!block->stream_uses.empty());
-    //     // sync events here?
-    //     // remove events here
-    //     insert_events(block);
-    //   }
-    //   needs_events_deferred_until_no_capture.clear();
-    // }
-    // go through blocks, check existing events, if no existing events=>free_block
-    // go through block->cudagraph_stream, remove it.
-    //
+  void printStreamUses(Block* block) {
+    for(auto& stream : block->stream_uses) {
+      printf("block->ptr: %p, stream: %ld, device_index: %d\n", block->ptr, stream.id(), stream.device_index());
+    }
+    for(auto& stream : block->cudagraph_stream_uses) {
+      printf("block->ptr: %p, cudagraph stream: %ld, device_index: %d\n", block->ptr, stream.id(), stream.device_index());
+    }
+  }
+
+  void insert_events_deferred_until_no_capture(
+    const std::shared_ptr<GatheredContext>& context) {
+    if (C10_UNLIKELY(!needs_events_deferred_until_no_capture.empty())) {
+      for (auto* block : needs_events_deferred_until_no_capture) {
+        printStreamUses(block);
+        TORCH_INTERNAL_ASSERT(!block->stream_uses.empty());
+        printf("before remove_cudagraph_stream_uses\n");
+        remove_cudagraph_stream_uses(block);
+        printf("after remove_cudagraph_stream_uses\n");
+        printStreamUses(block);
+        // only streams recorded before cudagraph will be used to insert events
+        // since we know all streams recorded during cudagraph must have completed
+        // insert_events(block);
+        if (block->event_count == 0) {
+          printf("free block. block->ptr: %p, size %zu, event_count: %d\n", block->ptr, block->size, block->event_count);
+          free_block(block, context);
+        } else {
+          printf("cannot free block. block->ptr: %p, size %zu, event_count: %d\n", block->ptr, block->size, block->event_count);
+        }
+      }
+      needs_events_deferred_until_no_capture.clear();
+    }
   }
 
   void process_events(const std::shared_ptr<GatheredContext>& context) {
-    insert_events_deferred_until_no_capture();
+    insert_events_deferred_until_no_capture(context);
 
     // Process outstanding cudaEvents. Events that are completed are
     // removed from the queue, and the 'event_count' for the
@@ -3093,6 +3136,7 @@ class NativeCachingAllocator : public CUDAAllocator {
   std::shared_ptr<AllocatorState> getCheckpointState(
       c10::DeviceIndex device,
       MempoolId_t id) override {
+    device_allocator[device]->remove_cudagraph_stream_uses_and_free_blocks();
     return device_allocator[device]->getCheckpointState(id);
   }
 
