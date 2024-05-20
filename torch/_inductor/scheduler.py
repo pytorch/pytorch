@@ -65,7 +65,7 @@ T = TypeVar("T")
 
 
 def _checked_cast(ty: Type[T], value: Any) -> T:
-    assert isinstance(value, ty)
+    assert isinstance(value, ty), f"unable to cast {value!r} to {ty}"
     return value
 
 
@@ -172,6 +172,8 @@ kernel_name_to_op = {
 
 
 class BaseSchedulerNode:
+    group: Tuple[torch.device, Sequence[Sequence[sympy.Expr]]]
+
     def __init__(self, scheduler: "Scheduler", node: ir.Buffer) -> None:
         self.scheduler: Scheduler = scheduler
         self.node: Optional[ir.Buffer] = node
@@ -903,16 +905,14 @@ class FusedSchedulerNode(BaseSchedulerNode):
         cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> "FusedSchedulerNode":
         assert node1.scheduler is node2.scheduler
-        assert isinstance(node1, (SchedulerNode, FusedSchedulerNode)) and isinstance(
-            node2, (SchedulerNode, FusedSchedulerNode)
-        )
-        nodes = [
-            _checked_cast(SchedulerNode, x)
-            for x in itertools.chain(node1.get_nodes(), node2.get_nodes())
-        ]
+        assert isinstance(node1, (SchedulerNode, FusedSchedulerNode))
+        assert isinstance(node2, (SchedulerNode, FusedSchedulerNode))
+        nodes = list(itertools.chain(node1.get_nodes(), node2.get_nodes()))
         return cls(node1.scheduler, nodes)
 
-    def __init__(self, scheduler: "Scheduler", snodes: Sequence[SchedulerNode]) -> None:
+    def __init__(
+        self, scheduler: "Scheduler", snodes: Sequence[BaseSchedulerNode]
+    ) -> None:
         # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
         self.snodes = snodes
         self.scheduler = scheduler
@@ -982,7 +982,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def used_or_aliased_buffer_names(self) -> Set[str]:
         return set.union(*[x.used_or_aliased_buffer_names() for x in self.snodes])
 
-    def get_nodes(self) -> Sequence[SchedulerNode]:
+    def get_nodes(self) -> Sequence[BaseSchedulerNode]:
         return self.snodes
 
     def __repr__(self) -> str:
@@ -1131,12 +1131,12 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         assert producer.is_foreach() or consumer.is_foreach()
         prev_node_1 = None
         prev_node_2 = None
-        fused_nodes: List[SchedulerNode]
+        fused_nodes: List[BaseSchedulerNode]
         if producer.is_foreach() and consumer.is_foreach():
             producer = typing.cast(ForeachKernelSchedulerNode, producer)
             consumer = typing.cast(ForeachKernelSchedulerNode, consumer)
             fused_nodes = [
-                _checked_cast(SchedulerNode, FusedSchedulerNode.fuse(l, r))
+                FusedSchedulerNode.fuse(l, r)
                 for l, r in zip(producer.snodes, consumer.snodes)
             ]
         elif producer.is_foreach():
@@ -1149,7 +1149,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 if node is producer_subnode:
                     new_node = FusedSchedulerNode.fuse(node, consumer)
                     prev_node_2 = new_node
-                    fused_nodes.append(_checked_cast(SchedulerNode, new_node))
+                    fused_nodes.append(new_node)
                 else:
                     fused_nodes.append(node)
 
@@ -1164,7 +1164,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 if node is consumer_subnode:
                     new_node = FusedSchedulerNode.fuse(producer, node)
                     prev_node_2 = new_node
-                    fused_nodes.append(_checked_cast(SchedulerNode, new_node))
+                    fused_nodes.append(new_node)
                 else:
                     fused_nodes.append(node)
 
@@ -1173,7 +1173,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
     def __init__(
         self,
         scheduler: "Scheduler",
-        nodes: List[SchedulerNode],
+        nodes: Sequence[BaseSchedulerNode],
         prev_node_1: Optional[BaseSchedulerNode] = None,
         prev_node_2: Optional[BaseSchedulerNode] = None,
     ) -> None:
@@ -1212,16 +1212,19 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             self.min_order = min([prev_node_1.min_order, prev_node_2.min_order])
             self.max_order = max([prev_node_1.max_order, prev_node_2.max_order])
 
-            foreach_node = prev_node_1 if prev_node_1.is_foreach() else prev_node_2
-            foreach_node = _checked_cast(ForeachKernelSchedulerNode, foreach_node)
-            other_node = prev_node_2 if prev_node_1.is_foreach() else prev_node_1
+            if prev_node_1.is_foreach():
+                assert isinstance(prev_node_1, ForeachKernelSchedulerNode)
+                foreach_node, other_node = prev_node_1, prev_node_2
+            else:
+                assert isinstance(prev_node_2, ForeachKernelSchedulerNode)
+                foreach_node, other_node = prev_node_2, prev_node_1
 
             self.ancestors = foreach_node.ancestors
             self.ancestors.update(other_node.ancestors)
 
             self.name_to_node = foreach_node.name_to_node
             for name in other_node.get_names():
-                self.name_to_node[name] = _checked_cast(SchedulerNode, other_node)
+                self.name_to_node[name] = other_node
 
         self.group = (nodes[0].get_device(), [[sympy.Expr("foreach")]])
 
@@ -1245,14 +1248,10 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         These nodes may be vertically fused."""
         return list(self.snodes)
 
-    def get_nodes(self) -> Sequence[SchedulerNode]:
-        """Returns all nodes contained in this kernel, unpacking fused nodes into their constituent scheduler nodes."""
-        return [
-            _checked_cast(SchedulerNode, node)
-            for node in itertools.chain.from_iterable(
-                x.get_nodes() for x in self.snodes
-            )
-        ]
+    def get_nodes(self) -> Sequence[BaseSchedulerNode]:
+        """Returns all nodes contained in this kernel, unpacking fused nodes
+        into their constituent scheduler nodes."""
+        return list(itertools.chain.from_iterable(x.get_nodes() for x in self.snodes))
 
     def get_first_name(self) -> str:
         return self.snodes[0].get_first_name()
@@ -1474,9 +1473,7 @@ class Scheduler:
                 continue
 
             removed_node_names.update(names)
-            snodes = [
-                _checked_cast(SchedulerNode, self.name_to_node[name]) for name in names
-            ]
+            snodes = [self.name_to_node[name] for name in names]
 
             fe_node = ForeachKernelSchedulerNode(self, snodes)
 
