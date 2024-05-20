@@ -1,5 +1,4 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-import itertools
 import math
 from dataclasses import dataclass
 from enum import Enum
@@ -16,9 +15,9 @@ from torch.distributed._tensor.op_schema import (
 )
 from torch.distributed._tensor.ops.utils import (
     as_list,
+    expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
     is_tensor_evenly_shardable,
-    is_tensor_shardable,
     normalize_dim,
     normalize_dims,
     normalize_to_torch_size,
@@ -992,8 +991,6 @@ def topk_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     topk_dim = op_schema.args_schema[2] if len(op_schema.args_schema) > 2 else -1
     topk_dim = normalize_dim(topk_dim, input_strategy.output_ndim)
 
-    all_mesh_dim_strategies = []
-
     for mesh_dim in range(mesh.ndim):
         single_mesh_dim_strategies = []
 
@@ -1010,26 +1007,6 @@ def topk_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
 
             # TODO: topk on sharded dim requries non-trival reduction, address it later
 
-        all_mesh_dim_strategies.append(single_mesh_dim_strategies)
-
-    strategy_combs = itertools.product(*all_mesh_dim_strategies)
-
-    all_strategies = []
-    for strategy_comb in strategy_combs:
-        spec_list = []
-        for specs in zip(*strategy_comb):
-            spec_list.append(DTensorSpec(mesh, tuple(specs)))
-
-        input_spec = spec_list[2]
-        if is_tensor_shardable(input_shape, input_spec):
-            redistribute_cost = [
-                generate_redistribute_costs(input_strategy, input_spec)
-            ]
-            strategy = PlacementStrategy(
-                output_specs=tuple(spec_list[:2]),
-                input_specs=(input_spec,),
-                redistribute_cost=redistribute_cost,
-            )
-            all_strategies.append(strategy)
-
-    return OpStrategy(all_strategies)
+    return expand_to_full_mesh_op_strategy(
+        mesh, op_schema, single_mesh_dim_strategies, input_index=2
+    )
