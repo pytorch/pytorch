@@ -289,6 +289,18 @@ class IndexPropagation:
         return inner
 
     def statically_true(self, e):
+        """
+        Given some iter_ranges, return a function that given an expression, returns whether
+        it is true or false using value ranges, guard knowledge and runtime_asserts.
+
+        FIXME I think this may not be entirely right, as we may not be able to use all runtime_asserts
+              If this is an issue, just use guards in `self.axioms`.
+
+              The proper way of handling this would be to have a global shape_env that adds
+              runtime_asserts as they happen in the code. Then, it shuld be used in SimplifyIndexing
+              to perform wrap_expr and in CSEProxy.check_bounds_lazy to elide upper / lower bounds
+              also for indirect_indexing
+        """
         evaluated = self.shape_env._maybe_evaluate_static(
             e,
             axioms=self.axioms,
@@ -317,14 +329,17 @@ class IndexPropagation:
                 else:
                     return Where(expr < 0, expr + size, expr)
 
-            # nb. Sometimes it's easier to prove 0 <= expr than the weaker -size <= expr
-            # nb. Need to prove bounds before wrapping, as Where is not supported within maybe_evaluate_static (easy fix tho)
-            can_prove_bounds = (
-                self.statically_true(0 <= expr) or self.statically_true(-size <= expr)
-            ) and self.statically_true(expr < size)
+            # Sometimes it's easier to prove 0 <= expr than the weaker -size <= expr
+            can_prove_lower = self.statically_true(0 <= expr) or self.statically_true(
+                -size <= expr
+            )
+            can_prove_upper = self.statically_true(expr < size)
             expr = wrap_expr(expr)
-            if generate_assert(check) and not can_prove_bounds:
-                wrapped_idx = self.materialize_expr(expr, index.value.dtype)
-                self.fallback("check_bounds", (wrapped_idx, size), {})
+            if generate_assert(check):
+                self.fallback(
+                    "check_bounds_lazy",
+                    (expr, size),
+                    dict(lower=not can_prove_lower, upper=not can_prove_upper),
+                )
             return expr
         return self.fallback("indirect_indexing", (index, size, check), {}).value

@@ -1251,56 +1251,6 @@ class CSE:
         return var
 
 
-class IndirectAssertLine(DeferredLineBase):
-    def __init__(
-        self,
-        line: str,
-        indirect_assert: Callable[
-            [CSEVariable, Optional[str], Optional[str], Optional[str]], str
-        ],
-        var: CSEVariable,
-        mask: str,
-        size_map: Dict[Tuple[CSEVariable, str], Tuple[sympy.Expr, str]],
-    ):
-        super().__init__(line)
-        self.var = var
-        self.mask = mask
-        self.indirect_assert = indirect_assert
-        self.size_map = size_map
-
-    def __call__(self):
-        size, size_str = self.size_map[(self.var, self.mask)]
-
-        # We assert if we've not been able to prove the bound
-        assert_min = (self.var.bounds.lower >= 0) != sympy.true
-        assert_max = (
-            not isinstance(size, sympy.Number)
-            or (self.var.bounds.upper < size) != sympy.true
-        )
-
-        lower = None
-        upper = None
-        if not (assert_min or assert_max):
-            return None
-        elif assert_min and assert_max:
-            lower = "0"
-            upper = size_str
-        elif assert_min:
-            lower = "0"
-        else:
-            assert assert_max
-            upper = size_str
-
-        return self.line.format(
-            assert_line=self.indirect_assert(self.var, lower, upper, self.mask)
-        )
-
-    def _new_line(self, line):
-        return IndirectAssertLine(
-            line, self.indirect_assert, self.var, self.mask, self.size_map
-        )
-
-
 class CodeGen:
     def __init__(self):
         super().__init__()
@@ -1359,11 +1309,9 @@ class Kernel(CodeGen):
         # set in set_current_node
         self.current_node = None
         self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges[Any]]] = None
-        # Upper bounds for indirect_indexing and their str representation
-        # NB: None, None is never stored in map, but it is the assumed
-        # "not set" value for the dict
-        self.indirect_max_sizes: Dict[
-            Tuple[CSEVariable, str], Tuple[sympy.Expr, str]
+        # map from expressionss to sizes and whether to check the lower and/or upper bound
+        self.pending_indirect_asserts: Dict[
+            sympy.Expr, Tuple[sympy.Expr, bool, bool]
         ] = {}
 
         self.removed_buffers = set()
@@ -1481,6 +1429,11 @@ class Kernel(CodeGen):
         upper: Optional[str],
         mask: Optional[str] = None,
     ) -> str:
+        if isinstance(var, CSEVariable):
+            var = str(var)
+        assert isinstance(var, str)
+        assert lower is None or isinstance(lower, str)
+        assert upper is None or isinstance(upper, str)
         if lower and upper:
             # The conditions need to be in parens because of Python's operator precedence.
             # It'd be less error-prone to use and/or/not, which is suported by triton
@@ -1498,6 +1451,29 @@ class Kernel(CodeGen):
             cond = f"({cond}) | ~{mask}"
 
         return f'{self.assert_function}({cond}, "index out of bounds: {cond_print}")'
+
+    def check_bounds(
+        self,
+        buffer: IndentedBuffer,
+        expr: sympy.Expr,
+        size: sympy.Expr,
+        lower: bool,
+        upper: bool,
+    ):
+        raise NotImplementedError
+
+    def issue_check_bounds(self, buffer: IndentedBuffer, index: sympy.Expr):
+        """
+        Given an index that is going to be read or written, issue all the
+        pending checks into the given buffer
+        """
+        issued = set()
+        for e, (s, lower, upper) in self.pending_indirect_asserts.items():
+            if index.has(e):
+                self.check_bounds(buffer, e, s, lower, upper)
+                issued.add(e)
+        for e in issued:
+            del self.pending_indirect_asserts[e]
 
     def index_to_str(self, index: sympy.Expr) -> str:
         raise NotImplementedError
@@ -1602,41 +1578,35 @@ class Kernel(CodeGen):
 
                     var = self.cse.generate(self.compute, stm, bounds=new_bounds)
 
+                sympy_var = parent_handler.indirect_indexing(var, size, check)
                 if generate_assert(check):
-                    mask = self.load_mask(var)
-
-                    # An assertion line may have been written already, if so just
-                    # update the max size.
-                    map_key = (var, mask)
-                    existing_size, _ = self.indirect_max_sizes.get(
-                        map_key, (None, None)
+                    assert_lower = not (var.bounds.lower >= 0)
+                    assert_upper = not isinstance(
+                        size, sympy.Number
+                    ) or not (  # value ranges cannot prove this
+                        var.bounds.upper < size
                     )
-                    if existing_size is not None:
-                        size = sympy.Min(size, existing_size)
-                    else:
-                        self.compute.writeline(
-                            IndirectAssertLine(
-                                "{assert_line}",
-                                self.indirect_assert,
-                                var,
-                                mask,
-                                self.indirect_max_sizes,
-                            )
-                        )
-
-                    self.indirect_max_sizes[map_key] = (size, self.index_to_str(size))
-                return parent_handler.indirect_indexing(var, size, check)
+                    CSEProxy.check_bounds_lazy(
+                        sympy_var, size, assert_lower, assert_upper
+                    )
+                return sympy_var
 
             @staticmethod
-            def check_bounds(var: CSEVariable, size: sympy.Expr):
-                size = self.sexpr(self.rename_indexing(size))  # type: ignore[attr-defined]
-                maybe_mask_str = None
-                if hasattr(var, "mask_vars") and var.mask_vars:
-                    maybe_mask_str = " & ".join(sorted(map(str, var.mask_vars)))
-                # expr is already wrapped
-                self.compute.writeline(
-                    self.indirect_assert(str(var), "0", size, maybe_mask_str)
-                )
+            def check_bounds_lazy(
+                expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+            ):
+                """
+                How do we issue size checks:
+                - This function is called from either
+                  - CSEProxy.indirect_indexing
+                  - IndexPropagation.indirect_indexing
+                - This saves the info necessary to issue the check
+                - When a load or a store happens within codegen, it will call self.issue_check_bounds(buffer, index
+                - If the given index uses (structural equality) any of the expressions that
+                  need checking, we call self.check_bounds(buffer, ...) which will print the relevant line
+                """
+                if lower or upper:
+                    self.pending_indirect_asserts[expr] = (size, lower, upper)
 
             @staticmethod
             def load(name: str, index: sympy.Expr) -> CSEVariable:
