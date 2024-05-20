@@ -140,7 +140,7 @@ class StrobelightCLIFunctionProfiler:
 
         if result.returncode != 0:
             raise StrobelightCLIProfilerError(
-                "failed to start strobelight profiling error in run_async"
+                "failed to start strobelight profiling, error in run_async"
             )
 
         for line in result.stderr.split(b"\n"):
@@ -165,7 +165,7 @@ class StrobelightCLIFunctionProfiler:
 
         if result.returncode != 0:
             raise StrobelightCLIProfilerError(
-                "failed to start strobelight profiling error in wait_for_running"
+                "failed to start strobelight profiling, error in wait_for_running"
             )
 
         for line in result.stderr.split(b"\n"):
