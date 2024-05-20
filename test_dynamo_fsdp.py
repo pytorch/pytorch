@@ -275,11 +275,11 @@ def checkpoint_wrapper(module, config):
         )
 
 
-test_case = "toy_transformer"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard" / "toy_transformer"
+test_case = "nested_fully_shard"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard" / "toy_transformer"
 balanced = True
 mixed_precision = False  # TODO(yf225): when True, fails accuracy test, needs debugging
 apply_fsdp = True
-enable_1st_eager_run = False
+enable_1st_eager_run = True
 
 def create_input(hidden_dim):
     torch.manual_seed(0)
@@ -473,14 +473,14 @@ local_rank = int(os.environ["LOCAL_RANK"])
 world_size = int(os.environ["WORLD_SIZE"])
 
 
-def compiler_fn(backend):
+def compiler_fn(backend, fullgraph):
     def _fn(gm):
         # if dist.get_rank() == 0:
         #     # HACK: delay rank 0 by X seconds, so that rank 1 will always fail first.
         #     import time
         #     time.sleep(600)
         torch_log.warning("Compiling autograd?")
-        return torch.compile(gm, backend=backend, fullgraph=False)
+        return torch.compile(gm, backend=backend, fullgraph=fullgraph)
     return _fn
 
 
@@ -488,15 +488,17 @@ def run(model, optim, n_iter, hidden_dim, use_compiled_autograd=False):
     torch.manual_seed(42)
     losses = []
     for i in range(n_iter):
-        if i == 0:
-            backend = "eager"
-        else:
-            backend = "inductor"
+        # if i == 0:
+        #     backend = "eager"
+        #     fullgraph = False
+        # else:
+        #     backend = "inductor"
+        #     fullgraph = True
         torch_log.warning(f"Starting iteration: {i}")
         optim.zero_grad(set_to_none=True)
         inp = create_input(hidden_dim)
         if use_compiled_autograd:
-            compiled_autograd_ctx = compiled_autograd.enable(compiler_fn(backend))
+            compiled_autograd_ctx = compiled_autograd.enable(compiler_fn("inductor", True))
         else:
             compiled_autograd_ctx = contextlib.nullcontext()
         with compiled_autograd_ctx:
@@ -529,8 +531,16 @@ def main_compiled(n_iter, activation_checkpoint, backend):
     if apply_fsdp:
         torch._dynamo.config.trace_distributed = True
         torch._functorch.config.move_view_chain_to_bwd_graph = True
-
-    torch._inductor.config.triton.unique_kernel_names = True
+        torch._functorch.config.aggressive_recomputation = False
+        torch._inductor.config.reorder_for_compute_comm_overlap = True
+        torch._inductor.config.reorder_for_compute_comm_overlap_passes = [
+            "sink_waits",
+            "raise_comms",
+        ]
+        torch._inductor.config.allow_buffer_reuse = True
+        torch._inductor.config.inplace_buffers = True
+        torch._inductor.config.raise_last_usage = True
+        torch._dynamo.config.error_on_recompile = True
 
     # if dist.get_rank() == 0:
     #     # HACK: delay rank 0 by X seconds, so that rank 1 will always fail first.
