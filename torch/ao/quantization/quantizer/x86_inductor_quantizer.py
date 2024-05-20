@@ -36,7 +36,7 @@ from torch.ao.quantization.quantizer.quantizer import (
     Quantizer,
     SharedQuantizationSpec,
 )
-from torch.ao.quantization.quantizer.utils import _get_module_name_filter, log
+from torch.ao.quantization.quantizer.utils import _get_module_name_filter
 from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
     get_bias_qspec,
     get_input_act_qspec,
@@ -143,14 +143,10 @@ def _skip_annotate(
     if current_stage.is_global and filter_fn is not None:
         for node in nodes:
             if filter_fn(node):
-                log.warning("not skip nodes %s", nodes)
                 return False
     if filter_fn and any(not filter_fn(node) for node in nodes):
-        log.warning("skip nodes %s", nodes)
         skip_annotate = True
         return skip_annotate
-    # import pdb; pdb.set_trace()
-    log.warning("not skip nodes %s", nodes)
     return skip_annotate
 
 
@@ -171,14 +167,6 @@ def _get_operator_type_filter(operator_type: Callable, module_name_list):
     def operator_type_filter(n: Node) -> bool:
         not_module_name_node = not any(f(n) for f in module_name_list_filters)
         has_certain_operator_type = n.target == operator_type
-        log.warning(
-            "!!for node: %s, (name: %s, target:%s) n.target equal operator_type (%s))? %s",
-            n,
-            n.name,
-            n.target,
-            operator_type,
-            has_certain_operator_type,
-        )
         return not_module_name_node and has_certain_operator_type
 
     return operator_type_filter
@@ -1306,7 +1294,6 @@ class X86InductorQuantizer(Quantizer):
             itertools.chain.from_iterable(linear_partitions.values())
         )
         for partition in linear_partitions:
-            log.warning("for partition: %s", partition)
             if len(partition.output_nodes) > 1:
                 raise ValueError(
                     "Linear partition cannot have more than one output node"

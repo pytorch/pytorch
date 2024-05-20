@@ -207,7 +207,6 @@ def _get_module_type_filter(tp: Callable):
     """
 
     tp_str = tp.__module__ + "." + tp.__qualname__
-    # import pdb; pdb.set_trace()
 
     def module_type_filter(n: Node) -> bool:
         # example: {
@@ -222,7 +221,6 @@ def _get_module_type_filter(tp: Callable):
             if isinstance(t, type):
                 t = t.__module__ + "." + t.__qualname__
             types.append(t)
-
         return tp_str in types
 
     return module_type_filter

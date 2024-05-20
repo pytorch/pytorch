@@ -1,14 +1,9 @@
-import logging
-import os
 from typing import List
 
 from torch.ao.quantization.pt2e.utils import _is_sym_size_node
 
 from torch.ao.quantization.quantizer.quantizer import QuantizationAnnotation
 from torch.fx import Node
-
-log = logging.getLogger(__name__)
-log.setLevel(os.environ.get("LOGLEVEL", "ERROR"))
 
 
 def _annotate_input_qspec_map(node: Node, input_node: Node, qspec):
