@@ -245,7 +245,7 @@ class FSDPParam:
         self.padded_sharded_param_size = padded_sharded_param.size()
         if sharded_param.numel() > 0:
             padded_sharded_param[: sharded_param.size(0)].copy_(sharded_param)
-        if self.offload_to_cpu:
+        if self.offload_to_cpu and not padded_sharded_param.is_meta:
             padded_sharded_param = padded_sharded_param.cpu()
             if self.pin_memory:
                 padded_sharded_param = padded_sharded_param.pin_memory()
@@ -584,6 +584,8 @@ class FSDPParam:
                 )
             self.sharded_param = new_param
         local_tensor = new_param._local_tensor
+        if local_tensor.is_meta:
+            return
         padded_sharded_size = self.padded_sharded_param_size
         if local_tensor.size() != padded_sharded_size:
             padded_local_tensor = local_tensor.new_zeros(padded_sharded_size)
