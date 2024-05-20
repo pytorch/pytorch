@@ -301,7 +301,7 @@ struct TORCH_API Module : public Object {
   Module clone_impl(
       std::unordered_map<TypePtr, TypePtr>& type_remap,
       bool inplace,
-      IValue::HashAliasedIValueMap memo,
+      IValue::HashIdentityIValueMap memo,
       const std::unordered_set<std::string>& ignored_methods,
       const std::unordered_set<std::string>& ignored_attributes) const;
 
