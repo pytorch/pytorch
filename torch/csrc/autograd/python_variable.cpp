@@ -267,7 +267,7 @@ PyObject* THPVariable_Wrap(at::TensorBase var) {
         c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
   }
 
-  c10::optional<PyObject*> mb_obj =
+  std::optional<PyObject*> mb_obj =
       var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
           getPyInterpreter(), /*ignore_hermetic_tls=*/false);
   c10::impl::PyInterpreterStatus status{};
@@ -587,14 +587,14 @@ static PyObject* view_func_impl(
         auto& view_func = view_info.view_fn();
 
         // Determine new SymInt / tensor state as needed.
-        c10::optional<std::vector<c10::SymInt>> new_symints = c10::nullopt;
+        std::optional<std::vector<c10::SymInt>> new_symints = c10::nullopt;
         if (symint_visitor_fn != Py_None) {
           new_symints = map_py_func(
               py::cast<py::function>(symint_visitor_fn),
               view_func.get_symints());
         }
 
-        c10::optional<std::vector<at::Tensor>> new_tensors = c10::nullopt;
+        std::optional<std::vector<at::Tensor>> new_tensors = c10::nullopt;
         if (tensor_visitor_fn != Py_None) {
           new_tensors = map_py_func(
               py::cast<py::function>(tensor_visitor_fn),
@@ -746,14 +746,31 @@ static PyObject* THPVariable_make_wrapper_subclass(
   HANDLE_TH_ERRORS
   // NB: pin_memory doesn't actually do anything
   // TODO: strides variant?
+
+  // cls: Python subclass type
+  // size, strides, storage_offset, memory_format, dtype: self-explanatory
+  // layout: memory layout, e.g. for types of Nested Tensors or other sparse
+  //         tensors
+  // pin_memory, requires_grad: self-explanatory
+  // dispatch_sizes_strides_policy: string - which sizes/strides we should
+  //                                dispatch to a custom python implementation.
+  // dispatch_device: whether to dispatch to a custom python implementation
+  //                  for device
+  // dispatch_layout: whether to dispatch to a custom python implementation
+  //                  for layout
+  // _extra_dispatch_keys: additional dispatch keys to add to the tensor
+  // storage_size: if provided, skip storage size calculation and just use the
+  //               value provided. One use case is for Nested Tensor, where the
+  //               storage size cannot be calculated from the sizes/strides
+  //               (because they contain a NestedInt).
   static PythonArgParser parser({
       "_make_wrapper_subclass(PyObject* cls, SymIntArrayRef size, SymIntArrayRef? strides=None, "
       "SymInt? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
       "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
       "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False, "
-      "DispatchKeySet _extra_dispatch_keys=None)",
+      "DispatchKeySet _extra_dispatch_keys=None, SymInt? storage_size=None)",
   });
-  ParsedArgs<14> parsed_args{};
+  ParsedArgs<15> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
 
@@ -798,12 +815,16 @@ static PyObject* THPVariable_make_wrapper_subclass(
     auto sym_sizes = r.symintlist(1);
     auto sym_strides_own = r.symintlistOptional(2);
     auto sym_strides =
-        static_cast<c10::optional<c10::SymIntArrayRef>>(sym_strides_own);
+        static_cast<std::optional<c10::SymIntArrayRef>>(sym_strides_own);
     auto sym_storage_offset = r.toSymIntOptional(3);
 
     c10::SymInt size_bytes;
     auto dtype_itemsize = static_cast<int64_t>(options.dtype().itemsize());
-    if (sym_strides.has_value()) {
+    auto storage_size = r.toSymIntOptional(14);
+
+    if (storage_size.has_value()) {
+      size_bytes = storage_size.value();
+    } else if (sym_strides.has_value()) {
       size_bytes = at::detail::computeStorageNbytes(
           sym_sizes,
           sym_strides.value(),
@@ -1910,7 +1931,7 @@ void THPVariable_subclass_dealloc(PyObject* self) {
   if (type->tp_del) {
     PyObject_GC_Track(self);
     type->tp_del(self);
-    if (self->ob_refcnt > 0) {
+    if (Py_REFCNT(self) > 0) {
       /* Resurrected */
       return;
     }

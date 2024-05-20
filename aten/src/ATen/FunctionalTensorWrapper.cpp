@@ -526,7 +526,7 @@ Tensor to_functional_tensor(const Tensor& tensor) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!isFunctionalTensor(tensor));
   return at::detail::make_tensor<FunctionalTensorWrapper>(tensor);
 }
-c10::optional<Tensor> to_functional_tensor(const c10::optional<Tensor>& tensor) {
+std::optional<Tensor> to_functional_tensor(const c10::optional<Tensor>& tensor) {
   if (tensor.has_value()) {
     return c10::make_optional<Tensor>(to_functional_tensor(*tensor));
   }
@@ -564,7 +564,7 @@ Tensor from_functional_tensor(const Tensor& tensor, bool assert_functional) {
     return tensor;
   }
 }
-c10::optional<Tensor> from_functional_tensor(const c10::optional<Tensor>& t, bool assert_functional) {
+std::optional<Tensor> from_functional_tensor(const c10::optional<Tensor>& t, bool assert_functional) {
   if (t.has_value()) {
     return c10::make_optional<Tensor>(from_functional_tensor(*t, assert_functional));
   }
@@ -610,7 +610,7 @@ void sync(const Tensor& t) {
   auto functional_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
   functional_impl->sync_();
 }
-void sync(const c10::optional<Tensor>& t) {
+void sync(const std::optional<Tensor>& t) {
   if (t.has_value()) {
     sync(*t);
   }
@@ -692,7 +692,7 @@ bool isFunctionalTensor(const at::Tensor& tensor) {
   return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Functionalize);
 }
 
-bool isFunctionalTensor(const c10::optional<Tensor>& t) {
+bool isFunctionalTensor(const std::optional<Tensor>& t) {
   if (t.has_value()) {
     return isFunctionalTensor(*t);
   } else {
