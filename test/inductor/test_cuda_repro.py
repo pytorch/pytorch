@@ -1135,6 +1135,27 @@ class CudaReproTests(TestCase):
         fn(*args)
         torch.cuda.synchronize()  # shake out Triton Error [CUDA]: misaligned address
 
+    def test_dynamic_persistent_reductions(self):
+        @torch.compile(dynamic=True)
+        def inner_reduce(x):
+            assert x.shape[x] <= 1024
+            return x.sum(-1)
+
+        a = torch.randn(50, 600, device="cuda")
+        out, code = run_and_get_code(inner_reduce, (a,))
+        self.assertEqual(inner_reduce(a), out)
+        self.aseertTrue("for roffset" not in code)
+
+        @torch.compile(dynamic=True)
+        def outer_reduce(x):
+            assert x.shape[-1] <= 64
+            return x.sum(0)
+
+        a = torch.randn(50, 600, device="cuda")
+        out, code = run_and_get_code(outer_reduce, (a,))
+        self.assertEqual(outer_reduce(a), out)
+        self.aseertTrue("for roffset" not in code)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
