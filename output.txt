@@ -1,0 +1,27 @@
+-- The CXX compiler identification is GNU 11.4.1
+-- The C compiler identification is GNU 11.4.1
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /home/sahanp/local/ccache/lib/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /home/sahanp/local/ccache/lib/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- /home/sahanp/local/ccache/lib/c++ /home/sahanp/pytorch/torch/abi-check.cpp -o /home/sahanp/pytorch/build/abi-check
+-- Determined _GLIBCXX_USE_CXX11_ABI=1
+-- Not forcing any particular BLAS to be found
+-- Performing Test C_HAS_AVX_1
+-- Performing Test C_HAS_AVX_1 - Failed
+-- Performing Test C_HAS_AVX_2
+-- Performing Test C_HAS_AVX_2 - Success
+-- Performing Test C_HAS_AVX2_1
+-- Performing Test C_HAS_AVX2_1 - Failed
+-- Performing Test C_HAS_AVX2_2
+Building wheel torch-2.4.0a0+git0ff0179
+BUILD_LIBTORCH_WHL - False
+BUILD_PYTORCH_USING_LIBTORCH_WHL - True
+-- Building version 2.4.0a0+git0ff0179
+cmake -GNinja -DBUILD_LIBTORCHLESS=ON -DBUILD_PYTHON=True -DBUILD_PYTHON_ONLY=1 -DBUILD_TEST=True -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/home/sahanp/pytorch/torch -DCMAKE_PREFIX_PATH=/home/sahanp/.conda/envs/pytorch-3.10/lib/python3.10/site-packages -DCUDA_NVCC_EXECUTABLE=/home/sahanp/local/ccache/cuda/nvcc -DNUMPY_INCLUDE_DIR=/home/sahanp/.conda/envs/pytorch-3.10/lib/python3.10/site-packages/numpy/core/include -DPYTHON_EXECUTABLE=/home/sahanp/.conda/envs/pytorch-3.10/bin/python -DPYTHON_INCLUDE_DIR=/home/sahanp/.conda/envs/pytorch-3.10/include/python3.10 -DPYTHON_LIBRARY=/home/sahanp/.conda/envs/pytorch-3.10/lib/libpython3.10.a -DTORCH_BUILD_VERSION=2.4.0a0+git0ff0179 -DUSE_NUMPY=True /home/sahanp/pytorch

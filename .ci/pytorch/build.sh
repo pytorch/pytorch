@@ -280,6 +280,7 @@ else
     # XLA test build fails when WERROR=1
     # set only when building other architectures
     # or building non-XLA tests.
+
     if [[ "$BUILD_ENVIRONMENT" != *rocm*  &&
           "$BUILD_ENVIRONMENT" != *xla* ]]; then
       if [[ "$BUILD_ENVIRONMENT" != *py3.8* ]]; then
@@ -287,11 +288,30 @@ else
         # Which should be backward compatible with Numpy-1.X
         python -mpip install --pre numpy==2.0.0rc1
       fi
-      WERROR=1 python setup.py bdist_wheel
+      if [[ "$USE_SPLIT_BUILD" != "false" ]]; then
+        WERROR=1 BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py install
+        WERROR=1 BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py clean
+        WERROR=1 BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py clean
+        WERROR=1 BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py install
+      else
+        WERROR=1 python setup.py clean
+        WERROR=1 python setup.py bdist_wheel
+      fi
     else
-      python setup.py bdist_wheel
+      if [[ "$USE_SPLIT_BUILD" != "false" ]]; then
+        BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py install
+        BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py clean
+        BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py clean
+        BUILD_PYTHON_ONLY=1 BUILD_LIBTORCH_WHL=0 python setup.py install
+      else
+        python setup.py clean
+        python setup.py bdist_wheel
+      fi
     fi
-    pip_install_whl "$(echo dist/*.whl)"
+
+    if [[ "$USE_SPLIT_BUILD" == "false" ]]; then
+      pip_install_whl "$(echo dist/*.whl)"
+    fi
 
     # TODO: I'm not sure why, but somehow we lose verbose commands
     set -x
@@ -327,10 +347,12 @@ else
     CUSTOM_OP_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-op-build"
     CUSTOM_OP_TEST="$PWD/test/custom_operator"
     python --version
+    ls $SITE_PACKAGES/torch
+    ls $SITE_PACKAGES/libtorch
     SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
     mkdir -p "$CUSTOM_OP_BUILD"
     pushd "$CUSTOM_OP_BUILD"
-    cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)" \
+    cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch;$SITE_PACKAGES/libtorch" -DPYTHON_EXECUTABLE="$(which python)" \
           -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
     make VERBOSE=1
     popd
