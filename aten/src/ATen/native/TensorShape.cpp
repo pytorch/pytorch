@@ -478,6 +478,12 @@ Tensor& set_meta_(Tensor& result) {
   return result;
 }
 
+Tensor& _unsafe_set_storage_(Tensor& x, Storage storage) {
+  if (!x.storage().is_alias_of(storage)) {
+    x.unsafeGetTensorImpl()->set_storage_keep_dtype(std::move(storage));
+  }
+}
+
 Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
   TORCH_CHECK(self.is_sparse(), "input must be sparse tensor");
   int64_t sparse_extra_ndim = size.size() - self.dim();
