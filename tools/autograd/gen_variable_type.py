@@ -389,7 +389,7 @@ GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
 GRADIENT_IMPLEMENTED_FOR_COMPLEX.update(GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX)
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
-RESET_GRAD_ACCUMULATOR = {"set_", "resize_"}
+RESET_GRAD_ACCUMULATOR = {"set_", "resize_", "_unsafe_set_storage_"}
 
 # NOTE [ TensorImpl and Storage Pointer Sanity Checks ]
 #
