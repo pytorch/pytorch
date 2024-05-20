@@ -52,6 +52,7 @@ class CppWrapperCpu(WrapperCodeGen):
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
+        self.stack_allocation_blocklist = set()
 
         from .cpp import cexpr, CppPrinter
 
@@ -1350,6 +1351,7 @@ class CppWrapperCpu(WrapperCodeGen):
     def can_stack_allocate_buffer(self, buffer):
         return (
             self.allow_stack_allocation
+            and buffer.name not in self.stack_allocation_blocklist
             and buffer.get_device().type == "cpu"
             and self.can_prove_buffer_has_static_shape(buffer)
             and ir.is_contiguous_strides_for_shape(
@@ -1654,6 +1656,10 @@ class CppWrapperCpu(WrapperCodeGen):
 
     def codegen_device_copy(self, src, dst):
         if config.abi_compatible:
+            # aoti_torch_tensor_copy_ takes AtenTensorHandle as input,
+            # while stack-allocation results in ArrayRefTensor
+            # so add `dst` to the list to prevent stack-allocation for `dst` later
+            self.stack_allocation_blocklist.add(dst)
             self.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_tensor_copy_(expensive_copy_to_tensor_if_needed({src}), {dst}));"
             )
