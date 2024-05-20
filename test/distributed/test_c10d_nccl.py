@@ -2579,6 +2579,27 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    def test_all_reduce_coalesced_nccl_float8_errors(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        process_group = c10d.distributed_c10d._get_default_group()
+        device = torch.device("cuda:%d" % self.rank)
+        tensors = [
+            torch.full(
+                (60 + i,), self.rank + 1 + i, device=device, dtype=torch.float
+            ).to(torch.float8_e4m3fn)
+            for i in range(5)
+        ]
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Float8 dtypes are not currenlty supported for NCCL reductions",
+        ):
+            torch.distributed.all_reduce_coalesced(tensors, group=process_group)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
     def test_all_reduce_coalesced_manager_nccl(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
@@ -2940,6 +2961,56 @@ class CompilerTest(test_c10d_common.CompilerTest):
                 dist.reduce_scatter_tensor(output_tensors[i], input_tensors[i])
         self.assertEqual(output_tensors, input_tensors[self.rank] * self.world_size)
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_reduce_scatter_base_k_float8_errors(self):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        output_tensor = (
+            torch.zeros(2, dtype=torch.float32).to(torch.float8_e4m3fn).to(self.rank)
+        )
+        input_tensors = (
+            torch.arange(self.world_size * 2, dtype=torch.float32)
+            .to(torch.float8_e4m3fn)
+            .to(self.rank)
+        )
+        input_tensors = torch.reshape(input_tensors, (self.world_size, 2))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Float8 dtypes are not currenlty supported for NCCL reductions",
+        ):
+            dist.reduce_scatter_tensor(output_tensor, input_tensors)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_reduce_scatter_tensor_coalesced_float8_errors(self):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        output_tensors = torch.zeros(2, 2).to(torch.float8_e5m2).to(self.rank)
+        input_tensors = [
+            torch.ones(2, 2).to(torch.float8_e5m2).to(self.rank)
+            for _ in range(self.world_size)
+        ]
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Float8 dtypes are not currenlty supported for NCCL reductions",
+        ):
+            with dist._coalescing_manager():
+                for i in range(self.world_size):
+                    dist.reduce_scatter_tensor(output_tensors[i], input_tensors[i])
+            self.assertEqual(output_tensors, input_tensors[self.rank])
+
 
 class SetDeviceMethod(Enum):
     TORCH_CUDA_SET = auto()  # torch.cuda.set_device
@@ -2979,6 +3050,28 @@ class NcclProcessGroupWithDispatchedCollectivesTests(
         output_tensor = torch.zeros(10, 10, device=torch.device(device))
         dist.all_gather_into_tensor(output_tensor, tensor)
         self.assertEqual(output_tensor, tensor)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    @parametrize("float8_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
+    def test_allgather_float8(self, float8_dtype):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        device = "cuda"
+        tensor = torch.ones(10, 16, device=torch.device(device)).to(float8_dtype)
+        output_tensor = torch.zeros(10, 16, device=torch.device(device)).to(
+            float8_dtype
+        )
+        dist.all_gather_into_tensor(output_tensor, tensor)
+        self.assertEqual(output_tensor.view(torch.float32), tensor.view(torch.float32))
+
+
+instantiate_parametrized_tests(NcclProcessGroupWithDispatchedCollectivesTests)
 
 
 class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase):
