@@ -622,14 +622,14 @@ class ScheduleLoopedBFS(PipelineScheduleMulti):
                 with record_function(f"Stage {stage.stage_index} Forward"):
                     ops = stage.get_fwd_recv_ops()
                     if ops:
-                        batch_p2p(ops, desc="fwd_recv").wait()
+                        _batch_p2p(ops, desc="fwd_recv").wait()
 
                     output = stage.forward_one_chunk(arg_mbs[i], kwarg_mbs[i])
                     self._maybe_compute_loss(stage, output, target_mbs, i)
 
                     ops = stage.get_fwd_send_ops()
                     if ops:
-                        batch_p2p(ops, desc="fwd_send")
+                        _batch_p2p(ops, desc="fwd_send")
 
         for stage in reversed(self._stages):
             for i in range(self._n_microbatches):
@@ -637,14 +637,14 @@ class ScheduleLoopedBFS(PipelineScheduleMulti):
                 with record_function(f"Stage {stage.stage_index} Backward"):
                     ops = stage.get_bwd_recv_ops()
                     if ops:
-                        batch_p2p(ops, desc="bwd_recv").wait()
+                        _batch_p2p(ops, desc="bwd_recv").wait()
 
                     loss = self._maybe_get_loss(stage, i)
                     stage.backward_one_chunk(loss=loss)
 
                     ops = stage.get_bwd_send_ops()
                     if ops:
-                        batch_p2p(ops, desc="bwd_send")
+                        _batch_p2p(ops, desc="bwd_send")
 
         self._update_losses(self._stages, losses)
 
@@ -759,7 +759,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
             with record_function(f"Forward {step}"):
                 ops.extend(fwd_stage.get_fwd_recv_ops())
                 if ops:
-                    work = batch_p2p(ops, desc="warmup_pre_fwd")
+                    work = _batch_p2p(ops, desc="warmup_pre_fwd")
                     work.wait()
                     ops.clear()
 
@@ -770,7 +770,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
                 # This is because fwd-bwd send/recvs among ranks need to be aligned to prevent a hang.
                 # In the edge cases where there are no fwd_bwds and cooldown is immediate, then no delay is needed
                 if ops and (step != warmup_steps - 1 or fwd_bwd_steps == 0):
-                    work = batch_p2p(ops, desc="warmup_post_fwd")
+                    work = _batch_p2p(ops, desc="warmup_post_fwd")
                     sends_to_wait.append(work)
                     ops.clear()
 
@@ -800,7 +800,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
                 ops.extend(fwd_stage.get_fwd_recv_ops())
                 ops.extend(bwd_stage.get_bwd_recv_ops())
                 if ops:
-                    work = batch_p2p(ops, desc=desc)
+                    work = _batch_p2p(ops, desc=desc)
                     work.wait()
                     ops.clear()
 
@@ -831,7 +831,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
             with record_function(desc):
                 ops.extend(bwd_stage.get_bwd_recv_ops())
                 if ops:
-                    work = batch_p2p(ops, desc=desc + " pre_bwd")
+                    work = _batch_p2p(ops, desc=desc + " pre_bwd")
                     work.wait()
                     ops.clear()
 
@@ -840,7 +840,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
 
                 ops.extend(bwd_stage.get_bwd_send_ops())
                 if ops:
-                    work = batch_p2p(ops, desc=desc + " post_bwd")
+                    work = _batch_p2p(ops, desc=desc + " post_bwd")
                     sends_to_wait.append(work)
                     ops.clear()
 
