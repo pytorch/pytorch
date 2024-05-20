@@ -2180,9 +2180,13 @@ class CppVecKernel(CppKernel):
                 else:
                     load_mask = f"{self._load_mask} != 0"
             if codecache.is_gcc():
-                code.writeline(f"#pragma GCC unroll {self.tail_size if self.tail_size else self.tiling_factor}")
+                code.writeline(
+                    f"#pragma GCC unroll {self.tail_size if self.tail_size else self.tiling_factor}"
+                )
             else:
-                code.writeline(f"#pragma unroll {self.tail_size if self.tail_size else self.tiling_factor}")
+                code.writeline(
+                    f"#pragma unroll {self.tail_size if self.tail_size else self.tiling_factor}"
+                )
             code.writeline(
                 f"for (long {itervar_inner} = 0; {itervar_inner} < {self.tail_size if self.tail_size else self.tiling_factor}; {itervar_inner}++)"
             )
@@ -2261,7 +2265,9 @@ class CppVecKernel(CppKernel):
         stride = self._try_get_const_stride(index, tiling_var)
         code = IndentedBuffer()
         if stride == 1:
-            code.writeline(f"{value}.store({var_expr}, {self.tail_size if self.tail_size else self.tiling_factor});")
+            code.writeline(
+                f"{value}.store({var_expr}, {self.tail_size if self.tail_size else self.tiling_factor});"
+            )
         else:
             self._load_or_store_non_contiguous(
                 var, index, dtype, buffer=code, store_value=value
@@ -2439,9 +2445,11 @@ class CppVecKernel(CppKernel):
     def reduction_combine_vec(self, reduction_type, var, next_value):
         if reduction_type in ["max", "min", "sum", "prod", "xor_sum"]:
             if self.tail_size:
-                return f"reduce({var}, {next_value}, \"{reduction_type}\", {self.tail_size})"
+                return (
+                    f'reduce({var}, {next_value}, "{reduction_type}", {self.tail_size})'
+                )
             else:
-                return f"reduce({var}, {next_value}, \"{reduction_type}\")"
+                return f'reduce({var}, {next_value}, "{reduction_type}")'
         elif reduction_type == "welford_reduce":
             if self.tail_size:
                 return f"welford_combine({var}, {next_value}, {self.tail_size})"
@@ -3293,7 +3301,11 @@ class CppKernelProxy(CppKernel):
                     tiling_indices[0], factor=tiling_factors[0]
                 )
                 masked_vec_kernel = codegen_kernel(
-                    CppVecKernel, tiling_factors[0], tiling_indices[0], vec_dtype, tail_loop.steps
+                    CppVecKernel,
+                    tiling_factors[0],
+                    tiling_indices[0],
+                    vec_dtype,
+                    tail_loop.steps,
                 )
                 main_loop.set_kernel(vec_kernel)
                 tail_loop.set_kernel(masked_vec_kernel)
