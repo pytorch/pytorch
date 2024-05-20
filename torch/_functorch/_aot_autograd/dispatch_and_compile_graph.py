@@ -33,7 +33,7 @@ from .traced_function_transforms import (
 )
 from .utils import (
     copy_fwd_metadata_to_bw_nodes,
-    root_module_when_exporting_non_strict, 
+    root_module_when_exporting_non_strict,
     unlift_tokens,
 )
 
@@ -278,9 +278,6 @@ def aot_dispatch_autograd_graph(
     # See Note: [Fake Modules and AOTAutograd]
     torch._dynamo.utils.assert_no_fake_params_or_buffers(fx_g)
     fx_g.graph.eliminate_dead_code()
-    fx_g.recompile()
-
-    # Copy metadata from fw to bw nodes
     copy_fwd_metadata_to_bw_nodes(fx_g)
     fx_g.recompile()
 

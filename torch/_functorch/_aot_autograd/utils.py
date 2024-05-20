@@ -298,7 +298,7 @@ def root_module_when_exporting_non_strict(flat_fn):
 
 def copy_fwd_metadata_to_bw_nodes(fx_g):
     """
-    Input: `fx_g` which contains the joint fwd+bwd FX graph created by 
+    Input: `fx_g` which contains the joint fwd+bwd FX graph created by
     aot_autograd.
 
     This function walks the graph and copies over metadata from forward nodes
@@ -307,21 +307,21 @@ def copy_fwd_metadata_to_bw_nodes(fx_g):
     profiling and debugging.
     """
     def _is_forward_node_with_seq_nr(node):
-        # For now, assume that if nn_module_stack_metadata is populated, this 
+        # For now, assume that if nn_module_stack_metadata is populated, this
         # node is from the forward. Ignore nodes without `seq_nr`.
         # TODO(future): there is likely a less brittle way to do this by walking
-        # the descendants of graph inputs corresponding to fwd inputs, didn't 
-        # seem obvious at first glance on how to partition graph inputs into 
+        # the descendants of graph inputs corresponding to fwd inputs, didn't
+        # seem obvious at first glance on how to partition graph inputs into
         # fwd vs bwd without relying on string names.
         return 'nn_module_stack' in node.meta and 'seq_nr' in node.meta
 
     def _is_backward_node_with_seq_nr(node):
-        # For now, assume that if nn_module_stack_metadata is not populated, 
+        # For now, assume that if nn_module_stack_metadata is not populated,
         # this node is from the backward. Ignore nodes without `seq_nr`.
         # TODO(future): there is likely a less brittle way to do this, same
         # as with the forward.
         return (not 'nn_module_stack' in node.meta) and 'seq_nr' in node.meta
-    
+
     fwd_seq_nr_to_node = {}
     for node in fx_g.graph.nodes:
         if not _is_forward_node_with_seq_nr(node):
