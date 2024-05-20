@@ -2125,6 +2125,59 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 )
 
     @skipIfNoX86
+    def test_set_mixed_static_and_dynamic(self):
+        """Test that mixed static and dynamic quantization for a module."""
+
+        with override_quantized_engine("x86"), torch.no_grad():
+            m = TestHelperModules.SelfAttnLikeModule(input_dim=64).eval()
+            example_inputs = (torch.randn(1, 4, 64),)
+            # quantize `self.q_proj`
+            static_config = xiq.get_default_x86_inductor_quantization_config(
+                is_dynamic=False
+            )
+            dynamic_config = xiq.get_default_x86_inductor_quantization_config(
+                is_dynamic=True
+            )
+            # quantize `self.v_proj` with static config
+            # quantize `self.q_proj` with dynamic config (will be skipped)
+            quantizer = (
+                X86InductorQuantizer()
+                .set_module_name_qconfig("q_proj", static_config)
+                .set_module_name_qconfig("v_proj", dynamic_config)
+            )
+            node_occurrence = {
+                # ops for quantizing/de-quantizing input
+                torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
+                # only q_proj be quantized
+                torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+            }
+            node_list = [
+                # ops for quantizing/de-quantizing input
+                torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                # op for de-quantizing `q_proj`'s weight
+                torch.ops.quantized_decomposed.dequantize_per_channel.default,
+                # q_proj
+                torch.ops.aten.linear.default,
+                # k_proj
+                torch.ops.aten.linear.default,
+                # `v_proj`'s weight will not be quantized
+                # torch.ops.quantized_decomposed.dequantize_per_channel.default,
+                # v_proj
+                torch.ops.aten.linear.default,
+            ]
+            self._test_quantizer(
+                m,
+                example_inputs,
+                quantizer,
+                node_occurrence,
+                node_list,
+                is_qat=True,
+                debug=True,
+            )
+
+    @skipIfNoX86
     def test_filter_conv2d_recipe(self):
         """
         Test removing conv2d from default recipe of X86InductorQuantizer.

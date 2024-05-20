@@ -150,7 +150,7 @@ def _get_not_operator_type_or_name_filter(
         _get_operator_type_filter(tp, module_name_list) for tp in tp_list
     ]
 
-    def not_module_type_or_name_filter(n: Node) -> bool:
+    def not_operator_type_or_name_filter(n: Node) -> bool:
         # For global_config, only quantize the `default_quantizable_ops`
         belong_to_default_quantizable_ops = n.target in default_quantizable_ops
         not_module_type_or_module_name_node = not any(
@@ -158,7 +158,7 @@ def _get_not_operator_type_or_name_filter(
         )
         return belong_to_default_quantizable_ops and not_module_type_or_module_name_node
 
-    return not_module_type_or_name_filter
+    return not_operator_type_or_name_filter
 
 
 def _map_module_function_to_aten_operator_type():
@@ -572,15 +572,15 @@ class X86InductorQuantizer(Quantizer):
         """
 
         def _need_skip_cur_config(
-            qconfig: Optional[QuantizationConfig], _pre_mode: Optional[bool]
+            qconfig: Optional[QuantizationConfig], _pre_mode: Optional[bool], msg: str
         ):
             input_act_config = getattr(qconfig, "input_activation", None)
             if input_act_config:
                 qconfig_is_dynamic = input_act_config.is_dynamic
                 if _pre_mode is not None and _pre_mode != qconfig_is_dynamic:
                     warnings.warn(
-                        "Mixed dynamic and static quantization config is not supported. \
-                        The subsequent configuration will be skipped."
+                        "Mixed dynamic and static quantization config is not supported."
+                        f"The configuration for {msg} will be skipped."
                     )
                     return _pre_mode, True
                 else:
@@ -592,7 +592,9 @@ class X86InductorQuantizer(Quantizer):
 
         tmp_module_name_qconfig: Dict[str, Optional[QuantizationConfig]] = {}
         for module_name, qconfig in self.module_name_qconfig.items():
-            _pre_mode, need_skip = _need_skip_cur_config(qconfig, _pre_mode)
+            _pre_mode, need_skip = _need_skip_cur_config(
+                qconfig, _pre_mode, module_name
+            )
             if not need_skip:
                 tmp_module_name_qconfig[module_name] = qconfig
         self.module_name_qconfig = tmp_module_name_qconfig
@@ -601,13 +603,17 @@ class X86InductorQuantizer(Quantizer):
             torch._ops.OpOverloadPacket, Optional[QuantizationConfig]
         ] = {}
         for operator_type, qconfig in self.operator_type_qconfig.items():
-            _pre_mode, need_skip = _need_skip_cur_config(qconfig, _pre_mode)
+            _pre_mode, need_skip = _need_skip_cur_config(
+                qconfig, _pre_mode, str(operator_type)
+            )
             if not need_skip:
                 tmp_operator_type_qconfig[operator_type] = qconfig
         self.operator_type_qconfig = tmp_operator_type_qconfig
 
         if self.global_config:
-            _pre_mode, need_skip = _need_skip_cur_config(self.global_config, _pre_mode)
+            _pre_mode, need_skip = _need_skip_cur_config(
+                self.global_config, _pre_mode, "global"
+            )
             if not need_skip:
                 self.global_config = self.global_config
             else:
