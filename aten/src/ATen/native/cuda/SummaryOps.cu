@@ -322,13 +322,15 @@ Tensor _histc_cuda_template(
       c10::nullopt /* pin_memory */);
   input_t minvalue = min;
   input_t maxvalue = max;
-  if (min == max && self.numel() > 0) {
+  if (min == 0.0 && max == 0.0 && self.numel() > 0) {
     minvalue = *self.min().cpu().const_data_ptr<input_t>();
     maxvalue = *self.max().cpu().const_data_ptr<input_t>();
   }
+
+  // expand empty range to avoid divide by zero
   if (minvalue == maxvalue) {
-    minvalue = minvalue - 1;
-    maxvalue = maxvalue + 1;
+    minvalue = minvalue - static_cast<input_t>(0.5);
+    maxvalue = maxvalue + static_cast<input_t>(0.5);
   }
 
 #if !defined(USE_ROCM)
