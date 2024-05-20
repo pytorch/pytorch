@@ -4,6 +4,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/csrc/inductor/aoti_torch/mkldnn_tensor.h>
 #include <torch/csrc/inductor/aoti_torch/proxy_executor.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
@@ -41,8 +42,6 @@
 #include <ATen/ops/view_ops.h>
 
 #endif
-
-#include <torch/csrc/inductor/aoti_torch/opaque_tensor.h>
 
 using namespace torch::aot_inductor;
 
