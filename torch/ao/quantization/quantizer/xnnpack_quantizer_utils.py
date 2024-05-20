@@ -26,7 +26,6 @@ from torch.ao.quantization.quantizer import (
 from torch.ao.quantization.quantizer.utils import (
     _annotate_input_qspec_map,
     _annotate_output_qspec,
-    _is_annotated,
 )
 from torch.fx import Node
 from torch.fx.passes.utils.matcher_with_name_node_map_utils import (
@@ -93,6 +92,21 @@ class OperatorConfig(NamedTuple):
     # tell us the graph structure resulting from the list of ops.
     config: QuantizationConfig
     operators: List[OperatorPatternType]
+
+
+def _is_annotated(nodes: List[Node]):
+    """
+    Given a list of nodes (that represents an operator pattern),
+    check if any of the node is annotated, return True if any of the node
+    is annotated, otherwise return False
+    """
+    annotated = False
+    for node in nodes:
+        annotated = annotated or (
+            "quantization_annotation" in node.meta
+            and node.meta["quantization_annotation"]._annotated
+        )
+    return annotated
 
 
 def _mark_nodes_as_annotated(nodes: List[Node]):

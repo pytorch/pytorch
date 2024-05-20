@@ -36,12 +36,7 @@ from torch.ao.quantization.quantizer.quantizer import (
     Quantizer,
     SharedQuantizationSpec,
 )
-from torch.ao.quantization.quantizer.utils import (
-    _get_module_name_filter,
-    _skip_annotate,
-    current_stage,
-    log,
-)
+from torch.ao.quantization.quantizer.utils import _get_module_name_filter, log
 from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
     get_bias_qspec,
     get_input_act_qspec,
@@ -106,6 +101,59 @@ quantizable_ops = default_quantizable_ops | {
 QUANT_ANNOTATION_KEY = "quantization_annotation"
 
 
+class CurrentStage:
+    is_global = False
+
+
+current_stage = CurrentStage()
+
+
+def _skip_annotate(
+    nodes: List[Node], filter_fn: Optional[Callable[[Node], bool]] = None
+):
+    skip_annotate = False
+    # 1) Skip annotate if any node is already annotated
+    if _is_any_annotated(nodes):
+        skip_annotate = True
+        return skip_annotate
+    # 2) Skip annotate if a) filter_fn is provided and b) any node fails the filter
+    # filter_fn result
+    # case 1,
+    # filter_fn     False, False, False
+    # not filter_fn True, True, True
+    # any           True
+    # ->            skip
+
+    # no node named as user specific
+
+    # case 2,
+    # filter_fn     True, False, False
+    # not filter_fn False, True, True
+    # any           True
+    # ->            skip
+
+    # some node are not user specific
+
+    # case 3,
+    # filter_fn     True
+    # not filter_fn False
+    # any           False
+    # ->            not skip
+    # all node are user specific
+    if current_stage.is_global and filter_fn is not None:
+        for node in nodes:
+            if filter_fn(node):
+                log.warning("not skip nodes %s", nodes)
+                return False
+    if filter_fn and any(not filter_fn(node) for node in nodes):
+        log.warning("skip nodes %s", nodes)
+        skip_annotate = True
+        return skip_annotate
+    # import pdb; pdb.set_trace()
+    log.warning("not skip nodes %s", nodes)
+    return skip_annotate
+
+
 def _get_operator_type_filter(operator_type: Callable, module_name_list):
     """Get the operator_type_filter function for a given operator type, the filter accepts
     a node and checks if the node has certain module type
@@ -136,7 +184,7 @@ def _get_operator_type_filter(operator_type: Callable, module_name_list):
     return operator_type_filter
 
 
-def _x86_get_not_module_type_or_name_filter(
+def _get_not_operator_type_or_name_filter(
     tp_list: List[torch._ops.OpOverloadPacket], module_name_list: List[str]
 ) -> Callable[[Node], bool]:
     # Check if the node is 1) belong to the `default_quantizable_ops` and 2) not be marked by `set_module_name_qconfig`,
@@ -572,28 +620,13 @@ class X86InductorQuantizer(Quantizer):
         return conv_gemm_node_idx, extra_input_node_idx
 
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
-        """just handling global spec for now"""
-        if self.global_config and self.global_config.input_activation.is_dynamic:  # type: ignore[union-attr]
-            model = self._annotate_entry(model)
-        else:
-            model = self._annotate_entry(model)
-        return model
-
-    def _annotate_by_single_config(self, model, config, filter_fn):
-        if config is None:
-            return
-        self._annotate_all_conv2d_fusion_pattern(model, config, filter_fn)
-        self._annotate_all_linear_fusion_pattern(model, config, filter_fn)
-        self._annotate_matmul(model, config, filter_fn)
-
-        self._annotate_propagation_quantizable_pattern_entry(model, config, filter_fn)
-        self._annotate_output_for_int8_in_int8_out_pattern_entry(
-            model, config, filter_fn
-        )
-
-    def _annotate_quantization_with_all_qconfig(
-        self, model: torch.fx.GraphModule
-    ) -> torch.fx.GraphModule:
+        """
+        1) Annotate each node according the user's qconfig with following order:
+        `module_name_qconfig`, `module_type_qconfig`, and `global_config`.
+        2) Skip nodes already annotated by an earlier stage. For example,
+        if `linear1` has been annotated in the `module_name_config` stage,
+        it will not be re-annotated in the `module_type_config` or `global_config` stages.
+        """
         module_name_list = list(self.module_name_qconfig.keys())
 
         for module_name, qconfig in self.module_name_qconfig.items():
@@ -612,12 +645,17 @@ class X86InductorQuantizer(Quantizer):
             self._annotate_by_single_config(
                 model,
                 self.global_config,
-                _x86_get_not_module_type_or_name_filter(tp_list, module_name_list),
+                _get_not_operator_type_or_name_filter(tp_list, module_name_list),
             )
         return model
 
-    def _annotate_entry(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
-        r"""
+    def _annotate_by_single_config(
+        self,
+        model: torch.fx.GraphModule,
+        config: Optional[QuantizationConfig],
+        filter_fn: Callable,
+    ) -> None:
+        """
         High-level description of quantization recipe for X86 Inductor Backend:
         Step 1: Apply quantization recipe for fusion patterns of conv/linear to enable int8 data type actively.
         Step 2: Propagate quantization annotation for patterns besides conv/linear. Go through the pattern in model
@@ -627,31 +665,29 @@ class X86InductorQuantizer(Quantizer):
         such as maxpool2d, which only supports output with int8 data type when the input is with int8 data type,
         we need to annotate the output of this pattern.
         """
+        if config is None:
+            return
 
         # Step1: Recipe of fusion patterns like conv/linear.
-
-        self._annotate_quantization_with_all_qconfig(model)
-
-        # if self.module_name_qconfig:
-        #     self._annotate_quantization_with_all_qconfig(model)
-        # if self.operator_type_qconfig or self.global_config:
-        #     self._annotate_static_quantization_by_op_type_and_global_config(model)
+        self._annotate_all_conv2d_fusion_pattern(model, config, filter_fn)
+        self._annotate_all_linear_fusion_pattern(model, config, filter_fn)
+        self._annotate_matmul(model, config, filter_fn)
 
         # Step2: Recipe to propagate annotation for patterns beside conv/linear.
         # Go through all the nodes from start to end.
         # Recipe refer to https://github.com/intel/intel-extension-for-pytorch/blob/
         # 90d19323d96afc53fcc22ba5a7bb3fb07fdd6c1c/intel_extension_for_pytorch/quantization/_recipe.py#L538
-        # for node in model.graph.nodes:
-        #     self._annotate_propagation_quantizable_pattern(node)
 
-        # # Step3: For quantizable ops, such as maxpool2d, we need to quantize its output if it is quantized
-        # # in inputs. So, we can fuse dq-operator-q into a quantized op.
-        # # Refer to https://github.com/intel/intel-extension-for-pytorch/blob/
-        # # 90d19323d96afc53fcc22ba5a7bb3fb07fdd6c1c/intel_extension_for_pytorch/quantization/_recipe.py#L487
-        # for node in model.graph.nodes:
-        #     self._annotate_output_for_int8_in_int8_out_pattern(node)
+        self._annotate_all_propagation_quantizable_pattern(model, config, filter_fn)
 
-        return model
+        # Step3: For quantizable ops, such as maxpool2d, we need to quantize its output if it is quantized
+        # in inputs. So, we can fuse dq-operator-q into a quantized op.
+        # Refer to https://github.com/intel/intel-extension-for-pytorch/blob/
+        # 90d19323d96afc53fcc22ba5a7bb3fb07fdd6c1c/intel_extension_for_pytorch/quantization/_recipe.py#L487
+
+        self._annotate_output_for_int8_in_int8_out_pattern_entry(
+            model, config, filter_fn
+        )
 
     def _annotate_all_qat_conv2d_fusion_pattern(
         self, model: torch.fx.GraphModule, config: QuantizationConfig, filter_fn
@@ -883,7 +919,6 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_all_conv2d_fusion_pattern(
         self, model: torch.fx.GraphModule, config, filter_fn
     ):
-        # if config := self._get_aten_operator_qconfig(torch.ops.aten.conv2d.default):
         if config.is_qat:
             # Annotate QAT specific pattern: mainly due to BN not folded in prepare_qat
             self._annotate_all_qat_conv2d_fusion_pattern(model, config, filter_fn)
@@ -1129,12 +1164,10 @@ class X86InductorQuantizer(Quantizer):
             _is_output_of_quantized_pattern=True,
         )
 
-    def _annotate_propagation_quantizable_pattern_entry(
+    def _annotate_all_propagation_quantizable_pattern(
         self, model, quantization_config, filter_fn
     ):
         for node in model.graph.nodes:
-            # if _skip_annotate([node], filter_fn):
-            #     continue
             self._annotate_propagation_quantizable_pattern(
                 node, quantization_config, filter_fn
             )
