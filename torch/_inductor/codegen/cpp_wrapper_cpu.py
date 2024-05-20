@@ -1250,7 +1250,7 @@ class CppWrapperCpu(WrapperCodeGen):
             self.writeline(self.wrap_kernel_call(kernel, args))
 
     def generate_user_defined_triton_kernel(
-        self, kernel_name, grid, configs, args, triton_meta
+        self, kernel_name, grid, configs, args, triton_meta, arg_types=None
     ):
         assert len(grid) != 0
         if len(grid) == 1:
@@ -1268,6 +1268,7 @@ class CppWrapperCpu(WrapperCodeGen):
         self.generate_kernel_call(
             kernel_name,
             args,
+            arg_types=arg_types,
             grid=grid_decision,
             device_index=V.graph.scheduler.current_device.index,
             cuda=True,
@@ -2287,7 +2288,7 @@ if (py_{buf_name}.get() == NULL) {{
             # When None is passed as an argument, it represents an optional that does not contain a value.
             if config.abi_compatible:
                 if type_ is None or isinstance(type_, torch.OptionalType):
-                    return "NULL"  # nullptr is not available in C
+                    return "0"  # nullptr is not available in C
                 elif isinstance(type_, torch.TensorType):
                     var_name = f"var_{next(self.arg_var_id)}"
                     self.writeline(f"AtenTensorHandle {var_name}_handle;")

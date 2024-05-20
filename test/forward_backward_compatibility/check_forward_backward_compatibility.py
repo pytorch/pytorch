@@ -9,9 +9,6 @@ import torch
 from torch._C import parse_schema
 
 
-# Run by backwards_compat CI job
-
-
 # How to run this test locally:
 # 1 Have two virtual environments (eg conda env), one without PyTorch installed (venv_nightly)
 #   one with your local changes (venv_yours).
@@ -143,10 +140,8 @@ ALLOW_LIST = [
     ("onednn::qconv2d_pointwise", datetime.date(2024, 12, 31)),
     ("onednn::qconv3d_pointwise", datetime.date(2024, 12, 31)),
     ("onednn::qconv2d_pointwise.binary", datetime.date(2024, 12, 31)),
-    ("aten::_aminmax", datetime.date(2024, 12, 31)),
-    ("aten::_aminmax.dim", datetime.date(2024, 12, 31)),
-    ("aten::_aminmax.out", datetime.date(2024, 12, 31)),
-    ("aten::_aminmax.dim_out", datetime.date(2024, 12, 31)),
+    # BC-breaking change in can_cast signature: 'from' -> 'from_'
+    ("aten::can_cast", datetime.date(2024, 5, 31)),
 ]
 
 ALLOW_LIST_COMPILED = [
