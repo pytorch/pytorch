@@ -8655,7 +8655,7 @@ def sample_inputs_attention_function(op_info, device, dtype, requires_grad, **kw
     q = make_tensor((10, 5), dtype=dtype, device=device)
     k = make_tensor((10, 5), dtype=dtype, device=device)
     v = make_tensor((10, 8), dtype=dtype, device=device)
-    yield SampleInput(input = (q, k, v))
+    yield SampleInput(q, args=(k, v))
 
 def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -19073,7 +19073,7 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         "attention_function",
-        dtypes=all_types(),
+        dtypes=floating_types(),
         sample_inputs_func=sample_inputs_attention_function,
         supports_out=True,
         supports_autograd=True,
