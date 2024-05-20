@@ -118,7 +118,7 @@ def _check_input_constraints_for_graph(
                                 sympy.Eq(node_dim.node.expr, arg_dim), symbol
                             )
                             if solution is None:
-                                raise RuntimeError(  # noqa: TRY200
+                                raise RuntimeError(  # noqa: B904
                                     f"Expected input {node.name}.shape[{j}] = {arg_dim} to be "
                                     f"of the form {node_dim.node.expr}, where {symbol} is an integer"
                                 )
