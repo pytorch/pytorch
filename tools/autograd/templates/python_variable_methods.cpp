@@ -997,6 +997,7 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
 
   TORCH_CHECK(
     !opt_layout.has_value() ||
+    (*opt_layout == self_.layout()) ||
     (self_.is_nested() &&
       (*opt_layout == c10::Layout::Strided || *opt_layout == c10::Layout::Jagged)),
     ".to(layout=val) is only valid for converting Nested Tensors between strided <-> jagged layouts, ",
