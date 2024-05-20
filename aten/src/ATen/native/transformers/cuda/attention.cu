@@ -735,13 +735,25 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   return std::make_tuple(attention, logsumexp, Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_k, philox_seed, philox_offset, debug_attn_mask);
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_cuda(
+// Adapted from TE
+// extract seed and offset from PhiloxCudaState
+__global__ void unpack_cudnn(at::PhiloxCudaState arg, int64_t* seed_ptr, int64_t* offset_ptr) {
+  if (arg.captured_) {
+    *seed_ptr = static_cast<int64_t>(*arg.seed_.ptr);
+    *offset_ptr = static_cast<int64_t>(
+                    *(arg.offset_.ptr) + static_cast<int64_t>(arg.offset_intragraph_));
+  } else {
+    *seed_ptr = static_cast<int64_t>(arg.seed_.val);
+    *offset_ptr = static_cast<int64_t>(arg.offset_.val);
+  }
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_cuda(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
     double dropout_p,
     bool is_causal,
-    bool return_debug_mask,
     c10::optional<double> scale) {
   // Used for tracking usage statistics
   C10_LOG_API_USAGE_ONCE("torch.sdpa.flash_attention_cudnn");
@@ -764,6 +776,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   //auto cudnn_seed = at::zeros({1}, query.options().dtype(kLong));
   //auto cudnn_offset = at::zeros({1}, query.options().dtype(kLong));
   at::Tensor cudnn_seed, cudnn_offset;
+  cudnn_seed = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+  cudnn_offset = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+
   const bool use_dropout = std::fpclassify(dropout_p) != FP_ZERO;
 
   // Note [Seed and Offset Device]
@@ -777,8 +792,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   at::PhiloxCudaState philox_state;
   const bool in_capture_stream =
       at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None;
-  auto device = at::kCUDA;
   if (use_dropout) {
+    // Device
     auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
         c10::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
 
@@ -786,26 +801,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
     std::lock_guard<std::mutex> lock(gen->mutex_);
     // if using dropout, we produce 1 random number for each element of the
     // attention tensor
+    // TODO(eqy): should state be advanced per thread (local) amount or per call/launch (global) amount
     philox_state = gen->philox_cuda_state(batch_size * num_heads * max_seqlen_batch_q * max_seqlen_batch_k);
-
-    if (in_capture_stream) {
-      // The seed and offset will be populated by the kernel
-      cudnn_seed = at::empty({}, at::dtype(at::kLong).device(device));
-      cudnn_offset = at::empty({}, at::dtype(at::kLong).device(device));
-    } else {
-      auto [seed, offset] = at::cuda::philox::unpack(philox_state);
-      cudnn_seed= at::scalar_tensor(
-          at::Scalar(static_cast<int64_t>(seed)), at::dtype(at::kLong).device(device));
-      cudnn_offset= at::scalar_tensor(
-          at::Scalar(static_cast<int64_t>(offset)), at::dtype(at::kLong).device(device));
-    }
-  } else {
-    // Not using dropout
-    cudnn_seed = at::empty({}, at::dtype(at::kLong).device(device));
-    cudnn_offset= at::empty({}, at::dtype(at::kLong).device(device));
-  }
-
-
+    unpack_cudnn<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
+		                      philox_state, static_cast<int64_t*>(cudnn_seed.data_ptr()), static_cast<int64_t*>(cudnn_offset.data_ptr()));
+  } 
 
   const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
   Tensor debugmask;
@@ -828,11 +828,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
                       log_sumexp/*Tensor softmaxstats*/,
                       attention/*Tensor o*/,
                       cudnn_seed/*Tensor dropoutseed*/,
-                      cudnn_offset/*Tensor dropoutoffset*/,
-                      return_debug_mask,
-                      debugmask);
+                      cudnn_offset/*Tensor dropoutoffset*/);
 
-  return std::make_tuple(attention, log_sumexp, Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_k, cudnn_seed, cudnn_offset, debugmask);
+  return std::make_tuple(attention, log_sumexp, cudnn_seed, cudnn_offset);
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attention_cuda(
