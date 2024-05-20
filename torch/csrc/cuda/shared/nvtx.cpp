@@ -1,7 +1,11 @@
 #ifdef _WIN32
 #include <wchar.h> // _wgetenv for nvtx
 #endif
+#if __has_include(<nvtx3/nvToolsExt.h>)
 #include <nvtx3/nvToolsExt.h>
+#else
+#include <nvToolsExt.h>
+#endif
 #include <torch/csrc/utils/pybind.h>
 
 namespace torch::cuda::shared {
