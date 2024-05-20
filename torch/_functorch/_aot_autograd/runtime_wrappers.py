@@ -486,15 +486,18 @@ class FakifiedOutWrapper(CompilerWrapper):
         fwd_output_strides = self.fwd_output_strides
         if not fwd_output_strides:
             return out
-        with TracingContext.get().fake_mode.shape_env.suppress_guards():
-            for i in range(len(out)):
-                if not isinstance(out[i], Tensor):
-                    continue
-                if all(
-                    s1 == s2 for s1, s2 in zip(out[i].stride(), fwd_output_strides[i])
-                ):
-                    continue
-                out[i] = out[i].as_strided(out[i].shape, fwd_output_strides[i])
+
+        from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+        for i in range(len(out)):
+            if not isinstance(out[i], Tensor):
+                continue
+            if all(
+                statically_known_true(s1 == s2)
+                for s1, s2 in zip(out[i].stride(), fwd_output_strides[i])
+            ):
+                continue
+            out[i] = out[i].as_strided(out[i].shape, fwd_output_strides[i])
         return out
 
     # To be called post compile
