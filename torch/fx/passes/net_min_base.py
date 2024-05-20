@@ -373,7 +373,7 @@ class _MinimizerBase:
             self._store_outputs(a_result, b_result, submodule)
         except Exception as e:
             report.append(f"Exception raised when running {submod_name}: {e}")
-            raise FxNetMinimizerRunFuncError(  # noqa: TRY200
+            raise FxNetMinimizerRunFuncError(  # noqa: B904
                 f"Exception raised when running {submod_name}: {e}"
             )
 
