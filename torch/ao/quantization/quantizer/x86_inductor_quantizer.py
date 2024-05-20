@@ -104,7 +104,6 @@ QUANT_ANNOTATION_KEY = "quantization_annotation"
 def _skip_annotate(
     nodes: List[Node], filter_fn: Optional[Callable[[Node], bool]] = None
 ):
-    skip_annotate = False
     # 1) Skip annotate if any node is already annotated
     if _is_any_annotated(nodes):
         return True
@@ -116,8 +115,10 @@ def _skip_annotate(
 
 
 def _get_operator_type_filter(operator_type: Callable, module_name_list):
-    """Get the operator_type_filter function for a given operator type, the filter accepts
-    a node and checks if the node has certain operator type.
+    """Get the operator_type_filter function for a given operator type and module name list.
+
+    The filter accept a node and checks if 1) the node has certain operator type,
+    and 2) the node does not marked by `set_module_name_qconfig`.
 
     For example:
         node: linear_op = call_function[...](...)  # linear_op.target if torch.ops.aten.linear.default
@@ -358,7 +359,7 @@ class X86InductorQuantizer(Quantizer):
 
     def __init__(self):
         super().__init__()
-        self.global_config: QuantizationConfig = None  # type: ignore[assignment]
+        self.global_config: Optional[QuantizationConfig] = None  # type: ignore[assignment]
         self.operator_type_qconfig: Dict[
             torch._ops.OpOverloadPacket, Optional[QuantizationConfig]
         ] = {}
@@ -565,9 +566,52 @@ class X86InductorQuantizer(Quantizer):
 
     def _check_qconfig(self) -> None:
         """Check if the qconfig is valid.
-        Currently, not support mixed static and dynamic quantization config."""
-        # TODO:
-        pass
+
+        Currently, not support mixed static and dynamic quantization config.
+        If the qconfig is mixed, the subsequent configuration will be skipped.
+        """
+
+        def _need_skip_cur_config(
+            qconfig: Optional[QuantizationConfig], _pre_mode: Optional[bool]
+        ):
+            input_act_config = getattr(qconfig, "input_activation", None)
+            if input_act_config:
+                qconfig_is_dynamic = input_act_config.is_dynamic
+                if _pre_mode is not None and _pre_mode != qconfig_is_dynamic:
+                    warnings.warn(
+                        "Mixed dynamic and static quantization config is not supported. \
+                        The subsequent configuration will be skipped."
+                    )
+                    return _pre_mode, True
+                else:
+                    if _pre_mode is None:
+                        _pre_mode = qconfig_is_dynamic
+            return _pre_mode, False
+
+        _pre_mode = None
+
+        tmp_module_name_qconfig: Dict[str, Optional[QuantizationConfig]] = {}
+        for module_name, qconfig in self.module_name_qconfig.items():
+            _pre_mode, need_skip = _need_skip_cur_config(qconfig, _pre_mode)
+            if not need_skip:
+                tmp_module_name_qconfig[module_name] = qconfig
+        self.module_name_qconfig = tmp_module_name_qconfig
+
+        tmp_operator_type_qconfig: Dict[
+            torch._ops.OpOverloadPacket, Optional[QuantizationConfig]
+        ] = {}
+        for operator_type, qconfig in self.operator_type_qconfig.items():
+            _pre_mode, need_skip = _need_skip_cur_config(qconfig, _pre_mode)
+            if not need_skip:
+                tmp_operator_type_qconfig[operator_type] = qconfig
+        self.operator_type_qconfig = tmp_operator_type_qconfig
+
+        if self.global_config:
+            _pre_mode, need_skip = _need_skip_cur_config(self.global_config, _pre_mode)
+            if not need_skip:
+                self.global_config = self.global_config
+            else:
+                self.global_config = None
 
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
         """
@@ -581,11 +625,11 @@ class X86InductorQuantizer(Quantizer):
         self._check_qconfig()
 
         module_name_list = list(self.module_name_qconfig.keys())
-
         for module_name, qconfig in self.module_name_qconfig.items():
             self._annotate_by_single_config(
                 model, qconfig, _get_module_name_filter(module_name)
             )
+
         tp_list = list(self.operator_type_qconfig.keys())
         for operator_type, qconfig in self.operator_type_qconfig.items():
             self._annotate_by_single_config(
@@ -593,12 +637,14 @@ class X86InductorQuantizer(Quantizer):
                 qconfig,
                 _get_operator_type_filter(operator_type, module_name_list),
             )
+
         if self.global_config:
             self._annotate_by_single_config(
                 model,
                 self.global_config,
                 _get_not_operator_type_or_name_filter(tp_list, module_name_list),
             )
+
         return model
 
     def _annotate_by_single_config(
