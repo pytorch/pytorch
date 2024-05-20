@@ -384,7 +384,7 @@ def run_test(
 ) -> int:
     env = env or os.environ.copy()
     maybe_set_hip_visible_devies()
-    unittest_args = options.additional_unittest_args.copy()
+    unittest_args = options.additional_args.copy()
     test_file = test_module.name
     stepcurrent_key = test_file
 
@@ -442,9 +442,6 @@ def run_test(
             ci_args.append("--rerun-disabled-tests")
         # use the downloaded test cases configuration, not supported in pytest
         unittest_args.extend(ci_args)
-
-    if options.save_xml:
-        unittest_args.append(f"--save-xml={options.save_xml}")
 
     if test_file in PYTEST_SKIP_RETRIES:
         if not options.pytest:
@@ -1060,7 +1057,6 @@ def parse_args():
         description="Run the PyTorch unit test suite",
         epilog="where TESTS is any of: {}".format(", ".join(TESTS)),
         formatter_class=argparse.RawTextHelpFormatter,
-        parents=[common_parser],
     )
     parser.add_argument(
         "-v",
@@ -1210,12 +1206,6 @@ def parse_args():
         and "parallelnative" not in BUILD_ENVIRONMENT,
     )
     parser.add_argument(
-        "additional_unittest_args",
-        nargs="*",
-        help="additional arguments passed through to unittest, e.g., "
-        "python run_test.py -i sparse -- TestSparse.test_factory_size_check",
-    )
-    parser.add_argument(
         "--shard",
         nargs=2,
         type=int,
@@ -1276,7 +1266,11 @@ def parse_args():
         help="Run tests with TorchInductor turned on",
     )
 
-    return parser.parse_args()
+    args, extra = parser.parse_known_args()
+    if len(extra) > 0 and extra[0] == "--":
+        extra = extra[1:]
+    args.additional_args = extra
+    return args
 
 
 def exclude_tests(
@@ -1629,7 +1623,7 @@ def run_tests(
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
-            options_clone.additional_unittest_args.extend(["-m", "serial"])
+            options_clone.additional_args.extend(["-m", "serial"])
             failure = run_test_module(test, test_directory, options_clone)
             test_failed = handle_error_messages(failure)
             if (
@@ -1644,7 +1638,7 @@ def run_tests(
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
-            options_clone.additional_unittest_args.extend(["-m", "not serial"])
+            options_clone.additional_args.extend(["-m", "not serial"])
             pool.apply_async(
                 run_test_module,
                 args=(test, test_directory, options_clone),
