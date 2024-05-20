@@ -6,6 +6,7 @@ import logging
 
 import math
 import operator
+import os
 import sys
 import textwrap
 import time
@@ -453,11 +454,8 @@ class TritonTemplateKernel(TritonKernel):
             block_ptr=block_ptr,
         )
 
-    def initialize_range_tree(self, pid_cache):
-        super().initialize_range_tree(pid_cache)
-        # ignore default codegen
-        self.body.clear()
-        self.indexing_code.clear()
+    def codegen_range_tree(self):
+        pass  # ignore default codegen
 
     def call_kernel(self, name: str, node: Optional[ir.IRNode] = None):
         wrapper = V.graph.wrapper_code
@@ -921,6 +919,13 @@ class NoValidChoicesError(RuntimeError):
     pass
 
 
+@functools.lru_cache(None)
+def get_env_num_workers() -> Optional[int]:
+    if "TORCHINDUCTOR_COMPILE_THREADS" in os.environ:
+        return int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
+    return None
+
+
 class AlgorithmSelectorCache(PersistentCache):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -985,11 +990,10 @@ class AlgorithmSelectorCache(PersistentCache):
                 or precompilation_timeout_seconds <= 0
             ):
                 return no_op
-            num_workers = min(
-                config.compile_threads,
-                torch.get_num_threads(),
-                len(choices),
-            )
+
+            env_workers = get_env_num_workers()
+            num_workers = env_workers if env_workers is not None else (len(choices))
+
             if num_workers <= 0:
                 return no_op
 
@@ -1081,7 +1085,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         else:
                             raise e
                     except ImportError:
-                        raise e
+                        raise e from None
 
                 executor.shutdown(wait=True)
 
@@ -1277,7 +1281,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
                     timing = float("inf")
                 except AssertionError as e:
-                    raise AssertionError(  # noqa: TRY200
+                    raise AssertionError(  # noqa: B904
                         f"Incorrect result from choice {choice}\n\n{e}"
                     )
                 except Exception as e:
@@ -1290,7 +1294,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         else:
                             raise e
                     except ImportError:
-                        raise e
+                        raise e from None
 
                 timings[choice] = timing
 
