@@ -1430,9 +1430,8 @@ class CppVecOverrides(CppOverrides):
                     code.writeline(f"return {other_code_vec};")
                 code.writeline("else")
                 with code.indent():
-                    new_mask_cast = V.kernel._get_mask_cast(new_mask, dtype)
                     code.writeline(
-                        f"return {type}::blendv({other_code_vec}, {body_code_vec}, {new_mask_cast});"
+                        f"return {type}::blendv({other_code_vec}, {body_code_vec}, {V.kernel._get_mask_cast(new_mask, dtype)});"
                     )
             code.writeline("()")
             csevar = V.kernel.cse.generate(
