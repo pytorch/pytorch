@@ -298,6 +298,9 @@ else
         WERROR=1 python setup.py bdist_wheel
       fi
     else
+      if [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
+        source .ci/pytorch/install_cache_xla.sh
+      fi
       if [[ "$USE_SPLIT_BUILD" != "false" ]]; then
         BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py install
         BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py clean
