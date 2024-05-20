@@ -986,7 +986,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             self._getattr_static(name)
             if isinstance(self, variables.UnspecializedNNModuleVariable):
                 result = tx.inline_user_function_return(
-                    variables.UserFunctionVariable(torch.nn.Module.__getattr__),
+                    variables.UserFunctionVariable(self.value.__getattr__.__func__),
                     [self, variables.ConstantVariable.create(name)],
                     {},
                 )
