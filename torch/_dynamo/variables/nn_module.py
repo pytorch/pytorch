@@ -892,12 +892,6 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     # Handle submodules
                     self.is_state_mutated = True
 
-            # Same as the previous if condition. We need to tighten the support
-            # for tracing both __Getattr__ and __setattr__ and __delattr__ to
-            # track all the mutations.
-            if name == "__setattr__" and isinstance(args[1], variables.DeletedVariable):
-                self.is_state_mutated = True
-
         return super().call_method(tx, name, args, kwargs)
 
 
