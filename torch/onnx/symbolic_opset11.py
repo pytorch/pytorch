@@ -23,6 +23,8 @@ from torch.onnx._internal import _beartype, jit_utils, registration
 # see Note [Edit Symbolic Files] in README.md
 
 __all__ = [
+    "__lshift_",
+    "__rshift_",
     "add",
     "append",
     "arange",

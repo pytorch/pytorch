@@ -22,7 +22,7 @@ from typing import List, Optional, Sequence, Tuple
 
 import torch
 from torch import _C
-from torch.onnx import symbolic_helper, _type_utils, symbolic_opset9 as opset9
+from torch.onnx import _type_utils, symbolic_helper, symbolic_opset9 as opset9
 from torch.onnx._internal import _beartype, jit_utils, registration
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -36,27 +36,16 @@ __all__ = [
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=18)
 
 
+@_onnx_symbolic("aten::__and_")
 @_onnx_symbolic("aten::bitwise_and")
 @_beartype.beartype
 def bitwise_and(g: jit_utils.GraphContext, self, other):
-    # cast to largest bitwidth between self and other:
-    self_jit_type = _type_utils.JitScalarType.from_value(self)
-    other_jit_type = _type_utils.JitScalarType.from_value(other)
-    self_dtype = self_jit_type.dtype()
-    other_dtype = other_jit_type.dtype()
-    promotion_dtype = torch.promote_types(self_dtype, other_dtype)
-    if self_dtype == promotion_dtype and other_dtype != promotion_dtype:
-        other = g.op(
-            "Cast",
-            other,
-            to_i=self_jit_type.onnx_type(),
-        )
-    if other_dtype == promotion_dtype and self_dtype != promotion_dtype:
-        self = g.op(
-            "Cast",
-            self,
-            to_i=other_jit_type.onnx_type(),
-        )
+    # do type promotion (scalars don't seem to apply)
+    args = [self, other]
+    ranked_args = [arg for arg in args if symbolic_helper._get_tensor_rank(arg)]
+    promotion_jit_type = symbolic_helper._type_promote_from_values(*ranked_args)
+    self = symbolic_helper._maybe_cast_to_type(g, self, promotion_jit_type)
+    other = symbolic_helper._maybe_cast_to_type(g, other, promotion_jit_type)
     return g.op("BitwiseAnd", self, other)
 
 
