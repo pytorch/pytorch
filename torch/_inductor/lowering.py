@@ -4559,7 +4559,7 @@ def _avg_poolnd(
                 factor = ops.index_expr(hend - hstart, torch.int32)
                 divide_factors.append(factor)
             divide_factor = functools.reduce(ops.mul, divide_factors)
-            return ops.div(fn_sum(idx, x_loader), divide_factor)
+            return ops.truediv(fn_sum(idx, x_loader), divide_factor)
 
     rv = Pointwise.create(
         device=x.get_device(),
@@ -5919,7 +5919,7 @@ def associative_scan(combine_fn: ir.Subgraph, input, dim: int):
     kwargs["dtypes"] = tuple(x.get_dtype() for x in input)
     kwargs["inner_fns"] = tuple(x.make_loader() for x in input)
     result = ir.Scan.create(**kwargs, combine_fn=wrapped_combine_fn)
-    if result is None:
+    if result[0] is None:
         raise RuntimeError("Unable to generate code for associative_scan op")
     return result
 

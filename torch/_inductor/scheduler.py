@@ -336,7 +336,7 @@ class BaseSchedulerNode:
             isinstance(self, (SchedulerNode,))
             and config.inplace_buffers
             and (
-                not isinstance(V.kernel, torch._inductor.codegen.triton.TritonKernel)
+                not isinstance(V.kernel, torch._inductor.codegen.simd.SIMDKernel)
                 or getattr(V.kernel, "mutations", None) is not None
             )
         ):
@@ -390,7 +390,7 @@ class BaseSchedulerNode:
                             )
                             # mutations not tracked in cpp kernels
                             if isinstance(
-                                V.kernel, torch._inductor.codegen.triton.TritonKernel
+                                V.kernel, torch._inductor.codegen.simd.SIMDKernel
                             ):
                                 V.kernel.mutations.add(input_node.get_name())
                                 V.kernel.mutations.add(self.get_name())
@@ -1752,7 +1752,9 @@ class Scheduler:
             del V.graph.name_to_buffer[replaced_name]
             new_node.name = orig_name
 
-            V.graph.buffers.remove(orig_node)
+            orig = V.graph.buffers.index(orig_node)
+            V.graph.buffers.remove(new_node)
+            V.graph.buffers[orig] = new_node
             V.graph.name_to_buffer[orig_name] = new_node
 
         for i, node in enumerate(self.nodes):
