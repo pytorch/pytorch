@@ -670,23 +670,26 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
                 aot_dispatch_base_graph if aot_config.is_export else aot_dispatch_base
             )
 
-        wrappers = [
+        # Wrappers that edit fw_metadata
+        fw_metadata_wrappers = [
             AOTDedupeWrapper(),
             AOTSyntheticBaseWrapper(trace_joint=needs_autograd),
             # Add more passes here
         ]
-        for wrapper in wrappers:
-            flat_fn, fake_flat_args, aot_config, fw_metadata = wrapper.pre_compile(
+        for wrapper in fw_metadata_wrappers:
+            flat_fn, fake_flat_args, fw_metadata = wrapper.pre_compile(
                 flat_fn, fake_flat_args, aot_config, fw_metadata=fw_metadata
             )
+        # Once all fw_metadata_wrappers have run, runtime_metadata is fixed
+        runtime_metadata = fw_metadata
 
         compiled_fn = compiler_fn(
-            flat_fn, fake_flat_args, aot_config, fw_metadata=fw_metadata
+            flat_fn, fake_flat_args, aot_config, fw_metadata=runtime_metadata
         )
 
-        for wrapper in reversed(wrappers):
+        for wrapper in reversed(fw_metadata_wrappers):
             compiled_fn = wrapper.post_compile(
-                compiled_fn, aot_config, fw_metadata=fw_metadata
+                compiled_fn, aot_config, runtime_metadata=runtime_metadata
             )
 
         if aot_config.is_export:

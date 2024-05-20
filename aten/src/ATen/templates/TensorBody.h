@@ -398,7 +398,7 @@ class TORCH_API Tensor: public TensorBase {
   /// // f requires grad, has no operation creating it
   /// @endcode
 
-  /// \fn void backward(const Tensor & gradient={}, c10::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, c10::optional<TensorList> inputs=c10::nullopt) const;
+  /// \fn void backward(const Tensor & gradient={}, std::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, c10::optional<TensorList> inputs=c10::nullopt) const;
   ///
   /// Computes the gradient of current tensor with respect to graph leaves.
   ///
@@ -433,7 +433,7 @@ class TORCH_API Tensor: public TensorBase {
   ///     the current implementation will call its grad_fn (even though it is not strictly needed to get this gradients).
   ///     It is an implementation detail on which the user should not rely.
   ///     See https://github.com/pytorch/pytorch/pull/60521#issuecomment-867061780 for more details.
-  void backward(const Tensor & gradient={}, c10::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, c10::optional<TensorList> inputs=c10::nullopt) const {
+  void backward(const Tensor & gradient={}, std::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, c10::optional<TensorList> inputs=c10::nullopt) const {
     // NB: Adding this wrapper to _backward here because we'd like our
     // 'backwards' api to accept the 'inputs' argument optionally. Since code gen
     // currently does not support optional of TensorList our approach is to replace
@@ -626,7 +626,7 @@ class TORCH_API Tensor: public TensorBase {
     return TensorBase::data();
   }
 
-  void _backward(TensorList inputs, const c10::optional<Tensor>& gradient, c10::optional<bool> keep_graph, bool create_graph) const;
+  void _backward(TensorList inputs, const std::optional<Tensor>& gradient, c10::optional<bool> keep_graph, bool create_graph) const;
 
   const Tensor& requires_grad_(bool _requires_grad=true) const {
     TensorBase::requires_grad_(_requires_grad);
@@ -737,7 +737,7 @@ struct ExclusivelyOwnedTraits<at::Tensor> {
 namespace at {
 
 inline c10::MaybeOwned<Tensor> borrow_from_optional_tensor(
-    const c10::optional<Tensor>& opt) {
+    const std::optional<Tensor>& opt) {
   return opt.has_value()
     ? c10::MaybeOwned<Tensor>::borrowed(*opt)
     : c10::MaybeOwned<Tensor>::owned(std::in_place);

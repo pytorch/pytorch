@@ -126,7 +126,7 @@ void call_caffe2_op_from_c10(
 
 inline FunctionSchema make_function_schema_for_c10(
     const char* schema_str,
-    c10::optional<c10::AliasAnalysisKind> optional_alias_analysis_kind) {
+    std::optional<c10::AliasAnalysisKind> optional_alias_analysis_kind) {
 #if !defined(EXPOSE_C2_OPS) && \
     (defined(CAFFE2_IS_XPLAT_BUILD) || defined(C10_MOBILE))
   throw std::logic_error(
