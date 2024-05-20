@@ -38,7 +38,9 @@ if not (IS_WINDOWS or IS_MACOS):
             super().setUp()
             self.max_interval = 0.01
             self.file_path = "/tmp/test_file_path_" + str(uuid.uuid4())
-            self.server = timer.FileTimerServer(self.file_path, self.max_interval)
+            self.server = timer.FileTimerServer(
+                self.file_path, "test", self.max_interval
+            )
             self.server.start()
 
         def tearDown(self):
@@ -111,14 +113,58 @@ if not (IS_WINDOWS or IS_MACOS):
             num_requests_per_client = 10
             processes = []
             for i in range(num_clients):
-                p = mp.Process(target=func, args=(num_requests_per_client, self.file_path))
+                p = mp.Process(
+                    target=func, args=(num_requests_per_client, self.file_path)
+                )
                 processes.append(p)
                 p.start()
             for p in processes:
                 p.join()
 
             self.server.run_once()  # Allows the server to process all requests
-            self.assertEqual(2 * num_clients * num_requests_per_client, self.server._request_count)
+            self.assertEqual(
+                2 * num_clients * num_requests_per_client, self.server._request_count
+            )
+
+        @mock.patch("torch.distributed.elastic.timer.FileTimerServer._reap_worker")
+        def test_exit_before_release(self, mock_reap):
+            def func1(file_path):
+                client = timer.FileTimerClient(file_path)
+                timer.configure(client)
+                expire = time.time() + 2
+                client.acquire("test_scope", expire)
+                time.sleep(1)
+
+            p = mp.Process(target=func1, args=(self.file_path,))
+            p.start()
+            p.join()
+
+            time.sleep(2)
+            self.server.run_once()  # Allows the server to process all requests
+            mock_reap.assert_not_called()
+            self.assertEqual(0, len(self.server._timers))
+
+        @mock.patch("torch.distributed.elastic.timer.FileTimerServer._reap_worker")
+        @mock.patch(
+            "torch.distributed.elastic.timer.FileTimerServer.is_process_running"
+        )
+        def test_exit_before_release_reap(self, mock_pid_exists, mock_reap):
+            def func1(file_path):
+                client = timer.FileTimerClient(file_path)
+                timer.configure(client)
+                expire = time.time() + 2
+                client.acquire("test_scope", expire)
+                time.sleep(1)
+
+            mock_pid_exists.return_value = True
+            p = mp.Process(target=func1, args=(self.file_path,))
+            p.start()
+            p.join()
+
+            time.sleep(2)
+            self.server.run_once()  # Allows the server to process all requests
+            mock_reap.assert_called()
+            self.assertEqual(0, len(self.server._timers))
 
         @staticmethod
         def _run(file_path, timeout, duration):
@@ -147,7 +193,6 @@ if not (IS_WINDOWS or IS_MACOS):
             client.acquire("test_scope", 0)
             time.sleep(interval)
 
-
     class FileTimerClientTest(TestCase):
         def test_send_request_without_server(self):
             client = timer.FileTimerClient("test_file")
@@ -156,13 +201,14 @@ if not (IS_WINDOWS or IS_MACOS):
                 with timer.expires(after=0.1):
                     time.sleep(0.1)
 
-
     class FileTimerServerTest(TestCase):
         def setUp(self):
             super().setUp()
             self.file_path = "/tmp/test_file_path_" + str(uuid.uuid4())
             self.max_interval = 0.01
-            self.server = timer.FileTimerServer(self.file_path, self.max_interval)
+            self.server = timer.FileTimerServer(
+                self.file_path, "test", self.max_interval
+            )
 
         def tearDown(self):
             super().tearDown()
@@ -196,17 +242,32 @@ if not (IS_WINDOWS or IS_MACOS):
 
         def _expired_timer(self, pid, scope):
             expired = time.time() - 60
-            return timer.FileTimerRequest(worker_pid=pid, scope_id=scope, expiration_time=expired, signal=signal.SIGKILL)
+            return timer.FileTimerRequest(
+                worker_pid=pid,
+                scope_id=scope,
+                expiration_time=expired,
+                signal=signal.SIGKILL,
+            )
 
         def _valid_timer(self, pid, scope):
             valid = time.time() + 60
-            return timer.FileTimerRequest(worker_pid=pid, scope_id=scope, expiration_time=valid, signal=signal.SIGKILL)
+            return timer.FileTimerRequest(
+                worker_pid=pid,
+                scope_id=scope,
+                expiration_time=valid,
+                signal=signal.SIGKILL,
+            )
 
         def _release_timer(self, pid, scope):
-            return timer.FileTimerRequest(worker_pid=pid, scope_id=scope, expiration_time=-1)
+            return timer.FileTimerRequest(
+                worker_pid=pid, scope_id=scope, expiration_time=-1
+            )
 
         @mock.patch("os.kill")
-        def test_expired_timers(self, mock_os_kill):
+        @mock.patch(
+            "torch.distributed.elastic.timer.file_based_local_timer.log_debug_info_for_expired_timers"
+        )
+        def test_expired_timers(self, mock_debug_info, mock_os_kill):
             """
             tests that a single expired timer on a process should terminate
             the process and clean up all pending timers that was owned by the process
@@ -221,6 +282,7 @@ if not (IS_WINDOWS or IS_MACOS):
             self.server.run_once()  # Allows the server to process all requests
             self.assertEqual(0, len(self.server._timers))
             mock_os_kill.assert_called_once_with(test_pid, signal.SIGKILL)
+            mock_debug_info.assert_called()
 
         @mock.patch("os.kill")
         def test_send_request_release(self, mock_os_kill):
@@ -240,12 +302,16 @@ if not (IS_WINDOWS or IS_MACOS):
             self.assertEqual(0, len(self.server._timers))
             mock_os_kill.assert_not_called()
 
+        @mock.patch(
+            "torch.distributed.elastic.timer.FileTimerServer.is_process_running"
+        )
         @mock.patch("os.kill")
-        def test_valid_timers(self, mock_os_kill):
+        def test_valid_timers(self, mock_os_kill, mock_pid_exists):
             """
             tests that valid timers are processed correctly and the process is left alone
             """
             self.server.start()
+            mock_pid_exists.return_value = True
 
             client = timer.FileTimerClient(self.file_path)
             client._send_request(self._valid_timer(pid=-3, scope="test1"))

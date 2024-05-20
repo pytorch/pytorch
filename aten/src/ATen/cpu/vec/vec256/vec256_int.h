@@ -494,7 +494,7 @@ public:
 template <typename T>
 class Vectorized8 : public Vectorizedi {
   static_assert(
-    std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value,
+    std::is_same_v<T, int8_t> || std::is_same_v<T, uint8_t>,
     "Only int8_t/uint8_t are supported");
 protected:
   static const Vectorized<T> ones;
@@ -1382,7 +1382,7 @@ Vectorized<int16_t> inline shift_256_16(const Vectorized<int16_t>& a, const Vect
   return c;
 }
 
-template <bool left_shift, typename T, typename std::enable_if_t<std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value, int> = 0>
+template <bool left_shift, typename T, typename std::enable_if_t<std::is_same_v<T, int8_t> || std::is_same_v<T, uint8_t>, int> = 0>
 Vectorized<T> inline shift_256_8(const Vectorized<T>& a, const Vectorized<T>& b) {
   // No vector instruction for shifting int8_t/uint8_t, so emulating
   // it instead.

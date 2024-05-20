@@ -18,22 +18,24 @@ namespace {
 // because passing in constexpr char* as template argument breaks some
 // versions of MSVC that are being used internally at Meta.
 // MSVC 14.16.27023 (vs2017_15.9)
-#define CONCRETE_GPU_TRACE(device_type, func_name, ...)                      \
-  at::impl::MaybeSetTLSOnEntryGuard guard;                                   \
-  if (Py_IsInitialized()) {                                                  \
-    pybind11::gil_scoped_acquire gil;                                        \
-    try {                                                                    \
-      py::module utils_mod = py::module::import("torch._utils");             \
-      py::object get_device_module = utils_mod.attr("_get_device_module");   \
-      py::object hook = get_device_module(DeviceTypeName(device_type, true)) \
-                            .attr("_gpu_trace")                              \
-                            .attr(func_name)                                 \
-                            .attr("fire_callbacks");                         \
-      hook(__VA_ARGS__);                                                     \
-    } catch (const std::exception& e) {                                      \
-      LOG(ERROR) << device_type                                              \
-                 << " trace hook execution failed: " << e.what();            \
-    }                                                                        \
+#define CONCRETE_GPU_TRACE(device_type, func_name, ...)                       \
+  at::impl::MaybeSetTLSOnEntryGuard guard;                                    \
+  if (Py_IsInitialized()) {                                                   \
+    pybind11::gil_scoped_acquire gil;                                         \
+    try {                                                                     \
+      /* Masquerade hip as cuda because hip uses `torch.cuda` module. */      \
+      if (device_type == at::kHIP) {                                          \
+        device_type = at::kCUDA;                                              \
+      }                                                                       \
+      std::string module_name = "torch." + DeviceTypeName(device_type, true); \
+      py::module mod = py::module::import(module_name.c_str());               \
+      py::object hook =                                                       \
+          mod.attr("_gpu_trace").attr(func_name).attr("fire_callbacks");      \
+      hook(__VA_ARGS__);                                                      \
+    } catch (const std::exception& e) {                                       \
+      LOG(ERROR) << device_type                                               \
+                 << " trace hook execution failed: " << e.what();             \
+    }                                                                         \
   }
 
 struct ConcretePyInterpreterVTable final
@@ -58,9 +60,11 @@ struct ConcretePyInterpreterVTable final
   void python_op_registration_trampoline(
       const c10::OperatorHandle& op,
       c10::DispatchKey key,
-      torch::jit::Stack* stack) const override {
+      c10::DispatchKeySet keyset,
+      torch::jit::Stack* stack,
+      bool with_keyset) const override {
     torch::impl::dispatch::python_op_registration_trampoline_impl(
-        op, key, stack);
+        op, key, keyset, stack, with_keyset);
   }
   void throw_abstract_impl_not_imported_error(
       std::string opname,
@@ -588,7 +592,7 @@ static void set_tensor_attr_with_capsule(
     const c10::TensorImpl* tensor,
     py::capsule& capsule,
     const char* attr_name) {
-  c10::optional<PyObject*> mb_obj = tensor->pyobj_slot()->check_pyobj(
+  std::optional<PyObject*> mb_obj = tensor->pyobj_slot()->check_pyobj(
       getPyInterpreter(), /*ignore_hermetic_tls=*/false);
   TORCH_CHECK(
       mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
@@ -616,7 +620,7 @@ static c10::ArrayRef<T> get_set_cached_attr(
     const c10::TensorImpl* tensor,
     const char* base_attr_name,
     const py::object& obj) {
-  c10::optional<PyObject*> mb_obj =
+  std::optional<PyObject*> mb_obj =
       tensor->pyobj_slot()->check_pyobj(getPyInterpreter());
   TORCH_CHECK(
       mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
@@ -827,12 +831,16 @@ c10::Layout ConcretePyInterpreterVTable::layout(
       "torch.ops.prim");
 
   TORCH_CHECK(
-      THPLayout_Check(out.ptr()),
+      THPLayout_Check(out.ptr()) || PyLong_Check(out.ptr()),
       "layout returned invalid type ",
       py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())),
       ", expected Layout");
 
-  return toLayout(out.ptr());
+  if (THPLayout_Check(out.ptr())) {
+    return toLayout(out.ptr());
+  } else {
+    return c10::Layout(py::cast<int64_t>(out));
+  }
 }
 
 int64_t ConcretePyInterpreterVTable::numel(const c10::TensorImpl* self) const {

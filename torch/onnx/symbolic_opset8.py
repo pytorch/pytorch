@@ -64,38 +64,29 @@ for block_listed_op in block_listed_operators:
     )
 
 
-def _apply_params(*args, **kwargs):
-    """Returns a decorator that calls the decorated (higher-order) function with the given parameters."""
-
-    def _apply(fn):
-        return fn(*args, **kwargs)
-
-    return _apply
-
-
 @_onnx_symbolic(
     "aten::upsample_nearest1d",
-    decorate=[_apply_params("upsample_nearest1d", 3, "nearest")],
+    decorate=[symbolic_helper._apply_params("upsample_nearest1d", 3, "nearest")],
 )
 @_onnx_symbolic(
     "aten::upsample_nearest2d",
-    decorate=[_apply_params("upsample_nearest2d", 4, "nearest")],
+    decorate=[symbolic_helper._apply_params("upsample_nearest2d", 4, "nearest")],
 )
 @_onnx_symbolic(
     "aten::upsample_nearest3d",
-    decorate=[_apply_params("upsample_nearest3d", 5, "nearest")],
+    decorate=[symbolic_helper._apply_params("upsample_nearest3d", 5, "nearest")],
 )
 @_onnx_symbolic(
     "aten::upsample_linear1d",
-    decorate=[_apply_params("upsample_linear1d", 3, "linear")],
+    decorate=[symbolic_helper._apply_params("upsample_linear1d", 3, "linear")],
 )
 @_onnx_symbolic(
     "aten::upsample_bilinear2d",
-    decorate=[_apply_params("upsample_bilinear2d", 4, "linear")],
+    decorate=[symbolic_helper._apply_params("upsample_bilinear2d", 4, "linear")],
 )
 @_onnx_symbolic(
     "aten::upsample_trilinear3d",
-    decorate=[_apply_params("upsample_trilinear3d", 5, "linear")],
+    decorate=[symbolic_helper._apply_params("upsample_trilinear3d", 5, "linear")],
 )
 def _interpolate(name, dim, interpolate_mode):
     def symbolic_fn(g, input, output_size, *args):

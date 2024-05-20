@@ -339,12 +339,12 @@ static void autogradNotImplementedFallbackImpl(
       std::vector<c10::IValue>(stack->begin() + stack_start, stack->end());
   std::vector<c10::intrusive_ptr<c10::TensorImpl>> impl_saved;
   impl_saved.reserve(num_tensor_inputs);
-  std::vector<c10::optional<c10::Storage>> storage_saved;
+  std::vector<std::optional<c10::Storage>> storage_saved;
   storage_saved.reserve(num_tensor_inputs);
   _foreach_tensor(
       [&](size_t idx, size_t _, const at::Tensor& t) {
         storage_saved.push_back(
-            t.has_storage() ? c10::optional<c10::Storage>(t.storage())
+            t.has_storage() ? std::optional<c10::Storage>(t.storage())
                             : c10::nullopt);
         impl_saved.push_back(t.getIntrusivePtr());
       },
@@ -378,7 +378,9 @@ static void autogradNotImplementedFallbackImpl(
   _foreach_tensor(
       [&](size_t idx_tensor, size_t idx_ret, const at::Tensor& t) {
         if (at::impl::tensor_has_dispatch(t) ||
-            at::impl::dispatch_mode_enabled())
+            at::impl::dispatch_mode_enabled() ||
+            // NJT offsets are expected to be reused; skip use_count() check
+            op_name == "aten::_nested_get_offsets")
           return;
         if (!is_inplace_output[idx_ret])
           TORCH_INTERNAL_ASSERT(
