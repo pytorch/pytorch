@@ -82,7 +82,7 @@ def foo_impl_cuda(x, z):
     return x, z, x + z
 
 
-@torch.library.impl_abstract("testlib::mutating_custom_op")
+@torch.library.register_fake("testlib::mutating_custom_op")
 def foo_impl_abstract(x, z):
     return x, z, x + z
 
