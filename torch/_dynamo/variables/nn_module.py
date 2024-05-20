@@ -892,7 +892,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     # Handle submodules
                     self.is_state_mutated = True
 
-            if name == "__setattr__" and isinstance(args[1], variables.DeletedVariable):
+            if method is torch.nn.Module.__setattr__ and isinstance(
+                args[1], variables.DeletedVariable
+            ):
                 # Trace through __delattr__ to track mutations on the module
                 # members like `_modules``.
                 return tx.inline_user_function_return(
