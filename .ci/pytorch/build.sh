@@ -292,8 +292,9 @@ else
         WERROR=1 BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py install
         WERROR=1 BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py clean
         WERROR=1 BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py clean
-        WERROR=1 BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py install
+        WERROR=1 BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py bdist_wheel
       else
+        WERROR=1 python setup.py clean
         WERROR=1 python setup.py bdist_wheel
       fi
     else
@@ -301,15 +302,16 @@ else
         BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py install
         BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py clean
         BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py clean
-        BUILD_PYTHON_ONLY=1 BUILD_LIBTORCH_WHL=0 python setup.py install
+        BUILD_PYTHON_ONLY=1 BUILD_LIBTORCH_WHL=0 python setup.py bdist_wheel
       else
+        python setup.py clean
         python setup.py bdist_wheel
       fi
     fi
 
-    if [[ "$USE_SPLIT_BUILD" == "false" ]]; then
-      pip_install_whl "$(echo dist/*.whl)"
-    fi
+    # if [[ "$USE_SPLIT_BUILD" == "false" ]]; then
+    pip_install_whl "$(echo dist/*.whl)"
+    # fi
 
     # TODO: I'm not sure why, but somehow we lose verbose commands
     set -x
