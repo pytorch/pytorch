@@ -1,5 +1,5 @@
 #include <ATen/Config.h>
-#include <torch/csrc/inductor/aoti_torch/opaque_tensor.h>
+#include <torch/csrc/inductor/aoti_torch/mkldnn_tensor.h>
 
 #if AT_MKLDNN_ENABLED()
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
