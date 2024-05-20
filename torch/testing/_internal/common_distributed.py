@@ -15,7 +15,7 @@ import time
 import traceback
 import types
 import unittest
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import timedelta
 from enum import Enum
@@ -539,6 +539,11 @@ class MultiProcessTestCase(TestCase):
                 fn()
 
         return types.MethodType(wrapper, self)
+
+    def assertRaisesRegexOnRank(self, rank, expected_exception, expected_regex, *args, **kwargs):
+        if self.rank == rank:
+            return self.assertRaisesRegex(expected_exception, expected_regex, *args, **kwargs)
+        return nullcontext()
 
     # The main process spawns N subprocesses that run the test.
     # Constructor patches current instance test method to
@@ -1302,6 +1307,11 @@ class MultiProcContinousTest(TestCase):
     rank: int = -1  # unset state
     # Rendezvous file
     rdvz_file: Optional[str] = None
+
+    def assertRaisesRegexOnRank(self, rank, expected_exception, expected_regex, *args, **kwargs):
+        if self.rank == rank:
+            return self.assertRaisesRegex(expected_exception, expected_regex, *args, **kwargs)
+        return nullcontext()
 
     @classmethod
     @abc.abstractmethod
