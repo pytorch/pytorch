@@ -34,6 +34,7 @@ base_type_to_c_type = {
     BaseTy.Layout: "int32_t",  # Represent enum as int
     BaseTy.MemoryFormat: "int32_t",  # Represent enum as int
     BaseTy.ScalarType: "int32_t",  # Represent enum as int
+    BaseTy.Generator: "AtenGeneratorHandle",
 }
 
 base_type_to_aten_type = {
@@ -48,6 +49,7 @@ base_type_to_aten_type = {
     BaseTy.Layout: "c10::Layout",
     BaseTy.MemoryFormat: "c10::MemoryFormat",
     BaseTy.ScalarType: "c10::ScalarType",
+    BaseTy.Generator: "at::Generator",
 }
 
 base_type_to_callsite_expr = {
@@ -62,6 +64,7 @@ base_type_to_callsite_expr = {
     BaseTy.Layout: "static_cast<c10::Layout>",
     BaseTy.MemoryFormat: "static_cast<c10::MemoryFormat>",
     BaseTy.ScalarType: "static_cast<c10::ScalarType>",
+    BaseTy.Generator: "*generator_handle_to_generator_pointer",
 }
 
 
@@ -89,7 +92,7 @@ def convert_arg_type_and_name(typ: Type, name: str) -> Tuple[List[str], List[str
                 ],
             )
         else:
-            # TODO: BaseTy.Dimname, BaseTy.Generator, etc.
+            # TODO: BaseTy.Dimname, etc.
             raise NotImplementedError(f"TODO: add support for arg type {repr(typ)}")
     elif isinstance(typ, OptionalType):
         c_types, names, aten_types, callsite_exprs = convert_arg_type_and_name(
@@ -246,18 +249,18 @@ def gen_declaration_and_definition(
         return declaration_definition_cache[(func_name, device, backend_call)]
 
     if schema.is_out_fn():
-        # out_variant has out arguments in the front, and it's ok to ignore return value
+        # out_variant has out arguments in the front, and it's ok to ignore return values
         # because C shim functions only return AOTITorchError
-        # Somehow at::native out-variant functions have out arguments in the back
         args, callsite_exprs = gen_arguments(
-            [*schema.arguments.flat_non_out, *schema.arguments.out]
-            if "at::native" in backend_call
-            else [*schema.arguments.out, *schema.arguments.flat_non_out],
+            [*schema.arguments.out, *schema.arguments.flat_non_out]
         )
         ret_assignments: List[str] = []
     else:
         args, callsite_exprs = gen_arguments(schema.arguments.flat_all)
-        ret_declarations, ret_assignments = gen_returns(schema)
+        # ignore return values for inplace ops
+        ret_declarations, ret_assignments = (
+            ([], []) if schema.name.name.inplace else gen_returns(schema)
+        )
         args.extend(ret_declarations)
 
     declaration = f"AOTITorchError aoti_torch_{device}_{func_name}({', '.join(args)})"

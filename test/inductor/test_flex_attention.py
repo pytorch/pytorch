@@ -132,7 +132,7 @@ def query_key_value_clones(
     return query_ref, key_ref, value_ref
 
 
-class TestTemplatedSDPA(InductorTestCase):
+class TestFlexAttention(InductorTestCase):
     def _check_equal(
         self,
         golden_out: torch.Tensor,
@@ -944,7 +944,7 @@ class GraphModule(torch.nn.Module):
         )
 
 
-common_utils.instantiate_parametrized_tests(TestTemplatedSDPA)
+common_utils.instantiate_parametrized_tests(TestFlexAttention)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
