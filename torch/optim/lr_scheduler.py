@@ -52,6 +52,9 @@ EPOCH_DEPRECATION_WARNING = (
     "https://github.com/pytorch/pytorch/issues/new/choose."
 )
 
+ModeLiteral = Literal["min", "max"]
+
+ThresholdModeLiteral = Literal["rel", "abs"]
 
 def _check_verbose_deprecated_warning(verbose):
     """Raises a warning when verbose is not the default value."""
@@ -1238,11 +1241,11 @@ class ReduceLROnPlateau(LRScheduler):
     def __init__(
         self,
         optimizer: Optimizer,
-        mode: Literal["min", "max"] = "min",
+        mode: ModeLiteral = "min",
         factor=0.1,
         patience=10,
         threshold=1e-4,
-        threshold_mode: Literal["rel", "abs"] = "rel",
+        threshold_mode: ThresholdModeLiteral = "rel",
         cooldown=0,
         min_lr: Union[List[float], float] = 0,
         eps=1e-8,
