@@ -223,11 +223,7 @@ static Tensor& nonzero_out_native_mps(const Tensor& self, Tensor& out_) {
 
   int64_t nDim = self.dim();
   MPSStream* stream = getCurrentMPSStream();
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-  };
+  using CachedGraph = MPSUnaryCachedGraph;
 
   dispatch_sync(stream->queue(), ^() {
     stream->synchronize(SyncType::COMMIT_AND_WAIT);
@@ -241,13 +237,13 @@ static Tensor& nonzero_out_native_mps(const Tensor& self, Tensor& out_) {
   bool contiguous_output = !needsGather(out_);
   Tensor out = out_;
   if (!contiguous_output) {
-    out = at::empty(out_.sizes(), out_.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+    out = at::empty_like(out_, MemoryFormat::Contiguous);
   }
 
   @autoreleasepool {
     string key = "nonzero_out_native_mps" + getTensorsStringKey(self);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self), getMPSShape(self));
+      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
 
       MPSGraphTensor* outputTensor = [mpsGraph nonZeroIndicesOfTensor:inputTensor name:nil];
 
@@ -337,10 +333,7 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
     out = at::empty(out_.sizes(), out_.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
   }
 
-  int64_t _apparentInputShape = 1;
-  for (auto dim : self.sizes()) {
-    _apparentInputShape *= dim;
-  }
+  int64_t _apparentInputShape = self.numel();
   MPSShape* apparentOutputShape = @[ @(total_nonzero * nDim) ];
   MPSShape* apparentInputShape = @[ @(_apparentInputShape) ];
 
@@ -368,9 +361,7 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
       MPSGraphTensor* inputNotEqualToZeroTensor = [mpsGraph notEqualWithPrimaryTensor:inputTensor
                                                                       secondaryTensor:zeroTensor
                                                                                  name:nil];
-      MPSGraphTensor* maskTensor = [mpsGraph castTensor:inputNotEqualToZeroTensor
-                                                 toType:MPSDataTypeInt32
-                                                   name:@"castToInt32"];
+      MPSGraphTensor* maskTensor = castMPSTensor(mpsGraph, inputNotEqualToZeroTensor, kInt);
       MPSGraphTensor* indicesTensor = [mpsGraph cumulativeSumWithTensor:maskTensor axis:0 name:nil];
       MPSGraphTensor* indicesMinusOneTensor = [mpsGraph subtractionWithPrimaryTensor:indicesTensor
                                                                      secondaryTensor:oneTensor
