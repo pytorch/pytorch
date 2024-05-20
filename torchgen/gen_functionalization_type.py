@@ -66,6 +66,8 @@ MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION = (
         "resize_as_",
         # This function is used as for testing purposes only.
         "_fill_mem_eff_dropout_mask_",
+        # Used to correct subclass aliasing
+        "_unsafe_set_storage_",
     ]
 )
 
