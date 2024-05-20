@@ -322,16 +322,42 @@ AOTITorchError aoti_torch_create_tensor_from_blob(
     int32_t dtype,
     int32_t device_type,
     int32_t device_index,
-    AtenTensorHandle* ret_new_tensor,
-    int8_t layout,
-    const uint8_t* opaque_metadata,
-    int64_t opaque_metadata_size) {
+    AtenTensorHandle* ret_new_tensor) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     c10::IntArrayRef sizes(sizes_ptr, ndim);
     c10::IntArrayRef strides(strides_ptr, ndim);
     c10::Device device = c10_device(device_type, device_index);
+    c10::TensorOptions options = c10::TensorOptions().device(device).dtype(
+        static_cast<c10::ScalarType>(dtype));
+    *ret_new_tensor = new_tensor_handle(
+        // data == nullptr can happen for a 0-size tensor
+        (data != nullptr) ? at::for_blob(data, sizes)
+                                .strides(strides)
+                                .storage_offset(storage_offset)
+                                .options(options)
+                                .make_tensor()
+                          : at::empty_strided(sizes, strides, options));
+  });
+}
 
-    if (layout == static_cast<int8_t>(at::kMkldnn)) {
+AOTITorchError aoti_torch_create_tensor_from_blob_v2(
+    void* data,
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    int64_t storage_offset,
+    int32_t dtype,
+    int32_t device_type,
+    int32_t device_index,
+    AtenTensorHandle* ret_new_tensor,
+    int32_t layout,
+    const uint8_t* opaque_metadata,
+    int64_t opaque_metadata_size) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    if (layout == static_cast<int32_t>(at::kMkldnn)) {
+      c10::IntArrayRef sizes(sizes_ptr, ndim);
+      c10::IntArrayRef strides(strides_ptr, ndim);
+      c10::Device device = c10_device(device_type, device_index);
       // get a mkldnn tensor wrapped by a torch Tensor(OpaqueTensorImpl),
       // which used by later mkldnn op.
       *ret_new_tensor = new_tensor_handle(mkldnn_tensor_from_data_ptr(
@@ -342,16 +368,16 @@ AOTITorchError aoti_torch_create_tensor_from_blob(
           opaque_metadata,
           opaque_metadata_size));
     } else {
-      c10::TensorOptions options = c10::TensorOptions().device(device).dtype(
-          static_cast<c10::ScalarType>(dtype));
-      *ret_new_tensor = new_tensor_handle(
-          // data == nullptr can happen for a 0-size tensor
-          (data != nullptr) ? at::for_blob(data, sizes)
-                                  .strides(strides)
-                                  .storage_offset(storage_offset)
-                                  .options(options)
-                                  .make_tensor()
-                            : at::empty_strided(sizes, strides, options));
+      aoti_torch_create_tensor_from_blob(
+          data,
+          ndim,
+          sizes_ptr,
+          strides_ptr,
+          storage_offset,
+          dtype,
+          device_type,
+          device_index,
+          ret_new_tensor);
     }
   });
 }

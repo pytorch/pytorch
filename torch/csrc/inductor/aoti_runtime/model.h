@@ -227,7 +227,7 @@ class AOTInductorModelBase {
       auto opaque_metadata_size = this->opaque_metadata_size(i);
 
       AtenTensorHandle tensor_handle;
-      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
+      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob_v2(
           internal_ptr,
           ndim,
           size,
@@ -346,7 +346,7 @@ class AOTInductorModelBase {
     return constants_info_.at(idx).dtype;
   }
 
-  int8_t constant_layout(int64_t idx) const {
+  int32_t constant_layout(int64_t idx) const {
     return constants_info_.at(idx).layout;
   }
 
@@ -503,7 +503,7 @@ class AOTInductorModelBase {
     int32_t dtype;
     int64_t offset;
     size_t data_size;
-    int8_t layout;
+    int32_t layout;
     std::vector<uint8_t> opaque_metadata;
     int64_t opaque_metadata_size;
     const char* original_fqn = nullptr;

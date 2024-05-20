@@ -749,7 +749,7 @@ class CppWrapperCpu(WrapperCodeGen):
                     f"constants_info_[{idx}].stride = {{{stride_str}}};"
                 )
                 self.prefix.writeline(
-                    f"constants_info_[{idx}].layout = static_cast<int8_t>({self.codegen_layout(tensor.layout)});"
+                    f"constants_info_[{idx}].layout = static_cast<int32_t>({self.codegen_layout(tensor.layout)});"
                 )
 
                 if tensor.is_mkldnn:
