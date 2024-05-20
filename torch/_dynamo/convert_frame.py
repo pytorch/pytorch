@@ -1,4 +1,3 @@
-import base64
 import collections
 import cProfile
 import dis
@@ -350,13 +349,12 @@ def cprofile_wrapper(func):
             ps.sort_stats(pstats.SortKey.TIME).print_stats(20)
             ps.sort_stats(pstats.SortKey.CUMULATIVE).print_stats(20)
 
-        if manifold_link:=maybe_upload_prof_stats_to_manifold(str(profile_path)):  # fb-only
+        if manifold_link := maybe_upload_prof_stats_to_manifold(
+            str(profile_path)
+        ):  # fb-only
             torch._logging.trace_structured(
                 "link",
-                lambda: {
-                    "name": "cprofile_manifold_url",
-                    "url": manifold_link
-                },
+                lambda: {"name": "cprofile_manifold_url", "url": manifold_link},
             )
         return retval
 
