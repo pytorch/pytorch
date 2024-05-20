@@ -29,7 +29,6 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_MACOS,
     IS_WINDOWS,
-    parser as common_parser,
     retry_shell,
     set_cwd,
     shell,
@@ -1054,7 +1053,6 @@ def parse_args():
         description="Run the PyTorch unit test suite",
         epilog="where TESTS is any of: {}".format(", ".join(TESTS)),
         formatter_class=argparse.RawTextHelpFormatter,
-        parents=[common_parser],
     )
     parser.add_argument(
         "-v",
