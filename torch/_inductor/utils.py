@@ -988,6 +988,11 @@ def use_cutlass_template(layout, m, n, k):
     return res
 
 
+@functools.lru_cache(None)
+def _rocm_native_device_arch_name(device):
+    return torch.cuda.get_device_properties(device).gcnArchName
+
+
 def use_ck_template(layout, m, n, k):
     # config knobs check 1
     if not use_max_autotune():
@@ -1001,21 +1006,19 @@ def use_ck_template(layout, m, n, k):
     # tensors must be on GPU
     if not layout.device.type == "cuda":
         return False
-    # hardware check, enable for CDNA3 only for now
-    device_capability = torch.cuda.get_device_capability(layout.device)
-    log.debug("Device capability %s", device_capability)
-    # https://llvm.org/docs/AMDGPUUsage.html#amd-gcn-gfx940-gfx942-cdna3
-    if device_capability != (9, 4):
+    # hardware check
+    # if config arch list is not specified, get the native arch from the device properties
+    native_arch = _rocm_native_device_arch_name(layout.device)
+    requested_archs = {k.split(':')[0]: k for k in config.rocm.arch} or {native_arch.split(':')[0]: native_arch} 
+    requested_supported_archs = [requested_archs[k] for k in requested_archs.keys() & config.rocm.supported_arch]
+    if not requested_supported_archs:
         return False
     # supported input dtypes
     if layout.dtype not in [torch.float16, torch.bfloat16]:
         return False
-    # TBD investigate if we need to disable backend based on number of available CUs
-    # if not is_big_gpu(layout.device.index or 0):
-    #     return False
-    from .virtualized import V
-
+    # TBD: investigate if we need to disable backend based on number of available CUs similar to `is_big_gpu`
     # check if shape is static and gemm size is not 0
+    from .virtualized import V
     gemm_size = V.graph.sizevars.size_hint(m * n * k, fallback=-1)
     if gemm_size <= 0:
         return False

@@ -1,6 +1,6 @@
 import os  # noqa: C101
 import sys
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Set, Union
 
 import torch
 
@@ -816,11 +816,13 @@ class cuda:
 
 
 class rocm:
-    # Device arch list, e.g. ["gfx908", "gfx942"]. If empty, the `native` arch is used
+    # Offload arch list for device code compilation, e.g. ["gfx941", "gfx942"]. 
+    # If empty, the `native` arch is used
     arch: List[str] = []
 
-    # Hip (and ROCm) version, if None, will use torch.hip.version
-    hip_version: Optional[str] = None
+    # Enable for CDNA3 only for now
+    # Processor name reference: https://llvm.org/docs/AMDGPUUsage.html#processors
+    supported_arch: Set[str] = {'gfx940', 'gfx941', 'gfx942'}
 
     # Optimization level, use to balance compilation speed and runtime performance
     compile_opt_level = "-O2"
