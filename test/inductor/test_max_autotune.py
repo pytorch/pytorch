@@ -463,6 +463,27 @@ class TestMaxAutotune(TestCase):
         self.assertEqual(fn(*inputs), fn_c(*inputs), atol=1e-2, rtol=1e-2)
         self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
 
+    @skipIfRocm
+    @fresh_inductor_cache()
+    @config.patch(max_autotune=True, max_fusion_size=2)
+    def test_jit_fusion_matches_aot_fusion(self):
+        # In this example, AOTInductor's JIT-compile will fuse(buf1, buf2) due
+        # to proximity, we want to make sure AOT-compile pass does the same.
+        # AOT could do fuse(buf2, buf4) instead if buf3 was pushed to the end
+        # of the V.graph.buffers list because fuse(buf2, buf4) would have a
+        # better proximity score than fuse(buf1, buf2). This scenario is possible
+        # since finalizing MultiTemplateBuffers needs to replace buffers.
+        def fn(x, number):
+            buf0 = x + x
+            buf1 = number.item()
+            buf2 = x * x
+            buf3 = x @ x  # MultiTemplateBuffer
+            buf4 = x**2
+            return buf0, buf1, buf2, buf3, buf4
+
+        inputs = (torch.rand([256, 256], device="cuda"), torch.tensor(3, device="cuda"))
+        torch._export.aot_compile(fn, args=inputs)
+
     @config.patch(autotune_local_cache=False, autotune_remote_cache=False)
     def test_precompilations(self):
         def fn(a, b, c):
