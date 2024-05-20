@@ -990,7 +990,7 @@ def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
         # is much slower than running them directly
         pytest_args.extend(["-n", str(NUM_PROCS)])
 
-        if IS_CI:
+        if options.save_xml:
             # Add the option to generate XML test report here as C++ tests
             # won't go into common_utils
             test_report_path = get_report_path(pytest=True)
@@ -1256,6 +1256,12 @@ def parse_args():
         "--no-translation-validation",
         action="store_false",
         help="Run tests without translation validation.",
+    )
+    parser.add_argument(
+        "--save-xml",
+        action="store_true",
+        default=IS_CI,
+        help="Save XML test reports to test/test-reports",
     )
 
     group = parser.add_mutually_exclusive_group()
