@@ -355,9 +355,4 @@ local_repository(
     path = "third_party/onnx/third_party/benchmark",
 )
 
-local_repository(
-    name = "unused_onnx_tensorrt_benchmark",
-    path = "third_party/onnx-tensorrt/third_party/onnx/third_party/benchmark",
-)
-
 ### Unused repos end

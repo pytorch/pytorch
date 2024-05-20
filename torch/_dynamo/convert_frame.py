@@ -312,7 +312,7 @@ def cprofile_wrapper(func):
         retval = prof.runcall(func, *args, **kwargs)
         profile_latency = time.time() - start_ts
         prof.disable()
-        log.info(
+        log.warning(
             "### Cprofile for %s trace id [%s] took %.3f seconds ###",
             func.__name__,
             trace_id,
@@ -322,7 +322,7 @@ def cprofile_wrapper(func):
         try:
             prof.dump_stats(profile_path)
         except PermissionError:
-            log.info("Cannot write to %s", str(profile_path))
+            log.warning("Cannot write to %s", str(profile_path))
         svg_path = profile_path.with_suffix(".svg")
         try:
             gprof2dot_process = subprocess.Popen(
@@ -341,9 +341,9 @@ def cprofile_wrapper(func):
                 ["dot", "-Tsvg", "-o", str(svg_path)],
                 stdin=gprof2dot_process.stdout,
             )
-            log.info("Generated SVG from profile at %s", str(svg_path))
+            log.warning("Generated SVG from profile at %s", str(svg_path))
         except FileNotFoundError:
-            log.info(
+            log.warning(
                 "Failed to generate SVG from profile -- dumping stats instead."
                 "Try installing gprof2dot and dot for a better visualization"
             )
