@@ -45,7 +45,6 @@ class UnflattenTests(TestCase):
         constant = torch.ones(1, 16, 256, 256)
 
         mod = M()
-        print("Original model:\n", mod)
 
         pipe = pipeline(
             mod,
@@ -58,21 +57,19 @@ class UnflattenTests(TestCase):
         orig_state_dict = mod.state_dict()
 
         # Check qualnames
-        print("\nParameters of each stage:")
         for stage_idx in range(pipe.num_stages):
-            print(f"\nStage {stage_idx}:")
             stage_mod = pipe.get_stage_module(stage_idx)
             for param_name, param in stage_mod.named_parameters():
                 assert (
                     param_name in orig_state_dict
                 ), f"{param_name} not in original state dict"
-                print(f"{param_name}: {param.size()}")
+        print("Param qualname test passed")
 
         # Check equivalence
         ref = mod(x, constant)
         out = pipe(x, constant)[0]
         torch.testing.assert_close(out, ref)
-        print(f"\nEquivalence test passed {torch.sum(out)} ref {torch.sum(ref)}")
+        print(f"Equivalence test passed {torch.sum(out)} ref {torch.sum(ref)}")
 
 
 if __name__ == "__main__":

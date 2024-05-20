@@ -17,7 +17,7 @@ inline Tensor batch_norm(
     Tensor weight,
     Tensor bias,
     bool training,
-    c10::optional<double> momentum,
+    std::optional<double> momentum,
     double eps) {
   TORCH_CHECK(
       input.dim() >= 2,
