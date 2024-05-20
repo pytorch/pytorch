@@ -1362,6 +1362,9 @@ class DeviceCachingAllocator {
       return;
     }
     block->stream_uses.insert(stream);
+    // check if cudagraph capture => add stream to some data structure (block->cudagraph_stream)
+    // if in capture, we want to log that block as a stream_use that we want to later remove if it doesn't already have the stream uses
+    // instead, we don't add insert_deferred_events_until_no_capture
   }
 
   /** set memory fraction to limit maximum allocated memory **/
@@ -2744,13 +2747,18 @@ class DeviceCachingAllocator {
   }
 
   void insert_events_deferred_until_no_capture() {
-    if (C10_UNLIKELY(!needs_events_deferred_until_no_capture.empty())) {
-      for (auto* block : needs_events_deferred_until_no_capture) {
-        TORCH_INTERNAL_ASSERT(!block->stream_uses.empty());
-        insert_events(block);
-      }
-      needs_events_deferred_until_no_capture.clear();
-    }
+    // if (C10_UNLIKELY(!needs_events_deferred_until_no_capture.empty())) {
+    //   for (auto* block : needs_events_deferred_until_no_capture) {
+    //     TORCH_INTERNAL_ASSERT(!block->stream_uses.empty());
+    //     // sync events here?
+    //     // remove events here
+    //     insert_events(block);
+    //   }
+    //   needs_events_deferred_until_no_capture.clear();
+    // }
+    // go through blocks, check existing events, if no existing events=>free_block
+    // go through block->cudagraph_stream, remove it.
+    //
   }
 
   void process_events(const std::shared_ptr<GatheredContext>& context) {
