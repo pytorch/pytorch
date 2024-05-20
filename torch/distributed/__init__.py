@@ -54,8 +54,6 @@ if is_available():
         set_debug_level,
         set_debug_level_from_env,
         _make_nccl_premul_sum,
-        _ControlCollectives,
-        _StoreCollectives,
     )
 
     class _DistributedPdb(pdb.Pdb):
