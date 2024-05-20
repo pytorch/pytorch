@@ -820,6 +820,39 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             return tx.output.side_effects.load_attr(self, name)
 
+        if name == "__dict__":
+            # Create a new ConstDictVariable Tracker with key, values from
+            # self.value __dict__. Do not go through VariableBuilder because it
+            # inserts guards on all the keys.
+            items_vt = {}
+            for key, value in self.value.__dict__.items():
+                if not ConstantVariable.is_literal(key):
+                    unimplemented("key is not constant")
+
+                key_vt = ConstantVariable.create(key)
+                if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
+                    value_vt = tx.output.side_effects.load_attr(
+                        self, key, deleted_ok=True
+                    )
+                else:
+                    attr_source = None
+                    if self.source:
+                        attr_source = AttrSource(self.source, key)
+                    value_vt = variables.LazyVariableTracker.create(value, attr_source)
+                items_vt[key_vt] = value_vt
+
+            # Check if there are new key additions using side effect infra
+            if tx.output.side_effects.has_pending_mutation(self):
+                mutations_dict = tx.output.side_effects.store_attr_mutations[
+                    self.mutable_local
+                ]
+                for key, value_vt in mutations_dict.items():
+                    if key not in self.value.__dict__:
+                        if not ConstantVariable.is_literal(key):
+                            unimplemented("key is not constant")
+                        items_vt[ConstantVariable.create(key)] = value_vt
+            return variables.ConstDictVariable(items_vt, dict, source=self.source)
+
         try:
             subobj = self._getattr_static(name)
         except AttributeError:
