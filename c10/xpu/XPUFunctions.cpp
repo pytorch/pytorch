@@ -2,8 +2,11 @@
 #include <c10/util/Exception.h>
 #include <c10/xpu/XPUFunctions.h>
 
+#ifndef WIN32
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
+
 #include <vector>
 
 namespace c10::xpu {
@@ -52,11 +55,18 @@ inline void initGlobalDevicePoolState() {
     TORCH_WARN("XPU device count is zero!");
     return;
   }
-
   // The default context is utilized for each Intel GPU device, allowing the
   // retrieval of the context from any GPU device.
-  gDevicePool.context = std::make_unique<sycl::context>(
-      gDevicePool.devices[0]->get_platform().ext_oneapi_get_default_context());
+  try {
+    gDevicePool.context =
+        std::make_unique<sycl::context>(gDevicePool.devices[0]
+                                            ->get_platform()
+                                            .ext_oneapi_get_default_context());
+  } catch (...) {
+    // TODO: until SYCL default context enabled by default on Windows
+    gDevicePool.context = std::make_unique<sycl::context>(
+        gDevicePool.devices[0]->get_platform().get_devices());
+  }
 }
 
 inline void initDevicePoolCallOnce() {
