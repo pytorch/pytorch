@@ -646,7 +646,6 @@ class BaseSchedulerNode:
                 ), V.set_fake_mode(
                     fake_mode
                 ):
-                    assert V.current_node is not None
                     from .ir import ir_node_to_tensor
 
                     fake_inputs = [
