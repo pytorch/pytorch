@@ -151,6 +151,7 @@
 #include <ATen/ops/select_native.h>
 #include <ATen/ops/select_scatter_native.h>
 #include <ATen/ops/set_native.h>
+#include <ATen/ops/_simulate_lazy_clone_native.h>
 #include <ATen/ops/slice.h>
 #include <ATen/ops/slice_backward_native.h>
 #include <ATen/ops/slice_copy_native.h>
@@ -1640,7 +1641,7 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
     if (c10::impl::cow::get_future_copy_instead_of_conditional_view()) {
       return at::_unsafe_view_symint(self._lazy_clone(), proposed_shape);
     } else {
-      return self._simulate_lazy_clone().view_symint(proposed_shape);
+      return at::native::_simulate_lazy_clone(self).view_symint(proposed_shape);
     }
   }
 
@@ -1676,9 +1677,9 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
       // We need to do the checks here instead of in `native_functions.yaml`
       // to preserve backwards compatibility.
       if (!self.is_xla() && !self.is_lazy() && !self.is_ipu() && !at::isTensorSubclassLike(self)) {
-        return self._simulate_lazy_clone()._reshape_alias_symint(shape, stride.value());
+        return at::native::_simulate_lazy_clone(self)._reshape_alias_symint(shape, stride.value());
       } else {
-        return self._simulate_lazy_clone().view_symint(shape);
+        return at::native::_simulate_lazy_clone(self).view_symint(shape);
       }
     }
   }
@@ -1740,9 +1741,9 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
       // We need to do the checks here instead of in `native_functions.yaml`
       // to preserve backwards compatibility.
       if (!self.is_xla() && !self.is_lazy() && !self.is_ipu()) {
-        return self._simulate_lazy_clone()._reshape_alias(shape, stride.value());
+        return at::native::_simulate_lazy_clone(self)._reshape_alias(shape, stride.value());
       } else {
-        return self._simulate_lazy_clone().view(shape);
+        return at::native::_simulate_lazy_clone(self).view(shape);
       }
     }
   }

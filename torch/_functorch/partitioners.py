@@ -73,7 +73,7 @@ class NodeInfo:
     unclaimed_nodes: Set[fx.Node]
     fw_order: Dict[fx.Node, int]
 
-    @property
+    @functools.cached_property
     def required_fw_nodes(self) -> List[fx.Node]:
         return sorted(
             (n for n in self._required_fw_nodes), key=lambda n: self.fw_order[n]
@@ -985,7 +985,7 @@ def get_saved_values(
             orders = [
                 node_info.get_fw_order(user)
                 for user in used_node.users
-                if user in node_info.required_fw_nodes
+                if node_info.is_required_fw(user)
             ]
             fw_users = [
                 user for user in used_node.users if node_info.is_required_fw(user)
@@ -994,7 +994,7 @@ def get_saved_values(
                 first_unfusible_use = find_first_unfusible(fw_users, max(orders))
                 for user in tuple(used_node.users):
                     if (
-                        user in node_info.required_fw_nodes
+                        node_info.is_required_fw(user)
                         and node_info.get_fw_order(user) > first_unfusible_use
                         and is_fusible(used_node, user)
                     ):
@@ -1024,7 +1024,7 @@ def get_saved_values(
     if min_cut_options.ban_if_long_fusible_chains:
         visited = set()
         for start_node in joint_graph.nodes:
-            if start_node not in node_info.required_fw_nodes:
+            if not node_info.is_required_fw(start_node):
                 continue
             fusible = [(node_info.get_fw_order(start_node), start_node)]
             start_order = node_info.get_fw_order(start_node)
@@ -1050,7 +1050,7 @@ def get_saved_values(
 
                 for user in cur.users:
                     if (
-                        user in node_info.required_fw_nodes
+                        node_info.is_required_fw(user)
                         and is_fusible(cur, user)
                         and user not in banned_nodes
                     ):
@@ -1404,7 +1404,7 @@ def min_cut_rematerialization_partition(
     for node in reversed(joint_module.graph.nodes):
         if node.op == "output":
             node.dist_from_bw = int(1e9)
-        elif node not in node_info.required_fw_nodes:
+        elif not node_info.is_required_fw(node):
             node.dist_from_bw = 0
         else:
             node.dist_from_bw = int(1e9)

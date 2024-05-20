@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
+#include <ATen/NamedTensorUtils.h>
 #include <c10/util/SmallBuffer.h>
 #include <c10/core/impl/COW.h>
 
@@ -101,14 +102,28 @@ static Tensor _lazy_clone_impl(Tensor const& self, bool simulate) {
     storage = c10::impl::cow::lazy_clone_storage(*self_storage);
   }
   TORCH_CHECK(storage != nullptr);
-  auto tensor = c10::make_intrusive<c10::TensorImpl>(
+  Tensor self_;
+
+  if (simulate) {
+    self_ = at::detail::make_tensor<TensorImpl>(
+      c10::TensorImpl::VIEW,
       c10::Storage(std::move(storage)),
       self.key_set(),
       self.dtype());
-  tensor->set_sizes_and_strides(self.sym_sizes(),
-                                self.sym_strides(),
-                                self.sym_storage_offset());
-  return Tensor(std::move(tensor));
+    at::namedinference::propagate_names(self_, self);
+
+  } else {
+    self_ = at::detail::make_tensor<TensorImpl>(
+      c10::Storage(std::move(storage)),
+      self.key_set(),
+      self.dtype());
+  }
+
+  self_.unsafeGetTensorImpl()->set_sizes_and_strides(
+    self.sym_sizes(),
+    self.sym_strides(),
+    self.sym_storage_offset());
+  return self_;
 }
 
 Tensor _lazy_clone(Tensor const& self) {
@@ -116,7 +131,19 @@ Tensor _lazy_clone(Tensor const& self) {
 }
 
 Tensor _simulate_lazy_clone(Tensor const& self) {
-  return _lazy_clone_impl(self, /*simulate=*/true);
+  //return _lazy_clone_impl(self, /*simulate=*/true);
+  //return self.view(self.sizes());
+  c10::StorageImpl* self_storage = self.storage().unsafeGetStorageImpl();
+  c10::intrusive_ptr<c10::StorageImpl> storage;
+  storage = c10::impl::cow::simulate_lazy_clone_storage(*self_storage);
+  TORCH_CHECK(storage != nullptr);
+
+  //Tensor self_ = aten::view(self)
+  Tensor self_ = self.view(self.sizes());
+
+  self_.unsafeGetTensorImpl()->set_storage_and_dtype(storage, self.dtype());
+
+  return self_;
 }
 
 } // namespace at::native
