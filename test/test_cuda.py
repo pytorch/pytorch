@@ -51,6 +51,7 @@ from torch.testing._internal.common_utils import (
     NO_MULTIPROCESSING_SPAWN,
     NoTest,
     parametrize,
+     recover_orig_fp32_precision,
     run_tests,
     serialTest,
     skipCUDAMemoryLeakCheckIf,
@@ -63,7 +64,6 @@ from torch.testing._internal.common_utils import (
     TEST_NUMPY,
     TEST_WITH_ROCM,
     TestCase,
-    recover_orig_fp32_precision,
 )
 from torch.utils.checkpoint import checkpoint_sequential
 from torch.utils.viz._cycles import observe_tensor_cycles
