@@ -406,7 +406,14 @@ class DistMathOpsTest(DTensorTestBase):
 
         for placement in placement_combs:
             dtensor = distribute_tensor(tensor, device_mesh, (placement,))
-            out_dt = dtensor.topk(3, dim=0)
+            with comm_mode:
+                out_dt = dtensor.topk(3, dim=0)
+            if placement.is_shard(0):
+                self.assertEqual(comm_mode.get_total_counts(), 1)
+                self.assertEqual(
+                    comm_mode.get_comm_counts()[funcol.all_gather_into_tensor],
+                    1,
+                )
             out_full_values = out_dt.values.full_tensor()
             self.assertEqual(global_topk.values, out_full_values)
 
