@@ -116,7 +116,7 @@ namespace impl {
   };
 
   template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_input_type<c10::optional<T>, AllowDeprecatedTypes>
+  struct assert_is_valid_input_type<std::optional<T>, AllowDeprecatedTypes>
   : assert_is_valid_input_type<T, AllowDeprecatedTypes> {};
 
   template <bool AllowDeprecatedTypes, class... Args>
@@ -226,7 +226,7 @@ namespace impl {
   };
 
   template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_output_type<c10::optional<T>, AllowDeprecatedTypes>
+  struct assert_is_valid_output_type<std::optional<T>, AllowDeprecatedTypes>
   : assert_is_valid_output_type<T, AllowDeprecatedTypes> {};
 
   template<class T, bool AllowDeprecatedTypes>

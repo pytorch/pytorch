@@ -1,13 +1,15 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
+import copy
 import os
 import sys
 import tempfile
 
 import torch
 import torch.distributed as dist
+
+from model_registry import ExampleCode, MultiMLP
 from torch.distributed.pipelining import (
-    pipe_split,
     pipeline,
     PipelineStage,
     Schedule1F1B,
@@ -32,30 +34,6 @@ chunks = 4
 torch.manual_seed(0)
 
 
-class ExampleCode(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.mm_param0 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
-        self.mm_param1 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
-        self.register_buffer("cval", torch.randn((d_hid,), requires_grad=False))
-        self.lin0 = torch.nn.Linear(d_hid, d_hid)
-        self.lin1 = torch.nn.Linear(d_hid, d_hid)
-
-    def forward(self, x, y=torch.zeros(batch_size, d_hid)):
-        x = torch.mm(x, self.mm_param0)
-        x = x + y
-        x = torch.relu(x)
-        # try passing a value that doesn't require_grad across skip boundaries
-        a_constant = self.cval.clone()
-        x = self.lin0(x)
-        pipe_split()
-        x = torch.relu(x) + a_constant
-        x = torch.mm(x, self.mm_param1)
-        x = self.lin1(x)
-        x = torch.relu(x)
-        return x
-
-
 class ScheduleTest(MultiProcContinousTest):
     @classmethod
     def backend_str(cls) -> str:
@@ -78,7 +56,7 @@ class ScheduleTest(MultiProcContinousTest):
         # Setting this flag for numerical stability
         torch.distributed.pipelining.microbatch._debug_mask_minibatches = True
 
-        mod = ExampleCode()
+        mod = ExampleCode(d_hid)
         mod.to(self.device)
 
         x = torch.randn(batch_size, d_hid, device=self.device)
@@ -125,7 +103,7 @@ class ScheduleTest(MultiProcContinousTest):
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
     def test_ec_backward(self, ScheduleClass):
-        mod = ExampleCode()
+        mod = ExampleCode(d_hid)
         mod.to(self.device)
 
         x = torch.randn(batch_size, d_hid, device=self.device)
@@ -167,6 +145,79 @@ class ScheduleTest(MultiProcContinousTest):
             pipe_loss = sum(losses)
             torch.testing.assert_close(out, ref_out, rtol=1e-2, atol=5e-3)
             torch.testing.assert_close(pipe_loss, ref_loss)
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
+    def test_grad(self, ScheduleClass):
+        mod = MultiMLP(d_hid)
+        mod.to(self.device)
+
+        ref_mod = copy.deepcopy(mod)
+        x = torch.randn(batch_size, d_hid, device=self.device)
+        with torch.no_grad():
+            y = ref_mod(x)
+            # Add a small perturbation
+            target = y + torch.randn(batch_size, d_hid, device=self.device)
+
+        loss_fn = torch.nn.MSELoss(reduction="sum")
+
+        # Run reference
+        for _ in range(2):
+            ref_mod.zero_grad()
+            ref_out = ref_mod(x)
+            ref_loss = loss_fn(ref_out, target)
+            ref_loss.backward()
+
+        # Create a pipeline
+        pipe = pipeline(
+            mod,
+            chunks,
+            example_args=(x,),
+        )
+
+        stage = PipelineStage(
+            pipe,
+            self.rank,
+            device=self.device,
+        )
+
+        # Attach to a schedule
+        schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn)
+
+        # Run
+        stage_module = pipe.get_stage_module(self.rank)
+        for _ in range(2):
+            # Zero gradients
+            stage_module.zero_grad()
+            if self.rank == 0:
+                schedule.step(x)
+            elif self.rank == self.world_size - 1:
+                losses = []
+                out = schedule.step(target=target, losses=losses)
+            else:
+                schedule.step()
+
+        dist.barrier()
+
+        # Last rank checks result
+        if self.rank == self.world_size - 1:
+            # Check output
+            torch.testing.assert_close(out, ref_out)
+            # Check loss
+            # Since the reduction used in the loss function above is "sum", we use
+            # "sum" here to reduce microbatch losses into a single value too.
+            pipe_loss = sum(losses)
+            torch.testing.assert_close(pipe_loss, ref_loss)
+
+        # Every rank checks gradients
+        for name, p in stage_module.named_parameters():
+            ref_p = ref_mod.get_parameter(name)
+            try:
+                torch.testing.assert_close(p.grad, ref_p.grad, rtol=1e-5, atol=4e-5)
+            except AssertionError:
+                print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
+                raise
 
 
 instantiate_parametrized_tests(ScheduleTest)

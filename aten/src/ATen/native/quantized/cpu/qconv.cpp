@@ -1152,7 +1152,7 @@ template <int kSpatialDim>
 template <bool kReluFused>
 at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
     const at::Tensor& act,
-    const c10::optional<at::Tensor>& accum,
+    const std::optional<at::Tensor>& accum,
     double output_scale,
     int64_t output_zero_point) {
   std::string func_name = "quantized::conv";
@@ -1391,7 +1391,7 @@ static at::Tensor _quantized_convolution_onednn(
     at::Tensor weight, // MKLDNN tensor with quantized values
     at::Tensor weight_scales,
     at::Tensor weight_zero_points,
-    c10::optional<at::Tensor> bias, // Bias is not packed into MKLDNN tensor
+    std::optional<at::Tensor> bias, // Bias is not packed into MKLDNN tensor
     torch::List<int64_t> stride,
     torch::List<int64_t> padding,
     torch::List<int64_t> dilation,
@@ -1399,15 +1399,15 @@ static at::Tensor _quantized_convolution_onednn(
     int64_t groups,
     double output_scale,
     int64_t output_zero_point,
-    c10::optional<at::Tensor> accum, // accum to fused with conv add
+    std::optional<at::Tensor> accum, // accum to fused with conv add
     double accum_scale,
     int64_t accum_zero_point,
-    c10::optional<c10::ScalarType> output_dtype,
-    c10::optional<c10::string_view> binary_attr,
-    c10::optional<at::Scalar> binary_alpha,
-    c10::optional<c10::string_view> unary_attr,
-    torch::List<c10::optional<at::Scalar>> unary_scalars,
-    c10::optional<c10::string_view> unary_algorithm) {
+    std::optional<c10::ScalarType> output_dtype,
+    std::optional<c10::string_view> binary_attr,
+    std::optional<at::Scalar> binary_alpha,
+    std::optional<c10::string_view> unary_attr,
+    torch::List<std::optional<at::Scalar>> unary_scalars,
+    std::optional<c10::string_view> unary_algorithm) {
   /*********************************/
   /*          Checks               */
   /*********************************/
@@ -1867,17 +1867,17 @@ class QConvoneDNN final {
       at::Tensor weight, // contains quantized values but not QTensor
       at::Tensor weight_scales,
       at::Tensor weight_zero_points,
-      c10::optional<at::Tensor> bias,
+      std::optional<at::Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> dilation,
       int64_t groups,
       double output_scale,
       int64_t output_zero_point,
-      c10::optional<c10::ScalarType> output_dtype,
+      std::optional<c10::ScalarType> output_dtype,
       c10::string_view attr,
-      torch::List<c10::optional<at::Scalar>> scalars,
-      c10::optional<c10::string_view> algorithm) {
+      torch::List<std::optional<at::Scalar>> scalars,
+      std::optional<c10::string_view> algorithm) {
 #if AT_MKLDNN_ENABLED()
     if (act.dim() == 3 || act.dim() == 5) {
       // Conv1D/3D post op check
@@ -1919,19 +1919,19 @@ class QConvoneDNN final {
       at::Tensor weight, // contains quantized values but not QTensor
       at::Tensor weight_scales,
       at::Tensor weight_zero_points,
-      c10::optional<at::Tensor> bias,
+      std::optional<at::Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> dilation,
       int64_t groups,
       double output_scale,
       int64_t output_zero_point,
-      c10::optional<c10::ScalarType> output_dtype,
+      std::optional<c10::ScalarType> output_dtype,
       c10::string_view binary_attr,
-      c10::optional<at::Scalar> alpha,
-      c10::optional<c10::string_view> unary_attr,
-      torch::List<c10::optional<at::Scalar>> unary_scalars,
-      c10::optional<c10::string_view> unary_algorithm) {
+      std::optional<at::Scalar> alpha,
+      std::optional<c10::string_view> unary_attr,
+      torch::List<std::optional<at::Scalar>> unary_scalars,
+      std::optional<c10::string_view> unary_algorithm) {
 #if AT_MKLDNN_ENABLED()
     // Conv2D post op check
     TORCH_CHECK(
