@@ -73,7 +73,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
         OpType opType,
         uint64_t seq,
         const char* profilingTitle = nullptr,
-        const c10::optional<std::vector<at::Tensor>>& inputTensors =
+        const std::optional<std::vector<at::Tensor>>& inputTensors =
             c10::nullopt);
 
     ~AsyncWork() override = default;
@@ -95,7 +95,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
     void finishWorkGlooError(const std::exception_ptr& eptr);
     inline void recordAsyncWorkProfilingInfo(
         const char* profilingTitle,
-        const c10::optional<std::vector<at::Tensor>>& inputTensors);
+        const std::optional<std::vector<at::Tensor>>& inputTensors);
 
     const std::vector<std::vector<at::Tensor>> outputTensors_;
     c10::intrusive_ptr<at::ivalue::Future> future_;

@@ -9,13 +9,13 @@ namespace metal {
 
 using SerializationTypeConv2dPrePack = std::tuple<
     Tensor,
-    c10::optional<Tensor>,
+    std::optional<Tensor>,
     std::vector<int64_t>,
     std::vector<int64_t>,
     std::vector<int64_t>,
     int64_t,
-    c10::optional<Scalar>,
-    c10::optional<Scalar>>;
+    std::optional<Scalar>,
+    std::optional<Scalar>>;
 
 class Conv2dOpContext : public torch::jit::CustomClassHolder {
  public:
@@ -33,13 +33,13 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
   Conv2dOpContext() = delete;
   Conv2dOpContext(
       at::Tensor&& weight,
-      c10::optional<at::Tensor>&& bias,
+      std::optional<at::Tensor>&& bias,
       std::vector<int64_t> stride,
       std::vector<int64_t> padding,
       std::vector<int64_t> dilation,
       int64_t groups,
-      c10::optional<Scalar> output_min,
-      c10::optional<Scalar> output_max)
+      std::optional<Scalar> output_min,
+      std::optional<Scalar> output_max)
       : weight_(std::move(weight)),
         bias_(std::move(bias)),
         stride_(std::move(stride)),
@@ -65,7 +65,7 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
     return weight_;
   }
 
-  const c10::optional<Tensor>& get_bias() const {
+  const std::optional<Tensor>& get_bias() const {
     return bias_;
   }
 
@@ -85,11 +85,11 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
     return groups_;
   }
 
-  const c10::optional<Scalar>& get_output_min() const {
+  const std::optional<Scalar>& get_output_min() const {
     return output_min_;
   }
 
-  const c10::optional<Scalar>& get_output_max() const {
+  const std::optional<Scalar>& get_output_max() const {
     return output_max_;
   }
 
@@ -111,22 +111,22 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
 
   private:
     Tensor weight_;
-    c10::optional<Tensor> bias_;
+    std::optional<Tensor> bias_;
     std::vector<int64_t> stride_;
     std::vector<int64_t> padding_;
     std::vector<int64_t> dilation_;
     int64_t groups_;
-    c10::optional<Scalar> output_min_;
-    c10::optional<Scalar> output_max_;
+    std::optional<Scalar> output_min_;
+    std::optional<Scalar> output_max_;
     std::function<void(void*)> releaseCallback_ = nullptr;
     void* conv2dOp_ = nullptr; // reserved to hold MPSCNNConv2dOp objects
 };
 
 using SerializationTypeLinearPrePack = std::tuple<
     Tensor,
-    c10::optional<Tensor>,
-    c10::optional<Scalar>,
-    c10::optional<Scalar>>;
+    std::optional<Tensor>,
+    std::optional<Scalar>,
+    std::optional<Scalar>>;
 
 class LinearOpContext : public torch::jit::CustomClassHolder {
  public:
@@ -136,9 +136,9 @@ class LinearOpContext : public torch::jit::CustomClassHolder {
   LinearOpContext() = delete;
   LinearOpContext(
       at::Tensor&& weight,
-      c10::optional<at::Tensor>&& bias,
-      c10::optional<Scalar> output_min,
-      c10::optional<Scalar> output_max)
+      std::optional<at::Tensor>&& bias,
+      std::optional<Scalar> output_min,
+      std::optional<Scalar> output_max)
       : weight_(std::move(weight)),
         bias_(std::move(bias)),
         output_min_(std::move(output_min)),
@@ -160,15 +160,15 @@ class LinearOpContext : public torch::jit::CustomClassHolder {
     return weight_;
   }
 
-  const c10::optional<Tensor>& get_bias() const {
+  const std::optional<Tensor>& get_bias() const {
     return bias_;
   }
 
-  const c10::optional<Scalar>& get_output_min() const {
+  const std::optional<Scalar>& get_output_min() const {
     return output_min_;
   }
 
-  const c10::optional<Scalar>& get_output_max() const {
+  const std::optional<Scalar>& get_output_max() const {
     return output_max_;
   }
 
@@ -190,9 +190,9 @@ class LinearOpContext : public torch::jit::CustomClassHolder {
 
  private:
   Tensor weight_;
-  c10::optional<Tensor> bias_;
-  c10::optional<Scalar> output_min_;
-  c10::optional<Scalar> output_max_;
+  std::optional<Tensor> bias_;
+  std::optional<Scalar> output_min_;
+  std::optional<Scalar> output_max_;
   void* opaqueOpPtr_ = nullptr; // reserved to hold MPSCNNFullyConnected objects
   std::function<void(void*)> releaseCallback_ = nullptr;
 };

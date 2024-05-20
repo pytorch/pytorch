@@ -68,7 +68,7 @@ std::shared_ptr<Source> SourceRangeDeserializer::deserialize_source(
     const auto& textIndex = tup_elems[0].toIntList();
     int64_t fnameIndex = tup_elems[1].toInt();
     int64_t starting_line_no_ = tup_elems[2].toInt();
-    c10::optional<std::string> filename = c10::nullopt;
+    std::optional<std::string> filename = c10::nullopt;
 
     TORCH_CHECK(
         (uint64_t)fnameIndex < text_table_.size(),
@@ -88,7 +88,7 @@ std::shared_ptr<Source> SourceRangeDeserializer::deserialize_source(
     source = std::make_shared<Source>(str_cord, filename, starting_line_no_);
   } else {
     std::string text_ = tup_elems[0].toStringRef();
-    c10::optional<std::string> filename_ =
+    std::optional<std::string> filename_ =
         tup_elems[1].toOptional<std::string>();
     int64_t starting_line_no_ = tup_elems[2].toInt();
     source = std::make_shared<Source>(
@@ -229,7 +229,7 @@ void ConcreteSourceRangeUnpickler::unpickle() {
   }
 }
 
-c10::optional<SourceRange> ConcreteSourceRangeUnpickler::
+std::optional<SourceRange> ConcreteSourceRangeUnpickler::
     findSourceRangeThatGenerated(const SourceRange& range) {
   unpickle();
 

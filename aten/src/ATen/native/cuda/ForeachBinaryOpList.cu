@@ -230,16 +230,18 @@ FOREACH_BINARY_OP_LIST(
     div,
     std::divides,
     /*division_op*/ true);
+// NOTE(crcrpar): `all_types_half_bfloat16` does not cover bool, so temporarily
+// set `division_op` to true.
 FOREACH_BINARY_OP_LIST(
     all_types_half_bfloat16,
     clamp_max,
     minimum,
-    /*division_op*/ false);
+    /*division_op*/ true);
 FOREACH_BINARY_OP_LIST(
     all_types_half_bfloat16,
     clamp_min,
     maximum,
-    /*division_op*/ false);
+    /*division_op*/ true);
 // NOTE(crcrpar): [Why is foreach_pow's division_op=true?]
 // To push integer inputs to slow path. This is because with integer type inputs
 // the fast path behaves differently from the slow one. Need to investigate

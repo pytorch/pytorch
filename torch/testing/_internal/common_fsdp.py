@@ -17,11 +17,14 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributed._composable import checkpoint
+from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._composable.fsdp._fsdp_param_group import (
     FSDPParamGroup,
     RegisterPostBackwardFunction,
 )
 from torch.distributed._tensor import distribute_tensor, DTensor, Shard
+from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp import CPUOffload, FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import TrainingState
 from torch.distributed.fsdp._init_utils import NO_RESHARD_AFTER_FORWARD_STRATEGIES
@@ -32,6 +35,11 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
 )
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.distributed.fsdp.wrap import always_wrap_policy, ModuleWrapPolicy, wrap
+from torch.distributed.tensor.parallel import (
+    ColwiseParallel,
+    parallelize_module,
+    RowwiseParallel,
+)
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import (
@@ -856,6 +864,47 @@ class MLP(nn.Module):
             torch.nn.init.normal_(self.buffer)
 
 
+class MLPStack(nn.Sequential):
+    def __init__(self, mlp_dim: int):
+        modules = [
+            nn.LayerNorm(mlp_dim, bias=False),
+            # Use multiplier of 3 to exercise uneven case
+            MLP(mlp_dim, dim_multiplier=3),
+            MLP(mlp_dim),
+            MLP(mlp_dim, dim_multiplier=3),
+        ]
+        super().__init__(*modules)
+
+    def parallelize(
+        self,
+        tp_mesh: DeviceMesh,
+        dp_mesh: DeviceMesh,
+        use_activation_checkpointing: bool,
+        reshard_after_forward: bool,
+    ) -> "MLPStack":
+        parallelize_module(
+            self,
+            device_mesh=tp_mesh,
+            # Leave the layer norm as implicitly replicated
+            parallelize_plan={
+                # Pass `use_local_output=False` to keep as DTensor to preserve
+                # uneven activation dims
+                "1.in_proj": ColwiseParallel(use_local_output=False),
+                "1.out_proj": RowwiseParallel(use_local_output=False),
+                "2.in_proj": ColwiseParallel(use_local_output=False),
+                "2.out_proj": RowwiseParallel(use_local_output=False),
+                "3.in_proj": ColwiseParallel(use_local_output=False),
+                "3.out_proj": RowwiseParallel(),
+            },
+        )
+        for mlp in self:
+            if use_activation_checkpointing:
+                checkpoint(mlp)
+            fully_shard(mlp, mesh=dp_mesh, reshard_after_forward=reshard_after_forward)
+        fully_shard(self, mesh=dp_mesh, reshard_after_forward=reshard_after_forward)
+        return self
+
+
 class DoubleLinear(nn.Module):
     """
     This can be used for returning multiple outputs from a module
@@ -905,6 +954,18 @@ def patch_reduce_scatter(new_reduce_scatter_tensor: Callable):
     finally:
         dist.barrier()
         dist.reduce_scatter_tensor = orig_reduce_scatter
+
+
+@contextlib.contextmanager
+def patch_all_reduce(new_all_reduce: Callable):
+    orig_all_reduce = dist.all_reduce
+    dist.barrier()
+    dist.all_reduce = new_all_reduce
+    try:
+        yield
+    finally:
+        dist.barrier()
+        dist.all_reduce = orig_all_reduce
 
 
 @no_type_check

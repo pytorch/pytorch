@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 
+import abc
 import faulthandler
 import itertools
 import logging
@@ -38,6 +39,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TEST_WITH_TSAN,
     TestCase,
+    run_tests,
 )
 from torch.testing._internal.distributed.multi_threaded_pg import (
     _install_threaded_pg,
@@ -1290,3 +1292,104 @@ class DynamoDistributedMultiProcTestCase(MultiProcessTestCase):
         self.rank = rank
         self.file_name = file_name
         self.run_test(test_name, parent_pipe)
+
+
+class MultiProcContinousTest(TestCase):
+    # Class variables:
+    # number of test processes
+    world_size: int = 2
+    # rank of the current process
+    rank: int = -1  # unset state
+    # Rendezvous file
+    rdvz_file: Optional[str] = None
+
+    @classmethod
+    @abc.abstractmethod
+    def backend_str(cls) -> str:
+        """
+        ProcessGroup backend str.
+        To be customized by sub test classes, e.g. "nccl".
+        Here we raise error.
+        """
+        raise NotImplementedError("Please implement backend_str in your test class")
+
+    @classmethod
+    def opts(cls, high_priority_stream=False):
+        """
+        ProcessGroup init options.
+        To be customized by sub test classes, e.g. ProcessGroupNCCLOpTest
+        Here we return None.
+        """
+        return None
+
+    @classmethod
+    def setUpClass(cls):
+        """
+        Class-scope test fixture. Run once for entire test class, before any test starts.
+        Set up the process group.
+        """
+        super().setUpClass()
+        if not 0 <= cls.rank < cls.world_size:
+            raise RuntimeError(
+                "Rank must be set and in the range of 0 to world_size. "
+                f"World size: {cls.world_size} Rank: {cls.rank}"
+            )
+        if cls.rdvz_file:
+            store = c10d.FileStore(cls.rdvz_file, cls.world_size)
+        else:
+            # torchrun takes care of rendezvous
+            store = None
+        opts = cls.opts()
+        backend = cls.backend_str()
+        print(f"Testing {backend=}")
+        # create nccl processgroup with opts
+        c10d.init_process_group(
+            backend=backend,
+            world_size=cls.world_size,
+            rank=cls.rank,
+            store=store,
+            pg_options=opts,
+        )
+        cls.pg = c10d.distributed_c10d._get_default_group()
+        print(f"Rank {cls.rank} setup complete")
+
+    @classmethod
+    def tearDownClass(cls):
+        """
+        Class-scope test fixture. Run once for entire test class, after all tests finish.
+        Tear down the process group.
+        """
+        c10d.destroy_process_group()
+        super().tearDownClass()
+        # Clear up the rendezvous file
+        if cls.rdvz_file:
+            try:
+                os.remove(cls.rdvz_file)
+            except OSError:
+                pass
+        print(f"Rank {cls.rank} teardown complete")
+
+    @classmethod
+    def run_rank(
+        cls,
+        rank: int,
+        world_size: int,
+        rdvz_file: Optional[str] = None,
+    ):
+        """
+        This is an entry point for each rank to run the tests in `MultiProcContinousTest`.
+        In this entry point, we set the class variables for the test class.
+        Then we run all tests.
+
+        Note:
+        - This helper only works for a subclass of `MultiProcContinousTest`.
+
+        Example:
+        - See `test_c10d_ops_nccl.py`.
+        """
+        # set class variables for the test class
+        cls.rank = rank
+        cls.world_size = world_size
+        cls.rdvz_file = rdvz_file
+        # Launch tests via `common_utils` infra
+        run_tests()
