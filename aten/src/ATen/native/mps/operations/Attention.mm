@@ -1,3 +1,4 @@
+#include <string>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <iostream>
 #include <optional>
@@ -44,6 +45,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_flash_attention_mps(const Tensor&
     MPSGraphTensor* qTensor = nil;
     MPSGraphTensor* kTensor = nil;
     MPSGraphTensor* vTensor = nil;
+    MPSGraphTensor* attnTensor = nil;
     MPSGraphTensor* outputTensor = nil;
   };
   int64_t batchSize = query.size(0);
@@ -53,7 +55,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_flash_attention_mps(const Tensor&
   auto out = at::empty({batchSize, num_head, qSize, headSize}, query.options());
   auto scale_factor = sdp::calculate_scale(query, scale).as_float_unchecked();
   @autoreleasepool {
-    auto mkey = __func__ + getTensorsStringKey({query, key, value}) + ":" + std::to_string(is_causal);
+    auto mkey = __func__ + getTensorsStringKey({query, key, value}) + ":" + std::to_string(is_causal) + ":" + std::to_string(attn_mask.has_value());
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(mkey, [&](auto mpsGraph, auto graph) {
       auto qTensor = mpsGraphRankedPlaceHolder(mpsGraph, query);
       auto kTensor = mpsGraphRankedPlaceHolder(mpsGraph, key);
@@ -72,6 +74,13 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_flash_attention_mps(const Tensor&
                                    truePredicateTensor:maskedMM
                                   falsePredicateTensor:minusInf
                                                   name:nil];
+      } else if (attn_mask) {
+        graph->attnTensor = mpsGraphRankedPlaceHolder(mpsGraph, *attn_mask);
+        auto minusInf = [mpsGraph constantWithScalar:-1e20 shape:maskedMM.shape dataType:maskedMM.dataType];
+        maskedMM = [mpsGraph selectWithPredicateTensor:graph->attnTensor
+                                   truePredicateTensor:maskedMM
+                                  falsePredicateTensor:minusInf
+                                                  name:nil];
       }
       auto sm = [mpsGraph softMaxWithTensor:maskedMM axis:3 name:nil];
       auto output = [mpsGraph matrixMultiplicationWithPrimaryTensor:sm secondaryTensor:vTensor name:nil];
@@ -84,7 +93,13 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_flash_attention_mps(const Tensor&
     auto kPlaceholder = Placeholder(cachedGraph->kTensor, key);
     auto vPlaceholder = Placeholder(cachedGraph->vTensor, value);
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor, out);
-    auto feeds = dictionaryFromPlaceholders(qPlaceholder, kPlaceholder, vPlaceholder);
+    NSDictionary *feeds = nil;
+    if (!attn_mask) {
+      feeds = dictionaryFromPlaceholders(qPlaceholder, kPlaceholder, vPlaceholder);
+    } else {
+      auto mPlaceholder = Placeholder(cachedGraph->attnTensor, *attn_mask);
+      feeds = dictionaryFromPlaceholders(qPlaceholder, kPlaceholder, vPlaceholder, mPlaceholder);
+    }
     runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
   }
   return {out, Tensor()};
