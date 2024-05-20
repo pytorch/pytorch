@@ -67,13 +67,12 @@ def command_to_string(command):
 
 class StrobelightCLIFunctionProfiler:
     """
-    Note: this is a meta only tool, that can be used to profiler python functions
-    on meta servers.
+    Note: this is a meta only tool.
 
     StrobelightCLIFunctionProfiler can be used to profile a python function and
     generate a strobelight link with the results. It works on meta servers but
     does not requries an fbcode target.
-    When stop_at_error is false(default),failing to profiling does not prevent
+    When stop_at_error is false(default), error during profiling does not prevent
     the work function from running.
 
     Check function_profiler_example.py for an example.
