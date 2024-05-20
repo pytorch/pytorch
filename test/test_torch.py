@@ -10632,6 +10632,17 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self._checked_swap(t6, t7)
 
 
+    def test_histc_when_min_is_equal_to_max(self):
+        # both min and max are non-zero
+        t = torch.tensor([1, 2, 3, 3, 4, 5, 6, 7, 8], dtype=torch.float)
+        res = torch.histc(t, 5, 7, 7)
+        self.assertEqual(res, torch.tensor([0., 0., 1., 0., 0.]))
+
+        # both min and max are zero, then the minimum and maximum values of the data are used
+        res = torch.histc(t, 5, 0, 0)
+        self.assertEqual(res, torch.tensor([2., 2., 2., 1., 2.]))
+
+
 # The following block extends TestTorch with negative dim wrapping tests
 # FIXME: replace these with OpInfo sample inputs or systemic OpInfo tests
 # Functions to test negative dimension wrapping
