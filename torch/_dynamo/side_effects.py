@@ -508,6 +508,12 @@ class SideEffects:
                             suffixes.append(
                                 [create_instruction("DELETE_ATTR", argval=name)]
                             )
+                        elif isinstance(var.mutable_local, AttributeMutationNew):
+                            # TODO(anijain2305) - Tighten the support for DeletedVariable and mutation tracking
+                            unimplemented(
+                                "An object was constructed, its attribute was deleted and"
+                                " the mutated object was returned. This is not supported"
+                            )
                     elif (
                         isinstance(var, variables.UserDefinedObjectVariable)
                         and var.needs_slow_setattr()
