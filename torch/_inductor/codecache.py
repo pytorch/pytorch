@@ -56,7 +56,7 @@ from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.codegen.rocm.compile_command import (
     rocm_compile_command,
-    rocm_compiler_version,
+    rocm_compiler,
 )
 from torch._inductor.runtime.compile_tasks import (
     _module_to_triton_kernel,
@@ -2924,8 +2924,7 @@ class ROCmCodeCache:
     cache: Dict[str, CacheEntry] = dict()
     cache_clear = staticmethod(cache.clear)
     _SOURCE_CODE_SUFFIX = "cpp"
-
-    log.debug("HIP compiler version:\n%s", rocm_compiler_version())
+    _logged_compiler_version = False
 
     @classmethod
     def write(cls, source_code, dst_file_ext) -> Tuple[str, str]:
@@ -2951,6 +2950,10 @@ class ROCmCodeCache:
         using the compile command specific for the ROCm platform.
         Returns a tuple of dst_file_path, hash_key, source_code_path
         """
+        if not cls._logged_compiler_version:
+            cls._logged_compiler_version = True
+            log.debug(get_compiler_version_info(rocm_compiler()))
+
         key, input_path = cls.write(source_code, dst_file_ext)
         if key not in cls.cache:
             from filelock import FileLock

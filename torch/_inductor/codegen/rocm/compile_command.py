@@ -68,7 +68,7 @@ def _rocm_compiler_options() -> List[str]:
     return opts
 
 
-def _rocm_compiler() -> Optional[str]:
+def rocm_compiler() -> Optional[str]:
     if is_linux():
         if config.rocm.rocm_home:
             return os.path.join(config.rocm.rocm_home, "llvm", "bin", "clang")
@@ -82,19 +82,6 @@ def _rocm_compiler() -> Optional[str]:
     return None
 
 
-@lru_cache(None)
-def rocm_compiler_version() -> Optional[str]:
-    rocm_compiler = _rocm_compiler()
-    if not rocm_compiler:
-        return None
-    import subprocess
-
-    try:
-        return subprocess.check_output([rocm_compiler, "--version"], text=True)
-    except subprocess.CalledProcessError:
-        return None
-
-
 def rocm_compile_command(
     src_files: List[str],
     dst_file: str,
@@ -104,7 +91,7 @@ def rocm_compile_command(
     include_paths = _rocm_include_paths()
     lib_options = _rocm_lib_options()
     compiler_options = _rocm_compiler_options()
-    compiler = _rocm_compiler()
+    compiler = rocm_compiler()
     options = (
         compiler_options
         + (extra_args if extra_args else [])
