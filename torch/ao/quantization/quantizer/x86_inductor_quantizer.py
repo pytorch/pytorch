@@ -107,33 +107,8 @@ def _skip_annotate(
     skip_annotate = False
     # 1) Skip annotate if any node is already annotated
     if _is_any_annotated(nodes):
-        skip_annotate = True
-        return skip_annotate
-    # 2) Skip annotate if a) filter_fn is provided and b) any node fails the filter
-    # filter_fn result
-    # case 1,
-    # filter_fn     False, False, False
-    # not filter_fn True, True, True
-    # any           True
-    # ->            skip
-
-    # no node named as user specific
-
-    # case 2,
-    # filter_fn     True, False, False
-    # not filter_fn False, True, True
-    # any           True
-    # ->            skip
-
-    # some node are not user specific
-
-    # case 3,
-    # filter_fn     True
-    # not filter_fn False
-    # any           False
-    # ->            not skip
-    # all node are user specific
-
+        return True
+    # 2) Not skip annotate if a) filter_fn is provided and b) any node passed the filter
     if filter_fn and any(filter_fn(node) for node in nodes):
         return False
 
@@ -142,7 +117,7 @@ def _skip_annotate(
 
 def _get_operator_type_filter(operator_type: Callable, module_name_list):
     """Get the operator_type_filter function for a given operator type, the filter accepts
-    a node and checks if the node has certain module type
+    a node and checks if the node has certain operator type.
 
     For example:
         node: linear_op = call_function[...](...)  # linear_op.target if torch.ops.aten.linear.default
@@ -480,15 +455,6 @@ class X86InductorQuantizer(Quantizer):
             )
         return self
 
-    def _get_aten_operator_qconfig(
-        self,
-        operator_type: torch._ops.OpOverloadPacket,
-    ) -> Optional[QuantizationConfig]:
-        if operator_type in self.operator_type_qconfig:
-            assert operator_type in quantizable_ops
-            return self.operator_type_qconfig[operator_type]
-        return self.global_config if operator_type in default_quantizable_ops else None
-
     def _annotate_conv_node_helper(
         self,
         conv_node: torch.fx.Node,
@@ -597,6 +563,12 @@ class X86InductorQuantizer(Quantizer):
         assert isinstance(extra_input_node, Node)
         return conv_gemm_node_idx, extra_input_node_idx
 
+    def _check_qconfig(self) -> None:
+        """Check if the qconfig is valid.
+        Currently, not support mixed static and dynamic quantization config."""
+        # TODO:
+        pass
+
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
         """
         1) Annotate each node according the user's qconfig with following order:
@@ -605,6 +577,9 @@ class X86InductorQuantizer(Quantizer):
         if `linear1` has been annotated in the `module_name_config` stage,
         it will not be re-annotated in the `module_type_config` or `global_config` stages.
         """
+
+        self._check_qconfig()
+
         module_name_list = list(self.module_name_qconfig.keys())
 
         for module_name, qconfig in self.module_name_qconfig.items():
@@ -1091,7 +1066,10 @@ class X86InductorQuantizer(Quantizer):
             self._annotate_conv_node_helper(conv_node, True, quantization_config)
 
     def _annotate_maxpool2d(
-        self, node: Node, quantization_config: QuantizationConfig, filter_fn
+        self,
+        node: Node,
+        quantization_config: QuantizationConfig,
+        filter_fn: Optional[Callable] = None,
     ) -> None:
         if node.target is not torch.ops.aten.max_pool2d.default:
             return
@@ -1157,7 +1135,6 @@ class X86InductorQuantizer(Quantizer):
             (node.target in propagation_quantizable_ops)
             and (not _is_any_annotated([node]))
             and (node.op == "call_function")
-            # and (quantization_config := self._get_aten_operator_qconfig(node.target))  # type: ignore[arg-type]
         ):
 
             def is_all_inputs_connected_to_quantized_op(input_nodes):
@@ -1215,7 +1192,10 @@ class X86InductorQuantizer(Quantizer):
         return
 
     def _annotate_output_for_int8_in_int8_out_pattern_entry(
-        self, model, quantization_config, filter_fn
+        self,
+        model: torch.fx.GraphModule,
+        quantization_config: Optional[QuantizationConfig] = None,
+        filter_fn: Optional[Callable] = None,
     ):
         for node in model.graph.nodes:
             self._annotate_output_for_int8_in_int8_out_pattern(
@@ -1223,7 +1203,10 @@ class X86InductorQuantizer(Quantizer):
             )
 
     def _annotate_output_for_int8_in_int8_out_pattern(
-        self, node: Node, quantization_config, filter_fn
+        self,
+        node: Node,
+        quantization_config: Optional[QuantizationConfig] = None,
+        filter_fn: Optional[Callable] = None,
     ) -> None:
         r"""
         Check and insert observer at output of node in int8_in_int8_out_ops if needed.
@@ -1231,11 +1214,7 @@ class X86InductorQuantizer(Quantizer):
         90d19323d96afc53fcc22ba5a7bb3fb07fdd6c1c/intel_extension_for_pytorch/quantization/_utils.py#L495
         """
         edge_or_node: Tuple[Node, Node]
-        if (
-            (node.target in int8_in_int8_out_ops)
-            and (_is_any_annotated([node]))
-            and (quantization_config := self._get_aten_operator_qconfig(node.target))  # type: ignore[arg-type]
-        ):
+        if (node.target in int8_in_int8_out_ops) and (_is_any_annotated([node])):
             if node.target == torch.ops.aten.max_pool2d.default:
                 maxpool_node = node
                 if not _is_all_annotated(
@@ -1244,9 +1223,8 @@ class X86InductorQuantizer(Quantizer):
                     ]
                 ):
                     return
-                # !!! Do not skip this, this annotator annotate a annotated node????
-                # if _skip_annotate([maxpool_node], filter_fn):
-                #     return
+                # Don't check the `filter_fn` here, as we want to annotate
+                # the output of the node that's being annotated.
                 # Get the quantization_annotation from getitem_node
                 maxpool_node_quantization_annotation = (
                     maxpool_node.meta[QUANT_ANNOTATION_KEY]
