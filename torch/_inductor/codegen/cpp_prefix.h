@@ -5,7 +5,6 @@
 #include <cmath>
 #include <cstdlib>
 #include <limits>
-#include <optional>
 #include <omp.h>
 
 // WARNING: be extra careful when including more ATen/c10 header files here!
