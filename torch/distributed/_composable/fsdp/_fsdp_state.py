@@ -203,27 +203,11 @@ class FSDPState(_State):
                 )
         return output
 
-    def _pre_backward(self, *unused: Any) -> None:
+    def _pre_backward(self, grad: torch.Tensor) -> torch.Tensor:
         self._training_state = TrainingState.PRE_BACKWARD
         self._register_root_post_backward_final_callback()
         if self._fsdp_param_group:
-            self._fsdp_param_group.pre_backward(*unused)
-
-    def _pre_backward_compile_only(self, grad) -> None:
-        """
-        NOTE(yf225): since under compile we use `register_hook` to call pre_backward, to mimic `multi_grad_hook` "any" mode behavior
-        we only want to call pre_backward once, so doing this check here to early return if already called.
-
-        Comment from Andrew:
-        one more thing to note is that the hook should run once per call to register_multi_grad_hook, where there is one call per forward
-        so if we run multiple forward before backward, we should run the pre-backward hook multiple times (one per forward)
-        as such, the bool to guard whether the pre-backward hook is a no-op or not needs to be per call to register_multi_grad_hook, not something global to the entire backward
-        """
-        if self._training_state == TrainingState.PRE_BACKWARD:
-            return grad
-        self._pre_backward()
-        # NOTE(yf225): this is only needed because we are using `register_hook` for pre-backward hooks under compile.
-        # Not needed for eager mode where we use `register_multi_grad_hook`.
+            self._fsdp_param_group.pre_backward()
         return grad
 
     def _root_post_backward_final_callback(self) -> None:
@@ -254,13 +238,8 @@ class FSDPState(_State):
             t for t in flat_outputs if (torch.is_tensor(t) and t.requires_grad)
         )
         if tensors:
-            # Invariant: if Compiled Autograd is used, regardless of whether FWD is eager,
-            # we must use the Traceable FSDP codepath.
-            if not torch._dynamo.compiled_autograd.compiled_autograd_enabled:
-                register_multi_grad_hook(tensors, self._pre_backward, mode="any")
-            else:
-                for tensor in tensors:
-                    handle = tensor.register_hook(self._pre_backward_compile_only)
+            for tensor in tensors:
+                handle = tensor.register_hook(self._pre_backward)
         return output
 
     def _register_root_post_backward_final_callback(self):

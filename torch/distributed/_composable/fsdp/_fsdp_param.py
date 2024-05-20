@@ -507,6 +507,7 @@ class FSDPParam:
         if not torch._dynamo.compiled_autograd.compiled_autograd_enabled:
             alloc_storage(self.all_gather_outputs[0], self.all_gather_output_storage_sizes[0])
         else:
+            free_storage(self._unsharded_param)
             alloc_storage(self._unsharded_param, self.all_gather_output_storage_sizes[0])
 
     def free_unsharded_param(self) -> None:

@@ -277,6 +277,8 @@ class FSDPParamGroup:
         self._post_forward_indices.append(post_forward_index)
 
     def pre_backward(self, *unused: Any):
+        if self._training_state == TrainingState.PRE_BACKWARD:
+            return
         with torch.profiler.record_function("FSDP::pre_backward"):
             self._training_state = TrainingState.PRE_BACKWARD
             self.unshard()  # no-op if prefetched
