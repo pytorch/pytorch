@@ -237,13 +237,13 @@ def dynamo_timed(original_function=None, phase_name=None, fwd_only=True):
                     # fwd + bwd compilation stages: inductor_compile, code_gen.
                     # use frame_key as time aggregation key for fwd graphs;
                     # use compile_id as time aggregation key for bwd graphs.
-                    if torch._guards.TracingContext.get().aot_graph_name is not None:
+                    if torch._guards.TracingContext.try_get() is not None:
                         aot_graph_name = str(
                             torch._guards.TracingContext.get().aot_graph_name
                         )
                         if "forward" in aot_graph_name or "inference" in aot_graph_name:
                             _add_time_spent(frame_key, phase_name, time_spent)
-                        else:
+                        elif "backward" in aot_graph_name:
                             compile_id = str(
                                 torch._guards.CompileContext.current_compile_id()
                             )
