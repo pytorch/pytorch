@@ -586,12 +586,13 @@ class TestStateDictHooks(TestCase):
             hook_called += 1
 
         hook_called = 0
+        # Test private API since this sets with_module=False which diverges from public API
         m_load._register_load_state_dict_pre_hook(hook_without_module)
         m_load.load_state_dict(m_state_dict)
         self.assertEqual(1, hook_called)
 
         hook_called = 0
-        m_load._register_load_state_dict_pre_hook(hook_with_module, True)
+        m_load.register_load_state_dict_pre_hook(hook_with_module)
         m_load.load_state_dict(m_state_dict)
         self.assertEqual(2, hook_called)
 
@@ -600,7 +601,7 @@ class TestStateDictHooks(TestCase):
             gc.disable()
             m = nn.Linear(10, 10)
 
-            m._register_load_state_dict_pre_hook(_hook_to_pickle, True)
+            m.register_load_state_dict_pre_hook(_hook_to_pickle)
             weak_m = weakref.ref(m)
             del m
 
@@ -610,7 +611,7 @@ class TestStateDictHooks(TestCase):
 
     def test_pickled_hook(self):
         m = nn.Linear(10, 10)
-        m._register_load_state_dict_pre_hook(_hook_to_pickle, True)
+        m.register_load_state_dict_pre_hook(_hook_to_pickle)
         pickle.loads(pickle.dumps(m))
 
     def test_load_state_dict_module_pre_hook(self):
@@ -675,14 +676,13 @@ class TestStateDictHooks(TestCase):
                 mod = m
 
             hook_called = 0
+            # Test private API since this sets with_module=False which diverges from public API
             mod._register_load_state_dict_pre_hook(mod.my_pre_load_hook)
             m.load_state_dict(state_dict)
             self.assertEqual(1, hook_called)
 
             hook_called = 0
-            mod._register_load_state_dict_pre_hook(
-                mod.my_pre_load_hook_with_module, True
-            )
+            mod.register_load_state_dict_pre_hook(mod.my_pre_load_hook_with_module)
             m.load_state_dict(state_dict)
             self.assertEqual(2, hook_called)
 

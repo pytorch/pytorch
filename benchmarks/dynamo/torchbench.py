@@ -36,7 +36,7 @@ def _reassign_parameters(model):
             ):
                 destination[name] = torch.nn.Parameter(destination[name])
 
-    model._register_state_dict_hook(state_dict_hook)
+    model.register_state_dict_post_hook(state_dict_hook)
 
 
 def setup_torchbench_cwd():

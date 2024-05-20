@@ -1778,24 +1778,28 @@ class Module:
             super().__delattr__(name)
 
     def _register_state_dict_hook(self, hook):
-        r"""Register a state-dict hook.
-
-        These hooks will be called with arguments: `self`, `state_dict`,
-        `prefix`, `local_metadata`, after the `state_dict` of `self` is set.
-        Note that only parameters and buffers of `self` or its children are
-        guaranteed to exist in `state_dict`. The hooks may modify `state_dict`
-        inplace or return a new one.
-        """
+        r"""See :meth:`~torch.nn.Module.register_state_dict_hook` for details."""
         handle = hooks.RemovableHandle(self._state_dict_hooks)
         self._state_dict_hooks[handle.id] = hook
         return handle
 
+    def register_state_dict_post_hook(self, hook):
+        r"""Register a post-hook for the :meth:`~torch.nn.Module.state_dict` method.
+
+        It should have the following signature::
+            hook(module, state_dict, prefix, local_metadata) -> None
+
+        The registered hooks can modify the ``state_dict`` inplace.
+        """
+        return self._register_state_dict_hook(hook)
+
     def register_state_dict_pre_hook(self, hook):
         r"""Register a pre-hook for the :meth:`~torch.nn.Module.state_dict` method.
 
-        These hooks will be called with arguments: ``self``, ``prefix``,
-        and ``keep_vars`` before calling ``state_dict`` on ``self``. The registered
-        hooks can be used to perform pre-processing before the ``state_dict``
+        It should have the following signature::
+            hook(module, prefix, keep_vars) -> None
+
+        The registered hooks can be used to perform pre-processing before the ``state_dict``
         call is made.
         """
         handle = hooks.RemovableHandle(self._state_dict_pre_hooks)
@@ -1920,15 +1924,12 @@ class Module:
         return destination
 
     def _register_load_state_dict_pre_hook(self, hook, with_module=False):
-        r"""Register a pre-hook for the :meth:`~torch.nn.Module.load_state_dict` method.
+        r"""See :meth:`~torch.nn.Module.register_load_state_dict_pre_hook` for details.
 
-        These hooks will be called with arguments: `state_dict`, `prefix`,
-        `local_metadata`, `strict`, `missing_keys`, `unexpected_keys`,
-        `error_msgs`, before loading `state_dict` into `self`. These arguments
-        are exactly the same as those of `_load_from_state_dict`.
-
-        If ``with_module`` is ``True``, then the first argument to the hook is
-        an instance of the module.
+        A subtle difference is that if ``with_module`` is set to ``False``, then the
+        hook will not take the ``module`` as the first argument whereas
+        :meth:`~torch.nn.Module.register_load_state_dict_pre_hook` always takes the
+        ``module`` as the first argument.
 
         Arguments:
             hook (Callable): Callable hook that will be invoked before
@@ -1940,8 +1941,20 @@ class Module:
         self._load_state_dict_pre_hooks[handle.id] = _WrappedHook(hook, self if with_module else None)
         return handle
 
+    def register_load_state_dict_pre_hook(self, hook):
+        r"""Register a pre-hook to be run before module's :meth:`~nn.Module.load_state_dict` is called.
+
+        It should have the following signature::
+            hook(module, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs) -> state_dict or None  # noqa: B950
+
+        Arguments:
+            hook (Callable): Callable hook that will be invoked before
+                loading the state dict.
+        """
+        return self._register_load_state_dict_pre_hook(hook, with_module=True)
+
     def register_load_state_dict_post_hook(self, hook):
-        r"""Register a post hook to be run after module's ``load_state_dict`` is called.
+        r"""Register a post-hook to be run after module's :meth:`~nn.Module.load_state_dict` is called.
 
         It should have the following signature::
             hook(module, incompatible_keys) -> None
@@ -2007,7 +2020,9 @@ class Module:
                 :meth:`~torch.nn.Module.load_state_dict`
         """
         for hook in self._load_state_dict_pre_hooks.values():
-            hook(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
+            hook_result = hook(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
+            if hook_result is not None:
+                state_dict = hook_result
 
         persistent_buffers = {k: v for k, v in self._buffers.items() if k not in self._non_persistent_buffers_set}
         local_name_params = itertools.chain(self._parameters.items(), persistent_buffers.items())

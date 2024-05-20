@@ -146,7 +146,7 @@ class SpectralNorm:
         module.register_buffer(fn.name + "_v", v)
 
         module.register_forward_pre_hook(fn)
-        module._register_state_dict_hook(SpectralNormStateDictHook(fn))
+        module.register_state_dict_post_hook(SpectralNormStateDictHook(fn))
         module._register_load_state_dict_pre_hook(SpectralNormLoadStateDictPreHook(fn))
         return fn
 

@@ -96,7 +96,7 @@ class QuantizedGraphModule(GraphModule):
         super().__init__(root, graph)
         for attr in preserved_attrs:
             setattr(self, attr, preserved_attrs[attr])
-        self._register_state_dict_hook(_save_packed_weight)
+        self.register_state_dict_post_hook(_save_packed_weight)
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
