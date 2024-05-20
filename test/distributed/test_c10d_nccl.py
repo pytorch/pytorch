@@ -75,6 +75,10 @@ BFLOAT16_AVAILABLE = torch.cuda.is_available() and (
     or torch.version.hip is not None
 )
 
+CUDA_12_AND_ABOVE = torch.cuda.is_available() and (
+    torch.version.cuda is not None and int(torch.version.cuda.split(".")[0]) >= 12
+)
+
 
 class RendezvousEnvTest(TestCase):
     @retry_on_connect_failures
@@ -335,6 +339,10 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_but_pass_in_sandcastle_if(
+        not CUDA_12_AND_ABOVE,
+        "Device side assert could cause hang in lower versions of CUDA",
+    )
     @parametrize("type", [torch.float16, torch.float32, torch.float64])
     @skip_if_rocm
     def test_nan_assert(self, type):
