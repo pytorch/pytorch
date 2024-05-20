@@ -88,9 +88,12 @@ TensorCheck::TensorCheck(
 // See note in guards.py [Note - On Export Tensor Guards]
 // Logic parallel to here must be maintained in python
 bool TensorCheck::check(const LocalState& state, const at::Tensor& v) {
-  // In terms of a sparse_
+  // In terms of a sparse_csr tensor, it does not support strides informatio
   c10::SymIntArrayRef sym_strides(std::vector<SymInt>(v.ndimension(), -1));
-  if (!v.is_sparse_csr()) {
+  bool does_not_support_stride = v.layout() == c10::kSparseCsr ||
+      v.layout() == c10::kSparseCsc || v.layout() == c10::kSparseBsc ||
+      v.layout() == c10::kSparseBsr;
+  if (!does_not_support_stride) {
     sym_strides = v.sym_strides();
   }
 
