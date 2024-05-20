@@ -2,12 +2,13 @@ import os
 
 import warnings
 
-import torch
-import torch.ao.quantization
 import torchvision
 import torchvision.transforms.transforms as transforms
-from torch.autograd import Variable
 from torchvision.models.quantization.resnet import resnet18
+
+import torch
+import torch.ao.quantization
+from torch.autograd import Variable
 
 # Setup warnings
 warnings.filterwarnings(action="ignore", category=DeprecationWarning, module=r".*")
@@ -26,6 +27,7 @@ eval_batch_size = 50
 
 class AverageMeter:
     """Computes and stores the average and current value"""
+
     def __init__(self, name, fmt=":f"):
         self.name = name
         self.fmt = fmt
@@ -99,7 +101,6 @@ def print_size_of_model(model):
 
 
 def prepare_data_loaders(data_path):
-
     normalize = transforms.Normalize(
         mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
     )

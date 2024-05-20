@@ -1,3 +1,5 @@
+from torchvision.models.quantization.resnet import resnet18
+
 import torch
 import torch.ao.quantization
 import torch.nn as nn
@@ -5,7 +7,6 @@ from torch.ao.quantization.experimental.quantization_helper import (
     evaluate,
     prepare_data_loaders,
 )
-from torchvision.models.quantization.resnet import resnet18
 
 # validation dataset: full ImageNet dataset
 data_path = "~/my_imagenet/"
@@ -89,9 +90,9 @@ b=4, k=2
 """
 
 prepared_model = prepare_ptq_linear(uniform_qconfig_4bit)
-quantized_model = convert_fx(
+quantized_model = convert_fx(  # noqa: F821
     prepared_model
-)  # convert the calibrated model to a quantized model  # noqa: F821
+)  # convert the calibrated model to a quantized model
 
 top1, top5 = evaluate(quantized_model1, criterion, data_loader_test)  # noqa: F821
 print(

@@ -1,9 +1,10 @@
+from torchvision.models.quantization.resnet import resnet18
+
 from torch.ao.quantization.experimental.quantization_helper import (
     evaluate,
     prepare_data_loaders,
     training_loop,
 )
-from torchvision.models.quantization.resnet import resnet18
 
 # training and validation dataset: full ImageNet dataset
 data_path = "~/my_imagenet/"
@@ -30,9 +31,9 @@ Prepare model QAT for specified qconfig for torch.nn.Linear
 
 def prepare_qat_linear(qconfig):
     qconfig_dict = {"object_type": [(torch.nn.Linear, qconfig)]}  # noqa: F821
-    prepared_model = prepare_fx(
+    prepared_model = prepare_fx(  # noqa: F821
         copy.deepcopy(float_model), qconfig_dict
-    )  # fuse modules and insert observers  # noqa: F821
+    )  # fuse modules and insert observers
     training_loop(prepared_model, criterion, data_loader)
     prepared_model.eval()
     return prepared_model
