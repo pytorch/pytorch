@@ -2379,6 +2379,8 @@ class SourcelessBuilder:
             return PlacementVariable(value)
         elif DeviceMeshVariable.is_device_mesh(value):
             return DeviceMeshVariable(value)
+        elif isinstance(value, re.Pattern):
+            return RegexPatternVariable(value)
         unimplemented(
             f"Unexpected type in sourceless builder {value_type.__module__}.{value_type.__qualname__}"
         )
@@ -2399,6 +2401,7 @@ class SourcelessBuilder:
         )
         handlers[dict] = lambda tx, value: ConstDictVariable(
             {create(tx, k): create(tx, v) for k, v in value.items()},
+            type(value),
             mutable_local=MutableLocal(),
         )
         handlers[list] = lambda tx, value: ListVariable(
@@ -2410,6 +2413,7 @@ class SourcelessBuilder:
         handlers[torch.Size] = lambda tx, value: SizeVariable(
             [create(tx, x) for x in value]
         )
+        handlers[collections.OrderedDict] = handlers[dict]
         handlers[immutable_dict] = handlers[dict]
         handlers[immutable_list] = handlers[list]
         handlers[types.ModuleType] = lambda tx, value: PythonModuleVariable(value)
