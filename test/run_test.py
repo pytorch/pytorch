@@ -1266,8 +1266,8 @@ def parse_args():
     )
 
     args, extra = parser.parse_known_args()
-    if len(extra) > 0 and extra[0] == "--":
-        extra = extra[1:]
+    if "--" in extra:
+        extra.remove("--")
     args.additional_args = extra
     return args
 
