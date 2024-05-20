@@ -304,7 +304,7 @@ def _pipe_split():
     return None
 
 
-@torch.library.impl_abstract("pippy::_pipe_split")  # type: ignore[no-redef]
+@torch.library.register_fake("pippy::_pipe_split")  # type: ignore[no-redef]
 def _pipe_split():  # noqa: F811
     return None
 
