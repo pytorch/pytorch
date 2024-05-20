@@ -490,6 +490,18 @@ class CallMethodKey:
 
 
 @dataclass(frozen=True)
+class InnerTensorKey:
+    inner_name: str
+
+    def __str__(self) -> str:
+        return f".{self.inner_name}"
+
+    def get(self, o: Any) -> Any:
+        """Get the inner tensor attribute"""
+        return getattr(o, self.inner_name)
+
+
+@dataclass(frozen=True)
 class DivideByKey:
     divisor: int
 
@@ -537,6 +549,14 @@ def compute_unbacked_bindings(shape_env, example_value, old_example_value=None, 
                             a[i], path + (pytree.SequenceKey(i),),
                             real=real[i] if real is not None else None
                         )
+                    )
+            elif is_traceable_wrapper_subclass(a):
+                # TODO: Determine if this is correct
+                attrs, _ = a.__tensor_flatten__()
+                for attr in attrs:
+                    sub = getattr(a, attr)
+                    r.update(
+                        free_unbacked_symbols_with_path(sub, path + (InnerTensorKey(attr),))
                     )
             elif isinstance(a, torch.Tensor):
                 r.update(
