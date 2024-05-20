@@ -388,6 +388,7 @@ def mps_ops_modifier(ops):
         'fft.ifftn',
         'fft.ifftshift',
         'fft.hfftn',
+        'fft.hfft',
         'flip',
         'fliplr',
         'flipud',
