@@ -2437,16 +2437,11 @@ class CppVecKernel(CppKernel):
         return vec_type
 
     def reduction_combine_vec(self, reduction_type, var, next_value):
-        if reduction_type == "max":
-            return f"at::vec::maximum({var}, {next_value})"
-        elif reduction_type == "min":
-            return f"at::vec::minimum({var}, {next_value})"
-        elif reduction_type == "sum":
-            return f"{var} + {next_value}"
-        elif reduction_type == "prod":
-            return f"{var} * {next_value}"
-        elif reduction_type == "xor_sum":
-            return f"{var} ^ {next_value}"
+        if reduction_type in ["max", "min", "sum", "prod", "xor_sum"]:
+            if self.tail_size:
+                return f"reduce({var}, {next_value}, \"{reduction_type}\", {self.tail_size})"
+            else:
+                return f"reduce({var}, {next_value}, \"{reduction_type}\")"
         elif reduction_type == "welford_reduce":
             if self.tail_size:
                 return f"welford_combine({var}, {next_value}, {self.tail_size})"
@@ -2459,7 +2454,10 @@ class CppVecKernel(CppKernel):
             else:
                 # When combining intermediate accumulators we have a Welford<T> struct
                 mean, m2, weight = reduction_project(reduction_type, next_value)
-            return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
+            if self.tail_size:
+                return f"welford_combine({var}, {{{mean}, {m2}, {weight}}}, {self.tail_size})"
+            else:
+                return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
         else:
             raise NotImplementedError
 
