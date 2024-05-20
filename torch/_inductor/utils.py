@@ -14,6 +14,7 @@ import math
 import operator
 import os
 import platform
+import re
 import shutil
 import sys
 import tempfile
@@ -256,11 +257,15 @@ def convert_shape_to_symint(
     from .virtualized import V
 
     return [
-        i
-        if isinstance(i, int)
-        else int(i)
-        if isinstance(i, sympy.Integer)
-        else V.graph.sizevars.shape_env.create_symintnode(i, hint=None)
+        (
+            i
+            if isinstance(i, int)
+            else (
+                int(i)
+                if isinstance(i, sympy.Integer)
+                else V.graph.sizevars.shape_env.create_symintnode(i, hint=None)
+            )
+        )
         for i in lst
     ]
 
@@ -388,11 +393,9 @@ RV = TypeVar("RV", covariant=True)
 
 class CachedMethod(Generic[P, RV], Protocol):
     @staticmethod
-    def clear_cache(self) -> None:
-        ...
+    def clear_cache(self) -> None: ...
 
-    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> RV:
-        ...
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> RV: ...
 
 
 # See https://github.com/python/mypy/issues/13222#issuecomment-1193073470 to understand the type signature
@@ -471,6 +474,13 @@ def get_kernel_metadata(node_schedule, wrapper):
 
     from_node_dict = collections.defaultdict(list)
     original_aten_dict = collections.defaultdict(list)
+
+    # sort `inductor_nodes` topologically
+    if len(inductor_nodes):
+        graph = inductor_nodes[0].graph
+        if all(n for n in inductor_nodes if n in graph.nodes):
+            inductor_nodes = [n for n in graph.nodes if n in inductor_nodes]
+
     for node in inductor_nodes:
         if "original_aten" in node.meta and node.meta["original_aten"] is not None:
             key = str(node.meta["original_aten"]._overloadpacket)
@@ -479,15 +489,56 @@ def get_kernel_metadata(node_schedule, wrapper):
             key = node.meta["from_node"][0][0]
             from_node_dict[key].append(node.name)
     metadata = (
-        f"{wrapper.comment} Source Nodes: [{', '.join(sorted(from_node_dict.keys()))}], "
-        f"Original ATen: [{', '.join(sorted(original_aten_dict.keys()))}]"
+        f"{wrapper.comment} Source Nodes: [{', '.join(from_node_dict.keys())}], "
+        f"Original ATen: [{', '.join(original_aten_dict.keys())}]"
     )
+
     # trace back to original node here
-    detailed_metadata = []
+    detailed_metadata = [f"{wrapper.comment} Source node to ATen node mapping:"]
     for original_node, nodes in sorted(from_node_dict.items()):
         detailed_metadata.append(
-            f"{wrapper.comment} {original_node} => {', '.join(sorted(nodes))}"
+            f"{wrapper.comment}   {original_node} => {', '.join(sorted(nodes))}"
         )
+
+    # print the aot_autograd graph fragment
+    detailed_metadata.append(f"{wrapper.comment} Graph fragment:")
+    for node in inductor_nodes:
+        node_s = node.format_node()
+        # Make the node string representation easier to read
+        # before: %abs_3 : [num_users=1] = call_function[target=torch.ops.aten.abs.default](args = (%tangents_1,), kwargs = {})
+        # after: %abs_3 = torch.ops.aten.abs.default(args = (%tangents_1,), kwargs = {})
+        node_s = re.sub(r" : \[num_users=[\d]\]", "", node_s)
+        node_s = node_s.replace("call_function[target=", "").replace("]", "")
+        detailed_metadata.append(f"{wrapper.comment}     {node_s}")
+
+    # print the unique fwd and bwd nn.Module stack values, if applicable
+    unique_nn_mod_stack_vals = set()
+    for node in inductor_nodes:
+        if "nn_module_stack" in node.meta:
+            nn_s = node.meta["nn_module_stack"]
+            last_key = list(nn_s.keys())[-1]
+            last_val = nn_s[last_key]
+            unique_nn_mod_stack_vals.add((last_key, last_val))
+    if len(unique_nn_mod_stack_vals):
+        detailed_metadata.append(
+            f"{wrapper.comment} Unique node to nn_module_stack last element"
+        )
+        for val in unique_nn_mod_stack_vals:
+            detailed_metadata.append(f"{wrapper.comment}     {val}")
+    unique_fwd_nn_mod_stack_vals = set()
+    for node in inductor_nodes:
+        if "fwd_nn_module_stack" in node.meta:
+            fwd_nn_s = node.meta["fwd_nn_module_stack"]
+            last_key = list(fwd_nn_s.keys())[-1]
+            last_val = fwd_nn_s[last_key]
+            unique_fwd_nn_mod_stack_vals.add((last_key, last_val))
+    if len(unique_fwd_nn_mod_stack_vals):
+        detailed_metadata.append(
+            f"{wrapper.comment} Unique node to fwd_nn_module_stack last element"
+        )
+        for val in unique_fwd_nn_mod_stack_vals:
+            detailed_metadata.append(f"{wrapper.comment}     {val}")
+
     return metadata, "\n".join(detailed_metadata)
 
 
