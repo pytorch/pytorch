@@ -1874,7 +1874,7 @@ class CPUReproTests(TestCase):
         check_metrics_vec_kernel_count(2)
 
     @requires_vectorization
-    def test_issue_126449(self):
+    def test_ops_masked_with_bool_input(self):
         x = torch.zeros(129, dtype=torch.bool)
         size = [2, 3]
         res_aten_eager = torch.constant_pad_nd(x, size)
