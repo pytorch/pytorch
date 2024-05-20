@@ -215,9 +215,10 @@ std::pair<double, double> histc_select_outer_bin_edges(const Tensor& input,
         rightmost_edge = std::get<1>(extrema).item<double>();
     }
 
+    // expand empty range to avoid divide by zero
     if (leftmost_edge == rightmost_edge) {
-        leftmost_edge -= 1;
-        rightmost_edge += 1;
+        leftmost_edge -= 0.5;
+        rightmost_edge += 0.5;
     }
 
     TORCH_CHECK(!(std::isinf(leftmost_edge) || std::isinf(rightmost_edge) ||
