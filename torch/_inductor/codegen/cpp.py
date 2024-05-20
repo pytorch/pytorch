@@ -20,6 +20,7 @@ from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
+from torch.fx.experimental.symbolic_shapes import has_free_symbols
 
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
@@ -3300,17 +3301,22 @@ class CppKernelProxy(CppKernel):
                 main_loop, tail_loop = self.loop_nest.split_with_tiling(
                     tiling_indices[0], factor=tiling_factors[0]
                 )
-                masked_vec_kernel = codegen_kernel(
-                    CppVecKernel,
-                    tiling_factors[0],
-                    tiling_indices[0],
-                    vec_dtype,
-                    tail_loop.steps,
-                )
                 main_loop.set_kernel(vec_kernel)
-                tail_loop.set_kernel(masked_vec_kernel)
                 main_loop.simd_vec = True
-                tail_loop.simd_vec = True
+                if has_free_symbols(tail_loop.size):
+                    tail_loop.steps = 1
+                    tail_loop.set_kernel(scalar_kernel)
+                    tail_loop.simd_omp = True
+                else:
+                    masked_vec_kernel = codegen_kernel(
+                        CppVecKernel,
+                        tiling_factors[0],
+                        tiling_indices[0],
+                        vec_dtype,
+                        tail_loop.steps,
+                    )
+                    tail_loop.set_kernel(masked_vec_kernel)
+                    tail_loop.simd_vec = True
                 # We chop the loop into two cubes by the nelements - main loop and tail loop.
                 # Regarding the main loop, it is straightforward that it could be vectorized with
                 # nelements. But for the tail loop, it still could be vectorized. For example,
