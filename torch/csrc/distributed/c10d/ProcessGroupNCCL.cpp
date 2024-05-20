@@ -1730,10 +1730,9 @@ void ProcessGroupNCCL::runHookLoop() {
         [&]() -> bool {
           return !completedWorkList_.empty() || terminateProcessGroup_.load();
         });
-
-    try {
-      for (auto it = completedWorkList_.begin(); it != completedWorkList_.end();
-           /* no increment */) {
+    for (auto it = completedWorkList_.begin(); it != completedWorkList_.end();
+         /* no increment */) {
+      try {
         const WorkNCCL& work = *it;
         // Hook might grab GIL, unlock first to prevent deadlock
         lock.unlock();
@@ -1750,35 +1749,34 @@ void ProcessGroupNCCL::runHookLoop() {
             std::chrono::duration<float, std::milli>(
                 work.getDuration()) // activeDuration
             ));
+      } catch (std::exception& e) {
+        if (std::string(e.what()).find("driver shutting down") !=
+            std::string::npos) {
+          LOG(INFO)
+              << logPrefix()
+              << "main process destroyed cuda before runHookLoop exited, terminating runHookLoop."
+              << " (runHookLoop caught exception: " << e.what();
 
-        lock.lock();
-        it = completedWorkList_.erase(it);
+        } else {
+          // PythonOnCompletionHook has already extracted Python exception
+          // message and wrapped it with a cpp one. So we no longer need to
+          // acquire GIL here.
+          const auto errorStr = c10::str(
+              "Caught exception on rank ",
+              rank_,
+              " while running onCompletion hook for ProcessGroupNCCL: ",
+              e.what(),
+              ". Aborting all communicators.");
+
+          // No need to call abort() on WorkNCCL here as that collective has
+          // already finished successfully at this point. We just need to abort
+          // the process Abort all NCCL Communicators on this ProcessGroupNCCL
+          // instance.
+          abort(errorStr);
+        }
       }
-    } catch (std::exception& e) {
-      if (std::string(e.what()).find("driver shutting down") !=
-          std::string::npos) {
-        LOG(INFO)
-            << logPrefix()
-            << "main process destroyed cuda before runHookLoop exited, terminating runHookLoop."
-            << " (runHookLoop caught exception: " << e.what();
-
-      } else {
-        // PythonOnCompletionHook has already extracted Python exception message
-        // and wrapped it with a cpp one. So we no longer need to acquire GIL
-        // here.
-        const auto errorStr = c10::str(
-            "Caught exception on rank ",
-            rank_,
-            " while running onCompletion hook for ProcessGroupNCCL: ",
-            e.what(),
-            ". Aborting all communicators.");
-
-        // No need to call abort() on WorkNCCL here as that collective has
-        // already finished successfully at this point. We just need to abort
-        // the process Abort all NCCL Communicators on this ProcessGroupNCCL
-        // instance.
-        abort(errorStr);
-      }
+      lock.lock();
+      it = completedWorkList_.erase(it);
     }
 
     // Lock is still acquired at this point
