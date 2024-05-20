@@ -8651,6 +8651,12 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
     yield from samples
 
 
+def sample_inputs_attention_function(op_info, device, dtype, requires_grad, **kwargs):
+    q = make_tensor((10, 5), dtype=dtype, device=device)
+    k = make_tensor((10, 5), dtype=dtype, device=device)
+    v = make_tensor((10, 8), dtype=dtype, device=device)
+    yield SampleInput(input = (q, k, v))
+
 def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     batch, num_heads, head_dim = 4, 4, 8
@@ -19064,6 +19070,13 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',
                          dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
         ),
+    ),
+    OpInfo(
+        "attention_function",
+        dtypes=all_types(),
+        sample_inputs_func=sample_inputs_attention_function,
+        supports_out=True,
+        supports_autograd=True,
     ),
     ReductionOpInfo(
         'all',

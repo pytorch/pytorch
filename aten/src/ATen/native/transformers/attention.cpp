@@ -1,3 +1,5 @@
+#include "ATen/core/TensorBody.h"
+#include "ATen/ops/tan.h"
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/TensorOperators.h>
@@ -950,6 +952,13 @@ Tensor triton_multi_head_attention(
   debug_assert_shape(__LINE__, proj, {B, T, D});
 #endif
   return proj;
+}
+
+std::tuple<Tensor, Tensor> attention_function(const Tensor& q, const Tensor& k, const Tensor& v){
+  auto x = at::matmul(q, k.transpose(0,1));
+  auto a = at::tan(x);
+  auto o = at::matmul(a, v);
+  return std::make_tuple(o, a);
 }
 } // namespace native
 } // namespace at
