@@ -4,7 +4,17 @@ import itertools
 import operator
 import warnings
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+)
 
 import torch
 import torch.nn.functional as F
@@ -20,7 +30,6 @@ from torch.ao.quantization.observer import (
     PlaceholderObserver,
 )
 from torch.ao.quantization.pt2e.graph_utils import find_sequential_partitions
-from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
 from torch.ao.quantization.quantizer.quantizer import (
     QuantizationAnnotation,
     QuantizationSpec,
@@ -42,6 +51,9 @@ from torch.fx.passes.utils.source_matcher_utils import (
     get_source_partitions,
     SourcePartition,
 )
+
+if TYPE_CHECKING:
+    from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
 
 __all__ = [
     "X86InductorQuantizer",
@@ -764,10 +776,8 @@ class X86InductorQuantizer(Quantizer):
 
     def _annotate_linear_fusion_pattern(self, model: torch.fx.GraphModule):
         if config := self._get_aten_operator_qconfig(torch.ops.aten.linear.default):
-            if config.input_activation and not config.input_activation.is_dynamic:
-                # <TODO> Weiwen: Dynamic Quant of linear unary will be supported in next step
-                self._annotate_linear_binary_unary(model, config)
-                self._annotate_linear_unary(model, config)
+            self._annotate_linear_binary_unary(model, config)
+            self._annotate_linear_unary(model, config)
             self._annotate_linear(model, config)
 
     def _annotate_matmul(self, model: torch.fx.GraphModule):

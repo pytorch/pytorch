@@ -279,7 +279,6 @@ def get_pt_preprocessor_flags():
         "-D_THP_CORE",
         "-DUSE_SCALARS",
         "-DNO_CUDNN_DESTROY_HANDLE",
-        "-DBUILD_CAFFE2",
     ]
 
     if _is_build_mode_dev():

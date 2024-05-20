@@ -58,7 +58,9 @@ from .variables import (
     UserMethodVariable,
 )
 
-from .variables.base import VariableTracker
+
+if typing.TYPE_CHECKING:
+    from .variables.base import VariableTracker
 
 
 """
@@ -189,6 +191,7 @@ manual_torch_name_rule_map = {
     "torch._C.autocast_decrement_nesting": SkipFunctionVariable,
     "torch._C.autocast_increment_nesting": SkipFunctionVariable,
     "torch.autograd.grad": SkipFunctionVariable,
+    "torch.autograd.backward": SkipFunctionVariable,
     "torch._C.clear_autocast_cache": SkipFunctionVariable,
     "torch.distributions.constraints.is_dependent": SkipFunctionVariable,
     "torch.jit.isinstance": SkipFunctionVariable,
@@ -1299,9 +1302,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C.parse_schema",
         "torch._C.parse_type_comment",
         "torch._C.read_vitals",
-        "torch._C.set_flush_denormal",
-        "torch._C.set_num_interop_threads",
-        "torch._C.set_num_threads",
         "torch._C.set_vital",
         "torch._C.unify_type_list",
         "torch._C.vitals_enabled",
@@ -2337,7 +2337,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.autograd._make_grads",
         "torch.autograd._register_py_tensor_class_for_device",
         "torch.autograd._tensor_or_tensors_to_tuple",
-        "torch.autograd.backward",
         "torch.autograd.forward_ad._maybe_load_decompositions",
         "torch.autograd.function._iter_filter",
         "torch.autograd.function._iter_jit_values",
@@ -3293,6 +3292,13 @@ FBCODE_INLINE_FILES_IN_SKIPPED_DIRS_RE = re.compile(
     f".*({'|'.join(map(re.escape, FBCODE_INLINE_FILES_IN_SKIPPED_DIRS))})"
 )
 
+# torch.optim is a special case,
+# we usually want to inline it, but the directory
+# structure does not match the module structure
+# and we want to skip the functions in optim/lr_scheduler.py
+# this has precedence over all other rules in check_file
+FORCE_SKIP_FILES = {f"{_module_dir(torch)}optim/lr_scheduler.py"}
+
 
 def _recompile_re():
     global SKIP_DIRS_RE
@@ -3326,6 +3332,8 @@ def check_file(filename, is_inlined_call=False):
     """Should skip this file?"""
     if filename is None:
         return SkipResult(True, "filename is None")
+    if filename in FORCE_SKIP_FILES:
+        return SkipResult(True, "FORCE_SKIP_FILES")
     if any(filename.startswith(d) for d in get_legacy_mod_inlinelist()):
         return SkipResult(
             False,
@@ -3541,3 +3549,11 @@ def lookup_inner(
         return SkipFunctionVariable
     else:
         return UserFunctionVariable
+
+
+def clear_lru_cache():
+    torch._dynamo.trace_rules.get_torch_obj_rule_map.cache_clear()
+    torch._dynamo.trace_rules.get_tensor_method.cache_clear()
+    torch._dynamo.trace_rules.get_legacy_mod_inlinelist.cache_clear()
+    torch._dynamo.trace_rules.get_mod_inlinelist.cache_clear()
+    torch._dynamo.trace_rules.dynamo_dir.cache_clear()

@@ -218,7 +218,8 @@ class ComptimeVariable(VariableTracker):
         # TODO: support an expression form as well
 
         assert not kwargs
-        assert len(args) == 1
+        # Second argument is runtime lambda, ignored
+        assert len(args) <= 2
         fn = args[0]
         if isinstance(fn, UserFunctionVariable):
             fn.get_function()(ComptimeContext(tx))
@@ -431,6 +432,16 @@ class AutogradFunctionVariable(VariableTracker):
                 f"non-function or method in subclass of torch.autograd.Function: {fn}"
             )
 
+    def call_backward(self, tx, args, kwargs):
+        fn = self.fn_cls.backward
+        self.source = AttrSource(self.source, "backward")
+        assert type(args[0].value) is torch._dynamo.external_utils.FakeBackwardCFunction
+        assert isinstance(fn, types.FunctionType)
+
+        return variables.UserFunctionVariable(fn, source=self.source).call_function(
+            tx, args, kwargs
+        )
+
     def call_function(self, tx, args, kwargs):
         return AutogradFunctionVariable(self.fn_cls)
 
@@ -460,6 +471,8 @@ class AutogradFunctionVariable(VariableTracker):
             else:
                 return self.call_apply(tx, args, kwargs)
 
+        elif name == "backward":
+            return self.call_backward(tx, args, kwargs)
         else:
             from .. import trace_rules
 
