@@ -1,8 +1,6 @@
 import logging
 from typing import cast, List
 
-from ...._dynamo.utils import counters
-
 from ... import config
 from ...codecache import code_hash, get_path
 from ...scheduler import BaseSchedulerNode, BaseScheduling, Scheduler, SchedulerNode
@@ -78,7 +76,6 @@ class ROCmCPPScheduling(BaseScheduling):
         """
         Codegen a ROCm template, possibly with fused epilogues
         """
-        counters["inductor"]["rocm_epilogue_fusion_counter"] += len(epilogue_nodes)
         assert self.is_rocm_cpp_template(
             template_node
         ), "Template node passed to ROCmScheduler.codegen_template must be a SchedulerNode that wraps a ROCmTemplateBuffer"
