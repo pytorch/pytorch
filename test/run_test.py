@@ -29,7 +29,6 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_MACOS,
     IS_WINDOWS,
-    parser as common_parser,
     retry_shell,
     set_cwd,
     shell,
