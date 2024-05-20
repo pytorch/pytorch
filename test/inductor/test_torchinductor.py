@@ -1121,12 +1121,16 @@ class CommonTemplate:
     @skipIfRocm
     @config.patch(debug_index_asserts=False)
     def test_neg_index(self):
-        def test(fn, inps, has_assert: bool, has_wrapping: bool):
+        def test(
+            fn, inps, has_assert: bool, has_wrapping: bool, vectorize: bool = True
+        ):
             fn_opt = torch.compile(fn)
             if self.device == "cpu":
                 _, code = run_and_get_cpp_code(fn_opt, *inps)
-                self.assertTrue(("?" in code or "blendv" in code) is has_wrapping)
+                self.assertTrue(("?" in code) is has_wrapping)
                 self.assertTrue(("TORCH_CHECK" in code) is has_assert)
+                # Assert that we always vectorize the kernel regardless of wrapping / checks
+                self.assertTrue(("loadu" in code) is vectorize)
             else:
                 code = run_and_get_triton_code(fn_opt, *inps)
                 self.assertTrue(("tl.where" in code) is has_wrapping)
@@ -1143,7 +1147,8 @@ class CommonTemplate:
             return x[:, -1]
 
         a = torch.rand(1, 64, 32, device=self.device)
-        test(direct, (a,), has_assert=False, has_wrapping=False)
+        # Does not even generate a kernel as it's a view
+        test(direct, (a,), has_assert=False, has_wrapping=False, vectorize=False)
 
         def flip(a, b):
             return a[b]
@@ -1183,6 +1188,7 @@ class CommonTemplate:
             (a,),
             has_assert=ifdynstaticdefault(False, True),
             has_wrapping=False,
+            vectorize=False,  # Constant propagation off -> indirect indexing -> no vec
         )
 
         def unsafe_index(a, b):
@@ -1199,6 +1205,7 @@ class CommonTemplate:
             (a,),
             has_assert=ifdynstaticdefault(False, True),
             has_wrapping=False,
+            vectorize=False,  # There's no loop to vectorize!
         )
 
         def constant_propagation_neg(a):
@@ -1211,6 +1218,7 @@ class CommonTemplate:
             (a,),
             has_assert=False,
             has_wrapping=False,
+            vectorize=False,  # There's no loop to vectorize!
         )
 
     def test_computed_buffer_inlining(self):

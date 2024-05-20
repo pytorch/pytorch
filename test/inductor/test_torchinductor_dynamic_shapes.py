@@ -59,10 +59,6 @@ test_failures = {
     # calling div on only symint args
     "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_conv_inference_heuristics_dynamic_shapes": TestFailure("cuda"),
-    # Our logic is not strong enough to prove these bounds... yet!
-    # They are of the form s0 > x0 % s0 and s0 > x0 // s0 for 0 <= x0 < s0
-    "test_index_propagation_floordiv_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_index_propagation_remainder_dynamic_shapes": TestFailure(("cpu", "cuda")),
 }
 
 if TEST_WITH_ROCM:
