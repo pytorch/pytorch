@@ -1250,7 +1250,7 @@ class CppWrapperCpu(WrapperCodeGen):
             self.writeline(self.wrap_kernel_call(kernel, args))
 
     def generate_user_defined_triton_kernel(
-        self, kernel_name, grid, configs, args, triton_meta
+        self, kernel_name, grid, configs, args, triton_meta, arg_types=None
     ):
         assert len(grid) != 0
         if len(grid) == 1:
@@ -1264,15 +1264,6 @@ class CppWrapperCpu(WrapperCodeGen):
                     grid_decision = grid[i]
                     break
             assert grid_decision is not None
-
-        # cpp wrapper needs arg type info for codegen
-        arg_types = []
-        for arg in args:
-            try:
-                arg_types.append(V.graph.get_dtype(arg))
-            except (KeyError, TypeError):
-                # arg is not a tensor, generate_args_decl will further detect type
-                arg_types.append(None)
 
         self.generate_kernel_call(
             kernel_name,

@@ -22,27 +22,6 @@ if TYPE_CHECKING:
     from ..graph import GraphLowering
 
 
-def is_int(s: str) -> bool:
-    # Cpp code gen adds L at the end of ints
-    # Lets remove it for checking whether we have an int or not
-    # TODO: do we need to check if this is int32 or int64?
-    if isinstance(s, str) and s[-1] == "L":
-        s = s[:-1]
-    try:
-        int(s)
-    except (ValueError, TypeError):
-        return False
-    return True
-
-
-def is_float(s: str) -> bool:
-    try:
-        float(s)
-    except (ValueError, TypeError):
-        return False
-    return True
-
-
 class CppWrapperCuda(CppWrapperCpu):
     """
     Generates cpp wrapper for running on GPU and calls CUDA kernels
@@ -120,8 +99,6 @@ class CppWrapperCuda(CppWrapperCpu):
             self.writeline("}")
 
     def generate_args_decl(self, call_args, arg_types):
-        dynamic_symbols = {s.name for s in V.graph.sizevars.free_symbols()}
-        # TODO: only works for constant now, need type info
         new_args = []
         for arg, arg_type in zip(call_args, arg_types):
             var_name = f"var_{next(self.arg_var_id)}"
@@ -152,23 +129,12 @@ class CppWrapperCuda(CppWrapperCpu):
                                 f"CUdeviceptr {var_name} = reinterpret_cast<CUdeviceptr>({arg}.data_ptr());"
                             )
                         )
-            elif (
-                arg_type in (sympy.Integer, sympy.Symbol, SymbolicCallArg)
-                or str(arg) in dynamic_symbols
-            ):
-                self.writeline(f"auto {var_name} = {arg};")
-            elif arg_type == sympy.Expr:
-                self.writeline(f"auto {var_name} = {self.expr_printer(arg)};")
-            elif arg_type == int or is_int(arg):
-                self.writeline(f"int {var_name} = {arg};")
-            elif arg_type in (sympy.Float, float) or is_float(arg):
+            elif arg_type in (sympy.Integer, int):
+                self.writeline(f"int {var_name} = {self.expr_printer(arg)};")
+            elif arg_type in (sympy.Float, float):
                 self.writeline(f"float {var_name} = {self.expr_printer(arg)};")
-            elif arg == "nullptr":
-                self.writeline(f"auto {var_name} = nullptr;")
-            elif arg == "c10::nullopt":
-                self.writeline(f"auto {var_name} = c10::nullopt;")
             else:
-                raise AssertionError(f"unsupported arg type: {arg_type=}")
+                self.writeline(f"auto {var_name} = {self.expr_printer(arg)};")
             new_args.append(f"&{var_name}")
 
         return ", ".join(new_args)
