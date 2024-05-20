@@ -65,9 +65,7 @@ def gen_additional_test_failures_file(tests: List[str]) -> None:
     pytest_cache_dir = REPO_ROOT / ".pytest_cache"
     if not os.path.exists(pytest_cache_dir):
         os.makedirs(pytest_cache_dir)
-    with open(
-        pytest_cache_dir / TD_HEURISTIC_PREVIOUSLY_FAILED_ADDITIONAL, "w"
-    ) as f:
+    with open(pytest_cache_dir / TD_HEURISTIC_PREVIOUSLY_FAILED_ADDITIONAL, "w") as f:
         json.dump(tests, f, indent=2)
 
 
