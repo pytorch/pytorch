@@ -22,7 +22,6 @@
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/Normalization.h>
-#include <ATen/native/Resize.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/AbortHandler.h>
@@ -2123,14 +2122,6 @@ Call this whenever a new thread is created in order to propagate values from
       "_set_conj", [](const at::Tensor& x, bool conj) { x._set_conj(conj); });
   py_module.def(
       "_set_neg", [](const at::Tensor& x, bool neg) { x._set_neg(neg); });
-  py_module.def("_unsafe_set_storage", [](at::Tensor& x, c10::Storage storage) {
-    at::native::checkSetStorage(
-        x,
-        std::move(storage),
-        x.sym_storage_offset(),
-        x.sym_sizes(),
-        x.sym_strides());
-  });
   py_module.def("_get_tensor_metadata", &torch::jit::getTensorMetadata);
   py_module.def(
       "_set_tensor_metadata",
