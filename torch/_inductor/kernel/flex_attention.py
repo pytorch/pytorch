@@ -188,8 +188,8 @@ flex_attention_template = TritonTemplate(
 
     Z = {{size("Q", 0)}}
     H = {{size("Q", 1)}}
-    M = {{size("Q", 2)}}
-    N = {{size("K", 2)}}
+    Q_LEN = {{size("Q", 2)}}
+    KV_LEN = {{size("K", 2)}}
 
     qk_scale = 1.0
     MATMUL_PRECISION = Q.dtype.element_ty
@@ -201,7 +201,7 @@ flex_attention_template = TritonTemplate(
     kv_offset = off_hz * stride_kh
     Q_block_ptr = tl.make_block_ptr(
         base=Q + q_offset,
-        shape=(M, BLOCK_DMODEL),
+        shape=(Q_LEN, BLOCK_DMODEL),
         strides=(stride_qm, stride_qk),
         offsets=(start_m * BLOCK_M, 0),
         block_shape=(BLOCK_M, BLOCK_DMODEL),
@@ -209,7 +209,7 @@ flex_attention_template = TritonTemplate(
     )
     K_block_ptr = tl.make_block_ptr(
         base=K + kv_offset,
-        shape=(BLOCK_DMODEL, N),
+        shape=(BLOCK_DMODEL, KV_LEN),
         strides=(stride_kk, stride_kn),
         offsets=(0, 0),
         block_shape=(BLOCK_DMODEL, BLOCK_N),
@@ -217,7 +217,7 @@ flex_attention_template = TritonTemplate(
     )
     V_block_ptr = tl.make_block_ptr(
         base=V + kv_offset,
-        shape=(N, BLOCK_DMODEL),
+        shape=(KV_LEN, BLOCK_DMODEL),
         strides=(stride_vk, stride_vn),
         offsets=(0, 0),
         block_shape=(BLOCK_N, BLOCK_DMODEL),
@@ -237,7 +237,7 @@ flex_attention_template = TritonTemplate(
     q = (q * qk_scale).to(MATMUL_PRECISION)
     # loop over k, v and update accumulator
     lo = 0
-    hi = N
+    hi = KV_LEN
     for start_n in range(lo, hi, BLOCK_N):
         start_n = tl.multiple_of(start_n, BLOCK_N)
         # -- load k, v --
@@ -299,7 +299,7 @@ flex_attention_template = TritonTemplate(
 
     # TODO dont want to write this if we dont require grad
     if OUTPUT_LOGSUMEXP:
-        l_ptrs = LSE + off_hz * M + offs_m
+        l_ptrs = LSE + off_hz * Q_LEN + offs_m
         lse = m_i + tl.math.log2(l_i)
         tl.store(l_ptrs, lse)
  """,
@@ -494,8 +494,8 @@ flex_attention_backward_template = TritonTemplate(
 
     Z = {{size("Q", 0)}}
     H = {{size("Q", 1)}}
-    M = {{size("Q", 2)}}
-    N = {{size("K", 2)}}
+    Q_LEN = {{size("Q", 2)}}
+    KV_LEN = {{size("K", 2)}}
 
     qk_scale = 1.0
     MATMUL_PRECISION = Q.dtype.element_ty
@@ -530,8 +530,8 @@ flex_attention_backward_template = TritonTemplate(
         dq_ptrs = DQ + (offs_m[:, None] * stride_qm + offs_k[None, :] * stride_qk)
 
         # pointer to row-wise quantities in value-like data
-        D_ptrs = DELTA + off_hz * M
-        l_ptrs = LSE + off_hz * N
+        D_ptrs = DELTA + off_hz * Q_LEN
+        l_ptrs = LSE + off_hz * KV_LEN
 
         # initialize dv and dk
         dv = tl.zeros([BLOCK_N, BLOCK_DMODEL], dtype=tl.float32)
