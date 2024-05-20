@@ -136,7 +136,7 @@ class StrobelightCLIFunctionProfiler:
                 command.append(item)
                 add_comma = True
 
-        logger.debug(f"running command:{command_to_string(command)}")
+        logger.debug("running command: %s", command_to_string(command))
 
         result = subprocess.run(command, capture_output=True)
 
@@ -149,9 +149,13 @@ class StrobelightCLIFunctionProfiler:
             logger.debug(line)
             match = re.search(rb"INFO Run Id:.*", line)
             if match:
-                self.current_run_id = int(
-                    re.search(rb"-?\d+$", match.group(0)).group(0)
-                )
+                inner_match = re.search(rb"-?\d+$", match.group(0))
+                if inner_match:
+                    self.current_run_id = int(inner_match.group(0))
+                else:
+                    raise StrobelightCLIProfilerError(
+                        "failed to start strobelight profiling, unexpected result format"
+                    )
 
     def _wait_for_running(self, counter=0):
         if counter > 20:
@@ -161,7 +165,7 @@ class StrobelightCLIFunctionProfiler:
 
         command = ["strobeclient", "getRunStatus", "--run-id", str(self.current_run_id)]
 
-        logger.debug(f"running command:{command_to_string(command)}")
+        logger.debug("running command: %s", command_to_string(command))
 
         result = subprocess.run(command, capture_output=True)
 
@@ -183,7 +187,7 @@ class StrobelightCLIFunctionProfiler:
                     return
                 else:
                     raise StrobelightCLIProfilerError(
-                        f"unexpected {current_status} phase"
+                        f"unexpected {current_status.decode('utf-8')} phase"
                     )
 
         raise StrobelightCLIProfilerError("unreachable")
@@ -191,7 +195,7 @@ class StrobelightCLIFunctionProfiler:
     def _stop_run(self):
         command = ["strobeclient", "stopRun", "--run-id", str(self.current_run_id)]
 
-        logger.debug(f"running command:{command_to_string(command)}")
+        logger.debug("running command: %s", command_to_string(command))
 
         result = subprocess.run(command, capture_output=True)
 
@@ -221,7 +225,7 @@ class StrobelightCLIFunctionProfiler:
     def _get_results(self):
         command = ["strobeclient", "getRunStatus", "--run-id", str(self.current_run_id)]
 
-        logger.debug(f"running command:{command_to_string(command)}")
+        logger.debug("running command: %s", command_to_string(command))
 
         result = subprocess.run(command, capture_output=True)
 
@@ -265,7 +269,7 @@ class StrobelightCLIFunctionProfiler:
 
             self._get_results()
         except Exception as error:
-            log.warning("error during stop_strobelight", exc_info=True)
+            logger.warning("error during stop_strobelight", exc_info=True)
 
     # Return true if strobelight started and is running.
     def _start_strobelight(self):
@@ -289,7 +293,7 @@ class StrobelightCLIFunctionProfiler:
 
         if StrobelightCLIFunctionProfiler.lock.locked():
             if self.stop_at_error:
-                raise StrobelightProfileError("simultaneous runs not supported")
+                raise StrobelightCLIProfilerError("simultaneous runs not supported")
 
             return work_function(*args, **kwargs)
 
@@ -308,6 +312,6 @@ class StrobelightCLIFunctionProfiler:
                 self._stop_strobelight_no_throw(collect_results=True)
                 return result
             except Exception as error:
-                logger.warning("work function throw exception")
+                logger.warning("work function throw exception", exc_info=True)
                 self._stop_strobelight_no_throw(collect_results=False)
                 raise error

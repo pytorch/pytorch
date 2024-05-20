@@ -1,9 +1,8 @@
-from strobelight_cli_function_profiler import (
+import torch
+from torch.profiler.strobelight_cli_function_profiler import (
     strobelight,
     StrobelightCLIFunctionProfiler,
 )
-
-import torch
 
 if __name__ == "__main__":
 
