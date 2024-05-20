@@ -13,7 +13,6 @@ import sympy
 
 import torch
 import torch._logging
-import torch.utils._pytree as pytree
 from torch._dynamo.utils import preserve_rng_state
 
 from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
@@ -1650,13 +1649,22 @@ class TritonKernel(SIMDKernel):
         )
 
         if not self.persistent_reduction:
-            partial_reduce_vars = pytree.tree_map(
-                self.reduction_resize,
-                cse_multiple(
-                    f"tl.reduce(({csv(broadcasted_values)}), {dim}, {combine_helper_fn})",
-                    len(values),
-                    None,
-                ),
+
+            def sum_fn(a, b):
+                return [ops.add(ai, bi) for ai, bi in zip(a, b)]
+
+            sum_helper_fn = self._lift_helper(sum_fn, len(values))
+            pre_reduce_vars = ", ".join(
+                f"{scan_var} * (rbase == (RBLOCK - 1))"
+                for scan_var in partial_scan_vars
+            )
+            # tl.reduce doesn't work for non-commutative operators, so instead
+            # of repeating the scan op as a reduction, we use sum to select the
+            # last scan value
+            partial_reduce_vars = cse_multiple(
+                f"tl.reduce(({pre_reduce_vars}), -1, {sum_helper_fn}, keep_dims=True)",
+                len(values),
+                masks,
             )
             accs_next = combine_fn(tuple(accumulators), partial_reduce_vars)
             full_scan_vars = combine_fn(tuple(accumulators), partial_scan_vars)

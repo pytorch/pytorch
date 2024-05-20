@@ -1924,12 +1924,19 @@ class AotCodeCompiler:
                 run_command_and_check(cmd)
             log.debug("aot constant binary command: %s", cmd)
 
-            # .data section is between .text and .bss. When the size of .data is large,
-            # during the linking, the relocation of .text against .bss may overflow.
-            # Rename it to .ldata so that it won't be in between the .text and .bss section
+            if config.aot_inductor.allow_buffer_mutation:
+                # .data section is between .text and .bss. When the size of .data is large,
+                # during the linking, the relocation of .text against .bss may overflow.
+                # Rename it to .ldata so that it won't be in between the .text and .bss section
+                rename_data = " .data=.ldata"
+            else:
+                # if no buffer mutation is needed, we could instead set the data region
+                # as read-only (i.e. .lrodata) which could accomodate larger size of data
+                # to be linked.
+                rename_data = " .data=.lrodata,alloc,load,readonly,data,contents"
             cmd = (
                 f"{objcopy_command} --rename-section"
-                " .data=.ldata"
+                f"{rename_data}"
                 " --set-section-alignment .data=64"  # following the gAlignment of CPU in c10/core/alignment.h
                 f" {consts_o} {consts_o}"
             )
