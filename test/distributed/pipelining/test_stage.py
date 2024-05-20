@@ -1,6 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
-import copy
 import os
 import sys
 import tempfile
@@ -8,12 +7,11 @@ import tempfile
 import torch
 import torch.distributed as dist
 
-from model_registry import ExampleCode, MultiMLP, ModelWithKwargs, MLPModule
+from model_registry import ExampleCode, ModelWithKwargs, MultiMLP
 from torch.distributed.pipelining import (
-    pipeline,
     ManualPipelineStage,
+    pipeline,
     PipelineStage,
-    Schedule1F1B,
     ScheduleGPipe,
 )
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
