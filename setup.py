@@ -268,7 +268,6 @@ import filecmp
 import glob
 import importlib
 import json
-import os
 import shutil
 import subprocess
 import sysconfig
@@ -363,10 +362,10 @@ cmake_python_include_dir = sysconfig.get_path("include")
 
 DEFAULT_PACKAGE_NAME = "libtorch" if BUILD_LIBTORCH_WHL else "torch"
 
-package_name = os.getenv("TORCH_PACKAGE_NAME", DEFAULT_PACKAGE_NAME)
+PACKAGE_NAME = os.getenv("TORCH_PACKAGE_NAME", DEFAULT_PACKAGE_NAME)
 package_type = os.getenv("PACKAGE_TYPE", "wheel")
 version = get_torch_version()
-report(f"Building wheel {package_name}-{version}")
+report(f"Building wheel {PACKAGE_NAME}-{version}")
 
 cmake = CMake()
 
@@ -1162,9 +1161,9 @@ def rename_torch_packages(package_list):
 
 
 def main():
-
     global BUILD_LIBTORCH_WHL
     global BUILD_PYTORCH_USING_LIBTORCH_WHL
+    global PACKAGE_NAME
 
     BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
     BUILD_PYTORCH_USING_LIBTORCH_WHL = os.getenv("BUILD_PYTHON_ONLY", "0") == "1"
@@ -1176,17 +1175,24 @@ def main():
         )
 
     if BUILD_TWO_WHEELS:
+        final_package_name = PACKAGE_NAME
+        PACKAGE_NAME = "libtorch"
         BUILD_LIBTORCH_WHL = True
         BUILD_PYTORCH_USING_LIBTORCH_WHL = False
         _main()
         BUILD_LIBTORCH_WHL = False
         BUILD_PYTORCH_USING_LIBTORCH_WHL = True
+        setup_cmd = sys.argv[1]
+        sys.argv[1] = "clean"
+        PACKAGE_NAME = final_package_name
+        _main()
+        sys.argv[1] = setup_cmd
     _main()
 
 
 def _main():
-    print(f'BUILD_LIBTORCH_WHL - {BUILD_LIBTORCH_WHL}')
-    print(f'BUILD_PYTORCH_USING_LIBTORCH_WHL - {BUILD_PYTORCH_USING_LIBTORCH_WHL}')
+    print(f"BUILD_LIBTORCH_WHL - {BUILD_LIBTORCH_WHL}")
+    print(f"BUILD_PYTORCH_USING_LIBTORCH_WHL - {BUILD_PYTORCH_USING_LIBTORCH_WHL}")
     # set up appropriate env variables
     if BUILD_LIBTORCH_WHL:
         # Set up environment variables for ONLY building libtorch.so and not libtorch_python.so
@@ -1515,7 +1521,7 @@ def _main():
         for package in packages:
             parts = package.split(".")
             if parts[0] == "torch":
-                modified_packages.append(DEFAULT_PACKAGE_NAME + package[len("torch") :])
+                modified_packages.append("libtorch" + package[len("torch") :])
         packages = modified_packages
         package_dir = {"libtorch": "torch"}
         torch_package_dir_name = "libtorch"
@@ -1531,9 +1537,8 @@ def _main():
                 "python/serialized_test/data/operator_test/*.zip",
             ],
         }
-
     setup(
-        name=package_name,
+        name=torch_package_dir_name,
         version=version,
         description=(
             "Tensors and Dynamic neural networks in "
