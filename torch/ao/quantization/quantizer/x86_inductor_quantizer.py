@@ -101,13 +101,6 @@ quantizable_ops = default_quantizable_ops | {
 QUANT_ANNOTATION_KEY = "quantization_annotation"
 
 
-class CurrentStage:
-    is_global = False
-
-
-current_stage = CurrentStage()
-
-
 def _skip_annotate(
     nodes: List[Node], filter_fn: Optional[Callable[[Node], bool]] = None
 ):
@@ -140,14 +133,11 @@ def _skip_annotate(
     # any           False
     # ->            not skip
     # all node are user specific
-    if current_stage.is_global and filter_fn is not None:
-        for node in nodes:
-            if filter_fn(node):
-                return False
-    if filter_fn and any(not filter_fn(node) for node in nodes):
-        skip_annotate = True
-        return skip_annotate
-    return skip_annotate
+
+    if filter_fn and any(filter_fn(node) for node in nodes):
+        return False
+
+    return True
 
 
 def _get_operator_type_filter(operator_type: Callable, module_name_list):
@@ -629,7 +619,6 @@ class X86InductorQuantizer(Quantizer):
                 _get_operator_type_filter(operator_type, module_name_list),
             )
         if self.global_config:
-            current_stage.is_global = True
             self._annotate_by_single_config(
                 model,
                 self.global_config,
