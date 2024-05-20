@@ -85,7 +85,7 @@ class CppTemplateKernel(Kernel):
         return cexpr_index(self.rename_indexing(node.get_stride()[dim]))
 
     def index(self, node: ir.Buffer, indices: List[Any]) -> str:
-        indexer = node.make_indexer()
+        indexer = node.layout.as_fixed().make_indexer()
         index = indexer([parse_expr_with_index_symbols(str(idx)) for idx in indices])
         index = self.rename_indexing(index)
         return f"{self.args.input(node.get_name())}[{cexpr_index(index)}]"

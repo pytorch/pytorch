@@ -330,7 +330,7 @@ def create_micro_gemm(
     compute_dtype=None,
     alpha=1,
     num_threads=-1,
-    use_ref=False,
+    use_ref=True,
 ) -> Optional[CppMicroGemm]:
     def create_from_config(cls, config: CppMicroGemmConfig):
         return cls(
@@ -344,7 +344,7 @@ def create_micro_gemm(
 
     assert isinstance(n, int) or n.is_number, n
     assert isinstance(k, int) or k.is_number, k
-    m = V.graph.sizevars.size_hint(m) if isinstance(m, sympy.Expr) else m
+    m = V.graph.sizevars.size_hint(m, fallback=1) if isinstance(m, sympy.Expr) else m
     assert isinstance(m, int), m
     if output_dtype is None:
         output_dtype = input_dtype
