@@ -359,6 +359,49 @@ def replica_only_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType
     return OpStrategy([PlacementStrategy(replicate_spec)])
 
 
+@register_op_strategy(
+    [aten.scatter_.value, aten.scatter.value, aten.scatter_.src, aten.scatter.src],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def scatter_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
+    input_strategy = cast(OpStrategy, op_schema.args_schema[0])
+    dim = cast(int, op_schema.args_schema[1])
+    index_strategy = cast(OpStrategy, op_schema.args_schema[2])
+
+    input_shape = input_strategy.output_shape
+    index_shape = index_strategy.output_shape
+
+    single_mesh_dim_strategies = []
+
+    # placement list stores placements of [output, input, index, src]
+    # first we always have replicate all for inputs and output
+    all_replicate: List[Placement] = [Replicate()] * 4
+    single_mesh_dim_strategies.append(all_replicate)
+
+    # input sharding, input sharded, index accepts mask partial, output follows index
+    # this only works when the input is sharded on the scatter dimension, and
+    # index has size 1 on the scatter dimension
+    if index_shape[dim] == 1:
+        index_partial_placement = _MaskPartial(logical_dim_size=input_shape[dim])
+        input_sharding = [
+            index_partial_placement,
+            Shard(dim),
+            index_partial_placement,
+            index_partial_placement,
+        ]
+        single_mesh_dim_strategies.append(input_sharding)
+
+    # index sharding, input replicated, index sharded, output/src follows index
+    # this only works when the sharding dimension is the scatter dimension
+    index_sharding = [Shard(dim), Replicate(), Shard(dim), Shard(dim)]
+    single_mesh_dim_strategies.append(index_sharding)
+
+    op_strategy = expand_to_full_mesh_op_strategy(
+        mesh, op_schema, single_mesh_dim_strategies
+    )
+    return op_strategy
+
+
 @register_op_strategy(aten.gather.default)
 def gather_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     input_strategy = cast(OpStrategy, op_schema.args_schema[0])
