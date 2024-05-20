@@ -620,8 +620,9 @@ class X86InductorQuantizer(Quantizer):
                 self.global_config = None
 
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
-        """
-        1) Annotate each node according the user's qconfig with following order:
+        """Annotate the model with quantization configuration.
+
+        1) Annotate each node according users's qconfig with following order:
         `module_name_qconfig`, `module_type_qconfig`, and `global_config`.
         2) Skip nodes already annotated by an earlier stage. For example,
         if `linear1` has been annotated in the `module_name_config` stage,

@@ -1918,7 +1918,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
 
     @skipIfNoX86
     def test_set_module_name_and_set_module_type_case2(self):
-        """
+        """Test that set `module_name_qconfig` and `module_type_qconfig` at the same time.
 
         All linear are quantized except the second one.
         """
@@ -1972,7 +1972,8 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
 
     @skipIfNoX86
     def test_set_module_name_and_set_module_type(self):
-        """
+        """Test that set `module_name_qconfig` and `module_type_qconfig` at the same time.
+
         All linear are not quantized except the second one.
         """
 
@@ -2138,8 +2139,8 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             dynamic_config = xiq.get_default_x86_inductor_quantization_config(
                 is_dynamic=True
             )
-            # quantize `self.v_proj` with static config
-            # quantize `self.q_proj` with dynamic config (will be skipped)
+            # set `self.v_proj` with static config
+            # set `self.q_proj` with dynamic config (will be skipped)
             quantizer = (
                 X86InductorQuantizer()
                 .set_module_name_qconfig("q_proj", static_config)
