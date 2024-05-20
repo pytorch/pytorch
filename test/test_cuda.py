@@ -1799,38 +1799,38 @@ torch.cuda.synchronize()
         loss.backward()
 
     def test_autocast_custom_deprecated_warning(self):
-        class MyMM(torch.autograd.Function):
-            @staticmethod
-            @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
-            def forward(ctx, x, y):
-                ctx.save_for_backward(x, y)
-                self.assertFalse(torch.is_autocast_enabled())
-                return x + y
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always", category=DeprecationWarning)
 
-            @staticmethod
-            @torch.cuda.amp.custom_bwd
-            def backward(ctx, grad):
-                _, _ = ctx.saved_variables
-                self.assertFalse(torch.is_autocast_enabled())
-                return grad, grad
+            class MyMM(torch.autograd.Function):
+                @staticmethod
+                @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
+                def forward(ctx, x, y):
+                    ctx.save_for_backward(x, y)
+                    self.assertFalse(torch.is_autocast_enabled())
+                    return x + y
+
+                @staticmethod
+                @torch.cuda.amp.custom_bwd
+                def backward(ctx, grad):
+                    _, _ = ctx.saved_tensors
+                    self.assertFalse(torch.is_autocast_enabled())
+                    return grad, grad
+
+        self.assertRegex(
+            str(w[0].message), r"torch.cuda.amp.custom_fwd\(args...\) is deprecated."
+        )
+        self.assertRegex(
+            str(w[1].message), r"torch.cuda.amp.custom_bwd\(args...\) is deprecated."
+        )
 
         mymm = MyMM.apply
         x = torch.randn(3, 3, requires_grad=True)
         y = torch.randn(3, 3, requires_grad=True)
-
-        with self.assertWarnsRegex(
-            DeprecationWarning,
-            r"torch.cuda.amp.custom_fwd\(args...\) is deprecated.",
-        ):
-            with torch.amp.autocast("cuda"):
-                output = mymm(x, y)
-                loss = output.sum()
-
-        with self.assertWarnsRegex(
-            DeprecationWarning,
-            r"torch.cuda.amp.custom_bwd\(args...\) is deprecated.",
-        ):
-            loss.backward()
+        with torch.amp.autocast("cuda"):
+            output = mymm(x, y)
+            loss = output.sum()
+        loss.backward()
 
     def test_autocast_cat_jit(self):
         # Reported at https://github.com/pytorch/pytorch/issues/38958
