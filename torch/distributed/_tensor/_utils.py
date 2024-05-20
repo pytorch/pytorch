@@ -21,6 +21,7 @@ def compute_local_shape(
     Compute the shape of a local shard of the given DTensor on its current
     coordinate of the mesh.
     """
+    # TODO(xilun): address new Shard type
     my_coordinate = mesh.get_coordinate()
 
     if my_coordinate is None:
@@ -85,6 +86,7 @@ def compute_local_shape_and_global_offset(
     rank6 -- local_shape:[0,], global_offset:[2,]
     rank7 -- local_shape:[0,], global_offset:[2,]
     """
+    # TODO(xilun): address new Shard type
     my_coordinate = mesh.get_coordinate()
 
     if my_coordinate is None:
@@ -224,3 +226,8 @@ def compute_local_stride(
     return tuple(
         global_stride[i] // stride_divisors[i] for i in range(len(global_stride))
     )
+
+
+def compute_shard_coordinate(
+    mesh: DeviceMesh, placements: Sequence[Placement]
+) -> Tuple[int, ...]:

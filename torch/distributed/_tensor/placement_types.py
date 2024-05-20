@@ -325,6 +325,86 @@ class Shard(Placement):
         return f"S({self.dim})"
 
 
+@dataclass(frozen=True, kw_only=True)
+class StridedShard(Shard):
+    """
+    StridedShard allows a more flexible Shard placement on device compared to the default
+    behavior where tensor is sharded on the leftmost (i.e. outermost) mesh dimension
+    first.
+
+    For instance, when sharding a 2D tensor along dimension 0 over a 2D mesh, the tensor
+    would be divided into four shards placed correspondingly on ranks [0, 1, 2, 3]:
+        tensor shape: [8, 8]
+        mesh: [[0, 1], [2, 3]]
+        placements: [Shard(0), Shard(0)]
+        Rank    |   Mesh Coordinate |   Shard Index
+        ------------------------------------------------
+        0       |   (0, 0)          |   0 (row 0-1)
+        1       |   (0, 1)          |   1 (row 2-3)
+        2       |   (1, 0)          |   2 (row 4-5)
+        3       |   (1, 1)          |   3 (row 6-7)
+
+    With StridedShard, users can choose the mesh dimension to shard first, unlike Shard
+    which always starts with the leftmost dimension. To determine each shard's placement
+    (i.e. on which rank it's placed) we here introduce the concept ``Shard Coordinate``
+    to represent where a shard should appear in the original tensor (e.g. if the Shard
+    Coordinate of a tensor shard is 0 on dimension 1, then it means the data in shard
+    appears first on dimension 1). To find out the mapping from rank to Shard Coordinate,
+    we borrow the concept of stride in tensor: the dot result of a rank's mesh coordinate
+    and the stride for a specified tensor dimension is the Shard Coordinate value on that
+    dimension. For the above case, the shard stride for tensor dim 0 is (2, 1) since we
+    shard on mesh dim 0 first:
+        Rank    |   Mesh Coordinate |   Shard Coordinate
+        ------------------------------------------------
+        0       |   (0, 0)          |   (0, -1) --> for Replicate dim we use -1
+        1       |   (0, 1)          |   (1, -1)
+        2       |   (1, 0)          |   (2, -1)
+        3       |   (1, 1)          |   (3, -1)
+
+    Now think about sharding this tensor on mesh dim 1 first:
+        mesh: [[0, 1], [2, 3]]
+        placements: [StridedShard(0, _shard_stride=1), Shard(0, _shard_stride=2)]
+        Rank    |   Mesh Coordinate |   Shard Coordinate
+        ------------------------------------------------
+        0       |   (0, 0)          |   (0, -1) (tensor[:2, :])
+        1       |   (0, 1)          |   (2, -1) (tensor[2:4, :])
+        2       |   (1, 0)          |   (1, -1) (tensor[4:6, :])
+        3       |   (1, 1)          |   (3, -1) (tensor[6:, :])
+
+    The rule to determine the shard stride is similar to tensor stride:
+        for any mesh dim i, say it shards tensor dim j, the stride is
+        prod(
+            [
+                mesh.size(mesh_dim=k)
+                for all mesh dim k that comes after i in sharding order
+            ],
+            start_value=1,
+        )
+    """
+    # the shard stride for current mesh dimension: the shard on next local rank along the
+    # mesh dim will be (_shard_stride - 1) shards away from the current shard.
+    _shard_stride: int
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Shard):
+            return False
+        # question: does sharding order matter here???
+        return self.dim == other.dim
+
+    def __hash__(self) -> int:
+        return hash(self.dim)
+
+    def __repr__(self) -> str:
+        """
+        machine readable representation of the StridedShard placement
+        """
+        return f"StridedShard(dim={self.dim}, _shard_stride={self._shard_stride})"
+
+    def __str__(self) -> str:
+        """human readable representation of the StridedShard placement"""
+        return f"StrS({self.dim}, {self._shard_stride})"
+
+
 @dataclass(frozen=True)
 class Replicate(Placement):
     # replicate placement
