@@ -806,9 +806,6 @@ std::tuple<Tensor,optional<int64_t>> gather_batch_rule(
 }
 
 Tensor get_expanded_index(const Tensor& index, IntArrayRef self_size, int64_t dim) {
-  if (index.dim() == 0) {
-    return index.expand(self_size);
-  }
   dim = maybe_wrap_dim(dim, static_cast<int64_t>(self_size.size()));
 
   // setup new_index_shape as [BS, 1, ..., idx_size, ..., 1]
