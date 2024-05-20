@@ -176,7 +176,7 @@ if(nvtx3_FOUND)
   add_library(torch::nvtoolsext INTERFACE IMPORTED)
   target_include_directories(torch::nvtoolsext INTERFACE "${nvtx3_dir}")
 else()
-  message(WARNING "Cannot find NVTX3")
+  message(FATAL_ERROR "Cannot find NVTX3")
 endif()
 
 
