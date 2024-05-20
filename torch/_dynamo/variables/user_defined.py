@@ -36,7 +36,13 @@ from torch._guards import TracingContext
 from .. import variables
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, GetItemSource, ODictGetItemSource, RandomValueSource
+from ..source import (
+    AttrSource,
+    DoNotReconstructSource,
+    GetItemSource,
+    ODictGetItemSource,
+    RandomValueSource,
+)
 from ..utils import (
     all_hook_names,
     build_checkpoint_variable,
@@ -851,7 +857,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         if not ConstantVariable.is_literal(key):
                             unimplemented("key is not constant")
                         items_vt[ConstantVariable.create(key)] = value_vt
-            return variables.ConstDictVariable(items_vt, dict, source=self.source)
+            return variables.ConstDictVariable(
+                items_vt, dict, source=DoNotReconstructSource(self.source)
+            )
 
         try:
             subobj = self._getattr_static(name)
