@@ -46,6 +46,9 @@
     "scatter",
     "gather"
   ],
+  "torch.csrc.jit.tensorexpr.scripts.bisect": [
+    "bisect"
+  ],
   "torch.cuda.nccl": [
     "init_rank",
     "is_available",
@@ -902,7 +905,9 @@
     "cast",
     "closing",
     "contextmanager",
-    "get_source_lines_and_file"
+    "get_source_lines_and_file",
+    "get_default_mmap_options",
+    "set_default_mmap_options"
   ],
   "torch.sparse": [
     "BFloat16Tensor",
@@ -1104,6 +1109,7 @@
     "_add_relu",
     "_add_relu_",
     "_addmm_activation",
+    "_aminmax",
     "_amp_foreach_non_finite_check_and_unscale_",
     "_amp_update_scale_",
     "_assert_async",
@@ -1313,7 +1319,6 @@
     "_values_copy",
     "_weight_norm",
     "_weight_norm_interface",
-    "aminmax",
     "autocast",
     "broadcast_shapes",
     "candidate",
@@ -1714,7 +1719,12 @@
     "env",
     "get_logger",
     "macros",
-    "record"
+    "record",
+    "DefaultLogsSpecs",
+    "LogsSpecs",
+    "Optional",
+    "Set",
+    "Type"
   ],
   "torch.fx.annotate": [
     "Proxy",
@@ -1932,7 +1942,8 @@
     "track_tensor",
     "track_tensor_tree",
     "wrap_key",
-    "wrapper_and_args_for_make_fx"
+    "wrapper_and_args_for_make_fx",
+    "TorchFunctionMetadataMode"
   ],
   "torch.fx.experimental.rewriter": [
     "Any",
@@ -2013,7 +2024,14 @@
     "parallel_and",
     "parallel_or",
     "safe_expand",
-    "uninteresting_files"
+    "uninteresting_files",
+    "CallMethodKey",
+    "DivideByKey",
+    "PropagateUnbackedSymInts",
+    "ShapeEnvSettings",
+    "log_lru_cache_stats",
+    "PendingUnbackedSymbolNotFound",
+    "lru_cache"
   ],
   "torch.fx.experimental.unification.match": [
     "first",
@@ -2603,5 +2621,135 @@
   ],
   "torch.version": [
     "get_file_path"
+  ],
+  "torch.ao.nn.intrinsic.modules": [
+    "_FusedModule"
+  ],
+  "torch.distributed.benchmarks.benchmark_ddp_rpc": [
+    "BackendType",
+    "DDP",
+    "DistributedOptimizer",
+    "RRef",
+    "TensorPipeRpcBackendOptions"
+  ],
+  "torch.distributed.pipelining": [
+    "ArgsChunkSpec",
+    "KwargsChunkSpec",
+    "Pipe",
+    "PipelineStage",
+    "SplitPoint",
+    "annotate_split_points",
+    "pipe_split",
+    "pipeline"
+  ],
+  "torch.distributed.pipelining.PipelineSchedule": [
+    "ABC",
+    "Any",
+    "Callable",
+    "Dict",
+    "List",
+    "Optional",
+    "Pipe",
+    "PipelineStageBase",
+    "Tuple",
+    "Union",
+    "abstractmethod",
+    "defaultdict",
+    "merge_chunks",
+    "record_function",
+    "split_args_kwargs_into_chunks"
+  ],
+  "torch.distributed.pipelining.microbatch": [
+    "Any",
+    "Dict",
+    "List",
+    "Optional",
+    "Tuple",
+    "tree_flatten",
+    "tree_unflatten"
+  ],
+  "torch.export": [
+    "Constraint",
+    "ShapesCollection"
+  ],
+  "torch.export.dynamic_shapes": [
+    "Constraint",
+    "ShapesCollection"
+  ],
+  "torch.export.graph_signature": [
+    "TokenArgument"
+  ],
+  "torch.fx.experimental.shape_inference.infer_shape": [
+    "DimDynamic",
+    "FakeTensorMode",
+    "LocalSource",
+    "ShapeEnv",
+    "defaultdict",
+    "infer_symbol_values",
+    "make_fx"
+  ],
+  "torch.fx.experimental.shape_inference.infer_symbol_values": [
+    "Any",
+    "DefaultDict",
+    "Dict",
+    "List",
+    "Tuple",
+    "Union"
+  ],
+  "torch.fx.passes.runtime_assert": [
+    "Any",
+    "Dict",
+    "GraphModule",
+    "Optional",
+    "Set",
+    "ShapeEnv",
+    "SymNode",
+    "compatibility",
+    "lazy_format_graph_code"
+  ],
+  "torch.library": [
+    "opcheck",
+    "register_autograd",
+    "register_kernel"
+  ],
+  "torch.mtia": [
+    "DeferredMtiaCallError",
+    "StreamContext"
+  ],
+  "torch.onnx.symbolic_helper": [
+    "Any",
+    "Callable",
+    "List",
+    "Literal",
+    "NoReturn",
+    "Number",
+    "Optional",
+    "Sequence",
+    "Set",
+    "Tuple",
+    "Union"
+  ],
+  "torch.onnx.symbolic_opset18": [
+    "amax",
+    "amin",
+    "aminmax",
+    "embedding_bag",
+    "linalg_vector_norm",
+    "max",
+    "maximum",
+    "min",
+    "minimum"
+  ],
+  "torch.onnx.symbolic_opset20": [
+    "_affine_grid_generator",
+    "_grid_sampler",
+    "convert_grid_sample_mode"
+  ],
+  "torch.utils.data.datapipes.dataframe.dataframe_wrapper": [
+    "Any",
+    "Optional"
+  ],
+  "torch.utils.hipify.hipify_python": [
+    "TrieNode"
   ]
 }
