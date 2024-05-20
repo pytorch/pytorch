@@ -59,9 +59,10 @@ class MemoryDep(Dep):
     index: sympy.Expr
     var_names: Tuple[sympy.Symbol, ...]
     size: Tuple[sympy.Expr, ...]
+    mode: Optional[str] = None
 
     def __repr__(self):
-        return f"MemoryDep({self.name!r}, {self.index}, {self.ranges})"
+        return f"MemoryDep({self.name!r}, {self.index}, {self.ranges}, {self.mode})"
 
     def get_offset(self):
         """
@@ -130,7 +131,11 @@ class MemoryDep(Dep):
     def rename(self, renames: Dict[str, str]) -> "MemoryDep":
         if self.name in renames:
             return MemoryDep(
-                renames[self.name], self.index, var_names=self.var_names, size=self.size
+                renames[self.name],
+                self.index,
+                var_names=self.var_names,
+                size=self.size,
+                mode=self.mode,
             )
         return self
 
@@ -186,6 +191,7 @@ class MemoryDep(Dep):
 @dataclasses.dataclass(frozen=True)
 class StarDep(Dep):
     name: str
+    mode: Optional[str] = None
 
     # depends on the entire buffer
     @property
@@ -197,7 +203,7 @@ class StarDep(Dep):
 
     def rename(self, renames: Dict[str, str]) -> "StarDep":
         if self.name in renames:
-            return StarDep(renames[self.name])
+            return StarDep(renames[self.name], self.mode)
         return self
 
     def numbytes_hint(self):
@@ -400,7 +406,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         return self.load(name, sympy.Integer(index))
 
     def store(self, name: str, index: sympy.Expr, value: str, mode=None) -> str:
-        self._writes.add(MemoryDep(name, *self.canonicalize(index)))
+        self._writes.add(MemoryDep(name, *self.canonicalize(index), mode=mode))
         return f"store({name}, {sympy_str(index)}, {value}, {mode})"
 
     def store_reduction(self, name: str, index, value) -> str:

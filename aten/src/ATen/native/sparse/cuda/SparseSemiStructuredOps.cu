@@ -522,8 +522,8 @@ void spgemm_cutlass_dispatch_layouts_tensor_c(
 // aten._sparse_semi_structured_addmm operators.
 Tensor sparse_semi_structured_mad_op(
       const Tensor& mat1, const Tensor& mat1_meta, const Tensor& mat2,
-      const c10::optional<Tensor>& input_opt, const Scalar& alpha,
-      const Scalar& beta, const c10::optional<c10::ScalarType> out_dtype_opt) {
+      const std::optional<Tensor>& input_opt, const Scalar& alpha,
+      const Scalar& beta, const std::optional<c10::ScalarType> out_dtype_opt) {
 #if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
     AT_ERROR(__func__, " : CUTLASS not supported");
     return Tensor{};
@@ -787,9 +787,9 @@ Tensor sparse_semi_structured_mad_op(
 // Implementation of aten._sparse_semi_structured_mm operator.
 Tensor _sparse_semi_structured_mm(
       const Tensor& mat1, const Tensor& mat1_meta, const Tensor& mat2,
-      const c10::optional<c10::ScalarType> out_dtype_opt) {
+      const std::optional<c10::ScalarType> out_dtype_opt) {
     return sparse_semi_structured_mad_op(mat1, mat1_meta, mat2,
-                                         c10::optional<Tensor>(), 1, 0,
+                                         std::optional<Tensor>(), 1, 0,
                                          out_dtype_opt);
 }
 
@@ -797,7 +797,7 @@ Tensor _sparse_semi_structured_mm(
 Tensor _sparse_semi_structured_addmm(
       const Tensor& input, const Tensor& mat1, const Tensor& mat1_meta,
       const Tensor& mat2, const Scalar& alpha, const Scalar& beta,
-      const c10::optional<c10::ScalarType> out_dtype_opt) {
+      const std::optional<c10::ScalarType> out_dtype_opt) {
     return sparse_semi_structured_mad_op(mat1, mat1_meta, mat2, input, alpha,
                                          beta, out_dtype_opt);
 }

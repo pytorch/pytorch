@@ -507,11 +507,11 @@ TEST(ExternalCall, Prepacked_Linear_float) {
           .findSchemaOrThrow("prepacked::linear_clamp_prepack", "")
           .typed<c10::intrusive_ptr<LinearOpContext>(
               at::Tensor,
-              c10::optional<at::Tensor>,
-              const c10::optional<at::Scalar>&,
-              const c10::optional<at::Scalar>&)>();
+              std::optional<at::Tensor>,
+              const std::optional<at::Scalar>&,
+              const std::optional<at::Scalar>&)>();
   auto prepacked = linear_clamp_prepack_op.call(
-      weight, bias, c10::optional<at::Scalar>(), c10::optional<at::Scalar>());
+      weight, bias, std::optional<at::Scalar>(), c10::optional<at::Scalar>());
 
   BufHandle DummyPrepacked("DummyPrepacked", {1}, kFloat);
   Tensor Result = Tensor(
@@ -581,13 +581,13 @@ TEST(ExternalCall, Prepacked_Conv2d_float) {
           .findSchemaOrThrow("prepacked::conv2d_clamp_prepack", "")
           .typed<c10::intrusive_ptr<Conv2dOpContext>(
               at::Tensor,
-              c10::optional<at::Tensor>,
+              std::optional<at::Tensor>,
               std::vector<int64_t>,
               std::vector<int64_t>,
               std::vector<int64_t>,
               int64_t,
-              const c10::optional<at::Scalar>&,
-              const c10::optional<at::Scalar>&)>();
+              const std::optional<at::Scalar>&,
+              const std::optional<at::Scalar>&)>();
   auto prepacked = conv2d_clamp_prepack_op.call(
       weight,
       bias,
@@ -595,8 +595,8 @@ TEST(ExternalCall, Prepacked_Conv2d_float) {
       {pad, pad},
       {dilation, dilation},
       groups,
-      c10::optional<at::Scalar>(),
-      c10::optional<at::Scalar>());
+      std::optional<at::Scalar>(),
+      std::optional<at::Scalar>());
 
   BufHandle DummyPrepacked("DummyPrepacked", {1}, kFloat);
   Tensor Result = Tensor(
@@ -945,7 +945,7 @@ TEST(ExternalCall, JitCustomFusionOp) {
           const std::vector<torch::jit::tensorexpr::ArgValue>& inputs,
           const std::vector<torch::jit::tensorexpr::ExprHandle>& output_shape,
           const std::vector<torch::jit::tensorexpr::ExprHandle>& output_strides,
-          const c10::optional<torch::jit::tensorexpr::ScalarType>& output_type,
+          const std::optional<torch::jit::tensorexpr::ScalarType>& output_type,
           at::Device device) {
         auto output_dtype = Dtype(*output_type);
         torch::jit::tensorexpr::BufHandle result_buf(
