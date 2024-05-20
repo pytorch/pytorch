@@ -16,7 +16,7 @@ class Job {
     std::chrono::time_point<std::chrono::steady_clock> _next_run;
 
 public:
-    static inline bool lt(Job a, Job b) { return a.next_run() < b.next_run(); }
+    static bool lt(Job a, Job b);
 
     Job(std::function<void()> function, std::chrono::microseconds interval);
 

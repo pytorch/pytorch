@@ -8,6 +8,8 @@
 
 namespace c10 {
 
+/* static */ bool Job::lt(Job a, Job b) { return a.next_run() < b.next_run(); }
+
 Job::Job(std::function<void()> function, std::chrono::microseconds interval)
     : _function(function), _interval(interval) {}
 
