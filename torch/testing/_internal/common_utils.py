@@ -5046,3 +5046,37 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
         s = re.sub(r"Cannot export model.+\n\n", "", s)
     s = re.sub(r" +$", "", s, flags=re.M)
     return s
+
+def recover_orig_fp32_precision():
+    @contextlib.contextmanager
+    def recover():
+        old_mkldnn_conv_p = torch.backends.mkldnn.conv.fp32_precision
+        old_mkldnn_rnn_p = torch.backends.mkldnn.rnn.fp32_precision
+        old_mkldnn_matmul_p = torch.backends.mkldnn.matmul.fp32_precision
+        old_cudnn_conv_p = torch.backends.cudnn.conv.fp32_precision
+        old_cudnn_rnn_p = torch.backends.cudnn.rnn.fp32_precision
+        old_cuda_matmul_p = torch.backends.cuda.matmul.fp32_precision
+        old_matmul_precision = torch.get_float32_matmul_precision()
+        old_cubls_tf32 = torch.backends.cuda.matmul.allow_tf32
+        try:
+            pass
+            yield
+        finally:
+            torch.backends.mkldnn.conv.fp32_precision = old_mkldnn_conv_p
+            torch.backends.mkldnn.rnn.fp32_precision = old_mkldnn_rnn_p
+            torch.backends.mkldnn.matmul.fp32_precision = old_mkldnn_matmul_p
+            torch.backends.cudnn.conv.fp32_precision = old_cudnn_conv_p
+            torch.backends.cudnn.rnn.fp32_precision = old_cudnn_rnn_p
+            torch.backends.cuda.matmul.fp32_precision = old_cuda_matmul_p
+            torch.set_float32_matmul_precision(old_matmul_precision)
+            torch.backends.cuda.matmul.allow_tf32 = old_cubls_tf32
+
+    def wrapper(f):
+        @functools.wraps(f)
+        def wrapped(*args, **kwargs):
+            with recover():
+                f(*args, **kwargs)
+
+        return wrapped
+
+    return wrapper
