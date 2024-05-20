@@ -432,7 +432,6 @@ class OutputSharding:
 
     output_spec: OutputSpecType
     redistribute_schema: Optional[OpSchema] = None
-    failed_reason: Optional[str] = None
     needs_redistribute: bool = False
 
 
