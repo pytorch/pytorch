@@ -2062,8 +2062,12 @@ class TritonKernel(SIMDKernel):
                     val = next_power_of_2(val)
                 else:
                     val = 128
-                    while not V.graph.sizevars.statically_known_leq(simplified_tree_numel, val):
-                        assert val <= 16 * 1024, f"Failed to find static RBLOCK for {simplified_tree_numel}"
+                    while not V.graph.sizevars.statically_known_leq(
+                        simplified_tree_numel, val
+                    ):
+                        assert (
+                            val <= 16 * 1024
+                        ), f"Failed to find static RBLOCK for {simplified_tree_numel}"
                         val *= 2
                 code.writeline(f"RBLOCK: tl.constexpr = {val}")
 
