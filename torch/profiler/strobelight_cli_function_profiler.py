@@ -260,28 +260,8 @@ class StrobelightCLIFunctionProfiler:
 
             if not collect_results:
                 return
+
             self._get_results()
-
-            # result = StrobelightFunctionProfiler.strobelight_client.waitForRunPhase(
-            #     WaitForRunPhaseParams(
-            #         run_id=id,
-            #         awaited_phase=RunPhase.FINISHED,
-            #         timeout_ms=int(self.timeout_wait_for_finished_sec * 1000),
-            #     )
-            # )
-
-            # if result.result.returnCode != ReturnCode.SUCCESS:
-            #     logger.warning(
-            #         "waitForRunPhase FINISHED was not successfull: %s",
-            #         result.result.errorMsg,
-            #     )
-            #     return
-
-            # logger.info(
-            #     "this link takes you to the collected strobelight profile %s",
-            #     result.result.resultLinks["GraphProfiler (python stack)"],
-            # )
-            # self.profile_result = result.result
         except Exception as error:
             logger.warning("error during stop_strobelight %s", error)
 
