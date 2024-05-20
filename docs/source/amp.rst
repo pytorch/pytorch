@@ -49,6 +49,12 @@ Autocasting
 .. autoclass:: autocast
     :members:
 
+.. currentmodule:: torch.amp
+
+.. autofunction::  custom_fwd
+
+.. autofunction::  custom_bwd
+
 .. currentmodule:: torch.cuda.amp
 
 .. autoclass:: autocast

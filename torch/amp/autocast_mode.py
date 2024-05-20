@@ -411,14 +411,6 @@ def _cast(value, device_type: str, dtype: _dtype):
         return value
 
 
-# custom_fwd is a decorator that may or may not be used with arguments, following
-# https://github.com/dabeaz/python-cookbook/tree/master/src/9/defining_a_decorator_that_takes_an_optional_argument.
-# this works:
-#     @custom_fwd
-#     def forward(...):
-# this also works:
-#     @custom_fwd(cast_inputs=torch.float)
-#     def forward(...):
 def custom_fwd(
     fwd=None,
     *,

@@ -1279,6 +1279,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._wrap_tensor_impl",
         "torch._C.fork",
         "torch._C.get_autocast_cpu_dtype",
+        "torch._C.get_autocast_dtype",
         "torch._C.get_autocast_gpu_dtype",
         "torch._C.get_autocast_ipu_dtype",
         "torch._C.get_autocast_xla_dtype",
