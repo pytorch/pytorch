@@ -66,7 +66,7 @@ __all__ = [
     'ProcessGroup', 'ReduceOp', 'ReduceOptions', 'ReduceScatterOptions',
     'ScatterOptions', 'Store', 'DebugLevel', 'get_debug_level', 'Work',
     'default_pg_timeout', 'get_group_rank', 'get_global_rank', 'get_process_group_ranks',
-    'reduce_op', 'all_gather_into_tensor', 'reduce_scatter_tensor',
+    'reduce_op', 'all_gather_into_tensor', 'reduce_scatter_tensor', 'get_node_local_rank',
 ]
 
 _MPI_AVAILABLE = True
@@ -408,6 +408,21 @@ class P2POp:
         _check_single_tensor(tensor, "tensor")
         return object.__new__(cls)
 
+    def __repr__(self):
+        my_group_rank = get_rank(self.group)
+        peer_group_rank = get_group_rank(self.group, self.peer) if self.group else self.peer
+        op_name = self.op.__name__
+        group_name = self.group.group_name if self.group else "default_pg"
+        if "send" in op_name:
+            s = my_group_rank
+            d = peer_group_rank
+        elif "recv" in op_name:
+            s = peer_group_rank
+            d = my_group_rank
+        else:
+            return super().__repr__()
+
+        return f"P2POp({op_name} pg={group_name}, s={s}, d={d},  {self.tensor.shape}, {self.tensor.dtype})"
 
 class _CollOp:
     """
@@ -737,7 +752,7 @@ def _store_based_barrier(rank, store, group_name, rendezvous_count, timeout, log
             )
 
             if timedelta(seconds=(time.time() - start)) > timeout:
-                raise DistStoreError(  # noqa: TRY200
+                raise DistStoreError(  # noqa: B904
                     "Timed out initializing process group in store based barrier on "
                     f"rank {rank}, for key: {store_key} (world_size={world_size}, "
                     f"num_workers_joined={worker_count}, timeout={timeout} error={e})"
