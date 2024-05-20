@@ -1015,7 +1015,7 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
                 rule.fuse(graph, subset)
                 fused_set.update(subset)
                 log.debug(
-                    f"test test {rule.__class__.__name__}: key = {key}; subset size = {len(list(subset))}"  # noqa: G004
+                    f"test test hahahaha{rule.__class__.__name__}: key = {key}; subset size = {len(list(subset))}"  # noqa: G004
                 )
                 log_to_scuba = True
     if log_to_scuba:
