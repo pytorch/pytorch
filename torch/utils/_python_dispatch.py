@@ -397,10 +397,10 @@ and output of type {type(ret)}. But expected types to match."""
 
                 if isinstance(ret, list):
                     for r in ret:
-                        torch._C._unsafe_set_storage(r, arg.untyped_storage())
+                        torch.ops.aten._unsafe_set_storage_(r, arg.untyped_storage())
                 else:
                     assert isinstance(ret, torch.Tensor), f"type: {type(ret)}"
-                    torch._C._unsafe_set_storage(ret, arg.untyped_storage())
+                    torch.ops.aten._unsafe_set_storage_(ret, arg.untyped_storage())
             finally:
                 torch._C._set_meta_in_tls_dispatch_include(meta_in_tls)
 

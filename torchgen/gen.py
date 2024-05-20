@@ -284,6 +284,7 @@ def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
             and str(f.func.name) != "resize_"
             and str(f.func.name) != "resize_as_"
             and str(f.func.name.name) != "set_"
+            and str(f.func.name.name) != "_unsafe_set_storage_"
         ):
             base_name = f.func.name.name
             assert base_name.inplace, (
