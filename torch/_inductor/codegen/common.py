@@ -608,6 +608,8 @@ class OverridesData:
     )
 
 
+# NB: if you add a new special function, don't forget to update
+# torch._inductor.ops_handler too
 pointwise_overrides_data: Dict[str, OverridesData] = dict(
     airy_ai=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
@@ -1475,6 +1477,22 @@ class Kernel(CodeGen):
         for e in issued:
             del self.pending_indirect_asserts[e]
 
+    def check_bounds_lazy(
+        self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+    ):
+        """
+        How do we issue size checks:
+        - This function is called from either
+            - CSEProxy.indirect_indexing
+            - IndexPropagation.indirect_indexing
+        - This saves the info necessary to issue the check
+        - When a load or a store happens within codegen, it will call self.issue_check_bounds(buffer, index
+        - If the given index uses (structural equality) any of the expressions that
+            need checking, we call self.check_bounds(buffer, ...) which will print the relevant line
+        """
+        if lower or upper:
+            self.pending_indirect_asserts[expr] = (size, lower, upper)
+
     def index_to_str(self, index: sympy.Expr) -> str:
         raise NotImplementedError
 
@@ -1598,18 +1616,7 @@ class Kernel(CodeGen):
             def check_bounds_lazy(
                 expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
             ):
-                """
-                How do we issue size checks:
-                - This function is called from either
-                  - CSEProxy.indirect_indexing
-                  - IndexPropagation.indirect_indexing
-                - This saves the info necessary to issue the check
-                - When a load or a store happens within codegen, it will call self.issue_check_bounds(buffer, index
-                - If the given index uses (structural equality) any of the expressions that
-                  need checking, we call self.check_bounds(buffer, ...) which will print the relevant line
-                """
-                if lower or upper:
-                    self.pending_indirect_asserts[expr] = (size, lower, upper)
+                return self.check_bounds_lazy(expr, size, lower, upper)
 
             @staticmethod
             def load(name: str, index: sympy.Expr) -> CSEVariable:
@@ -1730,7 +1737,14 @@ class Kernel(CodeGen):
         replacements = {
             x: self.args.size(x)
             for x in sorted_symbols
-            if symbol_is_type(x, (SymT.UNBACKED_INT, SymT.SIZE, SymT.PRECOMPUTED_SIZE))
+            if symbol_is_type(
+                x,
+                (
+                    SymT.UNBACKED_INT,
+                    SymT.SIZE,
+                    SymT.PRECOMPUTED_SIZE,
+                ),
+            )
         }
         return sympy_subs(index, replacements)
 

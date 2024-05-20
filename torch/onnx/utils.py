@@ -350,11 +350,6 @@ def export(
                     %3 : Float = onnx::Mul(%2, %0)
                     return (%3)
 
-                If PyTorch was built with Caffe2 (i.e. with ``BUILD_CAFFE2=1``), then
-                Caffe2-specific behavior will be enabled, including special support
-                for ops are produced by the modules described in
-                `Quantization <https://pytorch.org/docs/stable/quantization.html>`_.
-
                 .. warning::
 
                     Models exported this way are probably runnable only by Caffe2.
@@ -1802,9 +1797,8 @@ def _add_output_to_block(block: _C.Block, value: _C.Value) -> int:
 def _should_aten_fallback(
     name: str, opset_version: int, operator_export_type: _C_onnx.OperatorExportTypes
 ):
-    # For BUILD_CAFFE2=0 builds, if domain=="aten" and operator_export_type==ONNX_ATEN,
+    # For all builds, if domain=="aten" and operator_export_type==ONNX_ATEN,
     #   an aten::ATen operator is created regardless of symbolics existence
-    # For BUILD_CAFFE2=1, the same applies only if there is no symbolic available
 
     is_exportable_aten_op = registration.registry.is_registered_op(name, opset_version)
     is_onnx_aten_export = operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN

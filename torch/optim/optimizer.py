@@ -38,6 +38,8 @@ Args: TypeAlias = Tuple[Any, ...]
 Kwargs: TypeAlias = Dict[str, Any]
 StateDict: TypeAlias = Dict[str, Any]
 TensorListList: TypeAlias = List[List[torch.Tensor]]
+DeviceDict = Dict[Optional[torch.device], torch.Tensor]
+
 
 GlobalOptimizerPreHook: TypeAlias = Callable[
     ["Optimizer", Args, Kwargs], Optional[Tuple[Args, Kwargs]]
@@ -211,6 +213,16 @@ def _get_scalar_dtype(is_fused=None):
     return (
         torch.float64 if torch.get_default_dtype() == torch.float64 else torch.float32
     )
+
+
+def _get_capturable_supported_devices(supports_xla: bool = True) -> List[str]:
+    r"""Return the device type list that supports capturable optimizer."""
+    capturable_supported_devices = ["cuda"]
+    if not torch.jit.is_scripting():
+        capturable_supported_devices.append(torch._C._get_privateuse1_backend_name())
+    if supports_xla:
+        capturable_supported_devices.append("xla")
+    return capturable_supported_devices
 
 
 # Common doc strings among optimizers
