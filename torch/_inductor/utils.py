@@ -476,6 +476,7 @@ def get_kernel_metadata(node_schedule, wrapper):
     original_aten_dict = collections.defaultdict(list)
 
     # sort `inductor_nodes` topologically
+    graph = None
     if len(inductor_nodes):
         graph = inductor_nodes[0].graph
         if all(n for n in inductor_nodes if n in graph.nodes):
@@ -501,43 +502,48 @@ def get_kernel_metadata(node_schedule, wrapper):
         )
 
     # print the aot_autograd graph fragment
-    detailed_metadata.append(f"{wrapper.comment} Graph fragment:")
-    for node in inductor_nodes:
-        node_s = node.format_node()
-        # Make the node string representation easier to read
-        # before: %abs_3 : [num_users=1] = call_function[target=torch.ops.aten.abs.default](args = (%tangents_1,), kwargs = {})
-        # after: %abs_3 = torch.ops.aten.abs.default(args = (%tangents_1,), kwargs = {})
-        node_s = re.sub(r" : \[num_users=[\d]\]", "", node_s)
-        node_s = node_s.replace("call_function[target=", "").replace("]", "")
-        detailed_metadata.append(f"{wrapper.comment}     {node_s}")
+    if graph is not None:
+        detailed_metadata.append(f"{wrapper.comment} Graph fragment:")
+        node_names = {node.name for node in inductor_nodes}
+        # A bit hacky: get the parent graph generated code and only keep the
+        # lines corresponding to the variables we care about. This allows us
+        # to reuse the Python codegen code.
+        for line in graph.python_code("").src.split("\n"):
+            # Extract the "clamp_min_4" node name from a line such as
+            #   clamp_min_4 = torch.ops.aten.clamp_min.default(max_3, 1e-12);  max_3 = None
+            maybe_node_name = re.match("    ([a-z_0-9]+) = .*", line)
+            if not maybe_node_name or maybe_node_name.group(1) not in node_names:
+                continue
+            detailed_metadata.append(f"{wrapper.comment} {line}")
 
-    # print the unique fwd and bwd nn.Module stack values, if applicable
-    unique_nn_mod_stack_vals = set()
-    for node in inductor_nodes:
-        if "nn_module_stack" in node.meta:
-            nn_s = node.meta["nn_module_stack"]
-            last_key = list(nn_s.keys())[-1]
-            last_val = nn_s[last_key]
-            unique_nn_mod_stack_vals.add((last_key, last_val))
-    if len(unique_nn_mod_stack_vals):
-        detailed_metadata.append(
-            f"{wrapper.comment} Unique node to nn_module_stack last element"
-        )
-        for val in unique_nn_mod_stack_vals:
-            detailed_metadata.append(f"{wrapper.comment}     {val}")
-    unique_fwd_nn_mod_stack_vals = set()
-    for node in inductor_nodes:
-        if "fwd_nn_module_stack" in node.meta:
-            fwd_nn_s = node.meta["fwd_nn_module_stack"]
-            last_key = list(fwd_nn_s.keys())[-1]
-            last_val = fwd_nn_s[last_key]
-            unique_fwd_nn_mod_stack_vals.add((last_key, last_val))
-    if len(unique_fwd_nn_mod_stack_vals):
-        detailed_metadata.append(
-            f"{wrapper.comment} Unique node to fwd_nn_module_stack last element"
-        )
-        for val in unique_fwd_nn_mod_stack_vals:
-            detailed_metadata.append(f"{wrapper.comment}     {val}")
+    if config.comment_nn_module_stack_trace_info:
+        # print the unique fwd and bwd nn.Module stack values, if applicable
+        unique_nn_mod_stack_vals = set()
+        for node in inductor_nodes:
+            if "nn_module_stack" in node.meta:
+                nn_s = node.meta["nn_module_stack"]
+                last_key = list(nn_s.keys())[-1]
+                last_val = nn_s[last_key]
+                unique_nn_mod_stack_vals.add((last_key, last_val))
+        if len(unique_nn_mod_stack_vals):
+            detailed_metadata.append(
+                f"{wrapper.comment} Unique node to nn_module_stack last element"
+            )
+            for val in unique_nn_mod_stack_vals:
+                detailed_metadata.append(f"{wrapper.comment}     {val}")
+        unique_fwd_nn_mod_stack_vals = set()
+        for node in inductor_nodes:
+            if "fwd_nn_module_stack" in node.meta:
+                fwd_nn_s = node.meta["fwd_nn_module_stack"]
+                last_key = list(fwd_nn_s.keys())[-1]
+                last_val = fwd_nn_s[last_key]
+                unique_fwd_nn_mod_stack_vals.add((last_key, last_val))
+        if len(unique_fwd_nn_mod_stack_vals):
+            detailed_metadata.append(
+                f"{wrapper.comment} Unique node to fwd_nn_module_stack last element"
+            )
+            for val in unique_fwd_nn_mod_stack_vals:
+                detailed_metadata.append(f"{wrapper.comment}     {val}")
 
     return metadata, "\n".join(detailed_metadata)
 
