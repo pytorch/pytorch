@@ -7714,7 +7714,7 @@
 
 - func: result_type.Scalar_Scalar(Scalar scalar1, Scalar scalar2) -> ScalarType
 
-- func: can_cast(ScalarType from, ScalarType to) -> bool
+- func: can_cast(ScalarType from_, ScalarType to) -> bool
   variants: function
 
 - func: promote_types(ScalarType type1, ScalarType type2) -> ScalarType
