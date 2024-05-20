@@ -86,7 +86,7 @@ class StrobelightCLIFunctionProfiler:
         *,
         stop_at_error=False,
         max_profile_duration_sec=60 * 10,
-        sample_rate=1e7,
+        sample_each=1e7,  # sample each sample_each cycles.
         run_user_name="pytorch-strobelight-ondemand",
         timeout_wait_for_running_sec=60,
         timeout_wait_for_finished_sec=60,
@@ -97,7 +97,7 @@ class StrobelightCLIFunctionProfiler:
     ):
         self.stop_at_error = stop_at_error
         self.max_profile_duration_sec = max_profile_duration_sec
-        self.sample_rate = sample_rate
+        self.sample_each = sample_each
         self.run_user_name = run_user_name
         self.timeout_wait_for_running_sec = timeout_wait_for_running_sec
         self.timeout_wait_for_finished_sec = timeout_wait_for_finished_sec
@@ -118,7 +118,7 @@ class StrobelightCLIFunctionProfiler:
             "cycles",
             "--async",
             "--sample-interval",
-            str(int(self.sample_rate)),
+            str(int(self.sample_each)),
             "--duration-ms",
             str(int(self.max_profile_duration_sec * 1000)),
             "--pid",
@@ -176,7 +176,7 @@ class StrobelightCLIFunctionProfiler:
                 if current_status == b"RUNNING":
                     return
                 elif current_status == b"PREPARING":
-                    time.sleep(5)
+                    time.sleep(10)
                     self._wait_for_running(counter + 1)
                     return
                 else:
@@ -287,7 +287,7 @@ class StrobelightCLIFunctionProfiler:
 
         if StrobelightCLIFunctionProfiler.lock.locked():
             if self.stop_at_error:
-                raise StrobelightProfileError("multithreading not supported")
+                raise StrobelightProfileError("simultaneous runs not supported")
 
             return work_function(*args, **kwargs)
 
@@ -301,7 +301,7 @@ class StrobelightCLIFunctionProfiler:
                 return work_function(*args, **kwargs)
 
             try:
-                logger.debug("collections started")
+                logger.debug("collection started")
                 result = work_function(*args, **kwargs)
                 self._stop_strobelight_no_throw(collect_results=True)
                 return result
