@@ -443,6 +443,9 @@ def run_test(
         # use the downloaded test cases configuration, not supported in pytest
         unittest_args.extend(ci_args)
 
+    if options.save_xml:
+        unittest_args.append(f"--save-xml={options.save_xml}")
+
     if test_file in PYTEST_SKIP_RETRIES:
         if not options.pytest:
             raise RuntimeError(
