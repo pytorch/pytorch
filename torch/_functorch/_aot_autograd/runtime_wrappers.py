@@ -73,7 +73,7 @@ class CompilerWrapper:
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,
-    ):
+    ) -> Tuple[Callable, List[Tensor], ViewAndMutationMeta]:
         """
         Process the inputs to the compiler_fn. You can pass in extra metadata via kwargs.
         Args:
@@ -82,15 +82,15 @@ class CompilerWrapper:
         aot_config: AOTConfig passed in at compile time
         fw_metadata: ViewAndMutationMeta generated from flat_fn and flat_args
         """
-        return flat_fn, flat_args, aot_config, fw_metadata
+        return flat_fn, flat_args, fw_metadata
 
-    def post_compile(self, compiled_fn, aot_config, *, fw_metadata):
+    def post_compile(self, compiled_fn, aot_config, *, runtime_metadata) -> Callable:
         """
         Given an output of the compiler, wrap it with information received from prologue.
         Args:
         compiled_fn: Callable after calling compiler_fn
         aot_config: AOTConfig after calling prologue
-        fw_metadata: ViewAndMutationMeta after calling prologue
+        runtime_metadata: ViewAndMutationMeta after calling all wrappers's pre_compile steps.
         Example:
 
         def wrapped_compiled_fn(args):
@@ -100,28 +100,6 @@ class CompilerWrapper:
         return wrapped_compiled_fn
         """
         return compiled_fn
-
-    def create(
-        self,
-        flat_fn,
-        flat_args: List[Tensor],
-        aot_config: AOTConfig,
-        *,
-        fw_metadata: ViewAndMutationMeta,
-        compiler_fn,
-    ):
-        (
-            wrapped_flat_fn,
-            new_flat_args,
-            new_aot_config,
-            new_fw_metadata,
-        ) = self.pre_compile(flat_fn, flat_args, aot_config, fw_metadata=fw_metadata)
-        compiled_fn = compiler_fn(
-            wrapped_flat_fn, new_flat_args, new_aot_config, fw_metadata=new_fw_metadata
-        )
-        return self.post_compile(
-            compiled_fn, new_aot_config, fw_metadata=new_fw_metadata
-        )
 
 
 # The wrapper created by this function handles all of the runtime aliasing and mutation "epilogue" logic
@@ -143,11 +121,11 @@ class RuntimeWrapper(CompilerWrapper):
         compiled_fn,
         aot_config: AOTConfig,
         *,
-        fw_metadata: ViewAndMutationMeta,
+        runtime_metadata: ViewAndMutationMeta,
     ):
         return _create_runtime_wrapper(
             compiled_fn,
-            runtime_metadata=fw_metadata,
+            runtime_metadata=runtime_metadata,
             indices_of_inps_to_detach=self.indices_of_inps_to_detach,
             trace_joint=self.trace_joint,
             keep_input_mutations=aot_config.keep_inference_input_mutations,
@@ -421,7 +399,7 @@ class FunctionalizedRngRuntimeWrapper(CompilerWrapper):
         aot_config,
         *,
         fw_metadata,
-    ):
+    ) -> Tuple[Callable, List[Tensor], ViewAndMutationMeta]:
         if config.functionalize_rng_ops:
             # Update example inputs for the fw_compiler
             fake_mode = detect_fake_mode()
@@ -430,27 +408,27 @@ class FunctionalizedRngRuntimeWrapper(CompilerWrapper):
             # We are not clearing flat_args here because
             # 1) There is a check in the debug compiler at the end
             # 2) It does not matter as these are fake tensors
-        return flat_fn, flat_args, aot_config, fw_metadata
+        return flat_fn, flat_args, fw_metadata
 
     def post_compile(
         self,
         compiled_fn,
         aot_config: AOTConfig,
         *,
-        fw_metadata: ViewAndMutationMeta,
+        runtime_metadata: ViewAndMutationMeta,
     ):
         @wraps(compiled_fn)
         def wrapper(runtime_args: List[Any]):
-            if fw_metadata.is_rng_op_functionalized:
+            if runtime_metadata.is_rng_op_functionalized:
                 # Add the seed and offset to args
                 seed, offset = CUDARngStateHelper.get_torch_state_as_tuple()
                 runtime_args.extend([seed, offset])
                 out = compiled_fn(runtime_args)
                 out = self._functionalized_rng_runtime_epilogue(
-                    fw_metadata,
+                    runtime_metadata,
                     out,
                     # TODO: this won't be right for the backward when we convert the call_compiled_backward to use the wrapper
-                    fw_metadata.num_forward_returns,
+                    runtime_metadata.num_forward_returns,
                 )
                 return out
             return compiled_fn(runtime_args)
@@ -493,7 +471,7 @@ class FakifiedOutWrapper(CompilerWrapper):
         aot_config,
         *,
         fw_metadata,
-    ):
+    ) -> Tuple[Callable, List[Tensor], ViewAndMutationMeta]:
         tracing_context = torch._guards.TracingContext.try_get()
         if tracing_context and tracing_context.fakify_first_call:
             self.out_metas = [
@@ -501,22 +479,25 @@ class FakifiedOutWrapper(CompilerWrapper):
             ]
         else:
             self.needs_post_compile = False
-        return fw_module, flat_args, aot_config, fw_metadata
+        return fw_module, flat_args, fw_metadata
 
     def _compute_output_meta_with_inductor_strides(self):
         out = self.out_metas
         fwd_output_strides = self.fwd_output_strides
         if not fwd_output_strides:
             return out
-        with TracingContext.get().fake_mode.shape_env.suppress_guards():
-            for i in range(len(out)):
-                if not isinstance(out[i], Tensor):
-                    continue
-                if all(
-                    s1 == s2 for s1, s2 in zip(out[i].stride(), fwd_output_strides[i])
-                ):
-                    continue
-                out[i] = out[i].as_strided(out[i].shape, fwd_output_strides[i])
+
+        from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+        for i in range(len(out)):
+            if not isinstance(out[i], Tensor):
+                continue
+            if all(
+                statically_known_true(s1 == s2)
+                for s1, s2 in zip(out[i].stride(), fwd_output_strides[i])
+            ):
+                continue
+            out[i] = out[i].as_strided(out[i].shape, fwd_output_strides[i])
         return out
 
     # To be called post compile
@@ -528,7 +509,7 @@ class FakifiedOutWrapper(CompilerWrapper):
         compiled_fn,
         aot_config: AOTConfig,
         *,
-        fw_metadata: ViewAndMutationMeta,
+        runtime_metadata: ViewAndMutationMeta,
     ):
         if self.needs_post_compile:
             assert self.fwd_output_strides is not None
@@ -575,19 +556,19 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
             fw_only=self.fw_only,  # type: ignore[arg-type]
         )
         self.maybe_subclass_meta = subclass_meta
-        return new_flat_fn, new_flat_args, aot_config, fw_metadata
+        return new_flat_fn, new_flat_args, fw_metadata
 
     def post_compile(
         self,
         compiled_fn,
         _aot_config: AOTConfig,
         *,
-        fw_metadata: ViewAndMutationMeta,
+        runtime_metadata: ViewAndMutationMeta,
     ):
         if self.maybe_subclass_meta is None:
             return compiled_fn
 
-        subclass_metas = fw_metadata.subclass_fw_graph_out_meta
+        subclass_metas = runtime_metadata.subclass_fw_graph_out_meta
 
         @wraps(compiled_fn)
         def inner_fn(args: List[Any]):
@@ -713,7 +694,7 @@ class AOTDedupeWrapper(CompilerWrapper):
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,
-    ):
+    ) -> Tuple[Callable, List[Tensor], ViewAndMutationMeta]:
         # Use information about whether or not flat_fn mutates its arguments
         # or not to handle dupe args
 
@@ -740,7 +721,7 @@ class AOTDedupeWrapper(CompilerWrapper):
 
         if ok:
             self.needs_post_compile = False
-            return flat_fn, leaf_flat_args, aot_config, fw_metadata
+            return flat_fn, leaf_flat_args, fw_metadata
 
         if requires_subclass_dispatch(leaf_flat_args, fw_metadata):
             raise RuntimeError(
@@ -865,14 +846,14 @@ class AOTDedupeWrapper(CompilerWrapper):
                 ref_fw_metadata == updated_fw_metadata
             ), f"ref_metadata={str(ref_fw_metadata)}, actual_metadata={str(updated_fw_metadata)}"
 
-        return wrapped_flat_fn, deduped_flat_args, aot_config, updated_fw_metadata
+        return wrapped_flat_fn, deduped_flat_args, updated_fw_metadata
 
     def post_compile(
         self,
         compiled_fn,
         aot_config: AOTConfig,
         *,
-        fw_metadata: ViewAndMutationMeta,
+        runtime_metadata: ViewAndMutationMeta,
     ):
         if not self.needs_post_compile:
             return compiled_fn
@@ -932,6 +913,8 @@ class AOTDedupeWrapper(CompilerWrapper):
 # would cause us to hit that path more frequently).
 @dataclass
 class AOTSyntheticBaseWrapper(CompilerWrapper):
+    # Currently, the only reason we need to plumb this bool is because
+    # the synthetic base code prohibits more cases in the autograd case than the inference case.
     trace_joint: bool  # TODO: refactor trace_joint
     needs_post_compile: bool = True
     aliased_arg_idx_with_metadata_mutations: List[int] = field(default_factory=list)
@@ -943,7 +926,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,
-    ):
+    ) -> Tuple[Callable, List[Tensor], ViewAndMutationMeta]:
         is_inference = not self.trace_joint
         flat_args_with_synthetic_bases, synthetic_base_info = merge_view_inputs(
             flat_args,
@@ -954,7 +937,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         # Happy path: we don't need synthetic bases
         if synthetic_base_info is None:
             self.needs_post_compile = False
-            return flat_fn, flat_args, aot_config, fw_metadata
+            return flat_fn, flat_args, fw_metadata
 
         # export path: ban synthetic bases for now, add later if requested.
         if requires_subclass_dispatch(flat_args, fw_metadata):
@@ -1050,7 +1033,6 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         return (
             wrapped_flat_fn,
             flat_args_with_synthetic_bases,
-            aot_config,
             fw_metadata_updated,
         )
 
@@ -1059,7 +1041,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         compiled_fn,
         aot_config: AOTConfig,
         *,
-        fw_metadata: ViewAndMutationMeta,
+        runtime_metadata: ViewAndMutationMeta,
     ):
         if not self.needs_post_compile:
             return compiled_fn

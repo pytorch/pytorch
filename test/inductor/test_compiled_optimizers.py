@@ -136,6 +136,8 @@ KERNEL_COUNT_OVERRIDES = {
     "test_sgd_momentum_foreach_cuda": 5,
     "test_sgd_weight_decay_maximize_cuda": 4,
     "test_sgd_weight_decay_maximize_cpu": 4,
+    "test_sgd_weight_decay_cpu": 4,
+    "test_sgd_weight_decay_cuda": 4,
     "test_sgd_momentum_weight_decay_foreach_cuda": 2,
     "test_sgd_momentum_nesterov_weight_decay_foreach_cuda": 2,
     "test_sgd_cuda": 4,
@@ -766,6 +768,25 @@ class CompiledOptimizerTests(TestCase):
         ret_val = compiled(x)
 
         self.assertEqual(ret_val, x)
+
+    # compile a large foreach op and verify
+    # that the time taken is within an expected range
+    @requires_cuda
+    def test_compile_time_smoketest(self):
+        import time
+
+        xs = [torch.ones(2, 2, device="cuda") for _ in range(100)]
+        ys = [torch.ones(2, 2, device="cuda") for _ in range(100)]
+
+        @torch.compile
+        def fn(xs, ys):
+            return torch._foreach_add(xs, ys)
+
+        start = time.perf_counter()
+        fn(xs, ys)
+        end = time.perf_counter()
+
+        self.assertLess(end - start, 90)
 
 
 for optim_cls, name, kwargs, scheduler_cls in COMPILED_OPT_KWARG_DB:

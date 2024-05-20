@@ -23,7 +23,7 @@ TORCH_META_FUNC(upsample_linear1d) (
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    c10::optional<double> scales
+    std::optional<double> scales
 ) {
   auto full_output_size = native::upsample_1d_common_check(input.sizes(), output_size);
 
@@ -41,7 +41,7 @@ TORCH_META_FUNC(upsample_linear1d_backward) (
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    c10::optional<double> scales
+    std::optional<double> scales
 ) {
   auto full_output_size = native::upsample_1d_common_check(input_size, output_size);
 
@@ -65,7 +65,7 @@ TORCH_IMPL_FUNC(upsample_linear1d_out_cpu) (
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    c10::optional<double> scales,
+    std::optional<double> scales,
     const Tensor& output
 ) {
   upsample_linear1d_kernel(kCPU, output, input, align_corners, scales);
@@ -76,7 +76,7 @@ TORCH_IMPL_FUNC(upsample_linear1d_backward_out_cpu) (
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    c10::optional<double> scales,
+    std::optional<double> scales,
     const Tensor& grad_input
 ) {
   grad_input.zero_();
@@ -92,7 +92,7 @@ Tensor upsample_linear1d(
     const Tensor& input,
     at::OptionalIntArrayRef output_size,
     bool align_corners,
-    c10::optional<ArrayRef<double>> scale_factors) {
+    std::optional<ArrayRef<double>> scale_factors) {
   auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
   auto scale_w = get_scale_value(scale_factors, 0);
   return at::upsample_linear1d(input, osize, align_corners, scale_w);
