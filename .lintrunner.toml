@@ -1101,7 +1101,6 @@ exclude_patterns = [
     'test/test_native_functions.py',
     'test/test_native_mha.py',
     'test/test_nestedtensor.py',
-    'test/test_nn.py',
     'test/test_out_dtype_op.py',
     'test/test_overrides.py',
     'test/test_prims.py',
