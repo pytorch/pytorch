@@ -859,8 +859,9 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
                 fwd_mod_name = ""
                 if len(fwd_source_fn_stack):
                     fwd_mod_name = fwd_source_fn_stack[-1][0]
-                seq_table = seq_table + f"{seq_nr}|{orig_aten}|{mod_name}|{fwd_mod_name}\n"
-
+                seq_table = (
+                    seq_table + f"{seq_nr}|{orig_aten}|{mod_name}|{fwd_mod_name}\n"
+                )
 
         self.maxDiff = None
         self.assertExpectedInline(
