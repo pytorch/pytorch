@@ -1561,13 +1561,13 @@ class CppWrapperCpu(WrapperCodeGen):
         size = self.codegen_shape_tuple(shape)
         stride = self.codegen_shape_tuple(orig_stride)
         if config.abi_compatible:
-            size_array_var = self.codegen_var_array(
+            size_array_var = self.codegen_int_array_var(
                 size,
                 self.wrapper_call,
                 known_statically=self.is_statically_known_list_of_ints(shape),
                 graph=self.get_codegened_graph(),
             )
-            stride_array_var = self.codegen_var_array(
+            stride_array_var = self.codegen_int_array_var(
                 stride,
                 self.wrapper_call,
                 known_statically=self.is_statically_known_list_of_ints(orig_stride),
@@ -1634,10 +1634,10 @@ class CppWrapperCpu(WrapperCodeGen):
                 self.expr_printer(offset),  # bytes not numel
                 self.codegen_dtype(dtype),
                 str(len(shape)),
-                self.codegen_var_array(
+                self.codegen_int_array_var(
                     size, self.wrapper_call, graph=self.get_codegened_graph()
                 ),
-                self.codegen_var_array(
+                self.codegen_int_array_var(
                     stride, self.wrapper_call, graph=self.get_codegened_graph()
                 ),
                 f"&{tmp_name}",
@@ -1678,13 +1678,13 @@ class CppWrapperCpu(WrapperCodeGen):
             args = [
                 f"{data.get_name()}",
                 dim,
-                self.codegen_var_array(
+                self.codegen_int_array_var(
                     size,
                     writer,
                     known_statically=self.is_statically_known_list_of_ints(size_list),
                     graph=self.get_codegened_graph(),
                 ),
-                self.codegen_var_array(
+                self.codegen_int_array_var(
                     stride,
                     writer,
                     known_statically=self.is_statically_known_list_of_ints(stride_list),
