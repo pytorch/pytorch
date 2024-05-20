@@ -7,7 +7,7 @@ import time
 from threading import Lock
 from typing import Optional
 
-logger = logging.getLogger("strobelight_cli_function_profiler")
+logger = logging.getLogger("strobelight_function_profiler")
 
 console_handler = logging.StreamHandler()
 formatter = logging.Formatter(
@@ -21,7 +21,9 @@ logger.propagate = False
 
 
 class StrobelightCLIProfilerError(Exception):
-    "Raised when an error happens during strobelight profiling"
+    """
+    Raised when an error happens during strobelight profiling
+    """
 
 
 # A function decorator that wraps profile, if no profiler is provided one with
@@ -263,7 +265,7 @@ class StrobelightCLIFunctionProfiler:
 
             self._get_results()
         except Exception as error:
-            logger.warning("error during stop_strobelight %s", error)
+            log.warning("error during stop_strobelight", exc_info=True)
 
     # Return true if strobelight started and is running.
     def _start_strobelight(self):
