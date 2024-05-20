@@ -1778,7 +1778,7 @@ class Module:
             super().__delattr__(name)
 
     def _register_state_dict_hook(self, hook):
-        r"""See :meth:`~torch.nn.Module.register_state_dict_hook` for details."""
+        r"""See :meth:`~torch.nn.Module.register_state_dict_post_hook` for details."""
         handle = hooks.RemovableHandle(self._state_dict_hooks)
         self._state_dict_hooks[handle.id] = hook
         return handle
