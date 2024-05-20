@@ -1,6 +1,10 @@
 #include <sstream>
 
+#if __has_include(<nvtx3/nvToolsExt.h>)
 #include <nvtx3/nvToolsExt.h>
+#else
+#include <nvToolsExt.h>
+#endif
 
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/ApproximateClock.h>
