@@ -7901,7 +7901,7 @@
   device_guard: False
   tags: inplace_view
   dispatch:
-    CPU, CUDA, Meta, MPS, NestedTensorCPU, NestedTensorCUDA: _unsafe_set_storage_
+    CPU, CUDA, Meta, MPS, NestedTensorCPU, NestedTensorCUDA, NestedTensorMeta: _unsafe_set_storage_
   autogen: _unsafe_set_storage, _unsafe_set_storage.out
 
 # Not making it CompositeImplicitAutograd because lift
