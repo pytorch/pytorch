@@ -299,6 +299,8 @@ def register_onednn_fusion_ops():
             if len(x_size) > 2:
                 # GEMM template needs 2D input, normalize input shape here
                 x = view(x, [-1, x_size[-1]])
+            if b is not None:
+                b = ir.ExternKernel.realize_input(b)
             inputs = [x, w] if b is None else [x, w, b]
             choices: List[ChoiceCaller] = []
             if len(choices) == 0 or use_aten_gemm_kernels():
@@ -361,6 +363,8 @@ def register_onednn_fusion_ops():
             y_size = y.get_size()
             if len(y_size) > 2:
                 y = view(y, [-1, y_size[-1]])
+            if b is not None:
+                b = ir.ExternKernel.realize_input(b)
             inputs = [x, y, w] if b is None else [x, y, w, b]
             choices: List[ChoiceCaller] = []
             if len(choices) == 0 or use_aten_gemm_kernels():
