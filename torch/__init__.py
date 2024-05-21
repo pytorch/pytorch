@@ -244,10 +244,6 @@ else:
 if TYPE_CHECKING:
     from . import _C as _C
 
-# Import picklable torch._C.Generator subclass
-from torch._generator import Generator as Generator
-
-
 class SymInt:
     """
     Like an int (including magic methods), but redirects all operations on the
