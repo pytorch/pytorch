@@ -502,13 +502,15 @@ bool check_runtime_disabled_cudnn(sdp_params const& params, bool debug) {
   return true;
 }
 
-bool check_cudnn_requires_grad(sdp_params const& params, bool debug) {
-  // Check that the input is causal
-  if (input_requires_grad(params)) {
-    if (debug) {
-      TORCH_WARN("CuDNN does not currently support inputs with requires_grad=True.");
+bool check_cudnn_deterministic(const sdp_params& params, bool debug) {
+  auto& ctx = at::globalContext();
+  if (ctx.deterministicAlgorithms()) {
+    if (!ctx.deterministicAlgorithmsWarnOnly()) {
+      if (debug) {
+        TORCH_WARN("cuDNN SDPA is not deterministic.");
+      }
+      return false;
     }
-    return false;
   }
   return true;
 }
@@ -526,10 +528,10 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
           check_cudnn_hardware_support,
           check_all_tensors_on_device,
           check_cudnn_tensor_shapes,
+	  check_cudnn_deterministic,
           // check_cudnn_layout,
           // check_is_causal,
           check_for_nested_inputs,
-          // check_cudnn_requires_grad,
           check_dtypes_low_precision);
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {

@@ -180,6 +180,18 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_
     double dropout_p,
     bool is_causal,
     c10::optional<double> scale) {
+
+
+    auto& ctx = at::globalContext();
+    if (ctx.deterministicAlgorithms()) {
+      if (ctx.deterministicAlgorithmsWarnOnly()) {
+        TORCH_WARN_ONCE(
+            "cuDNN Attention defaults to a non-deterministic algorithm. ",
+            "To explicitly enable determinism call torch.use_deterministic_algorithms(True, warn_only=False).");
+      }
+    }
+
+
     const int64_t batch_size = query.size(0);
     const int64_t num_heads = query.size(1);
     const int64_t head_dim = query.size(3);

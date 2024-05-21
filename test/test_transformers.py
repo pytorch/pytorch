@@ -2524,7 +2524,12 @@ class TestSDPACudaOnly(NNTestCase):
         with use_deterministic_algorithims(True, warn_only=warn_only):
             with sdpa_kernel(backends=[fused_kernel]):
                 with warning_context:
-                    torch.nn.functional.scaled_dot_product_attention(query, key, value).sum().backward()
+                    if warn_only or fused_kernel != SDPBackend.CUDNN_ATTENTION:
+                        torch.nn.functional.scaled_dot_product_attention(query, key, value).sum().backward()
+                    else:
+                        # cuDNN attention has no deterministic fallback
+                        self.assertRaises(RuntimeError, lambda:
+                            torch.nn.functional.scaled_dot_product_attention(query, key, value).sum().backward())
 
     @unittest.skip("This test is not behaving deterministaclly non-deterministaclly on CI/CD")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Platform does not support fused SDPA")
