@@ -234,9 +234,7 @@ class BenchmarkRunner:
                     )
                 )
         else:
-            if test_case.framework == "PyTorch":
-                print(f"# Mode: {'JIT' if self.use_jit else 'Eager'}")
-
+            print(f"# Mode: {'JIT' if self.use_jit else 'Eager'}")
             print(
                 f"# Name: {test_case.test_config.test_name}\n# Input: {test_case.test_config.input_config}"
             )
@@ -284,8 +282,7 @@ class BenchmarkRunner:
         and the execution time is reported
         """
         test_case.run_forward(num_runs=1, print_per_iter=False, cuda_sync=False)
-        if test_case.framework == "PyTorch":
-            test_case._output_mean()
+        test_case._output_mean()
         backward_time = timeit.timeit(
             functools.partial(test_case.run_backward, iters, print_per_iter), number=1
         )
@@ -358,9 +355,6 @@ class BenchmarkRunner:
         # Currently, this is a sub-string matching.
         op_test_config = test_case.test_config
 
-        if self.args.framework:
-            frameworks = benchmark_utils.process_arg_list(self.args.framework)
-
         operators = (
             benchmark_utils.process_arg_list(self.args.operators)
             if self.args.operators
@@ -371,7 +365,6 @@ class BenchmarkRunner:
         if (
             self._check_keep(op_test_config.test_name, self.args.test_name)
             and self._check_keep_list(test_case.op_bench.module_name(), operators)
-            and self._check_keep_list(test_case.framework, frameworks)
             and self._check_operator_first_char(
                 test_case.op_bench.module_name(), self.operator_range
             )
