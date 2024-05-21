@@ -1698,3 +1698,20 @@ def run_and_get_cpp_code(fn, *args, **kwargs):
         output_code_log.setLevel(prev_level)
         output_code_log.removeHandler(ch)
     return result, s
+
+
+def print_mm_pattern(match, inputs: List[torch.fx.Node], pass_name: str = ""):
+    node = match.nodes[-1]
+    log.debug(
+        "mm pattern node %s of pass %s with input shape: %s",
+        node.target,
+        pass_name,
+        ", ".join(
+            str(input.meta["val"].shape) if "val" in input.meta else "None"
+            for input in inputs
+        ),
+    )
+
+
+def is_aten_node_meta_valid(node: torch.fx.Node):
+    return "val" in node.meta

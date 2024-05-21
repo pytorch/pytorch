@@ -6,12 +6,26 @@ from typing import List, Optional, Union
 import torch
 import torch._inductor.runtime.runtime_utils
 from torch import Tensor
+from torch._dynamo.utils import counters
 from torch._inductor import utils
+from torch._inductor.utils import is_aten_node_meta_valid, print_mm_pattern
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
+
 from ...utils._triton import has_triton
 
-from ..pattern_matcher import fwd_only, gen_register_replacement, joint_fwd_bwd, Match
+from ..pattern_matcher import (
+    Arg,
+    CallFunction,
+    fwd_only,
+    gen_register_replacement,
+    Ignored,
+    joint_fwd_bwd,
+    Match,
+    register_graph_pattern,
+)
+
+from .split_cat import construct_pattern_matcher_pass
 
 aten = torch.ops.aten
 
@@ -55,33 +69,34 @@ def check_dtype(a: Tensor, b: Tensor) -> bool:
     return a.is_floating_point() and b.is_floating_point()
 
 
+# It's fine we have symbolic shapes or strides as long as they
+# have hints. Later, we will make sure we only pad non-symbolic dimensions.
+def valid_shape_and_stride(t: Optional[Tensor]) -> bool:
+    if t is None:
+        return True
+
+    symbolic_cnt = 0
+    for x in t.size():
+        if isinstance(x, int):
+            continue
+        elif utils.is_symbolic(x):
+            if not x.node.has_hint():
+                return False
+            symbolic_cnt += 1
+        else:
+            return False
+    # filter out cases where all dimentions are symbolic
+    if symbolic_cnt == len(t.size()):
+        return False
+    return all(
+        isinstance(x, int) or (utils.is_symbolic(x) and x.node.has_hint())
+        for x in t.stride()
+    )
+
+
 def should_pad_common(
     mat1: Tensor, mat2: Tensor, input: Optional[Tensor] = None
 ) -> bool:
-    # It's fine we have symbolic shapes or strides as long as they
-    # have hints. Later, we will make sure we only pad non-symbolic dimensions.
-    def valid_shape_and_stride(t: Optional[Tensor]) -> bool:
-        if t is None:
-            return True
-
-        symbolic_cnt = 0
-        for x in t.size():
-            if isinstance(x, int):
-                continue
-            elif utils.is_symbolic(x):
-                if not x.node.has_hint():
-                    return False
-                symbolic_cnt += 1
-            else:
-                return False
-        # filter out cases where all dimentions are symbolic
-        if symbolic_cnt == len(t.size()):
-            return False
-        return all(
-            isinstance(x, int) or (utils.is_symbolic(x) and x.node.has_hint())
-            for x in t.stride()
-        )
-
     return (
         torch._inductor.config.shape_padding
         and check_device(mat1, mat2)
@@ -281,6 +296,21 @@ def get_non_view_def(node):
     return node
 
 
+def realize_symbols(ds):
+    return [d if isinstance(d, int) else d.node.hint for d in ds]
+
+
+def realize_tensor(t):
+    if isinstance(t, FakeTensor):
+        size_hints = realize_symbols(t.size())
+        stride_hint = realize_symbols(t.stride())
+        real_size = sum((d - 1) * s for d, s in zip(size_hints, stride_hint)) + 1
+        real_t = torch.randn(real_size, dtype=t.dtype, device=t.device)
+        return torch.as_strided(real_t, size_hints, stride_hint)
+    else:
+        return torch.randn_like(t)
+
+
 def should_exclude_padding_time(match, arg_name):
     node_def = get_non_view_def(match.kwargs[arg_name])
 
@@ -326,9 +356,6 @@ def should_pad_bench(
         if m_padded_length == k_padded_length == n_padded_length == 0:
             return False
 
-        def realize_symbols(ds):
-            return [d if isinstance(d, int) else d.node.hint for d in ds]
-
         if any(
             dim == 0
             for dim in itertools.chain(
@@ -353,18 +380,6 @@ def should_pad_bench(
         cached_pad = get_cached_should_pad(key)
         if cached_pad is not None:
             return cached_pad
-
-        def realize_tensor(t):
-            if isinstance(t, FakeTensor):
-                size_hints = realize_symbols(t.size())
-                stride_hint = realize_symbols(t.stride())
-                real_size = (
-                    sum((d - 1) * s for d, s in zip(size_hints, stride_hint)) + 1
-                )
-                real_t = torch.randn(real_size, dtype=t.dtype, device=t.device)
-                return torch.as_strided(real_t, size_hints, stride_hint)
-            else:
-                return torch.randn_like(t)
 
         mat1 = realize_tensor(mat1)
         mat2 = realize_tensor(mat2)
@@ -658,3 +673,160 @@ def _pad_mm_init():
             extra_check=extra_check,
             scalar_workaround=workaround,
         )
+
+
+def should_mutate_mm_common(mat1, mat2) -> bool:
+    if is_aten_node_meta_valid(mat1) and is_aten_node_meta_valid(mat2):
+        mat1 = mat1.meta["val"]
+        mat2 = mat2.meta["val"]
+    else:
+        return False
+    return check_device(mat1, mat2) and len(mat1.shape) == 2 and len(mat2.shape) == 2
+
+
+def should_pad_mm_common(mat1, mat2):
+    if not should_mutate_mm_common(mat1, mat2):
+        return False
+    mat1 = mat1.meta["val"]
+    mat2 = mat2.meta["val"]
+    return check_dtype(mat1, mat2) and all(
+        valid_shape_and_stride(t) for t in (mat1, mat2)
+    )
+
+
+def should_pad_mm_bf16(dtype, M, N, K):
+    # we have experienced some large perf hits in this case, even in bandwidth bound regimes
+    if (
+        dtype is torch.bfloat16
+        and K > M
+        and K > N
+        and torch.cuda.get_device_capability() < (9, 0)
+    ):  # doesnt repro on h100s:
+        return True
+    return False
+
+
+@register_graph_pattern(
+    CallFunction(aten.mm, Arg(), Arg()),
+    pass_dict=construct_pattern_matcher_pass("pad_mm_pass"),
+)
+def pad_aten_mm(
+    match: Match,
+    mat1: torch.fx.Node,
+    mat2: torch.fx.Node,
+):
+    graph = match.graph
+    mm_node = match.nodes[-1]
+    if should_pad_mm_common(mat1, mat2):
+        fake_mat1, fake_mat2 = mat1.meta["val"], mat2.meta["val"]
+        m = fake_mat1.shape[0]
+        k = fake_mat1.shape[1]
+        n = fake_mat2.shape[1]
+        if should_pad_mm_bf16(fake_mat1.dtype, m, n, k):
+            real_mat1 = realize_tensor(fake_mat1)
+            real_mat2 = realize_tensor(fake_mat2)
+            k_padded_length = get_padded_length(
+                real_mat1.shape[1], get_alignment_size(real_mat1)
+            )
+            m_padded_length = get_padded_length(
+                real_mat1.shape[0], get_alignment_size(real_mat1)
+            )
+            n_padded_length = get_padded_length(
+                real_mat2.shape[1], get_alignment_size(real_mat2)
+            )
+            if m_padded_length == 0 and n_padded_length == 0 and k_padded_length == 0:
+                return
+            counters["inductor"]["pad_mm_pass"] += 1
+            print_mm_pattern(match, [mat1, mat2], "pad_mm_pass")
+            # we pad the tensor with size (m, k, n) with multiple dimensions
+            # case 1: pad k dimension if padded_length is non-zero
+            if k_padded_length != 0:
+                with graph.inserting_after(mat1):
+                    meta1 = mat1.meta["val"]
+                    meta2 = mat2.meta["val"]
+                    mat1 = graph.call_function(
+                        aten.pad.default,
+                        args=(mat1, (0, k_padded_length, 0, 0), "constant", 0),
+                    )
+                    mat2 = graph.call_function(
+                        aten.pad.default,
+                        args=(mat2, (0, 0, 0, k_padded_length), "constant", 0),
+                    )
+                    mat1.meta["val"] = aten.pad.default(
+                        meta1, (0, k_padded_length, 0, 0), "constant", 0
+                    )
+                    mat2.meta["val"] = aten.pad.default(
+                        meta2, (0, 0, 0, k_padded_length), "constant", 0
+                    )
+                    padded_mm = graph.call_function(
+                        aten.mm.default,
+                        args=(mat1, mat2),
+                    )
+                    mm_node.replace_all_uses_with(padded_mm)
+                    padded_mm.meta.update(mm_node.meta)
+            # case2: pad n dimension if padded_length is non-zero
+            if n_padded_length != 0:
+                meta1 = mat1.meta["val"]
+                meta2 = mat2.meta["val"]
+                with graph.inserting_after(mat2):
+                    mat2 = graph.call_function(
+                        aten.pad.default,
+                        args=(mat2, (0, n_padded_length, 0, 0), "constant", 0),
+                    )
+                    mat2.meta["val"] = aten.pad.default(
+                        meta2, (0, n_padded_length, 0, 0), "constant", 0
+                    )
+                    padded_mm = graph.call_function(
+                        aten.mm.default,
+                        args=(mat1, mat2),
+                    )
+                    padded_mm.meta["val"] = aten.mm.default(meta1, meta2)
+                    sliced_mm = graph.call_function(
+                        aten.slice.Tensor,
+                        args=(padded_mm, 1, 0, n, 1),
+                    )
+                    mm_node.replace_all_uses_with(sliced_mm)
+                    sliced_mm.meta.update(mm_node.meta)
+            # case3: pad m dimension if padded_length is non-zero
+            if m_padded_length != 0:
+                meta1 = mat1.meta["val"]
+                meta2 = mat2.meta["val"]
+                with graph.inserting_after(mat1):
+                    mat1 = graph.call_function(
+                        aten.pad.default,
+                        args=(mat1, (0, 0, 0, m_padded_length), "constant", 0),
+                    )
+                    mat1.meta["val"] = aten.pad.default(
+                        meta1, (0, 0, 0, m_padded_length), "constant", 0
+                    )
+                    padded_mm = graph.call_function(
+                        aten.mm.default,
+                        args=(mat1, mat2),
+                    )
+                    padded_mm.meta["val"] = aten.mm.default(meta1, meta2)
+                    sliced_mm = graph.call_function(
+                        aten.slice.Tensor,
+                        args=(padded_mm, 0, 0, m, 1),
+                    )
+                    mm_node.replace_all_uses_with(sliced_mm)
+                    sliced_mm.meta.update(mm_node.meta)
+            graph.erase_node(mm_node)
+
+
+@register_graph_pattern(
+    CallFunction(aten.mm, CallFunction(aten.permute, Arg(), Ignored()), Arg()),
+    pass_dict=construct_pattern_matcher_pass("make_mmt_contiguous_pass"),
+)
+def make_mmt_contiguous(
+    match: Match,
+    mat1: torch.fx.Node,
+    mat2: torch.fx.Node,
+):
+    def repl(mat1, mat2):
+        return torch.mm(torch.transpose(mat1, 1, 0).contiguous(), mat2.contiguous())
+
+    if should_mutate_mm_common(mat1, mat2):
+        match.replace_by_example(repl, [mat1, mat2])
+        counters["inductor"]["make_mmt_contiguous_pass"] += 1
+        print_mm_pattern(match, [mat1, mat2], "make_mmt_contiguous_pass")
+    return

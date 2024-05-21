@@ -4,6 +4,7 @@ from typing import List
 import torch
 from torch import Tensor
 from torch._dynamo.utils import counters
+from torch._inductor.utils import print_mm_pattern
 
 from .. import config
 
@@ -79,18 +80,6 @@ def is_node_meta_valid(node: torch.fx.Node):
     return "val" in node.meta
 
 
-def print_decompose_pattern(match: Match, inputs: List[torch.fx.Node]):
-    node = match.nodes[-1]
-    log.debug(
-        "Decompose %s with input shape: %s",
-        node.target,
-        ", ".join(
-            str(input.meta["val"].shape) if "val" in input.meta else "None"
-            for input in inputs
-        ),
-    )
-
-
 @register_graph_pattern(
     CallFunction(aten.bmm, Arg(), Arg()),
     pass_dict=construct_pattern_matcher_pass("decompose_mm_pass"),
@@ -102,7 +91,7 @@ def decompose_bmm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node):
     if should_decompose_bmm(mat1, mat2):
         counters["inductor"]["decompose_bmm"] += 1
         match.replace_by_example(repl, [mat1, mat2])
-        print_decompose_pattern(match, [mat1, mat2])
+        print_mm_pattern(match, [mat1, mat2], "decompose_bmm")
         realize_inputs([mat1, mat2])
     return
 
@@ -123,7 +112,7 @@ def decompose_addmm(
     if should_decompose_mm(mat2, mat3):
         counters["inductor"]["decompose_addmm"] += 1
         match.replace_by_example(repl, [mat1, mat2, mat3])
-        print_decompose_pattern(match, [mat1, mat2, mat3])
+        print_mm_pattern(match, [mat1, mat2, mat3], "decompose_addmm")
         realize_inputs([mat1, mat2, mat3])
     return
 
@@ -143,6 +132,6 @@ def decompose_mm(
     if should_decompose_mm(mat1, mat2):
         counters["inductor"]["decompose_mm"] += 1
         match.replace_by_example(repl, [mat1, mat2])
-        print_decompose_pattern(match, [mat1, mat2])
+        print_mm_pattern(match, [mat1, mat2], "decompose_mm")
         realize_inputs([mat1, mat2])
     return

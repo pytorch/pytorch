@@ -56,6 +56,8 @@ pre_grad_pass_names = [
 
 post_grad_pass_names = [
     "decompose_mm_pass",
+    "make_mmt_contiguous_pass",
+    "pad_mm_pass",
 ]
 
 for pass_name in pre_grad_pass_names:

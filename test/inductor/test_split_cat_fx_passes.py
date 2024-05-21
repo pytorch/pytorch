@@ -1187,6 +1187,67 @@ class TestSplitCatFxPasses(TestCase):
             self.assertIn("merge_getitem_cat_pass_pre_grad", optimus_scuba_log)
             counters.clear()
 
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={},
+        post_grad_fusion_options={
+            "pad_mm_pass": {},
+        },
+    )
+    @unittest.skipUnless(
+        HAS_CUDA
+        and torch.cuda.get_device_capability() >= (7, 0)
+        and torch.cuda.get_device_capability() < (9, 0),
+        "requires cuda at least A100 but not H100",
+    )
+    def test_pad_mm_bf16(self):
+        def pad_mm_bf16(mat1, mat2):
+            return torch.ops.aten.mm(mat1, mat2)
+
+        args = [
+            torch.randn(13, 2**10, dtype=torch.bfloat16, device="cuda"),
+            torch.randn(2**10, 2, dtype=torch.bfloat16, device="cuda"),
+        ]
+        for fn, expected_pad_mm in [
+            (pad_mm_bf16, 1),
+        ]:
+            expected = fn(*args)
+            actual = torch.compile(fn)(*args)
+
+            torch.testing.assert_close(actual, expected)
+            self.assertEqual(
+                counters["inductor"]["pad_mm_pass"],
+                expected_pad_mm,
+            )
+            counters.clear()
+
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={},
+        post_grad_fusion_options={
+            "make_mmt_contiguous_pass": {},
+        },
+    )
+    def test_make_mmt_contiguous(self):
+        def make_mmt_contiguous(mat1, mat2):
+            mat1 = torch.ops.aten.permute(mat1, (1, 0))
+            return torch.ops.aten.mm(mat1, mat2)
+
+        args = [
+            torch.randn(2**25, 13, device="cuda"),
+            torch.randn(2**25, 2, device="cuda"),
+        ]
+        for fn, expected_make_mm_contiguous in [
+            (make_mmt_contiguous, 1),
+        ]:
+            expected = fn(*args)
+            actual = torch.compile(fn)(*args)
+
+            torch.testing.assert_close(actual, expected)
+            self.assertEqual(
+                counters["inductor"]["make_mmt_contiguous_pass"],
+                expected_make_mm_contiguous,
+            )
+            counters.clear()
+
     def test_numpy_compat_normalization(self):
         def fn(x, y):
             a = torch.stack([x, y], axis=1)
