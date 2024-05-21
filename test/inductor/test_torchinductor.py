@@ -748,6 +748,7 @@ class CommonTemplate:
 
     # Fails when testing the scalar version
     # See https://github.com/pytorch/pytorch/issues/126763.
+    @expectedFailureScalar
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_eager_aoti_cache_hit(self):
         ns = "aten"

@@ -6,9 +6,9 @@ import unittest
 
 import torch
 import torch._dynamo
-from torch._dynamo.testing import expectedFailureScalar
 import torch.utils.cpp_extension
 from torch._C import FileCheck
+from torch._dynamo.testing import expectedFailureScalar
 
 try:
     from extension_backends.cpp.extension_codegen_backend import (
