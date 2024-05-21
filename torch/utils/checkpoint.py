@@ -1223,8 +1223,6 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
         return out
 
     def _handle_compile_in_recompute_ctx(self, should_not_recompute, func, args, kwargs):
-        if func in _ignored_ops:
-            return func(*args, **kwargs)
         out = self.pop_from_storage(func, args, kwargs)
         return out
 
