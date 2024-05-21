@@ -507,8 +507,6 @@ def placeholder_naming_pass(
     name_map: Dict[str, str] = {}
 
     # map user input names with mod.forward() signature
-    from torch.jit._trace import TopLevelTracedModule
-
     sig = inspect.signature(mod.forward) if not _is_torch_jit_trace else _get_torch_jit_trace_forward_signature(mod)
     combined_args = (
         sig.bind(*fake_args, **fake_kwargs).arguments
