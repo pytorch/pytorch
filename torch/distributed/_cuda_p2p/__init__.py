@@ -300,9 +300,14 @@ def _fused_all_gather_matmul_meta(
     group_name: str,
 ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
     group_size = c10d._get_group_size_by_name(group_name)
-    ag_shape = list(A_shard.shape)
-    ag_shape[gather_dim] *= group_size
-    ag_out = A_shard.new_empty(ag_shape)
+    ag_out_shape = list(A_shard.shape)
+    ag_out_shape[gather_dim] *= group_size
+    ag_out = (
+        A_shard.new_empty(ag_out_shape)
+        .swapdims(0, gather_dim)
+        .contiguous()
+        .swapdims(0, gather_dim)
+    )
     return ag_out, [ag_out @ B for B in Bs]
 
 
