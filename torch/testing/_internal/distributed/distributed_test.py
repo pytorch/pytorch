@@ -6995,7 +6995,8 @@ class DistributedTest:
             """
             with open(et_file) as f:
                 et = json.load(f)
-
+            pg_cfg_node = [n for n in et["nodes"] if n["name"] == "## process_group:init ##"]
+            self.assertGreaterEqual(len(pg_cfg_node), 1)
             nccl_meta_nodes = [n for n in et["nodes"] if n["name"] == "record_param_comms"]
             self.assertEqual(len(nccl_meta_nodes), 3)
             per_coll_meta = defaultdict(list)
@@ -7052,7 +7053,6 @@ class DistributedTest:
             fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
             fp.close()
             et_file = fp.name
-
             et = ExecutionTraceObserver().register_callback(et_file)
 
             # first profiler context need not have ET
