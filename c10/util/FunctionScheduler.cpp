@@ -107,25 +107,25 @@ int FunctionScheduler::scheduleJob(
 }
 
 int FunctionScheduler::removeJob(int id) {
-  // TODO make sure job doesn't start while removing it?
-  _running = false;
-
-  // remove from _queue
-  for (auto it = _queue.begin(); it != _queue.end();) {
-    if (it->id() == id)
-      it = _queue.erase(it);
-    else
+  if (_running) {
+    for (auto it = _queue.begin(); it != _queue.end();) {
+      if (it->id() == id) {
+        _queue.erase(it);
+        return id;
+      }
       it++;
+    }
+    return -1;
+  } else {
+    const auto end = _jobs.end();
+    const auto updated_end = _jobs.erase(
+        std::remove_if(
+            _jobs.begin(),
+            _jobs.end(),
+            [id](const Job& job) { return job.id() == id; }),
+        end);
+    return updated_end == end ? -1 : id;
   }
-  _running = true;
-
-  // remove from _jobs
-  _jobs.erase(
-      std::remove_if(
-          _jobs.begin(),
-          _jobs.end(),
-          [id](const Job& job) { return job.id() == id; }),
-      _jobs.end());
 }
 
 void FunctionScheduler::start() {
