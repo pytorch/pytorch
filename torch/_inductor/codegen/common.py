@@ -1453,7 +1453,7 @@ class Kernel(CodeGen):
             cond_print = cond
 
         if mask:
-            cond = f"({cond}) | ~{mask}"
+            cond = f"({cond}) | ~({mask})"
 
         return f'{self.assert_function}({cond}, "index out of bounds: {cond_print}")'
 
