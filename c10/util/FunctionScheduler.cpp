@@ -1,4 +1,3 @@
-#include "./FunctionScheduler.h"
 #include <c10/util/FunctionScheduler.h>
 
 #include <algorithm>
@@ -12,12 +11,12 @@ namespace c10 {
 
 /* Job */
 
-bool Job::lt(Job a, Job b) {
+bool Job::lt(const Job& a, const Job& b) {
   return a.next_run() < b.next_run();
 }
 
 Job::Job(std::function<void()> function, std::chrono::microseconds interval)
-    : _function(function), _interval(interval) {}
+    : _function(std::move(function)), _interval(interval) {}
 
 std::chrono::time_point<std::chrono::steady_clock> Job::next_run() const {
   return _next_run;
@@ -89,7 +88,7 @@ int FunctionScheduler::scheduleJob(Job job) {
 int FunctionScheduler::scheduleJob(
     std::function<void()> function,
     std::chrono::microseconds interval) {
-  return scheduleJob(Job(function, interval));
+  return scheduleJob(Job(std::move(function), interval));
 }
 
 int FunctionScheduler::removeJob(int id) {

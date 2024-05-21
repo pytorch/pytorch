@@ -1,57 +1,60 @@
 #pragma once
 
-#include <functional>
-#include <chrono>
-#include <thread>
 #include <atomic>
-#include <vector>
+#include <chrono>
+#include <functional>
 #include <set>
+#include <thread>
+#include <vector>
 
 namespace c10 {
 
 class Job {
-    int _id;
-    std::function<void()> _function;
-    std::chrono::microseconds _interval;
-    std::chrono::time_point<std::chrono::steady_clock> _next_run;
+  int _id = -1;
+  std::function<void()> _function;
+  std::chrono::microseconds _interval;
+  std::chrono::time_point<std::chrono::steady_clock> _next_run;
 
-public:
-    static bool lt(Job a, Job b);
+ public:
+  static bool lt(const Job& a, const Job& b);
 
-    Job(std::function<void()> function, std::chrono::microseconds interval);
+  Job(std::function<void()> function, std::chrono::microseconds interval);
 
-    std::chrono::time_point<std::chrono::steady_clock> next_run() const;
-    std::chrono::microseconds interval() const;
-    int id() const;
+  int id() const;
+  std::chrono::time_point<std::chrono::steady_clock> next_run() const;
+  std::chrono::microseconds interval() const;
 
-    void set_next_run(std::chrono::time_point<std::chrono::steady_clock> next_run);
-    void set_id(int id);
+  void set_id(int id);
+  void set_next_run(
+      std::chrono::time_point<std::chrono::steady_clock> next_run);
 
-    void run();
+  void run() const;
 };
 
 class FunctionScheduler {
-    int _current_id = 0;
-    std::atomic_bool _running = false;
-    std::multiset<Job, decltype(&Job::lt)> _queue;
-    std::vector<Job> _jobs;
-    std::thread _thread;
+  int _current_id = 0;
+  std::atomic_bool _running = false;
+  std::multiset<Job, decltype(&Job::lt)> _queue;
+  std::vector<Job> _jobs;
+  std::thread _thread;
 
-    void runNextJob();
-    std::chrono::microseconds getNextInterval() const;
-    int id();
+  void runNextJob();
+  std::chrono::microseconds getNextInterval() const;
+  int id();
 
-public:
-    FunctionScheduler();
-    ~FunctionScheduler();
+ public:
+  FunctionScheduler();
+  ~FunctionScheduler();
 
-    int scheduleJob(Job job);
-    int scheduleJob(std::function<void()> function, std::chrono::microseconds interval);
+  int scheduleJob(Job job);
+  int scheduleJob(
+      std::function<void()> function,
+      std::chrono::microseconds interval);
 
-    int removeJob(int id);
+  int removeJob(int id);
 
-    void start();
-    void stop();
+  void start();
+  void stop();
 };
 
 } // namespace c10
