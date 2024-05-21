@@ -1375,6 +1375,7 @@ def init_process_group(
     _default_pg_init_method = init_method
 
     old_hook = sys.excepthook
+    excepthook_prefix = f"[rank{get_rank()}]"
 
     def _distributed_excepthook(*args):
         old_stderr = sys.stderr
@@ -1384,8 +1385,7 @@ def init_process_group(
         finally:
             sys.stderr = old_stderr
         msg = buf.getvalue()
-        prefix = f"[rank{get_rank()}]"
-        msg = "\n".join(f"{prefix}: {s}" if s != "" else "" for s in msg.split("\n"))
+        msg = "\n".join(f"{excepthook_prefix}: {s}" if s != "" else "" for s in msg.split("\n"))
         sys.stderr.write(msg)
         sys.stderr.flush()
 
