@@ -288,9 +288,9 @@ else
         # Which should be backward compatible with Numpy-1.X
         python -mpip install --pre numpy==2.0.0rc1
       fi
-      if [[ "$USE_SPLIT_BUILD" != "false" ]]; then
+      if [[ "$USE_SPLIT_BUILD" == true ]]; then
         WERROR=1 BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py bdist_wheel
-        FIRST_WHEEL=$(ls dist/*.whl)
+        LIBTORCH_WHL=$(ls dist/*.whl)
         pip_install_whl "$LIBTORCH_WHL"
         cp "$LIBTORCH_WHL" /tmp/
         python setup.py clean
@@ -304,9 +304,9 @@ else
       if [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
         source .ci/pytorch/install_cache_xla.sh
       fi
-      if [[ "$USE_SPLIT_BUILD" != "false" ]]; then
+      if [[ "$USE_SPLIT_BUILD" == true ]]; then
         BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py bdist_wheel
-        FIRST_WHEEL=$(ls dist/*.whl)
+        LIBTORCH_WHL=$(ls dist/*.whl)
         pip_install_whl "$LIBTORCH_WHL"
         cp "$LIBTORCH_WHL" /tmp/
         python setup.py clean
