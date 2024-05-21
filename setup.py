@@ -360,7 +360,7 @@ cmake_python_include_dir = sysconfig.get_path("include")
 # Version, create_version_file, and package_name
 ################################################################################
 
-DEFAULT_PACKAGE_NAME = "libtorch" if BUILD_LIBTORCH_WHL else "torch"
+DEFAULT_PACKAGE_NAME = "libtorch-for-split-build" if BUILD_LIBTORCH_WHL else "torch"
 
 PACKAGE_NAME = os.getenv("TORCH_PACKAGE_NAME", DEFAULT_PACKAGE_NAME)
 package_type = os.getenv("PACKAGE_TYPE", "wheel")
@@ -1154,7 +1154,7 @@ def rename_torch_packages(package_list):
         # Check if the top-level package is 'torch'
         if parts[0] == "torch":
             # Replace 'torch' with 'libtorch' in the top-level package name
-            new_key = "libtorch" + package[len("torch") :]
+            new_key = "libtorch-for-split-build" + package[len("torch") :]
             result[new_key] = package
 
     return result
@@ -1214,7 +1214,7 @@ def _main():
     ]
 
     if BUILD_PYTORCH_USING_LIBTORCH_WHL:
-        install_requires.append("libtorch")
+        install_requires.append("libtorch-for-split-build")
 
     use_prioritized_text = str(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD", ""))
     if (
@@ -1523,9 +1523,9 @@ def _main():
             if parts[0] == "torch":
                 modified_packages.append("libtorch" + package[len("torch") :])
         packages = modified_packages
-        package_dir = {"libtorch": "torch"}
-        torch_package_dir_name = "libtorch"
-        package_data = {"libtorch": torch_package_data}
+        package_dir = {"libtorch-for-split-build": "torch"}
+        torch_package_dir_name = "libtorch-for-split-build"
+        package_data = {"libtorch-for-split-build": torch_package_data}
         extensions = []
     else:
         torch_package_dir_name = "torch"
