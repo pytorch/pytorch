@@ -46,6 +46,10 @@ class CppWrapperCpu(WrapperCodeGen):
         self.supports_intermediate_hooks = False
         self.outputs_need_copy = set()
         self.kernel_callsite_id = count()
+        self.var_array_id = (
+            count()
+        )  # for different types of local array variable declarations
+        self.declared_var_array_vars = set()
         self.int_array_id = count()  # for int array local variable declarations
         self.declared_int_array_vars = set()
         self.tmp_tensor_id = count()  # for tmp tensor local variable declarations
@@ -1511,6 +1515,43 @@ class CppWrapperCpu(WrapperCodeGen):
                 writer.writeline(f"const {ctype} {var}[] = {int_array};")
         return var
 
+    @functools.lru_cache(None)
+    def codegen_var_array(
+        self,
+        var_array: str,
+        writer=None,
+        known_statically=False,
+        graph=None,  # for per-graph caching
+        type_hint=None,  # ['int64_t', 'tensor', 'bool']
+    ):
+        # Because the memory planning is done in two passes (see the implementation
+        # of self.generate), the writeline behavior is different in the two passes.
+        # As a result, the emitted int array declarations may appear in a later
+        # position of the generated code, so the second pass codegen should not
+        # reuse int array declarations generated in the first pass
+        if writer is None:
+            # The first pass codegen uses `self` as the writer
+            writer = self
+        if not type_hint or type_hint in ["bool", "int64_t"]:
+            return self.codegen_int_array_var(
+                var_array,
+                writer,
+                known_statically,
+                graph,
+                is_bool=type_hint == "bool",
+            )
+
+        var = f"var_array_{next(self.var_array_id)}"
+        assert type_hint == "tensor"
+        ctype = "AtenTensorHandle*"
+        if var not in self.declared_var_array_vars:
+            self.declared_var_array_vars.add(var)
+            if known_statically:
+                writer.writeline(f"static constexpr {ctype} {var}[] = {var_array};")
+            else:
+                writer.writeline(f"const {ctype} {var}[] = {var_array};")
+        return var
+
     def make_buffer_allocation(self, buffer):
         return self.make_allocation(
             buffer.get_name(),
@@ -2243,7 +2284,7 @@ if (py_{buf_name}.get() == NULL) {{
     def generate_save_uncompiled_kernels(self):
         pass
 
-    def val_to_cpp_arg_str(self, type_, val) -> str:
+    def val_to_cpp_arg_str(self, val, type_) -> str:
         if config.abi_compatible and isinstance(type_, torch.OptionalType):
             if val is None:
                 return "0"  # nullptr is not available in C
@@ -2280,9 +2321,9 @@ if (py_{buf_name}.get() == NULL) {{
                 self.writeline(f"AtenTensorHandle {var_name} = {base_handle}.get();")
                 return f"&{var_name}"
 
-        return self.val_to_arg_str(val)
+        return self.val_to_arg_str(val, type_)
 
-    def val_to_arg_str(self, val) -> str:
+    def val_to_arg_str(self, val, type_=None) -> str:
         if val is None:
             # When None is passed as an argument, it represents an optional that does not contain a value.
             if config.abi_compatible:
@@ -2317,14 +2358,28 @@ if (py_{buf_name}.get() == NULL) {{
             if config.abi_compatible:
                 assert len(val) > 0, "Empty array is not supported in C"
                 static = self.is_statically_known_list_of_ints(val)
+                type_hint = "bool" if isinstance(val[0], bool) else "int64_t"
+                if (
+                    type_ is not None
+                    and isinstance(type_, torch._C.ListType)
+                    and isinstance(type_.getElementType(), torch._C.OptionalType)
+                    and isinstance(
+                        type_.getElementType().getElementType(), torch._C.TensorType
+                    )
+                ):
+                    type_hint = "tensor"
+                    tmp_arg_list = ""
+                    for x in val:
+                        tmp_arg_list += f"&{x}_handle, "
+                    result = f"{{{tmp_arg_list}}}"
                 # Need to pass the array length because we can't use std::vector
-                int_var_array = self.codegen_int_array_var(
+                var_array = self.codegen_var_array(
                     result,
                     known_statically=static,
                     graph=self.get_codegened_graph(),
-                    is_bool=isinstance(val[0], bool),
+                    type_hint=type_hint,
                 )
-                return f"{int_var_array}, {len(val)}"
+                return f"{var_array}, {len(val)}"
             else:
                 return result
         else:
