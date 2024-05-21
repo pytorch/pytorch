@@ -744,9 +744,6 @@ class aot_inductor:
     # rather than embedded into the data section. Needed to support 1B+ parameter models
     force_mmap_weights: bool = False
 
-    # flag to allow buffer mutation. This would remove the read-only property from buffers.
-    allow_buffer_mutation: bool = False
-
 
 class cuda:
     # CUDA arch to use for CUDA template kernel compilation.
