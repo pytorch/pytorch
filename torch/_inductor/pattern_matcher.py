@@ -36,7 +36,6 @@ import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import counters
 from torch._prims_common import is_integer_dtype
-from torch.fx import Node
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
 from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
 from torch.fx.immutable_collections import immutable_dict, immutable_list
@@ -49,6 +48,9 @@ from ..fx import Transformer
 from . import config
 from .decomposition import select_decomp_table
 from .lowering import fallback_node_due_to_unsupported_type
+
+if typing.TYPE_CHECKING:
+    from torch.fx import Node
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -1237,7 +1239,7 @@ def _serialize_pattern(
         return f"{file_template}{formatted_imports}"
 
     if not SERIALIZED_PATTERN_PATH.is_dir():
-        raise Exception(  # noqa: TRY002
+        raise RuntimeError(
             f"Could not find serialized patterns directory at {SERIALIZED_PATTERN_PATH}"
         )
 
