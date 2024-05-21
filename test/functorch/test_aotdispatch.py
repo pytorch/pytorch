@@ -78,6 +78,7 @@ from torch.testing._internal.optests import (
     aot_autograd_check,
 )
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
+from torch.utils._triton import has_triton
 
 USE_TORCHVISION = False
 try:
@@ -4840,70 +4841,6 @@ class TestPartitioning(AOTTestCase):
         self.assertEqual(get_num_ins_outs(fw_graph), (4, 2))
         self.assertEqual(get_num_ins_outs(bw_graph), (2, 4))
 
-    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
-    def test_min_cut_partitioner_recomputable_ops(self):
-        def f(x):
-            return x * x * x
-
-        recomputable_ops = []
-        partition_fn = partial(
-            min_cut_rematerialization_partition, recomputable_ops=recomputable_ops
-        )
-
-        fw_graph, bw_graph = get_fw_bw_graph(
-            f, [torch.randn(3, requires_grad=True)], partition_fn
-        )
-        # Expected forward graph:
-        # opcode         name       target           args                        kwargs
-        # -------------  ---------  ---------------  --------------------------  --------
-        # placeholder    primals_1  primals_1        ()                          {}
-        # call_function  mul        aten.mul.Tensor  (primals_1, primals_1)      {}
-        # call_function  mul_1      aten.mul.Tensor  (mul, primals_1)            {}
-        # output         output     output           ([mul_1, primals_1, mul],)  {}
-        self.assertEqual(get_num_ins_outs(fw_graph), (1, 3))
-        # Expected backward graph:
-        # opcode         name        target           args                     kwargs
-        # -------------  ----------  ---------------  -----------------------  --------
-        # placeholder    primals_1   primals_1        ()                       {}
-        # placeholder    mul         mul              ()                       {}
-        # placeholder    tangents_1  tangents_1       ()                       {}
-        # call_function  mul_2       aten.mul.Tensor  (tangents_1, mul)        {}
-        # call_function  mul_3       aten.mul.Tensor  (tangents_1, primals_1)  {}
-        # call_function  mul_4       aten.mul.Tensor  (mul_3, primals_1)       {}
-        # call_function  add         aten.add.Tensor  (mul_2, mul_4)           {}
-        # call_function  add_1       aten.add.Tensor  (add, mul_4)             {}
-        # output         output      output           ([add_1],)               {}
-        self.assertEqual(get_num_ins_outs(bw_graph), (3, 1))
-
-        recomputable_ops = [torch.ops.aten.mul]
-        partition_fn = partial(
-            min_cut_rematerialization_partition, recomputable_ops=recomputable_ops
-        )
-        fw_graph, bw_graph = get_fw_bw_graph(
-            f, [torch.randn(3, requires_grad=True)], partition_fn
-        )
-        # Expected forward graph:
-        # opcode         name       target           args                    kwargs
-        # -------------  ---------  ---------------  ----------------------  --------
-        # placeholder    primals_1  primals_1        ()                      {}
-        # call_function  mul        aten.mul.Tensor  (primals_1, primals_1)  {}
-        # call_function  mul_1      aten.mul.Tensor  (mul, primals_1)        {}
-        # output         output     output           ([mul_1, primals_1],)   {}
-        self.assertEqual(get_num_ins_outs(fw_graph), (1, 2))
-        # Expected backward graph:
-        # opcode         name        target           args                     kwargs
-        # -------------  ----------  ---------------  -----------------------  --------
-        # placeholder    primals_1   primals_1        ()                       {}
-        # placeholder    tangents_1  tangents_1       ()                       {}
-        # call_function  mul         aten.mul.Tensor  (primals_1, primals_1)   {} # RECOMPUTED
-        # call_function  mul_2       aten.mul.Tensor  (tangents_1, mul)        {}
-        # call_function  mul_3       aten.mul.Tensor  (tangents_1, primals_1)  {}
-        # call_function  mul_4       aten.mul.Tensor  (mul_3, primals_1)       {}
-        # call_function  add         aten.add.Tensor  (mul_2, mul_4)           {}
-        # call_function  add_1       aten.add.Tensor  (add, mul_4)             {}
-        # output         output      output           ([add_1],)               {}
-        self.assertEqual(get_num_ins_outs(bw_graph), (2, 1))
-
     def test_contiguous(self):
         # The test simulates the condition where transpose followed by view
         # happens in the backward pass.
@@ -4961,7 +4898,7 @@ class TestPartitioning(AOTTestCase):
             res = aot_mod(x)
         res.sum().backward()
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipUnless(has_triton(), "Triton is unavailable")
     def test_partition_cross_entropy(self):
         """
         In transformer, it usually hurts perf if the partitioner saves softmax

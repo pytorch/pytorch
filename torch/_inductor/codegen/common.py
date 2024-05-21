@@ -601,6 +601,8 @@ class OverridesData:
     )
 
 
+# NB: if you add a new special function, don't forget to update
+# torch._inductor.ops_handler too
 pointwise_overrides_data: Dict[str, OverridesData] = dict(
     airy_ai=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
@@ -1121,6 +1123,7 @@ class CSEVariable:
         assert isinstance(bounds, ValueRanges)
         self.name = name
         self.bounds = bounds
+        self.use_count = 1  # track how many tims this expression is used
 
     def __str__(self):
         return self.name
@@ -1210,6 +1213,7 @@ class CSE:
             # assert expr.bounds == bounds, but sometimes the expression is created
             # with the loose ValueRanges.unknown(), so we need to tighten the bounds
             expr.bounds = expr.bounds.tighten(bounds)
+            expr.use_count += 1
             return expr
         cache_key = expr.getvalue() if isinstance(expr, IndentedBuffer) else expr
         var = self.cache.get(cache_key, None)
@@ -1234,6 +1238,7 @@ class CSE:
                     buffer.writeline(line)
         else:
             var.bounds = var.bounds.tighten(bounds)
+            var.use_count += 1
 
         return var
 
@@ -1333,6 +1338,10 @@ class Kernel(CodeGen):
         self.loads = IndentedBuffer()
         self.compute = IndentedBuffer()
         self.stores = IndentedBuffer()
+
+        self.num_load = 0
+        self.num_reduction = 0
+
         self.cse: CSE = CSE(self.newvar_prefix, self.suffix)
         self.must_keep_buffers = set()
         self.store_buffer_names = set()
@@ -1508,7 +1517,7 @@ class Kernel(CodeGen):
                     return ValueRanges.unknown()
 
                 fx_node = V.interpreter.current_node
-                if fx_node.target == name and self.node_to_bounds is not None:
+                if fx_node.target == name:
                     assert isinstance(self.node_to_bounds, dict)
                     return self.node_to_bounds.get(fx_node, ValueRanges.unknown())
                 elif config.compute_all_bounds and hasattr(ValueRangeAnalysis, name):
@@ -1606,7 +1615,12 @@ class Kernel(CodeGen):
                 store_cache = self.cse.store_cache
                 if name in store_cache:
                     return store_cache[name]
-                return self.load(name, index)
+                out = self.load(name, index)
+                # count load that is not in the store_cache, and also not in the
+                # cse cache.
+                if out.use_count == 1:
+                    self.num_load += 1
+                return out
 
             @staticmethod
             def store(
@@ -1641,6 +1655,7 @@ class Kernel(CodeGen):
                 reduction_type: ReductionType,
                 value: Union[CSEVariable, Tuple[CSEVariable, ...]],
             ) -> Union[CSEVariable, Tuple[CSEVariable, ...]]:
+                self.num_reduction += 1
                 return self.reduction(dtype, src_dtype, reduction_type, value)
 
             @staticmethod
