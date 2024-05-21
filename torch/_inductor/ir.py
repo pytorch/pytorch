@@ -4652,20 +4652,26 @@ class UserDefinedTritonKernel(ExternKernel):
         )
 
         args = self.codegen_kwargs()
+        arg_types = []
         if V.graph.cpp_wrapper:
             # in C++ wrapper, we don't pass constexpr args, as they don't
             # get added as parameters to the PTX code compiled from the
             # user-defined Triton kernel (only non-constexpr args do)
             args = [arg for i, arg in enumerate(args) if i not in kernel.constexprs]
+            # cpp wrapper needs arg type info for codegen
+            for arg_name in self.ordered_kwargs_for_cpp_kernel:
+                val = self.get_kwargs_value(arg_name)
+                arg_types.append(
+                    val.get_dtype() if hasattr(val, "get_dtype") else type(val)
+                )
+            arg_types = [
+                t for i, t in enumerate(arg_types) if i not in kernel.constexprs
+            ]
 
         # Call to kernel
         self.codegen_comment(wrapper)
         wrapper.generate_user_defined_triton_kernel(
-            new_name,
-            self.grid,
-            configs,
-            args,
-            triton_meta,
+            new_name, self.grid, configs, args, triton_meta, arg_types
         )
 
     def should_allocate(self):
