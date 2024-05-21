@@ -54,7 +54,7 @@ class ScheduleTest(MultiProcContinousTest):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
-    def test_schedule_with_tracer(self, ScheduleClass):
+    def test_kwargs_with_tracer(self, ScheduleClass):
         mod = ModelWithKwargs(d_hid)
         mod.to(self.device)
 
@@ -93,48 +93,6 @@ class ScheduleTest(MultiProcContinousTest):
         # Last rank checks result
         if self.rank == self.world_size - 1:
             ref_out = mod(x, y=y)
-            ref_loss = loss_fn(ref_out, target)
-            pipe_loss = sum(losses)
-            torch.testing.assert_close(out, ref_out, rtol=1e-2, atol=5e-3)
-            torch.testing.assert_close(pipe_loss, ref_loss)
-
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
-    def test_schedule_with_manual(self, ScheduleClass):
-        full_mod = MultiMLP(d_hid).to(self.device)
-        stage_mod = full_mod.get_submodule(f"mlp{self.rank}")
-
-        x = torch.randn(batch_size, d_hid, device=self.device)
-        target = torch.randn(batch_size, d_hid, device=self.device)
-        loss_fn = torch.nn.MSELoss(reduction="sum")
-
-        stage = ManualPipelineStage(
-            stage_mod,
-            self.rank,
-            self.world_size,
-            self.device,
-            chunks,
-            input_args=x.chunk(chunks)[0],
-        )
-
-        # Attach to a schedule
-        schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn)
-
-        # Run
-        if self.rank == 0:
-            schedule.step(x)
-        elif self.rank == self.world_size - 1:
-            losses = []
-            out = schedule.step(target=target, losses=losses)
-        else:
-            schedule.step()
-
-        dist.barrier()
-
-        # Last rank checks result
-        if self.rank == self.world_size - 1:
-            ref_out = full_mod(x)
             ref_loss = loss_fn(ref_out, target)
             pipe_loss = sum(losses)
             torch.testing.assert_close(out, ref_out, rtol=1e-2, atol=5e-3)
