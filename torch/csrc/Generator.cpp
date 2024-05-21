@@ -276,7 +276,11 @@ PyObject* THPGenerator_reduce(PyObject* _self, PyObject* noargs) {
 
   c10::DeviceType device_type = gen.device().type();
   PyTuple_SET_ITEM(state.get(), 0, THPGenerator_initialSeed(_self, nullptr));
-  PyTuple_SET_ITEM(state.get(), 1, device_type != at::kCPU ? THPGenerator_getOffset(_self, nullptr) : Py_None);
+  PyTuple_SET_ITEM(
+      state.get(),
+      1,
+      device_type != at::kCPU ? THPGenerator_getOffset(_self, nullptr)
+                              : Py_None);
   PyTuple_SET_ITEM(state.get(), 2, THPGenerator_getState(_self, nullptr));
   PyTuple_SET_ITEM(ret.get(), 2, state.release());
 
