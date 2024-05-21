@@ -43,6 +43,7 @@ std::chrono::microseconds FunctionScheduler::getNextWaitTime() {
   _next_run = std::move(_queue.top()); // TODO may be removed in the meantime?
   _queue.pop();
 
+  // Finding the first run associated with an active job.
   while (_jobs.find(_next_run->job_id()) == _jobs.end()) {
       _next_run = std::move(_queue.top());
       _queue.pop();
@@ -63,6 +64,10 @@ void FunctionScheduler::run() {
 
     std::chrono::microseconds wait_time = getNextWaitTime();
     if (wait_time.count() > 0) {
+      // Waiting for the next run to be ready.
+      // We need to wake up if a new run is added
+      // to the queue, as it may need to happen
+      // before the current ´_next_run´
       _cond.wait_for(lock, wait_time);
     }
 
@@ -71,7 +76,7 @@ void FunctionScheduler::run() {
 }
 
 void FunctionScheduler::runNextJob() {
-  // check if the job was removed in the meantime
+  // Check if the job was canceled in the meantime.
   if (_jobs.find(_next_run->job_id()) != _jobs.end()) {
     auto entry = _jobs.find(_next_run->job_id());
     entry->second->run();
@@ -89,6 +94,7 @@ void FunctionScheduler::addRun(int job_id, std::unique_ptr<Job> const &job) {
   auto run = std::make_shared<Run>(job_id, time);
   _queue.push(std::move(run));
 
+  // Notify the thread handling run execution.
   if (_running) _cond.notify_one();
 }
 
@@ -113,6 +119,10 @@ int FunctionScheduler::scheduleJob(
 
 int FunctionScheduler::removeJob(int id) {
   std::lock_guard<std::mutex> lock(_mutex);
+  // The scheduler checks if the job associated
+  // with a run is valid, so, to cancel a job
+  // and it's run, we just need to erase
+  // it (thus making it invalid).
   return _jobs.erase(id) ? id : -1;
 }
 
@@ -130,6 +140,9 @@ void FunctionScheduler::start() {
 
 void FunctionScheduler::stop() {
   _running = false;
+  // Unblock the thread executing
+  // `FunctionScheduler::run` so it
+  // exits the loop.
   _cond.notify_one();
   _thread.join();
   // TODO: clear queue

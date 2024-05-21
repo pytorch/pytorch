@@ -13,6 +13,8 @@
 
 namespace c10 {
 
+// Represents a function that runs
+// periodically.
 class Job {
   std::function<void()> _function;
   std::chrono::microseconds _interval;
@@ -29,6 +31,9 @@ class Job {
   void run() const;
 };
 
+// Represents a concrete run, i.e,
+// a job that will be executed at
+// a specific time.
 class Run {
   int _job_id;
   std::chrono::time_point<std::chrono::steady_clock>  _time;
