@@ -416,15 +416,6 @@ class GraphModuleSerializer(metaclass=Final):
         self.module_call_graph = module_call_graph
         self.custom_objs: Dict[str, torch._C.ScriptObject] = {}
 
-        self._register_serialization_fn()
-
-    def _register_serialization_fn(self):
-        # Register default serialization automatically.
-        for func in dir(self):
-            # Rely on assumption that all serialization starts with "handle_".
-            if "handle_" in func and "_handle_" not in func:
-                _register_node_serialization(self, func.lstrip("handle_"), getattr(self, func))
-
     @contextmanager
     def save_graph_state(self):
         saved = self.graph_state
@@ -524,6 +515,21 @@ class GraphModuleSerializer(metaclass=Final):
         elif isinstance(node.target, torch._ops.HigherOrderOperator):
             ex_node = Node(
                 target=self.serialize_operator(node.target),
+                inputs=self.serialize_hoo_inputs(node.args, node.kwargs),
+                outputs=self.serialize_hoo_outputs(node),
+                metadata=self.serialize_metadata(node),
+            )
+        elif isinstance(node.target, CustomOpHandler):
+            custom_op_handler = node.target
+            namespace = custom_op_handler.namespace()
+            op_name = custom_op_handler.op_name("target")
+
+            # Sanity check for unhandled serialization.
+            assert namespace in _serialization_registry, f"Miss {namespace} CustomOpHandler"
+            assert op_name in _serialization_registry[namespace], f"Miss {op_name} seralization under {namespace} CustomOpHandler"
+
+            ex_node = Node(
+                target=_serialization_registry[namespace][op_name](node.target), # Jump to custom serialization function.
                 inputs=self.serialize_hoo_inputs(node.args, node.kwargs),
                 outputs=self.serialize_hoo_outputs(node),
                 metadata=self.serialize_metadata(node),
@@ -1282,7 +1288,7 @@ class GraphModuleSerializer(metaclass=Final):
         assert isinstance(graph_module, torch.fx.GraphModule)
         for node in graph_module.graph.nodes:
             try:
-                serialization_registry[self][str(node.op)](node)
+                getattr(self, f"handle_{node.op}")(node)
             except Exception as e:
                 raise SerializeError(
                     f"Failed serializing node {node} in graph: {node.format_node()}"
@@ -2790,31 +2796,35 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
     )
 
 
-def _register_node_serialization(
-    gm_serializer: GraphModuleSerializer,
-    op_name: str,
-    serialization_fn: Callable[[Tuple[GraphModuleSerializer, torch.fx.Node], Node], Node],
-):
-    """Register serialization method for a node. It is supposed to be called internally for this module."""
-    if gm_serializer not in serialization_registry:
-        serialization_registry[gm_serializer] = {}
-    if op_name not in serialization_registry[gm_serializer]:
-        serialization_registry[gm_serializer][op_name] = serialization_fn
+class CustomOpHandler:
+    """
+    Base class for handling custom operators.
+    """
+    def namespace(cls):
+        raise NotImplementedError(f"{cls.__class__} namespace() must be implemented")
+
+    def op_name(cls, name):
+        raise NotImplementedError(f"{cls.__class__} op_name() must be implemented")
 
 
-def register_custom_node_serialization(
-    gm_serializer: GraphModuleSerializer,
-    op_name: str,
+def register_custom_op_serialization(
+    op_handler: CustomOpHandler,
     serialization_fn: Callable[[Tuple[GraphModuleSerializer, torch.fx.Node], Node], Node],
 ):
     """Register custom serialization method for a node."""
-    if gm_serializer in serialization_registry:
-        assert op_name not in serialization_registry[gm_serializer], \
-            f"{op_name} is already registered by default serialization methods."
-    _register_node_serialization(gm_serializer, op_name, serialization_fn)
+    assert isinstance(op_handler, CustomOpHandler), f"Expected CustomOpHandler, got {type(op_handler)}."
+
+    namespace = op_handler.namespace()
+    # FIXME: hardcoded target because currently custom op serialization only handles
+    # node.target during serialization.
+    op_name = op_handler.op_name("target")
+
+    if namespace not in _serialization_registry:
+        _serialization_registry[namespace] = {}
+    _serialization_registry[namespace][op_name] = serialization_fn
 
 
-# Registry to store all (default or custom) serialization implementations.
-# Because the GraphModuleSerializer is stateful, we need to store per instance
-# callback serialization function in the registry.
-serialization_registry: Dict[GraphModuleSerializer, Dict[str, Callable]] = {}
+# Registry to store all custom serialization implementations.
+# The registry maps a operation to its serialization function (a callable), in their own
+# namespace to avoid conflicts.
+_serialization_registry: Dict[str, Dict[str, Callable]] = {}

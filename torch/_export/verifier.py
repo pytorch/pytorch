@@ -187,7 +187,7 @@ class Verifier(metaclass=_VerifierMeta):
             )
 
             if not isinstance(op, _allowed_op_types()):
-                if op not in _allowed_builtin_ops() and op not in _allowed_torch_functions:
+                if op not in _allowed_builtin_ops() and op not in _allowed_torch_functions and not isinstance(op, torch._export.serde.serialize.CustomOpHandler):
                     raise SpecViolationError(
                         f"Operator '{op}' is not an allowed operator type: {_allowed_op_types()}\n"
                         f"Valid builtin ops: {_allowed_builtin_ops()}"
