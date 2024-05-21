@@ -105,24 +105,20 @@ static Tensor _lazy_clone_impl(Tensor const& self, bool simulate) {
   Tensor self_;
 
   if (simulate) {
-    self_ = at::detail::make_tensor<TensorImpl>(
-      c10::TensorImpl::VIEW,
-      c10::Storage(std::move(storage)),
-      self.key_set(),
-      self.dtype());
-    at::namedinference::propagate_names(self_, self);
+    self_ = self.view_symint(self.sym_sizes());
+    self_.unsafeGetTensorImpl()->set_storage_keep_dtype(storage);
 
   } else {
     self_ = at::detail::make_tensor<TensorImpl>(
       c10::Storage(std::move(storage)),
       self.key_set(),
       self.dtype());
-  }
 
-  self_.unsafeGetTensorImpl()->set_sizes_and_strides(
-    self.sym_sizes(),
-    self.sym_strides(),
-    self.sym_storage_offset());
+    self_.unsafeGetTensorImpl()->set_sizes_and_strides(
+      self.sym_sizes(),
+      self.sym_strides(),
+      self.sym_storage_offset());
+  }
   return self_;
 }
 
@@ -131,19 +127,7 @@ Tensor _lazy_clone(Tensor const& self) {
 }
 
 Tensor _simulate_lazy_clone(Tensor const& self) {
-  //return _lazy_clone_impl(self, /*simulate=*/true);
-  //return self.view(self.sizes());
-  c10::StorageImpl* self_storage = self.storage().unsafeGetStorageImpl();
-  c10::intrusive_ptr<c10::StorageImpl> storage;
-  storage = c10::impl::cow::simulate_lazy_clone_storage(*self_storage);
-  TORCH_CHECK(storage != nullptr);
-
-  //Tensor self_ = aten::view(self)
-  Tensor self_ = self.view(self.sizes());
-
-  self_.unsafeGetTensorImpl()->set_storage_and_dtype(storage, self.dtype());
-
-  return self_;
+  return _lazy_clone_impl(self, /*simulate=*/true);
 }
 
 } // namespace at::native
