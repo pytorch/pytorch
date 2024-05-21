@@ -136,7 +136,7 @@ class FunctionalTensor(torch.Tensor):
             elem.device,  # device
             False,  # pin_memory
             elem.requires_grad,  # requires_grad
-            "sizes",  # dispatch_sizes_strides_policy
+            None,  # dispatch_sizes_strides_policy
             False,  # dispatch_device
             False,  # dispatch_layout
             extra_dispatch_keys,  # _extra_dispatch_keys
