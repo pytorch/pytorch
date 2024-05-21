@@ -2,17 +2,23 @@
 
 #include <c10/util/ApproximateClock.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
+
+#include <ATen/cuda/CUDAEvent.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/profiler/combined_traceback.h>
 
 #include <sys/types.h>
 
 #include <cstdlib>
+#include <fstream>
 #include <string>
 #include <system_error>
 #include <vector>
+
 namespace c10d {
 
 static c10::IValue entries_key = "entries";
@@ -20,12 +26,14 @@ static c10::IValue nccl_comm_key = "nccl_comm_state";
 static c10::IValue version_key = "version";
 // Update whenever changing contents or formatting of the dump
 // (minor when adding fields, major when changing existing fields)
-static c10::IValue version_val = "1.5";
+static c10::IValue version_val = "2.0";
 static c10::IValue pg_config_key = "pg_config";
 static c10::IValue record_id_key = "record_id";
 static c10::IValue pg_id_key = "pg_id";
 static c10::IValue pg_name_key = "process_group";
-static c10::IValue seq_id_key = "seq_id";
+static c10::IValue collective_seq_id_key = "collective_seq_id";
+static c10::IValue p2p_seq_id_key = "p2p_seq_id";
+static c10::IValue is_p2p_key = "is_p2p";
 static c10::IValue op_id_key = "op_id";
 static c10::IValue profiling_name_key = "profiling_name";
 static c10::IValue input_sizes_key = "input_sizes";
@@ -428,11 +436,14 @@ struct NCCLTraceBuffer {
     size_t pg_id_;
     std::tuple<std::string, std::string> pg_name_; // <group_name, group_desc>
 
-    // Both seq_id_ and op_id_ are per_pg incrementing counters
-    // seq_id refers to actual kernel launches (e.g. 1 per coalesced group)
-    // op_id refers to logical operations (e.g. one per op inside coalesced
-    // group)
-    size_t seq_id_;
+    // collective_seq_id and p2p_seq_id refer to actual kernel launches (e.g. 1
+    // per coalesced group).
+    // collective_seq_id only increments for true collective operations (over
+    // all ranks in the group). p2p_seq_id only increments over non-collective
+    // operations in the group. op_id refers to logical operations (e.g. one per
+    // op inside coalesced group)
+    size_t collective_seq_id_;
+    size_t p2p_seq_id_;
     size_t op_id_;
     std::string profiling_name_;
 
@@ -445,6 +456,10 @@ struct NCCLTraceBuffer {
     // timestamp when the entry was created, likely close to the time the work
     // was 'enqueued'- not necessarily started
     c10::time_t time_created_;
+
+    // Is this a P2P event?
+    bool isP2P_;
+
     std::optional<float> duration_;
 
     // timestamp when our CPU threads discovered that the kernel started.
@@ -479,13 +494,15 @@ struct NCCLTraceBuffer {
   std::optional<size_t> record(
       size_t pg_id,
       const std::tuple<std::string, std::string>& pg_name,
-      size_t seq_id,
+      size_t collective_seq_id,
+      size_t p2p_seq_id,
       size_t op_id,
       std::string profiling_name,
       const std::vector<at::Tensor>& inputs,
       const std::vector<at::Tensor>& outputs,
       Event* start,
-      Event* end) {
+      Event* end,
+      bool isP2P) {
     if (!enabled_) {
       return c10::nullopt;
     }
@@ -497,13 +514,15 @@ struct NCCLTraceBuffer {
         id_,
         pg_id,
         pg_name,
-        seq_id,
+        collective_seq_id,
+        p2p_seq_id,
         op_id,
         std::move(profiling_name),
         std::move(traceback),
         std::move(start),
         std::move(end),
-        c10::getTime()};
+        c10::getTime(),
+        isP2P};
 
     for (const auto& input : inputs) {
       c10::IntArrayRef sizes = input.sizes();
@@ -656,7 +675,8 @@ struct NCCLTraceBuffer {
       dict.insert(record_id_key, int64_t(e.id_));
       dict.insert(pg_id_key, int64_t(e.pg_id_));
       dict.insert(pg_name_key, e.pg_name_);
-      dict.insert(seq_id_key, int64_t(e.seq_id_));
+      dict.insert(collective_seq_id_key, int64_t(e.collective_seq_id_));
+      dict.insert(p2p_seq_id_key, int64_t(e.p2p_seq_id_));
       dict.insert(op_id_key, int64_t(e.op_id_));
       dict.insert(profiling_name_key, e.profiling_name_);
       dict.insert(time_created_key, int64_t(e.time_created_));
@@ -699,6 +719,7 @@ struct NCCLTraceBuffer {
               ? int64_t(*e.time_discovered_completed_)
               : c10::IValue());
       dict.insert(retired_key, e.retired_);
+      dict.insert(is_p2p_key, e.isP2P_);
 
       auto frames = new_list();
       for (int64_t frame : tb) {
