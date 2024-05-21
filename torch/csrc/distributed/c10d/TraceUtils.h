@@ -19,6 +19,7 @@
 #include <string>
 #include <system_error>
 #include <vector>
+#include "c10/core/Scalar.h"
 namespace c10d {
 
 static c10::IValue entries_key = "entries";
@@ -477,9 +478,9 @@ struct NCCLTraceBuffer {
 
     // size information for input/output tensors
     c10::SmallVector<int, 4> input_dims_;
-    std::vector<c10::string_view> input_dtypes_;
+    std::vector<c10::ScalarType> input_dtypes_;
     c10::SmallVector<int, 4> output_dims_;
-    std::vector<c10::string_view> output_dtypes_;
+    std::vector<c10::ScalarType> output_dtypes_;
     c10::SmallVector<int64_t, 8> sizes_; // flattened from inputs, outputs
     bool retired_ = false; // is this work entry no longer in the workMetaList_?
                            // a retired but not completed event has timed out
@@ -530,14 +531,14 @@ struct NCCLTraceBuffer {
 
     for (const auto& input : inputs) {
       c10::IntArrayRef sizes = input.sizes();
-      te.input_dtypes_.push_back(input.dtype().name());
+      te.input_dtypes_.push_back(input.dtype().toScalarType());
       te.input_dims_.push_back(sizes.size());
       te.sizes_.insert(te.sizes_.end(), sizes.begin(), sizes.end());
     }
 
     for (const auto& output : outputs) {
       c10::IntArrayRef sizes = output.sizes();
-      te.output_dtypes_.push_back(output.dtype().name());
+      te.output_dtypes_.push_back(output.dtype().toScalarType());
       te.output_dims_.push_back(sizes.size());
       te.sizes_.insert(te.sizes_.end(), sizes.begin(), sizes.end());
     }
@@ -705,9 +706,17 @@ struct NCCLTraceBuffer {
       };
 
       dict.insert(input_sizes_key, read_sizes(e.input_dims_));
-      dict.insert(input_dtypes_key, e.input_dtypes_);
+      std::vector<std::string> input_dtypes_strs;
+      for (const auto e : e.input_dtypes_) {
+        input_dtypes_strs.push_back(c10::toString(e));
+      }
+      dict.insert(input_dtypes_key, input_dtypes_strs);
       dict.insert(output_sizes_key, read_sizes(e.output_dims_));
-      dict.insert(output_dtypes_key, e.output_dtypes_);
+      std::vector<std::string> output_dtypes_strs;
+      for (const auto e : e.output_dtypes_) {
+        output_dtypes_strs.push_back(c10::toString(e));
+      }
+      dict.insert(output_dtypes_key, output_dtypes_strs);
       if (e.time_discovered_completed_.has_value()) {
         dict.insert(state_key, "completed");
       } else if (e.time_discovered_started_.has_value()) {
