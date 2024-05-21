@@ -2929,10 +2929,10 @@ class CppKernelDispatcher(CppKernel):
                 return
             else:
                 self.vec_condition.writeline(
-                    f"if ({self.itervars[0]} < {cexpr_index(self.tiling_ranges[0])})"
+                    f"if (C10_LIKELY({self.itervars[0]} < {cexpr_index(self.tiling_ranges[0])}))"
                 )
                 self.scalar_condition.writeline(
-                    f"if ({self.itervars[0]} >= {cexpr_index(self.tiling_ranges[0])})"
+                    f"if (C10_UNLIKELY({self.itervars[0]} >= {cexpr_index(self.tiling_ranges[0])}))"
                 )
         elif self.split_level == 2:
             # generate 2-d tiling condition
@@ -2947,26 +2947,27 @@ class CppKernelDispatcher(CppKernel):
                 self.loops[1].steps = 1
                 if self.tiling_ranges[0] != self.sizes[0]:
                     self.vec_condition.writeline(
-                        f"if ({self.itervars[0]} < {cexpr_index(self.tiling_ranges[0])})"
+                        f"if (C10_LIKELY({self.itervars[0]} < {cexpr_index(self.tiling_ranges[0])}))"
                     )
+                    # we apply scalar kernel from itervars[1] == 0 to itervars[1] == sizes[1]
                     self.scalar_condition.writeline(
-                        f"if ({self.itervars[0]} >= {cexpr_index(self.tiling_ranges[0])} && "
-                        + f"{self.itervars[1]} == 0)"
+                        f"if (C10_UNLIKELY({self.itervars[0]} >= {cexpr_index(self.tiling_ranges[0])} && "
+                        + f"{self.itervars[1]} == 0))"
                     )
                 return
 
             self.tile2d_condition.writeline(
-                f"if ({self.itervars[0]} < {cexpr_index(self.tiling_ranges[0])} && "
-                + f"{self.itervars[1]} < {cexpr_index(self.tiling_ranges[1])})"
+                f"if (C10_LIKELY({self.itervars[0]} < {cexpr_index(self.tiling_ranges[0])} && "
+                + f"{self.itervars[1]} < {cexpr_index(self.tiling_ranges[1])}))"
             )
             self.vec_condition.writeline(
-                f"if ({self.itervars[0]} < {cexpr_index(self.tiling_ranges[0])} && "
-                + f"{self.itervars[1]} >= {cexpr_index(self.tiling_ranges[1])})"
+                f"if (C10_UNLIKELY({self.itervars[0]} < {cexpr_index(self.tiling_ranges[0])} && "
+                + f"{self.itervars[1]} >= {cexpr_index(self.tiling_ranges[1])}))"
             )
-            # TODO: more comments here about "==0"
+            # we apply scalar kernel from itervars[1] == 0 to itervars[1] == sizes[1]
             self.scalar_condition.writeline(
-                f"if ({self.itervars[0]} >= {cexpr_index(self.tiling_ranges[0])} && "
-                + f"{self.itervars[1]} == 0)"
+                f"if (C10_UNLIKELY({self.itervars[0]} >= {cexpr_index(self.tiling_ranges[0])} && "
+                + f"{self.itervars[1]} == 0))"
             )
 
     def gen_tiling_loops(self):
