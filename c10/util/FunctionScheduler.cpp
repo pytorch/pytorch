@@ -82,8 +82,8 @@ void FunctionScheduler::run() {
 }
 
 void FunctionScheduler::runNextJob() {
-  // Remove this run from the queue
-  _queue.pop();
+  // This function is always called with the mutex previously acquired.
+  _queue.pop(); // Remove this run from the queue
   // TODO: check that the queue top is actually the _next_run (?)
 
   // Check if the job was canceled in the meantime.
@@ -100,7 +100,7 @@ int FunctionScheduler::id() {
 }
 
 void FunctionScheduler::addRun(int job_id, std::unique_ptr<Job> const &job) {
-  std::lock_guard<std::mutex> lock(_mutex); // TODO: Deadlock here (?)
+  // This function is always called with the mutex previously acquired.
   auto time = std::chrono::steady_clock::now() + job->interval();
   auto run = std::make_shared<Run>(job_id, time);
   _queue.push(std::move(run));
@@ -110,13 +110,13 @@ void FunctionScheduler::addRun(int job_id, std::unique_ptr<Job> const &job) {
 }
 
 int FunctionScheduler::scheduleJob(std::unique_ptr<Job> job) {
+  std::lock_guard<std::mutex> lock(_mutex);
   int job_id = id();
 
   if (_running) {
     addRun(job_id, job);
   }
 
-  std::lock_guard<std::mutex> lock(_mutex);
   _jobs.insert(std::make_pair(job_id, std::move(job)));
   return job_id;
 }
