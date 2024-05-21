@@ -7,6 +7,8 @@ import time
 from threading import Lock
 from typing import Any, List, Optional, Sequence
 
+# mypy: disallow-untyped-defs
+
 __all__ = [
     "strobelight",
     "StrobelightCLIProfilerError",
