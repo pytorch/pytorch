@@ -2,14 +2,14 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <functional>
-#include <queue>
-#include <thread>
-#include <vector>
-#include <unordered_map>
 #include <memory>
 #include <mutex>
-#include <condition_variable>
+#include <queue>
+#include <thread>
+#include <unordered_map>
+#include <vector>
 
 namespace c10 {
 
@@ -36,10 +36,10 @@ class Job {
 // a specific time.
 class Run {
   int _job_id;
-  std::chrono::time_point<std::chrono::steady_clock>  _time;
+  std::chrono::time_point<std::chrono::steady_clock> _time;
 
  public:
-  static bool lt(std::shared_ptr<Run> const &a, std::shared_ptr<Run> const &b);
+  static bool lt(std::shared_ptr<Run> const& a, std::shared_ptr<Run> const& b);
 
   Run(int job_id, std::chrono::time_point<std::chrono::steady_clock> time);
 
@@ -50,7 +50,11 @@ class Run {
 class FunctionScheduler {
   int _current_id = 0;
   std::atomic_bool _running = false;
-  std::priority_queue<std::shared_ptr<Run>, std::vector<std::shared_ptr<Run>>, decltype(&Run::lt)> _queue;
+  std::priority_queue<
+      std::shared_ptr<Run>,
+      std::vector<std::shared_ptr<Run>>,
+      decltype(&Run::lt)>
+      _queue;
   std::unordered_map<int, std::unique_ptr<Job>> _jobs;
   std::shared_ptr<Run> _next_run;
   std::thread _thread;
@@ -61,7 +65,7 @@ class FunctionScheduler {
   void run();
   void runNextJob();
   std::chrono::microseconds getNextWaitTime();
-  void addRun(int job_id, std::unique_ptr<Job> const &job);
+  void addRun(int job_id, std::unique_ptr<Job> const& job);
   int scheduleJob(std::unique_ptr<Job> job);
 
  public:
@@ -77,6 +81,9 @@ class FunctionScheduler {
 
   void start();
   void stop();
+
+  bool isRunning() const;
+  int currentId() const;
 };
 
 } // namespace c10

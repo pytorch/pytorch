@@ -1,3 +1,4 @@
+#include "FunctionScheduler.h"
 #include <c10/util/FunctionScheduler.h>
 
 namespace c10 {
@@ -17,11 +18,14 @@ void Job::run() const {
 
 /* Run */
 
-/* static */ bool Run::lt(std::shared_ptr<Run> const &a, std::shared_ptr<Run> const &b) {
+/* static */ bool Run::lt(
+    std::shared_ptr<Run> const& a,
+    std::shared_ptr<Run> const& b) {
   return a->time() < b->time();
 }
 
-Run::Run(int job_id, std::chrono::time_point<std::chrono::steady_clock> time) : _job_id(job_id), _time(time) {}
+Run::Run(int job_id, std::chrono::time_point<std::chrono::steady_clock> time)
+    : _job_id(job_id), _time(time) {}
 
 int Run::job_id() const {
   return _job_id;
@@ -52,7 +56,8 @@ std::chrono::microseconds FunctionScheduler::getNextWaitTime() {
   }
 
   auto now = std::chrono::steady_clock::now();
-  return std::chrono::duration_cast<std::chrono::milliseconds>(_next_run->time() - now);
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+      _next_run->time() - now);
 }
 
 void FunctionScheduler::run() {
@@ -99,14 +104,15 @@ int FunctionScheduler::id() {
   return _current_id++;
 }
 
-void FunctionScheduler::addRun(int job_id, std::unique_ptr<Job> const &job) {
+void FunctionScheduler::addRun(int job_id, std::unique_ptr<Job> const& job) {
   // This function is always called with the mutex previously acquired.
   auto time = std::chrono::steady_clock::now() + job->interval();
   auto run = std::make_shared<Run>(job_id, time);
   _queue.push(std::move(run));
 
   // Notify the thread handling run execution.
-  if (_running) _cond.notify_one();
+  if (_running)
+    _cond.notify_one();
 }
 
 int FunctionScheduler::scheduleJob(std::unique_ptr<Job> job) {
@@ -143,8 +149,9 @@ int FunctionScheduler::removeJob(int id) {
 void FunctionScheduler::start() {
   std::lock_guard<std::mutex> lock(_mutex);
   auto now = std::chrono::steady_clock::now();
-  for (const auto &entry : _jobs) {
-    auto run = std::make_shared<Run>(entry.first, now + entry.second->interval());
+  for (const auto& entry : _jobs) {
+    auto run =
+        std::make_shared<Run>(entry.first, now + entry.second->interval());
     _queue.push(std::move(run));
   }
 
@@ -160,6 +167,14 @@ void FunctionScheduler::stop() {
   _cond.notify_one();
   _thread.join();
   // TODO: clear queue
+}
+
+bool FunctionScheduler::isRunning() const {
+  return _running;
+}
+
+int FunctionScheduler::currentId() const {
+  return _current_id;
 }
 
 } // namespace c10
