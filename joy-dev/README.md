@@ -8,9 +8,9 @@ divide $\mathbf{K}$, $\mathbf{V}$ into $\mathbf{K_1}, \mathbf{K_2}, ... , \mathb
 > $\quad$ $i = \text{bid}$       
 > $\quad$ load $\mathbf{Q}$ (boardcast) and $\mathbf{K_i}$ from HBM to cache.   
 > $\quad$ $\mathbf{S_i} = \mathbf{Q}\mathbf{K_i^T}$  ($\mathbf{S_i} \in \R^{Q\times B_c}$)  
-> $\quad$ $\mathbf{\tilde{S_i}} = \text{score\_comp}(\mathbf{S_i})$ // Apply costumized score func  
+> $\quad$ $\mathbf{\tilde{S_i}} = \text{scoremod}(\mathbf{S_i})$ // Apply costumized score func  
 > $\quad$ $\mathbf{R_i} = \text{rowmax}(\mathbf{\tilde{S_i}})$ ($\mathbf{R_i} \in \R^{Q}$, rowmax)   
-> $\quad$ $\mathbf{P_i}$ = exp($\mathbf{\tilde{S_i}}$ - $\mathbf{R_i}$), $\mathbf{O_i} = \mathbf{P_iV_i}$ ($\mathbf{O_i} \in \R^{Q\times d}$)   
+> $\quad$ $\mathbf{P_i}$ = exp($\mathbf{\tilde{S_i}}$ - $\mathbf{R_i}$), $\mathbf{O_i} = \mathbf{P_i}\mathbf{V_i}$ ($\mathbf{O_i} \in \R^{Q\times d}$)   
 > $\quad$ $\mathbf{L_i}$ = rowsum($\mathbf{P_i}$)    
 > $\quad$ Write $\mathbf{R_i} \in \R^Q$ to HMB, Write $\mathbf{O_i}$, $\mathbf{L_i}$ to on-chip cache   
 > **end for**    
@@ -70,7 +70,7 @@ divide $\mathbf{K}$, $\mathbf{V}$ into $\mathbf{K_1}, \mathbf{K_2}, ... , \mathb
 > $\quad$ $i = \text{bid}$       
 > $\quad$ load $\mathbf{Q}$ (boardcast) and $\mathbf{K_i}$ from HBM to cache.   
 > $\quad$ $\mathbf{S_i} = \mathbf{Q}\mathbf{K_i^T}$  ($\mathbf{S_i} \in \R^{Q\times B_c}$)  
-> $\quad$ $\mathbf{\tilde{S_i}} = \text{score\_comp}(\mathbf{S_i})$ // Apply costumized score func  
+> $\quad$ $\mathbf{\tilde{S_i}} = \text{scoremod}(\mathbf{S_i})$ // Apply costumized score func  
 > $\quad$ $\mathbf{R_i} = \text{rowmax}(\mathbf{\tilde{S_i}})$ ($\mathbf{R_i} \in \R^{Q}$, rowmax)   
 > $\quad$ Write $\mathbf{R_i} \in \R^Q$ to HMB, Write $\mathbf{S_i}$ to on-chip cache   
 > **end for**    
@@ -84,7 +84,7 @@ divide $\mathbf{K}$, $\mathbf{V}$ into $\mathbf{K_1}, \mathbf{K_2}, ... , \mathb
 > **for** each block in range($T_c$): // unrolled, parallel on each block   
 > $\quad$ $i = \text{bid}$    
 > $\quad$ load $\mathbf{R_{max}} \in \R^Q $ from HBM to on-chip cache (boardcast)   
-> $\quad$ $\mathbf{P_i}$ = exp($\mathbf{\tilde{S_i}}$ - $\mathbf{R_{max}}$), $\mathbf{O_i} = \mathbf{P_iV_i}$ ($\mathbf{O_i} \in \R^{Q\times d}$)   
+> $\quad$ $\mathbf{P_i}$ = exp($\mathbf{\tilde{S_i}}$ - $\mathbf{R_{max}}$), $\mathbf{O_i} = \mathbf{P_i}\mathbf{V_i}$ ($\mathbf{O_i} \in \R^{Q\times d}$)   
 > $\quad$ $\mathbf{L_i}$ = rowsum($\mathbf{P_i}$)     
 > $\quad$ write $\mathbf{O_i} \in \R^{Q\times d}$, $\mathbf{L_i} \in \R^{Q}$ to HBM    
 > **end for**   
