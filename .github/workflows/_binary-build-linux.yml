@@ -19,8 +19,7 @@ on:
       use_split_build:
         description: |
           [Experimental] Build a libtorch only wheel and build pytorch such that
-          are built from the libtorch wheel. A non "false" string triggers this behavior.
-          By default this this behavior is disabled.
+          are built from the libtorch wheel.
         required: false
         type: boolean
         default: false
