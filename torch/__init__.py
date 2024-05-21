@@ -17,6 +17,8 @@ import textwrap
 import ctypes
 import inspect
 import threading
+import pdb
+import pkgutil
 
 # multipy/deploy is setting this import before importing torch, this is the most
 # reliable way we have to detect if we're running within deploy.
@@ -166,10 +168,40 @@ def _preload_cuda_deps(lib_folder, lib_name):
     ctypes.CDLL(lib_path)
 
 
+def find_package_path(package_name):
+    loader = pkgutil.find_loader(package_name)
+    if loader:
+        # The package might be a namespace package, so get_data may fail
+        try:
+            file_path = loader.get_filename()
+            return os.path.dirname(file_path)
+        except AttributeError:
+            pass
+    return None
+
+def load_shared_libraries(library_path):
+    lib_dir = os.path.join(library_path, 'lib')
+    if not os.path.exists(lib_dir):
+        return
+
+    so_files = [f for f in os.listdir(lib_dir) if f.endswith('.so')]
+    if not so_files:
+        return
+    for so_file in so_files:
+        so_path = os.path.join(lib_dir, so_file)
+        try:
+            ctypes.CDLL(so_path, mode=ctypes.RTLD_GLOBAL)
+        except OSError as e:
+
 # See Note [Global dependencies]
 def _load_global_deps() -> None:
     if _running_with_deploy() or platform.system() == 'Windows':
         return
+    split_build_lib_name = "libtorchsplit"
+    library_path = find_package_path(split_build_lib_name)
+    print(f"libtrary path {library_path}")
+    if library_path:
+        load_shared_libraries(library_path)
 
     lib_name = 'libtorch_global_deps' + ('.dylib' if platform.system() == 'Darwin' else '.so')
     here = os.path.abspath(__file__)

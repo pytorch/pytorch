@@ -1157,7 +1157,7 @@ def main():
 
     if BUILD_TWO_WHEELS:
         final_package_name = PACKAGE_NAME
-        PACKAGE_NAME = "libtorch"
+        PACKAGE_NAME = "libtorchsplit"
         BUILD_LIBTORCH_WHL = True
         BUILD_PYTORCH_USING_LIBTORCH_WHL = False
         _main()
@@ -1502,7 +1502,7 @@ def _main():
         for package in packages:
             parts = package.split(".")
             if parts[0] == "torch":
-                modified_packages.append("libtorch" + package[len("torch") :])
+                modified_packages.append("libtorchsplit" + package[len("torch") :])
         packages = modified_packages
         package_dir = {"libtorchsplit": "torch"}
         torch_package_dir_name = "libtorchsplit"
