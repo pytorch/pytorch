@@ -685,8 +685,7 @@ class WrapperCodeGen(CodeGen):
         for line in code.split("\n"):
             self.writeline(line)
 
-        current_device = V.graph.scheduler.current_device
-        assert current_device is not None
+        current_device = V.graph.scheduler.get_current_device_or_throw()
         stream_name = self.write_get_raw_stream(current_device.index, V.graph)
         self.writeline(
             f"{kernel_name}.run({', '.join(args)}, grid={grid}, stream={stream_name})"
@@ -1149,7 +1148,7 @@ class WrapperCodeGen(CodeGen):
                 size_dtype=index_dtype,
                 indices=non_constant_indices,
             ),
-            "device": DeviceProperties.create(V.graph.scheduler.current_device),
+            "device": DeviceProperties.create(V.graph.scheduler.get_current_device_or_throw()),
             # Triton compiler includes equal_to_1 args into constants even
             # when they are not constexpr. otherwise there may be a segfault
             # during launching the Inductor-compiled Triton kernel.
@@ -1270,8 +1269,7 @@ class WrapperCodeGen(CodeGen):
 
         traverse(kernel)
 
-        current_device = V.graph.scheduler.current_device
-        assert current_device is not None
+        current_device = V.graph.scheduler.get_current_device_or_throw()
         compile_wrapper.writeline(f"''', device_str='{current_device.type}')")
         _, lineno = inspect.getsourcelines(kernel.fn)
         srcfile = inspect.getsourcefile(kernel.fn)
@@ -1387,8 +1385,7 @@ class WrapperCodeGen(CodeGen):
         """
         if cuda:
             call_args_str = ", ".join(pexpr(item) for item in call_args)
-            current_device = V.graph.scheduler.current_device
-            assert current_device is not None
+            current_device = V.graph.scheduler.get_current_device_or_throw()
             stream_name = self.write_get_raw_stream(current_device.index, V.graph)
             if triton:
                 grid_str = ", ".join(pexpr(item) for item in grid)

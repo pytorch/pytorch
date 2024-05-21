@@ -13,7 +13,6 @@ import sympy
 
 import torch
 import torch._logging
-import torch.utils._pytree as pytree
 from torch._dynamo.utils import preserve_rng_state
 
 from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
@@ -1650,13 +1649,22 @@ class TritonKernel(SIMDKernel):
         )
 
         if not self.persistent_reduction:
-            partial_reduce_vars = pytree.tree_map(
-                self.reduction_resize,
-                cse_multiple(
-                    f"tl.reduce(({csv(broadcasted_values)}), {dim}, {combine_helper_fn})",
-                    len(values),
-                    None,
-                ),
+
+            def sum_fn(a, b):
+                return [ops.add(ai, bi) for ai, bi in zip(a, b)]
+
+            sum_helper_fn = self._lift_helper(sum_fn, len(values))
+            pre_reduce_vars = ", ".join(
+                f"{scan_var} * (rbase == (RBLOCK - 1))"
+                for scan_var in partial_scan_vars
+            )
+            # tl.reduce doesn't work for non-commutative operators, so instead
+            # of repeating the scan op as a reduction, we use sum to select the
+            # last scan value
+            partial_reduce_vars = cse_multiple(
+                f"tl.reduce(({pre_reduce_vars}), -1, {sum_helper_fn}, keep_dims=True)",
+                len(values),
+                masks,
             )
             accs_next = combine_fn(tuple(accumulators), partial_reduce_vars)
             full_scan_vars = combine_fn(tuple(accumulators), partial_scan_vars)
@@ -1776,8 +1784,7 @@ class TritonKernel(SIMDKernel):
             grid_arg = f"{extra_args_str}grid=grid({', '.join(grid)})"
         else:
             grid_arg = f"grid={grid}"
-        current_device = V.graph.scheduler.current_device
-        assert current_device is not None
+        current_device = V.graph.scheduler.get_current_device_or_throw()
         index = current_device.index
         with result.indent():
             result.writeline(f"with {V.graph.device_ops.device_guard(index)}:")
@@ -1942,7 +1949,7 @@ class TritonKernel(SIMDKernel):
         )
         triton_meta = {
             "signature": triton_meta_signature,
-            "device": DeviceProperties.create(V.graph.scheduler.current_device),
+            "device": DeviceProperties.create(V.graph.scheduler.get_current_device_or_throw()),
             "constants": {},
         }
 
@@ -2107,8 +2114,7 @@ class TritonKernel(SIMDKernel):
         call_args = self.get_call_args()
         grid: List[Any] = []
         self.add_numel_to_call_args_and_grid(name, call_args, grid)
-        current_device = V.graph.scheduler.current_device
-        assert current_device is not None
+        current_device = V.graph.scheduler.get_current_device_or_throw()
 
         if self.args.workspace_arg is not None:
             ws = self.args.workspace_arg
@@ -2217,8 +2223,7 @@ class TritonScheduling(SIMDScheduling):
             compile_wrapper = IndentedBuffer()
             compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
             compile_wrapper.splice(src_code, strip=True)
-            current_device = V.graph.scheduler.current_device
-            assert current_device is not None
+            current_device = V.graph.scheduler.get_current_device_or_throw()
             compile_wrapper.writeline(f"''', device_str='{current_device.type}')")
 
             metadata_comment = f"# kernel path: {kernel_path}"

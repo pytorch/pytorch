@@ -1265,8 +1265,7 @@ class CppWrapperCpu(WrapperCodeGen):
                     break
             assert grid_decision is not None
 
-        current_device = V.graph.scheduler.current_device
-        assert current_device is not None
+        current_device = V.graph.scheduler.get_current_device_or_throw()
         self.generate_kernel_call(
             kernel_name,
             args,

@@ -468,8 +468,7 @@ class TritonTemplateKernel(TritonKernel):
             if isinstance(call_args[i], sympy.Symbol):
                 call_args[i] = texpr(call_args[i])
 
-        current_device = V.graph.scheduler.current_device
-        assert current_device is not None
+        current_device = V.graph.scheduler.get_current_device_or_throw()
 
         if V.graph.cpp_wrapper:
             # In the cpp_wrapper case, we have to compute CUDA launch grid at runtime

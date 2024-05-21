@@ -217,8 +217,7 @@ class MultiKernel:
 
         grid = V.graph.wrapper_code.generate_default_grid(kernel_name, grid)
 
-        current_device = V.graph.scheduler.current_device
-        assert current_device is not None
+        current_device = V.graph.scheduler.get_current_device_or_throw()
         V.graph.wrapper_code.generate_kernel_call(
             kernel_name,
             final_call_args,

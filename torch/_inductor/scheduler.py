@@ -1430,6 +1430,12 @@ class Scheduler:
             }
         )
 
+    def get_current_device_or_throw(self) -> torch.device:
+        if device := self.current_device:
+            return device
+        else:
+            raise RuntimeError("No current device")
+
     def debug_draw_graph(self) -> None:
         """Generate an image of the graph for debugging"""
         if os.environ.get("INDUCTOR_WRITE_SCHEDULER_GRAPH", None) == "1":
@@ -1848,7 +1854,9 @@ class Scheduler:
             del V.graph.name_to_buffer[replaced_name]
             new_node.name = orig_name
 
-            V.graph.buffers.remove(orig_node)
+            orig = V.graph.buffers.index(orig_node)
+            V.graph.buffers.remove(new_node)
+            V.graph.buffers[orig] = new_node
             V.graph.name_to_buffer[orig_name] = new_node
 
         for i, node in enumerate(self.nodes):
@@ -2680,9 +2688,7 @@ class Scheduler:
                 ):
                     self.flush()
                 if device != self.current_device:
-                    if self.current_device and device_need_guard(
-                        self.current_device.type
-                    ):
+                    if device_need_guard(self.get_current_device_or_throw().type):
                         V.graph.wrapper_code.codegen_device_guard_exit()
                     if device_need_guard(device.type):
                         assert device.index is not None, "device should have an index"
@@ -2730,7 +2736,7 @@ class Scheduler:
                 if device is not None and self.get_backend(device).ready_to_flush():
                     self.flush()
 
-        if self.current_device and device_need_guard(self.current_device.type):
+        if device_need_guard(self.get_current_device_or_throw().type):
             # exit the outermost CUDA device guard. this is
             # important for nested indentation codegen-ing.
             V.graph.wrapper_code.codegen_device_guard_exit()

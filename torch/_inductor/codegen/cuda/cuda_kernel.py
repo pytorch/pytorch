@@ -176,8 +176,7 @@ class CUDATemplateKernel(CUDAKernel):
         else:
             call_args.append("None")
 
-        current_device = V.graph.scheduler.current_device
-        assert current_device is not None
+        current_device = V.graph.scheduler.get_current_device_or_throw()
         wrapper.generate_kernel_call(
             name,
             call_args,
