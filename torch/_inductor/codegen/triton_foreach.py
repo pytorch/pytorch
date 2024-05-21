@@ -158,7 +158,9 @@ class ForeachKernel(Kernel):
         _, _, signature = self.args.python_argdefs()
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=size_dtype),
-            "device": DeviceProperties.create(V.graph.scheduler.get_current_device_or_throw()),
+            "device": DeviceProperties.create(
+                V.graph.scheduler.get_current_device_or_throw()
+            ),
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]

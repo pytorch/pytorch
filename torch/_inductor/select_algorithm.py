@@ -2,6 +2,7 @@ import builtins
 import functools
 import inspect
 import itertools
+import json
 import logging
 
 import math
@@ -17,6 +18,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from unittest.mock import patch
 
 import sympy
+from filelock import FileLock
 
 import torch
 from torch._dynamo.testing import rand_strided
@@ -908,6 +910,34 @@ class ExternKernelCaller(ChoiceCaller):
         }
 
 
+@functools.lru_cache(None)
+def get_mm_log_filename() -> Optional[str]:
+    mm_file_name = os.environ.get("TORCHINDUCTOR_MM_LOGGING_FILE", None)
+    if not mm_file_name:
+        return None
+
+    if "json" not in mm_file_name:
+        mm_file_name = f"{mm_file_name}.json"
+
+    return mm_file_name
+
+
+def append_to_log(filename, data):
+    lock_file = filename.replace(".json", ".lock")
+    lock = FileLock(lock_file)
+    with lock:
+        try:
+            with open(filename) as f:
+                log_data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            log_data = []
+
+        log_data.append(data)
+
+        with open(filename, "w") as f:
+            json.dump(log_data, f, indent=4)
+
+
 class ErrorFromChoice(RuntimeError):
     def __init__(self, msg, choice: ChoiceCaller, inputs_str):
         msg += f"\nFrom choice {choice}\n{inputs_str}"
@@ -962,6 +992,11 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # TODO(nmacchioni): remove once CI tests are fixed
         choices = [choice for choice in choices if choice is not None]
+
+        if mm_file_name := get_mm_log_filename():
+            M, K = input_nodes[-2].get_size()[:2]
+            N = input_nodes[-1].get_size()[-1]
+            append_to_log(mm_file_name, {"invoke": str((M, K, N))})
 
         if len(choices) == 0:
             raise NoValidChoicesError(
@@ -1344,9 +1379,48 @@ class AlgorithmSelectorCache(PersistentCache):
                 for n in input_nodes
             ]
         )
+
         n = None if log.getEffectiveLevel() == logging.DEBUG else 10
         top_k = sorted(timings, key=timings.__getitem__)[:n]
         best = top_k[0]
+
+        def get_choice_info(choice):
+            if isinstance(choice, torch._inductor.select_algorithm.ExternKernelCaller):
+                return {"type": "cublas", "time": timings[choice]}
+
+            assert isinstance(
+                choice, torch._inductor.select_algorithm.TritonTemplateCaller
+            )
+
+            info = choice.info_dict()
+            tile = info["tile_shape"]
+
+            tile_vals = eval(tile)  # type: ignore[arg-type]
+            BLOCK_M = tile_vals[0]
+            BLOCK_K = tile_vals[1]
+            BLOCK_N = tile_vals[2]
+
+            return {
+                "type": "triton",
+                "time": timings[choice],
+                "BLOCK_M": BLOCK_M,
+                "BLOCK_K": BLOCK_K,
+                "BLOCK_N": BLOCK_N,
+                "num_stages": info["num_stages"],
+                "num_warps": info["num_warps"],
+            }
+
+        mm_filename = get_mm_log_filename()
+        if mm_filename and "mm" in name:
+            M, K = input_nodes[-2].get_size()[:2]
+            N = input_nodes[-1].get_size()[-1]
+
+            out_dict = {
+                str((M, K, N)): [get_choice_info(choice) for choice in timings.keys()]
+            }
+
+            append_to_log(mm_filename, out_dict)
+
         best_time = timings[best]
         sys.stderr.write(f"AUTOTUNE {name}({sizes})\n")
         for choice in top_k:

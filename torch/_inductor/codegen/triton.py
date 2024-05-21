@@ -1949,7 +1949,9 @@ class TritonKernel(SIMDKernel):
         )
         triton_meta = {
             "signature": triton_meta_signature,
-            "device": DeviceProperties.create(V.graph.scheduler.get_current_device_or_throw()),
+            "device": DeviceProperties.create(
+                V.graph.scheduler.get_current_device_or_throw()
+            ),
             "constants": {},
         }
 
