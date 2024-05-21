@@ -191,8 +191,8 @@ ScalarType result_type(const Scalar& scalar1, const Scalar& scalar2) {
   return result_type(state);
 }
 
-bool can_cast(const at::ScalarType from, const at::ScalarType to) {
-  return at::canCast(from, to);
+bool can_cast(const at::ScalarType from_, const at::ScalarType to) {
+  return at::canCast(from_, to);
 }
 
 ScalarType promote_types(ScalarType type1, ScalarType type2) {

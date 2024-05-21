@@ -305,6 +305,7 @@ void initPythonBindings(PyObject* module) {
       .value("CUDA", ProfilerState::CUDA)
       .value("NVTX", ProfilerState::NVTX)
       .value("ITT", ProfilerState::ITT)
+      .value("PRIVATEUSE1", ProfilerState::PRIVATEUSE1)
       .value("KINETO", ProfilerState::KINETO)
       .value("KINETO_GPU_FALLBACK", ProfilerState::KINETO_GPU_FALLBACK)
       .value(
@@ -316,13 +317,15 @@ void initPythonBindings(PyObject* module) {
       .value("LEGACY", ActiveProfilerType::LEGACY)
       .value("KINETO", ActiveProfilerType::KINETO)
       .value("NVTX", ActiveProfilerType::NVTX)
-      .value("ITT", ActiveProfilerType::ITT);
+      .value("ITT", ActiveProfilerType::ITT)
+      .value("PRIVATEUSE1", ActiveProfilerType::PRIVATEUSE1);
 
   py::enum_<ActivityType>(m, "ProfilerActivity")
       .value("CPU", ActivityType::CPU)
       .value("XPU", ActivityType::XPU)
       .value("MTIA", ActivityType::MTIA)
-      .value("CUDA", ActivityType::CUDA);
+      .value("CUDA", ActivityType::CUDA)
+      .value("PrivateUse1", ActivityType::PrivateUse1);
 
   py::class_<ExperimentalConfig>(m, "_ExperimentalConfig")
       .def(
@@ -436,8 +439,7 @@ void initPythonBindings(PyObject* module) {
           "dtype",
           [](const TensorMetadata& metadata) {
             return py::reinterpret_borrow<py::object>(
-                torch::autograd::utils::wrap(
-                    torch::getTHPDtype(metadata.dtype_)));
+                torch::autograd::utils::wrap(metadata.dtype_));
           })
       .def_readonly("dim", &TensorMetadata::dim_)
       .def_readonly("sizes", &TensorMetadata::sizes_)
