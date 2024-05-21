@@ -24,8 +24,8 @@ void Job::run() const {
 
 /* Run */
 
-/* static */ bool Run::lt(Run a, Run b) {
-  return a.time() < b.time();
+/* static */ bool Run::lt(std::shared_ptr<Run> const &a, std::shared_ptr<Run> const &b) {
+  return a->time() < b->time();
 }
 
 Run::Run(int job_id, std::chrono::time_point<std::chrono::steady_clock> time) : _job_id(job_id), _time(time) {}
@@ -47,16 +47,16 @@ FunctionScheduler::~FunctionScheduler() {
 }
 
 std::chrono::microseconds FunctionScheduler::getNextWaitTime() {
-  _next_run = _queue.top(); // TODO may be removed in the meantime?
+  _next_run = std::move(_queue.top()); // TODO may be removed in the meantime?
   _queue.pop();
 
-  while (_jobs.find(_next_run.job_id()) == _jobs.end()) {
-      _next_run = _queue.top();
+  while (_jobs.find(_next_run->job_id()) == _jobs.end()) {
+      _next_run = std::move(_queue.top());
       _queue.pop();
   }
 
   auto now = std::chrono::steady_clock::now();
-  return std::chrono::duration_cast<std::chrono::milliseconds>(_next_run.time() - now);
+  return std::chrono::duration_cast<std::chrono::milliseconds>(_next_run->time() - now);
 }
 
 void FunctionScheduler::run() {
@@ -81,30 +81,32 @@ void FunctionScheduler::run() {
 
 void FunctionScheduler::runNextJob() {
   // check if the job was removed in the meantime
-  if (_jobs.find(_next_run.job_id()) != _jobs.end())
-    _jobs.find(_next_run.job_id())->second.run();
+  if (_jobs.find(_next_run->job_id()) != _jobs.end())
+    _jobs.find(_next_run->job_id())->second->run();
 }
 
 int FunctionScheduler::id() {
   return _current_id++;
 }
 
-int FunctionScheduler::scheduleJob(Job job) {
+int FunctionScheduler::scheduleJob(std::unique_ptr<Job> job) {
   int job_id = id();
-  _jobs.insert(std::make_pair(job_id, job));
 
   if (_running) {
-    Run run = Run(job_id, std::chrono::steady_clock::now() + job.interval());
-    _queue.push(run);
+    auto time = std::chrono::steady_clock::now() + job->interval();
+    auto run = std::make_shared<Run>(job_id, time);
+    _queue.push(std::move(run));
   }
 
+  _jobs.insert(std::make_pair(job_id, std::move(job)));
   return job_id;
 }
 
 int FunctionScheduler::scheduleJob(
     std::function<void()> function,
     std::chrono::microseconds interval) {
-  return scheduleJob(Job(std::move(function), interval));
+  auto job = std::make_unique<Job>(std::move(function), interval);
+  return scheduleJob(std::move(job));
 }
 
 int FunctionScheduler::removeJob(int id) {
@@ -114,8 +116,8 @@ int FunctionScheduler::removeJob(int id) {
 void FunctionScheduler::start() {
   auto now = std::chrono::steady_clock::now();
   for (const auto &entry : _jobs) {
-    Run run = Run(entry.first, now + entry.second.interval());
-    _queue.push(run);
+    auto run = std::make_shared<Run>(entry.first, now + entry.second->interval());
+    _queue.push(std::move(run));
   }
 
   _running = true;

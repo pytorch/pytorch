@@ -7,6 +7,7 @@
 #include <thread>
 #include <vector>
 #include <unordered_map>
+#include <memory>
 
 namespace c10 {
 
@@ -31,33 +32,32 @@ class Run {
   std::chrono::time_point<std::chrono::steady_clock>  _time;
 
  public:
-  static bool lt(Run a, Run b);
+  static bool lt(std::shared_ptr<Run> const &a, std::shared_ptr<Run> const &b);
 
   Run(int job_id, std::chrono::time_point<std::chrono::steady_clock> time);
 
   int job_id() const;
   std::chrono::time_point<std::chrono::steady_clock> time() const;
-
 };
 
 class FunctionScheduler {
   int _current_id = 0;
   std::atomic_bool _running = false;
-  std::priority_queue<Run, std::vector<Run>, decltype(&Run::lt)> _queue;
-  std::unordered_map<int, Job> _jobs;
-  Run _next_run = Run(-1, std::chrono::steady_clock::now()); // TODO remove this after changing to unique_ptr
+  std::priority_queue<std::shared_ptr<Run>, std::vector<std::shared_ptr<Run>>, decltype(&Run::lt)> _queue;
+  std::unordered_map<int, std::unique_ptr<Job>> _jobs;
+  std::shared_ptr<Run> _next_run;
   std::thread _thread;
 
+  int id();
   void run();
   void runNextJob();
   std::chrono::microseconds getNextWaitTime();
-  int id();
+  int scheduleJob(std::unique_ptr<Job> job);
 
  public:
   FunctionScheduler();
   ~FunctionScheduler();
 
-  int scheduleJob(Job job);
   int scheduleJob(
       std::function<void()> function,
       std::chrono::microseconds interval);
