@@ -333,15 +333,19 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         del pg
 
+    CUDA_12_AND_ABOVE = torch.cuda.is_available() and (
+        torch.version.cuda is not None and int(torch.version.cuda.split(".")[0]) >= 12
+    )
+
     @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_but_pass_in_sandcastle_if(
+        not (TEST_MULTIGPU and CUDA_12_AND_ABOVE),
+        "NCCL test requires 2+ GPUs and Device side assert could cause unexpected errors in lower versions of CUDA",
+    )
     @parametrize("type", [torch.float16, torch.float32, torch.float64])
     @skip_if_rocm
     def test_nan_assert(self, type):
         os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
-        # In some CUDA versions, DSA could hang the process, need monitor thread to kill it if so
-        os.environ["TORCH_NCCL_ENABLE_MONITORING"] = "1"
-        os.environ["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] = "5"
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_nccl(store, self.opts())
         device = self.rank_to_GPU[self.rank][0]
