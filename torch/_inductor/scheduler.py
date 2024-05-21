@@ -21,7 +21,6 @@ from typing import (
     Sequence,
     Set,
     Tuple,
-    Type,
     TypeVar,
     Union,
 )
@@ -61,20 +60,6 @@ from .virtualized import V
 
 log = logging.getLogger(__name__)
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
-
-T = TypeVar("T")
-
-
-def _checked_cast(ty: Type[T], value: Any) -> T:
-    assert isinstance(value, ty), f"unable to cast {value!r} to {ty}"
-    return value
-
-
-def _safe_cast(ty: Type[T], value: Any) -> Optional[T]:
-    if isinstance(value, ty):
-        return value
-    else:
-        return None
 
 
 class WhyNoFuse:
@@ -595,9 +580,7 @@ class BaseSchedulerNode:
                     for user in users:
                         assert isinstance(user.node, BaseSchedulerNode)
                         if isinstance(user.node.node, MultiOutput):
-                            tot += get_buf_elems(
-                                _checked_cast(BaseSchedulerNode, user.node).node
-                            )
+                            tot += get_buf_elems(user.node.node)
                         else:
                             # Buf is a MultiOutputLayout but not all of its
                             # users are MultiOutputs...
@@ -736,7 +719,8 @@ class NopKernelSchedulerNode(BaseSchedulerNode):
 
 def debug_triton_code(node: Union["SchedulerNode", "FusedSchedulerNode"]) -> List[str]:
     lines = []
-    multi_template = _safe_cast(ir.MultiTemplateBuffer, node.get_template_node())
+    multi_template = node.get_template_node()
+    assert multi_template is None or isinstance(multi_template, ir.MultiTemplateBuffer)
     if multi_template and multi_template.make_kernel_render is None:
         lines.append(f"{node.get_name()} Unfinalized multi template buffer")
     else:
@@ -745,7 +729,7 @@ def debug_triton_code(node: Union["SchedulerNode", "FusedSchedulerNode"]) -> Lis
         snodes = (node,) if isinstance(node, SchedulerNode) else node.snodes
         device = snodes[0].get_device()
         backend = node.scheduler.get_backend(device)
-        backend = _checked_cast(TritonScheduling, backend)
+        assert isinstance(backend, TritonScheduling)
         V.graph.scheduler.current_device = device
 
         # Don't increment kernel count when generating debug string.
@@ -1731,12 +1715,12 @@ class Scheduler:
 
     def compute_node_users(self) -> None:
         # set up buffer name to (fused)snode mapping
-        buf_to_snode = {}
+        buf_to_snode: Dict[str, BaseSchedulerNode] = {}
         for node in self.nodes:
             if isinstance(node, FusedSchedulerNode):
                 for x in node.snodes:
                     buf_to_snode[x.get_name()] = node
-            buf_to_snode[node.get_name()] = _checked_cast(FusedSchedulerNode, node)
+            buf_to_snode[node.get_name()] = node
 
         for node in self.nodes:
             node.node_users = []
@@ -2727,8 +2711,6 @@ class Scheduler:
 
             if node.is_template():
                 node, *epilogue = node.get_nodes()
-                node = _checked_cast(SchedulerNode, node)
-                epilogue = [_checked_cast(SchedulerNode, x) for x in epilogue]
                 self.get_backend(device).codegen_template(node, epilogue)
             elif node.is_extern():
                 node = typing.cast(ExternKernelSchedulerNode, node)
@@ -2813,7 +2795,9 @@ class BaseScheduling:
         raise NotImplementedError
 
     def codegen_template(
-        self, template_node: SchedulerNode, epilogue_nodes: List[SchedulerNode]
+        self,
+        template_node: BaseSchedulerNode,
+        epilogue_nodes: Sequence[BaseSchedulerNode],
     ) -> Optional[str]:
         """
         Given a template node, generate a kernel.
