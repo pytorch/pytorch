@@ -13,6 +13,7 @@ import torch
 # needs to be imported after torch
 import torch.utils.cpp_extension as cpp_extension  # noqa: F401
 
+
 """Performance microbenchmarks.
 
 This module contains core functionalities for performance microbenchmark tests.
@@ -50,7 +51,7 @@ def _create_test(
     """Create tests with the benchmark backend.
     Args:
         bench_op_obj: an object which instantiated from a subclass of
-            Caffe2BenchmarkBase/TorchBenchmarkBase which includes tensor
+            TorchBenchmarkBase which includes tensor
             creation and operator execution.
         orig_test_attrs: a dictionary includes test configs.
         tags: a attribute in test config to filter inputs
@@ -75,7 +76,7 @@ def _build_test(
     """Generate PyTorch/Caffe2 tests of operators with different inputs.
     Args:
         configs: a dictionary that has the input shapes
-        bench_op: a subclass of Caffe2BenchmarkBase/TorchBenchmarkBase which includes tensor
+        bench_op: a subclass of TorchBenchmarkBase which includes tensor
             creation and operator execution
         OperatorTestCase: a named tuple to save the metadata of an test
         run_backward: a bool parameter indicating backward path
