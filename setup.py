@@ -234,7 +234,6 @@ def _get_package_path(package_name):
             pass
     return None
 
-
 BUILD_LIBTORCH_WHL = False
 BUILD_PYTORCH_USING_LIBTORCH_WHL = False
 
@@ -1119,13 +1118,13 @@ def print_box(msg):
 def rename_torch_packages(package_list):
     """
     Create a dictionary from a list of package names, renaming packages where
-    the top-level package is 'torch' to 'libtorch'.
+    the top-level package is 'torch' to 'libtorchsplit'.
 
     Args:
         package_list (list of str): The list of package names.
 
     Returns:
-        dict: A dictionary where keys are the package names with 'torch' replaced by 'libtorch',
+        dict: A dictionary where keys are the package names with 'torch' replaced by 'libtorchsplit',
               and values are the original package names, only including those where the
               top-level name is 'torch'.
     """
@@ -1135,7 +1134,7 @@ def rename_torch_packages(package_list):
         parts = package.split(".")
         # Check if the top-level package is 'torch'
         if parts[0] == "torch":
-            # Replace 'torch' with 'libtorch' in the top-level package name
+            # Replace 'torch' with 'libtorchsplit' in the top-level package name
             new_key = "libtorchsplit" + package[len("torch") :]
             result[new_key] = package
 
@@ -1182,7 +1181,7 @@ def _main():
         os.environ["BUILD_FUNCTORCH"] = "OFF"
     if BUILD_PYTORCH_USING_LIBTORCH_WHL:
         os.environ["BUILD_LIBTORCHLESS"] = "ON"
-        os.environ["LIBTORCH_LIB_PATH"] = f"{_get_package_path('libtorch')}/lib"
+        os.environ["LIBTORCH_LIB_PATH"] = f"{_get_package_path('libtorchsplit')}/lib"
 
     # the list of runtime dependencies required by this built package
     install_requires = [
