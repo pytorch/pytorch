@@ -1358,6 +1358,21 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         self.assertRaises(torch._dynamo.exc.UserError, lambda: f(torch.tensor([3])))
 
+    def test_assert(self):
+        @torch.compile
+        def fn1(x):
+            assert x.shape != x.shape
+
+        with self.assertRaises(AssertionError):
+            a = torch.randn(10)
+            fn1(a)
+
+        def fn2(x):
+            assert x.shape == x.shape
+            return x.abs()
+
+        torch._dynamo.testing.standard_test(self, fn=fn2, nargs=1, expected_ops=1)
+
     def test_config_obj(self):
         class Cfg:
             def __init__(self):
