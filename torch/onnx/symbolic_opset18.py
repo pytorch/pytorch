@@ -46,6 +46,8 @@ def bitwise_and(g: jit_utils.GraphContext, self, other):
     promotion_jit_type = symbolic_helper._type_promote_from_values(*ranked_args)
     self = symbolic_helper._maybe_cast_to_type(g, self, promotion_jit_type)
     other = symbolic_helper._maybe_cast_to_type(g, other, promotion_jit_type)
+    if (promotion_jit_type == _type_utils.JitScalarType.BOOL):
+        return g.op("And", self, other)
     return g.op("BitwiseAnd", self, other)
 
 
