@@ -8,6 +8,7 @@ from torch._dynamo.test_case import run_tests, TestCase
 from torch._export.wrappers import _mark_strict_experimental
 
 from torch._functorch.aot_autograd import aot_export_module
+from torch.export._trace import _convert_ts_to_export_experimental
 
 from torch.testing import FileCheck
 
@@ -105,6 +106,36 @@ def forward(self, arg0_1, arg1_1):
             RuntimeError, "strict_mode HOO doesn't work unless"
         ):
             ep = torch.export.export(M(), inp, strict=False)
+
+    def test_torchscript_module_export(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.cos() + x.sin()
+
+        model_to_trace = M()
+        inps = (torch.randn(4, 4),)
+        traced_module_by_torchscript = torch.jit.trace(M(), example_inputs=inps)
+
+        exported_module = _convert_ts_to_export_experimental(
+            traced_module_by_torchscript, inps
+        )
+
+        self.assertTrue(torch.allclose(exported_module(*inps), model_to_trace(*inps)))
+
+    def test_torchscript_module_export_single_input(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.cos() + x.sin()
+
+        model_to_trace = M()
+        inps = torch.randn(4, 4)
+        traced_module_by_torchscript = torch.jit.trace(M(), example_inputs=inps)
+
+        exported_module = _convert_ts_to_export_experimental(
+            traced_module_by_torchscript, inps
+        )
+
+        self.assertTrue(torch.allclose(exported_module(inps), model_to_trace(inps)))
 
 
 if __name__ == "__main__":
