@@ -3977,7 +3977,7 @@ def run(runner, args, original_dir=None):
             assert args.bfloat16, "Quantization requires dtype bfloat16."
             try:
                 from .torchao_backend import setup_baseline, torchao_optimize_ctx
-            except:
+            except ImportError:
                 from torchao_backend import setup_baseline, torchao_optimize_ctx
 
             setup_baseline()
