@@ -1451,10 +1451,6 @@ def get_warning_all_flag(warning_all: bool = True) -> str:
     return "-Wall" if warning_all else ""
 
 
-def get_glibcxx_abi_build_flags() -> str:
-    return "-D_GLIBCXX_USE_CXX11_ABI=" + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))
-
-
 def cpp_flags() -> str:
     flags = ["-std=c++17", "-Wno-unused-variable", "-Wno-unknown-pragmas"]
     if is_clang():
@@ -1814,7 +1810,6 @@ def cpp_compile_command(
         f"""
             {cpp_compiler()} {inp_name_str} {get_shared(shared, compile_only)}
             {get_warning_all_flag(warning_all)} {cpp_flags()}
-            {get_glibcxx_abi_build_flags()}
             {ipaths_str} {lpaths} {libs} {build_arch_flags}
             {macros} {linker_paths} {clang_flags}
             {optimization_flags()}
