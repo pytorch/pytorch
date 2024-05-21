@@ -1162,10 +1162,6 @@ class VariableBuilder:
                 value in self._common_constants()
                 # Assume integers from global variables want to be specialized
                 or not self.source.guard_source().is_local()
-                # Assume that integers that came from NN modules want to be
-                # specialized (as we don't expect users to be changing the
-                # NN modules on the fly)
-                or self.source.guard_source().is_nn_module()
                 or is_from_defaults(self.source)
                 or is_cell_contents(self.source)
             ):
