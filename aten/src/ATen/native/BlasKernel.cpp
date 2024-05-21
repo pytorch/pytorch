@@ -333,6 +333,14 @@ static inline double reduce(float32x4_t x[F32_REGISTERS_PER_ITERATION]) {
   for (int i = 0; i < offset; ++i) {
     x[i] = vaddq_f32(x[i], x[offset + i]);
   }
+  offset /= 2;
+  for (int i = 0; i < offset; ++i) {
+    x[i] = vaddq_f32(x[i], x[offset + i]);
+  }
+  offset /= 2;
+  for (int i = 0; i < offset; ++i) {
+    x[i] = vaddq_f32(x[i], x[offset + i]);
+  }
   return vaddvq_f32(x[0]);
 }
 
