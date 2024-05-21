@@ -1236,6 +1236,8 @@ class InstructionTranslatorBase(
                 isinstance(val, BuiltinVariable) and val.fn is StopIteration
             ) or isinstance(val, variables.StopIterationVariable):
                 raise exc.UserStopIteration
+            elif isinstance(val, variables.AttributeErrorExceptionVariable):
+                raise exc.UserAttributeErrorException
             unimplemented(f"raise {exc}")
         else:
             unimplemented("raise ... from ...")

@@ -1147,3 +1147,10 @@ class TorchVersionVariable(ConstantLikeVariable):
 
 class NumpyTypeInfoVariable(ConstantLikeVariable):
     _error_prefix = "np.iinfo/np.finfo"
+
+
+class ExceptionVariable(VariableTracker):
+    pass
+
+class AttributeErrorExceptionVariable(ExceptionVariable):
+    pass
