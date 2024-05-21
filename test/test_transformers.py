@@ -2990,7 +2990,7 @@ class TestSDPACudaOnly(NNTestCase):
 
         fused_op = (torch.ops.aten._scaled_dot_product_efficient_attention
                     if fused_kernel == SDPBackend.EFFICIENT_ATTENTION else torch.ops.aten._scaled_dot_product_flash_attention
-                    if fused_kernel == SDPBackend.CUDNN_ATTENTION else torch.ops.aten._scaled_dot_product_cudnn_attention)
+                    if fused_kernel == SDPBackend.FLASH_ATTENTION else torch.ops.aten._scaled_dot_product_cudnn_attention)
         # Run the math kernel on low precision references
         query_ref_lp, key_ref_lp, value_ref_lp = query_key_value_clones(query, key, value, dtype=dtype)
 
@@ -3008,6 +3008,11 @@ class TestSDPACudaOnly(NNTestCase):
             kwargs["attn_bias"] = None
         if fused_kernel == SDPBackend.FLASH_ATTENTION:
             kwargs['return_debug_mask'] = dropout_p > 0.0
+        if fused_kernel == SDPBackend.CUDNN_ATTENTION:
+            if "compute_log_sumexp" in kwargs:
+                kwargs.pop("compute_log_sumexp")
+            if "return_debug_mask" in kwargs:
+                kwargs.pop("return_debug_mask")
         with torch.cuda.stream(s):
             # Create real output
             output_tuple = fused_op(query, key, value, **kwargs)
@@ -3045,7 +3050,8 @@ class TestSDPACudaOnly(NNTestCase):
                 # Low Precision Math Reference
                 out_lp_ref = F.scaled_dot_product_attention(query_ref_lp, key_ref_lp, value_ref_lp,
                                                             dropout_p=dropout_p, is_causal=is_causal, scale=scale)
-            else:
+            # cuDNN attention doesn't support returning dropout mask
+            elif fused_kernel != SDPBackend.CUDNN_ATTENTION:
                 # Create the dropout_mask
                 dropout_mask = get_dropout_mask(output_tuple, fused_kernel, batch_size,
                                                 n_heads, seq_len_q, seq_len_k, dropout_p, device)
@@ -3063,37 +3069,38 @@ class TestSDPACudaOnly(NNTestCase):
         with torch.cuda.graph(g1):
             out.backward(upstream_grad)
         g1.replay()
-        out_ref.backward(upstream_grad.to(out_ref.dtype))
-        out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
+        if fused_kernel != SDPBackend.CUDNN_ATTENTION or dropout_p == 0.0:
+            out_ref.backward(upstream_grad.to(out_ref.dtype))
+            out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
 
-        # [Note] Fused Tolerances
-        # Establish the numerical error between the "true" high precision math output
-        # and the low precision math reference. We use this reference for the atol
-        # And we use the default rtol for the low precision type.
-        # We then provide a fudge factor for gradients respectively to account
-        # for the use of the fused kernel rather than the eager implemntation.
-        output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref)
+            # [Note] Fused Tolerances
+            # Establish the numerical error between the "true" high precision math output
+            # and the low precision math reference. We use this reference for the atol
+            # And we use the default rtol for the low precision type.
+            # We then provide a fudge factor for gradients respectively to account
+            # for the use of the fused kernel rather than the eager implemntation.
+            output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref)
 
-        # Fudge Factor when dropout is enabled
-        dropout_fudge_factor = 1.0 if dropout_p == 0.0 else 1.5
+            # Fudge Factor when dropout is enabled
+            dropout_fudge_factor = 1.0 if dropout_p == 0.0 else 1.5
 
-        query_fudge_factor = dropout_fudge_factor
-        grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(query_ref.grad, query_ref_lp.grad, query_fudge_factor)
+            query_fudge_factor = dropout_fudge_factor
+            grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(query_ref.grad, query_ref_lp.grad, query_fudge_factor)
 
-        # TODO: Investigate why grad_k needs larger tolerances
-        key_fudge_factor = 8 * dropout_fudge_factor
-        grad_k_ref_atol, grad_k_ref_rtol = get_tolerances(key_ref.grad, key_ref_lp.grad, key_fudge_factor)
+            # TODO: Investigate why grad_k needs larger tolerances
+            key_fudge_factor = 8 * dropout_fudge_factor
+            grad_k_ref_atol, grad_k_ref_rtol = get_tolerances(key_ref.grad, key_ref_lp.grad, key_fudge_factor)
 
-        value_fudge_factor = 7 if not SM80OrLater and dtype == torch.float16 else 1.0
-        grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(value_ref.grad, value_ref_lp.grad, value_fudge_factor)
+            value_fudge_factor = 7 if not SM80OrLater and dtype == torch.float16 else 1.0
+            grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(value_ref.grad, value_ref_lp.grad, value_fudge_factor)
 
-        self.assertEqual(out, out_ref.to(out.dtype), atol=output_ref_atol, rtol=output_ref_rtol)
-        self.assertEqual(query.grad, query_ref.grad.to(query.grad.dtype),
-                         atol=grad_q_ref_atol, rtol=grad_q_ref_rtol)
-        self.assertEqual(key.grad, key_ref.grad.to(key.grad.dtype),
-                         atol=grad_k_ref_atol, rtol=grad_k_ref_rtol)
-        self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
-                         atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
+            self.assertEqual(out, out_ref.to(out.dtype), atol=output_ref_atol, rtol=output_ref_rtol)
+            self.assertEqual(query.grad, query_ref.grad.to(query.grad.dtype),
+                             atol=grad_q_ref_atol, rtol=grad_q_ref_rtol)
+            self.assertEqual(key.grad, key_ref.grad.to(key.grad.dtype),
+                             atol=grad_k_ref_atol, rtol=grad_k_ref_rtol)
+            self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
+                             atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
 
     @skipIfRocm  # Nested Tensor
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")

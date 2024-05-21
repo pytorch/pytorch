@@ -654,7 +654,7 @@ Tensor scaled_dot_product_attention(
   switch (backend) {
     case sdp::SDPBackend::cudnn_attention: {
       auto out_lse_softmax = at::_scaled_dot_product_cudnn_attention(
-          query_, key, value, dropout_p, is_causal, scale);
+          query_, key, value, Tensor(), dropout_p, is_causal, scale);
       return std::get<0>(out_lse_softmax);
     }
     case sdp::SDPBackend::flash_attention: {
