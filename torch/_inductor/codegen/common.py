@@ -1226,7 +1226,7 @@ class CSE:
         cache_key = expr.getvalue() if isinstance(expr, IndentedBuffer) else expr
         var = self.cache.get(cache_key, None)
         if not var:
-            var = self.newvar(bounds) if assignment else None
+            var = self.newvar(bounds)
             self.cache[cache_key] = var
             if write:
                 if V.kernel.current_node:
@@ -1606,9 +1606,7 @@ class Kernel(CodeGen):
                 if generate_assert(check):
                     assert_lower = not (var.bounds.lower >= 0)
                     # value ranges cannot x < s when x and s are symbols
-                    assert_upper = not isinstance(
-                        size, sympy.Number
-                    ) or not (
+                    assert_upper = not isinstance(size, sympy.Number) or not (
                         var.bounds.upper < size
                     )
                     CSEProxy.check_bounds_lazy(
