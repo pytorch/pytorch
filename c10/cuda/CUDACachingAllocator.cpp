@@ -744,7 +744,8 @@ struct PrivatePool {
 };
 
 BlockState::BlockState(Block* block)
-    : stream(block->stream),
+    : device(block->device),
+      stream(block->stream),
       stream_uses(block->stream_uses),
       size(block->size),
       ptr(block->ptr),
@@ -2771,33 +2772,17 @@ class DeviceCachingAllocator {
     C10_CUDA_CHECK(c10::cuda::MaybeSetDevice(prev_device));
   }
 
-  void printStreamUses(Block* block) {
-    for(auto& stream : block->stream_uses) {
-      printf("block->ptr: %p, stream: %ld, device_index: %d\n", block->ptr, stream.id(), stream.device_index());
-    }
-    for(auto& stream : block->cudagraph_stream_uses) {
-      printf("block->ptr: %p, cudagraph stream: %ld, device_index: %d\n", block->ptr, stream.id(), stream.device_index());
-    }
-  }
-
   void insert_events_deferred_until_no_capture(
     const std::shared_ptr<GatheredContext>& context) {
     if (C10_UNLIKELY(!needs_events_deferred_until_no_capture.empty())) {
       for (auto* block : needs_events_deferred_until_no_capture) {
-        printStreamUses(block);
         TORCH_INTERNAL_ASSERT(!block->stream_uses.empty());
-        printf("before remove_cudagraph_stream_uses\n");
         remove_cudagraph_stream_uses(block);
-        printf("after remove_cudagraph_stream_uses\n");
-        printStreamUses(block);
         // only streams recorded before cudagraph will be used to insert events
         // since we know all streams recorded during cudagraph must have completed
         // insert_events(block);
         if (block->event_count == 0) {
-          printf("free block. block->ptr: %p, size %zu, event_count: %d\n", block->ptr, block->size, block->event_count);
           free_block(block, context);
-        } else {
-          printf("cannot free block. block->ptr: %p, size %zu, event_count: %d\n", block->ptr, block->size, block->event_count);
         }
       }
       needs_events_deferred_until_no_capture.clear();
