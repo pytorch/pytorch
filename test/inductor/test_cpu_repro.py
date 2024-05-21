@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: cpu inductor"]
 import contextlib
 import copy
+import functools
 import itertools
 import math
 import platform
@@ -341,6 +342,24 @@ class CPUReproTests(TestCase):
             need_weights,
         ]
         self.common(fn, inps)
+
+    @config.patch(freezing=True)
+    def test_module_buffer_mutation(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("foo", torch.rand((3, 10)))
+
+            def forward(self, x):
+                lx = [x, x.clone(), x.clone()]
+                y = []
+                for i in range(3):
+                    y.append(lx[i] + self.foo[i])
+                return torch.cat(y, 1)
+
+        with torch.no_grad():
+            example_inputs = (torch.rand(1, 10),)
+            self.common(Model(), example_inputs)
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
@@ -1851,6 +1870,8 @@ class CPUReproTests(TestCase):
         self.assertEqual(input_grad_aten_eager, input_grad)
         self.assertEqual(input_grad_decomp_eager, input_grad)
         self.assertEqual(input_grad[1, 2, 3, 4], torch.tensor(0.0))
+        # For forward and backward kernel
+        check_metrics_vec_kernel_count(2)
 
     @patch("torch.cuda.is_available", lambda: False)
     def test_scatter_using_atomic_add(self):
@@ -3046,6 +3067,38 @@ class CPUReproTests(TestCase):
             v2 = jit_func(input_tensor)
             self.assertEqual(v1, v2)
 
+    def test_nn_param_assign_wrapped(self):
+        class Model2(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(in_channels=3, out_channels=5, kernel_size=3)
+                self.batchnorm = nn.BatchNorm2d(num_features=5)
+                self.conv_weight = torch.randn(5, 3, 3, 3)
+                self.conv_bias = torch.randn(5)
+
+            def forward(self, x):
+                self.conv.weight = nn.Parameter(self.conv_weight)
+                self.conv.bias = nn.Parameter(self.conv_bias, requires_grad=False)
+                self.conv.eval()
+                x = self.conv(x)
+                x = self.batchnorm(x)
+                x = F.relu(x)
+                return x
+
+        input_tensor = torch.randn(1, 3, 10, 10)
+        func = Model2().to("cpu")
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            return func(*args, **kwargs)
+
+        with torch.no_grad():
+            func.train(False)
+            v1 = func(input_tensor)
+            jit_func = torch.compile(wrapper, fullgraph=True)
+            v2 = jit_func(input_tensor)
+            self.assertEqual(v1, v2)
+
     @config.patch(inplace_buffers=True)
     def test_in_out_buffer(self):
         def fn(x, y):
@@ -3587,6 +3640,16 @@ class CPUReproTests(TestCase):
         self.common(fn, (x,))
         assert metrics.generated_cpp_vec_kernel_count == 1
 
+    def test_reduction_float_to_int64(self):
+        # https://github.com/pytorch/pytorch/issues/124821
+        def fn(x):
+            return x.max(0).values
+
+        x = torch.randint(0, 100, (22, 51), dtype=torch.int64)
+        metrics.reset()
+        self.common(fn, (x,))
+        assert metrics.generated_cpp_vec_kernel_count == 1
+
     @config.patch({"cpp.dynamic_threads": True})
     def test_reduction_with_dynamic_threads(self):
         def fn(a, b):
@@ -3647,6 +3710,39 @@ class CPUReproTests(TestCase):
         fn = Model()
         x = torch.randn(1, 4, 2, 2)
         self.common(fn, (x,))
+
+    @requires_vectorization
+    def test_vec_indirect_load_cse_cache(self):
+        # https://github.com/pytorch/pytorch/issues/123502
+        from math import inf
+
+        def fn(arg0_1):
+            full_default = torch.ops.aten.full.default([209985], 1)
+            select = torch.ops.aten.select.int(arg0_1, 0, 0)
+            select_1 = torch.ops.aten.select.int(arg0_1, 0, 1)
+            view = torch.ops.aten.reshape.default(select_1, [-1])
+            expand = torch.ops.aten.expand.default(view, [209985])
+            full_default_1 = torch.ops.aten.full.default([10000], 0)
+            scatter_add = torch.ops.aten.scatter_add.default(
+                full_default_1, 0, expand, full_default
+            )
+            pow_1 = torch.ops.aten.pow.Tensor_Scalar(scatter_add, -0.5)
+            eq = torch.ops.aten.eq.Scalar(pow_1, inf)
+            full_default_2 = torch.ops.aten.full.default([], 0.0)
+            where = torch.ops.aten.where.self(eq, full_default_2, pow_1)
+            index = torch.ops.aten.index.Tensor(where, [select])
+            index_1 = torch.ops.aten.index.Tensor(where, [select_1])
+            mul_1 = torch.ops.aten.mul.Tensor(index, index_1)
+            return (mul_1,)
+
+        x = torch.zeros(2, 209985).to(torch.int64)
+        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        _, code = run_and_get_cpp_code(opt_fn, x)
+        FileCheck().check_count(
+            "return at::vec::VectorizedN<int64_t,2>::loadu(tmpbuf.data(),",
+            2,
+            exactly=True,
+        ).run(code)
 
 
 if __name__ == "__main__":

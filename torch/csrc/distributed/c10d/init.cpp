@@ -1409,14 +1409,14 @@ Example::
       .def(
           py::init([](const std::string& host,
                       uint16_t port,
-                      c10::optional<int> worldSize,
+                      std::optional<int> worldSize,
                       bool isServer,
                       std::chrono::milliseconds timeout,
                       bool waitWorkers,
                       bool multiTenant,
-                      c10::optional<int> masterListenFd,
+                      std::optional<int> masterListenFd,
                       bool useLibUV) {
-            c10::optional<std::size_t> numWorkers = c10::nullopt;
+            std::optional<std::size_t> numWorkers = c10::nullopt;
             if (worldSize.has_value() && worldSize.value() > -1) {
               numWorkers = static_cast<std::size_t>(worldSize.value());
             }
@@ -1801,14 +1801,14 @@ Arguments:
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const c10::Device& device,
                  const ::c10d::ProcessGroup::BackendType& backendType,
-                 const c10::optional<c10::intrusive_ptr<::c10d::Backend>>&
+                 const std::optional<c10::intrusive_ptr<::c10d::Backend>>&
                      backend) {
                 self->setBackend(device.type(), backendType, backend);
               },
               py::arg("device"),
               py::arg("backend_type"),
               py::arg("backend") =
-                  c10::optional<c10::intrusive_ptr<::c10d::Backend>>(),
+                  std::optional<c10::intrusive_ptr<::c10d::Backend>>(),
               py::call_guard<py::gil_scoped_release>())
           .def(
               "_get_backend",
@@ -2432,7 +2432,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
                       size_t rank,
                       size_t world_size,
-                      c10::optional<size_t> buffer_size) {
+                      std::optional<size_t> buffer_size) {
             auto comm = c10::make_intrusive<IntraNodeComm>(
                 store, rank, world_size, buffer_size);
             if (!comm->rendezvous()) {
@@ -2744,7 +2744,7 @@ such as `dist.all_reduce(tensor, async_op=True)`.
          const std::vector<size_t>& bucket_size_limits,
          const std::vector<bool>& expect_sparse_gradient,
          const std::vector<int64_t>& tensor_indices,
-         const c10::optional<std::shared_ptr<::c10d::Logger>>& logger) {
+         const std::optional<std::shared_ptr<::c10d::Logger>>& logger) {
         if (logger.has_value()) {
           std::weak_ptr<::c10d::Logger> logger_weakref = logger.value();
           return ::c10d::compute_bucket_assignment_by_size(
@@ -2766,14 +2766,14 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       py::arg("bucket_size"),
       py::arg("expect_sparse_gradient") = std::vector<bool>(),
       py::arg("tensor_indices") = std::vector<int64_t>(),
-      py::arg("logger") = c10::optional<std::shared_ptr<::c10d::Logger>>{},
+      py::arg("logger") = std::optional<std::shared_ptr<::c10d::Logger>>{},
       py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_verify_params_across_processes",
       [](const c10::intrusive_ptr<::c10d::ProcessGroup>& process_group,
          const std::vector<at::Tensor>& params,
-         const c10::optional<std::shared_ptr<::c10d::Logger>>& logger) {
+         const std::optional<std::shared_ptr<::c10d::Logger>>& logger) {
         if (logger.has_value()) {
           std::weak_ptr<::c10d::Logger> logger_weakref = logger.value();
           verify_params_across_processes(
@@ -2784,7 +2784,7 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       },
       py::arg("process_group"),
       py::arg("params"),
-      py::arg("logger") = c10::optional<std::shared_ptr<::c10d::Logger>>{},
+      py::arg("logger") = std::optional<std::shared_ptr<::c10d::Logger>>{},
       py::call_guard<py::gil_scoped_release>());
 
   module.def(

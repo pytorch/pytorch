@@ -46,6 +46,7 @@ ALLOW_LIST = [
     ("prim::ModuleDictIndex", datetime.date(9999, 1, 1)),
     ("prim::MKLDNNRelu6", datetime.date(9999, 1, 1)),
     ("prim::MKLDNNRelu6_", datetime.date(9999, 1, 1)),
+    ("prim::is_ort", datetime.date(9999, 1, 1)),
     ("prim::Concat", datetime.date(9999, 1, 1)),
     ("aten::_NestedTensor_GeneralizedBMM", datetime.date(9999, 1, 1)),
     # Internal, profiler-specific ops
@@ -110,6 +111,7 @@ ALLOW_LIST = [
     ("prims::.*", datetime.date(9999, 1, 1)),
     ("aten::_flash_attention_forward", datetime.date(2023, 12, 30)),
     ("aten::_flash_attention_backward", datetime.date(2023, 12, 30)),
+    ("aten::_scaled_dot_product_cudnn_attention", datetime.date(9999, 1, 1)),
     ("aten::_sparse_mask_helper", datetime.date(2023, 3, 15)),
     # BetterTransformer 1.0 internal operators
     ("aten::_transformer_decoder_only_layer_fwd", datetime.date(9999, 1, 1)),
@@ -134,11 +136,12 @@ ALLOW_LIST = [
     ("aten::batch_norm_backward_elemt", datetime.date(2023, 12, 31)),
     ("aten::sym_constrain_range", datetime.date(2023, 12, 31)),
     ("aten::_efficient_attention_forward", datetime.date(2024, 1, 15)),
-    ("onednn::qconv1d_pointwise", datetime.date(2023, 12, 31)),
-    ("onednn::qconv2d_pointwise", datetime.date(2023, 12, 31)),
-    ("onednn::qconv3d_pointwise", datetime.date(2023, 12, 31)),
-    ("onednn::qconv2d_pointwise.binary", datetime.date(2023, 12, 31)),
-    ("onednn::qlinear_pointwise", datetime.date(2023, 12, 31)),
+    ("onednn::qconv1d_pointwise", datetime.date(2024, 12, 31)),
+    ("onednn::qconv2d_pointwise", datetime.date(2024, 12, 31)),
+    ("onednn::qconv3d_pointwise", datetime.date(2024, 12, 31)),
+    ("onednn::qconv2d_pointwise.binary", datetime.date(2024, 12, 31)),
+    # BC-breaking change in can_cast signature: 'from' -> 'from_'
+    ("aten::can_cast", datetime.date(2024, 5, 31)),
 ]
 
 ALLOW_LIST_COMPILED = [
