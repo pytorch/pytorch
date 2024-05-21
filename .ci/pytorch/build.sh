@@ -289,10 +289,10 @@ else
         python -mpip install --pre numpy==2.0.0rc1
       fi
       if [[ "$USE_SPLIT_BUILD" != "false" ]]; then
-        WERROR=1 BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py install
+        WERROR=1 BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py bdist_wheel
         pip_install_whl "$(echo dist/*.whl)"
         setup.py clean
-        WERROR=1 BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py install
+        WERROR=1 BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py bdist_wheel
       else
         WERROR=1 python setup.py clean
         WERROR=1 python setup.py bdist_wheel
@@ -302,10 +302,10 @@ else
         source .ci/pytorch/install_cache_xla.sh
       fi
       if [[ "$USE_SPLIT_BUILD" != "false" ]]; then
-        BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py install
+        BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py bdist_wheel
         pip_install_whl "$(echo dist/*.whl)"
         python setup.py clean
-        BUILD_PYTHON_ONLY=1 BUILD_LIBTORCH_WHL=0 python setup.py install
+        BUILD_PYTHON_ONLY=1 BUILD_LIBTORCH_WHL=0 python setup.py bdist_wheel
       else
         python setup.py clean
         python setup.py bdist_wheel
