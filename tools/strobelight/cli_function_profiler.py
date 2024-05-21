@@ -119,7 +119,7 @@ class StrobelightCLIFunctionProfiler:
         logger.debug("running command: %s", _command_to_string(command))
         result = subprocess.run(command, capture_output=True)
         output = result.stderr.decode("utf-8")
-        logger.debug(output)
+        logger.debug(f"output:\n{output}")
 
         if result.returncode != 0:
             raise StrobelightCLIProfilerError(
@@ -147,7 +147,7 @@ class StrobelightCLIFunctionProfiler:
         logger.debug("running command: %s", _command_to_string(command))
         result = subprocess.run(command, capture_output=True)
         output = result.stderr.decode("utf-8")
-        logger.debug(output)
+        logger.debug(f"output:\n{output}")
 
         if result.returncode != 0:
             raise StrobelightCLIProfilerError(
@@ -173,7 +173,7 @@ class StrobelightCLIFunctionProfiler:
         logger.debug("running command: %s", _command_to_string(command))
         result = subprocess.run(command, capture_output=True)
         output = result.stderr.decode("utf-8")
-        logger.debug(output)
+        logger.debug(f"output:\n{output}")
 
         if result.returncode != 0:
             raise StrobelightCLIProfilerError(
@@ -197,7 +197,7 @@ class StrobelightCLIFunctionProfiler:
         logger.debug("running command: %s", _command_to_string(command))
         result = subprocess.run(command, capture_output=True)
         output = result.stderr.decode("utf-8")
-        logger.debug(output)
+        logger.debug(f"output:\n{output}")
 
         if result.returncode != 0:
             raise StrobelightCLIProfilerError(
@@ -209,7 +209,7 @@ class StrobelightCLIFunctionProfiler:
             current_status = match.group(1)
             if not current_status.__contains__("Profile run finished with SUCCESS"):
                 raise StrobelightCLIProfilerError(
-                    "failed to extract profiling results, unexpected response"
+                    f"failed to extract profiling results, unexpected response {output}"
                 )
 
         for item in re.findall(

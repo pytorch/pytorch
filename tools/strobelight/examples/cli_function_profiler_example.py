@@ -14,9 +14,10 @@ if __name__ == "__main__":
     @strobelight(sample_each=100, stop_at_error=False)
     @torch.compile()
     def work() -> None:
-        for i in range(10000):
+        for i in range(100):
             torch._dynamo.reset()
             for j in range(5):
+                torch._dynamo.reset()
                 fn(torch.rand(j, j), torch.rand(j, j), torch.rand(j, j))
 
     work()
@@ -24,7 +25,7 @@ if __name__ == "__main__":
     # or pass a profiler instance.
     profiler = StrobelightCLIFunctionProfiler(stop_at_error=False)
 
-    @strobelight(profiler)
+    @strobelight(profiler, sample_tags=['something', 'another'])
     def work2():
         sum = 0
         for i in range(100000000):
