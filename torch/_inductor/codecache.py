@@ -2567,6 +2567,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         #include "{halidebuffer_h}"
         #include "{headerfile}"
         #include <stdexcept>
+        #include <cmath>
         void kernel({argdefs}) {{
             {buffers}
             int err = halide_kernel({buffer_names});
@@ -2672,7 +2673,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
                 return path
         if "HALIDE_LIB" in os.environ:
             path = os.path.abspath(
-                os.path.join(os.environ["HALIDE_INCLUDE"], f"../include/{name}")
+                os.path.join(os.environ["HALIDE_LIB"], f"../include/{name}")
             )
             if os.path.exists(path):
                 return path
@@ -3344,7 +3345,7 @@ class AsyncCompile:
         return self.submit(task)
 
     def halide(self, meta: HalideMeta, source_code: str):
-        kernel_code_log.info("Halide Kernel:\n%s", source_code)
+        kernel_code_log.info("Halide Kernel:\n%r\n%s", meta, source_code)
         if config.compile_threads <= 1:
             return HalideCodeCache.generate_halide(meta, source_code)
         else:

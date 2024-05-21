@@ -2,7 +2,7 @@ import collections
 import typing
 from dataclasses import fields
 from enum import auto, Enum
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 
 # NOTE: if these fail asserts submit a PR to increase them
@@ -149,7 +149,7 @@ class HalideMeta(typing.NamedTuple):
     argtypes: List[HalideInputSpec]
     target: str
     scheduler: str
-    scheduler_flags: Dict[str, str]
+    scheduler_flags: Dict[str, Union[int, str]]
 
     def args(self):
         """Command line args to pass to halide generator"""
