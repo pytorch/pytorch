@@ -440,6 +440,8 @@ inductor_all_samples = {
     "triu",
     "cummax",
     "cummin",
+    "_chunk_cat",
+    "constant_pad_nd",
 }
 
 
