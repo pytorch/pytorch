@@ -311,14 +311,17 @@ atomic_add(volatile T *addr, T offset) {
   atomic_addr->fetch_add(offset, std::memory_order_relaxed);
 }
 
-std::tuple<int64_t, int64_t, int64_t> mm_get_thread_blocking(
+void mm_get_thread_blocking(
+    int num_threads,
     int64_t M,
     int64_t N,
     int64_t K,
     int64_t M0,
     int64_t N0,
     int64_t K0,
-    int num_threads) {
+    int64_t& Mt,
+    int64_t& Nt,
+    int64_t& Kt) {
   auto get_factors = [](int64_t number) {
     int count = 0;
     for (int64_t i = std::sqrt(number); i > 0; --i) {
@@ -359,27 +362,30 @@ std::tuple<int64_t, int64_t, int64_t> mm_get_thread_blocking(
     int64_t factor = factors[i];
     if (n_blocks % factor == 0 &&
         m_blocks % (num_threads / factor) == 0) {
-      return get_blocking(
+      std::tie(Mt, Nt, Kt) = get_blocking(
           num_threads, factor, m_blocks, n_blocks, k_blocks);
+      return;
     }
   }
 
   for (int i = 0; i < count; ++i) {
     int64_t factor = factors[i];
     if (n_blocks % factor == 0) {
-      return get_blocking(
+      std::tie(Mt, Nt, Kt) = get_blocking(
           num_threads, factor, m_blocks, n_blocks, k_blocks);
+      return;
     }
     int64_t cofactor = num_threads / factor;
     if (m_blocks % cofactor == 0) {
-      return get_blocking(
+      std::tie(Mt, Nt, Kt) = get_blocking(
           num_threads, factor, m_blocks, n_blocks, k_blocks);
+      return;
     }
   }
 
   assert(false && "Should not reach here.");
   // Dummy return to avoid compiler warning
-  return std::make_tuple(0, 0, 0);
+  return;
 }
 
 inline void mm_get_thread_blocks(

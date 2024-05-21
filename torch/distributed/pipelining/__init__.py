@@ -8,7 +8,7 @@ from ._IR import (
     pipeline,
     SplitPoint,
 )
-from ._PipelineStage import PipelineStage
+from ._PipelineStage import ManualPipelineStage, PipelineStage
 from .PipelineSchedule import (
     Schedule1F1B,
     ScheduleGPipe,
@@ -24,6 +24,7 @@ __all__ = [
     "pipeline",
     "ArgsChunkSpec",
     "KwargsChunkSpec",
+    "ManualPipelineStage",
     "PipelineStage",
     "Schedule1F1B",
     "ScheduleGPipe",
