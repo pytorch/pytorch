@@ -1,5 +1,6 @@
 import torch
-from torch.profiler.strobelight_cli_function_profiler import (
+
+from tools.strobelight.cli_function_profiler import (
     strobelight,
     StrobelightCLIFunctionProfiler,
 )
@@ -12,7 +13,7 @@ if __name__ == "__main__":
     # use decorator with default profiler or optional profile arguments.
     @strobelight(sample_each=100, stop_at_error=False)
     @torch.compile()
-    def work():
+    def work() -> None:
         for i in range(10000):
             torch._dynamo.reset()
             for j in range(5):
