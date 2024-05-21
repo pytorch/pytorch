@@ -19,7 +19,6 @@ ciflow_push_tags:
 - ciflow/xpu
 - ciflow/torchbench
 retryable_workflows:
-- lint
 - pull
 - trunk
 - linux-binary
