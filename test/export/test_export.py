@@ -148,6 +148,7 @@ class Inp:
 
 NON_STRICT_SUFFIX = "_non_strict"
 RETRACEABILITY_SUFFIX = "_retraceability"
+PREDISPATCH_SUFFIX = "_pre_dispatch"
 
 
 def is_non_strict_test(test_name):
@@ -3278,6 +3279,159 @@ def forward(self, x):
         test_inp = ((torch.randn(4, 4), torch.randn(2, 4)), torch.randn(4, 4))
         with self.assertRaisesRegex(RuntimeError, "shape\[0\] to be >= 3, but got 2"):
             ep.module()(*test_inp)
+
+    def test_nested_module(self):
+        class M1(torch.nn.Module):
+            def forward(self, x):
+                return x + x
+
+        class M2(torch.nn.Module):
+            def forward(self, x):
+                m = M1()
+                return m(x) * x
+
+        inps = (torch.randn(3, 3),)
+        ep = export(M2(), inps)
+        self.assertTrue(torch.allclose(ep.module()(*inps), M2()(*inps)))
+
+        add_nodes = [
+            node
+            for node in ep.graph.nodes
+            if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor
+        ]
+        self.assertEqual(len(add_nodes), 1)
+        add_node = add_nodes[0]
+        self.assertEqual(len(add_node.meta["nn_module_stack"]), 1)
+        self.assertTrue("M2" in list(add_node.meta["nn_module_stack"].values())[0][1])
+
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
+graph():
+    %x : [num_users=2] = placeholder[target=x]
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %x), kwargs = {})
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%add, %x), kwargs = {})
+    return (mul,)""",
+        )
+
+        unflattened = unflatten(ep)
+        self.assertTrue(torch.allclose(unflattened(*inps), M2()(*inps)))
+
+    def test_nested_module_with_init_buffer(self):
+        class M1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.b = torch.ones(3, 3)
+
+            def forward(self, x):
+                return x + self.b
+
+        class M2(torch.nn.Module):
+            def forward(self, x):
+                m = M1()
+                return m(x) * x
+
+        inps = (torch.randn(3, 3),)
+        ep = export(M2(), inps)
+        self.assertTrue(torch.allclose(ep.module()(*inps), M2()(*inps)))
+
+        self.assertEqual(len(ep.state_dict), 0)
+        self.assertEqual(len(ep.constants), 0)
+
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
+graph():
+    %x : [num_users=2] = placeholder[target=x]
+    %ones : [num_users=1] = call_function[target=torch.ops.aten.ones.default](args = ([3, 3],), kwargs = {device: cpu, pin_memory: False})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %ones), kwargs = {})
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%add, %x), kwargs = {})
+    return (mul,)""",
+        )
+
+        unflattened = unflatten(ep)
+        self.assertTrue(torch.allclose(unflattened(*inps), M2()(*inps)))
+
+    @testing.expectedFailureRetraceability  # Retracing tensor constants results in buffers
+    def test_nested_module_with_constant_buffer(self):
+        class M1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.b = torch.tensor(5)
+
+            def forward(self, x):
+                return x + self.b
+
+        class M2(torch.nn.Module):
+            def forward(self, x):
+                m = M1()
+                return m(x) * x
+
+        inps = (torch.randn(3, 3),)
+        ep = export(M2(), inps)
+        self.assertTrue(torch.allclose(ep.module()(*inps), M2()(*inps)))
+
+        self.assertEqual(len(ep.state_dict), 0)
+        self.assertEqual(len(ep.constants), 1)
+
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
+graph():
+    %c_lifted_tensor_0 : [num_users=1] = placeholder[target=c_lifted_tensor_0]
+    %x : [num_users=2] = placeholder[target=x]
+    %lift_fresh_copy : [num_users=1] = call_function[target=torch.ops.aten.lift_fresh_copy.default](args = (%c_lifted_tensor_0,), kwargs = {})
+    %detach : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%lift_fresh_copy,), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %detach), kwargs = {})
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%add, %x), kwargs = {})
+    return (mul,)""",
+        )
+
+        unflattened = unflatten(ep)
+        self.assertTrue(torch.allclose(unflattened(*inps), M2()(*inps)))
+
+    def test_nested_module_with_parameter(self):
+        class M1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Parameter(torch.ones(3, 3))
+                self.b = torch.nn.Parameter(torch.tensor(5.0))
+
+            def forward(self, x):
+                return x + self.a * self.b
+
+        class M2(torch.nn.Module):
+            def forward(self, x):
+                m = M1()
+                return m(x) * x
+
+        inps = (torch.randn(3, 3),)
+        # Strict export segfaults (Issue #128109)
+        ep = torch.export.export(M2(), inps, strict=False)
+        self.assertTrue(torch.allclose(ep.module()(*inps), M2()(*inps)))
+
+        self.assertEqual(len(ep.state_dict), 0)
+        self.assertEqual(len(ep.constants), 1)
+
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
+graph():
+    %c_lifted_tensor_0 : [num_users=1] = placeholder[target=c_lifted_tensor_0]
+    %x : [num_users=2] = placeholder[target=x]
+    %ones : [num_users=1] = call_function[target=torch.ops.aten.ones.default](args = ([3, 3],), kwargs = {device: cpu, pin_memory: False})
+    %detach : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%ones,), kwargs = {})
+    %lift_fresh_copy : [num_users=1] = call_function[target=torch.ops.aten.lift_fresh_copy.default](args = (%c_lifted_tensor_0,), kwargs = {})
+    %detach_1 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%lift_fresh_copy,), kwargs = {})
+    %detach_2 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach_1,), kwargs = {})
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%detach, %detach_2), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %mul), kwargs = {})
+    %mul_1 : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%add, %x), kwargs = {})
+    return (mul_1,)""",
+        )
+
+        unflattened = unflatten(ep)
+        self.assertTrue(torch.allclose(unflattened(*inps), M2()(*inps)))
 
     def test_lazy_module_kwargs(self):
         class LazyModule(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
