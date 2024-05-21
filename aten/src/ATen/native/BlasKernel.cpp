@@ -244,11 +244,27 @@ static inline float16_t reduce(float16x8_t x) {
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
-#define F16_ELEMENTS_PER_ITERATION 32
+#define F16_ELEMENTS_PER_ITERATION 128
 #define F16_ELEMENTS_PER_REGISTER 8
 #define F16_REGISTERS_PER_ITERATION (F16_ELEMENTS_PER_ITERATION / F16_ELEMENTS_PER_REGISTER)
 static inline double reduce(float16x8_t x[F16_REGISTERS_PER_ITERATION]) {
   int offset = F16_REGISTERS_PER_ITERATION / 2;
+  for (int i = 0; i < offset; ++i) {
+    x[i] = vaddq_f16(x[i], x[offset + i]);
+  }
+  offset /= 2;
+  for (int i = 0; i < offset; ++i) {
+    x[i] = vaddq_f16(x[i], x[offset + i]);
+  }
+  offset /= 2;
+  for (int i = 0; i < offset; ++i) {
+    x[i] = vaddq_f16(x[i], x[offset + i]);
+  }
+  offset /= 2;
+  for (int i = 0; i < offset; ++i) {
+    x[i] = vaddq_f16(x[i], x[offset + i]);
+  }
+  offset /= 2;
   for (int i = 0; i < offset; ++i) {
     x[i] = vaddq_f16(x[i], x[offset + i]);
   }
