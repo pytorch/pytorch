@@ -136,7 +136,7 @@ def _port_metadata_for_output_quant_nodes(
 
     node_users = _filter_sym_size_users(node)
     if len(node_users) != 1:
-        raise InternalError(f"Expecting {node} to have single user")
+        logger.warning(f"Expecting {node} to have single user")  # noqa: G004
     q_node = node_users.pop()
     if q_node.op != "call_function" or q_node.target not in _QUANTIZE_OPS:
         logger.warning(
