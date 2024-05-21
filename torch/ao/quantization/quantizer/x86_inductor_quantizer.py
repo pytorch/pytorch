@@ -107,6 +107,7 @@ def _skip_annotate(
     # 1) Skip annotate if any node is already annotated
     if _is_any_annotated(nodes):
         return True
+
     # 2) Not skip annotate if a) filter_fn is provided and b) any node passed the filter
     if filter_fn and any(filter_fn(node) for node in nodes):
         return False
@@ -121,12 +122,14 @@ def _get_operator_type_filter(operator_type: Callable, module_name_list):
     and 2) the node does not marked by `set_module_name_qconfig`.
 
     For example:
-        node: linear_op = call_function[...](...)  # linear_op.target if torch.ops.aten.linear.default
+        # linear_op.target if torch.ops.aten.linear.default
+        # linear_op is traced from `fc3`
+        node: linear_op = call_function[...](...)
 
 
-    >> operator_type_filter = _get_operator_type_filter(torch.ops.aten.linear.default)
+    >> operator_type_filter = _get_operator_type_filter(torch.ops.aten.linear.default, ["fc1", "fc2"])
     >> print(operator_type_filter(node))
-    True  # the node's target is `torch.ops.aten.linear.default`
+    True  # the node's target is `torch.ops.aten.linear.default` and not marked by `set_module_name_qconfig`
     """
     module_name_list_filters = [_get_module_name_filter(m) for m in module_name_list]
 
@@ -141,22 +144,26 @@ def _get_operator_type_filter(operator_type: Callable, module_name_list):
 def _get_not_operator_type_or_name_filter(
     tp_list: List[torch._ops.OpOverloadPacket], module_name_list: List[str]
 ) -> Callable[[Node], bool]:
-    # Check if the node is 1) belong to the `default_quantizable_ops` and 2) not be marked by `set_module_name_qconfig`,
-    # or `set_module_type_qconfig` `set_function_type_qconfig`.
+    """Get the not_operator_type_or_name_filter function for a given operator type list and module name list.
 
-    # Only call the `operator_type_filters` is enough, since each filter of `operator_type_filters` will check
-    # the `module_name_list_filters`.
+    The filter accept a node and checks if 1) the node does not marked by `set_module_name_qconfig`,
+    or `set_module_type_qconfig` `set_function_type_qconfig`, and 2) the node's type
+    is belong to `default_quantizable_ops`.
+    """
+
+    # Only call the `operator_type_filters` is enough, since each filter of `operator_type_filters`
+    # will check the `module_name_list_filters`.
     operator_type_filters = [
         _get_operator_type_filter(tp, module_name_list) for tp in tp_list
     ]
 
     def not_operator_type_or_name_filter(n: Node) -> bool:
         # For global_config, only quantize the `default_quantizable_ops`
-        belong_to_default_quantizable_ops = n.target in default_quantizable_ops
-        not_module_type_or_module_name_node = not any(
+        is_default_quantizable_op = n.target in default_quantizable_ops
+        not_operator_type_or_module_name_node = not any(
             f(n) for f in operator_type_filters
         )
-        return belong_to_default_quantizable_ops and not_module_type_or_module_name_node
+        return is_default_quantizable_op and not_operator_type_or_module_name_node
 
     return not_operator_type_or_name_filter
 
@@ -439,6 +446,8 @@ class X86InductorQuantizer(Quantizer):
         """Set quantization_config for a submodule with name: `module_name`, for example:
         quantizer.set_module_name_qconfig("blocks.sub"), it will quantize all supported operator/operator
         patterns in the submodule with this module name with the given `quantization_config`
+
+        The supported operators include `quantizable_ops` and `propagation_quantizable_ops`.
         """
         self.module_name_qconfig[module_name] = quantization_config
         return self
@@ -568,13 +577,14 @@ class X86InductorQuantizer(Quantizer):
         """Check if the qconfig is valid.
 
         Currently, not support mixed static and dynamic quantization config.
-        If the qconfig is mixed, the subsequent configuration will be skipped.
+        If the mixture is detected, the subsequent configuration will be skipped.
         """
 
         def _need_skip_cur_config(
             qconfig: Optional[QuantizationConfig], _pre_mode: Optional[bool], msg: str
-        ):
+        ) -> Tuple[Optional[bool], bool]:
             input_act_config = getattr(qconfig, "input_activation", None)
+            need_skip = False
             if input_act_config:
                 qconfig_is_dynamic = input_act_config.is_dynamic
                 if _pre_mode is not None and _pre_mode != qconfig_is_dynamic:
@@ -582,11 +592,11 @@ class X86InductorQuantizer(Quantizer):
                         "Mixed dynamic and static quantization config is not supported."
                         f"The configuration for {msg} will be skipped."
                     )
-                    return _pre_mode, True
+                    need_skip = True
                 else:
                     if _pre_mode is None:
                         _pre_mode = qconfig_is_dynamic
-            return _pre_mode, False
+            return _pre_mode, need_skip
 
         _pre_mode = None
 
@@ -623,10 +633,10 @@ class X86InductorQuantizer(Quantizer):
         """Annotate the model with quantization configuration.
 
         1) Annotate each node according users's qconfig with following order:
-        `module_name_qconfig`, `module_type_qconfig`, and `global_config`.
-        2) Skip nodes already annotated by an earlier stage. For example,
-        if `linear1` has been annotated in the `module_name_config` stage,
-        it will not be re-annotated in the `module_type_config` or `global_config` stages.
+        `module_name_qconfig`, `operator_type_qconfig`, and `global_config`.
+        2) Skip nodes already annotated by earlier stage. For example,
+        if `linear1` has been annotated in the `module_name_config` stage, it will
+        not be re-annotated in the `operator_type_qconfig` or `global_config` stages.
         """
 
         self._check_qconfig()
@@ -660,7 +670,8 @@ class X86InductorQuantizer(Quantizer):
         config: Optional[QuantizationConfig],
         filter_fn: Callable,
     ) -> None:
-        """
+        """Annotate the model with a quantization configuration.
+
         High-level description of quantization recipe for X86 Inductor Backend:
         Step 1: Apply quantization recipe for fusion patterns of conv/linear to enable int8 data type actively.
         Step 2: Propagate quantization annotation for patterns besides conv/linear. Go through the pattern in model
@@ -690,9 +701,7 @@ class X86InductorQuantizer(Quantizer):
         # Refer to https://github.com/intel/intel-extension-for-pytorch/blob/
         # 90d19323d96afc53fcc22ba5a7bb3fb07fdd6c1c/intel_extension_for_pytorch/quantization/_recipe.py#L487
 
-        self._annotate_output_for_int8_in_int8_out_pattern_entry(
-            model, config, filter_fn
-        )
+        self._annotate_output_for_int8_in_int8_out_pattern_entry(model)
 
     def _annotate_all_qat_conv2d_fusion_pattern(
         self, model: torch.fx.GraphModule, config: QuantizationConfig, filter_fn
@@ -1122,7 +1131,6 @@ class X86InductorQuantizer(Quantizer):
         self,
         node: Node,
         quantization_config: QuantizationConfig,
-        filter_fn: Optional[Callable] = None,
     ) -> None:
         if node.target is not torch.ops.aten.max_pool2d.default:
             return
@@ -1133,8 +1141,7 @@ class X86InductorQuantizer(Quantizer):
             ]
         ):
             return
-        if _skip_annotate([maxpool_node], filter_fn):
-            return
+
         input_node = maxpool_node.args[0]
         assert isinstance(input_node, Node)
         input_qspec_map = {}
@@ -1197,12 +1204,15 @@ class X86InductorQuantizer(Quantizer):
                         return False
                 return True
 
+            if _skip_annotate([node], filter_fn):
+                return
+
             if node.target is torch.ops.aten.max_pool2d.default:
                 # Recipe of maxpool2d: check input arg[0] of maxpool2d is quantized or not
                 input_nodes_to_check = [node.all_input_nodes[0]]
                 if not is_all_inputs_connected_to_quantized_op(input_nodes_to_check):
                     return
-                self._annotate_maxpool2d(node, quantization_config, filter_fn)
+                self._annotate_maxpool2d(node, quantization_config)
                 return
             elif node.target is torch.ops.aten.cat.default:
                 input_nodes_to_check = node.all_input_nodes
@@ -1247,19 +1257,13 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_output_for_int8_in_int8_out_pattern_entry(
         self,
         model: torch.fx.GraphModule,
-        quantization_config: Optional[QuantizationConfig] = None,
-        filter_fn: Optional[Callable] = None,
     ):
         for node in model.graph.nodes:
-            self._annotate_output_for_int8_in_int8_out_pattern(
-                node, quantization_config, filter_fn
-            )
+            self._annotate_output_for_int8_in_int8_out_pattern(node)
 
     def _annotate_output_for_int8_in_int8_out_pattern(
         self,
         node: Node,
-        quantization_config: Optional[QuantizationConfig] = None,
-        filter_fn: Optional[Callable] = None,
     ) -> None:
         r"""
         Check and insert observer at output of node in int8_in_int8_out_ops if needed.

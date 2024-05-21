@@ -1911,7 +1911,6 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             # second linear is quantized
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-            torch.ops.quantized_decomposed.dequantize_per_channel.default,
             torch.ops.aten.linear.default,
         ]
         self._test_quantizer(m, example_inputs, quantizer, node_occurrence, node_list)
@@ -1920,7 +1919,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
     def test_set_module_name_and_set_module_type_case2(self):
         """Test that set `module_name_qconfig` and `module_type_qconfig` at the same time.
 
-        All linear are quantized except the second one.
+        All linear are quantized except the last one.
         """
 
         class Sub(torch.nn.Module):
@@ -1934,11 +1933,13 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.linear = torch.nn.Linear(5, 5)
+                self.linear1 = torch.nn.Linear(5, 10)
+                self.linear2 = torch.nn.Linear(10, 5)
                 self.sub = Sub()
 
             def forward(self, x):
-                x = self.linear(x)
+                x = self.linear1(x)
+                x = self.linear2(x)
                 x = self.sub(x)
                 return x
 
@@ -1951,19 +1952,19 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         )
 
         node_occurrence = {
-            torch.ops.aten.linear.default: 2,
-            # input and output for the first linear
-            torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
-            torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+            torch.ops.aten.linear.default: 3,
+            # quantize the input and output of the first linear
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
         }
         node_list = [
-            # first linear is quantized
+            # first and second linear are quantized
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-            torch.ops.quantized_decomposed.dequantize_per_channel.default,
             torch.ops.aten.linear.default,
-            # second linear is not quantized
+            torch.ops.aten.linear.default,
+            # last linear is not quantized
             torch.ops.aten.linear.default,
         ]
         self._test_quantizer(
@@ -1971,10 +1972,10 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         )
 
     @skipIfNoX86
-    def test_set_module_name_and_set_module_type(self):
+    def test_set_module_name_and_set_module_type_case1(self):
         """Test that set `module_name_qconfig` and `module_type_qconfig` at the same time.
 
-        All linear are not quantized except the second one.
+        All linear are not quantized except the last one.
         """
 
         class Sub(torch.nn.Module):
@@ -1988,11 +1989,13 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.linear = torch.nn.Linear(5, 5)
+                self.linear1 = torch.nn.Linear(5, 10)
+                self.linear2 = torch.nn.Linear(10, 5)
                 self.sub = Sub()
 
             def forward(self, x):
-                x = self.linear(x)
+                x = self.linear1(x)
+                x = self.linear2(x)
                 x = self.sub(x)
                 return x
 
@@ -2005,19 +2008,19 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         ).set_module_type_qconfig(torch.nn.Linear, None)
 
         node_occurrence = {
-            torch.ops.aten.linear.default: 2,
-            # input and output for the second linear
+            torch.ops.aten.linear.default: 3,
+            # quantize the input of the last linear
             torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
             torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
         }
         node_list = [
-            # first linear is not quantized
+            # first and second linear is not quantized
             torch.ops.aten.linear.default,
-            # second linear is quantized
+            torch.ops.aten.linear.default,
+            # last linear is quantized
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-            torch.ops.quantized_decomposed.dequantize_per_channel.default,
             torch.ops.aten.linear.default,
         ]
         self._test_quantizer(
@@ -2031,8 +2034,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                # This module name has underscores, which can be part of a mangled
-                # name.
+                # This module name has underscores, which can be part of a mangled name.
                 self.foo_bar = torch.nn.Linear(2, 2)
                 self.baz = torch.nn.Linear(2, 2)
 
@@ -2097,7 +2099,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.choose_qparams.tensor: 1,
                     torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 1,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 1,
-                    # each for q_proj and v_proj
+                    # ops for dequantize the weight of q_proj and v_proj
                     torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
                 }
                 node_list = [
@@ -2105,14 +2107,14 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.choose_qparams.tensor,
                     torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
-                    # op for de-quantizing `q_proj`'s weight
-                    torch.ops.quantized_decomposed.dequantize_per_channel.default,
+                    # # op for de-quantizing `q_proj`'s weight, disable this check
+                    # torch.ops.quantized_decomposed.dequantize_per_channel.default,
                     # q_proj
                     torch.ops.aten.linear.default,
                     # k_proj
                     torch.ops.aten.linear.default,
-                    # op for de-quantizing `v_proj`'s weight
-                    torch.ops.quantized_decomposed.dequantize_per_channel.default,
+                    # # op for de-quantizing `v_proj`'s weight, disable this check
+                    # torch.ops.quantized_decomposed.dequantize_per_channel.default,
                     # v_proj
                     torch.ops.aten.linear.default,
                 ]
@@ -2157,8 +2159,8 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 # ops for quantizing/de-quantizing input
                 torch.ops.quantized_decomposed.quantize_per_tensor.default,
                 torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-                # op for de-quantizing `q_proj`'s weight
-                torch.ops.quantized_decomposed.dequantize_per_channel.default,
+                # op for de-quantizing `q_proj`'s weight, disable this check
+                # torch.ops.quantized_decomposed.dequantize_per_channel.default,
                 # q_proj
                 torch.ops.aten.linear.default,
                 # k_proj
