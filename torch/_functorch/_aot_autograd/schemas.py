@@ -304,6 +304,9 @@ class ViewAndMutationMeta:
     # raised
     deterministic: Optional[bool] = None
 
+    # Keeps track of which input indices store parameters (which we will treat as static)
+    static_parameter_indices: List[int] = field(default_factory=list)
+
     # Map of effect type (ex. _EffectType.ORDERED) to token.  If there are
     # side-effectful operators, FunctionalTensorMode will populate this
     # dictionary telling us how many tokens we will need during tracing.
