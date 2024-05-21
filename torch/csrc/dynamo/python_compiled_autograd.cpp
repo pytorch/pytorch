@@ -8,6 +8,7 @@
 #include <torch/csrc/utils/pythoncapi_compat.h>
 #include <iostream>
 #include <sstream>
+#include <string>
 #include <vector>
 
 /*
@@ -50,14 +51,6 @@ Notes:
 namespace torch::dynamo::autograd {
 using c10::SymInt;
 
-// snapshot of python verbose logging toggle
-static bool is_verbose_logging_enabled;
-static constexpr std::string_view VLOG_PREFIX =
-    "[python_compiled_autograd.cpp] ";
-std::ostream& vcout() {
-  return std::cout << VLOG_PREFIX;
-}
-
 static PyObject* wrap_int_list(const std::vector<int64_t>& inputs) {
   PyObject* pyinput = PyTuple_New(static_cast<Py_ssize_t>(inputs.size()));
   for (const auto i : c10::irange(inputs.size())) {
@@ -90,6 +83,82 @@ static void check(bool result) {
   if (C10_UNLIKELY(!result))
     check(nullptr);
 }
+
+// snapshot of python verbose logging toggle
+static PyObject* python_verbose_logger = nullptr;
+struct VerboseLogger {
+  static std::optional<VerboseLogger> maybe_create() {
+    if (python_verbose_logger == nullptr) {
+      return std::nullopt;
+    }
+    return VerboseLogger();
+  }
+
+  void verbose_log_fn(std::string_view msg) const {
+    TORCH_CHECK(python_verbose_logger != nullptr);
+    check(PyObject_CallFunction(python_verbose_logger, "s", msg.data()));
+  }
+
+  void log_node_check(
+      const Node& fn,
+      size_t size_inputs_num,
+      std::unordered_set<CacheKey> cached_keys,
+      const CacheKey& key,
+      size_t node_idx) {
+    std::string node_name =
+        fn.name() + " (NodeCall " + std::to_string(node_idx) + ")";
+
+    cumulative_sizes_per_node[size_inputs_num] = node_name;
+
+    if (!logged_node_miss && cached_keys.find(key) == cached_keys.end()) {
+      _log_node_miss(typeid(fn), cached_keys, key, node_name);
+      logged_node_miss = true;
+    }
+  }
+
+  void _log_node_miss(
+      const std::type_info& node_type,
+      std::unordered_set<CacheKey> cached_keys,
+      const CacheKey& key,
+      const std::string& node_name) const {
+    std::ostringstream oss;
+    oss << "Cache miss due to new autograd node: " << node_name
+        << " with key size " << std::to_string(key.key_size)
+        << ", previous key sizes=[";
+
+    for (auto it = cached_keys.begin(); it != cached_keys.end(); it++) {
+      if (it->node_type != node_type) {
+        continue;
+      }
+      oss << it->key_size;
+      if (std::next(it) != cached_keys.end()) {
+        oss << ",";
+      }
+    }
+    oss << "]";
+    verbose_log_fn(oss.str());
+  }
+
+  void log_dynamic_shapes_check(size_t size_idx) const {
+    if (cumulative_sizes_per_node.empty()) {
+      return;
+    }
+
+    auto it = cumulative_sizes_per_node.lower_bound(size_idx);
+    TORCH_CHECK(it != cumulative_sizes_per_node.end());
+    size_t start_idx =
+        it == cumulative_sizes_per_node.begin() ? 0 : std::prev(it)->first;
+    verbose_log_fn(
+        "Cache miss due to changed shapes: marking size idx " +
+        std::to_string(size_idx - start_idx) + " of " + it->second +
+        " as dynamic");
+  }
+
+  // track which size index belongs to which node
+  std::map<size_t, std::string> cumulative_sizes_per_node;
+  // only log cache miss due to node key once
+  bool logged_node_miss = false;
+};
 
 struct CacheNode {
   // A node in the shadow graph, we follow next edges until we reach the end of
@@ -135,7 +204,9 @@ struct CacheNode {
   CacheNode& operator=(const CacheNode&) = delete;
   CacheNode& operator=(CacheNode&&) = delete;
 
-  bool check_dynamic_sizes(AutogradCompilerCall& call) {
+  bool check_dynamic_sizes(
+      AutogradCompilerCall& call,
+      const std::optional<VerboseLogger>& vlogger) {
     /*
     We start off by assuming everything is static, then we mark things
     as dynamic when we see them change.  This function:
@@ -161,9 +232,8 @@ struct CacheNode {
       if (changed_value) {
         if (!was_dynamic) {
           cache_hit = false;
-          if (is_verbose_logging_enabled) {
-            vcout() << "cache miss: marking sizes[" << i << "] as dynamic"
-                    << std::endl;
+          if (vlogger.has_value()) {
+            vlogger->log_dynamic_shapes_check(i);
           }
         }
         expected = SizeInput(SizeInput::DYNAMIC, data[i].value);
@@ -257,10 +327,17 @@ static PyObject* is_cache_empty(PyObject* dummy, PyObject* args) {
   END_HANDLE_TH_ERRORS;
 }
 
-static PyObject* set_verbose_logging(PyObject* dummy, PyObject* args) {
+static PyObject* set_verbose_logger(PyObject* dummy, PyObject* args) {
   HANDLE_TH_ERRORS;
-  if (!PyArg_ParseTuple(args, "p", &is_verbose_logging_enabled)) {
+  PyObject* logger = nullptr;
+  if (!PyArg_ParseTuple(args, "O", &logger)) {
     Py_RETURN_FALSE;
+  }
+
+  if (logger == Py_None) {
+    python_verbose_logger = nullptr;
+  } else {
+    python_verbose_logger = logger;
   }
   Py_RETURN_TRUE;
   END_HANDLE_TH_ERRORS;
@@ -271,7 +348,7 @@ static PyMethodDef _methods[] = {
     {"set_autograd_compiler", set_autograd_compiler, METH_VARARGS, nullptr},
     {"clear_cache", clear_cache, METH_NOARGS, nullptr},
     {"is_cache_empty", is_cache_empty, METH_NOARGS, nullptr},
-    {"set_verbose_logging", set_verbose_logging, METH_VARARGS, nullptr},
+    {"set_verbose_logger", set_verbose_logger, METH_VARARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 static struct PyModuleDef _module = {
@@ -353,6 +430,8 @@ CacheNode* _compiled_autograd_impl(
   calls.reserve(
       check_exec_info ? graph_task.exec_info_.size() : dependencies.size() + 1);
 
+  int i = 0;
+  std::optional<VerboseLogger> vlogger = VerboseLogger::maybe_create();
   while (!worklist.empty()) {
     std::shared_ptr<Node> fn = std::move(worklist.back());
     worklist.pop_back();
@@ -367,10 +446,17 @@ CacheNode* _compiled_autograd_impl(
         node_args.collect(call.node->next_edges());
       }
       CacheKey key = node_args.key();
-      if (is_verbose_logging_enabled &&
-          cache->lookup(key, /*create=*/false) == nullptr) {
-        vcout() << "Creating cache entry for " << fn->name()
-                << ", with key of size " << key.key_size << std::endl;
+      if (vlogger.has_value()) {
+        std::unordered_set<CacheKey> cached_keys;
+        for (const auto& [k, _] : cache->next) {
+          cached_keys.emplace(k);
+        }
+        vlogger->log_node_check(
+            *fn,
+            compiler_call.all_size_inputs.size(),
+            std::move(cached_keys),
+            key,
+            i);
       }
       cache = cache->lookup(key);
     }
@@ -395,10 +481,11 @@ CacheNode* _compiled_autograd_impl(
         worklist.emplace_back(edge.function);
       }
     }
+    i++;
   }
 
   // TODO(jansel): some dynamic sizes seem to be ints not symints
-  if (!cache->check_dynamic_sizes(compiler_call)) {
+  if (!cache->check_dynamic_sizes(compiler_call, vlogger)) {
     // cache miss, need to capture FX graph
     ClosingTHPObjectPtr py_compiler(
         check(PyObject_CallNoArgs((the_autograd_compiler))));
@@ -454,7 +541,7 @@ CacheNode* _compiled_autograd_impl(
         inputs = THPVariable_UnpackList(pyinputs);
       }
 
-      if (is_verbose_logging_enabled) {
+      if (python_verbose_logger != nullptr) {
         std::string _node_name = call.node->name();
         THPObjectPtr node_name(PyUnicode_FromString(_node_name.data()));
         TORCH_INTERNAL_ASSERT(node_name != nullptr);
