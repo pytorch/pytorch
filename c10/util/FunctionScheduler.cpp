@@ -40,13 +40,15 @@ FunctionScheduler::~FunctionScheduler() {
 }
 
 std::chrono::microseconds FunctionScheduler::getNextWaitTime() {
-  _next_run = std::move(_queue.top()); // TODO may be removed in the meantime?
-  _queue.pop();
+  // We can't pop the next run instantly,
+  // as it may still change while we're waiting.
+  _next_run = _queue.top();
 
   // Finding the first run associated with an active job.
   while (_jobs.find(_next_run->job_id()) == _jobs.end()) {
-      _next_run = std::move(_queue.top());
-      _queue.pop();
+    // Only pop runs associated with an invalid job.
+    _queue.pop();
+    _next_run = _queue.top();
   }
 
   auto now = std::chrono::steady_clock::now();
@@ -68,18 +70,27 @@ void FunctionScheduler::run() {
       // We need to wake up if a new run is added
       // to the queue, as it may need to happen
       // before the current ´_next_run´
-      _cond.wait_for(lock, wait_time);
+      if (_cond.wait_for(lock, wait_time) == std::cv_status::timeout) {
+        // Lock timed out, i.e., no new run was added while we waited.
+        // The run selected as next is still the correct one.
+        runNextJob();
+      }
+    } else {
+      runNextJob();
     }
-
-    runNextJob();
   }
 }
 
 void FunctionScheduler::runNextJob() {
+  // Remove this run from the queue
+  _queue.pop();
+  // TODO: check that the queue top is actually the _next_run (?)
+
   // Check if the job was canceled in the meantime.
-  if (_jobs.find(_next_run->job_id()) != _jobs.end()) {
-    auto entry = _jobs.find(_next_run->job_id());
+  auto entry = _jobs.find(_next_run->job_id());
+  if (entry != _jobs.end()) {
     entry->second->run();
+    // Add a new run associated with this job to the queue
     addRun(entry->first, entry->second);
   }
 }
@@ -89,7 +100,7 @@ int FunctionScheduler::id() {
 }
 
 void FunctionScheduler::addRun(int job_id, std::unique_ptr<Job> const &job) {
-  std::lock_guard<std::mutex> lock(_mutex);
+  std::lock_guard<std::mutex> lock(_mutex); // TODO: Deadlock here (?)
   auto time = std::chrono::steady_clock::now() + job->interval();
   auto run = std::make_shared<Run>(job_id, time);
   _queue.push(std::move(run));
