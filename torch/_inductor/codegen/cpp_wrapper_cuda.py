@@ -106,7 +106,7 @@ class CppWrapperCuda(CppWrapperCpu):
                 if arg.endswith(".item()"):
                     # Need to declare a scalar in this case
                     ctype = DTYPE_TO_CPP[arg_type]
-                    arg = arg.replace(".item()", "")
+                    arg = arg[:-7]
                     if config.abi_compatible:
                         self.codegen_tensor_item(
                             arg_type,
