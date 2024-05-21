@@ -215,6 +215,7 @@ class NNModuleVariable(VariableTracker):
 
         base = tx.output.get_submodule(self.module_key)
         base_dict = object.__getattribute__(base, "__dict__")
+
         object_member = True
         all_class_attribute_names = set()
         for x in inspect.getmro(base.__class__):
@@ -223,7 +224,9 @@ class NNModuleVariable(VariableTracker):
         if not self.source:
             unimplemented("GETATTR with no source")
 
-        if name in base_dict:
+        if name == "__dict__":
+            subobj = base_dict
+        elif name in base_dict:
             subobj = base_dict[name]
         elif (
             "_modules" in base_dict
