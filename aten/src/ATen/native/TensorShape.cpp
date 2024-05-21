@@ -63,6 +63,7 @@
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
 #include <ATen/ops/_stack_native.h>
 #include <ATen/ops/_unsafe_set_storage.h>
+#include <ATen/ops/_unsafe_set_storage_native.h>
 #include <ATen/ops/_unsafe_view.h>
 #include <ATen/ops/_unsafe_view_native.h>
 #include <ATen/ops/_values_copy_native.h>
