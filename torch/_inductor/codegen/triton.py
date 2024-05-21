@@ -1189,7 +1189,7 @@ class TritonKernel(SIMDKernel):
         else:
             load_buffer = self.loads
 
-        self.issue_check_bounds(load_buffer, index)
+        self.issue_check_bounds(load_buffer, original_index)
         result_var = self.cse.generate(load_buffer, line)
         assert isinstance(result_var, TritonCSEVariable)
         result_var.mask_vars = indexing.mask_vars  # type: ignore[assignment]
@@ -1239,7 +1239,7 @@ class TritonKernel(SIMDKernel):
             line = f"tl.atomic_add({var} + ({indexing.index_str}), {value}, {indexing.mask_str})"
         else:
             raise NotImplementedError(f"store mode={mode}")
-        self.issue_check_bounds(self.stores, index)
+        self.issue_check_bounds(self.stores, original_index)
         self.stores.writeline(DeferredLine(name, line))
         if advance_block_ptr:
             self.stores.writeline(advance_block_ptr)
@@ -1532,6 +1532,7 @@ class TritonKernel(SIMDKernel):
         self.inside_reduction = True
         var = self.args.output(name)
 
+        self.issue_check_bounds(self.suffix, index)
         if isinstance(indexing, BlockPtrOptions):
             self.suffix.writeline(
                 DeferredLine(

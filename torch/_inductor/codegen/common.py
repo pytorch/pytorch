@@ -398,6 +398,9 @@ class ExprPrinter(Printer):
         # Go figure...
         return " >= ".join(map(self.paren, map(self._print, expr.args)))
 
+    def _print_Boxed(self, expr):
+        return self._print(expr.args[0])
+
     def _print_align(self, expr):
         assert len(expr.args) == 1
         return f"align({self._print(expr.args[0])})"
@@ -1486,7 +1489,7 @@ class Kernel(CodeGen):
             - CSEProxy.indirect_indexing
             - IndexPropagation.indirect_indexing
         - This saves the info necessary to issue the check
-        - When a load or a store happens within codegen, it will call self.issue_check_bounds(buffer, index
+        - When a load or a store happens within codegen, it will call self.issue_check_bounds(buffer, index)
         - If the given index uses (structural equality) any of the expressions that
             need checking, we call self.check_bounds(buffer, ...) which will print the relevant line
         """

@@ -1665,7 +1665,7 @@ class CppKernel(Kernel):
         Convert an index expr to a string that can be used in cpp code.
         e.g. a sympy expression "s2" may actually appear as "ks1" in the cpp kernel.
         """
-        return cexpr_index(self.rename_indexing(index))
+        return cexpr(self.rename_indexing(index))
 
     def index_indirect_depends_on(self, index: sympy.Expr, itervar: sympy.Symbol):
         """
@@ -1709,13 +1709,14 @@ class CppKernel(Kernel):
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
+        original_index = index
         index = self.rename_indexing(index)
         line = f"{var}[{cexpr_index(index)}]"
         if V.graph.get_dtype(name) in [torch.float16]:
             line = f"static_cast<float>({line})"
 
         # Issue necessary TORCH_CHECKs for the indirect indexing
-        self.issue_check_bounds(self.loads, index)
+        self.issue_check_bounds(self.loads, original_index)
 
         csevar = self.cse.generate(self.loads, line)
         csevar.update_on_args("load", (name, index), {})
@@ -1724,6 +1725,7 @@ class CppKernel(Kernel):
     def store(self, name, index, value, mode=None):
         assert "buf" in name
         var = self.args.output(name)
+        original_index = index
         self.cache_fp32_cse_var_before_lowp_store(value)
         index = self.rename_indexing(index)
         if mode is None:
@@ -1740,7 +1742,7 @@ class CppKernel(Kernel):
             raise NotImplementedError(f"store mode={mode}")
 
         # Issue necessary TORCH_CHECKs for the indirect indexing
-        self.issue_check_bounds(self.stores, index)
+        self.issue_check_bounds(self.stores, original_index)
 
         self.stores.writeline(DeferredLine(name, line))
 
@@ -2153,6 +2155,8 @@ class CppVecKernel(CppKernel):
         :return: a CppCSEVariable that represents the loaded vector or None if it is a store.
         """
         assert not store_value or var is not None, "store var must be provided"
+        original_index = index
+        index = self.rename_indexing(index)
 
         if buffer is None:
             buffer = self.loads
@@ -2210,10 +2214,11 @@ class CppVecKernel(CppKernel):
                     array_var = vec_to_array(indirect_var)
                     replacements[indirect_var] = f"{array_var}[{itervar_inner}]"
 
+            # TODO Refactor. This function does way too many things.
             # If it's a load or a store
             if var:
                 # Issue necessary TORCH_CHECKs for the indirect indexing
-                self.issue_check_bounds(buffer, index)
+                self.issue_check_bounds(buffer, original_index)
 
             index = self.scale_index_with_offset(
                 index, itervar_idx=self.tiling_idx, offset=itervar_inner
@@ -2266,6 +2271,7 @@ class CppVecKernel(CppKernel):
     def load(self, name: str, index: sympy.Expr):
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.input(name)
+        original_index = index
         index = self.rename_indexing(index)
         dtype = V.graph.get_dtype(name)
         tiling_var = self.itervars[self.tiling_idx]
@@ -2278,10 +2284,10 @@ class CppVecKernel(CppKernel):
             if stride == 1:
                 # load contiguously
                 line = self._get_vec_load_line(var, index, dtype, self._load_mask)
-                self.issue_check_bounds(self.loads, index)
+                self.issue_check_bounds(self.loads, original_index)
                 csevar = self.cse.generate(self.loads, line)  # type: ignore[assignment]
             else:
-                csevar = self._load_or_store_non_contiguous(var, index, dtype)  # type: ignore[assignment]
+                csevar = self._load_or_store_non_contiguous(var, original_index, dtype)  # type: ignore[assignment]
         assert isinstance(csevar, CppCSEVariable)
         csevar.update_on_args("load", (name, index), {})
         csevar.is_vec = True
@@ -2307,17 +2313,21 @@ class CppVecKernel(CppKernel):
             isinstance(value, CppCSEVariable) and value.is_vec
         ), value
         tiling_var = self.itervars[self.tiling_idx]
-        var_expr = f"{var} + {cexpr_index(index)}"
+        original_index = index
+        index = self.rename_indexing(index)
         stride = self._try_get_const_stride(index, tiling_var)
         code = IndentedBuffer()
         if stride == 1:
+            # Issue necessary TORCH_CHECKs for the indirect indexing
+            self.issue_check_bounds(code, original_index)
+            var_expr = f"{var} + {cexpr_index(index)}"
             if dtype == torch.float:
                 code.writeline(f"{value}.store({var_expr});")
             else:
                 code.writeline(f"{value}.store({var_expr}, {self.tiling_factor});")
         else:
             self._load_or_store_non_contiguous(
-                var, index, dtype, buffer=code, store_value=value
+                var, original_index, dtype, buffer=code, store_value=value
             )
         return code
 
@@ -2331,11 +2341,8 @@ class CppVecKernel(CppKernel):
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.output(name)
         self.cache_fp32_cse_var_before_lowp_store(value)
-        index = self.rename_indexing(index)
         code = self._get_store_line(value, var, index, V.graph.get_dtype(name))
 
-        # Issue necessary TORCH_CHECKs for the indirect indexing
-        self.issue_check_bounds(self.stores, index)
         self.stores.splice(code.map(lambda x: DeferredLine(name, x)))
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
@@ -2439,6 +2446,7 @@ class CppVecKernel(CppKernel):
         return result
 
     def store_reduction(self, name, index, value):
+        original_index = index
         index = self.rename_indexing(index)
         var = self.args.output(name)
         out_dtype = V.graph.get_dtype(name)
@@ -2449,6 +2457,9 @@ class CppVecKernel(CppKernel):
             code.writeline(
                 f"{var}[{cexpr_index(index)}] = static_cast<{DTYPE_TO_CPP[out_dtype]}>({value});"
             )
+
+            # Issue necessary TORCH_CHECKs for the indirect indexing
+            self.issue_check_bounds(self.reduction_suffix, original_index)
         else:
             # Vertical reduction
             if out_dtype != dtype:
@@ -2457,7 +2468,8 @@ class CppVecKernel(CppKernel):
                     f"auto {converted_value} = at::vec::convert<{DTYPE_TO_CPP[out_dtype]}>({value});"
                 )
                 value = converted_value
-            code.splice(self._get_store_line(value, var, index, out_dtype))
+            # get_store_line does the TORCH_CHECKs
+            code.splice(self._get_store_line(value, var, original_index, out_dtype))
         self.reduction_suffix.splice(code.map(lambda x: DeferredLine(name, x)))
 
     def broadcast(self, scalar_var: CppCSEVariable) -> CppCSEVariable:

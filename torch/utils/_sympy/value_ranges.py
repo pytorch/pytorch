@@ -591,6 +591,10 @@ class SymPyValueRangeAnalysis:
         return ValueRanges.convex_min_zero_map(x, abs)
 
     @staticmethod
+    def identity(x):
+        return x
+
+    @staticmethod
     def exp(x):
         return ValueRanges.increasing_map(x, OpaqueUnaryFn_exp)
 

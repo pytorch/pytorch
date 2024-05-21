@@ -29,7 +29,7 @@ from typing_extensions import TypeAlias
 
 import torch
 from torch._prims_common import dtype_to_type, is_integer_dtype
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Where
+from torch.utils._sympy.functions import Boxed, FloorDiv, ModularIndexing, Where
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from .utils import generate_assert
 
@@ -342,8 +342,8 @@ class IndexPropagation:
             if generate_assert(check):
                 self.fallback(
                     "check_bounds_lazy",
-                    (expr, size),
+                    (Boxed(expr), size),
                     dict(lower=not can_prove_lower, upper=not can_prove_upper),
                 )
-            return expr
+            return Boxed(expr)
         return self.fallback("indirect_indexing", (index, size, check), {}).value
