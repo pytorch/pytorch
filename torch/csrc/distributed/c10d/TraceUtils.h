@@ -19,6 +19,7 @@
 #include <string>
 #include <system_error>
 #include <vector>
+#include "ATen/core/interned_strings.h"
 #include "c10/core/Scalar.h"
 namespace c10d {
 
@@ -707,12 +708,14 @@ struct NCCLTraceBuffer {
 
       dict.insert(input_sizes_key, read_sizes(e.input_dims_));
       std::vector<std::string> input_dtypes_strs;
+      input_dtypes_strs.reserve(e.input_dtypes_.size());
       for (const auto& input_dtype : e.input_dtypes_) {
         input_dtypes_strs.push_back(c10::toString(input_dtype));
       }
       dict.insert(input_dtypes_key, input_dtypes_strs);
       dict.insert(output_sizes_key, read_sizes(e.output_dims_));
       std::vector<std::string> output_dtypes_strs;
+      output_dtypes_strs.reserve(e.output_dtypes_.size());
       for (const auto& output_dtype : e.output_dtypes_) {
         output_dtypes_strs.push_back(c10::toString(output_dtype));
       }
