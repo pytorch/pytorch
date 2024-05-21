@@ -4413,7 +4413,6 @@ def matmul(tensor1, tensor2, *, is_out=False):
 
 
 @register_decomposition([aten.upsample_bicubic2d.default, aten.upsample_bicubic2d.out])
-@aten.upsample_bicubic2d.default.py_impl(DispatchKey.Autograd)
 @out_wrapper()
 @pw_cast_for_opmath
 def upsample_bicubic2d_default(
@@ -4495,6 +4494,76 @@ def upsample_bicubic2d_default(
 
     # convert output to correct memory format, if necessary
     memory_format = utils.suggest_memory_format(input)
+    result = result.contiguous(memory_format=memory_format)
+    return result
+
+
+@register_decomposition(aten.upsample_bicubic2d_backward)
+@out_wrapper("grad_input")
+@pw_cast_for_opmath
+def upsample_bicubic2d_backward(
+    grad_output: Tensor,
+    output_size: Tuple[int, int],
+    input_size: Tuple[int, int, int, int],
+    align_corners: bool,
+    scale_h: Optional[float] = None,
+    scale_w: Optional[float] = None,
+) -> Tensor:
+    # get dimensions of original image
+    _, _, in_h, in_w = input_size
+
+    # Calculate horizontal and vertical scaling factor
+    h_scale_factor = _compute_scale(in_h, output_size[0], align_corners, scale_h)
+    w_scale_factor = _compute_scale(in_w, output_size[1], align_corners, scale_w)
+
+    _, dtype = utils.elementwise_dtypes(
+        grad_output,
+        type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    )
+
+    # We have to create arange with int64 dtype and use .to in order to avoid
+    # additional kernels creation in inductor and get a perf slowdown
+    i = torch.arange(output_size[0], device=grad_output.device).to(dtype=dtype)
+    j = torch.arange(output_size[1], device=grad_output.device).to(dtype=dtype)
+
+    x_float = _compute_source_index(w_scale_factor, j, align_corners)
+    y_float = _compute_source_index(h_scale_factor, i, align_corners)
+    y_float = y_float.unsqueeze(-1)
+
+    x = x_float.floor()
+    y = y_float.floor()
+
+    # We should also clamp xscale/yscale
+    # See guard_index_and_lambda in UpSample.h
+    yscale = (y_float - y).clamp(0.0, 1.0)
+    xscale = (x_float - x).clamp(0.0, 1.0)
+    x = x.to(torch.int64)
+    y = y.to(torch.int64)
+
+    iys_ofs = (y - 1, y, y + 1, y + 2)
+    ixs_ofs = (x - 1, x, x + 1, x + 2)
+
+    weights_x = _upsample_get_cubic_coefficients(xscale)
+    weights_y = _upsample_get_cubic_coefficients(yscale)
+
+    def load_bounded(ys, xs):
+        y_idx = torch.clamp(ys, 0, in_h - 1)
+        x_idx = torch.clamp(xs, 0, in_w - 1)
+        v = aten._unsafe_index(input, [None, None, y_idx, x_idx])
+        return v
+
+    y_idxs = [torch.clamp(y_ofs, 0, in_h - 1) for y_ofs in iys_ofs]
+    x_idxs = [torch.clamp(x_ofs, 0, in_w - 1) for x_ofs in ixs_ofs]
+
+    result = grad_output.new_zeros(input_size)
+    for x_idx, x_weight in zip(x_idxs, weights_x):
+        for y_idx, y_weight in zip(y_idxs, weights_y):
+            result = aten._unsafe_index_put(
+                result, [None, None, y_idx, x_idx], x_weight * y_weight, accumulate=True
+            )
+
+    # convert output to correct memory format, if necessary
+    memory_format = utils.suggest_memory_format(grad_output)
     result = result.contiguous(memory_format=memory_format)
     return result
 
