@@ -6,6 +6,8 @@ from typing import cast, List, Optional, Sequence, Tuple, TYPE_CHECKING, TypedDi
 
 import torch
 
+from torch.fx.experimental.symbolic_shapes import free_symbols
+
 from .. import config, ir
 
 from ..lowering import (
@@ -363,6 +365,13 @@ def convolution(
         and not transposed
         and is_zeros(output_padding)
         and groups == 1
+        # We tried free_unbacked_symbols first but inductor somehow get
+        # unbacked symbols having 's' as prefix and those are not
+        # counted as unbacked symbols by free_unbacked_sybmols function.
+        #
+        # Call free_symbols instead. The downside is for some cases, we
+        # conservatively not converting conv1x1 to mm. Not a big deal.
+        and not free_symbols(x.get_size())
         and sympy_product(x.get_size()) > 0
     ):
         return convert_1x1_conv_to_mm(x, weight, bias)

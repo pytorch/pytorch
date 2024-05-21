@@ -6,7 +6,7 @@ import unittest
 from typing import Callable, List, Optional
 
 import torch
-from torch import multiprocessing as mp
+from torch import multiprocessing as mp, nn
 from torch._dynamo import reset
 from torch._dynamo.testing import reset_rng_state
 from torch._inductor import config
@@ -621,6 +621,31 @@ class TestMaxAutotune(TestCase):
     @config.patch(max_autotune=True)
     def test_empty_conv_input_with_1x1_kernel(self):
         self.test_empty_conv_input(kernel_size=1)
+
+    @config.patch(max_autotune=True)
+    def test_conv1x1_with_unbacked_symint(self):
+        """
+        Make sure there is no exception due to unbacked symint.
+        """
+        conv = nn.Conv2d(
+            3, 64, kernel_size=(1, 1), stride=(1, 1), padding=(0, 0), bias=False
+        ).to(device="cuda")
+
+        @torch.compile
+        def f(x, y, z):
+            h = y.nonzero().size(0)
+            w = z.nonzero().size(0)
+            x = x[:, :, :h, :w]
+            x = conv(x)
+            return x
+
+        x = torch.randn(4, 3, 224, 224).to(
+            memory_format=torch.channels_last, device="cuda"
+        )
+        for _ in range(2):
+            y = torch.randint(0, 10, (224,)).to(device="cuda")
+            z = torch.randint(0, 10, (224,)).to(device="cuda")
+            f(x, y, z)
 
     def test_non_contiguous_input_mm(self):
         """
