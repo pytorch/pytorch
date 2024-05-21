@@ -413,15 +413,24 @@ static void autogradNotImplementedFallbackImpl(
     if (aliased_input.has_storage()) {
       if (aliased_output_iv.isTensor()) {
         const at::Tensor& aliased_output = aliased_input_iv.toTensor();
-        TORCH_INTERNAL_ASSERT(
-            aliased_input.storage().is_alias_of(aliased_output.storage()),
-            op_name);
-      } else {
-        const auto aliased_output_vec = aliased_output_iv.toTensorVector();
-        for (const auto& aliased_output : aliased_output_vec) {
+        // only check aliasing for dense -> dense and subclass -> subclass views
+        if (at::impl::tensor_has_dispatch(aliased_input) ==
+            at::impl::tensor_has_dispatch(aliased_output)) {
           TORCH_INTERNAL_ASSERT(
               aliased_input.storage().is_alias_of(aliased_output.storage()),
               op_name);
+        }
+      } else {
+        const auto aliased_output_vec = aliased_output_iv.toTensorVector();
+        for (const auto& aliased_output : aliased_output_vec) {
+          // only check aliasing for dense -> dense and subclass -> subclass
+          // views
+          if (at::impl::tensor_has_dispatch(aliased_input) ==
+              at::impl::tensor_has_dispatch(aliased_output)) {
+            TORCH_INTERNAL_ASSERT(
+                aliased_input.storage().is_alias_of(aliased_output.storage()),
+                op_name);
+          }
         }
       }
     }
