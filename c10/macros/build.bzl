@@ -24,9 +24,6 @@ def define_targets(rules):
         ] + rules.select({
             "//c10:using_gflags": ["C10_USE_GFLAGS"],
             "//conditions:default": [],
-        }) + rules.select({
-            "//c10:using_glog": ["C10_USE_GLOG"],
-            "//conditions:default": [],
         }),
     )
 

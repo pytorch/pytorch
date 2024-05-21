@@ -49,21 +49,6 @@ new_local_repository(
 )
 
 http_archive(
-    name = "com_github_glog",
-    build_file_content = """
-licenses(['notice'])
-
-load(':bazel/glog.bzl', 'glog_library')
-# TODO: figure out why enabling gflags leads to SIGSEV on the logging init
-glog_library(with_gflags=0)
-    """,
-    strip_prefix = "glog-0.4.0",
-    urls = [
-        "https://github.com/google/glog/archive/v0.4.0.tar.gz",
-    ],
-)
-
-http_archive(
     name = "com_github_gflags_gflags",
     strip_prefix = "gflags-2.2.2",
     urls = [

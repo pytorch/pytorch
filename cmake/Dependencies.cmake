@@ -603,21 +603,6 @@ if(USE_GFLAGS)
   endif()
 endif()
 
-# ---[ Google-glog
-if(USE_GLOG)
-  include(${CMAKE_CURRENT_LIST_DIR}/public/glog.cmake)
-  if(TARGET glog::glog)
-    set(CAFFE2_USE_GOOGLE_GLOG 1)
-  else()
-    message(WARNING
-        "glog is not found. Caffe2 will build without glog support but it is "
-        "strongly recommended that you install glog. Suppress this warning "
-        "with -DUSE_GLOG=OFF")
-    caffe2_update_option(USE_GLOG OFF)
-  endif()
-endif()
-
-
 # ---[ Googletest and benchmark
 if(BUILD_TEST OR BUILD_MOBILE_BENCHMARK OR BUILD_MOBILE_TEST)
   # Preserve build options.

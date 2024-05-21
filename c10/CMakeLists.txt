@@ -20,7 +20,6 @@ endif()
 
   # ---[ Configure macro file.
   set(C10_USE_GFLAGS ${USE_GFLAGS}) # used in cmake_macros.h.in
-  set(C10_USE_GLOG ${USE_GLOG}) # used in cmake_macros.h.in
   set(C10_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS}) # used in cmake_macros.h.in
   set(C10_USE_NUMA ${USE_NUMA})
   set(C10_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
@@ -91,9 +90,6 @@ if(NOT BUILD_LIBTORCHLESS)
     target_link_libraries(c10 PUBLIC gflags)
   endif()
 
-  if(C10_USE_GLOG)
-    target_link_libraries(c10 PUBLIC glog::glog)
-  endif()
   target_link_libraries(c10 PRIVATE fmt::fmt-header-only)
   target_link_libraries(c10 PRIVATE nlohmann)
 

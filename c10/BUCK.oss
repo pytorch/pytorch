@@ -14,7 +14,6 @@ cxx_library(
       deps = [
         "//third_party:cpuinfo",
         "//third_party:fmt",
-        "//third_party:glog",
     ],
     exported_deps = [],
     compiler_flags = [
@@ -37,8 +36,6 @@ cxx_library(
     exported_linker_flags = [],
     exported_preprocessor_flags = [
         '-DC10_USING_CUSTOM_GENERATED_MACROS',
-        '-DC10_USE_GLOG',
-        '-DC10_USE_MINIMAL_GLOG',
         '-DC10_MOBILE',
         '-fexceptions',
         '-Wno-global-constructors'

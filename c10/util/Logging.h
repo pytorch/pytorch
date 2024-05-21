@@ -22,12 +22,7 @@
 #define CAFFE2_LOG_THRESHOLD INT_MIN
 #endif // CAFFE2_LOG_THRESHOLD
 
-// Below are different implementations for glog and non-glog cases.
-#ifdef C10_USE_GLOG
-#include <c10/util/logging_is_google_glog.h>
-#else // !C10_USE_GLOG
 #include <c10/util/logging_is_not_google_glog.h>
-#endif // C10_USE_GLOG
 
 C10_DECLARE_int(caffe2_log_level);
 C10_DECLARE_bool(caffe2_use_fatal_for_enforce);
@@ -110,11 +105,7 @@ C10_API void UpdateLoggingLevelsFromFlags();
 }
 
 constexpr bool IsUsingGoogleLogging() {
-#ifdef C10_USE_GLOG
-  return true;
-#else
   return false;
-#endif
 }
 
 /**

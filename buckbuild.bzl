@@ -168,7 +168,6 @@ THIRD_PARTY_LIBS = {
     "flatbuffers-api": ["//third-party/flatbuffers/fbsource_namespace:flatbuffers-api", "//third_party:flatbuffers-api"],
     "flatc": ["//third-party/flatbuffers/fbsource_namespace:flatc", "//third_party:flatc"],
     "fmt": ["//third-party/fmt:fmt", "//third_party:fmt"],
-    "glog": ["//third-party/glog:glog", "//third_party:glog"],
     "gmock": ["//third-party/googletest:gmock_main", "//third_party:gmock"],
     "gtest": ["//third-party/googletest:gtest_main", "//third_party:gtest"],
     "kineto": ["//xplat/kineto/libkineto:libkineto", "//third_party:libkineto"],
@@ -830,7 +829,6 @@ def get_pt_operator_registry_dict(
             ROOT + ":torch_mobile_core",
             ROOT + ":aten_cpu",
             ROOT + ":aten_metal_prepack_header",
-            third_party("glog"),
             C10,
         ] + ([ROOT + ":torch_mobile_train"] if train else []),
         **kwargs
@@ -1447,7 +1445,6 @@ def define_buck_targets(
             ":generated-autograd-headers",
             ":torch_headers",
             ":torch_mobile_deserialize",
-            third_party("glog"),
             third_party("rt"),
             C10,
         ] + ([] if IS_OSS else [
@@ -1723,7 +1720,6 @@ def define_buck_targets(
         ],
         visibility = ["PUBLIC"],
         deps = [
-            third_party("glog"),
             third_party("kineto"),
         ],
         exported_deps = [
@@ -1974,7 +1970,6 @@ def define_buck_targets(
             deps = [
                 third_party("omp"),
                 third_party("cpuinfo"),
-                third_party("glog"),
                 third_party("XNNPACK"),
                 third_party("pocketfft"),
             ] + select({
