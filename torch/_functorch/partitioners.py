@@ -1311,8 +1311,6 @@ def _optimize_runtime_with_given_memory(
     return res.x
 
 
-from triton.testing import do_bench
-
 from torch.utils._mode_utils import no_dispatch
 
 RUNTIME_MODE = "analytical"
@@ -1321,13 +1319,18 @@ RUNTIME_MODE = "analytical"
 def estimate_runtime(node):
     def materialize_arg(x):
         if isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.Tensor):
-            return torch.zeros_like(x.meta["val"])
+            shape = x.meta['val'].shape
+            def realize_symbol(d):
+                return d if isinstance(d, int) else d.node.int
+            shape = [realize_symbol(s) for s in shape]
+            return x.meta['val'].new_zeros(shape)
         return x
 
     if RUNTIME_MODE == "placeholder":
         return 1
 
     if RUNTIME_MODE == "profile":
+        from triton.testing import do_bench
         with no_dispatch():
             args, kwargs = pytree.tree_map(materialize_arg, (node.args, node.kwargs))
             ms = do_bench(lambda: node.target(*args, **kwargs))
@@ -1451,6 +1454,8 @@ def choose_saved_values_set(
     all_recomputable_banned_nodes = sorted(
         recomputable_banned_nodes, key=_size_of, reverse=True
     )
+    if len(all_recomputable_banned_nodes) == 0:
+        return node_info.inputs
     memories = [get_normalized_size(_size_of(i)) for i in all_recomputable_banned_nodes]
     runtimes = [estimate_runtime(node) for node in all_recomputable_banned_nodes]
     cur_memory_budget = memory_budget
