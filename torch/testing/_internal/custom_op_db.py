@@ -458,7 +458,7 @@ torch.library.register_fake("_torch_testing::source1", source1_fake, lib=lib)
 
 lib.define("source2(Tensor x) -> Tensor")
 
-@torch.library.impl_abstract("_torch_testing::source2", lib=lib)
+@torch.library.register_fake("_torch_testing::source2", lib=lib)
 def _(x):
     return x.clone()
 
@@ -467,7 +467,7 @@ lib.define("source3(Tensor x) -> Tensor")
 def source3_fake(x):
     return x.clone()
 
-torch.library.impl_abstract("_torch_testing::source3", source3_fake, lib=lib)
+torch.library.register_fake("_torch_testing::source3", source3_fake, lib=lib)
 
 
 @torch.library.custom_op("_torch_testing::source4", mutates_args=())
