@@ -43,6 +43,7 @@ from typing import (
     Generator,
     List,
     Optional,
+    Sequence,
     Set,
     Tuple,
     TYPE_CHECKING,
@@ -61,6 +62,7 @@ from torch._inductor.runtime.compile_tasks import (
     _set_triton_ptxas_path,
     _worker_compile_triton,
 )
+from torch._inductor.runtime.hints import HalideMeta
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import clear_on_fresh_inductor_cache, is_linux
 
@@ -1772,6 +1774,7 @@ def cpp_compile_command(
     compile_only: bool = False,
     use_absolute_path: bool = False,
     use_mmap_weights: bool = False,
+    extra_flags: Sequence[str] = (),
 ) -> str:
     ipaths, lpaths, libs, macros, build_arch_flags = get_include_and_linking_paths(
         include_pytorch, vec_isa, cuda, aot_mode
@@ -1821,6 +1824,7 @@ def cpp_compile_command(
             {use_fb_internal_macros()}
             {use_standard_sys_dir_headers()}
             {get_compile_only(compile_only)}
+            {' '.join(extra_flags)}
             -o {out_name}
         """,
     ).strip()
@@ -2304,11 +2308,12 @@ class CppCodeCache:
             raise
 
     @classmethod
-    def load_async(cls, source_code: str, cuda=False, submit_fn=None):
+    def load_async(cls, source_code: str, cuda=False, submit_fn=None, extra_flags=()):
         compile_command = {
             **cls.cpp_compile_command_flags,
             "cuda": cuda,
             "vec_isa": pick_vec_isa(),
+            "extra_flags": extra_flags,
         }
         cpp_command = repr(cpp_compile_command("i", "o", **compile_command))
         key, input_path = write(source_code, "cpp", extra=cpp_command)
@@ -2473,6 +2478,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         cuda: bool = False,
         num_outputs: int = -1,
         submit_fn=None,
+        extra_flags=(),
     ) -> Any:
         """
         Wrap a C++ function in fast Python bindings.
@@ -2500,7 +2506,9 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             cls.entry_function,
             cls.entry_function,
         )
-        get_result = cls.load_async(source_code + suffix, cuda, submit_fn=submit_fn)
+        get_result = cls.load_async(
+            source_code + suffix, cuda, submit_fn=submit_fn, extra_flags=extra_flags
+        )
         result = None
 
         def future():
@@ -2578,6 +2586,213 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
         }
         """
     )
+
+
+@clear_on_fresh_inductor_cache
+class HalideCodeCache(CppPythonBindingsCodeCache):
+    cache: Dict[str, Callable[[], Union[ModuleType, CDLL]]] = {}
+    cache_clear = staticmethod(cache.clear)
+    glue_template = textwrap.dedent(
+        """
+        #include "{halidebuffer_h}"
+        #include "{headerfile}"
+        #include <stdexcept>
+        #include <cmath>
+        void kernel({argdefs}) {{
+            {buffers}
+            int err = halide_kernel({buffer_names});
+            if(err != 0) {{
+                throw std::runtime_error("halide_kernel failed");
+            }}
+        }}
+        """
+    )
+
+    @classmethod
+    def _codegen_glue(cls, argtypes, headerfile):
+        buffers = []
+        buffer_names = []
+        for i, arg in enumerate(argtypes):
+            if arg.numel:
+                buffer_names.append(f"hl_buf_{i}")
+                buffers.append(
+                    f"    Halide::Runtime::Buffer {buffer_names[-1]}({arg.halide_type()}, {arg.name}, {arg.numel});"
+                )
+            else:
+                assert "*" not in arg.ctype
+                buffer_names.append(arg.name)
+        glue_code = cls.glue_template.format(
+            halidebuffer_h=cls.find_header("HalideBuffer.h"),
+            headerfile=headerfile,
+            argdefs=", ".join(f"{a.bindings_type()} {a.name}" for a in argtypes),
+            buffers="\n".join(buffers).lstrip(),
+            buffer_names=", ".join(buffer_names),
+        )
+        return glue_code
+
+    @classmethod
+    @functools.lru_cache(None)
+    def config_hash(cls):
+        return sha256_hash(
+            "\n".join(
+                [
+                    cls.glue_template,
+                    f"{cls.cpu_cache_size()}",
+                    cpp_compile_command("I", "O"),
+                ]
+            ).encode("utf-8")
+        )
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def cpu_cache_size():
+        try:
+            cpuinfo = open("/proc/cpuinfo").read()
+        except OSError:
+            return 16777216
+        m = re.search(r"cache size\s*: (\d+) KB", cpuinfo)
+        if m:
+            return int(m.group(1)) * 1024
+        m = re.search(r"cache size\s*: (\d+) MB", cpuinfo)
+        if m:
+            return int(m.group(1)) * 1024 * 1024
+        raise RuntimeError("failed to find 'cache size: ... KB' in /proc/cpuinfo")
+
+    @staticmethod
+    def _search_for_file(suffix, errmsg):
+        try:
+            search, *_ = importlib.machinery.PathFinder.find_spec(  # type: ignore[union-attr,misc]
+                "halide"
+            ).submodule_search_locations
+            for file in os.listdir(search):
+                if file.endswith(".so"):
+                    try:
+                        out = subprocess.check_output(
+                            ["ldd", os.path.join(search, file)]
+                        )
+                    except subprocess.SubprocessError:
+                        continue
+                    m = re.search(r"(/.*)/libHalide.so", out.decode("utf-8"))
+                    if m:
+                        path = os.path.join(os.path.abspath(m.group(1)), suffix)
+                        if os.path.exists(path):
+                            return os.path.abspath(path)
+        except Exception as e:
+            raise RuntimeError(errmsg) from e
+        raise RuntimeError(errmsg)
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def find_libautoschedule(name):
+        sofile = f"libautoschedule_{name.lower()}.so"
+        if "HALIDE_LIB" in os.environ:
+            path = os.path.join(os.environ["HALIDE_LIB"], sofile)
+            if os.path.exists(path):
+                return path
+        errmsg = (
+            f"Can't find {sofile}, set env HALIDE_LIB to the directory containing it"
+        )
+        return HalideCodeCache._search_for_file(sofile, errmsg)
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def find_header(name):
+        if "HALIDE_INCLUDE" in os.environ:
+            path = os.path.join(os.environ["HALIDE_INCLUDE"], name)
+            if os.path.exists(path):
+                return path
+        if "HALIDE_LIB" in os.environ:
+            path = os.path.abspath(
+                os.path.join(os.environ["HALIDE_LIB"], f"../include/{name}")
+            )
+            if os.path.exists(path):
+                return path
+        errmsg = (
+            f"Can't find {name}, set env HALIDE_INCLUDE to the directory containing it"
+        )
+        return HalideCodeCache._search_for_file(f"../include/{name}", errmsg)
+
+    @classmethod
+    def generate_halide_async(cls, meta: HalideMeta, source_code: str, submit_fn=None):
+        dirpath = Path(
+            get_path(
+                code_hash(
+                    source_code,
+                    extra=repr((cls.config_hash(), meta)),
+                ),
+                "halide",
+            )[2]
+        )
+        os.makedirs(dirpath, exist_ok=True)
+        wait_for_compile = None
+        genfile = str(dirpath / "generate_kernel.py")
+        libfile = str(dirpath / "halide_kernel.a")
+        headerfile = str(dirpath / "halide_kernel.h")
+        donefile = str(dirpath / "done")
+        lockfile = str(dirpath / "lock")
+        need_compile = not os.path.exists(donefile)
+        jobs = []
+
+        if need_compile:
+            write_atomic(genfile, source_code)
+            jobs.append(
+                functools.partial(
+                    subprocess.check_call,
+                    [
+                        sys.executable,
+                        genfile,
+                        "-g",
+                        "kernel",
+                        "-o",
+                        f"{dirpath}",
+                        "-f",
+                        "halide_kernel",
+                        "-e",
+                        "static_library,h,schedule,pytorch_wrapper",
+                        "-p",
+                        cls.find_libautoschedule(meta.scheduler),
+                        *meta.args(),
+                    ],
+                )
+            )
+
+        bindings_future = cls.load_pybinding_async(
+            [arg.bindings_type() for arg in meta.argtypes],
+            cls._codegen_glue(meta.argtypes, headerfile),
+            extra_flags=(libfile,),
+            submit_fn=jobs.append if need_compile else None,
+        )
+
+        if need_compile:
+            jobs.append(functools.partial(touch, donefile))
+            task = functools.partial(_worker_task_halide, lockfile, jobs)
+            if submit_fn:
+                wait_for_compile = submit_fn(task).result
+            else:
+                task()
+
+        def load():
+            if wait_for_compile:
+                wait_for_compile()
+            return bindings_future()
+
+        return load
+
+    @classmethod
+    def generate_halide(cls, *args, **kwargs):
+        return cls.generate_halide_async(*args, **kwargs)()
+
+
+def _worker_task_halide(lockfile, jobs):
+    from filelock import FileLock
+
+    with FileLock(lockfile, LOCK_TIMEOUT):
+        for job in jobs:
+            job()
+
+
+def touch(filename):
+    open(filename, "a").close()
 
 
 @clear_on_fresh_inductor_cache
@@ -3158,6 +3373,16 @@ class AsyncCompile:
             return CUDACodeCache.load(source_code, dst_file_ext)[0]
 
         return self.submit(task)
+
+    def halide(self, meta: HalideMeta, source_code: str):
+        kernel_code_log.info("Halide Kernel:\n%r\n%s", meta, source_code)
+        if config.compile_threads <= 1:
+            return HalideCodeCache.generate_halide(meta, source_code)
+        else:
+            get_result = HalideCodeCache.generate_halide_async(
+                meta, source_code, submit_fn=self.submit
+            )
+            return LambdaFuture(get_result)
 
     def wait(self, scope: Dict[str, Any]) -> None:
         num_kernels = len(
