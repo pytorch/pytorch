@@ -1873,6 +1873,16 @@ class CPUReproTests(TestCase):
         # For forward and backward kernel
         check_metrics_vec_kernel_count(2)
 
+    @requires_vectorization
+    def test_ops_masked_with_bool_input(self):
+        x = torch.zeros(129, dtype=torch.bool)
+        size = [2, 3]
+        res_aten_eager = torch.constant_pad_nd(x, size)
+        cfn = torch.compile(torch.constant_pad_nd)
+        res = cfn(x, size)
+        self.assertEqual(res_aten_eager, res)
+        check_metrics_vec_kernel_count(1)
+
     @patch("torch.cuda.is_available", lambda: False)
     def test_scatter_using_atomic_add(self):
         def fn(a, dim, index, b):
