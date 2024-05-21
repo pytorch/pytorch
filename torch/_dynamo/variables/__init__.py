@@ -63,6 +63,7 @@ from .misc import (
     AutogradFunctionVariable,
     ClosureVariable,
     DeletedVariable,
+    AttributeErrorExceptionVariable,
     GetAttrVariable,
     InspectSignatureVariable,
     LambdaVariable,

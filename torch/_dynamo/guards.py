@@ -73,7 +73,6 @@ from .source import (
     ChainedSource,
     ConstDictKeySource,
     DefaultsSource,
-    DoNotReconstructSource,
     FlattenScriptObjectSource,
     FSDPNNModuleSource,
     GetItemSource,
@@ -825,7 +824,6 @@ class GuardBuilder(GuardBuilderBase):
                 NNModuleSource,
                 NotNNModuleSource,
                 FSDPNNModuleSource,
-                DoNotReconstructSource,
             ),
         ):
             assert base_guard_manager  # to make mypy happy
