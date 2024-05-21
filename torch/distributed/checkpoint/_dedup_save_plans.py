@@ -33,7 +33,7 @@ def dedup_save_plans(
     plan_to_size = [0] * len(all_plans)
     for write_item_idx, plan_indices in write_item_to_plan_indices.items():
         if save_to_lowest_rank:
-            select_plan_idx = min(plan_indices, key=lambda plan_idx: plan_idx)
+            select_plan_idx = min(plan_indices)
         else:
             select_plan_idx = min(plan_indices, key=lambda plan_idx: plan_to_size[plan_idx])
 
