@@ -1183,31 +1183,20 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         out_detached = tree_map(_detach, out)
         self.storage[func].append(out_detached)
 
-    def _handle_compile_in_forward_ctx(self, should_not_recompute, func, args, kwargs):
-        if func in _ignored_ops:
-            return func(*args, **kwargs)
-        if should_not_recompute:
-            fx_traceback.current_meta["recompute"] = 0
-        # NOTE: Here we just store and reuse output of all ops, since in torch.compile mode
-        # we decide and handle recomputation in the partitioner.
-        out = func(*args, **kwargs)
-        self.push_into_storage(out, func, args, kwargs)
-        return out
-
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
+        if func in _ignored_ops:
+            return func(*args, **kwargs)
         should_not_recompute = self.policy_fn("forward", func, *args, **kwargs)
-        if _is_compiling(func, args, kwargs):
-            return self._handle_compile_in_forward_ctx(should_not_recompute, func, args, kwargs)
+        if should_not_recompute:
+            if _is_compiling(func, args, kwargs):
+                fx_traceback.current_meta["recompute"] = 0
+            out = func(*args, **kwargs)
+            self.push_into_storage(out, func, args, kwargs)
         else:
-            if should_not_recompute:
-                out = func(*args, **kwargs)
-                self.push_into_storage(out, func, args, kwargs)
-            else:
-                out = func(*args, **kwargs)
-            return out
-
+            out = func(*args, **kwargs)
+        return out
 
 class _CachedTorchDispatchMode(TorchDispatchMode):
     r"""
@@ -1223,25 +1212,17 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
         out = self.storage[func].pop(0)
         return out
 
-    def _handle_compile_in_recompute_ctx(self, should_not_recompute, func, args, kwargs):
-        if func in _ignored_ops:
-            return func(*args, **kwargs)
-        out = self.pop_from_storage(func, args, kwargs)
-        return out
-
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
+        if func in _ignored_ops:
+            return func(*args, **kwargs)
         should_not_recompute = self.policy_fn("recompute", func, *args, **kwargs)
-        if _is_compiling(func, args, kwargs):
-            return self._handle_compile_in_recompute_ctx(should_not_recompute, func, args, kwargs)
+        if should_not_recompute:
+            out = self.pop_from_storage(func, args, kwargs)
         else:
-            if should_not_recompute:
-                out = self.pop_from_storage(func, args, kwargs)
-            else:
-                out = func(*args, **kwargs)
-            return out
-
+            out = func(*args, **kwargs)
+        return out
 
 def _pt2_selective_checkpoint_context_fn_gen(policy_fn):
     """
