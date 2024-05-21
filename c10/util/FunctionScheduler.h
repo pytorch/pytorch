@@ -38,8 +38,9 @@ class FunctionScheduler {
   std::vector<Job> _jobs;
   std::thread _thread;
 
+  void run();
   void runNextJob();
-  std::chrono::microseconds getNextInterval() const;
+  std::chrono::microseconds getJobInterval(Job& job) const;
   int id();
 
  public:

@@ -51,19 +51,34 @@ FunctionScheduler::~FunctionScheduler() {
   stop();
 }
 
-void FunctionScheduler::runNextJob() {
-  if (_queue.empty())
-    return;
-
-  if (getNextInterval().count() < 0)
-    _queue.begin()->run();
+void FunctionScheduler::run() {
+  while (_running) {
+    if (_queue.empty()) {
+      // TODO wait with mutex or check periodically?
+      continue;
+    }
+    runNextJob();
+  }
 }
 
-std::chrono::microseconds FunctionScheduler::getNextInterval() const {
-  if (_queue.empty())
-    return std::chrono::microseconds(999);
+void FunctionScheduler::runNextJob() {
+  Job next_job = *_queue.begin(); // TODO may be removed in the meantime?
+  std::chrono::microseconds next_interval = getJobInterval(next_job);
+  if (next_interval.count() > 0) {
+    /* TODO
+     * 1. other jobs may be scheduled with lower interval while this is waiting
+     * 2. stop() may occur while waiting
+     */
+    std::this_thread::sleep_for(next_interval);
+  }
 
-  auto interval = _queue.begin()->next_run() - std::chrono::steady_clock::now();
+  // check if the job was removed in the meantime
+  if (_queue.begin()->id() == next_job.id())
+    next_job.run();
+}
+
+std::chrono::microseconds FunctionScheduler::getJobInterval(Job& job) const {
+  auto interval = job.next_run() - std::chrono::steady_clock::now();
   return std::chrono::duration_cast<std::chrono::milliseconds>(interval);
 }
 
@@ -114,17 +129,24 @@ int FunctionScheduler::removeJob(int id) {
 }
 
 void FunctionScheduler::start() {
+  auto now = std::chrono::steady_clock::now();
   while (!_jobs.empty()) {
     Job job = _jobs.back();
     _jobs.pop_back();
-    job.set_next_run(std::chrono::steady_clock::now() + job.interval());
+    job.set_next_run(now + job.interval());
     _queue.insert(job);
   }
+
   _running = true;
+  _thread = std::thread(&FunctionScheduler::run, this);
 }
 
 void FunctionScheduler::stop() {
   _running = false;
+  if (_thread.joinable())
+    _thread.join();
+
+  // save unfinished jobs
   _jobs.insert(_jobs.end(), _queue.begin(), _queue.end());
   _queue.clear();
 }
