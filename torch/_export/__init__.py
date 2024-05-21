@@ -149,7 +149,10 @@ def capture_pre_autograd_graph(
         kwargs = {}
 
     if export_api_rollout_check():
-        log.warning("Using torch.export._trace._export")
+        @lru_cache
+        def print_export_warning():
+            log.warning("Using torch.export._trace._export")
+        print_export_warning()
         module = torch.export._trace._export(f, args, kwargs, dynamic_shapes=dynamic_shapes, pre_dispatch=True).module()
     else:
         log_export_usage(event="export.private_api", flags={"capture_pre_autograd_graph"})
