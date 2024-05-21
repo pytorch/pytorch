@@ -174,6 +174,8 @@ def register_onednn_fusion_ops():
             if use_max_autotune():
                 transposed_w = permute(w, [1, 0])
                 *_, layout, x, transposed_w = mm_args(x, transposed_w, layout=layout)
+                if b is not None:
+                    b = ir.ExternKernel.realize_input(b)
                 # TODO(jgong5): support epilogue fusion
                 if (
                     use_cpp_packed_gemm_template(layout, x, transposed_w)
