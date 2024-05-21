@@ -62,8 +62,6 @@
 #include <ATen/ops/_sparse_csr_tensor_unsafe.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
 #include <ATen/ops/_stack_native.h>
-#include <ATen/ops/_unsafe_set_storage.h>
-#include <ATen/ops/_unsafe_set_storage_native.h>
 #include <ATen/ops/_unsafe_view.h>
 #include <ATen/ops/_unsafe_view_native.h>
 #include <ATen/ops/_values_copy_native.h>
@@ -478,13 +476,6 @@ Tensor& set_meta_(Tensor& result) {
   result.set_(std::move(storage), 0, {0}, {});
   TORCH_INTERNAL_ASSERT(dtype == result.dtype());
   return result;
-}
-
-Tensor& _unsafe_set_storage_(Tensor& x, Storage storage) {
-  if (!x.storage().is_alias_of(storage)) {
-    x.unsafeGetTensorImpl()->set_storage_keep_dtype(std::move(storage));
-  }
-  return x;
 }
 
 Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
