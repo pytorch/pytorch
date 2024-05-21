@@ -1919,8 +1919,6 @@ class Module:
                 module.state_dict(destination=destination, prefix=prefix + name + '.', keep_vars=keep_vars)
         for hook in self._state_dict_hooks.values():
             hook_result = hook(self, destination, prefix, local_metadata)
-            if hook_result is not None:
-                destination = hook_result
         return destination
 
     def _register_load_state_dict_pre_hook(self, hook, with_module=False):
