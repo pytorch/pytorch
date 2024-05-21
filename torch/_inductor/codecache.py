@@ -1943,10 +1943,14 @@ class AotCodeCompiler:
                 run_command_and_check(cmd)
             log.debug("aot constant binary command: %s", cmd)
 
-            if config.aot_inductor.allow_buffer_mutation:
+            if graph.buffer_mutation:
                 # .data section is between .text and .bss. When the size of .data is large,
                 # during the linking, the relocation of .text against .bss may overflow.
                 # Rename it to .ldata so that it won't be in between the .text and .bss section
+                if len(consts) > 2_000_000_000:
+                    raise ValueError(
+                        "Models with buffer mutation included doesn't support constants greater than 2GB!"
+                    )
                 rename_data = " .data=.ldata"
             else:
                 # if no buffer mutation is needed, we could instead set the data region

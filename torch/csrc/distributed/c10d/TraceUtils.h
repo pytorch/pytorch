@@ -1,4 +1,5 @@
 #pragma once
+#include <ATen/cuda/CUDAEvent.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/ApproximateClock.h>
 #include <c10/util/irange.h>
@@ -9,12 +10,11 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/profiler/combined_traceback.h>
-#include <ATen/cuda/CUDAEvent.h>
 
+#include <sys/types.h>
 #include <cstdlib>
 #include <fstream>
 #include <string>
-#include <sys/types.h>
 #include <system_error>
 #include <vector>
 
