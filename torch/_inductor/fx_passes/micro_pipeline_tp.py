@@ -48,7 +48,7 @@ def _find_ancestors(node: torch.fx.Node) -> Set[torch.fx.Node]:
                     ancestors.add(inp)
                     new_nodes.append(inp)
         cur_nodes = new_nodes
-    return ancestors
+    return {node for node in ancestors if node.op != "placeholder"}
 
 
 def _can_schedule_y_before_x(
@@ -313,7 +313,7 @@ def fuse_all_gather_matmul(match, shard, gather_dim, group_name):
         {x for matmul in matmuls for x in matmul.B_node_ancestors},
         key=lambda x: order[x],
     )
-    for node in set(nodes_to_raise):
+    for node in nodes_to_raise:
         if order[node] > order[fused_node]:
             fused_node.prepend(node)
 
@@ -434,7 +434,7 @@ def fuse_matmul_reduce_scatter(match, rs_input, reduce_op, scatter_dim, group_na
         _find_ancestors(B_node),
         key=lambda x: order[x],
     )
-    for node in set(nodes_to_raise):
+    for node in nodes_to_raise:
         if order[node] > order[fused_node]:
             fused_node.prepend(node)
 

@@ -9,12 +9,20 @@ from torch.distributed._functional_collectives import (
     all_gather_tensor,
     reduce_scatter_tensor,
 )
+from torch.distributed._tensor import DeviceMesh
+from torch.distributed._tensor.placement_types import Shard
+from torch.distributed.tensor.parallel import (
+    ColwiseParallel,
+    parallelize_module,
+    RowwiseParallel,
+)
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TestCase,
 )
+from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils._triton import has_triton
 
@@ -101,6 +109,30 @@ class MicroPipelineTPTest(TestCase):
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, A, B)
 
+        assert "fused_matmul_reduce_scatter" in code
+        assert "reduce_scatter_tensor" not in code
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @fresh_inductor_cache()
+    def test_dtensor_seq_par(self):
+        model = MLPModule(device="cuda", bias=False)
+        device_mesh = DeviceMesh(
+            "cuda",
+            torch.arange(0, self.world_size),
+        )
+        parallelize_plan = {
+            "net1": ColwiseParallel(input_layouts=Shard(0)),
+            "net2": RowwiseParallel(output_layouts=Shard(0)),
+        }
+        model = parallelize_module(model, device_mesh, parallelize_plan)
+        inp = torch.rand(8, 10, device="cuda")
+
+        with test_with_non_cuda_p2p_group():
+            compiled = torch.compile(model)
+            code = run_and_get_triton_code(compiled, inp)
+
+        assert "fused_all_gather_matmul" in code
+        assert "all_gather_into_tensor" not in code
         assert "fused_matmul_reduce_scatter" in code
         assert "reduce_scatter_tensor" not in code
 
