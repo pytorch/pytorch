@@ -135,7 +135,6 @@ class StateDictOptions:
 
     - ``strict``: the ``strict`` option when ``set_state_dict`` calls
       model.load_state_dict().
-      The default value is False.
 
     - ``broadcast_from_rank0``: when the option is True, rank0 should receive a
        full state_dict and will broadcast the tensors in the state_dict/

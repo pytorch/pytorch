@@ -57,6 +57,7 @@ def insert_deferred_runtime_asserts(
         ConvertIntKey,
         DivideByKey,
         free_symbols,
+        InnerTensorKey,
     )
     from torch.utils._sympy.interp import sympy_interp
     from torch.utils._sympy.reference import PythonReferenceAnalysis
@@ -222,6 +223,13 @@ def insert_deferred_runtime_asserts(
                             return go(
                                 graph.call_function(
                                     operator.floordiv, (node, keypath[0].divisor)
+                                ),
+                                keypath[1:],
+                            )
+                        elif isinstance(keypath[0], InnerTensorKey):
+                            return go(
+                                graph.call_function(
+                                    getattr, (node, keypath[0].inner_name)
                                 ),
                                 keypath[1:],
                             )
