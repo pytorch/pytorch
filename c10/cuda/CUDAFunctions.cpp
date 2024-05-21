@@ -136,7 +136,7 @@ void set_device(DeviceIndex device) {
 void device_synchronize() {
   const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
   if (C10_UNLIKELY(interp)) {
-    (*interp)->trace_gpu_device_synchronization();
+    (*interp)->trace_gpu_device_synchronization(c10::kCUDA);
   }
   C10_CUDA_CHECK(cudaDeviceSynchronize());
 }
@@ -151,7 +151,7 @@ void warn_or_error_on_sync() {
   }
 }
 
-c10::optional<DeviceIndex> getDeviceIndexWithPrimaryContext() {
+std::optional<DeviceIndex> getDeviceIndexWithPrimaryContext() {
   // check current device first
   auto current_device_index = current_device();
   if (current_device_index >= 0) {

@@ -6,7 +6,8 @@ from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 
 from .. import config
 from ..codecache import PyCodeCache, TritonFuture
-from ..utils import cache_on_self, do_bench
+from ..runtime.runtime_utils import do_bench_gpu
+from ..utils import cache_on_self
 from ..virtualized import V
 from .common import TensorArg
 
@@ -53,7 +54,7 @@ def get_all_call_args(call_args_list):
     It will fail if any kernel has the same argument passed in multiple times.
     Check test_pass_same_arg_multi_times in test_multi_kernel.py
 
-    Instead, we pick the longest call args and assert that otehr call args are
+    Instead, we pick the longest call args and assert that other call args are
     a subset of it.
     """
     return _get_all_args(call_args_list)
@@ -127,7 +128,7 @@ class MultiKernelState:
         )
 
         # add subkernel src code hashes to the multi-kernel source code so changing a
-        # subkernel implementation will result in a differnt py file for
+        # subkernel implementation will result in a different py file for
         # multi-kernel. This makes cache implementation straightforward since
         # we can decide cache file name based on multi-kernel py file name
         # directly.
@@ -338,7 +339,7 @@ class MultiKernelCall:
         be picked.
         """
         return [
-            do_bench(lambda: kernel_call(True), rep=40, fast_flush=True)
+            do_bench_gpu(lambda: kernel_call(True), rep=40, fast_flush=True)
             for kernel_call in kernel_calls
         ]
 

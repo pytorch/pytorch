@@ -11,6 +11,7 @@ import torch.nn as nn
 from torch.distributed._tensor._collective_utils import mesh_broadcast
 from torch.distributed._tensor._utils import compute_global_tensor_info
 from torch.distributed._tensor.placement_types import (
+    _Partial,
     DTensorSpec,
     Placement,
     Replicate,
@@ -197,6 +198,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
     _op_dispatcher: op_dispatch.OpDispatcher = op_dispatch.OpDispatcher()
 
     @staticmethod
+    @torch._disable_dynamo
     def __new__(
         cls,
         local_tensor: torch.Tensor,
@@ -272,7 +274,22 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             stride=outer_stride,
         )
 
+    def __coerce_tangent_metadata__(self):
+        if not any(isinstance(p, _Partial) for p in self.placements):
+            return self
+        placements = [
+            Replicate() if isinstance(p, _Partial) else p for p in self.placements
+        ]
+        return self.redistribute(device_mesh=self.device_mesh, placements=placements)
+
+    def __coerce_same_metadata_as_tangent__(self, metadata_tensor):
+        return self.redistribute(
+            device_mesh=self.device_mesh,
+            placements=metadata_tensor.placements,
+        )
+
     @classmethod
+    @torch._disable_dynamo
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -556,7 +573,7 @@ def distribute_tensor(
     # OffsetBasedRNGTracker to perform random operators.
     # TODO: the value assignment to global variable is not the ideal solution
     # we can replace it in future.
-    if is_rng_supported_mesh(device_mesh) and not random._rng_tracker:
+    if not random._rng_tracker and is_rng_supported_mesh(device_mesh):
         random._rng_tracker = OffsetBasedRNGTracker(device_type)
 
     if not tensor.is_leaf:
@@ -578,8 +595,10 @@ def distribute_tensor(
             f"Found placements length: {len(placements)}, and device_mesh.ndim: {device_mesh.ndim}."
         )
     if isinstance(tensor, DTensor):
-        # if the tensor is already a DTensor, we just need to check if the
-        # device mesh and placements are the same
+        # if the tensor is already a DTensor, we need to check:
+        # 1. if the we can further shard this DTensor if the two device mesh belong to
+        #   the same parenet mesh and further sharding is possible.
+        # 2. check if device mesh and placements are the same
         if tensor.device_mesh != device_mesh:
             raise ValueError(
                 f"Cannot distribute a DTensor with device mesh {tensor.device_mesh} "
@@ -593,7 +612,7 @@ def distribute_tensor(
             )
         return tensor
 
-    local_tensor = tensor
+    local_tensor = tensor.detach()
 
     # distribute the tensor according to the placements.
     placements = list(placements)
@@ -618,7 +637,7 @@ def distribute_tensor(
     # detach the local tensor passed to DTensor since after the construction
     # of DTensor, autograd would work on top of DTensor instead of local tensor
     return DTensor(
-        local_tensor.detach().requires_grad_(tensor.requires_grad),
+        local_tensor.requires_grad_(tensor.requires_grad),
         device_mesh,
         placements,
         shape=tensor.size(),

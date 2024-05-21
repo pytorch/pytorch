@@ -144,9 +144,6 @@ def argumenttype_type(
         remove_non_owning_ref_types=remove_non_owning_ref_types,
     )
     if r is not None:
-        if isinstance(t, OptionalType) and not mutable:
-            if str(t.elem) == "Generator":
-                return NamedCType(binds, ConstRefCType(r.type))
         return r
 
     if isinstance(t, BaseType):
@@ -315,7 +312,7 @@ def return_names(f: NativeFunction, *, fallback_name: str = "result") -> Sequenc
 JIT_TO_CPP_DEFAULT = {
     "False": "false",
     "True": "true",
-    "None": "c10::nullopt",  # UGH this one is type directed
+    "None": "::std::nullopt",  # UGH this one is type directed
     "Mean": "at::Reduction::Mean",
     "[]": "{}",
     "contiguous_format": "MemoryFormat::Contiguous",
@@ -350,7 +347,7 @@ def default_expr(d: str, t: Type, *, symint: bool) -> str:
 
     if isinstance(t, OptionalType):
         if d == "None":
-            return "c10::nullopt"
+            return "::std::nullopt"
 
         return default_expr(d, t.elem, symint=symint)
 

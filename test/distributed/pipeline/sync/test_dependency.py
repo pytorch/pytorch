@@ -11,7 +11,7 @@ import weakref
 import pytest
 import torch
 
-from torch.distributed.pipeline.sync.dependency import Fork, Join, fork, join
+from torch.distributed.pipeline.sync.dependency import Fork, fork, Join, join
 from torch.testing._internal.common_utils import run_tests
 
 

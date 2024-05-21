@@ -15,6 +15,10 @@
 #include <omp.h>
 #endif
 
+#if defined(__APPLE__) && defined(__aarch64__) && !defined(C10_MOBILE)
+#include <sys/sysctl.h>
+#endif
+
 namespace at {
 
 namespace {
@@ -104,11 +108,23 @@ int intraop_default_num_threads() {
 #if defined(FBCODE_CAFFE2) && defined(__aarch64__)
     nthreads = 1;
 #else
+#if defined(__aarch64__) && defined(__APPLE__)
+    // On Apple Silicon there are efficient and performance core
+    // Restrict parallel algorithms to performance cores by default
+    int32_t num_cores = -1;
+    size_t num_cores_len = sizeof(num_cores);
+    if (sysctlbyname("hw.perflevel0.physicalcpu", &num_cores, &num_cores_len, nullptr, 0) == 0) {
+      if (num_cores > 1) {
+        nthreads = num_cores;
+        return num_cores;
+      }
+    }
+#endif
     nthreads = TaskThreadPoolBase::defaultNumThreads();
 #endif
   }
   return static_cast<int>(nthreads);
-#endif
+#endif /* !defined(C10_MOBILE) */
 }
 
 } // namespace at

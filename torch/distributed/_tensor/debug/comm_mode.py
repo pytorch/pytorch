@@ -8,6 +8,8 @@ from torch.utils._python_dispatch import TorchDispatchMode
 
 funcol_native = torch.ops._c10d_functional
 funcol_py = torch.ops.c10d_functional
+funcol_autograd = torch.ops._c10d_functional_autograd
+c10d_ops = torch.ops.c10d
 
 NATIVE_TO_PY_MAPPING = {
     funcol_native.all_gather_into_tensor: funcol_py.all_gather_into_tensor,
@@ -17,6 +19,15 @@ NATIVE_TO_PY_MAPPING = {
     funcol_native.broadcast: funcol_py.broadcast,
     funcol_native.reduce_scatter_tensor: funcol_py.reduce_scatter_tensor,
     funcol_native.reduce_scatter_tensor_coalesced: funcol_py.reduce_scatter_tensor_coalesced,
+    # functional ops
+    funcol_autograd.all_to_all_single: funcol_py.all_to_all_single,
+}
+
+c10d_collective_ops = {
+    c10d_ops.allreduce_,
+    c10d_ops._allgather_base_,
+    c10d_ops._reduce_scatter_base_,
+    c10d_ops.broadcast_,
 }
 
 
@@ -46,6 +57,8 @@ class CommDebugMode(TorchDispatchMode):
         for native_op, py_op in NATIVE_TO_PY_MAPPING.items():
             self.comm_registry.add(native_op)
             self.comm_registry.add(py_op)
+
+        self.comm_registry.add(torch.ops._dtensor.shard_dim_alltoall)
 
     def get_total_counts(self) -> int:
         return sum(self.comm_counts.values())
@@ -83,7 +96,8 @@ class CommDebugMode(TorchDispatchMode):
         # the need to modify all tests to accommodate the two implementations,
         # we make CommDebugMode translate native funcol ops into legacy funcol
         # ops until the migration finishes.
-        if func_packet in self.comm_registry:
+
+        if func_packet in self.comm_registry or func_packet in c10d_collective_ops:
             if func_packet in NATIVE_TO_PY_MAPPING:
                 func_packet = NATIVE_TO_PY_MAPPING[func_packet]
             self.comm_counts[func_packet] += 1

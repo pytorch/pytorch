@@ -4,6 +4,7 @@
 Python polyfills for common builtins.
 """
 import math
+from typing import Any, Callable, Sequence
 
 import torch
 
@@ -45,3 +46,28 @@ def accumulate_grad(x, new_grad):
         x.grad = new_grad
     else:
         x.grad.add_(new_grad)
+
+
+def list_cmp(op: Callable[[Any, Any], bool], left: Sequence[Any], right: Sequence[Any]):
+    """emulate `(1,2,3) > (1,2)` etc"""
+    for a, b in zip(left, right):
+        if a != b:
+            return op(a, b)
+    return op(len(left), len(right))
+
+
+def set_isdisjoint(set1, set2):
+    for x in set1:
+        if x in set2:
+            return False
+    return True
+
+
+def dropwhile(predicate, iterable):
+    # dropwhile(lambda x: x<5, [1,4,6,4,1]) -> 6 4 1
+    iterable = iter(iterable)
+    for x in iterable:
+        if not predicate(x):
+            yield x
+            break
+    yield from iterable
