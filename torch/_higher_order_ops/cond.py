@@ -21,7 +21,6 @@ from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
     _set_compilation_env,
-    autograd_not_implemented,
     reenter_make_fx,
     unique_graph_id,
     UnsupportedAliasMutationException,
@@ -34,7 +33,6 @@ from torch._subclasses.functional_tensor import (
     FunctionalTensor,
 )
 from torch.fx.experimental.proxy_tensor import (
-    _temp_remove_pre_dispatch_torch_function_mode,
     disable_proxy_modes_tracing,
     make_fx,
     ProxyTorchDispatchMode,
@@ -43,9 +41,9 @@ from torch.fx.experimental.proxy_tensor import (
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils._python_dispatch import _get_current_dispatch_mode
+from torch._higher_order_ops.map import _stack_pytree, _unstack_pytree
 
-
-@exposed_in("torch")
+# @exposed_in("torch")
 def cond(pred, true_fn, false_fn, operands):
     r"""
     Conditionally applies `true_fn` or `false_fn`.
@@ -226,7 +224,8 @@ def create_fw_bw_graph(true_fn, false_fn, operands):
             example_flat_out = pytree.tree_map(
                 _from_fun, true_fn(*example_operands)
             )
-            example_flat_out = [example_flat_out]
+            if type(example_flat_out) != list and type(example_flat_out) != tuple:
+                example_flat_out = [example_flat_out]
             if any(
                 not isinstance(out, torch.Tensor)
                 for out in example_flat_out
@@ -241,12 +240,57 @@ def create_fw_bw_graph(true_fn, false_fn, operands):
             fw_true_graph = make_fx(true_fn)(*example_operands)
             fw_false_graph = make_fx(false_fn)(*example_operands)
 
-        def joint_f(fn, *joint_mapped_args):
+        def joint_f_true(*joint_mapped_args):
             mapped_input = joint_mapped_args[:num_mapped_args]
             mapped_grads = joint_mapped_args[num_mapped_args:]
 
             def fw_with_masks(*args):
-                fw_out = fn(*args)
+                fw_out = true_fn(*args)
+                # fw_out = [fw_out]
+                if type(fw_out) != list and type(fw_out) != tuple:
+                    fw_out = [fw_out]
+                return fw_out, [
+                    True
+                    if isinstance(ret, torch.Tensor) and ret.requires_grad
+                    else False
+                    for ret in fw_out
+                ]
+
+            joint = create_joint(fw_with_masks, aot_config=dummy_aot_config)
+            _, grads = joint(
+                list(mapped_input),
+                [
+                    grad
+                    for grad in mapped_grads
+                    if grad is not None and grad.requires_grad
+                ],
+            )
+
+            # In order to keep map functional for backward graph,
+            # we clone outputs that are aliasing inputs
+            input_storage = {
+                StorageWeakRef(arg._typed_storage())
+                for arg in joint_mapped_args
+                if isinstance(arg, torch.Tensor)
+            }
+
+            def maybe_clone(t):
+                if (
+                    isinstance(t, torch.Tensor)
+                    and StorageWeakRef(t._typed_storage()) in input_storage
+                ):
+                    return t.clone()
+                return t
+
+            return pytree.tree_map(maybe_clone, grads)
+        
+        def joint_f_false(*joint_mapped_args):
+            mapped_input = joint_mapped_args[:num_mapped_args]
+            mapped_grads = joint_mapped_args[num_mapped_args:]
+
+            def fw_with_masks(*args):
+                fw_out = false_fn(*args)
+                
                 fw_out = [fw_out]
                 return fw_out, [
                     True
@@ -283,8 +327,9 @@ def create_fw_bw_graph(true_fn, false_fn, operands):
 
             return pytree.tree_map(maybe_clone, grads)
 
-        joint_true_graph = make_fx(joint_f)(true_fn, *example_operands, *example_grad)
-        joint_false_graph = make_fx(joint_f)(false_fn, *example_operands, *example_grad)
+        joint_operands_grads = list(example_operands) + list(example_grad)
+        joint_true_graph = make_fx(joint_f_true)(*joint_operands_grads)
+        joint_false_graph = make_fx(joint_f_false)(*joint_operands_grads)
         return fw_true_graph, fw_false_graph, joint_true_graph, joint_false_graph
 
 
@@ -386,108 +431,33 @@ def cond_op_dense(pred, true_fn, false_fn, operands):
 
 class CondAutogradOp(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, pred, fw_true_graph, fw_false_graph, joint_true_graph, joint_false_graph, operands):
+    def forward(ctx, pred, fw_true_graph, fw_false_graph, joint_true_graph, joint_false_graph, num_mapped_args, *operands):
         ctx._pred = pred
         ctx._joint_true_graph = joint_true_graph
         ctx._joint_false_graph = joint_false_graph
         ctx.save_for_backward(*operands)
         
         with torch._C._AutoDispatchBelowAutograd():
-            # with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
-            #     res = torch.compile(while_loop_op, backend="eager", fullgraph=True)(
-            #         cond_graph, fw_graph, flat_args[:num_mapped_args], flat_args[num_mapped_args:]
-            #     )
-            # return (*cond_op(pred, fw_true_graph, fw_false_graph, operands),)
-            return cond_op(pred, fw_true_graph, fw_false_graph, operands)
-            # res = cond_op(pred, fw_true_graph, fw_false_graph, operands)
-            # return res
+            with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
+                return torch.compile(cond_op, backend="eager", fullgraph=True)(
+                    pred, fw_true_graph, fw_false_graph, operands
+                )
 
     @staticmethod
     def backward(ctx, *flat_grads):       
         operands = ctx.saved_tensors
 
-        # with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
-        #     grads = torch.compile(while_loop_op, backend="eager", fullgraph=True)(
-        #         ctx._cond_graph, ctx._bw_graph, full_res, pos_args
-        #     )
-        
-        grads = cond_op(ctx._pred, ctx._joint_true_graph, ctx._joint_false_graph, operands + flat_grads)
-        return None, None, None, None, None, *grads
-    
-def _unstack_pytree(xs):
-    flat_xs, inspec = pytree.tree_flatten(xs)
-    if not all(isinstance(xs, torch.Tensor) for xs in flat_xs):
-        raise RuntimeError(f"Leaves of xs must be Tensor {flat_xs}")
-
-    if not all(xs.shape[0] == flat_xs[0].shape[0] for xs in flat_xs):
-        raise RuntimeError(
-            f"Leaves of xs must have same leading dimension size {[xs.shape for xs in flat_xs]}"
-        )
-
-    a = zip(*flat_xs)
-
-    pytrees = []
-    for tuple in a:
-        pytrees.append(pytree.tree_unflatten(tuple, inspec))
-    return pytrees
-
-
-def _stack_pytree(pytrees):
-    flat_out = []
-    out_spec = None
-    for pt in pytrees:
-        flat_pt, out_spec = pytree.tree_flatten(pt)
-        flat_out.append(flat_pt)
-    assert out_spec is not None
-    b = zip(*flat_out)
-    stacked_out = []
-    for leaves in b:
-        if all(isinstance(leaf, torch.Tensor) for leaf in leaves):
-            stacked_out.append(torch.stack(leaves))
-        elif all(leaf is None for leaf in leaves):
-            # Backward graph can return None output when forward inputs doesn't require grad.
-            # When we eagerly execute backward graph, we need to call _stack_pytree on its output,
-            # therefore we need to deal with None output.
-            stacked_out.append(None)  # type: ignore[arg-type]
-        else:
-            raise RuntimeError(f"Cannot stack {leaves}.")
-    return pytree.tree_unflatten(stacked_out, out_spec)
-
-def cond_wrapper(pred, true_fn, false_fn, operands):
-    flat_operands, operands_spec = pytree.tree_flatten(operands)
-    if not all(isinstance(t, torch.Tensor) for t in flat_operands):
-        raise RuntimeError(f"Cond operands can only consist of tensors. Got xs {flat_operands}.")
-
-    out_spec = None
-
-    def flat_true_fn(*flat_args):
-        xs = pytree.tree_unflatten(list(flat_args), operands_spec)
-        unflattened_out = true_fn(*xs)
-        flat_out, tmp_out_spec = pytree.tree_flatten(unflattened_out)
-
-        nonlocal out_spec
-        out_spec = tmp_out_spec
-        return flat_out
-    
-    def flat_false_fn(*flat_args):
-        xs = pytree.tree_unflatten(list(flat_args), operands_spec)
-        unflattened_out = false_fn(*xs)
-        flat_out, tmp_out_spec = pytree.tree_flatten(unflattened_out)
-
-        nonlocal out_spec
-        out_spec = tmp_out_spec
-        return flat_out
-
-    return pytree.tree_unflatten(
-        cond_op(pred, flat_true_fn, flat_false_fn, flat_operands), out_spec  # type: ignore[arg-type]
-    )
+        with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
+            grads = torch.compile(cond_op, backend="eager", fullgraph=True)(
+                ctx._pred, ctx._joint_true_graph, ctx._joint_false_graph, operands + flat_grads
+            )
+            return None, None, None, None, None, None, *grads
 
 @cond_op.py_impl(DispatchKey.Autograd)
 def cond_autograd(pred, true_fn, false_fn, operands):
-    # true_fn_wrap = cond_wrapper(pred, true_fn, operands)
-    # false_fn_wrap = cond_wrapper(pred, false_fn, operands)
+    num_mapped_args = len(operands)
     fw_true_graph, fw_false_graph, joint_true_graph, joint_false_graph = create_fw_bw_graph(true_fn, false_fn, operands)
-    flat_out = CondAutogradOp.apply(pred, fw_true_graph, fw_false_graph, joint_true_graph, joint_false_graph, operands)
+    flat_out = CondAutogradOp.apply(pred, fw_true_graph, fw_false_graph, joint_true_graph, joint_false_graph, num_mapped_args, *operands)
     return flat_out
 
 @cond_op.py_impl(ProxyTorchDispatchMode)
