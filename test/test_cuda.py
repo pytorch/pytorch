@@ -4251,7 +4251,10 @@ class TestCudaMallocAsync(TestCase):
 
     @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
     def test_nvml_get_handler(self):
-        self.assertTrue(torch.cuda._get_pynvml_handler() is not None)
+        if not torch.version.hip:
+            self.assertTrue(torch.cuda._get_pynvml_handler() is not None)
+        else:
+            self.assertTrue(torch.cuda._get_amdsmi_handler() is not None)
 
     @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
     def test_temperature(self):
