@@ -36,13 +36,7 @@ from torch._guards import TracingContext
 from .. import variables
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
-from ..source import (
-    AttrSource,
-    DoNotReconstructSource,
-    GetItemSource,
-    ODictGetItemSource,
-    RandomValueSource,
-)
+from ..source import AttrSource, GetItemSource, ODictGetItemSource, RandomValueSource
 from ..utils import (
     all_hook_names,
     build_checkpoint_variable,
@@ -828,8 +822,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         if name == "__dict__":
             # Create a new ConstDictVariable Tracker with key, values from
-            # self.value __dict__. Do not go through VariableBuilder because it
-            # inserts guards on all the keys.
+            # self.value __dict__.
+            #
+            # Note that the items and the returned vt is deliberately kept
+            # sourceless. We don't want to reconstruct __dict__, we should
+            # directly use STORE_ATTR for the object reconstruction. Simillary,
+            # we don't want to insert any guards on __dict__ from this tracker.
             items_vt = {}
             for key, value in self.value.__dict__.items():
                 if not ConstantVariable.is_literal(key):
@@ -841,10 +839,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         self, key, deleted_ok=True
                     )
                 else:
-                    attr_source = None
-                    if self.source:
-                        attr_source = AttrSource(self.source, key)
-                    value_vt = variables.LazyVariableTracker.create(value, attr_source)
+                    from .builder import SourcelessBuilder
+
+                    value_vt = SourcelessBuilder.create(tx, value)
                 items_vt[key_vt] = value_vt
 
             # Check if there are new key additions using side effect infra
@@ -858,7 +855,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                             unimplemented("key is not constant")
                         items_vt[ConstantVariable.create(key)] = value_vt
             return variables.ConstDictVariable(
-                items_vt, dict, source=DoNotReconstructSource(self.source)
+                items_vt,
+                dict,
+                source=None,
             )
 
         try:
