@@ -104,9 +104,12 @@ class PlacementStrategy:
         return self.input_specs[index]
 
     def __str__(self) -> str:
-        input_specs_str = _pretty_print_spec(self.input_specs)
+        if self.input_specs is not None:
+            input_specs_str = f"{_pretty_print_spec(self.input_specs)} -> "
+        else:
+            input_specs_str = ""
         output_spec_str = _pretty_print_spec(self.output_specs)
-        return f"{input_specs_str} -> {output_spec_str}"
+        return f"{input_specs_str}{output_spec_str}"
 
 
 class StrategyType:
@@ -130,7 +133,7 @@ class OpStrategy(StrategyType):
     def __str__(self) -> str:
         strategy_list_str = ", ".join([str(strategy) for strategy in self.strategies])
         mesh_shape = self.output_mesh_shape
-        return f"OpStrategy:[{strategy_list_str}] @ mesh: {mesh_shape}"
+        return f"[{strategy_list_str}] @ mesh: {mesh_shape}"
 
     def max_num_shards(self) -> int:
         """
@@ -157,6 +160,14 @@ class OpStrategy(StrategyType):
     @property
     def output_shape(self):
         return self.strategies[0].output_spec.shape
+
+    @property
+    def ndim(self):
+        return self.output_ndim
+
+    @property
+    def shape(self):
+        return self.output_shape
 
 
 class TupleStrategy(StrategyType):

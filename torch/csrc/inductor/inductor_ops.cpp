@@ -8,6 +8,7 @@
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/library.h>
 
+#include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/native/Resize.h>
 
 #ifdef USE_CUDA
@@ -100,6 +101,26 @@ static void resize_storage_bytes_(const Tensor& variable, SymInt new_size) {
   }
 }
 
+static void resize_storage_bytes__functionalize(
+    const Tensor& variable,
+    SymInt new_size) {
+  static auto op = c10::Dispatcher::singleton()
+                       .findSchemaOrThrow("inductor::resize_storage_bytes_", "")
+                       .typed<void(const Tensor&, SymInt)>();
+  if (!at::functionalization::impl::isFunctionalTensor(variable)) {
+    // Functionalization not active: nop
+    at::AutoDispatchSkipFunctionalize guard;
+    op.call(variable, new_size);
+    return;
+  }
+  auto functional_impl =
+      at::functionalization::impl::unsafeGetFunctionalWrapper(variable);
+  // Sync pending mutations before running the resize_()
+  functional_impl->sync_();
+  functional_impl->storage_resize_(new_size);
+  return;
+}
+
 TORCH_LIBRARY_FRAGMENT(inductor, m) {
   m.def(
       "_mm_plus_mm(Tensor a, Tensor b, Tensor c, Tensor d, Tensor(t!) out) -> Tensor(t!)",
@@ -123,6 +144,11 @@ TORCH_LIBRARY_FRAGMENT(inductor, m) {
       dispatch(
           c10::DispatchKey::CompositeExplicitAutograd, resize_storage_bytes_),
       {at::Tag::pt2_compliant_tag});
+}
+
+TORCH_LIBRARY_IMPL(inductor, Functionalize, m) {
+  m.impl(
+      "resize_storage_bytes_", TORCH_FN(resize_storage_bytes__functionalize));
 }
 
 } // namespace inductor

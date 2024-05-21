@@ -127,6 +127,7 @@ if is_available():
     )
 
     from .remote_device import _remote_device
+    from .device_mesh import init_device_mesh, DeviceMesh
 
     set_debug_level_from_env()
 

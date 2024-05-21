@@ -6,6 +6,7 @@ import logging
 import operator
 import textwrap
 import types
+import unittest
 from typing import Dict, List
 
 import sympy
@@ -147,6 +148,10 @@ class TensorVariable(VariableTracker):
             # no need to rename inputs
             _is_name_set = self.proxy.node.op == "placeholder"
         self._is_name_set: bool = _is_name_set
+
+    def debug_repr(self):
+        # TODO: strip off fake tensor from repr here
+        return repr(self.proxy.node.meta["example_value"])
 
     def as_proxy(self):
         return self.proxy
@@ -524,6 +529,10 @@ class TensorVariable(VariableTracker):
         if self.dtype is not None:
             return ConstantVariable.create(self.dtype.is_floating_point)
 
+    def method_is_complex(self):
+        if self.dtype is not None:
+            return ConstantVariable.create(self.dtype.is_complex)
+
     def method_is_contiguous(self, memory_format=None):
         memory_format = (
             memory_format.as_python_constant()
@@ -641,11 +650,15 @@ class TensorVariable(VariableTracker):
 
         def tolist(tensor, sub_proxy):
             def wrap(i, sub_proxy):
-                return SymNodeVariable.create(
-                    tx,
-                    sub_proxy.item(),
-                    sym_num=tx.output.shape_env.create_unbacked_symint(),
-                )
+                # Sigh, we forgot to gate this, so this data dependent is on
+                # by default and is load bearing in CI
+                with unittest.mock.patch.object(
+                    tx.fake_mode, "allow_scalar_outputs", True
+                ):
+                    return SymNodeVariable.create(
+                        tx,
+                        sub_proxy.item(),
+                    )
 
             if tensor.dtype not in [
                 torch.int8,
@@ -949,7 +962,9 @@ class TensorVariable(VariableTracker):
 
 class SymNodeVariable(VariableTracker):
     """
-    Represents a symbolic size, e.g., as returned by tensor.size(0)
+    Represents a symbolic scalar, either int, float or bool.  This is most commonly used to
+    handle symbolic size computation, e.g., tensor.size(0), but it is also used to
+    handle logic like float_tensor.item() or unspecialized float inputs.
     """
 
     _nonvar_fields = {
@@ -958,12 +973,15 @@ class SymNodeVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
+    def debug_repr(self):
+        return repr(self.sym_num)
+
     @classmethod
-    def create(cls, tx, proxy, sym_num, **options):
-        if "example_value" in proxy.node.meta:
-            assert proxy.node.meta["example_value"] == sym_num
+    def create(cls, tx, proxy, sym_num=None, **options):
         if sym_num is None:
             sym_num = get_fake_value(proxy.node, tx)
+        if "example_value" in proxy.node.meta:
+            assert proxy.node.meta["example_value"] == sym_num
         set_example_value(proxy.node, sym_num)
 
         if isinstance(sym_num, (sympy.Integer, int, bool)):
@@ -977,6 +995,7 @@ class SymNodeVariable(VariableTracker):
         self.proxy = proxy
         # TODO: Should we allow non SymTypes here?  Today it is allowed
         self.sym_num = sym_num
+        self._tensor_var = None
 
     def python_type(self):
         if isinstance(self.sym_num, SymTypes):
@@ -987,13 +1006,22 @@ class SymNodeVariable(VariableTracker):
     def as_proxy(self):
         return self.proxy
 
+    def as_tensor(self, tx):
+        if self._tensor_var is None:
+            from .builder import SourcelessBuilder
+
+            self._tensor_var = SourcelessBuilder.create(
+                tx, torch.scalar_tensor
+            ).call_function(tx, [self], {})
+        return self._tensor_var
+
     def evaluate_expr(self, output_graph=None):
         try:
             return guard_scalar(self.sym_num)
         except GuardOnDataDependentSymNode as e:
-            raise UserError(  # noqa: TRY200
+            raise UserError(  # noqa: B904
                 UserErrorType.ANTI_PATTERN,
-                f"Consider annotating your code using torch._constrain_as_*(). {str(e)}",
+                f"Consider annotating your code using torch._check*(). {str(e)}",
                 case_name="constrain_as_size_example",
             )
 

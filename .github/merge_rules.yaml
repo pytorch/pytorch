@@ -29,10 +29,12 @@
   approved_by:
   - BowenBao
   - justinchuby
+  - liqunfu
   - shubhambhokare1
   - thiagocrepaldi
   - titaiwangms
   - wschin
+  - xadupre
   mandatory_checks_name:
   - EasyCLA
   - Lint

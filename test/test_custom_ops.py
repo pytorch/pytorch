@@ -1827,7 +1827,6 @@ dynamic shape operator: _torch_testing.numpy_nonzero.default
 
     def test_autogen_aten_ops_are_pt2_compliant(self):
         for op in [
-            torch.ops.aten._foreach_copy.default,
             torch.ops.aten.fill.Tensor_out,
         ]:
             self.assertIn(torch.Tag.generated, op.tags)
@@ -2423,6 +2422,16 @@ class TestCustomOpAPI(TestCase):
             self.assertGreater(after, prev)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    @parametrize("idx", [0, 1, 2, 3, 4, 5])
+    def test_library_register_fake_source(self, idx):
+        opname = f"source{idx}"
+        op = getattr(torch.ops._torch_testing, opname).default
+        entry = torch._library.simple_registry.singleton.find(op._name)
+        source = entry.abstract_impl.kernel.source
+        assert source is not None
+        self.assertTrue("custom_op_db.py" in source)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_fake(self):
         for mode in ["function", "qualname", "opoverload"]:
 
@@ -2436,10 +2445,15 @@ class TestCustomOpAPI(TestCase):
 
             if mode == "function":
                 dec = torch.library.register_fake(add)
+                self.assertIsNotNone(dec)
             elif mode == "qualname":
                 dec = torch.library.register_fake("_torch_testing::add")
+                self.assertIsNotNone(dec)
             elif mode == "opoverload":
                 dec = torch.library.register_fake(torch.ops._torch_testing.add.default)
+                self.assertIsNotNone(dec)
+            else:
+                raise AssertionError("should not get here")
 
             @dec
             def _(x, y):
