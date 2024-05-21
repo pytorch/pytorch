@@ -2327,7 +2327,20 @@ if (py_{buf_name}.get() == NULL) {{
         if val is None:
             # When None is passed as an argument, it represents an optional that does not contain a value.
             if config.abi_compatible:
-                return "0"  # nullptr is not available in C
+                if type_ is None or isinstance(type_, torch.OptionalType):
+                    return "0"  # nullptr is not available in C
+                elif isinstance(type_, torch.TensorType):
+                    var_name = f"var_{next(self.arg_var_id)}"
+                    self.writeline(f"AtenTensorHandle {var_name}_handle;")
+                    self.writeline(
+                        f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_uninitialized_tensor(&{var_name}_handle));"
+                    )
+                    self.writeline(
+                        f"RAIIAtenTensorHandle {var_name}({var_name}_handle);"
+                    )
+                    return var_name
+                else:
+                    raise AssertionError("Can not map None to a known data type")
             return "c10::nullopt"
         elif isinstance(val, bool):
             if config.abi_compatible:
