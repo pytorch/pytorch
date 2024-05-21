@@ -13021,6 +13021,11 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_diagonal_scatter),
+    OpInfo('alias_copy',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
+           sample_inputs_func=sample_inputs_alias_copy,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True),
     BinaryUfuncInfo('eq',
                     ref=np.equal,
                     dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
@@ -20990,14 +20995,6 @@ op_db: List[OpInfo] = [
                 device_type="cuda",
             ),
         ),
-    ),
-    OpInfo(
-        'alias_copy',
-        dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
-        supports_out=True,
-        sample_inputs_func=sample_inputs_alias_copy,
-        supports_forward_ad=True,
-        supports_fwgrad_bwgrad=True,
     ),
 ]
 op_db += opinfo.definitions.op_db
