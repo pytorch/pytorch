@@ -3179,7 +3179,5 @@ if (
     or os.environ.get("TORCH_WARM_POOL", "1") != "1"
 ):
     pass
-elif sys.version_info >= (3, 12):
-    log.info("AsyncCompile.warm_pool() is broken on 3.12+.")
 else:
     AsyncCompile.warm_pool()
