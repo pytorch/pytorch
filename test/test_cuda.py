@@ -51,7 +51,7 @@ from torch.testing._internal.common_utils import (
     NO_MULTIPROCESSING_SPAWN,
     NoTest,
     parametrize,
-     recover_orig_fp32_precision,
+    recover_orig_fp32_precision,
     run_tests,
     serialTest,
     skipCUDAMemoryLeakCheckIf,
@@ -516,7 +516,6 @@ class TestCuda(TestCase):
         torch.backends.cuda.matmul.fp32_precision = "tf32"
         with self.assertRaisesRegex(RuntimeError, "Invalid status"):
             print(torch.backends.cuda.matmul.allow_tf32)
-
 
     def test_type_conversions(self):
         x = torch.randn(5, 5)
