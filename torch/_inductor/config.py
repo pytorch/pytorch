@@ -727,6 +727,10 @@ class aot_inductor:
 
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
 
+    debug_dump_consts_bin: bool = (
+        os.environ.get("AOT_INDUCTOR_DEBUG_DUMP_CONSTS_BIN", "0") == "1"
+    )
+
     # Serialized tree spec for flattening inputs
     serialized_in_spec = ""
 
@@ -739,6 +743,9 @@ class aot_inductor:
     # flag to force weight to be appened to the shared library and mmaped  by the runtime
     # rather than embedded into the data section. Needed to support 1B+ parameter models
     force_mmap_weights: bool = False
+
+    # flag to allow buffer mutation. This would remove the read-only property from buffers.
+    allow_buffer_mutation: bool = False
 
 
 class cuda:
