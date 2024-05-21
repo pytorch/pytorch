@@ -5,7 +5,11 @@ from typing import List
 import torch
 
 import torch.distributed as dist
-from torch.distributed._cuda_p2p import get_cuda_p2p_backend, is_cuda_p2p_group, get_p2p_buffer_size
+from torch.distributed._cuda_p2p import (
+    get_cuda_p2p_backend,
+    get_p2p_buffer_size,
+    is_cuda_p2p_group,
+)
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_nccl,
