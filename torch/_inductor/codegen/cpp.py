@@ -1412,13 +1412,13 @@ class CppVecOverrides(CppOverrides):
             else f"{V.kernel._get_vec_type(dtype)}({body_code})"
         )
         other_code = value_to_cpp(other, DTYPE_TO_CPP[dtype])
-        other_code_vec = f"{V.kernel._get_vec_type(dtype)}({other_code})"
+        # Loading bool as VecMask<float, N>
+        other_code_vec = (
+            f"{V.kernel._get_mask_type()}::from({other_code})"
+            if dtype == torch.bool
+            else f"{V.kernel._get_vec_type(dtype)}({other_code})"
+        )
         assert isinstance(new_mask, CppCSEVariable), new_mask
-        if dtype == torch.bool and (new_mask.is_vec or result.is_vec):
-            # Unify to use the VecMask<float, N>, since loading bool as VecMask<float, N> by default
-            dtype = torch.float
-            num_vectors = V.kernel._get_num_vectors(dtype)
-            other_code_vec = f"at::vec::VecMask<{DTYPE_TO_CPP[dtype]}, {num_vectors}>::from({other_code})"
         if new_mask.is_vec:
             type = f"decltype({body_code_vec})"
             code = BracesBuffer()
@@ -1429,8 +1429,12 @@ class CppVecOverrides(CppOverrides):
                     code.writeline(f"return {other_code_vec};")
                 code.writeline("else")
                 with code.indent():
+                    # Unify to use the VecMask<float, N>, since loading bool as VecMask<float, N> by default
+                    new_mask_cast = V.kernel._get_mask_cast(
+                        new_mask, torch.float if dtype == torch.bool else dtype
+                    )
                     code.writeline(
-                        f"return {type}::blendv({other_code_vec}, {body_code_vec}, {V.kernel._get_mask_cast(new_mask, dtype)});"
+                        f"return {type}::blendv({other_code_vec}, {body_code_vec}, {new_mask_cast});"
                     )
             code.writeline("()")
             csevar = V.kernel.cse.generate(
