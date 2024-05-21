@@ -9156,7 +9156,7 @@ class CommonTemplate:
             print(code)
             FileCheck().check_count(
                 "static_cast<int>(256)",
-                1,
+                2,
                 exactly=True,
             ).run(code)
 
