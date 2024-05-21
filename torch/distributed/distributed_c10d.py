@@ -408,6 +408,21 @@ class P2POp:
         _check_single_tensor(tensor, "tensor")
         return object.__new__(cls)
 
+    def __repr__(self):
+        my_group_rank = get_rank(self.group)
+        peer_group_rank = get_group_rank(self.group, self.peer) if self.group else self.peer
+        op_name = self.op.__name__
+        group_name = self.group.group_name if self.group else "default_pg"
+        if "send" in op_name:
+            s = my_group_rank
+            d = peer_group_rank
+        elif "recv" in op_name:
+            s = peer_group_rank
+            d = my_group_rank
+        else:
+            return super().__repr__()
+
+        return f"P2POp({op_name} pg={group_name}, s={s}, d={d},  {self.tensor.shape}, {self.tensor.dtype})"
 
 class _CollOp:
     """
@@ -1113,7 +1128,7 @@ def get_pg_count() -> int:
     """
     return _world.group_count
 
-def get_node_local_rank() -> int:
+def get_node_local_rank(fallback_rank: Optional[int] = None) -> int:
     """
     Return the local rank of the current process relative to the node.
 
@@ -1125,14 +1140,17 @@ def get_node_local_rank() -> int:
     and communicated via the `LOCAL_RANK` environment variable.
 
     Torchrun will automatically populate `LOCAL_RANK`, but other launchers may not.  If `LOCAL_RANK` is unspecified,
-    this API will raise an exception.
+    this API will fall back to the provided kwarg 'fallback_rank' if specified, otherwise it will raise an error. The
+    intent is to allow writing an application that runs either in single or multi device contexts without error.
 
     """
     if "LOCAL_RANK" in os.environ:
         return int(os.environ["LOCAL_RANK"])
+    elif fallback_rank is not None:
+        return int(fallback_rank)
     raise RuntimeError(
-        "LOCAL_RANK is not in the environment, so `get_node_local_rank` can't be used. "
-        "Consider using torchrun or updating your process launcher to specify LOCAL_RANK."
+        "LOCAL_RANK is not in the environment. Consider passing fallback_rank to allow `get_node_local_rank` to work, "
+        "assuming you are not running in a multi-device context and want the code to run locally instead."
     )
 
 def _set_pg_timeout(timeout: timedelta, group: Optional[ProcessGroup] = None) -> None:
@@ -1357,6 +1375,7 @@ def init_process_group(
     _default_pg_init_method = init_method
 
     old_hook = sys.excepthook
+    excepthook_prefix = f"[rank{get_rank()}]"
 
     def _distributed_excepthook(*args):
         old_stderr = sys.stderr
@@ -1366,8 +1385,7 @@ def init_process_group(
         finally:
             sys.stderr = old_stderr
         msg = buf.getvalue()
-        prefix = f"[rank{get_rank()}]"
-        msg = "\n".join(f"{prefix}: {s}" if s != "" else "" for s in msg.split("\n"))
+        msg = "\n".join(f"{excepthook_prefix}: {s}" if s != "" else "" for s in msg.split("\n"))
         sys.stderr.write(msg)
         sys.stderr.flush()
 
