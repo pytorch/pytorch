@@ -7,7 +7,6 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_unsafe_set_storage.h>
 #include <ATen/ops/set_native.h>
 #endif
 
@@ -37,13 +36,6 @@ Tensor& set_storage_cuda_(Tensor& result, Storage storage, int64_t storage_offse
                                           at::OptionalIntArrayRef(stride) : c10::nullopt;
   at::native::resize_impl_cuda_(result.unsafeGetTensorImpl(), size, stride_opt);
   return result;
-}
-
-Tensor& _unsafe_set_storage_(Tensor& x, Storage storage) {
-  if (!x.storage().is_alias_of(storage)) {
-    x.unsafeGetTensorImpl()->set_storage_keep_dtype(std::move(storage));
-  }
-  return x;
 }
 
 } // namespace at::native
