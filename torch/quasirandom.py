@@ -119,7 +119,7 @@ class SobolEngine:
             out (Tensor, optional): The output tensor
             dtype (:class:`torch.dtype`, optional): the desired data type of the
                                                     returned tensor.
-                                                    Default: ``torch.float32``
+                                                    Default: ``None``
         """
         n = 2 ** m
         total_n = self.num_generated + n

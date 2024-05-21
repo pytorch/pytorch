@@ -7490,9 +7490,12 @@ class TestTorch(TestCase):
         self.test_sobolengine_fast_forward(scramble=True)
 
     def test_sobolengine_default_dtype(self):
+        engine = torch.quasirandom.SobolEngine(dimension=3, scramble=True, seed=123456)
+        # Check that default dtype is correctly handled
+        self.assertEqual(engine.draw(n=5).dtype, torch.float32)
         with set_default_dtype(torch.float64):
             engine = torch.quasirandom.SobolEngine(dimension=3, scramble=True, seed=123456)
-            # Check that default dtype is correctly handled
+            # Check that default dtype is correctly handled (when set to float64)
             self.assertEqual(engine.draw(n=5).dtype, torch.float64)
             # Check that explicitly passed dtype is adhered to
             self.assertEqual(engine.draw(n=5, dtype=torch.float32).dtype, torch.float32)
