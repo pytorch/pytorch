@@ -218,7 +218,8 @@ class ComptimeVariable(VariableTracker):
         # TODO: support an expression form as well
 
         assert not kwargs
-        assert len(args) == 1
+        # Second argument is runtime lambda, ignored
+        assert len(args) <= 2
         fn = args[0]
         if isinstance(fn, UserFunctionVariable):
             fn.get_function()(ComptimeContext(tx))

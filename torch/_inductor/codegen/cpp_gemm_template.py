@@ -39,7 +39,8 @@ extern "C"
     const int64_t M = {{kernel.size(GemmOut, 0)}};
     const int64_t M0_blocks = (M + M0 - 1) / M0;
     {%- if num_threads > 1 %}
-    const auto [Mt_blocks, Nt_blocks, Kt_blocks] = mm_get_thread_blocking(M, N, K, M0, N0, K0, num_threads);
+    int64_t Mt_blocks, Nt_blocks, Kt_blocks;
+    mm_get_thread_blocking(num_threads, M, N, K, M0, N0, K0, Mt_blocks, Nt_blocks, Kt_blocks);
     {%- else %}
     const auto Mt_blocks = M0_blocks;
     const auto Nt_blocks = N0_blocks;
@@ -426,7 +427,9 @@ class CppPackedGemmTemplate(CppTemplate):
         if epilogue_nodes:
             epilogues.extend(epilogue_nodes)
             Y = cast(ir.Buffer, epilogue_nodes[-1])
-            if Y.get_stride() == list(reversed(template_buffer.get_stride())):
+            if Y.get_size() == list(
+                reversed(template_buffer.get_size())
+            ) and Y.get_stride() == list(reversed(template_buffer.get_stride())):
                 Y_is_transposed = True
 
         micro_gemm = create_micro_gemm(

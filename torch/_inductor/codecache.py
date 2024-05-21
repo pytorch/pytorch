@@ -773,11 +773,23 @@ class FxGraphCache:
                 subdir = FxGraphCache._get_tmp_dir_for_key(key)
                 if os.path.exists(subdir):
                     for path in sorted(os.listdir(subdir)):
-                        with open(os.path.join(subdir, path), "rb") as f:
-                            yield pickle.load(f)
+                        try:
+                            with open(os.path.join(subdir, path), "rb") as f:
+                                yield pickle.load(f)
+                        except Exception:
+                            log.warning(
+                                "fx graph cache unable to load compiled graph",
+                                exc_info=True,
+                            )
+
             if remote_cache:
-                if (data := remote_cache.get(key)) is not None:
-                    yield pickle.loads(data)
+                try:
+                    if (data := remote_cache.get(key)) is not None:
+                        yield pickle.loads(data)
+                except Exception:
+                    log.warning(
+                        "fx graph cache unable to load compiled graph", exc_info=True
+                    )
 
         # Iterate over any entries in the subdir for this key and evaluate
         # their guards to determine whether there's a hit.
@@ -890,32 +902,39 @@ class FxGraphCache:
 
         try:
             content = pickle.dumps(disk_compiled_graph)
-        except Exception as e:
-            log.debug("fx graph cache unable to serialize compiled graph: %s", e)
+        except Exception:
+            log.warning(
+                "fx graph cache unable to serialize compiled graph", exc_info=True
+            )
             counters["inductor"]["fxgraph_cache_pickle_error"] += 1
             return
 
-        if local:
-            subdir = FxGraphCache._get_tmp_dir_for_key(key)
-            if not os.path.exists(subdir):
-                os.makedirs(subdir, exist_ok=True)
+        try:
+            if local:
+                subdir = FxGraphCache._get_tmp_dir_for_key(key)
+                if not os.path.exists(subdir):
+                    os.makedirs(subdir, exist_ok=True)
 
-            # Use a hash of the serialized CompiledFxGraph to get a unique file
-            # name. The specific name doesn't matter since a lookup involves
-            # iterating over all entries in the parent subdir.
-            path = os.path.join(subdir, sha256_hash(content))
-            write_atomic(path, content, make_dirs=True)
+                # Use a hash of the serialized CompiledFxGraph to get a unique file
+                # name. The specific name doesn't matter since a lookup involves
+                # iterating over all entries in the parent subdir.
+                path = os.path.join(subdir, sha256_hash(content))
+                write_atomic(path, content, make_dirs=True)
 
-        if remote_cache:
-            cache_data = (
-                {
-                    "data": content,
-                    "time_taken_ms": time_taken_ns // 1000000,  # Convert from NS to MS
-                }
-                if config.is_fbcode()
-                else content
-            )
-            remote_cache.put(key, cache_data)
+            if remote_cache:
+                cache_data = (
+                    {
+                        "data": content,
+                        "time_taken_ms": time_taken_ns
+                        // 1000000,  # Convert from NS to MS
+                    }
+                    if config.is_fbcode()
+                    else content
+                )
+                remote_cache.put(key, cache_data)
+        except Exception:
+            log.warning("fx graph unable to write to cache", exc_info=True)
+            counters["inductor"]["fxgraph_cache_write_error"] += 1
 
     @staticmethod
     def _check_can_cache(gm: torch.fx.GraphModule):
@@ -1924,12 +1943,19 @@ class AotCodeCompiler:
                 run_command_and_check(cmd)
             log.debug("aot constant binary command: %s", cmd)
 
-            # .data section is between .text and .bss. When the size of .data is large,
-            # during the linking, the relocation of .text against .bss may overflow.
-            # Rename it to .ldata so that it won't be in between the .text and .bss section
+            if config.aot_inductor.allow_buffer_mutation:
+                # .data section is between .text and .bss. When the size of .data is large,
+                # during the linking, the relocation of .text against .bss may overflow.
+                # Rename it to .ldata so that it won't be in between the .text and .bss section
+                rename_data = " .data=.ldata"
+            else:
+                # if no buffer mutation is needed, we could instead set the data region
+                # as read-only (i.e. .lrodata) which could accomodate larger size of data
+                # to be linked.
+                rename_data = " .data=.lrodata,alloc,load,readonly,data,contents"
             cmd = (
                 f"{objcopy_command} --rename-section"
-                " .data=.ldata"
+                f"{rename_data}"
                 " --set-section-alignment .data=64"  # following the gAlignment of CPU in c10/core/alignment.h
                 f" {consts_o} {consts_o}"
             )
