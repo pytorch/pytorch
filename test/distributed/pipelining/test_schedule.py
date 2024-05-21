@@ -8,7 +8,7 @@ import tempfile
 import torch
 import torch.distributed as dist
 
-from model_registry import ModelWithKwargs, MultiMLP
+from model_registry import ExampleCode, MultiMLP
 from torch.distributed.pipelining import (
     pipeline,
     PipelineStage,
@@ -52,9 +52,58 @@ class ScheduleTest(MultiProcContinousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_ec_forward(self):
+        # Setting this flag for numerical stability
+        torch.distributed.pipelining.microbatch._debug_mask_minibatches = True
+
+        mod = ExampleCode(d_hid)
+        mod.to(self.device)
+
+        x = torch.randn(batch_size, d_hid, device=self.device)
+        y = torch.randn(batch_size, d_hid, device=self.device)
+
+        pipe = pipeline(
+            mod,
+            chunks,
+            example_args=(x,),
+            example_kwargs={"y": y},
+        )
+
+        stage = PipelineStage(
+            pipe,
+            self.rank,
+            device=self.device,
+        )
+
+        # Attach to a schedule
+        schedule = ScheduleGPipe(stage, chunks)
+
+        # Run
+        if self.rank == 0:
+            schedule.step(x, y=y)
+        else:
+            out = schedule.step()
+
+        dist.barrier()
+
+        # Last rank checks result
+        if self.rank == self.world_size - 1:
+            ref_out = mod(x, y=y)
+            torch.testing.assert_close(out, ref_out)
+
+        # Test qualname mapping
+        submod_keys = stage.submod.state_dict().keys()
+        # Confirm keys are consistent with original model
+        old_keys = mod.state_dict().keys()
+        assert all(k in old_keys for k in submod_keys)
+        # Reset this flag
+        torch.distributed.pipelining.microbatch._debug_mask_minibatches = False
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
     def test_ec_backward(self, ScheduleClass):
-        mod = ModelWithKwargs(d_hid)
+        mod = ExampleCode(d_hid)
         mod.to(self.device)
 
         x = torch.randn(batch_size, d_hid, device=self.device)
