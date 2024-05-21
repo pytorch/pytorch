@@ -290,8 +290,8 @@ else
       fi
       if [[ "$USE_SPLIT_BUILD" != "false" ]]; then
         WERROR=1 BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py install
-        WERROR=1 BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py clean
-        WERROR=1 BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py clean
+        pip_install_whl "$(echo dist/*.whl)"
+        setup.py clean
         WERROR=1 BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py install
       else
         WERROR=1 python setup.py clean
@@ -303,8 +303,8 @@ else
       fi
       if [[ "$USE_SPLIT_BUILD" != "false" ]]; then
         BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py install
-        BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py clean
-        BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py clean
+        pip_install_whl "$(echo dist/*.whl)"
+        python setup.py clean
         BUILD_PYTHON_ONLY=1 BUILD_LIBTORCH_WHL=0 python setup.py install
       else
         python setup.py clean
@@ -312,9 +312,7 @@ else
       fi
     fi
 
-    if [[ "$USE_SPLIT_BUILD" == "false" ]]; then
-      pip_install_whl "$(echo dist/*.whl)"
-    fi
+    pip_install_whl "$(echo dist/*.whl)"
 
     # TODO: I'm not sure why, but somehow we lose verbose commands
     set -x
@@ -351,10 +349,6 @@ else
     CUSTOM_OP_TEST="$PWD/test/custom_operator"
     python --version
     SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-    ls "$SITE_PACKAGES"
-    ls "$SITE_PACKAGES/torch"
-    ls "$SITE_PACKAGES/libtorch"
-    ls "$SITE_PACKAGES/libtorch/lib"
     mkdir -p "$CUSTOM_OP_BUILD"
     pushd "$CUSTOM_OP_BUILD"
     cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/libtorch;$SITE_PACKAGES/torch;$SITE_PACKAGES" -DPYTHON_EXECUTABLE="$(which python)" \
