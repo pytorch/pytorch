@@ -970,7 +970,7 @@ class SIMDKernel(Kernel):
         """
         nbytes = []
         ninplace_args = len(unique(self.args.inplace_buffers.values()))
-        _, call_args, _ = self.args.python_argdefs()
+        _, call_args, _, _ = self.args.python_argdefs()
 
         # For pointwise and reduction kernels, this is the upper-bound numels
         # for the output buffer.
@@ -1031,7 +1031,7 @@ class SIMDKernel(Kernel):
             # the mix layouts.
             return
 
-        argdefs, call_args, signature = self.args.python_argdefs()
+        argdefs, call_args, signature, _ = self.args.python_argdefs()
         uniform_stride_order = None
         for arg_name in call_args:
             buf = V.graph.get_buffer(arg_name)
