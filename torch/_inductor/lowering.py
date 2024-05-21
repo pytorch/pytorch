@@ -2156,7 +2156,6 @@ make_fallback(aten.fractional_max_pool2d_backward)
 make_fallback(aten.fractional_max_pool3d_backward)
 make_fallback(aten.replication_pad1d_backward)
 make_fallback(aten.replication_pad2d_backward)
-make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
 make_fallback(aten.grid_sampler_2d_backward, require_dense)
 make_fallback(aten._pdist_backward)
 
