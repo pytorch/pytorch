@@ -9,6 +9,7 @@ from torch.distributed._cuda_p2p import (
     _fused_all_gather_matmul_fallback,
     _fused_matmul_reduce_scatter_fallback,
     get_cuda_p2p_backend,
+    get_p2p_buffer_size,
     is_cuda_p2p_group,
 )
 from torch.testing._internal.common_distributed import (
@@ -86,6 +87,8 @@ class ProcessGroupCudaP2PTest(MultiProcessTestCase):
 
         # Verify cuda p2p specific APIs on ProcessGroupCudaP2P
         assert is_cuda_p2p_group(dist.group.WORLD)
+        assert get_p2p_buffer_size(dist.group.WORLD) == BUFFER_SIZE
+
         backend = get_cuda_p2p_backend(dist.group.WORLD)
         assert isinstance(backend, dist.ProcessGroupCudaP2P)
         assert backend.get_buffer_size() == BUFFER_SIZE
@@ -100,6 +103,7 @@ class ProcessGroupCudaP2PTest(MultiProcessTestCase):
         non_cuda_p2p_pg = dist.new_group(backend="nccl")
 
         assert not is_cuda_p2p_group(non_cuda_p2p_pg)
+        assert get_p2p_buffer_size(non_cuda_p2p_pg) == 0
         with self.assertRaises(TypeError):
             get_cuda_p2p_backend(non_cuda_p2p_pg)
 
