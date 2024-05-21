@@ -93,14 +93,22 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
         &sparse_input_descriptor,
         sparse_input.size(0),
         sparse_input.size(1),
+    #ifdef USE_ROCM
+        sparse_input.size(0),
+    #else
         sparse_input.size(1),
+    #endif
         16,
     #ifdef USE_ROCM
         sparseLtDataTypes.at(type),
     #else
         type,
     #endif
+    #ifdef USE_ROCM
+        CUSPARSE_ORDER_COL,
+    #else
         CUSPARSE_ORDER_ROW,
+    #endif
         CUSPARSELT_SPARSITY_50_PERCENT));
 
     // compress input
@@ -157,7 +165,7 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
   cusparseComputeType compute_type;
   auto compression_factor = 9;
   #ifdef USE_ROCM
-  TORCH_CHECK(isHipSparseLtSupported(compressed_A.device().index()), "hipSPARSELt not supported on this platform.");
+  //TORCH_CHECK(isHipSparseLtSupported(compressed_A.device().index()), "hipSPARSELt not supported on this platform.");
   #endif
 
   switch(compressed_A.scalar_type())
@@ -247,14 +255,22 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
       &sparse_input_descriptor,
       m,
       k,
+#ifdef USE_ROCM
+      m,
+#else
       k,
+#endif
       16,
 #ifdef USE_ROCM
       sparseLtDataTypes.at(input_type),
 #else
       input_type,
 #endif
+#ifdef USE_ROCM
+      CUSPARSE_ORDER_COL,
+#else
       CUSPARSE_ORDER_ROW,
+#endif
       CUSPARSELT_SPARSITY_50_PERCENT));
 
   // initialize dense input descriptor
@@ -264,14 +280,23 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
       &dense_input_descriptor,
       (dense_B.is_contiguous()) ? k : n,
       (dense_B.is_contiguous()) ? n : k,
+#ifdef USE_ROCM
+      (dense_B.is_contiguous()) ? k : n,
+#else
       (dense_B.is_contiguous()) ? n : k,
+#endif
       16,
 #ifdef USE_ROCM
       sparseLtDataTypes.at(input_type),
 #else
       input_type,
 #endif
-      CUSPARSE_ORDER_ROW));
+#ifdef USE_ROCM
+      CUSPARSE_ORDER_COL
+#else
+      CUSPARSE_ORDER_ROW
+#endif
+      ));
 
   // create result tensor
   auto res_tensor_options = c10::TensorOptions().dtype(out_dtype).device(dense_B.device());
@@ -284,14 +309,23 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
       &res_descriptor,
       m,
       n,
+#ifdef USE_ROCM
+      m,
+#else
       (transpose_result) ? m: n,
+#endif
       16,
 #ifdef USE_ROCM
       sparseLtDataTypes.at(output_type),
 #else
       output_type,
 #endif
-      (transpose_result) ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW));
+#ifdef USE_ROCM
+      CUSPARSE_ORDER_COL
+#else
+      (transpose_result) ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW
+#endif
+      ));
 
   // initialize matmul
   TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescriptorInit(
