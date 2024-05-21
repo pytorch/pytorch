@@ -8,7 +8,6 @@
 
 #include <cstring>
 #include <system_error>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -38,8 +37,7 @@ C10_DIAGNOSTIC_POP()
 
 #include <c10/util/CallOnce.h>
 
-namespace c10d {
-namespace detail {
+namespace c10d::detail {
 namespace {
 #ifdef _WIN32
 
@@ -183,8 +181,7 @@ class SocketImpl {
 
   Handle hnd_;
 };
-} // namespace detail
-} // namespace c10d
+} // namespace c10d::detail
 
 //
 // libfmt formatters for `addrinfo` and `Socket`
@@ -251,8 +248,7 @@ struct formatter<c10d::detail::SocketImpl> {
 
 } // namespace fmt
 
-namespace c10d {
-namespace detail {
+namespace c10d::detail {
 
 SocketImpl::~SocketImpl() {
 #ifdef _WIN32
@@ -458,6 +454,7 @@ class SocketListenOp {
   bool tryListen(const ::addrinfo& addr);
 
   template <typename... Args>
+  // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
   void recordError(fmt::string_view format, Args&&... args) {
     auto msg = fmt::vformat(format, fmt::make_format_args(args...));
 
@@ -614,7 +611,9 @@ class SocketListenFromFdOp {
   std::unique_ptr<SocketImpl> run() const;
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const int fd_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const std::uint16_t expected_port_;
 };
 
@@ -624,7 +623,7 @@ SocketListenFromFdOp::SocketListenFromFdOp(int fd, std::uint16_t expected_port)
 std::unique_ptr<SocketImpl> SocketListenFromFdOp::run() const {
   C10D_DEBUG("listenFromFd: fd {}, expected port {}", fd_, expected_port_);
 
-  ::sockaddr_storage addr_storage;
+  ::sockaddr_storage addr_storage{};
   ::socklen_t addr_len = sizeof(addr_storage);
   if (::getsockname(
           fd_, reinterpret_cast<::sockaddr*>(&addr_storage), &addr_len) < 0) {
@@ -691,6 +690,7 @@ class SocketConnectOp {
   [[noreturn]] void throwTimeoutError() const;
 
   template <typename... Args>
+  // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
   void recordError(fmt::string_view format, Args&&... args) {
     auto msg = fmt::vformat(format, fmt::make_format_args(args...));
 
@@ -1033,6 +1033,4 @@ bool Socket::waitForInput(std::chrono::milliseconds timeout) {
   return impl_->waitForInput(timeout);
 }
 
-} // namespace detail
-
-} // namespace c10d
+} // namespace c10d::detail

@@ -2,25 +2,32 @@
 
 import copy
 import functools
+import unittest
 
 from typing import Dict
 
 import torch
 import torch.nn as nn
-from torch.distributed._composable.fsdp import fully_shard
-from torch.distributed._tensor import DTensor
+from torch.distributed._composable.fsdp import CPUOffloadPolicy, fully_shard
+from torch.distributed._tensor import distribute_tensor, DTensor
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
     RowwiseParallel,
 )
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest, MLP
+from torch.testing._internal.common_fsdp import FSDPTest, FSDPTestMultiThread, MLP
 from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    ModelArgs,
+    Transformer,
+    TransformerBlock,
+)
 
 
-class TestFullyShardStateDict(FSDPTest):
+class TestFullyShardStateDictMultiProcess(FSDPTest):
     @property
     def world_size(self) -> int:
         return min(4, torch.cuda.device_count())
@@ -60,6 +67,42 @@ class TestFullyShardStateDict(FSDPTest):
         self.assertEqual(set(ref_sharded_sd.keys()), set(sharded_sd.keys()))
         for key, value in ref_sharded_sd.items():
             self.assertEqual(value, sharded_sd[key])
+
+    @skip_if_lt_x_gpu(2)
+    def test_1d_state_dict_cpu_offload(self):
+        mlp_dim = 4
+        offload_policy = CPUOffloadPolicy(pin_memory=True)
+        torch.manual_seed(42)
+        with torch.device("meta"):
+            model = nn.Sequential(
+                nn.Linear(mlp_dim, mlp_dim, bias=False),
+                nn.Linear(mlp_dim, mlp_dim, bias=False),
+            )
+        for module in model:
+            fully_shard(module, offload_policy=offload_policy)
+        fully_shard(model, offload_policy=offload_policy)
+
+        # split full sd into multiple pieces
+        # to test loading with `strict=False`
+        state_dicts = []
+        for name, dtensor in model.named_parameters():
+            full_tensor = torch.randn(dtensor.size())
+            sharded_tensor = distribute_tensor(
+                full_tensor, dtensor.device_mesh, dtensor.placements
+            )
+            state_dicts.append({name: sharded_tensor})
+
+        # check that we can load with some parameters still on meta device
+        for sd in state_dicts:
+            model.load_state_dict(sd, assign=True, strict=False)
+
+        # lazy init without error
+        inp = torch.rand((mlp_dim, mlp_dim), device="cuda")
+        model(inp)
+
+        state_dict = model.state_dict()
+        for name, dtensor in state_dict.items():
+            self.assertEqual(dtensor.device.type, "cpu")
 
     @skip_if_lt_x_gpu(2)
     def test_2d_state_dict_save_load(self):
@@ -148,9 +191,68 @@ class TestFullyShardStateDict(FSDPTest):
                 param.to_local(),
                 torch.ones_like(param.to_local()) * new_fill_value,
             )
-            self.assertEqual(
-                param.to_local().data_ptr(), param_name_to_data_ptr[param_name]
-            )
+            local_param = param.to_local()
+            # Only guarantee that the local tensor's data pointer does not
+            # change if the sharding was even (i.e. no padding); otherwise,
+            # FSDP may re-pad the local tensor, changing its data pointer
+            if local_param.size(0) * param.device_mesh.size() == param.size(0):
+                self.assertEqual(
+                    local_param.data_ptr(), param_name_to_data_ptr[param_name]
+                )
+
+
+class TestFullyShardStateDictMultiThread(FSDPTestMultiThread):
+    @property
+    def world_size(self):
+        return 2
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_rank0_offload_full_state_dict(self):
+        # Construct a reference unsharded model on all ranks
+        model_args = ModelArgs(dropout_p=0.0)
+        torch.manual_seed(42)
+        ref_model = Transformer(model_args).cuda()
+        for param in ref_model.parameters():
+            torch.distributed.broadcast(param.detach(), src=0)
+
+        # Construct a sharded model and sharded state dict on all ranks
+        model = copy.deepcopy(ref_model)
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard(module)
+        fully_shard(model)
+        sharded_sd = model.state_dict()
+
+        # Save a reference CPU full state dict on rank 0 and delete the
+        # reference model otherwise
+        if self.rank != 0:
+            del ref_model
+        else:
+            ref_gpu_full_sd = ref_model.state_dict()
+            ref_full_sd = {k: v.cpu() for k, v in ref_gpu_full_sd.items()}
+            del ref_gpu_full_sd
+
+        # Reshard the GPU sharded state dict to a CPU full state dict on rank 0
+        full_sd = {}
+        for param_name, sharded_param in sharded_sd.items():
+            full_param = sharded_param.full_tensor()
+            if self.rank == 0:
+                full_sd[param_name] = full_param.cpu()
+            else:
+                del full_param
+
+        # Check that we have a CPU full state dict only on rank 0
+        if self.rank == 0:
+            self.assertEqual(len(full_sd), len(ref_full_sd))
+            self.assertEqual(list(full_sd.keys()), list(ref_full_sd.keys()))
+            for (param_name, param), ref_param in zip(
+                full_sd.items(), ref_full_sd.values()
+            ):
+                self.assertEqual(param.device, torch.device("cpu"))
+                self.assertEqual(param.device, ref_param.device)
+                self.assertEqual(param, ref_param)
+        else:
+            self.assertEqual(len(full_sd), 0)
 
 
 if __name__ == "__main__":

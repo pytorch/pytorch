@@ -46,9 +46,10 @@ def mark_mixed_dtype_allowed_convs(gm):
     Mark convolutions which we will binary fold even with mixed precision constants. We constant fold in the higher precision
     for better accuracy and then recover the original precision after.
     """
-    for node in gm.graph.nodes:
-        if node.target is aten.convolution.default:
-            mark_mixed_dtype_conv(node)
+    for node in gm.graph.find_nodes(
+        op="call_function", target=aten.convolution.default
+    ):
+        mark_mixed_dtype_conv(node)
 
 
 def recover_original_precision_folded_convs(gm):
@@ -56,8 +57,7 @@ def recover_original_precision_folded_convs(gm):
     After binary folding conv weights and biases to a higher dtype, recover the original precision they were in.
     """
     graph = gm.graph
-    convs = [node for node in graph.nodes if node.target is aten.convolution.default]
-    for node in convs:
+    for node in graph.find_nodes(op="call_function", target=aten.convolution.default):
         orig_dtype = node.meta.get("_allow_conv_mixed_dtype_folding", None)
         if orig_dtype is None:
             continue

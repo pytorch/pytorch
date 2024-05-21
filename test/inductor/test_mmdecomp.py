@@ -1,7 +1,6 @@
 # Owner(s): ["module: nn"]
 
 import math
-import sys
 import unittest
 from typing import List, Tuple, Union
 
@@ -198,7 +197,6 @@ device_types = ("cpu", "cuda")
 instantiate_device_type_tests(TestDecomp, globals(), only_for=device_types)
 
 if __name__ == "__main__":
-    # We don't support torch.compile() on
-    # Windows and Python 3.12+
-    if not IS_WINDOWS and sys.version_info < (3, 12):
+    # We don't support torch.compile() on Windows
+    if not IS_WINDOWS:
         run_tests()

@@ -6,7 +6,6 @@ from typing import cast, List, Optional, Sequence, Tuple, Union
 
 import torch
 
-import torch.distributed.distributed_c10d as c10d
 from torch.distributed._tensor.op_schema import (
     OpSchema,
     OpStrategy,
@@ -47,7 +46,7 @@ class NormReduction:
     norm_type: Union[int, float, str]
 
 
-ReductionOpType = Union[NormReduction, c10d.ReduceOp.RedOpType]
+ReductionOpType = Union[NormReduction, str]
 
 
 @dataclass(frozen=True)
@@ -74,11 +73,11 @@ class _NormPartial(_Partial):
         """Set the appropriate reduce op based on the norm type."""
         # Use `object.__setattr__` to bypass frozen checks
         if self.norm_type in (float("inf"), "inf"):
-            object.__setattr__(self, "reduce_op", c10d.ReduceOp.MAX)
+            object.__setattr__(self, "reduce_op", "max")
         elif self.norm_type in (float("-inf"), "-inf"):
-            object.__setattr__(self, "reduce_op", c10d.ReduceOp.MIN)
+            object.__setattr__(self, "reduce_op", "min")
         elif isinstance(self.norm_type, (int, float)):
-            object.__setattr__(self, "reduce_op", c10d.ReduceOp.SUM)
+            object.__setattr__(self, "reduce_op", "sum")
         else:
             raise NotImplementedError(f"Unsupported norm type: {self.norm_type}")
 
@@ -94,9 +93,9 @@ class _NormPartial(_Partial):
         One such f(x) is f(x) = x / sqrt(4). This generalizes to d ranks and
         p-norm as f(x) = x / d^(1/p).
         """
-        if self.reduce_op in (c10d.ReduceOp.MAX, c10d.ReduceOp.MIN):
+        if self.reduce_op in ("max", "min"):
             return tensor
-        elif self.reduce_op == c10d.ReduceOp.SUM:
+        elif self.reduce_op == "sum":
             if self.norm_type == 0:
                 raise NotImplementedError(f"Unsupported norm type:: {self.norm_type}")
             elif self.norm_type == 1:
@@ -125,14 +124,14 @@ class _NormPartial(_Partial):
         return self._post_reduce_transform(reduced_tensor)
 
     def _pre_reduce_transform(self, tensor: torch.Tensor) -> torch.Tensor:
-        if self.reduce_op == c10d.ReduceOp.SUM:
+        if self.reduce_op == "sum":
             assert isinstance(self.norm_type, (int, float)), f"{self.norm_type}"
             if self.norm_type != 0 and self.norm_type != 1:
                 return tensor**self.norm_type
         return tensor
 
     def _post_reduce_transform(self, tensor: torch.Tensor) -> torch.Tensor:
-        if self.reduce_op == c10d.ReduceOp.SUM:
+        if self.reduce_op == "sum":
             assert isinstance(self.norm_type, (int, float)), f"{self.norm_type}"
             if self.norm_type != 0 and self.norm_type != 1:
                 return tensor ** (1.0 / self.norm_type)
@@ -230,7 +229,7 @@ def common_reduction_strategy(
     reduce_dims: List[int],
     keep_dim: bool = False,
     reduction_linear: bool = True,
-    reduction_op: ReductionOpType = c10d.ReduceOp.SUM,
+    reduction_op: ReductionOpType = "sum",
 ) -> OpStrategy:
     """
     reduction_linear means that the reduction `f` follows this rule:
@@ -277,22 +276,22 @@ def common_reduction_strategy(
 
 
 LINEAR_REDUCTION_OP_MAP = {
-    aten.all.default: c10d.ReduceOp.SUM,
-    aten.all.dim: c10d.ReduceOp.SUM,
-    aten.sum.default: c10d.ReduceOp.SUM,
-    aten.sum.dim_IntList: c10d.ReduceOp.SUM,
-    aten.prod.default: c10d.ReduceOp.PRODUCT,
-    aten.prod.dim_int: c10d.ReduceOp.PRODUCT,
-    aten.prod.int_out: c10d.ReduceOp.PRODUCT,
-    aten.mean.default: c10d.ReduceOp.AVG,
-    aten.mean.dim: c10d.ReduceOp.AVG,
-    aten.mean.out: c10d.ReduceOp.AVG,
-    aten.max.default: c10d.ReduceOp.MAX,
-    aten.max.dim: c10d.ReduceOp.MAX,
-    aten.max.out: c10d.ReduceOp.MAX,
-    aten.min.default: c10d.ReduceOp.MIN,
-    aten.min.dim: c10d.ReduceOp.MIN,
-    aten.min.out: c10d.ReduceOp.MIN,
+    aten.all.default: "sum",
+    aten.all.dim: "sum",
+    aten.sum.default: "sum",
+    aten.sum.dim_IntList: "sum",
+    aten.prod.default: "product",
+    aten.prod.dim_int: "product",
+    aten.prod.int_out: "product",
+    aten.mean.default: "avg",
+    aten.mean.dim: "avg",
+    aten.mean.out: "avg",
+    aten.max.default: "max",
+    aten.max.dim: "max",
+    aten.max.out: "max",
+    aten.min.default: "min",
+    aten.min.dim: "min",
+    aten.min.out: "min",
 }
 
 
@@ -542,7 +541,7 @@ def nll_loss_forward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
             )
         else:
             if reduction == Reduction.MEAN.value:
-                reduction_op = c10d.ReduceOp.AVG
+                reduction_op = "avg"
                 if not is_tensor_evenly_shardable(
                     target_expected_spec.shape, target_expected_spec
                 ):
@@ -551,7 +550,7 @@ def nll_loss_forward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
                         resulting in biased mean result."
                     )
             else:  # reduction == Reduction.SUM.value:
-                reduction_op = c10d.ReduceOp.SUM
+                reduction_op = "sum"
             reduce_dims = list(range(target_expected_spec.ndim))
             reduce_dims_map = _infer_reduce_dims_map(
                 reduce_dims, target_expected_spec.ndim, keep_dim=False
@@ -572,7 +571,7 @@ def nll_loss_forward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
                 target_expected_spec.placements,
                 reduce_dims,
                 reduce_dims_map,
-                c10d.ReduceOp.SUM,
+                "sum",
             )
             total_weight_expected_spec = DTensorSpec(
                 mesh=mesh,
@@ -899,7 +898,7 @@ def layer_norm_bwd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy
                 outer_dims, input_src_spec.ndim, False
             )
             out_placements = map_placements_after_reduction(
-                inp_placements, outer_dims, reduce_dims_map, c10d.ReduceOp.SUM
+                inp_placements, outer_dims, reduce_dims_map, "sum"
             )
             output_specs_list.append(
                 DTensorSpec(
@@ -932,7 +931,7 @@ def layer_norm_bwd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy
                 outer_dims, grad_out_spec.ndim, False
             )
             out_placements = map_placements_after_reduction(
-                inp_placements, outer_dims, reduce_dims_map, c10d.ReduceOp.SUM
+                inp_placements, outer_dims, reduce_dims_map, "sum"
             )
             output_specs_list.append(
                 DTensorSpec(

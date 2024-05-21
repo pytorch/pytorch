@@ -15,14 +15,19 @@ from torch.testing._internal.common_utils import run_tests
 
 def test_simple_linears(setup_rpc):
     def sum_grad(parameters):
-        return sum([p.grad.sum() for p in parameters if p.grad is not None])
+        return sum(p.grad.sum() for p in parameters if p.grad is not None)
 
     def zero_grad(parameters):
         for p in parameters:
             p.grad = None
 
     inputs = torch.rand(8, 1)
-    model = nn.Sequential(nn.Linear(1, 2), nn.Linear(2, 4), nn.Linear(4, 2), nn.Linear(2, 1),)
+    model = nn.Sequential(
+        nn.Linear(1, 2),
+        nn.Linear(2, 4),
+        nn.Linear(4, 2),
+        nn.Linear(2, 1),
+    )
 
     # Without Pipe
     outputs = model(inputs)
