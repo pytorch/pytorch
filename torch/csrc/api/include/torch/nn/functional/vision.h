@@ -59,7 +59,7 @@ inline Tensor grid_sample(
     const Tensor& grid,
     GridSampleFuncOptions::mode_t mode,
     GridSampleFuncOptions::padding_mode_t padding_mode,
-    c10::optional<bool> align_corners) {
+    std::optional<bool> align_corners) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t mode_enum, padding_mode_enum;
 

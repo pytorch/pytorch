@@ -564,23 +564,27 @@ class FxGraphCachePickler(pickle.Pickler):
 
 
 @functools.lru_cache(None)
-def get_inductor_code_hash() -> bytes:
+def torch_key():
     """
-    Compute a hash of all inductor code modules. Used by the FxGraph cache
-    so any inductor code changes would result in new cache keys.
+    Compute a key that contains relevant information about torch source files
     """
-    inductor_root = os.path.dirname(__file__)
+    if not config.is_fbcode():
+        inductor_root = os.path.dirname(__file__)
 
-    contents: Dict[str, bytes] = {}
-    for lib in pkgutil.iter_modules([inductor_root]):
-        spec = lib.module_finder.find_spec(lib.name, None)
-        assert spec is not None
-        module = spec.origin
-        assert module is not None
-        with open(module, "rb") as f:
-            contents[module] = f.read()
+        contents: Dict[str, bytes] = {torch.__version__: b""}
+        for lib in pkgutil.iter_modules([inductor_root]):
+            spec = lib.module_finder.find_spec(lib.name, None)
+            assert spec is not None
+            module = spec.origin
+            assert module is not None
+            with open(module, "rb") as f:
+                contents[module] = f.read()
 
-    return hashlib.sha256(pickle.dumps(contents)).digest()
+        return hashlib.sha256(pickle.dumps(contents)).digest()
+
+    from libfb.py import parutil
+
+    return parutil.get_file_contents("torch/src_hash.txt").rstrip()
 
 
 @dataclasses.dataclass
@@ -645,11 +649,9 @@ class FxGraphHashDetails:
         )
 
         # Also hash on various system info (including the triton compiler version).
-        self.torch_version = torch.__version__
+        self.torch_version = torch_key()
         self.system_info = CacheBase.get_system()
 
-        # And the inductor configuration and code.
-        self.inductor_code_hash = get_inductor_code_hash()
         try:
             self.inductor_config = config.save_config()
         except (TypeError, AttributeError) as e:
@@ -732,11 +734,12 @@ class FxGraphCache:
         return os.path.join(FxGraphCache._get_tmp_dir(), key[1:3], key)
 
     @staticmethod
-    def _filter_symints(inputs: List[Any]) -> List[torch.SymInt]:
+    def _filter_backed_symints(inputs: List[Any]) -> List[torch.SymInt]:
         """
-        Get the SymInt objects from the input list.
+        Get the backed SymInt objects from the input list. Note that we can never
+        have guards that depend on unbacked symint.
         """
-        return [s for s in inputs if isinstance(s, torch.SymInt)]
+        return [s for s in inputs if isinstance(s, torch.SymInt) and has_hint(s)]
 
     @staticmethod
     def _get_shape_env() -> Optional[ShapeEnv]:
@@ -762,8 +765,7 @@ class FxGraphCache:
         shape_env = FxGraphCache._get_shape_env()
         assert shape_env is not None
 
-        symints = FxGraphCache._filter_symints(example_inputs)
-        assert all(has_hint(s) for s in symints)
+        symints = FxGraphCache._filter_backed_symints(example_inputs)
         hints = [hint_int(s) for s in symints]
 
         def iterate_over_candidates() -> Generator[CompiledFxGraph, None, None]:
@@ -771,11 +773,23 @@ class FxGraphCache:
                 subdir = FxGraphCache._get_tmp_dir_for_key(key)
                 if os.path.exists(subdir):
                     for path in sorted(os.listdir(subdir)):
-                        with open(os.path.join(subdir, path), "rb") as f:
-                            yield pickle.load(f)
+                        try:
+                            with open(os.path.join(subdir, path), "rb") as f:
+                                yield pickle.load(f)
+                        except Exception:
+                            log.warning(
+                                "fx graph cache unable to load compiled graph",
+                                exc_info=True,
+                            )
+
             if remote_cache:
-                if (data := remote_cache.get(key)) is not None:
-                    yield pickle.loads(data)
+                try:
+                    if (data := remote_cache.get(key)) is not None:
+                        yield pickle.loads(data)
+                except Exception:
+                    log.warning(
+                        "fx graph cache unable to load compiled graph", exc_info=True
+                    )
 
         # Iterate over any entries in the subdir for this key and evaluate
         # their guards to determine whether there's a hit.
@@ -883,37 +897,44 @@ class FxGraphCache:
         # Tensor arg with a symbolic shape will have a SymInt arg for the graph.
         shape_env = FxGraphCache._get_shape_env()
         assert shape_env is not None
-        symints = FxGraphCache._filter_symints(example_inputs)
+        symints = FxGraphCache._filter_backed_symints(example_inputs)
         disk_compiled_graph.guards_expr = shape_env.produce_guards_expression(symints)
 
         try:
             content = pickle.dumps(disk_compiled_graph)
-        except Exception as e:
-            log.debug("fx graph cache unable to serialize compiled graph: %s", e)
+        except Exception:
+            log.warning(
+                "fx graph cache unable to serialize compiled graph", exc_info=True
+            )
             counters["inductor"]["fxgraph_cache_pickle_error"] += 1
             return
 
-        if local:
-            subdir = FxGraphCache._get_tmp_dir_for_key(key)
-            if not os.path.exists(subdir):
-                os.makedirs(subdir, exist_ok=True)
+        try:
+            if local:
+                subdir = FxGraphCache._get_tmp_dir_for_key(key)
+                if not os.path.exists(subdir):
+                    os.makedirs(subdir, exist_ok=True)
 
-            # Use a hash of the serialized CompiledFxGraph to get a unique file
-            # name. The specific name doesn't matter since a lookup involves
-            # iterating over all entries in the parent subdir.
-            path = os.path.join(subdir, sha256_hash(content))
-            write_atomic(path, content, make_dirs=True)
+                # Use a hash of the serialized CompiledFxGraph to get a unique file
+                # name. The specific name doesn't matter since a lookup involves
+                # iterating over all entries in the parent subdir.
+                path = os.path.join(subdir, sha256_hash(content))
+                write_atomic(path, content, make_dirs=True)
 
-        if remote_cache:
-            cache_data = (
-                {
-                    "data": content,
-                    "time_taken_ms": time_taken_ns // 1000000,  # Convert from NS to MS
-                }
-                if config.is_fbcode()
-                else content
-            )
-            remote_cache.put(key, cache_data)
+            if remote_cache:
+                cache_data = (
+                    {
+                        "data": content,
+                        "time_taken_ms": time_taken_ns
+                        // 1000000,  # Convert from NS to MS
+                    }
+                    if config.is_fbcode()
+                    else content
+                )
+                remote_cache.put(key, cache_data)
+        except Exception:
+            log.warning("fx graph unable to write to cache", exc_info=True)
+            counters["inductor"]["fxgraph_cache_write_error"] += 1
 
     @staticmethod
     def _check_can_cache(gm: torch.fx.GraphModule):
@@ -1922,12 +1943,19 @@ class AotCodeCompiler:
                 run_command_and_check(cmd)
             log.debug("aot constant binary command: %s", cmd)
 
-            # .data section is between .text and .bss. When the size of .data is large,
-            # during the linking, the relocation of .text against .bss may overflow.
-            # Rename it to .ldata so that it won't be in between the .text and .bss section
+            if config.aot_inductor.allow_buffer_mutation:
+                # .data section is between .text and .bss. When the size of .data is large,
+                # during the linking, the relocation of .text against .bss may overflow.
+                # Rename it to .ldata so that it won't be in between the .text and .bss section
+                rename_data = " .data=.ldata"
+            else:
+                # if no buffer mutation is needed, we could instead set the data region
+                # as read-only (i.e. .lrodata) which could accomodate larger size of data
+                # to be linked.
+                rename_data = " .data=.lrodata,alloc,load,readonly,data,contents"
             cmd = (
                 f"{objcopy_command} --rename-section"
-                " .data=.ldata"
+                f"{rename_data}"
                 " --set-section-alignment .data=64"  # following the gAlignment of CPU in c10/core/alignment.h
                 f" {consts_o} {consts_o}"
             )
@@ -1959,6 +1987,14 @@ class AotCodeCompiler:
             return consts_o
 
         def _compile_consts_darwin(consts: bytes) -> str:
+            if config.aot_inductor.debug_dump_consts_bin:
+                _, _binary_constants_path = write(
+                    consts,
+                    "bin",
+                    specified_dir=specified_output_path,
+                )
+                log.debug("binary constants path: %s", _binary_constants_path)
+
             is_large_consts = len(consts) > 1024
             consts_asm = "\t.section\t__DATA,__data\n"
             consts_asm += "\t.globl\t__binary_constants_bin_start\n"
@@ -3143,7 +3179,5 @@ if (
     or os.environ.get("TORCH_WARM_POOL", "1") != "1"
 ):
     pass
-elif sys.version_info >= (3, 12):
-    log.info("AsyncCompile.warm_pool() is broken on 3.12+.")
 else:
     AsyncCompile.warm_pool()

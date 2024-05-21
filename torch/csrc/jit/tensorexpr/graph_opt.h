@@ -60,7 +60,7 @@ bool OptimizeCat(const std::shared_ptr<Graph>& graph);
 
 TORCH_API void annotateInputShapes(
     const std::shared_ptr<Graph>& graph,
-    const std::vector<c10::optional<at::Tensor>>& example_inputs);
+    const std::vector<std::optional<at::Tensor>>& example_inputs);
 TORCH_API std::shared_ptr<Graph> removeUnusedSelfArgument(
     const std::shared_ptr<Graph>& graph);
 TORCH_API std::shared_ptr<Graph> removeGraphOutput(
