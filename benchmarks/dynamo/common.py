@@ -2762,6 +2762,7 @@ class BenchmarkRunner:
                     peak_mem = percentage * total / 10**9
             except Exception:
                 log.exception("Backend %s failed in warmup()", mode)
+                write_csv_when_exception(self.args, current_name, "warmup_failed", current_device)
                 return sys.exit(-1)
             dynamo_stats = get_dynamo_stats()
             dynamo_stats.subtract(start_stats)
