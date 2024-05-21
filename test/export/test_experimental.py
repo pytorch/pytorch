@@ -134,6 +134,7 @@ def forward(self, arg0_1, arg1_1):
         exported_module = _convert_ts_to_export_experimental(
             traced_module_by_torchscript, inps
         )
+        print(exported_module.graph)
 
         self.assertTrue(torch.allclose(exported_module(inps), model_to_trace(inps)))
 

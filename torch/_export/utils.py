@@ -3,6 +3,7 @@ import inspect
 import math
 import operator
 import re
+import ast
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Type
 
 import torch
@@ -428,6 +429,35 @@ def node_inline_(call_mod_node: torch.fx.Node) -> None:
     return gm
 
 
+def _get_torch_jit_trace_forward_signature(mod: torch.nn.Module):
+    """
+    Get source code and parse argument names using AST.
+    """
+    ast_mod = ast.parse(mod.code)
+    ast_func_def = ast_mod.body[0]
+
+    # Arguments type mappings. Used to map from AST to Python signature.
+    # FIXME: Currently, other arguments types are commentted out.
+    arg_type_map = {
+        # "posonlyargs": inspect._POSITIONAL_ONLY,
+        "args": inspect._POSITIONAL_OR_KEYWORD,
+        # "vararg": inspect._VAR_POSITIONAL,
+        # "kwonlyargs": inspect._KEYWORD_ONLY,
+        # "kwarg": inspect._VAR_KEYWORD,
+    }
+
+    # Traverse all argument types in AST tree and create associated parameters.
+    param_list = []
+    for arg_type, param_type in arg_type_map.items():
+        arg_name_list = [a.arg for a in getattr(ast_func_def.args, arg_type)]
+        for arg_name in arg_name_list:
+            if arg_name == "self":
+                continue  # Skip self argument.
+            param_list.append(inspect.Parameter(arg_name, param_type))
+
+    return inspect.Signature(parameters=param_list)
+
+
 def placeholder_naming_pass(
     gm: torch.fx.GraphModule,
     export_graph_signature: torch.export.ExportGraphSignature,
@@ -436,6 +466,7 @@ def placeholder_naming_pass(
     fake_kwargs,
     fake_params_buffers,
     constants: Dict[str, Any],
+    _is_torch_jit_trace: bool,
 ) -> None:
     """
     This pass is run at the end of _export_non_strict() to assign better placeholder node names:
@@ -475,9 +506,13 @@ def placeholder_naming_pass(
     name_map: Dict[str, str] = {}
 
     # map user input names with mod.forward() signature
+    from torch.jit._trace import TopLevelTracedModule
+
+    sig = inspect.signature(mod.forward) if not _is_torch_jit_trace else _get_torch_jit_trace_forward_signature(mod)
     combined_args = (
-        inspect.signature(mod.forward).bind(*fake_args, **fake_kwargs).arguments
+        sig.bind(*fake_args, **fake_kwargs).arguments
     )
+
     flat_args_with_path, _ = tree_flatten_with_path(combined_args)
     user_input_names = [
         spec.arg.name
