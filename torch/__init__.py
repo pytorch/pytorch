@@ -184,14 +184,30 @@ def load_shared_libraries(library_path):
     if not os.path.exists(lib_dir):
         return
 
-    so_files = [f for f in os.listdir(lib_dir) if f.endswith('.so')]
+    # Determine the file extension based on the platform
+    if platform.system() == 'Darwin':
+        lib_ext = '.dylib'
+    elif platform.system() == 'Windows':
+        lib_ext = '.dll'
+    else:
+        lib_ext = '.so'
+
+    # Find all shared library files with the appropriate extension
+    so_files = [f for f in os.listdir(lib_dir) if f.endswith(lib_ext)]
     if not so_files:
         return
+
     for so_file in so_files:
         so_path = os.path.join(lib_dir, so_file)
         try:
-            ctypes.CDLL(so_path, mode=ctypes.RTLD_GLOBAL)
+            # Use RTLD_GLOBAL only if not on Windows
+            if platform.system() == 'Windows':
+                ctypes.CDLL(so_path)
+            else:
+                ctypes.CDLL(so_path, mode=ctypes.RTLD_GLOBAL)
+            print(f"Successfully loaded {so_path}")
         except OSError as e:
+            print(f"Failed to load {so_path}: {e}")
 
 # See Note [Global dependencies]
 def _load_global_deps() -> None:
@@ -199,7 +215,6 @@ def _load_global_deps() -> None:
         return
     split_build_lib_name = "libtorchsplit"
     library_path = find_package_path(split_build_lib_name)
-    print(f"libtrary path {library_path}")
     if library_path:
         load_shared_libraries(library_path)
 
