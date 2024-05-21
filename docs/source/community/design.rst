@@ -119,7 +119,7 @@ This principle began as **Python First**:
   PyTorch is not a Python binding into a monolithic C++ framework.
   It is built to be deeply integrated into Python. You can use it
   naturally like you would use `NumPy <https://www.numpy.org/>`__,
-  `SciPy <https://www.scipy.org/>`__, `scikit-learn <(https://scikit-learn.org/>`__,
+  `SciPy <https://www.scipy.org/>`__, `scikit-learn <https://scikit-learn.org/>`__,
   or other Python libraries. You can write your new neural network
   layers in Python itself, using your favorite libraries and use
   packages such as `Cython <https://cython.org/>`__ and

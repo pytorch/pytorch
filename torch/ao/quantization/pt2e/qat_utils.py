@@ -58,6 +58,7 @@ _quantized_conv2d_bn_example_inputs = (
 def _get_quantized_conv_bn_example_inputs_kwargs(
     is_per_channel: bool,
     has_bias: bool,
+    bias_is_quantized: bool,
     is_cuda: bool,
 ) -> Dict[str, Any]:
     """
@@ -68,8 +69,11 @@ def _get_quantized_conv_bn_example_inputs_kwargs(
     # Per tensor quantization uses literals to represent scale and zero
     # point, so there is no need to include them here as kwargs
     if is_per_channel:
-        kwargs["scale"] = torch.tensor([1], dtype=torch.float)
-        kwargs["zero_point"] = torch.tensor([0], dtype=torch.int)
+        kwargs["weight_scale"] = torch.tensor([1], dtype=torch.float)
+        kwargs["weight_zero_point"] = torch.tensor([0], dtype=torch.int)
+        if has_bias and bias_is_quantized:
+            kwargs["bias_scale"] = torch.tensor([1], dtype=torch.float)
+            kwargs["bias_zero_point"] = torch.tensor([0], dtype=torch.int)
     if has_bias:
         kwargs["conv_bias"] = torch.randn(1)
     if is_cuda:
@@ -157,7 +161,7 @@ def _get_qat_conv_bn_pattern_no_conv_bias(conv_fn: Callable) -> Callable:
         return x
     return _WrapperModule(_qat_conv_bn_pattern_no_conv_bias)
 
-def _append_qdq(x, is_per_channel, kwargs):
+def _append_qdq(x, is_per_channel, is_bias, kwargs):
     """
     Helper function to append q-dq ops after `x`, using dummy values for the qparams
     and qmin/qmax. We use dummy values here because we match with `ignore_literals=True`
@@ -167,8 +171,10 @@ def _append_qdq(x, is_per_channel, kwargs):
     """
     # Dummy args to be passed into q-dq ops
     per_channel_axis = 0
-    scale = kwargs["scale"] if is_per_channel else 1.0
-    zp = kwargs["zero_point"] if is_per_channel else 0
+    scale_key = "bias_scale" if is_bias else "weight_scale"
+    zp_key = "bias_zero_point" if is_bias else "weight_zero_point"
+    scale = kwargs[scale_key] if is_per_channel else 1.0
+    zp = kwargs[zp_key] if is_per_channel else 0
     qmin = -127
     qmax = 127
     dtype = torch.int8
@@ -215,11 +221,15 @@ def _get_quantized_qat_conv_bn_pattern(
         bias_shape = [1] * len(conv_weight.shape)
         bias_shape[1] = -1
         scaled_weight = conv_weight * scale_factor.reshape(weight_shape)
-        scaled_weight = _append_qdq(scaled_weight, is_per_channel, kwargs)
+        scaled_weight = _append_qdq(
+            scaled_weight, is_per_channel, is_bias=False, kwargs=kwargs,
+        )
         if has_bias:
             zero_bias = torch.zeros_like(kwargs["conv_bias"], dtype=x.dtype)
             if bias_is_quantized:
-                zero_bias = _append_qdq(zero_bias, is_per_channel, kwargs)
+                zero_bias = _append_qdq(
+                    zero_bias, is_per_channel, is_bias=True, kwargs=kwargs,
+                )
             x = conv_fn(x, scaled_weight, zero_bias)
         else:
             x = conv_fn(x, scaled_weight, None)
@@ -252,11 +262,15 @@ def _get_folded_quantized_qat_conv_bn_pattern(
         bn_running_var: torch.Tensor,
         **kwargs,
     ) -> torch.Tensor:
-        conv_weight = _append_qdq(conv_weight, is_per_channel, kwargs)
+        conv_weight = _append_qdq(
+            conv_weight, is_per_channel, is_bias=False, kwargs=kwargs,
+        )
         if has_bias:
             bias = kwargs["conv_bias"]
             if bias_is_quantized:
-                bias = _append_qdq(bias, is_per_channel, kwargs)
+                bias = _append_qdq(
+                    bias, is_per_channel, is_bias=True, kwargs=kwargs,
+                )
         else:
             bias = None
         x = conv_fn(x, conv_weight, bias)
@@ -696,7 +710,7 @@ def _copy_over_q_dq_args(original_node: Node, replacement_node: Node):
         # Args: input, scale, zp, [axis, qmin, qmax, dtype]
         start_copy_arg_index = 3
     else:
-        raise ValueError("Expected quantize/dequantize nodes, got '%s'" % original_node.target)
+        raise ValueError(f"Expected quantize/dequantize nodes, got '{original_node.target}'")
     replacement_node.args = (
         replacement_node.args[:start_copy_arg_index] + original_node.args[start_copy_arg_index:]
     )
@@ -739,7 +753,7 @@ def _fold_conv_bn_qat_helper(
         # filter out one of the values for this flag to avoid having duplicate patterns
         if not has_bias and bias_is_quantized:
             continue
-        kwargs = _get_quantized_conv_bn_example_inputs_kwargs(is_per_channel, has_bias, is_cuda)
+        kwargs = _get_quantized_conv_bn_example_inputs_kwargs(is_per_channel, has_bias, bias_is_quantized, is_cuda)
         match_pattern = _get_quantized_qat_conv_bn_pattern(
             is_per_channel, has_bias, bias_is_quantized, conv_fn, bn_is_training
         )

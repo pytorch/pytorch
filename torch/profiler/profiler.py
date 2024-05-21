@@ -72,8 +72,10 @@ class _KinetoProfile:
 
     Args:
         activities (iterable): list of activity groups (CPU, CUDA) to use in profiling, supported values:
-            ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``.
-            Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA.
+            ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``,
+            ``torch.profiler.ProfilerActivity.XPU``.
+            Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA
+            or (when available) ProfilerActivity.XPU.
         record_shapes (bool): save information about operator's input shapes.
         profile_memory (bool): track tensor memory allocation/deallocation (see ``export_memory_timeline``
             for more details).
@@ -126,9 +128,13 @@ class _KinetoProfile:
         self.profiler: Optional[prof.profile] = None
         self.mem_tl: Optional[MemoryProfileTimeline] = None
         self.use_device = None
-        privateuse1_backend = _get_privateuse1_backend_name()
-        if privateuse1_backend != "privateuseone":
-            self.use_device = privateuse1_backend
+        if ProfilerActivity.CUDA in self.activities:
+            self.use_device = "cuda"
+        elif ProfilerActivity.XPU in self.activities:
+            self.use_device = "xpu"
+        elif ProfilerActivity.PrivateUse1 in self.activities:
+            self.use_device = _get_privateuse1_backend_name()
+
         # user-defined metadata to be amended to the trace
         self.preset_metadata: Dict[str, str] = dict()
 
@@ -140,19 +146,19 @@ class _KinetoProfile:
         self.stop_trace()
 
     def prepare_trace(self):
-        self.profiler = prof.profile(
-            use_cuda=(ProfilerActivity.CUDA in self.activities),
-            use_cpu=(ProfilerActivity.CPU in self.activities),
-            use_mtia=(ProfilerActivity.MTIA in self.activities),
-            use_device=None,
-            record_shapes=self.record_shapes,
-            with_flops=self.with_flops,
-            profile_memory=self.profile_memory,
-            with_stack=self.with_stack,
-            with_modules=self.with_modules,
-            use_kineto=True,
-            experimental_config=self.experimental_config,
-        )
+        if self.profiler is None:
+            self.profiler = prof.profile(
+                use_cpu=(ProfilerActivity.CPU in self.activities),
+                use_mtia=(ProfilerActivity.MTIA in self.activities),
+                use_device=self.use_device,
+                record_shapes=self.record_shapes,
+                with_flops=self.with_flops,
+                profile_memory=self.profile_memory,
+                with_stack=self.with_stack,
+                with_modules=self.with_modules,
+                use_kineto=True,
+                experimental_config=self.experimental_config,
+            )
         self.profiler._prepare_trace()
 
     def start_trace(self):
@@ -201,7 +207,8 @@ class _KinetoProfile:
 
     def export_chrome_trace(self, path: str):
         """
-        Exports the collected trace in Chrome JSON format.
+        Exports the collected trace in Chrome JSON format. If kineto is enabled, only
+        last cycle in schedule is exported.
         """
         assert self.profiler
         if path.endswith(".gz"):
@@ -444,8 +451,10 @@ class profile(_KinetoProfile):
 
     Args:
         activities (iterable): list of activity groups (CPU, CUDA) to use in profiling, supported values:
-            ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``.
-            Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA.
+            ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``,
+            ``torch.profiler.ProfilerActivity.XPU``.
+            Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA
+            or (when available) ProfilerActivity.XPU.
         schedule (Callable): callable that takes step (int) as a single parameter and returns
             ``ProfilerAction`` value that specifies the profiler action to perform at each step.
         on_trace_ready (Callable): callable that is called at each step when ``schedule``
@@ -811,7 +820,10 @@ class ExecutionTraceObserver(_ITraceObserver):
 
         if self._registered:
             self.stop()
-            _save_triton_kernels()
+            try:
+                _save_triton_kernels()
+            except Exception as e:
+                warn(f"Execution trace failed to save kernels: {e}")
             _remove_execution_trace_observer()
             self._registered = False
 

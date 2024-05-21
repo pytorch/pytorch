@@ -125,10 +125,11 @@ def foreach_reduce(
     orig_dtype: torch.dtype,
     reduce_dtype: Optional[torch.dtype],
     device: torch.device,
-    divide_factors: Union[Tuple[None, None], Tuple[float, float]],
-    all_reduce_group: Optional[dist.ProcessGroup],
+    all_reduce_group: Optional[dist.ProcessGroup],  # not `None` iff HSDP
     all_reduce_stream: torch.cuda.Stream,
-) -> torch.cuda.Event:
+    all_reduce_grads: bool,
+    partial_reduce_output: Optional[torch.Tensor],  # only used for HSDP
+) -> Tuple[torch.cuda.Event, Optional[torch.Tensor]]:
     """
     ``unsharded_grads`` owns the references to the gradients computed by
     autograd, so clearing the list frees the gradients.
@@ -142,7 +143,9 @@ def foreach_reduce(
         )
     grad_dtype = unsharded_grads[0].dtype
     reduce_dtype = reduce_dtype or grad_dtype
-    predivide_factor, postdivide_factor = divide_factors
+    predivide_factor, postdivide_factor = _get_gradient_divide_factors(
+        reduce_scatter_group, all_reduce_group, reduce_dtype
+    )
     world_size = reduce_scatter_group.size()
     padded_unsharded_sizes = tuple(
         _get_dim0_padded_size(grad.size(), world_size) for grad in unsharded_grads
@@ -162,37 +165,63 @@ def foreach_reduce(
         # computed in the default stream
         current_stream.wait_stream(reduce_scatter_stream)
         unsharded_grads.clear()
-        post_reduce_output = reduce_scatter_input.new_empty(
-            (reduce_scatter_output_numel,)
-        )
+        reduce_output = reduce_scatter_input.new_empty((reduce_scatter_output_numel,))
         _div_if_needed(reduce_scatter_input, predivide_factor)
-        _reduce_scatter(
-            post_reduce_output,
-            reduce_scatter_input,
-            reduce_scatter_group,
-            divide_factors,
+        dist.reduce_scatter_tensor(
+            output=reduce_output,
+            input=reduce_scatter_input,
+            group=reduce_scatter_group,
+            op=ReduceOp.AVG if predivide_factor is None else ReduceOp.SUM,
         )
-    view_out_stream = reduce_scatter_stream
-    if all_reduce_group is not None:
-        view_out_stream = all_reduce_stream
-        all_reduce_stream.wait_stream(reduce_scatter_stream)
-        with torch.cuda.stream(all_reduce_stream):
-            _all_reduce(post_reduce_output, all_reduce_group, divide_factors)
-    with torch.cuda.stream(view_out_stream):
-        _div_if_needed(post_reduce_output, postdivide_factor)
-        post_reduce_output = _to_dtype_if_needed(post_reduce_output, orig_dtype)
-        # - View out and accumulate
+        post_reduce_stream = reduce_scatter_stream
+        if all_reduce_group is not None:  # HSDP
+            # Accumulations must run in the reduce-scatter stream
+            if not all_reduce_grads:
+                if partial_reduce_output is not None:
+                    partial_reduce_output += reduce_output
+                else:
+                    partial_reduce_output = reduce_output
+                return post_reduce_stream.record_event(), partial_reduce_output
+            if partial_reduce_output is not None:
+                reduce_output += partial_reduce_output
+            post_reduce_stream = all_reduce_stream
+            all_reduce_stream.wait_stream(reduce_scatter_stream)
+            with torch.cuda.stream(all_reduce_stream):
+                dist.all_reduce(
+                    reduce_output,
+                    group=all_reduce_group,
+                    op=ReduceOp.AVG if predivide_factor is None else ReduceOp.SUM,
+                )
+    with torch.cuda.stream(post_reduce_stream):
+        _div_if_needed(reduce_output, postdivide_factor)
+        reduce_output = _to_dtype_if_needed(reduce_output, orig_dtype)
+        # View out and accumulate sharded gradients
         flat_grad_offset = 0  # [0, reduce_scatter_output_numel - 1]
         for padded_unsharded_size, fsdp_param in zip(
             padded_unsharded_sizes, fsdp_params
         ):
             new_sharded_grad = torch.as_strided(
-                post_reduce_output,
+                reduce_output,
                 size=fsdp_param.sharded_size,
                 stride=fsdp_param.contiguous_sharded_stride,
                 storage_offset=flat_grad_offset,
             )
             to_accumulate_grad = fsdp_param.sharded_param.grad is not None
+            if fsdp_param.offload_to_cpu:
+                # Only overlap the D2H copy (copying to pinned memory) if not
+                # accumulating gradients since the CPU add kernel depends on
+                # the copy result and we cannot run the add as a callback
+                non_blocking = fsdp_param.pin_memory and not to_accumulate_grad
+                # Since the GPU sharded gradient is allocated in the RS stream,
+                # we can free it here by not keeping a ref without waiting for
+                # the D2H copy since future RS-stream ops run after the copy
+                new_sharded_grad = new_sharded_grad.to(
+                    torch.device("cpu"), non_blocking=non_blocking
+                )
+                if non_blocking:
+                    # Record an event on which to block the CPU thread to
+                    # ensure that the D2H copy finishes before the optimizer
+                    fsdp_param.grad_offload_event = reduce_scatter_stream.record_event()
             new_sharded_dtensor_grad = fsdp_param.to_sharded_dtensor(new_sharded_grad)
             if to_accumulate_grad:
                 fsdp_param.sharded_param.grad += new_sharded_dtensor_grad
@@ -200,12 +229,12 @@ def foreach_reduce(
                 fsdp_param.sharded_param.grad = new_sharded_dtensor_grad
             padded_sharded_numel = padded_unsharded_size.numel() // world_size
             flat_grad_offset += padded_sharded_numel
-        post_reduce_view_out_event = view_out_stream.record_event()
+        post_reduce_event = post_reduce_stream.record_event()
     # The RS output is allocated in the RS stream and used in the default
     # stream (for optimizer). To ensure its memory is not reused for later
     # RSs, we do not need extra synchronization since the sharded parameters
     # hold refs through the end of backward.
-    return post_reduce_view_out_event
+    return post_reduce_event, None
 
 
 def foreach_reduce_scatter_copy_in(
@@ -242,30 +271,27 @@ def _get_all_gather_input_metadatas(
     )
 
 
-def _reduce_scatter(
-    output: torch.Tensor,
-    input: torch.Tensor,
-    group: dist.ProcessGroup,
-    divide_factors: Union[Tuple[None, None], Tuple[float, float]],
-) -> None:
-    if divide_factors[0]:
-        dist.reduce_scatter_tensor(output, input, group=group)
-    else:
-        # Using NCCL's reduce-scatter to do the division by world size saves
-        # extra memory read/write from a separate division kernel
-        dist.reduce_scatter_tensor(output, input, op=ReduceOp.AVG, group=group)
-
-
-def _all_reduce(
-    tensor: torch.Tensor,
-    group: dist.ProcessGroup,
-    divide_factors: Union[Tuple[None, None], Tuple[float, float]],
-) -> None:
-    if divide_factors[0]:
-        dist.all_reduce(tensor, group=group)
-    else:
-        # saves extra memory read/write from a separate division kernel
-        dist.all_reduce(tensor, op=ReduceOp.AVG, group=group)
+def _get_gradient_divide_factors(
+    reduce_scatter_group: dist.ProcessGroup,
+    all_reduce_group: Optional[dist.ProcessGroup],
+    reduce_dtype: torch.dtype,
+) -> Union[Tuple[None, None], Tuple[float, float]]:
+    # For fp32/bf16, we do not need to worry about overflow/underflow, so we
+    # use NCCL's built-in division to avoid separate div kernels
+    if reduce_dtype in (torch.float32, torch.bfloat16):
+        return None, None
+    data_parallel_size = reduce_scatter_group.size()
+    if all_reduce_group is not None:
+        data_parallel_size *= all_reduce_group.size()
+    # Since fp16 has smaller dynamic range than fp32/bf16, we want to avoid
+    # overflow/underflow. For N data parallel workers, each worker computes
+    # g_i, and they collectively reduce (g_1 + ... + g_N) / N. To avoid
+    # overflow/underflow, we divide by ~sqrt(N) before/after the reduction.
+    factor: int = 1
+    while data_parallel_size % factor == 0 and data_parallel_size / factor > factor:
+        factor *= 2
+    factor = float(factor)
+    return (factor, data_parallel_size / factor)
 
 
 def _div_if_needed(tensor: torch.Tensor, div_factor: Optional[float]) -> None:

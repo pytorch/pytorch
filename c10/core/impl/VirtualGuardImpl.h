@@ -87,8 +87,9 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
     impl_->recordDataPtrOnStream(data_ptr, stream);
   }
 
-  double elapsedTime(void* event1, void* event2) const override {
-    return impl_->elapsedTime(event1, event2);
+  double elapsedTime(void* event1, void* event2, const DeviceIndex device_index)
+      const override {
+    return impl_->elapsedTime(event1, event2, device_index);
   }
 
   void synchronizeEvent(void* event) const override {

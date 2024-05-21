@@ -3,6 +3,8 @@ import functools
 import itertools
 import unittest
 
+from functools import partial
+
 import torch
 
 import torch._dynamo.test_case
@@ -35,6 +37,105 @@ from torch.testing._internal.two_tensor import TwoTensor
 
 def traceable_subclass(c):
     return torch._dynamo.config.patch("traceable_tensor_subclasses", {c})
+
+
+def get_jagged_tensor(nested_size, offsets, requires_grad=True):
+    # Makes a jagged tensor with N constituent tensors with size
+    # as specified ((S0, S1, S2), D)
+    D = nested_size[1]
+    out = []
+    for s in nested_size[0]:
+        out.append(torch.randn(s, D, requires_grad=requires_grad, dtype=torch.float64))
+    return jagged_from_list(out, offsets)
+
+
+def get_view_test_cases():
+    # Test all cases with both an NT base and a dense base
+    # Subclass -> Subclass
+    # Dense -> Subclass
+
+    # NB: Don't close over loop variables, they will not get copied into the
+    # closure
+    #
+    # NB: These return functions so we don't generate tensors during test
+    # collection time
+
+    def mk_basic(base_is_nt):
+        # There are three cases to consider here based on the logic in
+        # meta_utils.py
+        #
+        # (1) basic case:
+        # view is not a leaf and has the same requires grad as its basic case
+        x, _ = get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)
+        x = x.clone() if base_is_nt else x
+        assert not x.is_leaf
+        return x.unsqueeze(-1)
+
+    def mk_leaf(base_is_nt, requires_grad_1, requires_grad_2):
+        x, _ = get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=requires_grad_1)
+        x = x.clone() if base_is_nt else x
+        with torch.no_grad():
+            x_view = x.unsqueeze(-1)
+            # The issue is this doesn't quite work
+            x_view.requires_grad_(requires_grad_2)
+
+        return x_view
+
+    def mk_obscure(base_is_nt):
+        x, _ = get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=False)
+        x = x.clone() if base_is_nt else x
+        # intermediate leaf view
+        with torch.no_grad():
+            x_view = x.unsqueeze(-1)
+        x_view.requires_grad_(True)
+        x_view_view = x_view.unsqueeze(-1)
+        return x_view_view
+
+    for base_is_nt in [False, True]:
+        prefix = f"base_is_nt_{base_is_nt}"
+
+        yield partial(mk_basic, base_is_nt), f"{prefix}_basic"
+
+        # (2) leaf view case:
+        # the view has to be a leaf (w/ requires_grad True or requires_grad False)
+        # base w/ requires_grad True or requires_grad False
+        for requires_grad_1, requires_grad_2 in itertools.product(
+            [True, False], repeat=2
+        ):
+            yield partial(
+                mk_leaf, base_is_nt, requires_grad_1, requires_grad_2
+            ), f"{prefix}_leaf_{requires_grad_1}_{requires_grad_2}"
+
+        # (3) obscure case:
+        # view is not a leaf (implies requires_grad True)
+        # base w/ requires_grad False)
+        yield partial(mk_obscure, base_is_nt), f"{prefix}_obscure"
+
+    # Subclass -> Dense
+    yield lambda: get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)[
+        0
+    ].clone(), "subclass_dense"
+
+    # Dense -> Subclass -> Dense -> Subclass
+    def mk_dense_subclass_dense_subclass():
+        values = torch.randn(10, 5)
+        offsets = torch.tensor([0, 3, 6, 10])
+        offsets2 = offsets.clone().detach()
+        return nested_view_from_values_offsets(
+            nested_view_from_values_offsets(values, offsets).values(), offsets
+        )
+
+    yield mk_dense_subclass_dense_subclass, "dense_subclass_dense_subclass"
+
+    def mk_subclass_dense_subclass_dense():
+        x = get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)[0].clone()
+        offsets2 = x.offsets().clone().detach()
+        nt_view = nested_view_from_values_offsets(x.values(), offsets2).values()
+
+    yield mk_subclass_dense_subclass_dense, "subclass_dense_subclass_dense"
+
+
+VIEW_TEST_CASES = {k: v for v, k in get_view_test_cases()}
 
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
@@ -660,18 +761,20 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(backend.graphs), 1)
         self.assertEqual(len(backend.example_inputs), 1)
 
-        expected = """\
+        actual = normalize_gm(backend.graphs[0].print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_ : torch.Tensor):
+    def forward(self, L_x_: "f32[3, 4]"):
         l_x_ = L_x_
 
-        add_ = l_x_.add_(1.0)
-        relu_ = torch.relu_(l_x_);  l_x_ = None
-        add = add_ + relu_;  add_ = relu_ = None
+        add_: "f32[3, 4]" = l_x_.add_(1.0)
+        relu_: "f32[3, 4]" = torch.relu_(l_x_);  l_x_ = None
+        add: "f32[3, 4]" = add_ + relu_;  add_ = relu_ = None
         return (add,)
-"""
-        actual = normalize_gm(backend.graphs[0].print_readable(print_output=False))
-        self.assertEqual(actual, expected)
+""",
+        )
 
         ff = torch.func.functionalize(f)
         ff_out = ff(x_clone)
@@ -681,7 +784,19 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(backend.graphs), 2)
         self.assertEqual(len(backend.example_inputs), 2)
         actual = normalize_gm(backend.graphs[1].print_readable(print_output=False))
-        self.assertEqual(actual, expected)
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        add_ = l_x_.add_(1.0)
+        relu_ = torch.relu_(l_x_);  l_x_ = None
+        add = add_ + relu_;  add_ = relu_ = None
+        return (add,)
+""",
+        )
         self.assertTrue(torch._is_functional_tensor(backend.example_inputs[1][0]))
 
         # Cannot re-use the version from AOTAutograd, since that uses python functional tensors.
@@ -711,7 +826,19 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(backend.graphs), 3)
         self.assertEqual(len(backend.example_inputs), 3)
         actual = normalize_gm(backend.graphs[2].print_readable(print_output=False))
-        self.assertEqual(actual, expected)
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        add_ = l_x_.add_(1.0)
+        relu_ = torch.relu_(l_x_);  l_x_ = None
+        add = add_ + relu_;  add_ = relu_ = None
+        return (add,)
+""",
+        )
         self.assertTrue(torch._is_functional_tensor(backend.example_inputs[1][0]))
 
         self.assertEqual(f_out, ff_out)
@@ -743,14 +870,42 @@ class GraphModule(torch.nn.Module):
             actual = normalize_gm(
                 backend.graphs[exp_n_graph - 1].print_readable(print_output=False)
             )
-            self.assertExpectedInline(actual, exp_graph)
+            self.assertExpectedInline(actual, exp_graph, skip=1)
 
         t = torch.randn([3, 4])
         t_clone = t.clone()
         t_clone2 = t.clone()
         f(t)
 
-        expected_graph = """\
+        check_count_and_graph(
+            1,
+            2,
+            1,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[3, 4]"):
+        l_x_ = L_x_
+
+        wrap_body_0 = self.wrap_body_0
+        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
+        getitem: "f32[3, 4]" = wrap[0];  wrap = None
+        return (getitem,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_: "f32[3, 4]"):
+            add_: "f32[3, 4]" = l_x_.add_(1.0);  l_x_ = None
+            return (add_,)
+""",
+        )
+
+        ff = torch.func.functionalize(f)
+        ff_out = ff(t_clone)
+        # frame count and op count are incremented due to re-compilation
+        check_count_and_graph(
+            2,
+            4,
+            2,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
         l_x_ = L_x_
@@ -764,13 +919,8 @@ class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
             add_ = l_x_.add_(1.0);  l_x_ = None
             return (add_,)
-"""
-        check_count_and_graph(1, 2, 1, expected_graph)
-
-        ff = torch.func.functionalize(f)
-        ff_out = ff(t_clone)
-        # frame count and op count are incremented due to re-compilation
-        check_count_and_graph(2, 4, 2, expected_graph)
+""",
+        )
 
         try:
             x = torch._to_functional_tensor(t_clone2)
@@ -781,7 +931,26 @@ class GraphModule(torch.nn.Module):
             torch._disable_functionalization()
 
         # frame count and op count are incremented due to re-compilation
-        check_count_and_graph(3, 6, 3, expected_graph)
+        check_count_and_graph(
+            3,
+            6,
+            3,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        wrap_body_0 = self.wrap_body_0
+        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
+        getitem = wrap[0];  wrap = None
+        return (getitem,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_):
+            add_ = l_x_.add_(1.0);  l_x_ = None
+            return (add_,)
+""",
+        )
 
     def test_has_torch_function(self):
         class MyTensor:
@@ -1088,13 +1257,13 @@ s1 > 3""",
         true_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self):
-        ones = torch.ones([3, 4])
+        ones: "f32[3, 4]" = torch.ones([3, 4])
         return (ones,)
 """
         false_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self):
-        ones = torch.ones([4, 3])
+        ones: "f32[4, 3]" = torch.ones([4, 3])
         return (ones,)
 """
         test_recompilation(
@@ -1207,15 +1376,7 @@ instantiate_parametrized_tests(SubclassTests)
 
 class TestNestedTensor(torch._dynamo.test_case.TestCase):
     def _get_jagged_tensor(self, nested_size, offsets, requires_grad=True):
-        # Makes a jagged tensor with N constituent tensors with size
-        # as specified ((S0, S1, S2), D)
-        D = nested_size[1]
-        out = []
-        for s in nested_size[0]:
-            out.append(
-                torch.randn(s, D, requires_grad=requires_grad, dtype=torch.float64)
-            )
-        return jagged_from_list(out, offsets)
+        return get_jagged_tensor(nested_size, offsets, requires_grad)
 
     def _get_nc_jagged_tensor(self, inner_dim, starts, lengths, requires_grad=True):
         # Makes a jagged tensor with N constituent tensors with size
@@ -1361,62 +1522,17 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         self._check_recompiles(fn, (nt,), (nt2,), False)
         self._check_recompiles(fn, (nt,), (nt3,), True)
 
-    def _get_views(self):
-        # Test all cases with both an NT base and a dense base
-        # Subclass -> Subclass
-        # Dense -> Subclass
-        for base_is_nt in [False, True]:
-            # There are three cases to consider here based on the logic in
-            # meta_utils.py
-            #
-            # (1) basic case:
-            # view is not a leaf and has the same requires grad as its basic case
-            x, _ = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)
-            x = x.clone() if base_is_nt else x
-            self.assertEqual(x.is_leaf, False)
-            yield x.unsqueeze(-1)
+    def test_inline_nested_tensor_from_jagged(self):
+        nt, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
 
-            # (2) leaf view case:
-            # the view has to be a leaf (w/ requires_grad True or requires_grad False)
-            # base w/ requires_grad True or requires_grad False
-            for requires_grad_1, requires_grad_2 in itertools.product(
-                [True, False], repeat=2
-            ):
-                x, _ = self._get_jagged_tensor(
-                    ((2, 3, 4), 3), None, requires_grad=requires_grad_1
-                )
-                x = x.clone() if base_is_nt else x
-                with torch.no_grad():
-                    x_view = x.unsqueeze(-1)
-                    # The issue is this doesn't quite work
-                    x_view.requires_grad_(requires_grad_2)
-                yield x_view
+        def fn(x):
+            return torch.nested.nested_tensor_from_jagged(x.values() * 2, x.offsets())
 
-            # (3) obscure case:
-            # view is not a leaf (implies requires_grad True)
-            # base w/ requires_grad False)
-            x, _ = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=False)
-            x = x.clone() if base_is_nt else x
-            # intermediate leaf view
-            with torch.no_grad():
-                x_view = x.unsqueeze(-1)
-            x_view.requires_grad_(True)
-            x_view_view = x_view.unsqueeze(-1)
-            yield x_view_view
+        torch.compile(fn, fullgraph=True, backend="aot_eager")(nt)
 
-        # Subclass -> Dense
-        x = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)[0].clone()
-        yield x.values()
+    def _input_view_test(self, nt_view_name):
+        nt_view = VIEW_TEST_CASES[nt_view_name]()
 
-        # Dense -> Subclass -> Dense -> Subclass
-        values = torch.randn(10, 5)
-        offsets = torch.tensor([0, 3, 6, 10])
-        offsets2 = offsets.clone().detach()
-        yield nested_view_from_values_offsets(
-            nested_view_from_values_offsets(values, offsets).values(), offsets
-        )
-
-    def _input_view_test(self, nt_view):
         def fn(x):
             return x.sin()
 
@@ -1442,7 +1558,10 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
 
             # varies based on the type of view
             guard_str = "\n".join(guards)
-            if isinstance(nt_view._base, NestedTensor):
+            if (
+                isinstance(nt_view._base, NestedTensor)
+                or nt_view_name == "subclass_dense"
+            ):
                 self.assertExpectedInline(guard_str, """Eq(s3 - 1, s0)""")
             else:
                 self.assertExpectedInline(guard_str, """""")
@@ -1452,9 +1571,12 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         compile_fn = torch.compile(fn, fullgraph=True, backend=backend, dynamic=True)
         out = compile_fn(nt_view)
 
-    def test_inputs_to_compiled_fn_are_views(self):
-        for nt_view in self._get_views():
-            self._input_view_test(nt_view)
+    @parametrize(
+        "nt_view_name",
+        [k for k in VIEW_TEST_CASES.keys() if k != "subclass_dense_subclass_dense"],
+    )
+    def test_inputs_to_compiled_fn_are_views(self, nt_view_name):
+        self._input_view_test(nt_view_name)
 
     def test_subclass_gives_static_shapes_when_dynamic_false(self):
         def check_graph(gm, *args):
@@ -1482,10 +1604,10 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
     # are cached onto fake offsets to solve this problem.
     @unittest.expectedFailure
     def test_subclass_dense_subclass_dense_view(self):
-        x = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)[0].clone()
-        offsets2 = x.offsets().clone().detach()
-        nt_view = nested_view_from_values_offsets(x.values(), offsets2).values()
-        self._input_view_test(nt_view)
+        self._input_view_test("subclass_dense_subclass_dense")
+
+
+instantiate_parametrized_tests(TestNestedTensor)
 
 
 if __name__ == "__main__":

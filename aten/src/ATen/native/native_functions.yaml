@@ -1750,6 +1750,7 @@
 - func: copy(Tensor self, Tensor src, bool non_blocking=False) -> Tensor
   variants: function
   dispatch:
+    Meta: copy_meta
     CompositeExplicitAutogradNonFunctional: copy
   tags: core
 
@@ -3127,6 +3128,7 @@
   structured: True
   dispatch:
     CPU, CUDA: isin_Tensor_Tensor_out
+    MPS: isin_Tensor_Tensor_out_mps
 
 - func: isin.Tensor_Tensor(Tensor elements, Tensor test_elements, *, bool assume_unique=False, bool invert=False) -> Tensor
   variants: function
@@ -3341,6 +3343,18 @@
 - func: _cslt_sparse_mm_search(Tensor compressed_A, Tensor dense_B, Tensor? bias=None, Tensor? alpha=None, ScalarType? out_dtype=None, bool transpose_result=False) -> int
   dispatch:
     CUDA: _cslt_sparse_mm_search
+
+- func: _sparse_semi_structured_tile(Tensor input, str algorithm="", bool use_cutlass=True) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+  dispatch:
+    CUDA: _sparse_semi_structured_tile
+
+- func: _sparse_semi_structured_apply(Tensor input, Tensor thread_masks) -> (Tensor, Tensor)
+  dispatch:
+    CUDA: _sparse_semi_structured_apply
+
+- func: _sparse_semi_structured_apply_dense(Tensor input, Tensor thread_masks) -> Tensor
+  dispatch:
+    CUDA: _sparse_semi_structured_apply_dense
 
 # DEPRECATED: Use torch.__sparse_semi_structured_mm/torch._sparse_semi_structured_addmm instead
 - func: _sparse_semi_structured_linear(Tensor input, Tensor weight, Tensor meta, *, Tensor? bias=None, str? activation=None, ScalarType? out_dtype=None) -> Tensor
@@ -4111,11 +4125,13 @@
 - func: _weight_int4pack_mm(Tensor self, Tensor mat2, int qGroupSize, Tensor qScaleAndZeros) -> Tensor
   dispatch:
     CPU: _weight_int4pack_mm_cpu
+    MPS: _weight_int4pack_mm_mps
     CUDA: _weight_int4pack_mm_cuda
 
 - func: _weight_int8pack_mm(Tensor self, Tensor mat2, Tensor scales) -> Tensor
   dispatch:
     CPU: _weight_int8pack_mm_cpu
+    MPS: _weight_int8pack_mm_mps
 
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
   python_module: sparse
@@ -7197,9 +7213,9 @@
 - func: sparse_dim(Tensor self) -> int
   variants: method
   dispatch:
-    CPU, CUDA: sparse_dim_strided
     SparseCPU, SparseCUDA, SparseMeta: sparse_dim_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sparse_dim_sparse_csr
+    CompositeExplicitAutograd: sparse_dim_default
   device_check: NoCheck
   device_guard: False
 
@@ -7214,9 +7230,9 @@
 - func: dense_dim(Tensor self) -> int
   variants: method
   dispatch:
-    CPU, CUDA: dense_dim_strided
     SparseCPU, SparseCUDA, SparseMeta: dense_dim_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: dense_dim_sparse_csr
+    CompositeExplicitAutograd: dense_dim_default
   device_check: NoCheck
   device_guard: False
 
@@ -7450,7 +7466,7 @@
     MkldnnCPU: mkldnn_reorder_conv2d_weight
   autogen: mkldnn_reorder_conv2d_weight.out
 
-- func: mkldnn_reorder_conv3d_weight(Tensor self, SymInt[3] padding=0, SymInt[3] stride=1, SymInt[3] dilation=1, SymInt groups=1) -> Tensor
+- func: mkldnn_reorder_conv3d_weight(Tensor self, SymInt[3] padding=0, SymInt[3] stride=1, SymInt[3] dilation=1, SymInt groups=1, SymInt[]? input_size=None) -> Tensor
   variants: function
   python_module: nn
   dispatch:
@@ -7698,7 +7714,7 @@
 
 - func: result_type.Scalar_Scalar(Scalar scalar1, Scalar scalar2) -> ScalarType
 
-- func: can_cast(ScalarType from, ScalarType to) -> bool
+- func: can_cast(ScalarType from_, ScalarType to) -> bool
   variants: function
 
 - func: promote_types(ScalarType type1, ScalarType type2) -> ScalarType
@@ -11342,7 +11358,13 @@
   dispatch:
     CPU: foreach_tensor_copy_list_kernel_slow_
     CUDA: foreach_tensor_copy_list_kernel_cuda_
-  autogen: _foreach_copy, _foreach_copy.out
+  autogen: _foreach_copy.out
+
+- func: _foreach_copy(Tensor[] self, Tensor[] src, bool non_blocking=False) -> Tensor[] self_out
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _foreach_copy
 
 - func: bucketize.Tensor(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
   dispatch:
@@ -14688,25 +14710,30 @@
     CUDA: _scaled_dot_product_efficient_attention_backward_cuda
   tags: nondeterministic_seeded
 
-- func: _scaled_dot_product_cudnn_attention(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor output, Tensor logsumexp, Tensor philox_seed, Tensor philox_offset)
+- func: _scaled_dot_product_cudnn_attention(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
   dispatch:
     CUDA: _scaled_dot_product_cudnn_attention_cuda
   tags: nondeterministic_seeded
 
-- func: _flash_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? cum_seq_q, Tensor? cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, bool return_debug_mask, *, float? scale=None) -> (Tensor output, Tensor softmax_logsumexp, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
+- func: _scaled_dot_product_cudnn_attention_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, Tensor philox_seed, Tensor philox_offset, *, float? scale=None) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CUDA: _scaled_dot_product_cudnn_attention_backward_cuda
+  tags: nondeterministic_seeded
+
+- func: _flash_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? cum_seq_q, Tensor? cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, bool return_debug_mask, *, float? scale=None, SymInt? window_size_left=None, SymInt? window_size_right=None) -> (Tensor output, Tensor softmax_logsumexp, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
   variants: function
   dispatch:
     CUDA: _flash_attention_forward
   tags: nondeterministic_seeded
 
-- func: _flash_attention_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, Tensor philox_seed, Tensor philox_offset, *, float? scale=None) -> (Tensor, Tensor, Tensor)
+- func: _flash_attention_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, Tensor philox_seed, Tensor philox_offset, *, float? scale=None, SymInt? window_size_left=None, SymInt? window_size_right=None) -> (Tensor, Tensor, Tensor)
   device_check: NoCheck
   variants: function
   dispatch:
     CUDA: _flash_attention_backward
 
 # Returns output, logsumexp if compute_logsumexp
-- func: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? bias, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int? max_seqlen_q, int? max_seqlen_k, float dropout_p, int custom_mask_type, bool compute_log_sumexp=False, *, float? scale=None, Tensor? causal_diagonal=None, Tensor? seqlen_k=None, int? window_size=None) -> (Tensor output, Tensor logsumexp, Tensor philox_seed, Tensor philox_offset, SymInt max_seqlen_batch_q, SymInt max_seqlen_batch_k)
+- func: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? bias, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, SymInt? max_seqlen_q, SymInt? max_seqlen_k, float dropout_p, int custom_mask_type, bool compute_log_sumexp=False, *, float? scale=None, Tensor? causal_diagonal=None, Tensor? seqlen_k=None, int? window_size=None) -> (Tensor output, Tensor logsumexp, Tensor philox_seed, Tensor philox_offset, SymInt max_seqlen_batch_q, SymInt max_seqlen_batch_k)
   variants: function
   dispatch:
     CUDA: _efficient_attention_forward
@@ -15512,11 +15539,11 @@
     CPU: foobar
   autogen: _foobar.out
 
-# Fused Optimizer CUDA kernels.
 - func: _fused_adam_(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] exp_avgs, Tensor(d!)[] exp_avg_sqs, Tensor(e!)[] max_exp_avg_sqs, Tensor[] state_steps, *, float lr, float beta1, float beta2, float weight_decay, float eps, bool amsgrad, bool maximize, Tensor? grad_scale=None, Tensor? found_inf=None) -> ()
   # Unlike "foreach" functions, lists of tensors should be guaranteed to be on the same device (for now).
   variants: function
   dispatch:
+    CPU: _fused_adam_kernel_cpu_
     CUDA: _fused_adam_kernel_cuda_
   autogen: _fused_adam, _fused_adam.out
 
@@ -15526,6 +15553,7 @@
   device_check: NoCheck
   variants: function
   dispatch:
+    CPU: _fused_adam_kernel_cpu_
     CUDA: _fused_adam_kernel_cuda_
   autogen: _fused_adam.tensor_lr, _fused_adam.tensor_lr_out
 
@@ -15533,6 +15561,7 @@
   # Unlike "foreach" functions, lists of tensors should be guaranteed to be on the same device (for now).
   variants: function
   dispatch:
+    CPU: _fused_adamw_kernel_cpu_
     CUDA: _fused_adamw_kernel_cuda_
   autogen: _fused_adamw, _fused_adamw.out
 
@@ -15542,6 +15571,7 @@
   device_check: NoCheck
   variants: function
   dispatch:
+    CPU: _fused_adamw_kernel_cpu_
     CUDA: _fused_adamw_kernel_cuda_
   autogen: _fused_adamw.tensor_lr, _fused_adamw.tensor_lr_out
 
@@ -15549,6 +15579,7 @@
   # Unlike "foreach" functions, lists of tensors should be guaranteed to be on the same device (for now).
   variants: function
   dispatch:
+    CPU: _fused_sgd_kernel_cpu_
     CUDA: _fused_sgd_kernel_cuda_
   autogen: _fused_sgd, _fused_sgd.out
 
@@ -15558,8 +15589,15 @@
   device_check: NoCheck
   variants: function
   dispatch:
+    CPU: _fused_sgd_kernel_cpu_
     CUDA: _fused_sgd_kernel_cuda_
   autogen: _fused_sgd.tensor_lr, _fused_sgd.tensor_lr_out
+
+- func: _fused_adagrad_(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] state_sums, Tensor(d!)[] state_steps, *, float lr, float lr_decay, float weight_decay, float eps, bool maximize, Tensor? grad_scale=None, Tensor? found_inf=None) -> ()
+  variants: function
+  dispatch:
+    CPU: _fused_adagrad_kernel_cpu_
+  autogen: _fused_adagrad, _fused_adagrad.out
 
 # This op is ONLY used by pytorch/XLA in functionalization, and should never show up in vanilla eager mode or in any pytorch tracing contexts.
 - func: _propagate_xla_data(Tensor input, Tensor output) -> ()

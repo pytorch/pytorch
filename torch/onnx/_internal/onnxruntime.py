@@ -145,7 +145,7 @@ def _get_ort_device_type(device_type: str):
     if device_type == "cpu":
         return ORTC.OrtDevice.cpu()
     # ort pytorch device is mapped to NPU OrtDevice type
-    if device_type == "ort":
+    if device_type == "maia":
         return ORTC.OrtDevice.npu()
     raise ValueError("Unsupported device type: " + device_type)
 
@@ -887,9 +887,9 @@ class OrtBackend:
                 )
             else:
                 try:
-                    prim_outputs = FakeTensorProp(
-                        graph_module, check_consistency=False
-                    ).propagate(*args, **kwargs)
+                    prim_outputs = FakeTensorProp(graph_module).propagate(
+                        *args, **kwargs
+                    )
                 except Exception:
                     logger.warning("FakeTensorProb failed for %s", graph_module)
                     # When FakeTensorProp fails, it is not possible to preallocate output buffers

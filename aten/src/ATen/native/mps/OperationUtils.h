@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <initializer_list>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Tensor.h>
 #include <ATen/Utils.h>
@@ -71,6 +72,9 @@ static inline std::string getMPSTypeString(const Tensor& t, bool short_name = fa
   return getMPSTypeString(t.scalar_type(), short_name);
 }
 std::string scalarToMetalTypeString(const c10::ScalarType& scalar_type);
+static inline std::string scalarToMetalTypeString(const Tensor& t) {
+  return scalarToMetalTypeString(t.scalar_type());
+}
 NSArray<NSNumber*>* getTensorAxes(const Tensor& t);
 NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes, at::OptionalIntArrayRef dim);
 std::string getMPSShapeString(MPSShape* shape);
@@ -329,6 +333,30 @@ inline bool is_dense_in_storage(const at::Tensor& t) {
   return compute_storage_numel_distance(t) == static_cast<size_t>(t.numel());
 }
 
+
+class MetalShaderLibrary {
+public:
+  MetalShaderLibrary(const std::string& src, unsigned nparams_ = 0): shaderSource(src), nparams(nparams_) {}
+  MetalShaderLibrary(const MetalShaderLibrary&) = delete;
+  inline id<MTLComputePipelineState> getPipelineStateForFunc(const std::string& fname) {
+    return getLibraryPipelineState(getLibrary(), fname);
+  }
+  id<MTLComputePipelineState> getPipelineStateForFunc(const std::string& fname, const std::initializer_list<std::string>& params) {
+    return getLibraryPipelineState(getLibrary(params), fname);
+  }
+private:
+  id<MTLComputePipelineState> getLibraryPipelineState(id<MTLLibrary> lib, const std::string& fname);
+  id<MTLLibrary> getLibrary();
+  id<MTLLibrary> getLibrary(const std::initializer_list<std::string>& params);
+
+  id<MTLLibrary> compileLibrary(const std::string& src);
+  std::string shaderSource;
+  unsigned nparams;
+  id<MTLLibrary> library = nil;
+  std::unordered_map<std::string, id<MTLLibrary>> libMap;
+  std::unordered_map<std::string, id<MTLComputePipelineState>> cplMap;
+};
+
 static inline void mtl_setBuffer(id<MTLComputeCommandEncoder> encoder, const Tensor& t, unsigned idx) {
   [encoder setBuffer:getMTLBufferStorage(t)
               offset:t.storage_offset() * t.element_size()
@@ -389,6 +417,10 @@ inline bool supportedFloatingType(ScalarType dtype) {
 
 inline bool supportedFloatingType(const Tensor& t) {
   return supportedFloatingType(t.scalar_type());
+}
+
+inline bool needsGather(const Tensor& t) {
+  return !t.is_contiguous() || t.storage_offset();
 }
 
 } // namespace at::native::mps

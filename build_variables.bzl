@@ -106,6 +106,7 @@ libtorch_profiler_sources = [
     "torch/csrc/profiler/standalone/execution_trace_observer.cpp",
     "torch/csrc/profiler/standalone/itt_observer.cpp",
     "torch/csrc/profiler/standalone/nvtx_observer.cpp",
+    "torch/csrc/profiler/standalone/privateuse1_observer.cpp",
     "torch/csrc/profiler/stubs/base.cpp",
     "torch/csrc/profiler/orchestration/vulkan.cpp",
     "torch/csrc/profiler/perf.cpp",
@@ -679,6 +680,7 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/UCCUtils.cpp",
     "torch/csrc/distributed/c10d/intra_node_comm.cpp",
     "torch/csrc/distributed/c10d/intra_node_comm.cu",
+    "torch/csrc/distributed/c10d/Utils.cu",
     "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
     "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
 ]
@@ -824,6 +826,8 @@ libtorch_python_core_sources = [
     "torch/csrc/mps/Module.cpp",
     "torch/csrc/mtia/Module.cpp",
     "torch/csrc/inductor/aoti_runner/pybind.cpp",
+    "torch/csrc/inductor/aoti_eager/kernel_holder.cpp",
+    "torch/csrc/inductor/aoti_eager/kernel_meta_info.cpp",
     "torch/csrc/jit/backends/backend_init.cpp",
     "torch/csrc/jit/python/init.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
@@ -949,7 +953,7 @@ aten_cpu_non_globed_sources = [
     "aten/src/ATen/detail/CUDAHooksInterface.cpp",
     "aten/src/ATen/detail/HIPHooksInterface.cpp",
     "aten/src/ATen/detail/MPSHooksInterface.cpp",
-    "aten/src/ATen/detail/ORTHooksInterface.cpp",
+    "aten/src/ATen/detail/MAIAHooksInterface.cpp",
     "aten/src/ATen/detail/PrivateUse1HooksInterface.cpp",
     "aten/src/ATen/detail/XPUHooksInterface.cpp",
     "aten/src/ATen/detail/MTIAHooksInterface.cpp",
@@ -966,7 +970,7 @@ aten_cpu_non_globed_headers = [
     "aten/src/ATen/detail/CUDAHooksInterface.h",
     "aten/src/ATen/detail/MPSHooksInterface.h",
     "aten/src/ATen/detail/HIPHooksInterface.h",
-    "aten/src/ATen/detail/ORTHooksInterface.h",
+    "aten/src/ATen/detail/MAIAHooksInterface.h",
     "aten/src/ATen/detail/PrivateUse1HooksInterface.h",
     "aten/src/ATen/detail/XPUHooksInterface.h",
     "aten/src/ATen/detail/MTIAHooksInterface.h",
@@ -1168,6 +1172,9 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/SpmmReduceKernel.cpp",
     "aten/src/ATen/native/cpu/SparseFactories.cpp",
     "aten/src/ATen/native/quantized/cpu/kernels/QuantizedOpKernels.cpp",
+    "aten/src/ATen/native/cpu/FusedAdamKernel.cpp",
+    "aten/src/ATen/native/cpu/FusedSGDKernel.cpp",
+    "aten/src/ATen/native/cpu/FusedAdagradKernel.cpp",
 ]
 
 # This aten native source file list will not go through aten codegen process
@@ -1402,6 +1409,9 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/xnnpack/OpContext.cpp",
     "aten/src/ATen/native/xnnpack/RegisterOpContextClass.cpp",
     "aten/src/ATen/native/xnnpack/Shim.cpp",
+    "aten/src/ATen/native/FusedAdam.cpp",
+    "aten/src/ATen/native/FusedSGD.cpp",
+    "aten/src/ATen/native/FusedAdagrad.cpp",
     # Files not in native, but depends on native symbols
     # "aten/src/ATen/TensorIndexing.cpp",
     "aten/src/ATen/TensorIterator.cpp",
