@@ -360,7 +360,7 @@ def same_two_models(
             fp64_ref = run_fwd_maybe_bwd(fp64_model, fp64_examples, only_fwd)
         except Exception:
             if require_fp64:
-                raise RuntimeError("Could not generate fp64 outputs")  # noqa: TRY200
+                raise RuntimeError("Could not generate fp64 outputs")  # noqa: B904
             log.warning("Could not generate fp64 outputs")
 
     try:
