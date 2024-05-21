@@ -138,7 +138,7 @@ hf_Bert_large,pass,0
 
 
 
-hf_BigBird,fail_accuracy,0
+hf_BigBird,fail_to_run,0
 
 
 
