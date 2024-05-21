@@ -39,7 +39,8 @@ extern "C"
     const int64_t M = {{kernel.size(Y, 0)}};
     const int64_t M0_blocks = (M + M0 - 1) / M0;
     {%- if num_threads > 1 %}
-    const auto [Mt_blocks, Nt_blocks, Kt_blocks] = mm_get_thread_blocking(M, N, K, M0, N0, K0, num_threads);
+    int64_t Mt_blocks, Nt_blocks, Kt_blocks;
+    mm_get_thread_blocking(num_threads, M, N, K, M0, N0, K0, Mt_blocks, Nt_blocks, Kt_blocks);
     {%- else %}
     const auto Mt_blocks = M0_blocks;
     const auto Nt_blocks = N0_blocks;
