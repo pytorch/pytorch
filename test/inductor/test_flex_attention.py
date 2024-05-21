@@ -1,7 +1,7 @@
 # Owner(s): ["module: inductor"]
+# flake8: noqa: B950
 
 import functools
-import unittest
 from collections import namedtuple
 from typing import Callable, Optional
 
@@ -12,6 +12,7 @@ import torch
 
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
 from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
+from torch._inductor import metrics
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn.attention._flex_attention import (
@@ -499,9 +500,8 @@ class TestFlexAttention(InductorTestCase):
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
         # floor_div is not decomposed in decompostion_table is empty
-        gm = make_fx(_flex_attention, decomposition_table={})(
-            query, key, value, score_mod_func
-        )
+        flex_attention = functools.partial(_flex_attention, score_mod=score_mod_func)
+        gm = make_fx(flex_attention, decomposition_table={})(query, key, value)
         self.assertExpectedInline(
             gm.sdpa_score0.code.strip(),
             """\
@@ -513,8 +513,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
         # floor_div is decomposed for core_aten_decompositions
-        gm = make_fx(_flex_attention, decomposition_table=core_aten_decompositions())(
-            query, key, value, score_mod_func
+        gm = make_fx(flex_attention, decomposition_table=core_aten_decompositions())(
+            query, key, value
         )
         self.assertExpectedInline(
             gm.sdpa_score0.code.strip(),
@@ -528,7 +528,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
-    @unittest.skip("Silu decomp failing for full in backwards")
     def test_silu_on_score(self, dtype):
         def silu_score(score, b, h, q, kv):
             return torch.nn.functional.silu(score)
@@ -644,6 +643,50 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out = f(query, *keys, *values)
         out2 = torch.compile(f)(query, *keys, *values)
         self.assertTrue((out - out2).abs().mean() < 1e-2)
+
+    @supported_platform
+    def test_inputs_are_realized(self):
+        def f(q, k, v):
+            x = torch.randn(1024, device="cuda")
+            x = x * 2
+
+            def func(qk, b, h, q, kv):
+                return qk + x[q]
+
+            return _flex_attention(q.sin(), k, v, score_mod=func).cos()
+
+        q, k, v = (
+            torch.randn(1, 8, 1024, 64, device="cuda", requires_grad=True)
+            for _ in range(3)
+        )
+        ref = f(q, k, v)
+        out = torch.compile(f)(q, k, v)
+        self.assertTrue((ref - out).abs().mean() < 1e-2)
+        gradOut = torch.randn_like(q)
+
+        ref_grads = torch.autograd.grad(ref, (q, k, v), gradOut)
+        out_grads = torch.autograd.grad(out, (q, k, v), gradOut)
+        for ref, out in zip(ref_grads, out_grads):
+            self.assertTrue((ref - out).abs().mean() < 1e-2)
+
+    @supported_platform
+    def test_epilogue_fused(self):
+        @torch.compile
+        def f(q, k, v):
+            out = _flex_attention(q, k, v)
+            return out.cos()
+
+        q, k, v = (torch.randn(1, 8, 1024, 64, device="cuda") for _ in range(3))
+        metrics.reset()
+        f(q, k, v)
+        accessed_bytes = 1 * 8 * 1024 * 64 * torch.float32.itemsize
+        num_accesses = 4  # q, k, v reads, one output.
+        # TODO: Get rid of this fudge factor
+        # We need this fudge factor for now, since
+        # 1. For some reason we materialize the output of the attention unnecessarily (it's related to the mutation somehow)
+        # 2. We also write the extraneous logsumexp
+        num_accesses += 2
+        self.assertLess(metrics.num_bytes_accessed, accessed_bytes * num_accesses)
 
     @supported_platform
     @skip("Triton bug ")  # https://github.com/pytorch/pytorch/issues/124571
@@ -919,7 +962,13 @@ class GraphModule(torch.nn.Module):
             joint_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "f64[2, 2, 8, 4]", primals_2: "f64[2, 2, 8, 4]", primals_3: "f64[2, 2, 8, 4]", alias_3: "f64[2, 2, 8, 4]", alias_5: "f32[2, 2, 8]", tangents_1: "f64[2, 2, 8, 4]"):
+    def forward(self, primals_1: "f64[2, 2, 8, 4]", primals_2: "f64[2, 2, 8, 4]", primals_3: "f64[2, 2, 8, 4]", getitem: "f64[2, 2, 8, 4]", getitem_1: "f32[2, 2, 8]", tangents_1: "f64[2, 2, 8, 4]"):
+        alias: "f64[2, 2, 8, 4]" = torch.ops.aten.alias.default(getitem);  getitem = None
+        alias_2: "f64[2, 2, 8, 4]" = torch.ops.aten.alias.default(alias);  alias = None
+        alias_3: "f64[2, 2, 8, 4]" = torch.ops.aten.alias.default(alias_2);  alias_2 = None
+        alias_1: "f32[2, 2, 8]" = torch.ops.aten.alias.default(getitem_1);  getitem_1 = None
+        alias_4: "f32[2, 2, 8]" = torch.ops.aten.alias.default(alias_1);  alias_1 = None
+        alias_5: "f32[2, 2, 8]" = torch.ops.aten.alias.default(alias_4);  alias_4 = None
         fw_graph = self.fw_graph
         joint_graph = self.joint_graph
         flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, alias_3, alias_5, tangents_1, fw_graph, joint_graph);  primals_1 = primals_2 = primals_3 = alias_3 = alias_5 = tangents_1 = fw_graph = joint_graph = None
