@@ -17,6 +17,7 @@ from unittest.mock import patch
 
 import torch
 import torch._dynamo as torchdynamo
+import torch._inductor.compile_fx
 import torch.nn as nn
 import torch.utils._pytree as pytree
 from common_utils import decorate, decorateForModules, skip, skipOps, xfail
@@ -46,6 +47,7 @@ from torch._higher_order_ops.out_dtype import out_dtype
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode, ShapeEnv
+from torch.nn import functional as F
 from torch.nn.utils.rnn import PackedSequence
 
 from torch.testing._internal.common_device_type import (
@@ -76,13 +78,17 @@ from torch.testing._internal.optests import (
     aot_autograd_check,
 )
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
+from torch.utils._triton import has_triton
 
 USE_TORCHVISION = False
 try:
     import torchvision
 
     USE_TORCHVISION = True
-except ImportError:
+except (ImportError, RuntimeError):
+    # Sometimes one can get:
+    #   RuntimeError: operator torchvision::nms does not exist
+    # when importing torchvision
     warnings.warn(
         "Couldn't import torchvision. Some of our tests use it, try "
         "to install it with commands from pytorch.org, post-fixed with "
@@ -4891,6 +4897,71 @@ class TestPartitioning(AOTTestCase):
         with torch.cuda.amp.autocast(True):
             res = aot_mod(x)
         res.sum().backward()
+
+    @unittest.skipUnless(has_triton(), "Triton is unavailable")
+    def test_partition_cross_entropy(self):
+        """
+        In transformer, it usually hurts perf if the partitioner saves softmax
+        output for the backward pass. We can skip writing the softmax output
+        but recompute it based on softmax input and max/sum statistics.
+        """
+        B = 32
+        T = 1024
+        C = 768
+        V = 50257
+
+        linear = nn.Linear(C, V, bias=False, dtype=torch.bfloat16).cuda()
+        x = torch.randn(B, T, C, dtype=torch.bfloat16, device="cuda")
+        target = torch.randint(0, V, (B, T), dtype=torch.long, device="cuda")
+
+        def f(linear, x, target):
+            x = linear(x)
+            F.cross_entropy(
+                x.view(-1, x.size(-1)),
+                target.view(-1),
+                ignore_index=-1,
+                reduction="mean",
+            ).backward()
+
+        fwd_gm = None
+
+        def mock_partition(*args, **kwargs):
+            out = min_cut_rematerialization_partition(*args, **kwargs)
+            nonlocal fwd_gm
+            fwd_gm = out[0]
+            return out
+
+        with unittest.mock.patch.object(
+            torch._inductor.compile_fx,
+            "min_cut_rematerialization_partition",
+            mock_partition,
+        ):
+            opt_f = torch.compile(f)
+            opt_f(linear, x, target)
+
+        self.assertTrue(fwd_gm is not None)
+
+        # make sure we save softmax_input rather than softmax_output for the
+        # backward pass
+        # To do that, we first find the only [B*T, V] tensor that is saved, and then
+        # go backward to make sure we reach matmul before reaching any other
+        # non view/type-casting op.
+        # If we are saving the softmax output, we would reach a sub node first.
+        *_, output_nd = fwd_gm.graph.nodes
+        large_output = None
+        for nd in pytree.tree_flatten(output_nd.args)[0]:
+            # >= rather than == to account for potential matmul padding
+            if nd.meta["val"].numel() >= B * T * V:
+                self.assertTrue(large_output is None)
+                large_output = nd
+
+        self.assertTrue(large_output is not None)
+
+        while large_output.target in [torch.ops.prims.convert_element_type.default]:
+            large_output = large_output.args[0]
+        self.assertTrue(
+            large_output.target is torch.ops.aten.mm.default, f"{large_output.target}"
+        )
 
 
 class TestAOTDispatch(AOTTestCase):
