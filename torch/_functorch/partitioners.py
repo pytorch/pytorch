@@ -1386,6 +1386,9 @@ def choose_saved_values_set(
 
     min_act_size = estimate_activations_size(node_info.inputs)
     max_act_size = estimate_activations_size(runtime_optimized_saved_values)
+    # The optimized choice is smaller than the inputs anyways
+    if max_act_size <= min_act_size:
+        return runtime_optimized_saved_values
 
     more_aggressive_options = replace(
         min_cut_options,
