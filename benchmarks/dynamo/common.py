@@ -732,6 +732,10 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         p.export_chrome_trace(name)
     median = np.median(timings, axis=0)
     speedup = median[0] / median[1]
+
+    print(f'median[0] (expected): {median[0]}')
+    print(f'median[1] (actual): {median[1]}')
+
     if args.dump_raw_metrics:
         np.save(
             f"{output_filename[:-4]}-raw_timings-{current_name}-{current_device}.npy",
