@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional, Tuple, Type
 
 from typing_extensions import TypeVarTuple, Unpack
 
@@ -9,8 +9,9 @@ import torch
 ConstructorArgTs = TypeVarTuple("ConstructorArgTs")
 
 
-def _rebuild(
+def _rebuild_from_type_v2(
     func: Callable[[Unpack[ConstructorArgTs]], Generator],
+    new_type: Type[Generator],
     args: Tuple[Unpack[ConstructorArgTs]],
     state: Tuple[int, Optional[int], torch.Tensor],
 ) -> Generator:
@@ -27,14 +28,13 @@ class Generator(torch._C.Generator):
         self,
         proto: int,
     ) -> Tuple[Callable[[Unpack[ConstructorArgTs]], Generator], Tuple[Unpack[ConstructorArgTs]]]:
-        func = type(self)
         args = (self.device,)
         state = (
             self.initial_seed(),
             self.get_offset() if self.device.type == "cpu" else None,
             self.get_state(),
         )
-        return (_rebuild, (func, args, state))
+        return (_rebuild_from_type_v2, (type(self), type(self), args, state))
 
     def __setstate__(self, state: Tuple[int, Optional[int], torch.Tensor]) -> None:
         seed, offset, state_tensor = state
