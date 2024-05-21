@@ -437,7 +437,8 @@ def _get_torch_jit_trace_forward_signature(mod: torch.nn.Module):
     ast_func_def = ast_mod.body[0]
 
     # Arguments type mappings. Used to map from AST to Python signature.
-    # FIXME: Currently, other arguments types are commentted out.
+    # FIXME: Based on my understanding, TorchScript only supports explicit arguments
+    # and it cannot take variable length arguments.
     arg_type_map = {
         # "posonlyargs": inspect._POSITIONAL_ONLY,
         "args": inspect._POSITIONAL_OR_KEYWORD,
