@@ -1412,7 +1412,7 @@ class CppVecOverrides(CppOverrides):
             else f"{V.kernel._get_vec_type(dtype)}({body_code})"
         )
         other_code = value_to_cpp(other, DTYPE_TO_CPP[dtype])
-        # Loading bool as VecMask<float, N>
+        # loading bool as VecMask<float, N>
         other_code_vec = (
             f"{V.kernel._get_mask_type()}::from({other_code})"
             if dtype == torch.bool
@@ -1420,7 +1420,6 @@ class CppVecOverrides(CppOverrides):
         )
         assert isinstance(new_mask, CppCSEVariable), new_mask
         if new_mask.is_vec:
-            type = f"decltype({body_code_vec})"
             code = BracesBuffer()
             code.writeline("[&]")
             with V.kernel.swap_buffers(code), code.indent():
@@ -1429,12 +1428,21 @@ class CppVecOverrides(CppOverrides):
                     code.writeline(f"return {other_code_vec};")
                 code.writeline("else")
                 with code.indent():
-                    # Unify to use the VecMask<float, N>, since loading bool as VecMask<float, N> by default
-                    new_mask_cast = V.kernel._get_mask_cast(
-                        new_mask, torch.float if dtype == torch.bool else dtype
+                    # Create cse variable to reuse kernel.overrides.where
+                    body_vec_var = V.kernel.cse.generate(
+                        V.kernel.compute,
+                        body_code_vec,
                     )
+                    other_vec_var = V.kernel.cse.generate(
+                        V.kernel.compute,
+                        other_code_vec,
+                    )
+                    assert isinstance(body_vec_var, CppCSEVariable), body_vec_var
+                    assert isinstance(other_vec_var, CppCSEVariable), other_vec_var
+                    body_vec_var.dtype = dtype
+                    other_vec_var.dtype = dtype
                     code.writeline(
-                        f"return {type}::blendv({other_code_vec}, {body_code_vec}, {new_mask_cast});"
+                        f"return {V.kernel.overrides.where(new_mask, body_vec_var, other_vec_var)};"
                     )
             code.writeline("()")
             csevar = V.kernel.cse.generate(
