@@ -22,7 +22,6 @@ from ..runtime.hints import HalideInputSpec, HalideMeta, ReductionHint
 from ..utils import (
     get_bounds_index_expr,
     get_kernel_metadata,
-    is_welford_reduction,
     parallel_num_threads,
     sympy_dot,
     sympy_index_symbol,
@@ -36,15 +35,16 @@ from .common import (
     IndentedBuffer,
     OpOverrides,
     PythonPrinter,
+    SizeArg,
 )
 from .cpp import DTYPE_TO_CPP
 from .cpp_utils import cexpr
 from .simd import (
+    constant_repr,
     IndexingOptions,
     IterationRangesEntry,
     SIMDKernel,
     SIMDScheduling,
-    triton_constant,
 )
 
 log = logging.getLogger(__name__)
@@ -52,15 +52,15 @@ log = logging.getLogger(__name__)
 
 def halide_constant(val):
     if isinstance(val, int) and not (-2147483648 <= val <= 2147483647):
-        # workaround https://github.com/halide/Halide/issues/8224
         info = torch.iinfo(torch.int64)
         if val == info.min:
             return "hl.Int(64).min()"
         if val == info.max:
             return "hl.Int(64).max()"
-        raise Unsupported("int64 constant")
-
-    return triton_constant(val)
+        return f"hl.i64({val!r})"
+    if isinstance(val, float):
+        return f"hl.f64({constant_repr(val)})"
+    return repr(val)
 
 
 class Unsupported(RuntimeError):
@@ -71,12 +71,7 @@ class Unsupported(RuntimeError):
 class HalidePrinter(PythonPrinter):
     @staticmethod
     def cast_index(expr):
-        # TODO(jansel)
-        if V.kernel.index_dtype == torch.int32:
-            return f"hl.cast(hl.Int(32), {expr})"
-        if V.kernel.index_dtype == torch.int64:
-            return f"hl.cast(hl.Int(64), {expr})"
-        raise AssertionError("not implemented: %s", V.kernel.index_dtype)
+        return f"hl.cast({V.kernel.index_dtype}, {expr})"
 
     @staticmethod
     def cast_float(expr):
@@ -176,7 +171,10 @@ class HalidePrinter(PythonPrinter):
         return self.cast_index(f"hl.round({self._print(expr.args[0])})")
 
     def _print_RoundDecimal(self, expr):
-        raise Unsupported("_print_RoundDecimal")
+        val, n = expr.args
+        val = self._print(val)
+        n = int(n)
+        return f"hl.f32({10.**(-n)!r})*hl.round(({val})*hl.f32({10.**n!r}))"
 
 
 texpr = HalidePrinter().doprint
@@ -192,6 +190,10 @@ _halide_type = {
     torch.int16: "hl.Int(16)",
     torch.int32: "hl.Int(32)",
     torch.int64: "hl.Int(64)",
+    torch.uint8: "hl.UInt(8)",
+    torch.uint16: "hl.UInt(16)",
+    torch.uint32: "hl.UInt(32)",
+    torch.uint64: "hl.UInt(64)",
 }
 
 
@@ -248,7 +250,7 @@ class HalideOverrides(OpOverrides):
 
     @staticmethod
     def sqrt(x):
-        return f"hl.fast_sqrt({x})"
+        return f"hl.sqrt({x})"
 
     @staticmethod
     def libdevice_sqrt(x):
@@ -272,7 +274,7 @@ class HalideOverrides(OpOverrides):
 
     @staticmethod
     def cos(x):
-        return f"hl.fast_cos({x})"
+        return f"hl.cos({x})"
 
     @staticmethod
     def libdevice_cos(x):
@@ -280,7 +282,7 @@ class HalideOverrides(OpOverrides):
 
     @staticmethod
     def sin(x):
-        return f"hl.fast_sin({x})"
+        return f"hl.sin({x})"
 
     @staticmethod
     def libdevice_sin(x):
@@ -509,7 +511,7 @@ class HalideOverrides(OpOverrides):
         indexing = V.kernel.indexing(expr, block_ptr=False)
         assert isinstance(indexing, IndexingOptions)
         var = V.kernel.genfunc(
-            indexing.index_str,
+            V.kernel.index_to_str(indexing.index),
             V.kernel.used_dims_from_index(indexing.index),
             bounds=get_bounds_index_expr(expr),
         )
@@ -603,7 +605,9 @@ class HalideKernel(SIMDKernel):
         self.compute = self.body
         self.loads = self.body
         self.stores = self.body
-        self.indexing_code = self.body
+        self.indexing_code = IndentedBuffer()
+        self.indexing_code_dom = IndentedBuffer()
+        self.needs_dom_indexing = self.inside_reduction
         self.has_reduction = self.inside_reduction
 
     def create_cse_var(self, name, bounds=None):
@@ -612,7 +616,7 @@ class HalideKernel(SIMDKernel):
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry):
         expr = self.rename_indexing(entry.expr)
-        self.body.writeline(f"{entry.name} = {self.kexpr(expr)}")
+        self.indexing_code.writeline(f"{entry.name} = {self.kexpr(expr)}")
 
         if self.has_reduction:
             # idom includes iteration ranges of the numel of inputs
@@ -623,7 +627,9 @@ class HalideKernel(SIMDKernel):
                     for tree in self.range_trees
                 },
             )
-            self.body.writeline(f"{entry.name}_idom = {self.kexpr(expr_idom)}")
+            self.indexing_code_dom.writeline(
+                f"{entry.name}_idom = {self.kexpr(expr_idom)}"
+            )
 
         if entry.prefix != "r":
             # idom includes iteration ranges of the numel of outputs (which is different for reductions)
@@ -634,7 +640,9 @@ class HalideKernel(SIMDKernel):
                     for tree in self.range_trees
                 },
             )
-            self.body.writeline(f"{entry.name}_odom = {self.kexpr(expr_idom)}")
+            self.indexing_code_dom.writeline(
+                f"{entry.name}_odom = {self.kexpr(expr_idom)}"
+            )
 
     def used_dims_from_index(self, index: sympy.Expr):
         """Detect which range trees are used to populate HalideCSEVariable.used_dims"""
@@ -767,6 +775,7 @@ class HalideKernel(SIMDKernel):
                         )
                     return index_str, value_str
 
+        self.needs_dom_indexing = True
         # Fall back to using RDom-style store
         self.body.writeline(
             DeferredLine(name, f"{var}[hl.Var()] = hl.undef({var}.type())")
@@ -817,19 +826,13 @@ class HalideKernel(SIMDKernel):
         result_var = self.newfunc([tree.name for tree in self.range_trees[:-1]])
 
         default = ir.Reduction.default_accumulator(reduction_type, src_dtype)
-        assert not isinstance(default, tuple), "TODO"
 
         assert isinstance(value, HalideCSEVariable) and value.used_dims is not None
         if value.used_dims[-1] != "rindex":
             value = self.wrap_in_dense_index(value)
         value_str = value.reduction_str()
 
-        if reduction_type not in {"argmax", "argmin"}:
-            self.body.writeline(
-                f"{result_var} = hl.cast({acc_type}, {halide_constant(default)})"
-            )
-
-        if reduction_type in {"argmax", "argmin"}:
+        if reduction_type in ("argmax", "argmin"):
 
             def cast_tuple(a, b):
                 return f"hl.Tuple([hl.cast({halide_type(src_dtype)}, {a}), hl.cast({halide_type(dtype)}, {b})])"
@@ -844,29 +847,35 @@ class HalideKernel(SIMDKernel):
                 f"{tuple_var} = hl.select({better}, {cast_tuple(value_str, 'rdom')}, {tuple_var})"
             )
             self.body.writeline(f"{result_var} = {tuple_var}[1]")
-        elif is_welford_reduction(reduction_type):
+        elif reduction_type == "welford_reduce":
+            result_var = self.welford_reduce_fallback(dtype, value)
+        elif reduction_type == "welford_combine":
             raise Unsupported(reduction_type)
-        elif reduction_type == "sum":
-            self.body.writeline(f"{result_var} += {value_str}")
-        elif reduction_type == "any":
-            self.body.writeline(f"{result_var} |= {value_str}")
-        elif reduction_type == "prod":
-            self.body.writeline(f"{result_var} *= {value_str}")
-        elif reduction_type == "min":
-            self.body.writeline(f"{result_var} = hl.min({result_var}, {value_str})")
-        elif reduction_type == "max":
-            self.body.writeline(f"{result_var} = hl.max({result_var}, {value_str})")
-        elif reduction_type == "xor_sum":
-            self.body.writeline(f"{result_var} = {result_var} ^ {value_str}")
         else:
-            raise Unsupported(reduction_type)
+            self.body.writeline(
+                f"{result_var} = hl.cast({acc_type}, {halide_constant(default)})"
+            )
+            if reduction_type == "sum":
+                self.body.writeline(f"{result_var} += {value_str}")
+            elif reduction_type == "any":
+                self.body.writeline(f"{result_var} |= {value_str}")
+            elif reduction_type == "prod":
+                self.body.writeline(f"{result_var} *= {value_str}")
+            elif reduction_type == "min":
+                self.body.writeline(f"{result_var} = hl.min({result_var}, {value_str})")
+            elif reduction_type == "max":
+                self.body.writeline(f"{result_var} = hl.max({result_var}, {value_str})")
+            elif reduction_type == "xor_sum":
+                self.body.writeline(f"{result_var} = {result_var} ^ {value_str}")
+            else:
+                raise Unsupported(reduction_type)
 
-        # for any
-        # if src_dtype == torch.bool:
-        #     prior = result_var
-        #     result_var: HalideCSEVariable = self.cse.newvar()
-        #     result_var.used_dims = prior.used_dims
-        #     self.body.writeline(f"{result_var} = hl.cast({halide_type(src_dtype)}, {prior})")
+            # for any
+            # if src_dtype == torch.bool:
+            #     prior = result_var
+            #     result_var: HalideCSEVariable = self.cse.newvar()
+            #     result_var.used_dims = prior.used_dims
+            #     self.body.writeline(f"{result_var} = hl.cast({halide_type(src_dtype)}, {prior})")
 
         self.cse.reduction_cache[cache_key] = result_var
         return result_var
@@ -904,8 +913,14 @@ class HalideKernel(SIMDKernel):
         _, _, signature = self.args.python_argdefs()
         argtypes = []
         for arg in signature:
-            numel = cexpr(self.rename_indexing(self.halide_buffer_numel(arg.buffer)))
-            dtype = f"{DTYPE_TO_CPP[arg.dtype]}*"
+            if isinstance(arg, SizeArg):
+                numel = None
+                dtype = "long"
+            else:
+                numel = cexpr(
+                    self.rename_indexing(self.halide_buffer_numel(arg.buffer))
+                )
+                dtype = f"{DTYPE_TO_CPP[arg.dtype]}*"
             argtypes.append(
                 HalideInputSpec(
                     dtype,
@@ -918,6 +933,9 @@ class HalideKernel(SIMDKernel):
         # for cuda: target="host-cuda-cuda_capability_86-user_context"
         if config.halide.no_asserts:
             target += "-no_asserts"
+
+        if "64" in self.index_dtype:
+            target += "-large_buffers"
 
         return HalideMeta(
             argtypes,
@@ -948,10 +966,14 @@ class HalideKernel(SIMDKernel):
 
         _, _, signature = self.args.python_argdefs()
         for arg in signature:
-            assert arg.buffer, "TODO"
-            argcls = "hl.OutputBuffer" if "out" in arg.name else "hl.InputBuffer"
-            argtype = halide_type(arg.dtype)
-            code.writeline(f"{arg.name} = {argcls}({argtype}, 1)")
+            if isinstance(arg, SizeArg):
+                code.writeline(f"{arg.name} = hl.InputScalar({self.index_dtype})")
+            else:
+                assert arg.buffer, arg
+                argcls = "hl.OutputBuffer" if "out" in arg.name else "hl.InputBuffer"
+                argtype = halide_type(arg.dtype)
+                code.writeline(f"{arg.name} = {argcls}({argtype}, 1)")
+
         code.splice(
             """
             def generate(g):
@@ -960,6 +982,8 @@ class HalideKernel(SIMDKernel):
         code.do_indent()
         for arg in signature:
             code.writeline(f"{arg.name} = g.{arg.name}")
+        for old, new in self.args.aliases():
+            code.writeline(f"{old} = {new}")
 
         dom_size = {}
         for tree in self.active_range_trees(reorder=True):
@@ -967,6 +991,7 @@ class HalideKernel(SIMDKernel):
             length = self.kexpr(self.rename_indexing(tree.numel))
             dom_size[tree.name] = f"hl.Range(0, {length})"
         assert len(dom_size) <= 3
+        code.splice(self.indexing_code)
 
         if self.inside_reduction:
             sizes = [*dom_size.values()]
@@ -977,13 +1002,13 @@ class HalideKernel(SIMDKernel):
                 code.writeline(f"{name}_idom = idom.{xyz}")
                 if name[0] != "r":
                     code.writeline(f"{name}_odom = odom.{xyz}")
-        else:
+        elif self.needs_dom_indexing:
             code.writeline(f"odom = hl.RDom([{', '.join(dom_size.values())}])")
             for name, xyz in zip(dom_size.keys(), "xyz"):
                 code.writeline(f"{name}_odom = odom.{xyz}")
 
-        for old, new in self.args.aliases():
-            code.writeline(f"{old} = {new}")
+        if self.needs_dom_indexing:
+            code.splice(self.indexing_code_dom)
 
         def update_index(m):
             var = self.cse.varname_map[m.group(1)]
@@ -1001,12 +1026,22 @@ class HalideKernel(SIMDKernel):
         code.writeline("")
         code.writeline("assert g.using_autoscheduler()")
         for arg in signature:
-            numel = V.graph.sizevars.symbolic_hint(V.graph.get_numel(arg.buffer))
+            if isinstance(arg, SizeArg):
+                numel = V.graph.sizevars.symbolic_hint(arg.expr)
+            else:
+                numel = V.graph.sizevars.symbolic_hint(V.graph.get_numel(arg.buffer))
             try:
-                low = high = int(numel)
+                hint = int(numel)
             except TypeError:
-                low, high = 0, 8192  # arbitrary range for unbacked symints
-            code.writeline(f"{arg.name}.set_estimates([hl.Range({low}, {high})])")
+                # Halide requires buffers to be at least as large as the estimates
+                # This causes crashes if our estimate is greater than the vector length
+                # https://github.com/halide/Halide/issues/3103
+                # TODO(jansel): should we add guards for this case?
+                hint = 1
+            if isinstance(arg, SizeArg):
+                code.writeline(f"{arg.name}.set_estimate({hint})")
+            else:
+                code.writeline(f"{arg.name}.set_estimates([hl.Range(0, {hint})])")
 
         code.do_unindent(2)
         code.writeline("")
@@ -1016,11 +1051,7 @@ class HalideKernel(SIMDKernel):
     def call_kernel(self, name: str, node=None):
         """Codegen a call to this kernel"""
         wrapper = V.graph.wrapper_code
-        _, _, signature = self.args.python_argdefs()
-        call_args = []
-        for arg in signature:
-            call_args.append(arg.buffer)
-
+        call_args = [*map(str, self.args.python_argdefs()[1])]
         current_device = V.graph.scheduler.current_device
         assert current_device.type == "cpu"
         wrapper.generate_kernel_call(

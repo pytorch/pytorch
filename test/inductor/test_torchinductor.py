@@ -3831,7 +3831,7 @@ class CommonTemplate:
                 self.buf.add_(1)
                 return (self.w1 * x * self.w2).sum() + self.buf.sum()
 
-        model_for_eager = MyModel()
+        model_for_eager = MyModel().to(self.device)
         model_for_compile = copy.deepcopy(model_for_eager)
 
         eager_version_counters = [
@@ -3843,8 +3843,8 @@ class CommonTemplate:
 
         compiled_f = torch.compile(model_for_compile, backend="inductor")
 
-        inp_ref = torch.ones(1, requires_grad=True)
-        inp_test = torch.ones(1, requires_grad=True)
+        inp_ref = torch.ones(1, requires_grad=True, device=self.device)
+        inp_test = torch.ones(1, requires_grad=True, device=self.device)
 
         out_ref = model_for_eager(inp_ref.clone())
         out_test = compiled_f(inp_test.clone())
@@ -3878,7 +3878,7 @@ class CommonTemplate:
                 self.buf.add_(1)
                 return (self.w @ x).sum() + self.buf.sum()
 
-        model_for_eager = MyModel()
+        model_for_eager = MyModel().to(self.device)
         model_for_compile = copy.deepcopy(model_for_eager)
 
         eager_version_counters = [
@@ -3890,8 +3890,8 @@ class CommonTemplate:
 
         compiled_f = torch.compile(model_for_compile, backend="inductor")
 
-        inp_ref = torch.ones(2, 4, requires_grad=True)
-        inp_test = torch.ones(2, 4, requires_grad=True)
+        inp_ref = torch.ones(2, 4, requires_grad=True, device=self.device)
+        inp_test = torch.ones(2, 4, requires_grad=True, device=self.device)
 
         out_ref = model_for_eager(inp_ref.clone())
         out_test = compiled_f(inp_test.clone())
@@ -3921,7 +3921,7 @@ class CommonTemplate:
             def forward(self, x):
                 return self.m(x)
 
-        model_for_eager = MyModel()
+        model_for_eager = MyModel().to(self.device)
         model_for_compile = copy.deepcopy(model_for_eager)
 
         eager_version_counters = [
@@ -3933,8 +3933,8 @@ class CommonTemplate:
 
         compiled_f = torch.compile(model_for_compile, backend="inductor")
 
-        inp_ref = torch.ones(20, 100, requires_grad=True)
-        inp_test = torch.ones(20, 100, requires_grad=True)
+        inp_ref = torch.ones(20, 100, requires_grad=True, device=self.device)
+        inp_test = torch.ones(20, 100, requires_grad=True, device=self.device)
 
         out_ref = model_for_eager(inp_ref.clone())
         out_test = compiled_f(inp_test.clone())
@@ -6569,6 +6569,7 @@ class CommonTemplate:
             ],
         )
 
+    @skip_if_halide
     def test_bernoulli2(self):
         def fn(a):
             return aten.bernoulli(a)
@@ -10011,6 +10012,7 @@ class CommonTemplate:
         self.assertEqual(ref, actual)
 
     @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    @skip_if_halide
     def test_bfloat16_to_int16(self):
         def fn(a, b):
             x = a + b
@@ -11024,6 +11026,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
             torch.cuda.is_available() and torch.cuda.get_device_capability() < (9, 0),
             "Triton does not support fp8 on A100",
         )
+        @skip_if_halide
         def test_red_followed_by_transposed_pointwise(self):
             bs = 26624
             dim = 1024

@@ -50,7 +50,7 @@ from ..utils import (
     sympy_subs,
     unique,
 )
-from ..virtualized import ops, V
+from ..virtualized import ops, OpsValue, V
 from .common import CSEVariable, index_prevent_reordering, Kernel, PythonPrinter
 from .multi_kernel import MultiKernel
 
@@ -359,7 +359,7 @@ class IterationRangesEntry(IterationRanges):
         return self.name == other.name
 
 
-def triton_constant(value):
+def constant_repr(value):
     if value == float("inf"):
         return 'float("inf")'
     elif value == float("-inf"):
@@ -903,7 +903,8 @@ class SIMDKernel(Kernel):
         if prior:
             mask = ops.logical_and(mask, prior)
 
-        self._load_mask = str(mask)
+        mask = OpsValue.unwrap(mask)
+        self._load_mask = mask
         try:
             # TODO(jansel): do we need a reshape here?
             yield mask
@@ -1081,6 +1082,18 @@ class SIMDKernel(Kernel):
             f"All the inputs for the triton kernel {kernel_name} have uniform layout"
         )
         log.warning(msg)
+
+    def welford_reduce_fallback(self, dtype, value):
+        sum_ = ops.reduction(dtype, dtype, "sum", value)
+        self.inside_reduction = False
+        rnumel = ops.index_expr(self.numels[-1], dtype)
+        mean = ops.truediv(sum_, rnumel)
+
+        self.inside_reduction = True
+        dx = ops.sub(value, mean)
+        dx2 = ops.mul(dx, dx)
+        m2 = ops.reduction(dtype, dtype, "sum", dx2)
+        return OpsValue.unwrap((mean, m2, rnumel))
 
     def codegen_kernel(self):
         raise NotImplementedError

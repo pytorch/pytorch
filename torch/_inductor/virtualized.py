@@ -248,6 +248,14 @@ class OpsValue:
     def __lshift__(self, n):
         return ops.bitwise_left_shift(self, n)
 
+    @staticmethod
+    def unwrap(x):
+        if isinstance(x, OpsValue):
+            return x.value
+        if isinstance(x, (list, tuple)):
+            return x.__class__(map(OpsValue.unwrap, x))
+        return x
+
 
 class OpsWrapper:
     """This wraps any returned IR values into an `OpsValue` instance, so that we

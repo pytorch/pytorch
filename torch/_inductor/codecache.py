@@ -2567,6 +2567,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         #include "{halidebuffer_h}"
         #include "{headerfile}"
         #include <stdexcept>
+        #include <cmath>
         void kernel({argdefs}) {{
             {buffers}
             int err = halide_kernel({buffer_names});
@@ -2577,11 +2578,20 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         """
     )
 
+    @staticmethod
+    def _arg_order(arg):
+        # Halide reorders args
+        is_in = "in_ptr" in arg.name
+        is_out = "out_ptr" in arg.name
+        is_scalar = arg.numel is None
+        assert (is_in + is_out + is_scalar) == 1
+        return is_scalar + is_out * 2
+
     @classmethod
     def _codegen_glue(cls, argtypes, headerfile):
         buffers = []
         buffer_names = []
-        for i, arg in enumerate(argtypes):
+        for i, arg in enumerate(sorted(argtypes, key=cls._arg_order)):
             if arg.numel:
                 buffer_names.append(f"hl_buf_{i}")
                 buffers.append(
@@ -2672,7 +2682,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
                 return path
         if "HALIDE_LIB" in os.environ:
             path = os.path.abspath(
-                os.path.join(os.environ["HALIDE_INCLUDE"], f"../include/{name}")
+                os.path.join(os.environ["HALIDE_LIB"], f"../include/{name}")
             )
             if os.path.exists(path):
                 return path
@@ -3344,7 +3354,7 @@ class AsyncCompile:
         return self.submit(task)
 
     def halide(self, meta: HalideMeta, source_code: str):
-        kernel_code_log.info("Halide Kernel:\n%s", source_code)
+        kernel_code_log.info("Halide Kernel:\n%r\n%s", meta, source_code)
         if config.compile_threads <= 1:
             return HalideCodeCache.generate_halide(meta, source_code)
         else:
