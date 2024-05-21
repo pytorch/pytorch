@@ -118,7 +118,7 @@ def _get_restore_location(device):
     Used for rebuild functions where the tensor device is distinct from the storage
     """
 
-    map_location = _thread_local_state.map_location
+    map_location = getattr(_thread_local_state, "map_location", None)
     if map_location is None:
         return device
     else:
