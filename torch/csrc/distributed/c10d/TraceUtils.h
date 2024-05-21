@@ -13,6 +13,7 @@
 
 #include <sys/types.h>
 
+#include <c10/util/string_view.h>
 #include <cstdlib>
 #include <fstream>
 #include <string>
@@ -476,9 +477,9 @@ struct NCCLTraceBuffer {
 
     // size information for input/output tensors
     c10::SmallVector<int, 4> input_dims_;
-    std::vector<c10::ScalarType> input_dtypes_;
+    std::vector<c10::string_view> input_dtypes_;
     c10::SmallVector<int, 4> output_dims_;
-    std::vector<c10::ScalarType> output_dtypes_;
+    std::vector<c10::string_view> output_dtypes_;
     c10::SmallVector<int64_t, 8> sizes_; // flattened from inputs, outputs
     bool retired_ = false; // is this work entry no longer in the workMetaList_?
                            // a retired but not completed event has timed out
@@ -529,14 +530,14 @@ struct NCCLTraceBuffer {
 
     for (const auto& input : inputs) {
       c10::IntArrayRef sizes = input.sizes();
-      te.input_dtypes_.push_back(input.dtype().toScalarType());
+      te.input_dtypes_.push_back(input.dtype().name());
       te.input_dims_.push_back(sizes.size());
       te.sizes_.insert(te.sizes_.end(), sizes.begin(), sizes.end());
     }
 
     for (const auto& output : outputs) {
       c10::IntArrayRef sizes = output.sizes();
-      te.output_dtypes_.push_back(output.dtype().toScalarType());
+      te.output_dtypes_.push_back(output.dtype().name());
       te.output_dims_.push_back(sizes.size());
       te.sizes_.insert(te.sizes_.end(), sizes.begin(), sizes.end());
     }
