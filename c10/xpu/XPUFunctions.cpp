@@ -54,12 +54,12 @@ inline void initGlobalDevicePoolState() {
   }
 
 #ifdef _WIN32
-  // TODO: default context feature is disabled by default on windows. As a
-  // workaround, we use a constructed context associated with all devices we
-  // enumerated. We should switch to the default context when this feature is
-  // enabled by default on windows. Otherwise, our context cannot be shared with
+  // TODO: default context feature is disabled by default on Windows. We use a
+  // constructed context associated with all devices we enumerated as a
+  // workaround. We should switch to the default context when this feature is
+  // enabled by default on Windows. Otherwise, our context cannot be shared with
   // other components or libraries, which will lead to some features, such as
-  // zero-copy, not working on windows.
+  // zero-copy, not working on Windows.
   std::vector<sycl::device> deviceList;
   for (auto it = gDevicePool.devices.begin(); it != gDevicePool.devices.end();
        ++it) {
