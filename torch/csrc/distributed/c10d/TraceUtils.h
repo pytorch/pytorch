@@ -2,25 +2,22 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/ApproximateClock.h>
 #include <c10/util/irange.h>
+#include <c10/util/string_view.h>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
-
-#include <ATen/cuda/CUDAEvent.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/profiler/combined_traceback.h>
+#include <ATen/cuda/CUDAEvent.h>
 
-#include <sys/types.h>
-
-#include <c10/util/string_view.h>
 #include <cstdlib>
 #include <fstream>
 #include <string>
+#include <sys/types.h>
 #include <system_error>
 #include <vector>
-#include "ATen/core/interned_strings.h"
-#include "c10/core/Scalar.h"
+
 namespace c10d {
 
 static c10::IValue entries_key = "entries";
