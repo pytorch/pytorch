@@ -50,6 +50,20 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         torch._dynamo.reset()
         OrtBackend.clear_cached_instances()
 
+    def test_get_ort_device_type(self):
+        self.assertEqual(
+            torch.onnx._internal.onnxruntime._get_ort_device_type("cuda"),
+            torch.onnx._internal.onnxruntime.ORTC.OrtDevice.cuda(),
+        )
+        self.assertEqual(
+            torch.onnx._internal.onnxruntime._get_ort_device_type("cpu"),
+            torch.onnx._internal.onnxruntime.ORTC.OrtDevice.cpu(),
+        )
+        self.assertEqual(
+            torch.onnx._internal.onnxruntime._get_ort_device_type("maia"),
+            torch.onnx._internal.onnxruntime.ORTC.OrtDevice.npu(),
+        )
+
     def test_torch_compile_backend_registration(self):
         self.assertIn("onnxrt", torch._dynamo.backends.registry.list_backends())
         backend = torch._dynamo.backends.registry.lookup_backend("onnxrt")
@@ -458,8 +472,9 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         if test_local_backend:
             assert local_ort is not None
-            number_of_captured_graphs = 2 if test_backward else 1
+            number_of_captured_graphs = 3 if test_backward else 2
             execution_count = len(example_args_collection) * number_of_captured_graphs
+            # breakpoint()
             self._assert_counting_information(
                 local_ort,
                 # Number of InferenceSession runs.
@@ -551,7 +566,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         if test_local_backend:
             assert local_ort is not None
-            number_of_captured_graphs = 2 if test_backward else 1
+            number_of_captured_graphs = 3 if test_backward else 2
             execution_count = len(example_args_collection) * number_of_captured_graphs
             self._assert_counting_information(
                 local_ort,
@@ -636,7 +651,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         if test_local_backend:
             assert local_ort is not None
-            number_of_captured_graphs = 2 if test_backward else 1
+            number_of_captured_graphs = 3 if test_backward else 2
             execution_count = len(example_args_collection) * number_of_captured_graphs
             self._assert_counting_information(
                 local_ort,

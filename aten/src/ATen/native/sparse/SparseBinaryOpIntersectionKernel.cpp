@@ -76,7 +76,7 @@ struct CPUValueSelectionIntersectionKernel {
               const auto* ptr_rhs_values_bytes = data[3];
               const auto* ptr_rhs_select_idx_bytes = data[4];
               const auto* ptr_intersection_counts_bytes = data[5];
-              const auto* ptr_argsort = argsort.data_ptr<index_t>();
+              const auto* ptr_argsort = argsort.const_data_ptr<index_t>();
 
               for (int64_t i = 0; i < n; ++i) {
                 // Exctract data
@@ -119,7 +119,7 @@ struct CPUValueSelectionIntersectionKernel {
   }
 };
 
-using OptTensor = c10::optional<Tensor>;
+using OptTensor = std::optional<Tensor>;
 
 void mul_sparse_sparse_out_cpu_kernel(
     Tensor& result,

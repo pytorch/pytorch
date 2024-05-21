@@ -1366,7 +1366,10 @@ def _collapse_view_helper(
             continue
 
         length = length * shape[idx]
-        stride = min(stride, strides[idx])
+        if guard_size_oblivious(stride < strides[idx]):
+            stride = stride
+        else:
+            stride = strides[idx]
 
         if (
             guard_size_oblivious(a.numel() > 0)

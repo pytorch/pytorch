@@ -114,7 +114,7 @@ class _MaskPartial(_Partial):
 
         # perform sum reduction
         return funcol.all_reduce(
-            tensor, reduceOp=self.reduce_op.name, group=(mesh, mesh_dim)
+            tensor, reduceOp=self.reduce_op, group=(mesh, mesh_dim)
         )
 
     def _reduce_shard_value(
@@ -174,7 +174,6 @@ def embedding_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     """
     This strategy handles embedding op. We have two possible embedding shardings:
     rowwise and colwise
-    # TODO: implement rowwise sharding
     """
     weight_strategy = cast(OpStrategy, op_schema.args_schema[0])
     indices_strategy = cast(OpStrategy, op_schema.args_schema[1])
@@ -250,7 +249,6 @@ def embedding_dense_backward_strategy(
     """
     This strategy handles embedding op. We have two possible embedding shardings:
     rowwise and colwise
-    # TODO: implement rowwise sharding backward
     """
     grad_out_strategy = cast(OpStrategy, op_schema.args_schema[0])
     indices_strategy = cast(OpStrategy, op_schema.args_schema[1])
