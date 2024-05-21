@@ -25,7 +25,7 @@ if __name__ == "__main__":
     # or pass a profiler instance.
     profiler = StrobelightCLIFunctionProfiler(stop_at_error=False)
 
-    @strobelight(profiler, sample_tags=['something', 'another'])
+    @strobelight(profiler, sample_tags=["something", "another"])
     def work2():
         sum = 0
         for i in range(100000000):

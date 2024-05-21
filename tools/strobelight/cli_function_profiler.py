@@ -119,7 +119,7 @@ class StrobelightCLIFunctionProfiler:
         logger.debug("running command: %s", _command_to_string(command))
         result = subprocess.run(command, capture_output=True)
         output = result.stderr.decode("utf-8")
-        logger.debug(f"output:\n{output}")
+        logger.debug("output:\n{%s}", output)
 
         if result.returncode != 0:
             raise StrobelightCLIProfilerError(
@@ -147,7 +147,7 @@ class StrobelightCLIFunctionProfiler:
         logger.debug("running command: %s", _command_to_string(command))
         result = subprocess.run(command, capture_output=True)
         output = result.stderr.decode("utf-8")
-        logger.debug(f"output:\n{output}")
+        logger.debug("output:\n{%s}", output)
 
         if result.returncode != 0:
             raise StrobelightCLIProfilerError(
@@ -173,7 +173,7 @@ class StrobelightCLIFunctionProfiler:
         logger.debug("running command: %s", _command_to_string(command))
         result = subprocess.run(command, capture_output=True)
         output = result.stderr.decode("utf-8")
-        logger.debug(f"output:\n{output}")
+        logger.debug("output:\n{%s}", output)
 
         if result.returncode != 0:
             raise StrobelightCLIProfilerError(
@@ -197,7 +197,7 @@ class StrobelightCLIFunctionProfiler:
         logger.debug("running command: %s", _command_to_string(command))
         result = subprocess.run(command, capture_output=True)
         output = result.stderr.decode("utf-8")
-        logger.debug(f"output:\n{output}")
+        logger.debug("output:\n{%s}", output)
 
         if result.returncode != 0:
             raise StrobelightCLIProfilerError(
@@ -207,7 +207,11 @@ class StrobelightCLIFunctionProfiler:
         match = re.search("INFO ::1:(.*)", output)
         if match:
             current_status = match.group(1)
-            if not current_status.__contains__("Profile run finished with SUCCESS"):
+            if current_status.__contains__("Profile run status: PROCESSING"):
+                time.sleep(10)
+                self._get_results()
+                return
+            elif not current_status.__contains__("Profile run finished with SUCCESS"):
                 raise StrobelightCLIProfilerError(
                     f"failed to extract profiling results, unexpected response {output}"
                 )
