@@ -1254,7 +1254,7 @@ class CppWrapperCpu(WrapperCodeGen):
             self.writeline(self.wrap_kernel_call(kernel, args))
 
     def generate_user_defined_triton_kernel(
-        self, kernel_name, grid, configs, args, triton_meta
+        self, kernel_name, grid, configs, args, triton_meta, arg_types=None
     ):
         assert len(grid) != 0
         if len(grid) == 1:
@@ -1272,6 +1272,7 @@ class CppWrapperCpu(WrapperCodeGen):
         self.generate_kernel_call(
             kernel_name,
             args,
+            arg_types=arg_types,
             grid=grid_decision,
             device_index=V.graph.scheduler.current_device.index,
             cuda=True,
