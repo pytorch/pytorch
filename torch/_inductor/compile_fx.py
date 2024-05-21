@@ -118,6 +118,19 @@ def complex_memory_overlap(t: torch.Tensor) -> bool:
     return False
 
 
+def get_static_input_idxs(num_fixed):
+    # If we are inlining NNModules, we treat all torch.nn.Parameters as static for the purposes
+    # of cudagraphs. Rather than copying these into cudagraph-owned memory
+    # like we do for normal inputs on each run, we will re-record a cudagraph if these
+    # parameter locations change.
+    context = torch._guards.TracingContext.try_get()
+    return (
+        list(range(num_fixed)) + context.fw_metadata.static_parameter_indices
+        if context
+        else []
+    )
+
+
 @functools.lru_cache(None)
 def _step_logger():
     return dynamo_logging.get_step_logger(log)
@@ -413,7 +426,7 @@ def compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
     cudagraphs: Optional[BoxedBool] = None,
-    num_fixed: int = 0,
+    static_input_idxs: Optional[List[int]] = None,
     is_backward: bool = False,
     graph_id: Optional[int] = None,
     cpp_wrapper: bool = False,
@@ -447,7 +460,7 @@ def compile_fx_inner(
             gm,
             example_inputs,
             cudagraphs=cudagraphs,
-            num_fixed=num_fixed,
+            static_input_idxs=static_input_idxs,
             is_backward=is_backward,
             graph_id=graph_id,
             cpp_wrapper=cpp_wrapper,
@@ -466,7 +479,7 @@ def compile_fx_inner(
     # of fx_codegen_and_compile changes, the dict should be updated accordingly
     graph_kwargs = {
         "cudagraphs": cudagraphs,
-        "num_fixed": num_fixed,
+        "static_input_idxs": static_input_idxs,
         "is_backward": is_backward,
         "graph_id": graph_id,
         "cpp_wrapper": cpp_wrapper,
@@ -539,7 +552,7 @@ def compile_fx_inner(
             )
 
             has_mutation_str = check_for_mutation_ignore_cuda_graph_managed_tensor(
-                gm, compiled_graph, num_fixed
+                gm, compiled_graph, static_input_idxs
             )
             has_mutation = has_mutation_str is not None
 
@@ -579,7 +592,7 @@ def compile_fx_inner(
             compiled_graph.current_callable = cudagraphify(
                 compiled_graph.current_callable,
                 example_inputs,
-                static_input_idxs=range(num_fixed),
+                static_input_idxs=static_input_idxs,
                 device_index=next(iter(compiled_graph.device_idxs)),
                 stack_traces=stack_traces,
                 is_backward=is_backward,
@@ -626,7 +639,7 @@ def compile_fx_inner(
     # cudagraphs does its own aligning of inputs
     if not cudagraphs:
         new_callable = align_inputs(
-            compiled_graph.current_callable, example_inputs, range(num_fixed)
+            compiled_graph.current_callable, example_inputs, static_input_idxs
         )
         if new_callable is not compiled_graph.current_callable:
             compiled_graph.current_callable = new_callable
@@ -648,7 +661,7 @@ def fx_codegen_and_compile(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
     cudagraphs: Optional[BoxedBool] = None,
-    num_fixed: int = 0,
+    static_input_idxs: Optional[List[int]] = None,
     is_backward: bool = False,
     graph_id: Optional[int] = None,
     cpp_wrapper: bool = False,
@@ -737,7 +750,6 @@ def fx_codegen_and_compile(
                 const_gm,
                 example_inputs=[],
                 shape_env=shape_env,
-                num_static_inputs=num_fixed,
                 graph_id=graph_id,
                 cpp_wrapper=cpp_wrapper,
                 aot_mode=aot_mode,
@@ -759,7 +771,6 @@ def fx_codegen_and_compile(
             # we currently use fake tensors and defake them later.
             example_inputs=example_inputs,
             shape_env=shape_env,
-            num_static_inputs=num_fixed,
             graph_id=graph_id,
             cpp_wrapper=cpp_wrapper,
             aot_mode=aot_mode,
@@ -1177,6 +1188,7 @@ def fw_compiler_freezing(
         n.name for n in model_outputs if isinstance(n, torch.fx.Node)
     )
 
+    static_input_idxs = list(range(num_fixed))
     # constant params will be real tensors, not fake
     tracing_context = torch._guards.TracingContext.try_get()
     if tracing_context is not None:
@@ -1186,11 +1198,13 @@ def fw_compiler_freezing(
             if i not in preserved_arg_indices:
                 params_flat[i] = None
 
+        static_input_idxs += tracing_context.fw_metadata.static_parameter_indices
+
     with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
         optimized_function = inner_compile(
             opt_model,
             aot_example_inputs,
-            num_fixed=num_fixed,
+            static_input_idxs=static_input_idxs,
             cudagraphs=cudagraphs,
             graph_id=graph_id,
             is_inference=True,
@@ -1321,7 +1335,8 @@ def compile_fx(
         fixed = torch._inductor.utils.num_fw_fixed_arguments(
             num_example_inputs, len(example_inputs)
         )
-        user_visible_outputs = {}
+
+        user_visible_outputs = set()
 
         if config.keep_output_stride:
             model_outputs_node = output_node(model)
@@ -1376,7 +1391,7 @@ def compile_fx(
         return inner_compile(
             model,
             example_inputs,
-            num_fixed=fixed,
+            static_input_idxs=get_static_input_idxs(fixed),
             cudagraphs=cudagraphs,
             graph_id=graph_id,
             is_inference=is_inference,
@@ -1420,7 +1435,7 @@ def compile_fx(
         return inner_compile(
             model,
             example_inputs,
-            num_fixed=fixed,
+            static_input_idxs=list(range(fixed)),
             cudagraphs=cudagraphs,
             is_backward=True,
             graph_id=graph_id,

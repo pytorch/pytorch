@@ -1550,6 +1550,12 @@ class CUDAGraphNode:
         ):
             return False
 
+        # static input data pointers remain stable
+        if not torch._C._tensors_data_ptrs_at_indices_equal(
+            inputs, self.static_input_data_ptrs, self.static_input_idxs
+        ):
+            return False
+
         if not self._check_liveness(
             self.expected_dead_indices_before_graph, self.path_weakrefs
         ):

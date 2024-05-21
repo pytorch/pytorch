@@ -648,7 +648,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             with mode:
                 inps = [torch.rand([6, 5], device="cuda")[1:] for _ in range(2)]
 
-            compiled_f = compile_fx_inner(mod, inps, num_fixed=1, cudagraphs=True)
+            compiled_f = compile_fx_inner(
+                mod, inps, static_input_idxs=[0], cudagraphs=True
+            )
 
             def get_unaligned_inputs():
                 return [torch.rand([6, 5], device="cuda")[1:] for _ in range(2)]
@@ -1703,6 +1705,29 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             with self.assertRaisesRegex(Exception, "custom error msg"):
                 device = x.untyped_storage()
+
+        @torch._inductor.config.patch("triton.cudagraphs", True)
+        def test_multiple_dispatch_single_graph(self):
+            # Verify that we can record multiple cudagraphs for a single
+            # compiled function
+            torch.set_default_device("cuda")
+
+            @torch.compile(mode="reduce-overhead")
+            def fn(x, y):
+                return x * y
+
+            p1 = torch.nn.Parameter(torch.ones([2, 2]))
+            p2 = torch.nn.Parameter(torch.zeros([2, 2]))
+            for _ in range(5):
+                res1 = fn(torch.ones(2, 2), p1)
+                res1.sum().backward()
+
+            for _ in range(5):
+                res2 = fn(torch.ones(2, 2), p2)
+                res2.sum().backward()
+
+            # Fwd + bwd graphs for each version of the function => 4 graphs
+            self.assertEqual(self.get_manager().new_graph_id().id, 4)
 
     instantiate_parametrized_tests(CudaGraphTreeTests)
 
