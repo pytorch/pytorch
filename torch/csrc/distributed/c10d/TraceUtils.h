@@ -707,14 +707,14 @@ struct NCCLTraceBuffer {
 
       dict.insert(input_sizes_key, read_sizes(e.input_dims_));
       std::vector<std::string> input_dtypes_strs;
-      for (const auto e : e.input_dtypes_) {
-        input_dtypes_strs.push_back(c10::toString(e));
+      for (const auto& input_dtype : e.input_dtypes_) {
+        input_dtypes_strs.push_back(c10::toString(input_dtype));
       }
       dict.insert(input_dtypes_key, input_dtypes_strs);
       dict.insert(output_sizes_key, read_sizes(e.output_dims_));
       std::vector<std::string> output_dtypes_strs;
-      for (const auto e : e.output_dtypes_) {
-        output_dtypes_strs.push_back(c10::toString(e));
+      for (const auto& output_dtype : e.output_dtypes_) {
+        output_dtypes_strs.push_back(c10::toString(output_dtype));
       }
       dict.insert(output_dtypes_key, output_dtypes_strs);
       if (e.time_discovered_completed_.has_value()) {
