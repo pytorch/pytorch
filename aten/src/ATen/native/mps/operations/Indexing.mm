@@ -42,7 +42,7 @@
 #include <ATen/ops/view_as_real.h>
 #endif
 
-#define NONZERO_MAX_SIZE 16777216 // 2 ^ 24
+constexpr auto nonZeroMaxSize == 1UL << 24;
 
 namespace at::native {
 namespace mps {
@@ -218,7 +218,6 @@ static Tensor nonzero_fallback(const Tensor& self) {
 }
 
 static Tensor& nonzero_out_native_mps(const Tensor& self, Tensor& out_) {
-
   using namespace mps;
 
   int64_t nDim = self.dim();
@@ -303,9 +302,8 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
   TORCH_CHECK(self.dim() <= maxDimensions, "nonzero is not supported for tensor with more than ", 16, " dimensions");
   TORCH_CHECK(out_.is_mps());
 
-  if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS)
-    && self.numel() < NONZERO_MAX_SIZE
-    && !self.is_complex()) {
+  if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) && self.numel() < NONZERO_MAX_SIZE &&
+      !self.is_complex()) {
     // If conditions are met, use native nonzero op for better performance
     return nonzero_out_native_mps(self, out_);
   }
