@@ -1705,7 +1705,7 @@ class CppKernel(Kernel):
         size_str = V.kernel.sexpr(self.rename_indexing(size)) if upper else None
 
         line = self.indirect_assert(csevar, "0" if lower else None, size_str)
-        buffer.writeline(line)
+        self.cse.generate(buffer, line, assignment=False)
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)

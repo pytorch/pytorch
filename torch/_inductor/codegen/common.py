@@ -1605,9 +1605,10 @@ class Kernel(CodeGen):
                 sympy_var = parent_handler.indirect_indexing(var, size, check)
                 if generate_assert(check):
                     assert_lower = not (var.bounds.lower >= 0)
+                    # value ranges cannot x < s when x and s are symbols
                     assert_upper = not isinstance(
                         size, sympy.Number
-                    ) or not (  # value ranges cannot prove this
+                    ) or not (
                         var.bounds.upper < size
                     )
                     CSEProxy.check_bounds_lazy(
@@ -1725,10 +1726,6 @@ class Kernel(CodeGen):
         if V.graph.scheduler:
             V.graph.scheduler.remove_kernel_local_buffers()
         super().__exit__(exc_type, exc_val, exc_tb)
-
-    def load_mask(self, var) -> str:
-        # only the triton kernel requires mask
-        return ""
 
     def rename_indexing(self, index) -> sympy.Expr:
         # adds the necessary kernel args for index expressions
