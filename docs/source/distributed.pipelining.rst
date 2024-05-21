@@ -255,8 +255,6 @@ You can implement your own pipeline schedule by extending one of the following t
 For example, ``ScheduleGPipe`` and ``Schedule1F1B`` are subclasses of ``PipelineScheduleSingle``.
 Whereas, ``ScheduleInterleaved1F1B`` and ``ScheduleLoopedBFS`` are subclasses of ``PipelineScheduleMulti``.
 
-.. automodule:: torch.distributed.pipelining.PipelineSchedule
-
 .. currentmodule:: torch.distributed.pipelining.PipelineSchedule
 
 .. autoclass:: PipelineScheduleSingle
