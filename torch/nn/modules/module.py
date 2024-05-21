@@ -1693,18 +1693,22 @@ class Module:
     # See full discussion on the problems with returning `Union` here
     # https://github.com/microsoft/pyright/issues/4213
     def __getattr__(self, name: str) -> Any:
-        if '_parameters' in self.__dict__:
-            _parameters = self.__dict__['_parameters']
-            if name in _parameters:
-                return _parameters[name]
-        if '_buffers' in self.__dict__:
-            _buffers = self.__dict__['_buffers']
-            if name in _buffers:
-                return _buffers[name]
-        if '_modules' in self.__dict__:
-            modules = self.__dict__['_modules']
-            if name in modules:
-                return modules[name]
+        __dict__ = self.__dict__
+        _parameters = __dict__['_parameters']
+        if _parameters:
+            result = _parameters.get(name, None)
+            if result is not None:
+                return result
+        _buffers = __dict__['_buffers']
+        if _buffers:
+            result = _buffers.get(name, None)
+            if result is not None:
+                return result
+        _modules = __dict__['_modules']
+        if _modules:
+            result = _modules.get(name, None)
+            if result is not None:
+                return result
         raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
     def __setattr__(self, name: str, value: Union[Tensor, 'Module']) -> None:
