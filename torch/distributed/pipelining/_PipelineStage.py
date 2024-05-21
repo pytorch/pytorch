@@ -21,12 +21,17 @@ from ._utils import flatten_args, modify_graph_op_device
 logger = logging.getLogger(__name__)
 
 
+class PipeliningShapeError(RuntimeError):
+    """Shape mismatch between configured and runtime values."""
+
+
 class RootArgPlaceholder:
     """
     Placeholder for model-level inputs.
     """
 
-    pass
+    def __init__(self, tensor):
+        self.meta = tensor.to("meta")
 
 
 class RecvInfo:
@@ -453,6 +458,7 @@ class PipelineStageBase(ABC):
         `args` and `kwargs` are the inputs from *external* to this stage. They
         applies only to the first stage in most cases.
         """
+
         if self.is_first:
             # First stage doesn't need to receive anything
             composite_args = args
@@ -462,6 +468,8 @@ class PipelineStageBase(ABC):
             # Activations only come in args form
             composite_args = self._retrieve_recv_activations()
             composite_kwargs = {}
+
+        self._validate_fwd_input(args, kwargs)
 
         # Compute forward
         try:
@@ -542,6 +550,55 @@ class PipelineStageBase(ABC):
             f"{self.log_prefix} Backwarded chunk {self.bwd_chunk_id}"  # noqa: G004
         )
         self.bwd_chunk_id += 1
+
+    def _validate_fwd_input(self, args, kwargs):
+        """Raises a RuntimeError if shapes of input args/kwargs do not match the shapes configured for this stage."""
+
+        def _validate(desc, expected, given):
+            if not expected.shape == given.shape:
+                raise PipeliningShapeError(
+                    f"{desc} has a shape mismatch: expected {expected.shape} actual {given.shape}"
+                )
+            if not expected.dtype == given.dtype:
+                raise PipeliningShapeError(
+                    f"{desc} has a dtype mismatch: expected {expected.dtype} actual {given.dtype}"
+                )
+            if not expected.stride() == given.stride():
+                raise PipeliningShapeError(
+                    f"{desc} has a stride mismatch: expected {expected.stride()} actual {given.stride()}"
+                )
+
+        if self.is_first:
+            # TODO why is there a separate recv_info for each pipeline chunk?
+            expected_args = self.args_recv_info[self.fwd_chunk_id]
+        else:
+            expected_args = tuple()
+
+        if len(kwargs):
+            # TODO- need a mapping of kwarg to position in self.args_recv_info
+            # without it, we just validate shapes for args and ignore kwargs
+            logger.warning(
+                "Unable to validate input info for traced modules with kwargs."
+            )
+            expected_args = expected_args[: len(expected_args) - len(kwargs)]
+
+        if len(expected_args) != len(args):
+            # TODO- need a mapping of kwarg to position in self.args_recv_info
+            # maybe it's impossible to tell whether the len mismatches because
+            # (a) the user passed an extra arg or missed an arg
+            # (b) the user did not pass a kwarg, which has a default value baked into expected_args
+            raise PipeliningShapeError(
+                f"Number of input args ({len(args)}) does not match expected number ({len(expected_args)})"
+            )
+
+        for i, (expected, given) in enumerate(zip(expected_args, args)):
+            if isinstance(expected, RootArgPlaceholder):
+                exp = expected.meta
+            else:
+                assert isinstance(expected, RecvInfo), type(exp)
+                exp = expected.buffer
+
+            _validate(f"args[{i}]", exp, given)
 
 
 class _PipelineStage(PipelineStageBase):
@@ -656,10 +713,11 @@ class _PipelineStage(PipelineStageBase):
             """
             Create a receive buffer for a placeholder.
             """
+            example_value = placeholder.meta["val"]
             if arg_node.op == "placeholder":
                 # This is a root level placeholder, thus an input argument to the entire model.
                 # We are likely at stage 0, hence no need to create a receive buffer.
-                return RootArgPlaceholder()
+                return RootArgPlaceholder(example_value)
 
             # Figure out the source stage of this input
             while arg_node.target is operator.getitem:
@@ -672,7 +730,6 @@ class _PipelineStage(PipelineStageBase):
             src_stage = self.get_stage_index_of_submod(arg_node.name)
 
             # Create a receive buffer for this placeholder
-            example_value = placeholder.meta["val"]
             logger.debug(
                 f"{self.log_prefix} "  # noqa: G004
                 f"Creating recv buffer for input '{placeholder.name}' "
@@ -1061,7 +1118,7 @@ class ManualPipelineStage(PipelineStageBase):
                 self.args_recv_info[chunk_id] = recv_infos
             else:
                 self.args_recv_info[chunk_id] = tuple(
-                    [RootArgPlaceholder() for _ in self.inputs]
+                    [RootArgPlaceholder(i) for i in self.inputs]
                 )
 
         # Send info during forward for each activation
