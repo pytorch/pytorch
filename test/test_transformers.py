@@ -2511,7 +2511,8 @@ class TestSDPACudaOnly(NNTestCase):
         make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=torch.float16, packed=False, requires_grad=True)
         query, key, value = make_tensor(shape), make_tensor(shape), make_tensor(shape)
 
-        kernel_name = "Memory Efficient attention" if fused_kernel == SDPBackend.EFFICIENT_ATTENTION else "Flash Attention"
+        kernel_name = "Memory Efficient attention" if fused_kernel == SDPBackend.EFFICIENT_ATTENTION else \
+            "Flash Attention" if fused_kernel == SDPBackend.FLASH_ATTENTION else "cuDNN Attention"
         warning_context = (
             self.assertWarnsRegex(
                 UserWarning,
