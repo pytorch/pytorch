@@ -283,47 +283,21 @@ static void fp16_gemv_trans_fp16_arith_by_dot_products(const int m, const int n,
       float16x8_t ax[F16_REGISTERS_PER_ITERATION];
       float16x8_t ay[F16_REGISTERS_PER_ITERATION];
 
-      for (int j = 0; j < m; j += F16_ELEMENTS_PER_ITERATION) {
+      const auto m_aligned = m & ~(F16_ELEMENTS_PER_ITERATION - 1);
+      for (int j = 0; j < m_aligned ; j += F16_ELEMENTS_PER_ITERATION) {
         for (int k = 0; k < F16_REGISTERS_PER_ITERATION; ++k) {
           ax[k] = vld1q_f16(x + j + k * F16_ELEMENTS_PER_REGISTER);
           ay[k] = vld1q_f16(a + lda * i + j + k * F16_ELEMENTS_PER_REGISTER);
           sum[k] = f16_fma(sum[k], ax[k], ay[k]);
         }
       }
-      // TODO: add a tail fixup so we don't have to have such a
-      // restrictive gate to enter this path.
-      y[i * incy] = reduce(sum);
-  }
-  });
-}
+      auto reducedSum = reduce(sum);
 
-static void fp16_gemv_trans_fp16_arith(const int m, const int n, const float16_t* a, const int lda, const float16_t *x, float16_t* y, int incy) {
-  parallel_for(0, n / 4, 1, [&](int begin, int end) {
-    for (auto i = begin * 4 ; i < end * 4; i += 4) {
-      float16x8_t sum0Vec = vdupq_n_f16(0);
-      float16x8_t sum1Vec = vdupq_n_f16(0);
-      float16x8_t sum2Vec = vdupq_n_f16(0);
-      float16x8_t sum3Vec = vdupq_n_f16(0);
-      const auto row0 = a + lda * (i + 0);
-      const auto row1 = a + lda * (i + 1);
-      const auto row2 = a + lda * (i + 2);
-      const auto row3 = a + lda * (i + 3);
-      for (auto j = 0; j < m; j += 8) {
-        float16x8_t xVec = vld1q_f16(x + j);
-        float16x8_t a0Vec = vld1q_f16(row0 + j);
-        sum0Vec = f16_fma(sum0Vec, a0Vec, xVec);
-        float16x8_t a1Vec = vld1q_f16(row1 + j);
-        sum1Vec = f16_fma(sum1Vec, a1Vec, xVec);
-        float16x8_t a2Vec = vld1q_f16(row2 + j);
-        sum2Vec = f16_fma(sum2Vec, a2Vec, xVec);
-        float16x8_t a3Vec = vld1q_f16(row3 + j);
-        sum3Vec = f16_fma(sum3Vec, a3Vec, xVec);
+      for (int j = m_aligned; j < m; ++j) {
+        reducedSum += x[j] * a[lda * i + j];
       }
-      y[(i + 0) * incy] = reduce(sum0Vec);
-      y[(i + 1) * incy] = reduce(sum1Vec);
-      y[(i + 2) * incy] = reduce(sum2Vec);
-      y[(i + 3) * incy] = reduce(sum3Vec);
-    }
+      y[i * incy] = reducedSum;
+  }
   });
 }
 
@@ -383,18 +357,15 @@ void fp16_gemv_trans(
     const float beta,
     float16_t* y,
     const int incy) {
-  if (incx == 1 && alpha == 1.0 && beta == 0.0 && m % 4 == 0 && n % 4 == 0) {
+  if (incx == 1 && alpha == 1.0 && beta == 0.0) {
 #ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
     if (at::globalContext().allowFP16ReductionCPU()) {
-      if (m % 32 == 0 && n % 32 == 0) {
-        return fp16_gemv_trans_fp16_arith_by_dot_products(m, n, a, lda, x, y, incy);
-      }
-      if (m % 8 == 0) {
-        return fp16_gemv_trans_fp16_arith(m, n, a, lda, x, y, incy);
-      }
+      return fp16_gemv_trans_fp16_arith_by_dot_products(m, n, a, lda, x, y, incy);
     }
 #endif
-    return fp16_gemv_trans_fp32_arith(m, n, a, lda, x, y, incy);
+    if (m % 4 == 0 && n % 4 == 0) {
+      return fp16_gemv_trans_fp32_arith(m, n, a, lda, x, y, incy);
+    }
   }
   for (const auto i : c10::irange(n)) {
     float sum = 0;
