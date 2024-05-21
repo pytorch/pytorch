@@ -1790,6 +1790,17 @@ class Module:
         self._state_dict_hooks[handle.id] = hook
         return handle
 
+    def register_state_dict_hook(self, hook):
+        r"""Register a state-dict hook.
+
+        These hooks will be called with arguments: `self`, `state_dict`,
+        `prefix`, `local_metadata`, after the `state_dict` of `self` is set.
+        Note that only parameters and buffers of `self` or its children are
+        guaranteed to exist in `state_dict`. The hooks may modify `state_dict`
+        inplace or return a new one.
+        """
+        return self._register_state_dict_hook(hook)
+
     def register_state_dict_pre_hook(self, hook):
         r"""Register a pre-hook for the :meth:`~torch.nn.Module.state_dict` method.
 
@@ -1912,7 +1923,7 @@ class Module:
         self._save_to_state_dict(destination, prefix, keep_vars)
         for name, module in self._modules.items():
             if module is not None:
-                module.state_dict(destination=destination, prefix=prefix + name + '.', keep_vars=keep_vars)
+                destination = module.state_dict(destination=destination, prefix=prefix + name + '.', keep_vars=keep_vars)
         for hook in self._state_dict_hooks.values():
             hook_result = hook(self, destination, prefix, local_metadata)
             if hook_result is not None:
@@ -1939,6 +1950,25 @@ class Module:
         handle = hooks.RemovableHandle(self._load_state_dict_pre_hooks)
         self._load_state_dict_pre_hooks[handle.id] = _WrappedHook(hook, self if with_module else None)
         return handle
+
+    def register_load_state_dict_pre_hook(self, hook):
+        r"""Register a pre-hook for the :meth:`~torch.nn.Module.load_state_dict` method.
+
+        It should have the following signature::
+            hook(module, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs) -> state_dict or None
+
+        The ``module`` argument is the current module that this hook is registered on
+        Arguments:
+            hook (Callable): Callable hook that will be invoked before
+                loading the state dict
+
+        Returns:
+            :class:`torch.utils.hooks.RemovableHandle`:
+                a handle that can be used to remove the added hook by calling
+                ``handle.remove()``
+
+        """
+       return self._register_load_state_dict_pre_hook(hook, with_module=True)
 
     def register_load_state_dict_post_hook(self, hook):
         r"""Register a post hook to be run after module's ``load_state_dict`` is called.
