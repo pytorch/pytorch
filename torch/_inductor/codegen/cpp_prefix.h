@@ -99,7 +99,38 @@ Welford<T> welford_combine(const Welford<T>& acc, const T& data) {
 
 #if INDUCTOR_USE_VECTOR_TYPES()
 template <typename T>
-at::vec::Vectorized<T> reduce(const at::vec::Vectorized<T>& a, const at::vec::Vectorized<T>& b, const std::string& reduction_type) {
+Welford<T> welford_combine(const Welford<T>& a, const Welford<T>& b, const int64_t tail_size) {
+  auto delta = b.mean - a.mean;
+  auto new_weight = a.weight + b.weight;
+  auto wb_over_w = b.weight / new_weight;
+  // Guard against division by zero
+  wb_over_w = T::blendv(wb_over_w, T(0), new_weight == T(0));
+  auto new_mean = a.mean + delta * wb_over_w;
+  auto new_m2 = a.m2 + b.m2 + delta * delta * a.weight * wb_over_w;
+  return Welford<T>{
+    T::set(a.mean, new_mean, tail_size),
+    T::set(a.m2, new_m2, tail_size),
+    T::set(a.weight, new_weight, tail_size)
+  };
+}
+
+template <typename T>
+Welford<T> welford_combine(const Welford<T>& acc, const T& data, const int64_t tail_size) {
+  // Add a single data point
+  auto delta = data - acc.mean;
+  auto new_weight = acc.weight + T(1);
+  auto new_mean = acc.mean + delta / new_weight;
+  auto new_delta = data - new_mean;
+  auto new_m2 = acc.m2 + delta * new_delta;
+  return Welford<T>{
+    T::set(acc.mean, new_mean, tail_size),
+    T::set(acc.m2, new_m2, tail_size),
+    T::set(acc.weight, new_weight, tail_size)
+  };
+}
+
+template <typename T>
+T reduce(const T& a, const T& b, const std::string& reduction_type) {
   if (reduction_type == "max") {
     return at::vec::maximum(a, b);
   } else if (reduction_type == "min") {
@@ -116,42 +147,9 @@ at::vec::Vectorized<T> reduce(const at::vec::Vectorized<T>& a, const at::vec::Ve
 }
 
 template <typename T>
-at::vec::Vectorized<T> reduce(const at::vec::Vectorized<T>& a, const at::vec::Vectorized<T>& b, const std::string& reduction_type, const int64_t tail_size) {
+T reduce(const T& a, const T& b, const std::string& reduction_type, const int64_t tail_size) {
   auto out = reduce(a, b, reduction_type);
-  return at::vec::Vectorized<T>::set(a, out, tail_size);
-}
-
-template <typename T>
-Welford<at::vec::Vectorized<T>> welford_combine(const Welford<at::vec::Vectorized<T>>& a, const Welford<at::vec::Vectorized<T>>& b, const int64_t tail_size) {
-  using Vec = at::vec::Vectorized<T>;
-  auto delta = b.mean - a.mean;
-  auto new_weight = a.weight + b.weight;
-  auto wb_over_w = b.weight / new_weight;
-  // Guard against division by zero
-  wb_over_w = Vec::blendv(wb_over_w, Vec(0), new_weight == Vec(0));
-  auto new_mean = a.mean + delta * wb_over_w;
-  auto new_m2 = a.m2 + b.m2 + delta * delta * a.weight * wb_over_w;
-  return Welford<Vec>{
-    Vec::set(a.mean, new_mean, tail_size),
-    Vec::set(a.m2, new_m2, tail_size),
-    Vec::set(a.weight, new_weight, tail_size)
-  };
-}
-
-template <typename T>
-Welford<at::vec::Vectorized<T>> welford_combine(const Welford<at::vec::Vectorized<T>>& acc, const at::vec::Vectorized<T>& data, const int64_t tail_size) {
-  // Add a single data point
-  using Vec = at::vec::Vectorized<T>;
-  auto delta = data - acc.mean;
-  auto new_weight = acc.weight + Vec(1);
-  auto new_mean = acc.mean + delta / new_weight;
-  auto new_delta = data - new_mean;
-  auto new_m2 = acc.m2 + delta * new_delta;
-  return Welford<Vec>{
-    Vec::set(acc.mean, new_mean, tail_size),
-    Vec::set(acc.m2, new_m2, tail_size),
-    Vec::set(acc.weight, new_weight, tail_size)
-  };
+  return T::set(a, out, tail_size);
 }
 #endif
 
