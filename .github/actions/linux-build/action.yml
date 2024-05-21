@@ -53,13 +53,12 @@ inputs:
     required: false
     default: ""
   use-split-build:
-  description: |
-    [Experimental] Build a libtorch only wheel and build pytorch such that
-    are built from the libtorch wheel. A non "false" string triggers this behavior.
-    By default this this behavior is disabled.
-  required: false
-  type: string
-  default: false
+    description: |
+      [Experimental] Build a libtorch only wheel and build pytorch such that
+      are built from the libtorch wheel.
+    required: false
+    type: string
+    default: false
 outputs:
   docker-image:
     value: ${{ steps.calculate-docker-image.outputs.docker-image }}
