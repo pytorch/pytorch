@@ -43,10 +43,10 @@
 #include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu_native.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu_backward.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu_backward_native.h>
-#include <ATen/ops/_scaled_dot_product_flash_attention_overrideable.h>
-#include <ATen/ops/_scaled_dot_product_flash_attention_overrideable_native.h>
-#include <ATen/ops/_scaled_dot_product_flash_attention_overrideable_backward.h>
-#include <ATen/ops/_scaled_dot_product_flash_attention_overrideable_backward_native.h>
+#include <ATen/ops/_scaled_dot_product_fused_attention_overrideable.h>
+#include <ATen/ops/_scaled_dot_product_fused_attention_overrideable_native.h>
+#include <ATen/ops/_scaled_dot_product_fused_attention_overrideable_backward.h>
+#include <ATen/ops/_scaled_dot_product_fused_attention_overrideable_backward_native.h>
 #include <ATen/ops/_softmax.h>
 #include <ATen/ops/_transform_bias_rescale_qkv.h>
 #include <ATen/ops/_transform_bias_rescale_qkv_native.h>
@@ -663,7 +663,7 @@ Tensor scaled_dot_product_attention(
       return std::get<0>(out_lse_softmax);
     }
     case sdp::SDPBackend::flash_attention: {
-      if(query_.device().type() == DeviceType::CUDA) {
+      if(query_.device().type() == DeviceType::CUDA){
         c10::SymInt og_size = query_.sym_size(-1);
         Tensor query_padded = pad_last_dim<8, false>(query_);
         Tensor key_padded = pad_last_dim<8, false>(key);
@@ -674,7 +674,7 @@ Tensor scaled_dot_product_attention(
             query_padded, key_padded, value_padded, dropout_p, is_causal, false /*return_debug_mask*/, og_scale.as_float_unchecked());
         return post_process_flash_output(std::get<0>(out_lse_softmax), og_size);
       } else if (query_.device().type() == DeviceType::PrivateUse1) {
-        auto out_lse_softmax = at::_scaled_dot_product_flash_attention_overrideable(
+        auto out_lse_softmax = at::_scaled_dot_product_fused_attention_overrideable(
             query_, key, value, dropout_p, is_causal, false /*return_debug_mask*/, scale);
         return std::get<0>(out_lse_softmax);
       } else {
@@ -848,7 +848,7 @@ _scaled_dot_product_flash_attention_cpu_backward(
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, c10::SymInt, c10::SymInt, at::Tensor, at::Tensor, at::Tensor>
-_scaled_dot_product_flash_attention_overrideable(
+_scaled_dot_product_fused_attention_overrideable(
     const at::Tensor & query,
     const at::Tensor & key,
     const at::Tensor & value,
@@ -856,11 +856,11 @@ _scaled_dot_product_flash_attention_overrideable(
     bool is_causal,
     bool return_debug_mask,
     std::optional<double> scale) {
-  TORCH_CHECK_NOT_IMPLEMENTED(false, "_scaled_dot_product_flash_attention_overrideable not implemented. This is an operator for privateuse1 backends, please use TORCH_LIBRARY_IMPL to override this function ");
+  TORCH_CHECK_NOT_IMPLEMENTED(false, "_scaled_dot_product_fused_attention_overrideable not implemented. This is an operator for privateuse1 backends, please use TORCH_LIBRARY_IMPL to override this function ");
 }
 
 std::tuple<at::Tensor,at::Tensor,at::Tensor>
-_scaled_dot_product_flash_attention_overrideable_backward(
+_scaled_dot_product_fused_attention_overrideable_backward(
     const at::Tensor & grad_out,
     const at::Tensor & query,
     const at::Tensor & key,
@@ -876,7 +876,7 @@ _scaled_dot_product_flash_attention_overrideable_backward(
     const at::Tensor & philox_seed,
     const at::Tensor & philox_offset,
     std::optional<double> scale) {
-  TORCH_CHECK_NOT_IMPLEMENTED(false, "_scaled_dot_product_flash_attention_overrideable_backward not implemented: This is an operator for privateuse1 backends, please use TORCH_LIBRARY_IMPL to override this function ");
+  TORCH_CHECK_NOT_IMPLEMENTED(false, "_scaled_dot_product_fused_attention_overrideable_backward not implemented: This is an operator for privateuse1 backends, please use TORCH_LIBRARY_IMPL to override this function ");
   return std::tuple<Tensor, Tensor, Tensor>(
           at::empty_like(query),
           at::empty_like(key),
