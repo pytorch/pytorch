@@ -52,6 +52,7 @@ class FunctionScheduler {
   void run();
   void runNextJob();
   std::chrono::microseconds getNextWaitTime();
+  void addRun(int job_id, std::unique_ptr<Job> const &job);
   int scheduleJob(std::unique_ptr<Job> job);
 
  public:

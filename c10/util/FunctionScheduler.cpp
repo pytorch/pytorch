@@ -81,21 +81,28 @@ void FunctionScheduler::run() {
 
 void FunctionScheduler::runNextJob() {
   // check if the job was removed in the meantime
-  if (_jobs.find(_next_run->job_id()) != _jobs.end())
-    _jobs.find(_next_run->job_id())->second->run();
+  if (_jobs.find(_next_run->job_id()) != _jobs.end()) {
+    auto entry = _jobs.find(_next_run->job_id());
+    entry->second->run();
+    addRun(entry->first, entry->second);
+  }
 }
 
 int FunctionScheduler::id() {
   return _current_id++;
 }
 
+void FunctionScheduler::addRun(int job_id, std::unique_ptr<Job> const &job) {
+  auto time = std::chrono::steady_clock::now() + job->interval();
+  auto run = std::make_shared<Run>(job_id, time);
+  _queue.push(std::move(run));
+}
+
 int FunctionScheduler::scheduleJob(std::unique_ptr<Job> job) {
   int job_id = id();
 
   if (_running) {
-    auto time = std::chrono::steady_clock::now() + job->interval();
-    auto run = std::make_shared<Run>(job_id, time);
-    _queue.push(std::move(run));
+    addRun(job_id, job);
   }
 
   _jobs.insert(std::make_pair(job_id, std::move(job)));
