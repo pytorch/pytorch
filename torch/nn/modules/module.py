@@ -796,6 +796,7 @@ class Module:
 
         def compute_should_use_swap_tensors(tensor, tensor_applied):
             return (should_use_swap_tensors
+                    # subclasses may have multiple child tensors so we need to use swap_tensors
                     or is_traceable_wrapper_subclass(tensor_applied)
                     or tensor.device.type == 'xla'
                     or tensor_applied.device.type == 'xla')
@@ -810,7 +811,6 @@ class Module:
                 param_applied = fn(param)
             p_should_use_set_data = compute_should_use_set_data(param, param_applied)
 
-            # subclasses may have multiple child tensors so we need to use swap_tensors
             p_should_use_swap_tensors = compute_should_use_swap_tensors(param, param_applied)
 
             param_grad = param.grad
