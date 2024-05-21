@@ -1225,6 +1225,10 @@ class CppWrapperCpu(WrapperCodeGen):
                 output_args.append(f"&{output_name}")
             elif output is None:
                 output_args.append("nullptr")
+            elif output.is_Symbol:
+                output_name = f"{output_name_base}_{idx}"
+                self.writeline(f"auto {output_name} = {output};")
+                output_args.append(f"&{output_name}")
             else:
                 raise NotImplementedError(f"unsupported type of {output=}")
         args = args + output_args
