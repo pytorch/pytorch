@@ -614,6 +614,12 @@ void run_cudnn_SDP_bprop(
     Tensor& dV,
     const Tensor& dropoutseed,
     const Tensor& dropoutoffset) {
+  Tensor dO_ = dO;
+  if (!dO.strides()[dO.strides().size() - 1]) {
+    TORCH_WARN("cuDNN SDPA backward got an innermost stride of 0 in grad_out, which is unsupported. Materializing a contiguous\
+		tensor which will increase memory usage...");
+    dO_ = dO.contiguous();
+  }
   cudnnHandle_t handle = getCudnnHandle();
   auto key = MHACacheKeyWrapper(
       b, h, s_q, s_kv, d, q, k, v, dropout_probability, is_causal, true);
@@ -635,7 +641,7 @@ void run_cudnn_SDP_bprop(
         k,
         v,
         o,
-        dO,
+        dO_,
         softmaxstats,
         dQ,
         dK,
