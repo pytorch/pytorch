@@ -713,8 +713,10 @@ class BuiltinVariable(VariableTracker):
             )
 
         if fn is AttributeError:
+
             def attribute_exception_handler(tx, args, kwargs):
                 return variables.AttributeErrorExceptionVariable()
+
             return attribute_exception_handler
 
         if obj.can_insert_in_graph() and not (
