@@ -9,6 +9,7 @@ except ImportError:
     import testing
 
 from torch.export import export, load, save
+from torch.export._trace import _export
 
 test_classes = {}
 

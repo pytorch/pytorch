@@ -1,7 +1,7 @@
 import contextlib
 import inspect
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Tuple, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -111,7 +111,12 @@ def make_fake_params_buffers(
 
 
 def make_fake_inputs(
-    nn_module, args, kwargs, dynamic_shapes, _is_torch_jit_trace=False
+    nn_module,
+    args,
+    kwargs,
+    dynamic_shapes,
+    _is_torch_jit_trace=False,
+    allow_complex_guards_as_runtime_asserts=False,
 ):
     """
     Given an nn module, example inputs, and constraints, return a new fake mode,
@@ -156,12 +161,21 @@ def make_fake_inputs(
             "co_firstlineno": code.co_firstlineno,
         }
         fake_mode = FakeTensorMode(
-            shape_env=ShapeEnv(tracked_fakes=[], co_fields=co_fields),
+            shape_env=ShapeEnv(
+                tracked_fakes=[],
+                co_fields=co_fields,
+                prefer_deferred_runtime_asserts_over_guards=allow_complex_guards_as_runtime_asserts,
+                allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+            ),
             allow_non_fake_inputs=True,
         )
     else:
         fake_mode = FakeTensorMode(
-            shape_env=ShapeEnv(tracked_fakes=[]),
+            shape_env=ShapeEnv(
+                tracked_fakes=[],
+                prefer_deferred_runtime_asserts_over_guards=allow_complex_guards_as_runtime_asserts,
+                allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+            ),
             allow_non_fake_inputs=True,
         )
     if fake_mode.shape_env is None or fake_mode.shape_env.tracked_fakes is None:
@@ -224,7 +238,6 @@ def produce_guards_and_solve_constraints(
     gm: torch.fx.GraphModule,
     equalities_inputs: EqualityConstraint,
     original_signature: inspect.Signature,
-    _disable_forced_specializations: Optional[bool] = False,
     _is_torch_jit_trace=False,
 ):
     """
@@ -236,7 +249,6 @@ def produce_guards_and_solve_constraints(
     Additional inputs:
         equalities_inputs: the equality constraints to use for guards
         original_signature: the signature of the forward method
-        _disable_forced_specializations: if True, avoids forced specializations
     """
     shape_env = fake_mode.shape_env
     assert shape_env.tracked_fakes is not None
@@ -252,7 +264,6 @@ def produce_guards_and_solve_constraints(
             input_contexts=input_contexts,
             equalities_inputs=equalities_inputs,
             ignore_static=False,
-            _disable_forced_specializations=_disable_forced_specializations,
         )
     except ConstraintViolationError as e:
         constraint_violation_error = e
@@ -265,9 +276,7 @@ def produce_guards_and_solve_constraints(
         # TODO(avik): Maybe record the constraint violation error instead and replay later?
         assert constraint_violation_error
         raise constraint_violation_error
-    dim_constraints.solve(
-        _disable_forced_specializations=_disable_forced_specializations
-    )
+    dim_constraints.solve()
     dim_constraints.remove_redundant_dynamic_results()
     forced_specializations = dim_constraints.forced_specializations()
     if not _is_torch_jit_trace:

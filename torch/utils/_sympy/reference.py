@@ -71,7 +71,7 @@ class ReferenceAnalysis:
     @staticmethod
     def mod(x, y):
         ret = abs(x) % abs(y)
-        if x < 0:
+        if isinstance(x, (int, sympy.Number)) and x < 0:
             ret *= -1
         return ret
 

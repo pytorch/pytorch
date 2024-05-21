@@ -1,6 +1,6 @@
 import logging
 import operator
-from typing import Any, Dict, Optional, Set, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING
 
 # Import sympy and ShapeEnv during TYPE_CHECKING since importing sympy is slow
 if TYPE_CHECKING:
@@ -14,6 +14,7 @@ from torch import fx
 from torch.fx._compatibility import compatibility
 from torch.fx._utils import lazy_format_graph_code
 from torch.fx.experimental.sym_node import SymNode
+from torch.fx.experimental.symbolic_shapes import RuntimeAssert
 from torch.fx.graph_module import GraphModule
 
 log = logging.getLogger(__name__)
@@ -74,14 +75,27 @@ def insert_deferred_runtime_asserts(
         lazy_format_graph_code(f"pre insert_deferred_runtime_asserts {name}", gm),
     )
 
+    # deduplicate unassociated runtime assertions
+    # we could do better, some guards might be redundant,
+    # e.g. Eq(s0, 4) & Eq(2*s0, 8)
+    # but unclear how to handle all of that right now.
+    # TODO(pianpwk): better way of doing this
+    ras_exprs: Set[sympy.Expr] = set()
+    new_ras: List[RuntimeAssert] = []
+    for ras in ras_by_symbol.pop(None, []):  # type: ignore[call-overload]
+        if ras.expr not in ras_exprs:
+            new_ras.append(ras)
+            ras_exprs.add(ras.expr)
+    ras_by_symbol[None] = new_ras  # type: ignore[index]
+
     # We are going to mutate the dict
     symbol_to_proxy: Dict[sympy.Symbol, fx.Proxy] = {}
     placeholders = set()
     last_placeholder = None
     for node in graph.nodes:
         if node.op != "placeholder":
-            last_placeholder = node
             break
+        last_placeholder = node
         placeholders.add(node)
     assert last_placeholder is not None
 
@@ -121,6 +135,7 @@ def insert_deferred_runtime_asserts(
                     ),
                 )
 
+    inserted_sym_nodes = 0  # for inserting unassociated runtime asserts
     nodes = list(graph.nodes)
     for i, node in enumerate(nodes[:-1]):
         # Placeholders can match symbols, but when we destructure them
@@ -148,6 +163,8 @@ def insert_deferred_runtime_asserts(
                     ):
                         symbol_to_proxy[s] = fx.Proxy(cb())
                         log.debug("symbol_to_proxy[%s] = %s", s, symbol_to_proxy[s])
+                        nonlocal inserted_sym_nodes
+                        inserted_sym_nodes += 1
 
                 match_symbol(example_value, lambda: node)
                 if isinstance(t := example_value, torch.Tensor):
@@ -175,8 +192,13 @@ def insert_deferred_runtime_asserts(
             # Handle asserts that aren't associated with any symbol.  This
             # doesn't really have to be in the loop as it will only run once,
             # it just needs to happen right after the placeholders.
+            # insert this after placeholders & added sym nodes, and before non-placeholders.
             if node not in placeholders:
-                add_runtime_asserts(ras_by_symbol.pop(None, []))  # type: ignore[call-overload]
+                last_sym_node = last_placeholder
+                for _ in range(inserted_sym_nodes):
+                    last_sym_node = last_sym_node.next
+                with graph.inserting_before(last_sym_node.next):
+                    add_runtime_asserts(ras_by_symbol.pop(None, []))  # type: ignore[call-overload]
 
             defs = []
 

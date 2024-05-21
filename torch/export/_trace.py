@@ -2,6 +2,7 @@ import dataclasses
 import functools
 import inspect
 import logging
+import os
 import re
 import time
 import warnings
@@ -413,6 +414,7 @@ def _export_to_torch_ir(
     *,
     preserve_module_call_signature: Tuple[str, ...] = (),
     disable_constraint_solver: bool = False,
+    allow_complex_guards_as_runtime_asserts: bool = False,
     restore_fqn: bool = True,
     _log_export_usage: bool = True,
     same_signature: bool = True,
@@ -445,6 +447,10 @@ def _export_to_torch_ir(
                     assume_static_by_default=True,
                     tracing_mode="symbolic",
                     disable_constraint_solver=disable_constraint_solver,
+                    # currently the following 2 flags are tied together for export purposes,
+                    # but untangle for sake of dynamo export api
+                    prefer_deferred_runtime_asserts_over_guards=allow_complex_guards_as_runtime_asserts,
+                    allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
                     _log_export_usage=_log_export_usage,
                     same_signature=same_signature,
                 )(
@@ -480,6 +486,10 @@ def _export_to_aten_ir(
     should_insert_runtime_assertion=False,
     _is_torch_jit_trace=False,
 ):
+    # set this to False if env variable is specified
+    if os.environ.get("TORCH_DYNAMO_DO_NOT_EMIT_RUNTIME_ASSERTS", "0") == "1":
+        should_insert_runtime_assertion = False
+
     # [NOTE] If the user is exporting under training mode, we want to detect if there is any
     # state change in the autograd global state and error. If the user is exporting under inference
     # mode, we don't care. At predispatch level, we don't care about the state change.
@@ -945,7 +955,7 @@ def _export(
     strict: bool = True,
     preserve_module_call_signature: Tuple[str, ...] = (),
     pre_dispatch: bool = False,
-    _disable_forced_specializations: Optional[bool] = False,
+    allow_complex_guards_as_runtime_asserts: bool = False,
     _is_torch_jit_trace: bool = False,
 ) -> ExportedProgram:
     """
@@ -977,13 +987,16 @@ def _export(
         preserve_module_call_signature: A list of submodule paths for which the original
             calling conventions are preserved as metadata.
 
-        _disable_forced_specializations:
-         By default, some inferred dynamic shapes guards/constraints that are not expressible with the current
-         dynamic shapes language will lead to specialization to the concrete input values provided.
-         If _disable_forced_specializations is set to True, we will not specialize, and will not perform runtime
-         checks on such produced guards. Instead, we allow the user to specify arbitrary shapes,
-         and fail during runtime if the inputs are invalid. Constraints expressible with the language
-         (e.g. ranges, linear derived dims) will still be enforced.
+        allow_complex_guards_as_runtime_asserts:
+         With the current dynamic shapes language for dims and derived dims, we can run into constraints
+         that are not expressible with the language. For example, flattening a matrix and adding to a vector,
+         both fully dynamic (i.e. x.reshape([-1]) + y) emits a guard s0 * s1 = s2, which is not expressible.
+         By default, we either raise a constraint violation error or specialize to static values.
+         If this flag is set to True, we avoid erroring out and instead allow complex constraints to exist as runtime
+         assertions in the graph (i.e. sym_size_int, eq, _assert_scalar, and other math ops will compute and assert
+         the value of the guard).
+         Additionally, if TORCH_DYNAMO_DO_NOT_EMIT_RUNTIME_ASSERTS=1 is specified, we will allow complex constraints
+         while not emitting runtime asserts, returning a cleaner graph with lesser guarantees around dynamic shapes.
 
     Returns:
         An ExportedProgram containing the traced method.
@@ -992,12 +1005,6 @@ def _export(
         raise UserError(
             UserErrorType.INVALID_INPUT,
             f"Expecting `args` to be a tuple of example positional inputs, got {type(args)}",
-        )
-
-    if _disable_forced_specializations and strict:
-        raise UserError(
-            UserErrorType.INVALID_INPUT,
-            "_disable_forced_specializations can be only be specified in non-strict mode.",
         )
 
     global _EXPORT_FLAGS, _EXPORT_MODULE_HIERARCHY
@@ -1098,7 +1105,12 @@ def _export(
             equalities_inputs,
             original_signature,
         ) = make_fake_inputs(
-            mod, args, kwargs, dynamic_shapes, _is_torch_jit_trace=_is_torch_jit_trace
+            mod,
+            args,
+            kwargs,
+            dynamic_shapes,
+            _is_torch_jit_trace=_is_torch_jit_trace,
+            allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,  # for shape env initialization
         )
 
         fake_params_buffers = make_fake_params_buffers(
@@ -1150,7 +1162,6 @@ def _export(
                 aten_export_artifact.gm,
                 equalities_inputs,
                 original_signature,
-                _disable_forced_specializations=_disable_forced_specializations,
                 _is_torch_jit_trace=_is_torch_jit_trace,
             )
         except (ConstraintViolationError, ValueRangeError) as e:
@@ -1228,6 +1239,7 @@ def _export(
         dynamic_shapes,
         preserve_module_call_signature=preserve_module_call_signature,
         restore_fqn=False,  # don't need to restore because we will do it later
+        allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
         _log_export_usage=False,
     )
 
