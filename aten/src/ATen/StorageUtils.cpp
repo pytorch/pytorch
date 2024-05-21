@@ -3,6 +3,13 @@
 #include <ATen/StorageUtils.h>
 #include <c10/core/TensorOptions.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/_unsafe_set_storage.h>
+#include <ATen/ops/_unsafe_set_storage_native.h>
+#endif
+
 namespace at {
 
 C10_EXPORT c10::intrusive_ptr<c10::StorageImpl> new_shm_fd_storage(
@@ -52,5 +59,16 @@ C10_EXPORT void share_memory_(TensorBase& t) {
   origStorageImpl->set_data_ptr(std::move(newStorageImpl->mutable_data_ptr()));
   origStorageImpl->set_allocator(newStorageImpl->allocator());
 }
+
+namespace native {
+
+Tensor& _unsafe_set_storage_(Tensor& x, Storage storage) {
+  if (!x.storage().is_alias_of(storage)) {
+    x.unsafeGetTensorImpl()->set_storage_keep_dtype(std::move(storage));
+  }
+  return x;
+}
+
+} // namespace native
 
 } // namespace at
