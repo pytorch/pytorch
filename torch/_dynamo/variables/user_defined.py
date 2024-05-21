@@ -34,15 +34,9 @@ import torch.nn
 from torch._guards import TracingContext
 
 from .. import variables
-from ..exc import unimplemented
+from ..exc import unimplemented, UserAttributeErrorException
 from ..guards import GuardBuilder, install_guard
-from ..source import (
-    AttrSource,
-    DoNotReconstructSource,
-    GetItemSource,
-    ODictGetItemSource,
-    RandomValueSource,
-)
+from ..source import AttrSource, GetItemSource, ODictGetItemSource, RandomValueSource
 from ..utils import (
     all_hook_names,
     build_checkpoint_variable,
@@ -65,7 +59,6 @@ from .dicts import DefaultDictVariable
 def is_standard_setattr(val):
     return val in (
         object.__setattr__,
-        torch.nn.Module.__setattr__,
     )
 
 
@@ -795,7 +788,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def _getattr_static(self, name):
         if (
-            isinstance(self.value, (torch.nn.Module, PyTreeSpec))
+            isinstance(self.value, PyTreeSpec)
             or "__slots__" in self.value.__class__.__dict__
             or type(self.value) == threading.local
         ):
@@ -808,7 +801,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     return cls_var
             except AttributeError:
                 pass  # __slots__
-            # this might call torch.nn.Module.__getattr__
             subobj = getattr(self.value, name)
         else:
             subobj = inspect.getattr_static(self.value, name)
@@ -828,8 +820,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         if name == "__dict__":
             # Create a new ConstDictVariable Tracker with key, values from
-            # self.value __dict__. Do not go through VariableBuilder because it
-            # inserts guards on all the keys.
+            # self.value __dict__.
+            #
+            # Note that the items and the returned vt is deliberately kept
+            # sourceless. We don't want to reconstruct __dict__, we should
+            # directly use STORE_ATTR for the object reconstruction. Simillary,
+            # we don't want to insert any guards on __dict__ from this tracker.
             items_vt = {}
             for key, value in self.value.__dict__.items():
                 if not ConstantVariable.is_literal(key):
@@ -841,10 +837,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         self, key, deleted_ok=True
                     )
                 else:
-                    attr_source = None
-                    if self.source:
-                        attr_source = AttrSource(self.source, key)
-                    value_vt = variables.LazyVariableTracker.create(value, attr_source)
+                    from .builder import SourcelessBuilder
+
+                    value_vt = SourcelessBuilder.create(tx, value)
                 items_vt[key_vt] = value_vt
 
             # Check if there are new key additions using side effect infra
@@ -858,7 +853,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                             unimplemented("key is not constant")
                         items_vt[ConstantVariable.create(key)] = value_vt
             return variables.ConstDictVariable(
-                items_vt, dict, source=DoNotReconstructSource(self.source)
+                items_vt,
+                dict,
+                source=None,
             )
 
         try:
@@ -1020,20 +1017,32 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             install_guard(
                 AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
             )
-        if self._check_for_getattribute() or self._check_for_getattr():
-            unimplemented("hasattr with custom __getattr__")
+        if self._check_for_getattribute():
+            unimplemented("hasattr with custom __getattribute__")
 
-        try:
-            self._getattr_static(name)
-            if isinstance(self, variables.UnspecializedNNModuleVariable):
-                result = tx.inline_user_function_return(
-                    variables.UserFunctionVariable(self.value.__getattr__.__func__),
-                    [self, variables.ConstantVariable.create(name)],
-                    {},
-                )
+        getattr_fn = self._check_for_getattr()
+        if isinstance(getattr_fn, types.FunctionType):
+            # Dynamo is going to trace the __getattr__ function with
+            # args=name. Set the source accordingly.
+            new_source = None
+            if self.source:
+                new_source = AttrSource(self.source, "__getattr__")
+            try:
+                result = variables.UserMethodVariable(
+                    getattr_fn, self, source=new_source
+                ).call_function(tx, [variables.ConstantVariable.create(name)], {})
+
                 return variables.ConstantVariable.create(
                     not isinstance(result, variables.DeletedVariable)
                 )
+            except UserAttributeErrorException:
+                return variables.ConstantVariable.create(False)
+
+        elif getattr_fn is not None:
+            unimplemented("UserDefined with non-function __getattr__")
+
+        try:
+            self._getattr_static(name)
             return variables.ConstantVariable.create(True)
         except AttributeError:
             return variables.ConstantVariable.create(False)

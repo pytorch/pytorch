@@ -712,6 +712,11 @@ class BuiltinVariable(VariableTracker):
                 tx, [v.realize() for v in args], kwargs
             )
 
+        if fn is AttributeError:
+            def attribute_exception_handler(tx, args, kwargs):
+                return variables.AttributeErrorExceptionVariable()
+            return attribute_exception_handler
+
         if obj.can_insert_in_graph() and not (
             fn is operator.getitem
             and not issubclass(arg_types[0], variables.TensorVariable)
