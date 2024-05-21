@@ -12,7 +12,7 @@ from typing_extensions import ParamSpec
 import torch
 
 
-def _type(self, dtype=None, non_blocking=False, **kwargs):
+def _type (self, dtype=None, non_blocking=False, **kwargs):
     """Returns the type if `dtype` is not provided, else casts this object to
     the specified type.
 
