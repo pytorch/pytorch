@@ -67,13 +67,13 @@ class _TestClipGradNormBase(FSDPTest):
             )
             comm_mode = CommDebugMode()
             with comm_mode:
+                # foreach is default to turn on so we don't need to specify it.
                 total_norm = torch.nn.utils.clip_grad_norm_(
                     model.parameters(),
                     max_norm=max_norm,
                     norm_type=norm_type,
-                    foreach=True,
                 )
-            self.assertEqual(ref_total_norm, total_norm)
+            self.assertEqual(ref_total_norm, total_norm.full_tensor())
             # Expect one all-reduce per mesh dim for partial -> replicate
             expected_all_reduces = len(total_norm.placements)
             self.assertEqual(

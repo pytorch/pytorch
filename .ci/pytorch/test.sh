@@ -350,10 +350,20 @@ test_inductor() {
 
 test_inductor_cpp_wrapper_abi_compatible() {
   export TORCHINDUCTOR_ABI_COMPATIBLE=1
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+
   echo "Testing Inductor cpp wrapper mode with TORCHINDUCTOR_ABI_COMPATIBLE=1"
   # cpu stack allocation causes segfault and needs more investigation
   TORCHINDUCTOR_STACK_ALLOCATION=0 python test/run_test.py --include inductor/test_cpu_cpp_wrapper
   python test/run_test.py --include inductor/test_cuda_cpp_wrapper
+
+  TORCHINDUCTOR_CPP_WRAPPER=1 python benchmarks/dynamo/timm_models.py --device cuda --accuracy --amp \
+    --training --inductor --disable-cudagraphs --only vit_base_patch16_224 \
+    --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_training.csv"
+  python benchmarks/dynamo/check_accuracy.py \
+    --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_training.csv" \
+    --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_timm_training.csv"
 }
 
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
@@ -556,12 +566,12 @@ test_inductor_torchbench_smoketest_perf() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
-  # smoke test the cpp_wrapper mode
-  TORCHINDUCTOR_CPP_WRAPPER=1 python benchmarks/dynamo/torchbench.py --device cuda --accuracy --bfloat16 \
-    --inference --inductor --only hf_T5 --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_smoketest.csv"
+  # Test some models in the cpp wrapper mode
+  TORCHINDUCTOR_ABI_COMPATIBLE=1 TORCHINDUCTOR_CPP_WRAPPER=1 python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
+    --bfloat16 --inference --inductor --only hf_T5 --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
   python benchmarks/dynamo/check_accuracy.py \
-      --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_smoketest.csv" \
-      --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_torchbench_inference.csv"
+    --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv" \
+    --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_torchbench_inference.csv"
 
   python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --float16 --training \
     --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" --only hf_Bert \

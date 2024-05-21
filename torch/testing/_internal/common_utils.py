@@ -2919,7 +2919,8 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         if self._default_dtype_check_enabled:
             assert torch.get_default_dtype() == torch.float
 
-        torch.set_grad_enabled(self._prev_grad_state)
+        if hasattr(self, '_prev_grad_state'):
+            torch.set_grad_enabled(self._prev_grad_state)
 
     @staticmethod
     def _make_crow_indices(n_rows, n_cols, nnz,
