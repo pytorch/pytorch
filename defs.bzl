@@ -1,7 +1,7 @@
 def get_blas_gomp_arch_deps():
     return [
         ("x86_64", [
-            "third-party//IntelComposerXE:{}".format(native.read_config("fbcode", "mkl_lp64", "mkl_lp64_omp")),
+            "fbsource//third-party/mkl:{}".format(native.read_config("fbcode", "mkl_lp64", "mkl_lp64_omp")),
         ]),
         ("aarch64", [
             "third-party//OpenBLAS:OpenBLAS",

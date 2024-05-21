@@ -1739,8 +1739,12 @@ class GuardBuilder(GuardBuilderBase):
         # For FSDP modules, we must use TENSOR_MATCH because FSDP module is
         # traced using UnspecializedNNModuleVariable and therefore lifts the
         # params as inputs.
+        # For numpy tensors, always use TENSOR_MATCH because __from_numpy leads
+        # to a new tensor everytime and therefore id differs.
         if (
-            guard.is_nn_module() and not guard.is_fsdp_module()
+            guard.is_nn_module()
+            and not guard.is_fsdp_module()
+            and not isinstance(guard.originating_source, NumpyTensorSource)
         ) or match_on_id_for_tensor(guard):
             self.ID_MATCH(guard)
         else:
