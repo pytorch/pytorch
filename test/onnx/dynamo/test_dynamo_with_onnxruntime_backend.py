@@ -472,8 +472,9 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         if test_local_backend:
             assert local_ort is not None
-            number_of_captured_graphs = 2 if test_backward else 1
+            number_of_captured_graphs = 3 if test_backward else 2
             execution_count = len(example_args_collection) * number_of_captured_graphs
+            # breakpoint()
             self._assert_counting_information(
                 local_ort,
                 # Number of InferenceSession runs.
@@ -565,7 +566,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         if test_local_backend:
             assert local_ort is not None
-            number_of_captured_graphs = 2 if test_backward else 1
+            number_of_captured_graphs = 3 if test_backward else 2
             execution_count = len(example_args_collection) * number_of_captured_graphs
             self._assert_counting_information(
                 local_ort,
@@ -650,7 +651,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         if test_local_backend:
             assert local_ort is not None
-            number_of_captured_graphs = 2 if test_backward else 1
+            number_of_captured_graphs = 3 if test_backward else 2
             execution_count = len(example_args_collection) * number_of_captured_graphs
             self._assert_counting_information(
                 local_ort,
