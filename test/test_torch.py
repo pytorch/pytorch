@@ -7492,10 +7492,13 @@ class TestTorch(TestCase):
     def test_sobolengine_default_dtype(self):
         with set_default_dtype(torch.float64):
             engine = torch.quasirandom.SobolEngine(dimension=3, scramble=True, seed=123456)
-            result = engine.draw(n=5)
-            self.assertEqual(result.dtype, torch.float64)
-            result = engine.draw(n=5, dtype=torch.float32)
-            self.assertEqual(result.dtype, torch.float32)
+            # Check that default dtype is correctly handled
+            self.assertEqual(engine.draw(n=5).dtype, torch.float64)
+            # Check that explicitly passed dtype is adhered to
+            self.assertEqual(engine.draw(n=5, dtype=torch.float32).dtype, torch.float32)
+            # Reinitialize the engine and check that first draw dtype is correctly handled
+            engine = torch.quasirandom.SobolEngine(dimension=3, scramble=True, seed=123456)
+            self.assertEqual(engine.draw(n=5, dtype=torch.float32).dtype, torch.float32)
 
     @skipIfTorchDynamo("np.float64 restored as float32 after graph break.")
     def test_sobolengine_distribution(self, scramble=False):
