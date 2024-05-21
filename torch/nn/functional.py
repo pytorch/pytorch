@@ -5016,6 +5016,24 @@ greater than 0.0 is specified. The optional scale argument can only be specified
 
 .. warning:: This function is beta and subject to change.
 
+.. warning::
+
+    This function always applies dropout according to the specified ``dropout_p`` argument.
+    To disable dropout during evaluation, be sure to pass a value of ``0.0`` when the module
+    that makes the function call is not in training mode.
+
+    For example:
+
+    .. code-block:: python
+
+        class MyModel(nn.Module):
+            def __init__(self, p=0.5):
+                super().__init__()
+                self.p = p
+
+            def forward(self, ...):
+                return F.scaled_dot_product_attention(..., dropout_p=(self.p if self.training else 0.0))
+
 Note:
 
     There are currently three supported implementations of scaled dot product attention:

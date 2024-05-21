@@ -103,7 +103,7 @@ bool is_fast_path_index_select_scale(const Tensor& src, const Tensor& scale, Ten
 }
 
 template<typename index_t>
-bool is_fast_path(const Tensor& src, const c10::optional<Tensor>& scale, Tensor& output, index_t padding_idx) {
+bool is_fast_path(const Tensor& src, const std::optional<Tensor>& scale, Tensor& output, index_t padding_idx) {
   return (scale.has_value() && scale.value().defined()) ?
          is_fast_path_index_select_scale(src, scale.value(), output, padding_idx) :
          is_fast_path_index_select(src, output, padding_idx);
@@ -891,7 +891,7 @@ void check_arguments(
     const Tensor& indices,
     const Tensor& offsets,
     const int64_t mode,
-    const c10::optional<Tensor>& per_sample_weights,
+    const std::optional<Tensor>& per_sample_weights,
     bool include_last_offset) {
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarTypes("embedding_bag", indices_arg, {kLong, kInt});
@@ -985,7 +985,7 @@ void make_offset2bag_out(
     const Tensor& indices,
     const Tensor& offsets,
     const int64_t mode,
-    const c10::optional<Tensor>& per_sample_weights,
+    const std::optional<Tensor>& per_sample_weights,
     const int64_t padding_idx) {
   // To save compute, if we are going to go down the fast path case for the 'sum'
   // mode, we skip calculating offset2bag, since it is not going to be used.
@@ -1040,7 +1040,7 @@ static Tensor make_offset2bag(
     const Tensor& indices,
     const Tensor& offsets,
     const int64_t mode,
-    const c10::optional<Tensor>& per_sample_weights,
+    const std::optional<Tensor>& per_sample_weights,
     const int64_t padding_idx) {
   Tensor offset2bag = at::empty({0}, offsets.options());
   make_offset2bag_out(offset2bag, output, weight, indices, offsets, mode, per_sample_weights, padding_idx);
@@ -1144,7 +1144,7 @@ void _embedding_bag_cpu_impl_out(Tensor& output, Tensor& offset2bag,
                             Tensor& bag_size, Tensor* max_indices,
                             const Tensor &weight, const Tensor &indices,
                             const Tensor &offsets, const int64_t mode,
-                            const c10::optional<Tensor>& per_sample_weights,
+                            const std::optional<Tensor>& per_sample_weights,
                             bool include_last_offset, int64_t padding_idx, _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
   if (mode == MODE_MEAN || mode == MODE_SUM) {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, weight.scalar_type(), "embedding_bag_no_grad_cpu_out",
@@ -1241,8 +1241,8 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_cpu_impl(
 std::tuple<Tensor, Tensor, Tensor, Tensor>
 embedding_bag(const Tensor &weight, const Tensor &indices,
               const Tensor &offsets, const bool scale_grad_by_freq,
-              const int64_t mode, bool sparse, const c10::optional<Tensor>& per_sample_weights_opt,
-              bool include_last_offset, c10::optional<int64_t> padding_idx_opt) {
+              const int64_t mode, bool sparse, const std::optional<Tensor>& per_sample_weights_opt,
+              bool include_last_offset, std::optional<int64_t> padding_idx_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> per_sample_weights_maybe_owned = at::borrow_from_optional_tensor(per_sample_weights_opt);
   const Tensor& per_sample_weights = *per_sample_weights_maybe_owned;
@@ -1273,7 +1273,7 @@ embedding_bag(const Tensor &weight, const Tensor &indices,
 std::tuple<Tensor, Tensor, Tensor, Tensor>
 embedding_bag(const Tensor &weight, const Tensor &indices,
               const Tensor &offsets, const bool scale_grad_by_freq,
-              const int64_t mode, bool sparse, const c10::optional<Tensor>& per_sample_weights_opt,
+              const int64_t mode, bool sparse, const std::optional<Tensor>& per_sample_weights_opt,
               bool include_last_offset) {
   return at::native::embedding_bag(weight, indices, offsets, scale_grad_by_freq,
       mode, sparse, per_sample_weights_opt, include_last_offset, c10::nullopt);
@@ -1284,7 +1284,7 @@ embedding_bag(const Tensor &weight, const Tensor &indices,
 std::tuple<Tensor, Tensor, Tensor, Tensor>
 _embedding_bag_forward_only_cpu(const Tensor &weight, const Tensor &indices,
                   const Tensor &offsets, const bool scale_grad_by_freq,
-                  const int64_t mode, bool sparse, const c10::optional<Tensor>& per_sample_weights_opt, bool include_last_offset,
+                  const int64_t mode, bool sparse, const std::optional<Tensor>& per_sample_weights_opt, bool include_last_offset,
                   int64_t padding_idx) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> per_sample_weights_maybe_owned = at::borrow_from_optional_tensor(per_sample_weights_opt);
@@ -1307,7 +1307,7 @@ _embedding_bag_forward_only_cpu(const Tensor &weight, const Tensor &indices,
 std::tuple<Tensor, Tensor, Tensor, Tensor>
 _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
                   const Tensor &offsets, const bool scale_grad_by_freq,
-                  const int64_t mode, bool sparse, const c10::optional<Tensor>& per_sample_weights_opt, bool include_last_offset,
+                  const int64_t mode, bool sparse, const std::optional<Tensor>& per_sample_weights_opt, bool include_last_offset,
                   int64_t padding_idx) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> per_sample_weights_maybe_owned = at::borrow_from_optional_tensor(per_sample_weights_opt);
@@ -1337,9 +1337,9 @@ void _embedding_bag_cpu_out(
     const bool /* scale_grad_by_freq */,
     const int64_t mode,
     const bool /* sparse */,
-    const c10::optional<at::Tensor>& per_sample_weights,
+    const std::optional<at::Tensor>& per_sample_weights,
     const bool include_last_offset,
-    const c10::optional<int64_t>& padding_idx,
+    const std::optional<int64_t>& padding_idx,
     _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
   auto [indicesMaybeOwned, offsetsMaybeOwned] = promoteIndicesAndOffsets(indices_, offsets_);
   const auto& indices = *indicesMaybeOwned;
@@ -1393,7 +1393,7 @@ Tensor _embedding_bag_backward(const Tensor &grad, const Tensor &indices_,
                               const Tensor &max_indices_,
                               int64_t num_weights,
                               bool scale_grad_by_freq, int64_t mode,
-                              bool sparse, const c10::optional<Tensor>& per_sample_weights_opt,
+                              bool sparse, const std::optional<Tensor>& per_sample_weights_opt,
                               int64_t padding_idx) {
     return at::native::_embedding_bag_backward_symint(
         grad, indices_, offsets_, offset2bag, bag_size_, max_indices_, num_weights, scale_grad_by_freq, mode, sparse, per_sample_weights_opt, padding_idx);
@@ -1408,7 +1408,7 @@ Tensor _embedding_bag_backward_symint(const Tensor &grad, const Tensor &indices_
                               const Tensor &max_indices_,
                               c10::SymInt num_weights,
                               bool scale_grad_by_freq, int64_t mode,
-                              bool sparse, const c10::optional<Tensor>& per_sample_weights_opt,
+                              bool sparse, const std::optional<Tensor>& per_sample_weights_opt,
                               int64_t padding_idx) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> per_sample_weights_maybe_owned = at::borrow_from_optional_tensor(per_sample_weights_opt);
@@ -1610,7 +1610,7 @@ Tensor _embedding_bag_dense_backward_cpu(const Tensor &grad_, const Tensor &indi
                                   const Tensor &offset2bag__,
                                   const Tensor &bag_size_,
                                   const Tensor& max_indices_, int64_t num_weights,
-                                  bool scale_grad_by_freq, int64_t mode, const c10::optional<Tensor>& per_sample_weights__opt,
+                                  bool scale_grad_by_freq, int64_t mode, const std::optional<Tensor>& per_sample_weights__opt,
                                   int64_t padding_idx) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> per_sample_weights__maybe_owned = at::borrow_from_optional_tensor(per_sample_weights__opt);
@@ -1765,7 +1765,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu(
 Tensor _embedding_bag_sparse_backward_symint(
     const Tensor &grad_, const Tensor &indices, const Tensor &offsets,
     const Tensor &offset2bag, const Tensor &bag_size_, SymInt num_weights,
-    bool scale_grad_by_freq, int64_t mode, const c10::optional<Tensor>& per_sample_weights_opt,
+    bool scale_grad_by_freq, int64_t mode, const std::optional<Tensor>& per_sample_weights_opt,
     int64_t padding_idx) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> per_sample_weights_maybe_owned = at::borrow_from_optional_tensor(per_sample_weights_opt);

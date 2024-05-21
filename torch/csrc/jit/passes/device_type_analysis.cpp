@@ -27,7 +27,7 @@ of the Node (based on the rule itself)
 Returns: Bool indicating if anything was changed
 */
 
-bool setDeviceType(Value* value, c10::optional<Device> device) {
+bool setDeviceType(Value* value, std::optional<Device> device) {
   auto tensor_type = value->type()->expect<TensorType>();
   bool changed = tensor_type->device() != device;
   if (changed) {
@@ -36,7 +36,7 @@ bool setDeviceType(Value* value, c10::optional<Device> device) {
   return changed;
 }
 
-bool setReturnsToDevice(Node* n, c10::optional<Device> device) {
+bool setReturnsToDevice(Node* n, std::optional<Device> device) {
   bool changed = false;
   for (Value* out : n->outputs()) {
     auto tensor_type = out->type()->cast<TensorType>();
@@ -93,7 +93,7 @@ bool propWithNoDevice(Node* n) {
 
   auto tensor_type = n->inputs()[input_num]->type()->expect<TensorType>();
   bool only_seen_cpu_zerodim = isZerodimCPUTensor(tensor_type);
-  c10::optional<Device> device = tensor_type->device();
+  std::optional<Device> device = tensor_type->device();
 
   // Now see if all inputs have a consistent device type
   for (input_num++; input_num < n->inputs().size(); input_num++) {

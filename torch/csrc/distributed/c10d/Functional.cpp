@@ -196,6 +196,19 @@ at::Tensor all_gather_into_tensor(
       inputs, group_size, std::move(group_name))[0];
 }
 
+at::Tensor& all_gather_into_tensor_out(
+    at::Tensor& input,
+    int64_t group_size,
+    std::string group_name,
+    at::Tensor& output) {
+  c10d::AllgatherOptions opts;
+
+  auto group = c10d::resolve_process_group(group_name);
+  auto work = group->_allgather_base(output, input, opts);
+  c10d::RankLocal<WorkRegistry>::get().register_work(output, work);
+  return output;
+}
+
 at::Tensor allocate_reduce_scatter_output(
     const at::Tensor& input,
     const int64_t group_size) {
@@ -319,6 +332,13 @@ TORCH_LIBRARY(_c10d_functional, m) {
       "all_reduce_coalesced_(Tensor[](a!) inputs, str reduce_op, str group_name) -> Tensor[](a!)",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd, ::all_reduce_coalesced_),
+      {at::Tag::pt2_compliant_tag});
+
+  m.def(
+      "all_gather_into_tensor_out(Tensor input, int group_size, str group_name, *, Tensor(a!) out) -> Tensor(a!)",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd,
+          ::all_gather_into_tensor_out),
       {at::Tag::pt2_compliant_tag});
 
   m.def(
