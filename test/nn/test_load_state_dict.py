@@ -604,17 +604,17 @@ class MyWrapperLoadTensor(MyLoadTensor):
 
 class TestLoadStateDictSwap(TestCase):
     def _test_load_subclasses(self, m_subclass=None, sd_subclass=None, assign=False):
-        '''
+        """
         Tests that the model and state_dict are loaded correctly when
         model has parameters of type m_subclass and state_dict has valuse
         of type sd_subclass.
-        '''
+        """
 
         def _create_model(subclass=None):
-            '''
+            """
             Creates a Linear layer with a weight and buffer that are of type subclass
             (or regular Linear layer if subclass is None)
-            '''
+            """
             m = torch.nn.Linear(2, 3, bias=False)
             m.register_buffer("buf", torch.randn(2, 3))
             if subclass is not None:
@@ -646,11 +646,11 @@ class TestLoadStateDictSwap(TestCase):
     @swap([True])
     @parametrize("assign", [True, False])
     def test_swap_subclass(self, assign):
-        '''
+        """
         Tests that swap_tensors path has the correct behavior for various combinations
         of subclass types (e.g. no subclass, subclass, wrapper subclass) for params
         and state_dict.
-        '''
+        """
         # (MyLoadTensor, MyWrapperLoadTensor) tests the behavior of (superclass, subclass)
         subclasses = [None, MyLoadTensor, MyLoadTensor2, MyWrapperLoadTensor]
         for m_s, sd_s in product(subclasses, subclasses):
@@ -666,13 +666,15 @@ class TestLoadStateDictSwap(TestCase):
     @swap([False])
     @parametrize("assign", [True, False])
     def test_swap_traceable_wrapper_subclass(self, assign):
-        '''
+        """
         Tests that swap_tensors path is used by default when either of params
         or state_dict[value] are traceable wrapper subclasses.
-        '''
-        subclasses = [(None, MyWrapperLoadTensor),
-                      (MyWrapperLoadTensor, None),
-                      (MyWrapperLoadTensor, MyWrapperLoadTensor)]
+        """
+        subclasses = [
+            (None, MyWrapperLoadTensor),
+            (MyWrapperLoadTensor, None),
+            (MyWrapperLoadTensor, MyWrapperLoadTensor),
+        ]
         for m_s, sd_s in subclasses:
             self._test_load_subclasses(m_s, sd_s, assign)
 
