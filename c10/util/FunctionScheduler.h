@@ -70,7 +70,7 @@ class FunctionScheduler {
 
   int scheduleJob(
       std::function<void()> function,
-      std::chrono::microseconds interval);
+      std::chrono::seconds interval);
 
   int removeJob(int id);
 

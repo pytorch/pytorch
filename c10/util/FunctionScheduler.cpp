@@ -123,7 +123,8 @@ int FunctionScheduler::scheduleJob(std::unique_ptr<Job> job) {
 
 int FunctionScheduler::scheduleJob(
     std::function<void()> function,
-    std::chrono::microseconds interval) {
+    std::chrono::seconds seconds) {
+  auto interval = std::chrono::duration_cast<std::chrono::microseconds>(seconds);
   auto job = std::make_unique<Job>(std::move(function), interval);
   return scheduleJob(std::move(job));
 }
