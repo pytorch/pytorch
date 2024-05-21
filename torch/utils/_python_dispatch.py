@@ -395,12 +395,19 @@ and output of type {type(ret)}. But expected types to match."""
                 #     This requires swapping the storage of out to be the same as inp,
                 #     but we do *not* want it to change the sizes/strides that were compute for out.
 
+                def _alias_storage(source, dst):
+                    # NB: There are problems with this approach for mixed dense -> subclass
+                    # and subclass -> dense views, so don't do this for those yet.
+                    # TODO: Support mixed views here as well
+                    if is_traceable_wrapper_subclass(source) == is_traceable_wrapper_subclass(dst):
+                        torch.ops.aten._unsafe_set_storage_(dst, source.untyped_storage())
+
                 if isinstance(ret, list):
                     for r in ret:
-                        torch.ops.aten._unsafe_set_storage_(r, arg.untyped_storage())
+                        _alias_storage(arg, r)
                 else:
                     assert isinstance(ret, torch.Tensor), f"type: {type(ret)}"
-                    torch.ops.aten._unsafe_set_storage_(ret, arg.untyped_storage())
+                    _alias_storage(arg, ret)
             finally:
                 torch._C._set_meta_in_tls_dispatch_include(meta_in_tls)
 
