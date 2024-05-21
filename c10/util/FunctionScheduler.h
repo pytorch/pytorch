@@ -8,6 +8,8 @@
 #include <vector>
 #include <unordered_map>
 #include <memory>
+#include <mutex>
+#include <condition_variable>
 
 namespace c10 {
 
@@ -47,6 +49,8 @@ class FunctionScheduler {
   std::unordered_map<int, std::unique_ptr<Job>> _jobs;
   std::shared_ptr<Run> _next_run;
   std::thread _thread;
+  std::mutex _mutex;
+  std::condition_variable _cond;
 
   int id();
   void run();

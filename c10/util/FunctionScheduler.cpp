@@ -1,12 +1,5 @@
 #include <c10/util/FunctionScheduler.h>
 
-#include <algorithm>
-#include <atomic>
-#include <chrono>
-#include <functional>
-#include <thread>
-#include <vector>
-
 namespace c10 {
 
 /* Job */
@@ -60,19 +53,17 @@ std::chrono::microseconds FunctionScheduler::getNextWaitTime() {
 }
 
 void FunctionScheduler::run() {
+  std::unique_lock<std::mutex> lock(_mutex);
+
   while (_running) {
     if (_queue.empty()) {
-      // TODO wait with mutex or check periodically?
+      _cond.wait(lock);
       continue;
     }
 
     std::chrono::microseconds wait_time = getNextWaitTime();
     if (wait_time.count() > 0) {
-        /* TODO
-        * 1. other jobs may be scheduled with lower interval while this is waiting
-        * 2. stop() may occur while waiting
-        */
-        std::this_thread::sleep_for(wait_time);
+      _cond.wait_for(lock, wait_time);
     }
 
     runNextJob();
@@ -93,9 +84,12 @@ int FunctionScheduler::id() {
 }
 
 void FunctionScheduler::addRun(int job_id, std::unique_ptr<Job> const &job) {
+  std::lock_guard<std::mutex> lock(_mutex);
   auto time = std::chrono::steady_clock::now() + job->interval();
   auto run = std::make_shared<Run>(job_id, time);
   _queue.push(std::move(run));
+
+  if (_running) _cond.notify_one();
 }
 
 int FunctionScheduler::scheduleJob(std::unique_ptr<Job> job) {
@@ -105,6 +99,7 @@ int FunctionScheduler::scheduleJob(std::unique_ptr<Job> job) {
     addRun(job_id, job);
   }
 
+  std::lock_guard<std::mutex> lock(_mutex);
   _jobs.insert(std::make_pair(job_id, std::move(job)));
   return job_id;
 }
@@ -117,10 +112,12 @@ int FunctionScheduler::scheduleJob(
 }
 
 int FunctionScheduler::removeJob(int id) {
+  std::lock_guard<std::mutex> lock(_mutex);
   return _jobs.erase(id) ? id : -1;
 }
 
 void FunctionScheduler::start() {
+  std::lock_guard<std::mutex> lock(_mutex);
   auto now = std::chrono::steady_clock::now();
   for (const auto &entry : _jobs) {
     auto run = std::make_shared<Run>(entry.first, now + entry.second->interval());
@@ -133,8 +130,9 @@ void FunctionScheduler::start() {
 
 void FunctionScheduler::stop() {
   _running = false;
-  if (_thread.joinable())
-    _thread.join();
+  _cond.notify_one();
+  _thread.join();
+  // TODO: clear queue
 }
 
 } // namespace c10
