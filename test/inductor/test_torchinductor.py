@@ -746,6 +746,8 @@ class CommonTemplate:
             ),
         )
 
+    # Fails when testing the scalar version
+    # See https://github.com/pytorch/pytorch/issues/126763.
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_eager_aoti_cache_hit(self):
         ns = "aten"
@@ -842,6 +844,9 @@ class CommonTemplate:
 
         self.assertTrue(kernel_lib_path in kernel_libs_abs_path)
 
+    # Fails when testing the scalar version
+    # See https://github.com/pytorch/pytorch/issues/126763.
+    @expectedFailureScalar
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_eager_aoti_with_scalar(self):
         namespace_name = "aten"
@@ -922,6 +927,9 @@ class CommonTemplate:
             self.assertEqual(len(ref_values), len(res_values))
             self.assertEqual(ref_values, res_values)
 
+    # Fails when testing the scalar version
+    # See https://github.com/pytorch/pytorch/issues/126763.
+    @expectedFailureScalar
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_torch_compile_override_registration(self):
         dynamic = False
@@ -9232,7 +9240,7 @@ class CommonTemplate:
             opt_fn = torch._dynamo.optimize("inductor")(fn)
             _, code = run_and_get_cpp_code(opt_fn, *args)
             print(code)
-            # When test the scalar version, i.e., ATEN_CPU_CAPABILITY=default,
+            # When testing the scalar version, i.e., ATEN_CPU_CAPABILITY=default,
             # static_cast<int>(256) is not found, but static_cast<int64_t>(256).
             # See https://github.com/pytorch/pytorch/issues/126262.
             FileCheck().check_count(
