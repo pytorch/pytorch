@@ -29,20 +29,20 @@ struct Argument {
   Argument(
       std::string name = "",
       const TypePtr& type = nullptr,
-      c10::optional<int32_t> N = c10::nullopt,
-      c10::optional<IValue> default_value = c10::nullopt,
+      std::optional<int32_t> N = c10::nullopt,
+      std::optional<IValue> default_value = c10::nullopt,
       bool kwarg_only = false,
-      c10::optional<AliasInfo> alias_info = c10::nullopt)
+      std::optional<AliasInfo> alias_info = c10::nullopt)
     : Argument(std::move(name), type, type, N, std::move(default_value), kwarg_only, std::move(alias_info)) {}
 
   Argument(
       std::string name,
       TypePtr fake_type,
       TypePtr real_type,
-      c10::optional<int32_t> N = c10::nullopt,
-      c10::optional<IValue> default_value = c10::nullopt,
+      std::optional<int32_t> N = c10::nullopt,
+      std::optional<IValue> default_value = c10::nullopt,
       bool kwarg_only = false,
-      c10::optional<AliasInfo> alias_info = c10::nullopt)
+      std::optional<AliasInfo> alias_info = c10::nullopt)
       : name_(std::move(name)),
         type_(fake_type ? std::move(fake_type) : TensorType::get()),
         real_type_(real_type ? std::move(real_type) : type_),
@@ -94,10 +94,10 @@ struct Argument {
   const TypePtr& real_type() const {
     return real_type_;
   }
-  c10::optional<int32_t> N() const {
+  std::optional<int32_t> N() const {
     return N_;
   }
-  const c10::optional<IValue>& default_value() const {
+  const std::optional<IValue>& default_value() const {
     return default_value_;
   }
   bool kwarg_only() const {
@@ -150,7 +150,7 @@ struct Argument {
         N_,
         default_value_,
         kwarg_only_,
-        alias_info_ ? c10::optional<AliasInfo>(*alias_info_) : c10::nullopt);
+        alias_info_ ? std::optional<AliasInfo>(*alias_info_) : c10::nullopt);
   }
 
   // this function checks whether this Argument is backward compatible with
@@ -179,9 +179,9 @@ struct Argument {
   // e.g. for int[3]: type = ListType::ofInts(), N = 3
   // If present, this will allow scalars to be broadcast to this length to
   // become a list.
-  c10::optional<int32_t> N_;
+  std::optional<int32_t> N_;
 
-  c10::optional<IValue> default_value_;
+  std::optional<IValue> default_value_;
   // AliasInfo is huge, so let's only allocate memory for it if
   // necessary (which it isn't during schema parsing on startup, to
   // give a pertinent example).
@@ -322,7 +322,7 @@ struct TORCH_API FunctionSchema {
   // alias information should we infer?
   // NB: due to alias analysis kind merging, this may be nullopt.  Eventually
   // this should always be set no matter what
-  c10::optional<AliasAnalysisKind> alias_kind_;
+  std::optional<AliasAnalysisKind> alias_kind_;
 
   template <typename T>
   void checkArg(const IValue& value, const Argument& argument, optional<size_t> pos) const;
@@ -395,7 +395,7 @@ struct TORCH_API FunctionSchema {
     return aliasInfo && aliasInfo->isWrite();
   }
   bool is_mutable(c10::string_view name) const {
-    c10::optional<int> index = argumentIndexWithName(name);
+    std::optional<int> index = argumentIndexWithName(name);
     TORCH_INTERNAL_ASSERT(
         index != c10::nullopt, "Schema has no argument named ", name);
 
@@ -416,22 +416,22 @@ struct TORCH_API FunctionSchema {
 
   // Returns whether the two AliasTypeSets contain any similarities
   // ie: whether the two type sets can alias.
-  bool canAliasTypeSetsAlias(const c10::optional<AliasTypeSet> &lhs, const c10::optional<AliasTypeSet> &rhs) const;
+  bool canAliasTypeSetsAlias(const std::optional<AliasTypeSet> &lhs, const c10::optional<AliasTypeSet> &rhs) const;
 
   // Recursively Finds all contained types within the AliasTypeSet.
-  c10::optional<AliasTypeSet> getAliasTypeSetContainedTypes(const c10::optional<AliasTypeSet> &aliasTypeSet) const;
+  std::optional<AliasTypeSet> getAliasTypeSetContainedTypes(const c10::optional<AliasTypeSet> &aliasTypeSet) const;
 
   // Similar to mapTypeToAliasTypeSet defined in alias_analysis.cpp.
   // Used to map types to a type such that all types that can alias will be mapped to the same type.
   // For example, calling this method on 'Optional[List[int]]' is the same as calling this method
   // on 'List[int]'.
-  c10::optional<AliasTypeSet> mapTypeToAliasTypeSet(const TypePtr& type) const;
+  std::optional<AliasTypeSet> mapTypeToAliasTypeSet(const TypePtr& type) const;
 
   // Returns either arguments() or returns() depending on the SchemaArgType
   // output => returns(), input => arguments()
   const std::vector<Argument>& getCorrectList(SchemaArgType type) const;
 
-  c10::optional<int> argumentIndexWithName(c10::string_view name) const {
+  std::optional<int> argumentIndexWithName(c10::string_view name) const {
     for (const auto i : c10::irange(arguments().size())) {
       if(name == arguments()[i].name())
         return i;
@@ -470,8 +470,8 @@ struct TORCH_API FunctionSchema {
   std::string formatTypeMismatchMsg(
       const Argument& expected,
       const std::string& actual_type,
-      c10::optional<size_t> position = c10::nullopt,
-      c10::optional<std::string> value = c10::nullopt) const;
+      std::optional<size_t> position = c10::nullopt,
+      std::optional<std::string> value = c10::nullopt) const;
 
   FunctionSchema cloneWithRemappedTypes(
       const std::function<TypePtr(TypePtr)> type_map) const;
@@ -514,7 +514,7 @@ struct TORCH_API FunctionSchema {
     alias_kind_ = v;
   }
 
-  c10::optional<c10::string_view> getNamespace() const {
+  std::optional<c10::string_view> getNamespace() const {
     return name_.getNamespace();
   }
 

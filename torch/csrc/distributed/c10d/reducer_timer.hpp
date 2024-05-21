@@ -39,12 +39,12 @@ class TORCH_API Timer {
 
   // Return the difference between when two events occurred, in nanoseconds.
   // Or nullopt if one of them hasn't been recorded.
-  virtual c10::optional<int64_t> measureDifference(Event start, Event end) = 0;
+  virtual std::optional<int64_t> measureDifference(Event start, Event end) = 0;
 
   virtual ~Timer() = default;
 
   // Return host-side timestamp, or nullopt if it has not yet been recorded.
-  c10::optional<int64_t> getTimestamp(Event event) {
+  std::optional<int64_t> getTimestamp(Event event) {
     auto time = getTimeRef(event);
     if (time == kUnsetTime) {
       return c10::nullopt;

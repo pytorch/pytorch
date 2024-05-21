@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple, Union
+from typing import cast, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
@@ -18,6 +18,7 @@ from .optimizer import (
     _stack_if_compiling,
     _use_grad_for_differentiable,
     _view_as_real,
+    DeviceDict,
     Optimizer,
     ParamsT,
 )
@@ -202,14 +203,14 @@ class AdamW(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            params_with_grad = []
-            grads = []
-            exp_avgs = []
-            exp_avg_sqs = []
-            max_exp_avg_sqs = []
-            state_steps = []
-            amsgrad = group["amsgrad"]
-            beta1, beta2 = group["betas"]
+            params_with_grad: List[Tensor] = []
+            grads: List[Tensor] = []
+            exp_avgs: List[Tensor] = []
+            exp_avg_sqs: List[Tensor] = []
+            max_exp_avg_sqs: List[Tensor] = []
+            state_steps: List[Tensor] = []
+            amsgrad: bool = group["amsgrad"]
+            beta1, beta2 = cast(Tuple[float, float], group["betas"])
 
             has_complex = self._init_group(
                 group,
@@ -506,7 +507,7 @@ def _multi_tensor_adamw(
                 )
 
         if maximize:
-            device_grads = torch._foreach_neg(device_grads)
+            device_grads = torch._foreach_neg(device_grads)  # type: ignore[assignment]
 
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
@@ -533,6 +534,10 @@ def _multi_tensor_adamw(
 
         # Delete the local intermediate since it won't be used anymore to save on peak memory
         del device_grads
+
+        bias_correction1: Union[Tuple[Tensor, ...], List[Tensor]]
+        bias_correction2: Union[Tuple[Tensor, ...], List[Tensor]]
+        bias_correction2_sqrt: Union[Tuple[Tensor, ...], List[Tensor]]
 
         if capturable:
             bias_correction1 = torch._foreach_pow(beta1, device_state_steps)
@@ -580,7 +585,9 @@ def _multi_tensor_adamw(
 
             step_size = _stack_if_compiling([(lr / bc) * -1 for bc in bias_correction1])
 
-            bias_correction2_sqrt = [_dispatch_sqrt(bc) for bc in bias_correction2]
+            bias_correction2_sqrt = [
+                _dispatch_sqrt(bc) for bc in bias_correction2  # type: ignore[arg-type]
+            ]
 
             if amsgrad:
                 # Maintains the maximum of all 2nd moment running avg. till now
@@ -594,7 +601,10 @@ def _multi_tensor_adamw(
             torch._foreach_div_(exp_avg_sq_sqrt, bias_correction2_sqrt)
             torch._foreach_add_(exp_avg_sq_sqrt, eps)
             torch._foreach_addcdiv_(
-                device_params, device_exp_avgs, exp_avg_sq_sqrt, step_size
+                device_params,
+                device_exp_avgs,
+                exp_avg_sq_sqrt,
+                step_size,  # type: ignore[arg-type]
             )
 
 
@@ -611,27 +621,29 @@ def _fused_adamw(
     amsgrad: bool,
     beta1: float,
     beta2: float,
-    lr: Union[float, Tensor],
+    lr: Union[Tensor, float],
     weight_decay: float,
     eps: float,
     maximize: bool,
     capturable: bool,  # Needed for consistency.
     differentiable: bool,
-    has_complex: bool,
+    has_complex: bool,  # Needed for consistency.
 ) -> None:
     if not params:
         return
     if differentiable:
         raise RuntimeError("Adam with fused=True does not support differentiable=True")
 
-    grad_scale_dict = (
-        {grad_scale.device: grad_scale} if grad_scale is not None else None
+    grad_scale_dict: DeviceDict = (
+        {grad_scale.device: grad_scale} if grad_scale is not None else {}
     )
-    found_inf_dict = {found_inf.device: found_inf} if found_inf is not None else None
+    found_inf_dict: DeviceDict = (
+        {found_inf.device: found_inf} if found_inf is not None else {}
+    )
 
     # We only shuffle around the lr when it is a Tensor and on CUDA, otherwise, we prefer
     # treating it as a scalar.
-    lr_dict = (
+    lr_dict: Optional[DeviceDict] = (
         {lr.device: lr} if isinstance(lr, Tensor) and str(lr.device) != "cpu" else None
     )
 
@@ -651,16 +663,17 @@ def _fused_adamw(
     ) in grouped_tensors.items():
         device_grad_scale, device_found_inf = None, None
         if grad_scale is not None:
-            if device not in grad_scale_dict:
-                grad_scale_dict[device] = grad_scale.to(device, non_blocking=True)
-            device_grad_scale = grad_scale_dict[device]
+            device_grad_scale = grad_scale_dict.setdefault(
+                device, grad_scale.to(device, non_blocking=True)
+            )
         if found_inf is not None:
-            if found_inf not in found_inf_dict:
-                found_inf_dict[device] = found_inf.to(device, non_blocking=True)
-            device_found_inf = found_inf_dict[device]
+            device_found_inf = found_inf_dict.setdefault(
+                device, found_inf.to(device, non_blocking=True)
+            )
         if lr_dict is not None and device not in lr_dict:
-            lr_dict[device] = lr.to(device=device, non_blocking=True)
-            lr = lr_dict[device]
+            lr = lr_dict.setdefault(
+                device, lr.to(device=device, non_blocking=True)  # type: ignore[union-attr]
+            )
         torch._foreach_add_(device_state_steps, 1)
         torch._fused_adamw_(
             device_params,
