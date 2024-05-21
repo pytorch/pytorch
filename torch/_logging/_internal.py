@@ -212,6 +212,7 @@ def set_logs(
     recompiles_verbose: bool = False,
     trace_source: bool = False,
     trace_call: bool = False,
+    trace_bytecode: bool = False,
     output_code: bool = False,
     schedule: bool = False,
     perf_hints: bool = False,
@@ -223,6 +224,7 @@ def set_logs(
     modules: Optional[Dict[str, Union[int, bool]]] = None,
     cudagraphs: bool = False,
     sym_node: bool = False,
+    compiled_autograd_verbose: bool = False,
 ):
     """
     Sets the log level for individual components and toggles individual log
@@ -348,6 +350,10 @@ def set_logs(
             Whether to emit detailed line location when TorchDynamo creates an FX node
             corresponding to function call. Python 3.11+ only. Default: ``False``
 
+        trace_bytecode (:class:`bool`):
+            Whether to emit bytecode instructions and traced stack state as TorchDynamo
+            traces bytecode. Default: ``False``
+
         output_code (:class:`bool`):
             Whether to emit the TorchInductor output code. Default: ``False``
 
@@ -465,6 +471,7 @@ def set_logs(
         recompiles_verbose=recompiles_verbose,
         trace_source=trace_source,
         trace_call=trace_call,
+        trace_bytecode=trace_bytecode,
         output_code=output_code,
         schedule=schedule,
         perf_hints=perf_hints,
@@ -476,6 +483,7 @@ def set_logs(
         sym_node=sym_node,
         export=export,
         cudagraphs=cudagraphs,
+        compiled_autograd_verbose=compiled_autograd_verbose,
     )
 
 

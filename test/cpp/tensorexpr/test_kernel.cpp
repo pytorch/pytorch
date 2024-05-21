@@ -888,7 +888,7 @@ TEST_F(Kernel, SumAllAxes) {
     parseIR(graph_string, &*graph);
 
     auto o = at::empty({}, TensorOptions(kCPU));
-    c10::optional<c10::ScalarType> dtype;
+    std::optional<c10::ScalarType> dtype;
     if (scalar_type != ScalarType::Undefined) {
       dtype = static_cast<c10::ScalarType>(scalar_type);
     }
@@ -947,7 +947,7 @@ TEST_F(Kernel, SumOneAxis) {
         env.d("dim", dim);
         env.d("keepdim", keepdim);
         env.s("dtype", dtypeConstant(scalar_type));
-        c10::optional<c10::ScalarType> dtype;
+        std::optional<c10::ScalarType> dtype;
         if (scalar_type != ScalarType::Undefined) {
           dtype = static_cast<c10::ScalarType>(scalar_type);
         }
@@ -1665,7 +1665,7 @@ Tensor lowerNanToNum(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device) {
   auto input_buf = std::get<BufHandle>(inputs[0]);
   auto e = Compute(

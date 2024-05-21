@@ -127,7 +127,7 @@ TensorImpl::TensorImpl(
 TensorImpl::TensorImpl(
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type,
-    c10::optional<c10::Device> device_opt)
+    std::optional<c10::Device> device_opt)
     : TensorImpl({}, key_set, data_type, device_opt) {}
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -135,7 +135,7 @@ TensorImpl::TensorImpl(
     Storage&& storage,
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type,
-    c10::optional<c10::Device> device_opt)
+    std::optional<c10::Device> device_opt)
     : storage_(std::move(storage)),
 
       numel_(0),
@@ -846,7 +846,7 @@ static void clone_symvec(SymIntArrayRef src, SymDimVector& dst) {
 void TensorImpl::set_sizes_and_strides(
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,
-    c10::optional<c10::SymInt> storage_offset) {
+    std::optional<c10::SymInt> storage_offset) {
   auto int_sizes = asIntArrayRefSlowOpt(sizes);
   auto int_strides = asIntArrayRefSlowOpt(strides);
   if (int_sizes && int_strides &&

@@ -1127,13 +1127,13 @@ TEST(ListTest, canAccessStringByReference) {
 }
 
 TEST(ListTest, canAccessOptionalStringByReference) {
-  List<c10::optional<std::string>> list({"one", "two", c10::nullopt});
+  List<std::optional<std::string>> list({"one", "two", c10::nullopt});
   const auto& listRef = list;
   static_assert(
-      std::is_same_v<decltype(listRef[1]), c10::optional<std::reference_wrapper<const std::string>>>,
-      "List<c10::optional<std::string>> access should be by const reference");
-  c10::optional<std::string> str1 = list[1];
-  c10::optional<std::string> str2 = list[2];
+      std::is_same_v<decltype(listRef[1]), std::optional<std::reference_wrapper<const std::string>>>,
+      "List<std::optional<std::string>> access should be by const reference");
+  std::optional<std::string> str1 = list[1];
+  std::optional<std::string> str2 = list[2];
   decltype(auto) strRef1 = listRef[1];
   decltype(auto) strRef2 = listRef[2];
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)

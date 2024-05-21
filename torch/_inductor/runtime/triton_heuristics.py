@@ -10,6 +10,7 @@ import operator
 import os
 import os.path
 import re
+import sys
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
@@ -32,7 +33,7 @@ from .runtime_utils import (
     ceildiv,
     conditional_product,
     create_bandwidth_info_str,
-    do_bench,
+    do_bench_gpu,
     dynamo_timed,
     get_first_attr,
     get_max_y_grid,
@@ -55,11 +56,17 @@ if triton is not None:
         from triton.compiler.compiler import ASTSource
     except ImportError:
         ASTSource = None
+
+    try:
+        from triton.backends.compiler import GPUTarget
+    except ImportError:
+        GPUTarget = None
 else:
     Config = object
     KernelInterface = object
     OutOfResources = object
     ASTSource = None
+    GPUTarget = None
 
 try:
     autograd_profiler = torch.autograd.profiler
@@ -117,6 +124,33 @@ def disable_pointwise_autotuning(inductor_meta):
     if inductor_meta.get("are_deterministic_algorithms_enabled"):
         return True
     return not inductor_meta.get("autotune_pointwise", True)
+
+
+def _dump_launch_params(args, kwargs, launcher, kernel_name):
+    call_args = []
+    call_kwargs = {}
+    for arg in args:
+        if isinstance(arg, (int, bool)):
+            call_args.append(str(arg))
+        else:
+            call_args.append("T")
+    for k, v in kwargs.items():
+        if isinstance(arg, (int, bool)):
+            call_kwargs[k] = v
+        else:
+            call_kwargs[k] = v
+    for k, v in launcher.config.kwargs.items():
+        call_kwargs[k] = v
+    call_kwargs["num_warps"] = launcher.config.num_warps
+    call_kwargs["num_stages"] = launcher.config.num_stages
+    args_str = ""
+    args_str += ", ".join(call_args)
+    for k, v in call_kwargs.items():
+        args_str += f", {k}={v}"
+
+    abs_path = os.path.abspath(sys.argv[0])
+    with open(f"{abs_path}.launch_params", "a") as f:
+        f.write(f"{kernel_name} | {args_str}\n")
 
 
 class CachingAutotuner(KernelInterface):
@@ -192,7 +226,6 @@ class CachingAutotuner(KernelInterface):
             compiled_binaries = []
             if not self.configs:
                 raise RuntimeError("No triton configs are available")
-
             for c in self.configs:
                 try:
                     compiled_binary, launcher = self._precompile_config(
@@ -200,11 +233,8 @@ class CachingAutotuner(KernelInterface):
                     )
                 except OutOfResources as e:
                     if len(self.configs) == 1:
-                        raise RuntimeError(
-                            f"Failed to compile triton config: {c}. "
-                            f"Report a fatal compilation error. "
-                            f"{e}"
-                        )
+                        # There are no valid Triton configs
+                        raise e
                     # Skip the config if we run out of resource
                     continue
                 self.launchers.append(launcher)
@@ -338,11 +368,22 @@ class CachingAutotuner(KernelInterface):
             else:
                 rocm_warp_size = 64
 
-            target = (
-                (compile_meta["device_type"], compile_meta["cc"])
-                if not torch.version.hip
-                else [compile_meta["device_type"], compile_meta["cc"], rocm_warp_size]
-            )
+            if GPUTarget:
+                target = GPUTarget(
+                    compile_meta["device_type"],
+                    compile_meta["cc"],
+                    rocm_warp_size if torch.version.hip else 32,
+                )
+            else:
+                target = (
+                    (compile_meta["device_type"], compile_meta["cc"])
+                    if not torch.version.hip
+                    else [
+                        compile_meta["device_type"],
+                        compile_meta["cc"],
+                        rocm_warp_size,
+                    ]
+                )
 
             options = {
                 "num_warps": compile_meta["num_warps"],
@@ -615,7 +656,7 @@ class CachingAutotuner(KernelInterface):
                 stream=stream,
             )
 
-        return do_bench(kernel_call, rep=40, fast_flush=True)
+        return do_bench_gpu(kernel_call, rep=40, fast_flush=True)
 
     def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
         from ..compile_fx import clone_preserve_strides
@@ -707,7 +748,7 @@ class CachingAutotuner(KernelInterface):
 
         binary = (
             launcher.bin.asm["cubin"]
-            if torch.version.hip is None
+            if self.device_props.type != "hip"
             else launcher.bin.asm["hsaco"]
         )
         CudaKernelParamCache.set(key, params, binary)
@@ -722,7 +763,7 @@ class CachingAutotuner(KernelInterface):
         E.g., assuming regular autotune only get one config C1; while max-autotune get 4 configs C1, C2, C3, C4
         and max-autotune figure out C3 is the best.
 
-        Then if coordinate descnt tuning is run with max-autotune disabled, it will start from C1;
+        Then if coordinate desecnt tuning is run with max-autotune disabled, it will start from C1;
         while if coordinate descent tuning is run with max-autotune enabled, it will start from C3.
         """
         if (
@@ -791,22 +832,23 @@ class CachingAutotuner(KernelInterface):
                 {**dict(zip(self.arg_names, args)), **launcher.config.kwargs, **kwargs}
             )
 
-        # guard the record function and only call it if profiling is currently
-        # in progress, to reduce latency when profiler is not turned on. Note that
-        # the "if" statement (instead of, say, a contextlib.nullcontext) is intentional;
+        if os.environ.get("TORCHINDUCTOR_DUMP_LAUNCH_PARAMS", 0) == "1":
+            _dump_launch_params(args, kwargs, launcher, self.fn.__name__)
+
         # it is faster than entering and exiting a context manager, even if the context
         # manager is a nullcontext.
         if autograd_profiler._is_profiler_enabled:
             # grid can be a tuple of ints or a string.
-            grid_info = (
-                grid if isinstance(grid, tuple) else getattr(grid, "grid_fn_str", None)
-            )
+            if isinstance(grid, tuple):
+                grid_info = str(grid)
+            else:
+                grid_info = getattr(grid, "grid_fn_str", "")
             with torch._C._profiler._RecordFunctionFast(
                 self.inductor_meta.get("kernel_name", "triton kernel"),
                 args,
                 {
-                    "kernel_file": self.filename,
-                    "kernel_type": "triton",
+                    "kernel_file": "" if self.filename is None else self.filename,
+                    "kernel_backend": "triton",
                     "grid": grid_info,
                     "stream": stream,
                 },
@@ -1044,17 +1086,18 @@ def cached_autotune(
                 )
 
         best_config = None
-        if cache_filename is not None and os.path.exists(cache_filename):
-            with open(cache_filename) as fd:
-                best_config = json.loads(fd.read())
-        elif remote_cache is not None and remote_cache_key is not None:
-            best_config = remote_cache.get(remote_cache_key)
+        if not inductor_meta.get("force_disable_caches", False):
+            if cache_filename is not None and os.path.exists(cache_filename):
+                with open(cache_filename) as fd:
+                    best_config = json.loads(fd.read())
+            elif remote_cache is not None and remote_cache_key is not None:
+                best_config = remote_cache.get(remote_cache_key)
 
-        best_config = load_cached_autotuning(
-            best_config, configs_hash, configs, inductor_meta
-        )
-        if best_config:
-            configs = [best_config]
+            best_config = load_cached_autotuning(
+                best_config, configs_hash, configs, inductor_meta
+            )
+            if best_config:
+                configs = [best_config]
 
         def save_cache_hook(cfg, time_taken_ns, found_by_coordesc=False):
             data = {
@@ -1273,7 +1316,11 @@ def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None) -> C
     cfg = {"XBLOCK": x, "RBLOCK": r}
     if num_warps is None:
         num_warps = conditional_product(x, r) // 128
-    num_warps = next_power_of_2(min(max(num_warps, 2), 8))
+    # On AMD GPU each warp has 64 lanes which is double the size on NV GPU,
+    # therefore using half the number of warps here correspondingly.
+    default_num_warps = 4 if torch.version.hip else 8
+    min_num_warps = 1 if torch.version.hip else 2
+    num_warps = next_power_of_2(min(max(num_warps, min_num_warps), default_num_warps))
     check_config(cfg, xnumel=size_hints[0])
     assert r <= TRITON_MAX_BLOCK["R"], f"increase TRITON_MAX_BLOCK['r'] to {r}"
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)

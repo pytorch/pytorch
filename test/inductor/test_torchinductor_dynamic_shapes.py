@@ -30,7 +30,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_GPU
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -96,7 +96,7 @@ if HAS_CPU:
     copy_tests(DynamicShapesCommonTemplate, DynamicShapesCpuTests, "cpu", test_failures)
 
 
-if HAS_GPU and not TEST_WITH_ASAN:
+if HAS_CUDA and not TEST_WITH_ASAN:
 
     class DynamicShapesGPUTests(TestCase):
         common = check_model_gpu
@@ -116,7 +116,7 @@ class TestInductorDynamic(TestCase):
         if not HAS_GPU:
             self.skipTest("Triton not available")
         torch._dynamo.reset()
-        super(TestCase, self).setUp()
+        TestCase.setUp(self)
         # this should be in setUpClass, but device-generic tests
         # don't work with setUpClass well (non-deterministically the wrong setUpClass is resolved),
         # so put it in test setUp, it's cheap
@@ -134,7 +134,7 @@ class TestInductorDynamic(TestCase):
 
     def tearDown(self):
         self._stack.close()
-        super(TestCase, self).tearDown()
+        TestCase.tearDown(self)
         torch._dynamo.reset()
 
     def test_arange_dynamic(self, device):
@@ -244,6 +244,18 @@ class TestInductorDynamic(TestCase):
 
         f(torch.tensor([True], device=device))
 
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_noops_tensor_repropagate(self, device):
+        @torch.compile(fullgraph=True)
+        def f(x):
+            b = torch.ops.prims.convert_element_type.default(x, torch.int64)
+            r = b.nonzero()
+            return r * 2
+
+        f(torch.tensor([0, 4, 2, 0, 1], dtype=torch.int64, device=device))
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_item_zeros_nobreak(self, device):
         @torch.compile(fullgraph=True)
@@ -303,6 +315,7 @@ class TestInductorDynamic(TestCase):
 
         f(torch.tensor([3], device=device), torch.randn(10, device=device))
 
+    @unittest.expectedFailure
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
@@ -388,6 +401,52 @@ class TestInductorDynamic(TestCase):
         cf = torch.compile(fullgraph=True)(f)
         arg = torch.tensor([4, 6], device="cuda")
         self.assertEqual(f(arg), cf(arg))
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_unbacked_cat_backwards(self, device):
+        def f(x, w):
+            device = w.device
+            a, b = x.tolist()
+            ta = torch.ones(a, device=device)
+            tb = torch.ones(b, device=device)
+            pa = ta * w  # make it require gradients
+            pb = tb * w
+            r = torch.cat([pa, pb])
+            return r.sum()
+
+        x = torch.tensor([4, 9])
+        w = torch.randn(1, requires_grad=True)
+        f(x, w).backward()
+        orig_w = w.grad
+        w.grad = None
+
+        torch.compile(fullgraph=True)(f)(x, w).backward()
+        self.assertEqual(orig_w, w.grad)
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_unbacked_cat_backwards_save_data_dependent(self, device):
+        def f(x, w):
+            device = w.device
+            a, b = x.tolist()
+            ta = torch.ones(a, device=device)
+            tb = torch.ones(b, device=device)
+            pa = ta * w  # make it require gradients
+            pb = tb * w
+            r = torch.cat([pa, pb])
+            return r
+
+        x = torch.tensor([4, 9])
+        w = torch.randn(1, requires_grad=True)
+        f(x, w).sum().backward()
+        orig_w = w.grad
+        w.grad = None
+
+        torch.compile(fullgraph=True)(f)(x, w).sum().backward()
+        self.assertEqual(orig_w, w.grad)
 
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
@@ -722,7 +781,9 @@ class TestInductorDynamic(TestCase):
         @torch.compile(fullgraph=True, dynamic=True)
         def f(x):
             a = x.item()
-            torch._constrain_as_size(a, min=1, max=10)
+            torch._check_is_size(a)
+            torch._check(a >= 1)
+            torch._check(a <= 10)
             return torch.ones(a, a)
 
         f(torch.tensor([5], device=device))
@@ -734,5 +795,5 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # Slow on ASAN after https://github.com/pytorch/pytorch/pull/94068
-    if (HAS_CPU or HAS_GPU) and not TEST_WITH_ASAN:
+    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ASAN:
         run_tests(needs="filelock")

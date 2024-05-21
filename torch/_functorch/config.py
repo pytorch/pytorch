@@ -41,6 +41,26 @@ static_weight_shapes = True
 # Applies CSE to the graph before partitioning
 cse = True
 
+# When AOTAutograd regenerates aliased graph outputs,
+# attempte to use functionalization's view-replay logic
+# before falling back to the autograd engine's view replay or as_strided.
+# This can have some perf implications
+# (although for many models this will not matter).
+# (1) If you have many view ops chained together, replaying all of them
+#     at runtime can have more overhead compared to a single as_strided call
+# (2) If you are doing training, AsStridedBackward is quite slow,
+#     and the individual view op backward formulas will likely be faster.
+# (3) Some backends like XLA do not support as_strided
+
+# Temporary hack: disable this flag for internal
+# (needed to fix an internal issue while avoiding bumping XLA pin)
+# eventually: either default this config to false completely
+# once XLA pin update works,
+# or default config to true and fix relevant bugs
+from torch._inductor.config import is_fbcode
+
+view_replay_for_aliased_outputs = not is_fbcode()
+
 # Restricts the amount of computation AOTAutograd can do.
 # NB: We have essentially disabled this heuristic now. However, this is kept
 # here for now in case it's useful. Setting it low can artificially reduce the
@@ -85,6 +105,40 @@ fake_tensor_allow_unsafe_data_ptr_access = True
 # which may lead to silent errors unless the backend knows how to handle the
 # tokens.
 unlift_effect_tokens = False
+
+# This mode specifies that we should also keep track of the real
+# tensor along with the fake tensor, and do real compute.  While
+# seemingly this eliminates the whole point of fake tensors, there are
+# two obvious use cases for it:
+#
+#   1. When users call item()/other data dependent operations,
+#      if we propagate_real_tensors we are able to determine what
+#      the true value is and keep going.
+#
+#   2. It can be useful for testing, when you want to see if the fake
+#      and real tensors agree with each other.  (Note that there are
+#      currently known inaccuracies in how we clone real tensors, that
+#      would have to be tightened up for this to be useful in this
+#      case.)
+#
+# Note that fake tensors are typically understood to be cheap to store
+# indefinitely, so we tend to hold on to them longer than we would
+# hold onto the real tensors.  So we also support you explicitly
+# deallocating the real tensor associated with a fake tensor, at which
+# point we will stop propagating real tensors.
+#
+# One more thing: when you provide a real tensor to fakeify, we will
+# clone it, so that we can safely perform mutations on it if necessary.
+# This will increase live memory usage.  This could potentially be
+# optimized by using COW.  We also currently do not faithfully
+# maintain autograd metadata on the real tensor; this is fine because
+# AOTAutograd will only use the fake tensor to determine leafness/etc
+# of tensors in question.
+fake_tensor_propagate_real_tensors = False
+
+# Controls the default graph output format used by draw_graph
+# Supported formats are defined here https://graphviz.org/docs/outputs/
+torch_compile_graph_format = os.environ.get("TORCH_COMPILE_GRAPH_FORMAT", "svg")
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
