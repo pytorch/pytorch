@@ -1900,9 +1900,10 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         )
         node_occurrence = {
             torch.ops.aten.linear.default: 2,
-            # input and output for the second linear
+            # quantize and dequantize the input for input of the second linear
             torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
+            # dequantize the weight of the second linear
             torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
         }
         node_list = [
@@ -1945,7 +1946,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
 
         m = M().eval()
         example_inputs = (torch.randn(3, 5),)
-        # Set global to no quantization and then default config for a specific submodule.
+        # Set `sub` to no quantization and then default config for a all `Linear`.
         quantizer = X86InductorQuantizer()
         quantizer.set_module_name_qconfig("sub", None).set_module_type_qconfig(
             torch.nn.Linear, xiq.get_default_x86_inductor_quantization_config()
@@ -1953,9 +1954,10 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
 
         node_occurrence = {
             torch.ops.aten.linear.default: 3,
-            # quantize the input and output of the first linear
+            # quantize and dequantize the input and output of the first and second linear
             torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
+            # dequantize the weight of the first and second linear
             torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
         }
         node_list = [
@@ -2009,13 +2011,14 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
 
         node_occurrence = {
             torch.ops.aten.linear.default: 3,
-            # quantize the input of the last linear
+            # quantize and dequantize the input of the last linear
             torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
+            # dequantize the weight of the last linear
             torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
         }
         node_list = [
-            # first and second linear is not quantized
+            # first and second linear are not quantized
             torch.ops.aten.linear.default,
             torch.ops.aten.linear.default,
             # last linear is quantized
@@ -2095,25 +2098,25 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     .set_module_name_qconfig("v_proj", dynamic_config)
                 )
                 node_occurrence = {
-                    # ops for quantizing/de-quantizing input
+                    # quantize and dequantize the input
                     torch.ops.quantized_decomposed.choose_qparams.tensor: 1,
                     torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 1,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 1,
-                    # ops for dequantize the weight of q_proj and v_proj
+                    # dequantize the weight of q_proj and v_proj
                     torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
                 }
                 node_list = [
-                    # ops for quantizing/de-quantizing input
+                    # quantize and dequantize the input
                     torch.ops.quantized_decomposed.choose_qparams.tensor,
                     torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
-                    # # op for de-quantizing `q_proj`'s weight, disable this check
+                    # # op for de-quantizing `q_proj`'s weight, disable this check to avoid random error.
                     # torch.ops.quantized_decomposed.dequantize_per_channel.default,
                     # q_proj
                     torch.ops.aten.linear.default,
                     # k_proj
                     torch.ops.aten.linear.default,
-                    # # op for de-quantizing `v_proj`'s weight, disable this check
+                    # # op for de-quantizing `v_proj`'s weight, disable this check to avoid random error.
                     # torch.ops.quantized_decomposed.dequantize_per_channel.default,
                     # v_proj
                     torch.ops.aten.linear.default,
@@ -2149,17 +2152,17 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 .set_module_name_qconfig("v_proj", dynamic_config)
             )
             node_occurrence = {
-                # ops for quantizing/de-quantizing input
+                # quantize and dequantize the input
                 torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
                 torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
-                # only q_proj be quantized
+                # only q_proj be quantized, dequantize its weight
                 torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
             }
             node_list = [
                 # ops for quantizing/de-quantizing input
                 torch.ops.quantized_decomposed.quantize_per_tensor.default,
                 torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-                # op for de-quantizing `q_proj`'s weight, disable this check
+                # op for de-quantizing `q_proj`'s weight, disable this check to avoid random error.
                 # torch.ops.quantized_decomposed.dequantize_per_channel.default,
                 # q_proj
                 torch.ops.aten.linear.default,
