@@ -1097,7 +1097,7 @@ class TritonKernel(SIMDKernel):
         line = self.indirect_assert(
             index_str, "0" if lower else None, size_str, mask_str
         )
-        buffer.writeline(line)
+        self.cse.generate(buffer, line, assignment=False)
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)

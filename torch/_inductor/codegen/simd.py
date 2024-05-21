@@ -909,21 +909,6 @@ class SIMDKernel(Kernel):
         finally:
             self._load_mask = prior
 
-    def load_mask(self, var):
-        mask = ""
-        mask_vars = set(var.mask_vars)
-        if self._load_mask:
-            mask_vars.add(self._load_mask)
-
-        if mask_vars:
-            mask = (
-                f"{next(iter(mask_vars))}"
-                if len(mask_vars) == 1
-                # sorted for deterministic order
-                else f"({' & '.join(sorted(map(str, mask_vars)))})"
-            )
-        return mask
-
     def get_strides_of_load(self, index: sympy.Expr):
         """
         This gets the stride of the index for each of the tiling variables
