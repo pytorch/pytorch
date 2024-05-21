@@ -61,7 +61,7 @@ class ArrayRef final {
   void debugCheckNullptrInvariant() {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         Data != nullptr || Length == 0,
-        "created ArrayRef with nullptr and non-zero length! c10::optional relies on this being illegal");
+        "created ArrayRef with nullptr and non-zero length! std::optional relies on this being illegal");
   }
 
  public:

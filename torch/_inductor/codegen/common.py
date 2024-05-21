@@ -26,17 +26,11 @@ import torch
 import torch.fx
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.utils import _pytree as pytree
-from torch.utils._sympy.value_ranges import ValueRanges
+from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
+from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, ValueRanges
 
 from .. import config, metrics
-from ..utils import (
-    DeferredLineBase,
-    free_symbol_startswith,
-    IndentedBuffer,
-    sympy_dot,
-    sympy_subs,
-    unique,
-)
+from ..utils import DeferredLineBase, IndentedBuffer, sympy_dot, sympy_subs, unique
 from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
 
 
@@ -229,12 +223,12 @@ class DataTypePropagation:
         if len(input_nodes) == 0:
             return None
 
-        all_input_nodes_propogated = all(
+        all_input_nodes_propagated = all(
             OptimizationContext.key in n.meta
             and n.meta[OptimizationContext.key].dtype is not None
             for n in input_nodes
         )
-        if not all_input_nodes_propogated:
+        if not all_input_nodes_propagated:
             return None
 
         return functools.reduce(
@@ -275,6 +269,7 @@ class DataTypePropagation:
         if node.target in (
             "get_index",
             "index_expr",
+            "randint64",
         ):
             return torch.int64
 
@@ -535,7 +530,7 @@ class OpOverrides:
 
     @staticmethod
     def reciprocal(x):
-        return ops.truediv("1", x)
+        return ops.truediv(ops.constant(1, torch.int32), x)
 
     @staticmethod
     def square(x):
@@ -572,7 +567,11 @@ class OpOverrides:
     @staticmethod
     def remainder(a, b):
         r = ops.mod(a, b)
-        return ops.where(f"(({r} != 0) & (({r} < 0) != ({b} < 0)))", ops.add(r, b), r)
+        cond = ops.and_(
+            ops.ne(r, ops.constant(0, torch.int32)),
+            ops.ne(ops.signbit(r), ops.signbit(b)),
+        )
+        return ops.where(cond, ops.add(r, b), r)
 
     @staticmethod
     def load_seed(name, offset):
@@ -602,6 +601,8 @@ class OverridesData:
     )
 
 
+# NB: if you add a new special function, don't forget to update
+# torch._inductor.ops_handler too
 pointwise_overrides_data: Dict[str, OverridesData] = dict(
     airy_ai=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
@@ -989,7 +990,7 @@ class KernelArgs:
         return str(size)
 
     def cpp_argdefs(self):
-        from .cpp import DTYPE_TO_CPP, INDEX_TYPE
+        from .cpp_utils import DTYPE_TO_CPP, INDEX_TYPE
 
         call_args = []
         arg_defs = []
@@ -1138,7 +1139,7 @@ class CSEVariable:
 
 class CppWrapperKernelArgs(KernelArgs):
     def wrap_ptr_arg(self, buf, dtype):
-        from .cpp import DTYPE_TO_CPP
+        from .cpp_utils import DTYPE_TO_CPP
 
         if config.abi_compatible:
             # In the abi_compatible model, we just return the buf here.
@@ -1296,6 +1297,28 @@ class CodeGen:
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
 
+class ScopedDict:
+    def __init__(self, original_dict):
+        self.original_dict = original_dict
+        self.new_items = {}
+
+    def __getitem__(self, key):
+        if key in self.new_items:
+            return self.new_items[key]
+        return self.original_dict[key]
+
+    def __setitem__(self, key, value):
+        self.new_items[key] = value
+
+    def __contains__(self, key):
+        return key in self.new_items or key in self.original_dict
+
+    def get(self, key, default=None):
+        if key in self.new_items:
+            return self.new_items[key]
+        return self.original_dict.get(key, default)
+
+
 class Kernel(CodeGen):
     newvar_prefix = ""
     suffix = ""
@@ -1349,6 +1372,13 @@ class Kernel(CodeGen):
 
     @contextlib.contextmanager
     def swap_buffers(self, lb, cb=None, sb=None):
+        def scope_cse(cse):
+            new_cse = cse.clone()
+            new_cse.cache = ScopedDict(cse.cache)
+            new_cse.reduction_cache = ScopedDict(cse.reduction_cache)
+            new_cse.store_cache = ScopedDict(cse.store_cache)
+            return new_cse
+
         if cb is None:
             cb = lb
         loads = self.loads
@@ -1358,7 +1388,7 @@ class Kernel(CodeGen):
         self.loads = lb
         self.compute = cb
         self.stores = sb
-        self.cse = cse.clone()
+        self.cse = scope_cse(cse)
         try:
             yield
         finally:
@@ -1450,29 +1480,66 @@ class Kernel(CodeGen):
         # TODO: hoist this to top level
         class CSEProxy:
             self.name = "CSEProxy"
+            vr_analysis = ValueRangeAnalysis()
 
             @staticmethod
             def __getattr__(name: str) -> Callable[..., CSEVariable]:  # type: ignore[misc]
                 def inner(*args, **kwargs):
-                    # TritonTemplateKernel has no current_node
-                    buf_bounds = ValueRanges.unknown()
-                    if hasattr(V.interpreter, "current_node"):
-                        fx_node = V.interpreter.current_node
-                        assert isinstance(self.node_to_bounds, dict)
-                        buf_bounds = self.node_to_bounds.get(
-                            fx_node, ValueRanges.unknown()
-                        )
+                    bounds = CSEProxy._bound_variable(name, *args, **kwargs)
 
                     value = getattr(parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
 
                     def do_cse(v):
-                        csevar = self.cse.generate(self.compute, v, bounds=buf_bounds)
+                        csevar = self.cse.generate(self.compute, v, bounds=bounds)
                         csevar.update_on_args(name, args, kwargs)
                         return csevar
 
                     return pytree.tree_map(do_cse, value)
 
                 return inner
+
+            @staticmethod
+            def _bound_variable(name, *args, **kwargs):
+                """
+                If the variable comes from an FX node, we forward the bound we have already computed
+                Else, if the variable when codegen'ing another op, we try to compute its bounds
+                """
+                from ..select_algorithm import TritonTemplateKernel
+
+                if isinstance(V.kernel, TritonTemplateKernel):
+                    return ValueRanges.unknown()
+
+                fx_node = V.interpreter.current_node
+                if fx_node.target == name:
+                    assert isinstance(self.node_to_bounds, dict)
+                    return self.node_to_bounds.get(fx_node, ValueRanges.unknown())
+                elif config.compute_all_bounds and hasattr(ValueRangeAnalysis, name):
+                    # These create lots of inner strings. We would need to compute the bounds at the ops
+                    # We will also likely not get much from computing VRs on these nodes
+                    if any(
+                        s in fx_node.target
+                        for s in ("set_indirect", "reduction", "scan")
+                    ):
+                        return ValueRanges.unknown()
+
+                    # We assume that the inputs come from `ops.` and are not strings. If you want to generate
+                    # intermediary strings, wrap them in CSE variables with properly initialised bounds.
+
+                    # If there is no FX bound but we know how to compute one we do so
+                    assert not kwargs
+
+                    def arg_to_bound(x):
+                        if isinstance(x, CSEVariable):
+                            return x.bounds
+                        elif isinstance(x, sympy.Expr):
+                            return bound_sympy(x)
+                        else:
+                            return x
+
+                    arg_bounds = list(map(arg_to_bound, args))
+                    return getattr(CSEProxy.vr_analysis, name)(*arg_bounds)
+                else:
+                    return ValueRanges.unknown()
 
             @staticmethod
             def indirect_indexing(
@@ -1536,7 +1603,7 @@ class Kernel(CodeGen):
                     # A load from an invalidated store requires us to
                     # keep the actual buffer around
                     V.kernel.must_keep_buffers.add(name)
-                if free_symbol_startswith(index, "tmp"):
+                if free_symbol_is_type(index, SymT.TMP):
                     return self.indirect_load(name, index)
                 store_cache = self.cse.store_cache
                 if name in store_cache:
@@ -1652,8 +1719,14 @@ class Kernel(CodeGen):
         replacements = {
             x: self.args.size(x)
             for x in sorted_symbols
-            if x.name.startswith(("s", "u", "ps"))
-            or (x.name.startswith("i") and not x.name.startswith("idx"))
+            if symbol_is_type(
+                x,
+                (
+                    SymT.UNBACKED_INT,
+                    SymT.SIZE,
+                    SymT.PRECOMPUTED_SIZE,
+                ),
+            )
         }
         return sympy_subs(index, replacements)
 

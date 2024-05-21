@@ -126,6 +126,33 @@ class DistributedUtilTest(TestCase):
                 timeout=1,
             )
 
+    def test_create_store_with_libuv_support(self):
+        world_size = 1
+        wait_for_workers = False
+        localhost = socket.gethostname()
+
+        store = create_c10d_store(
+            is_server=True,
+            server_addr=localhost,
+            server_port=0,
+            timeout=2,
+            world_size=world_size,
+            wait_for_workers=wait_for_workers,
+            use_libuv=False,
+        )
+        self.assertFalse(store.libuvBackend)
+
+        store = create_c10d_store(
+            is_server=True,
+            server_addr=localhost,
+            server_port=0,
+            timeout=2,
+            world_size=world_size,
+            wait_for_workers=wait_for_workers,
+            use_libuv=True,
+        )
+        self.assertTrue(store.libuvBackend)
+
     def test_port_already_in_use_on_server(self):
         # try to create the TCPStore server twice on the same port
         # the second should fail due to a port conflict

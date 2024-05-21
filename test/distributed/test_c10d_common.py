@@ -102,10 +102,10 @@ class AbstractTimeoutTest:
     def _init_methods(self):
         f = tempfile.NamedTemporaryFile(delete=False)
         if sys.platform == "win32":
-            yield "file:///%s" % f.name.replace("\\", "/")
+            yield "file:///{}".format(f.name.replace("\\", "/"))
             f.close()
         else:
-            yield "file://%s" % f.name
+            yield f"file://{f.name}"
             f.close()
             yield "tcp://127.0.0.1:%d" % common.find_free_port()
 
@@ -2213,6 +2213,13 @@ class LocalRankTest(MultiProcessTestCase):
     def testWithoutEnv(self):
         with self.assertRaisesRegex(RuntimeError, "LOCAL_RANK"):
             dist.get_node_local_rank()
+
+    def testWithoutEnvWithFallback(self):
+        self.assertEqual(dist.get_node_local_rank(fallback_rank=2), 2)
+
+    def testNodeLocalRankOverridesFallback(self):
+        os.environ["LOCAL_RANK"] = str(self.rank)
+        self.assertEqual(dist.get_node_local_rank(fallback_rank=123), self.rank)
 
     def testNodeLocalRank(self):
         os.environ["LOCAL_RANK"] = str(self.rank)

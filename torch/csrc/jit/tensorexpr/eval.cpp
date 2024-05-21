@@ -1300,7 +1300,7 @@ InterpValue SimpleIREvaluator::value() const {
   return impl_->value();
 }
 
-c10::optional<int64_t> evalInt(ExprPtr e) {
+std::optional<int64_t> evalInt(ExprPtr e) {
   try {
     return ExprEval<SimpleIREvaluator>(cast<int64_t>(ExprHandle(e)))
         .value<int64_t>();
