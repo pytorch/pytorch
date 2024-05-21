@@ -59,6 +59,14 @@ outputs:
   test-matrix:
     value: ${{ steps.filter.outputs.test-matrix }}
     description: An optional JSON description of what test configs to run later on.
+  use-split-build:
+  description: |
+    [Experimental] Build a libtorch only wheel and build pytorch such that
+    are built from the libtorch wheel. A non "false" string triggers this behavior.
+    By default this this behavior is disabled.
+  required: false
+  type: string
+  default: false
 
 runs:
   using: composite
@@ -144,6 +152,7 @@ runs:
         DEBUG: ${{ inputs.build-with-debug == 'true' && '1' || '0' }}
         OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         HUGGING_FACE_HUB_TOKEN: ${{ inputs.HUGGING_FACE_HUB_TOKEN }}
+        USE_SPLIT_BUILD: ${{ inputs.use_split_build }}
       shell: bash
       run: |
         # detached container should get cleaned up by teardown_ec2_linux
@@ -163,6 +172,7 @@ runs:
           -e PR_LABELS \
           -e OUR_GITHUB_JOB_ID \
           -e HUGGING_FACE_HUB_TOKEN \
+          -e USE_SPLIT_BUILD \
           --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
           --security-opt seccomp=unconfined \
           --cap-add=SYS_PTRACE \
