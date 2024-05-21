@@ -58,6 +58,20 @@ class _Unassigned:
     pass
 
 
+def _is_plain_tensor(t):
+    return (
+        type(t) is torch.Tensor
+        and t.layout == torch.strided
+        and not (
+            t.is_sparse
+            or t.is_nested
+            or is_functorch_wrapped_tensor(t)
+            or is_legacy_batchedtensor(t)
+            or torch._is_functional_tensor(t)
+        )
+    )
+
+
 _UNASSIGNED = _Unassigned()
 
 DimList = List
@@ -325,26 +339,19 @@ class FakeTensorConverter:
 
         from torch._dynamo.source import RandomValueSource
 
-        # TODO: extend this for smaller dtypes too.  Some care will have to be
-        # taken though, because smaller dtypes will compute differently but
-        # Python sympy compute is always done at arbitrary precision.
         value = None
         if (
             not self.export
-            and type(t) is torch.Tensor
-            # TODO: It sure would be nice to test if something was a plain
-            # tensor without having to enumerate all the cases
-            and t.layout == torch.strided
-            and not (
-                t.is_sparse
-                or t.is_nested
-                or is_functorch_wrapped_tensor(t)
-                or is_legacy_batchedtensor(t)
-                or torch._is_functional_tensor(t)
-            )
+            and _is_plain_tensor(t)  # mostly, we want to know if item() works
             and t.dim() == 0
             and t.device.type == "cpu"
-            and t.dtype in [torch.int64, torch.float64]
+            # All integer types are fair game, because signed overflow is UB
+            # (and even int64 can overflow, since integers in Python are
+            # arbitrary precision). But only float64 is OK for float, because
+            # switching between float32 and float64 changes semantics in an
+            # observable way without hitting UB.
+            and t.dtype
+            in [torch.int64, torch.int32, torch.int16, torch.int8, torch.float64]
             and source is not None
             # Impede setting up item() on things coming from random.  These
             # are not "real" item() calls, instead UnspecializedPythonVariable
@@ -364,6 +371,9 @@ class FakeTensorConverter:
             #   PYTORCH_TEST_WITH_DYNAMO=1 python test/test_reductions.py -k
             #   TestReductionsCPU.test_dim_reduction_fns_fn_name_amax_cpu_bfloat16
             and not isinstance(source, RandomValueSource)
+            # In Dynamo, shape_env is never none (even with static shapes).
+            # However, FakeTensorMode can be used by hand and in some cases
+            # ShapeEnv is not allocated.
             and shape_env is not None
         ):
             from torch._dynamo.source import CallMethodItemSource, FloatTensorSource
@@ -928,6 +938,15 @@ class FakeTensorMode(TorchDispatchMode):
         allow_non_fake_inputs=False,
         shape_env=None,
         static_shapes=None,
+        # TODO: This is a temporary measure, see
+        # https://github.com/pytorch/pytorch/pull/126245#discussion_r1604185748
+        # We're currently solely using this to impede population of
+        # item_memo for 0d scalar tensor inputs when export, because this
+        # causes things that used to be deferred runtime asserts to turn into
+        # guards, and then the guards are just lost.  We can potentially fix
+        # this by ensuring guards also get put in the graph, but this is
+        # pending a rework of how deferred runtime asserts in export.  Once
+        # that's done, we can remove this.
         export=False,
     ):
         log.debug("create_mode 0x%x", id(self))
