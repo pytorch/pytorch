@@ -3304,10 +3304,10 @@ class CppKernelProxy(CppKernel):
                 main_loop.set_kernel(vec_kernel)
                 main_loop.simd_vec = True
                 if has_free_symbols(tail_loop.size):
-                    tail_loop.steps = 1
                     tail_loop.set_kernel(scalar_kernel)
                     tail_loop.simd_omp = True
                 else:
+                    tail_loop.steps = tail_loop.size - tail_loop.offset
                     masked_vec_kernel = codegen_kernel(
                         CppVecKernel,
                         tiling_factors[0],
@@ -3930,7 +3930,6 @@ class LoopLevel:
 
             tail_loop = LoopLevel(self.var, self.size)
             tail_loop.offset = offset
-            tail_loop.steps = self.size - offset
             tail_loop.parallel = self.parallel
             tail_loop.collapsed = False
             tail_loop.is_reduction = self.is_reduction
