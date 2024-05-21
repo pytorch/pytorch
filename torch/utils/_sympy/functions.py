@@ -9,6 +9,7 @@ __all__ = [
     "ModularIndexing",
     "CleanDiv",
     "CeilDiv",
+    "Boxed",
     "Pow",
     "TrueDiv",
     "LShift",
@@ -195,6 +196,14 @@ class Where(sympy.Function):
             return p
         elif c == sympy.false:
             return q
+
+
+class Boxed(sympy.Function):
+    """
+    Operator designed so that SymPy does not perfor simplifications on the internal expression
+    """
+
+    nargs = (1,)
 
 
 class Mod(sympy.Function):

@@ -634,7 +634,7 @@ check_model_cuda = check_model_gpu
 
 
 def _run_and_assert_no_indirect_indexing(
-    test_case, func, *args, has_wrapping=None, **kwargs
+    test_case, func, *args, has_wrapping=None, has_assert=False, **kwargs
 ):
     result, source_codes = run_and_get_code(func, *args, **kwargs)
 
@@ -667,7 +667,12 @@ def _run_and_assert_no_indirect_indexing(
                 ("where" in code or "?" in code) is has_wrapping,
                 msg=f"Wanted {has_wrapping=} but got\n{code}",
             )
-
+    test_case.assertTrue(
+        any(
+            ("device_assert" in code or "TORCH_CHECK" in code) is has_assert
+            for code in source_codes
+        )
+    )
     return result
 
 
@@ -1253,11 +1258,15 @@ class CommonTemplate:
             i = torch.arange(x.shape[0] * n, device=x.device)
             return x[i // n]
 
-        x = torch.randn(8, device=self.device)
+        x = torch.randn(8, 16, device=self.device)
         repeat_interleave_opt = torch._dynamo.optimize("inductor")(repeat_interleave)
+        # With static shapes we can prove the bound, our dynamic shapes reasoning is not good enough
+        has_assert = ifdynstaticdefault(False, True)
         # this should be collapsed to direct indexing
-        actual = _run_and_assert_no_indirect_indexing(self, repeat_interleave_opt, x, 3)
-        expect = torch.repeat_interleave(x, 3)
+        actual = _run_and_assert_no_indirect_indexing(
+            self, repeat_interleave_opt, x, 3, has_assert=has_assert
+        )
+        expect = torch.repeat_interleave(x, 3, dim=0)
         self.assertEqual(expect, actual)
         self.assertEqual(actual, repeat_interleave(x, 3))
 
@@ -1267,14 +1276,16 @@ class CommonTemplate:
             i = torch.arange(x.shape[0] * n, device=x.device)
             return x[i % x.shape[0]]
 
-        x = torch.randn(8, device=self.device)
+        x = torch.randn(8, 16, device=self.device)
         repeat_opt = torch._dynamo.optimize("inductor")(repeat)
 
+        # With static shapes we can prove the bound, our dynamic shapes reasoning is not good enough
+        has_assert = ifdynstaticdefault(False, True)
         # this should be collapsed to direct indexing
         actual = _run_and_assert_no_indirect_indexing(
-            self, repeat_opt, x, 3, has_wrapping=False
+            self, repeat_opt, x, 3, has_wrapping=False, has_assert=has_assert
         )
-        expect = x.repeat(3)
+        expect = x.repeat(3, 1)
         self.assertEqual(expect, actual)
         self.assertEqual(actual, repeat(x, 3))
 
@@ -1287,9 +1298,11 @@ class CommonTemplate:
         x = torch.randn(8, device=self.device)
         opt_fn = torch._dynamo.optimize("inductor")(reflection_pad_left)
 
+        # With static shapes we can prove the bound, our dynamic shapes reasoning is not good enough
+        has_assert = ifdynstaticdefault(False, True)
         # this should be collapsed to direct indexing
         actual = _run_and_assert_no_indirect_indexing(
-            self, opt_fn, x, 3, has_wrapping=False
+            self, opt_fn, x, 3, has_wrapping=False, has_assert=has_assert
         )
         expect = reflection_pad_left(x, 3)
         self.assertEqual(expect, actual)
