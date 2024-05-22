@@ -17,10 +17,10 @@ void Job::run() const {
 
 /* Run */
 
-/* static */ bool Run::lt(
+/* static */ bool Run::gt(
     std::shared_ptr<Run> const& a,
     std::shared_ptr<Run> const& b) {
-  return a->time() < b->time();
+  return a->time() > b->time();
 }
 
 Run::Run(int job_id, std::chrono::time_point<std::chrono::steady_clock> time)
@@ -36,7 +36,7 @@ std::chrono::time_point<std::chrono::steady_clock> Run::time() const {
 
 /* FunctionScheduler */
 
-FunctionScheduler::FunctionScheduler() : _queue(&Run::lt) {};
+FunctionScheduler::FunctionScheduler() : _queue(&Run::gt) {};
 
 FunctionScheduler::~FunctionScheduler() {
   stop();
@@ -149,9 +149,7 @@ void FunctionScheduler::start() {
   std::lock_guard<std::mutex> lock(_mutex);
   auto now = std::chrono::steady_clock::now();
   for (const auto& entry : _jobs) {
-    auto run =
-        std::make_shared<Run>(entry.first, now + entry.second->interval());
-    _queue.push(std::move(run));
+    addRun(entry.first, entry.second);
   }
 
   _running = true;

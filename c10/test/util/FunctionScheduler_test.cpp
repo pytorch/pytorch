@@ -42,8 +42,8 @@ TEST(Run, lt) {
   auto r1 = std::make_shared<c10::Run>(job_id1, time1);
   auto r2 = std::make_shared<c10::Run>(job_id2, time2);
 
-  ASSERT_TRUE(c10::Run::lt(r1, r2));
-  ASSERT_FALSE(c10::Run::lt(r2, r1));
+  ASSERT_TRUE(c10::Run::gt(r2, r1));
+  ASSERT_FALSE(c10::Run::gt(r1, r2));
 }
 
 TEST(FunctionScheduler, Initialization) {

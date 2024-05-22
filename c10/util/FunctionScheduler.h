@@ -39,7 +39,7 @@ class Run {
   std::chrono::time_point<std::chrono::steady_clock> _time;
 
  public:
-  static bool lt(std::shared_ptr<Run> const& a, std::shared_ptr<Run> const& b);
+  static bool gt(std::shared_ptr<Run> const& a, std::shared_ptr<Run> const& b);
 
   Run(int job_id, std::chrono::time_point<std::chrono::steady_clock> time);
 
@@ -53,7 +53,7 @@ class FunctionScheduler {
   std::priority_queue<
       std::shared_ptr<Run>,
       std::vector<std::shared_ptr<Run>>,
-      decltype(&Run::lt)>
+      decltype(&Run::gt)>
       _queue;
   std::unordered_map<int, std::unique_ptr<Job>> _jobs;
   std::shared_ptr<Run> _next_run;
