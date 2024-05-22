@@ -113,6 +113,9 @@ class TorchExport(exporter.FXGraphExtractor):
         # Insert type casts explicitly where needed.
         fx_module = passes.InsertTypePromotion(diagnostic_context, fx_module).run()
 
+        # TODO: Delete this after https://github.com/pytorch/pytorch/issues/112443 is done
+        fx_module = passes.RemoveAssertions(diagnostic_context, fx_module).run()
+
         analysis.UnsupportedFxNodesAnalysis(
             diagnostic_context, fx_module, options.onnxfunction_dispatcher
         ).analyze(infra.levels.ERROR)

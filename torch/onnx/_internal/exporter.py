@@ -1560,6 +1560,9 @@ def common_pre_export_passes(
     # Insert type casts explicitly where needed.
     module = passes.InsertTypePromotion(diagnostic_context, module).run()
 
+    # TODO: Delete this after https://github.com/pytorch/pytorch/issues/112443 is done
+    module = passes.RemoveAssertions(diagnostic_context, module).run(*fx_module_args)
+
     analysis.UnsupportedFxNodesAnalysis(
         diagnostic_context, module, options.onnxfunction_dispatcher
     ).analyze(infra.levels.ERROR)

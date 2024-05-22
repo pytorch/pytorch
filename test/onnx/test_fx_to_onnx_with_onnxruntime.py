@@ -314,6 +314,15 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         input = torch.randn(2)
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(Model(), (input,))
 
+    def test_assert_does_not_raise_unsupported_node_error(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                torch.ops.aten._assert_async.msg(torch.tensor(True), "assertion failed")
+                return x + x
+
+        input = torch.randn(2)
+        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(Model(), (input,))
+
     @skip_if_no_torchvision
     def test_resnet18(self):
         # TODO(bowbao): Note [training vs eval in dynamo_export]
