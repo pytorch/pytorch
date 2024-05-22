@@ -17,6 +17,8 @@ import textwrap
 import ctypes
 import inspect
 import threading
+import pdb
+import pkgutil
 
 # multipy/deploy is setting this import before importing torch, this is the most
 # reliable way we have to detect if we're running within deploy.
@@ -166,10 +168,54 @@ def _preload_cuda_deps(lib_folder, lib_name):
     ctypes.CDLL(lib_path)
 
 
+def find_package_path(package_name):
+    loader = pkgutil.find_loader(package_name)
+    if loader:
+        # The package might be a namespace package, so get_data may fail
+        try:
+            file_path = loader.get_filename()  # type: ignore[attr-defined]
+            return os.path.dirname(file_path)
+        except AttributeError:
+            pass
+    return None
+
+def load_shared_libraries(library_path):
+    lib_dir = os.path.join(library_path, 'lib')
+    if not os.path.exists(lib_dir):
+        return
+
+    # Determine the file extension based on the platform
+    if platform.system() == 'Darwin':
+        lib_ext = '.dylib'
+    elif platform.system() == 'Windows':
+        lib_ext = '.dll'
+    else:
+        lib_ext = '.so'
+
+    # Find all shared library files with the appropriate extension
+    so_files = [f for f in os.listdir(lib_dir) if f.endswith(lib_ext)]
+    if not so_files:
+        return
+
+    for so_file in so_files:
+        so_path = os.path.join(lib_dir, so_file)
+        try:
+            # Use RTLD_GLOBAL only if not on Windows
+            if platform.system() == 'Windows':
+                ctypes.CDLL(so_path)
+            else:
+                ctypes.CDLL(so_path, mode=ctypes.RTLD_GLOBAL)
+        except OSError as err:
+            print(f"Failed to load {so_path}: {err}")
+
 # See Note [Global dependencies]
 def _load_global_deps() -> None:
     if _running_with_deploy() or platform.system() == 'Windows':
         return
+    split_build_lib_name = "libtorchsplit"
+    library_path = find_package_path(split_build_lib_name)
+    if library_path:
+        load_shared_libraries(library_path)
 
     lib_name = 'libtorch_global_deps' + ('.dylib' if platform.system() == 'Darwin' else '.so')
     here = os.path.abspath(__file__)
@@ -1268,7 +1314,7 @@ def _check_tensor_all(cond, message=None):  # noqa: F811
 
 # For Python Array API (https://data-apis.org/array-api/latest/API_specification/constants.html) and
 # NumPy consistency (https://numpy.org/devdocs/reference/constants.html)
-from math import e , nan , inf , pi
+from math import e, nan , inf , pi
 newaxis: None = None
 __all__.extend(['e', 'pi', 'nan', 'inf', 'newaxis'])
 

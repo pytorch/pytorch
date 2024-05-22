@@ -106,9 +106,7 @@ if config.abi_compatible:
         test_failures_cuda_wrapper[
             f"{test_name}_dynamic_shapes"
         ] = test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=False)
-    skip_list = [
-        "test_multi_device_cuda",
-    ]
+    skip_list = []
     for test_name in skip_list:
         test_failures_cuda_wrapper[test_name] = test_torchinductor.TestFailure(
             ("cuda_wrapper",), is_skip=True
@@ -200,6 +198,7 @@ if RUN_CUDA:
         BaseTest("test_adding_tensor_offsets"),
         BaseTest("test_index_tensor"),
         BaseTest("test_inductor_layout_optimization_input_mutations"),
+        BaseTest("test_insignificant_strides"),
         BaseTest("test_layer_norm"),
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),
