@@ -15,6 +15,7 @@ import time
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from torch.distributed.elastic.timer.api import TimerClient, TimerRequest
+from torch.distributed.elastic.timer.debug_info_logging import log_debug_info_for_expired_timers
 from torch.distributed.elastic.utils.logging import get_logger
 
 __all__ = ["FileTimerClient", "FileTimerRequest", "FileTimerServer"]
@@ -156,11 +157,13 @@ class FileTimerServer:
     def __init__(
         self,
         file_path: str,
+        run_id: str,
         max_interval: float = 10,
         daemon: bool = True,
         log_event: Optional[Callable[[str, Optional[FileTimerRequest]], None]] = None
     ) -> None:
         self._file_path = file_path
+        self._run_id = run_id
         self._max_interval = max_interval
         self._daemon = daemon
         self._timers: Dict[Tuple[int, str], FileTimerRequest] = {}
@@ -247,7 +250,14 @@ class FileTimerServer:
         self.register_timers(timer_requests)
         now = time.time()
         reaped_worker_pids = set()
-        for worker_pid, expired_timers in self.get_expired_timers(now).items():
+
+        all_expired_timers = self.get_expired_timers(now)
+        log_debug_info_for_expired_timers(
+            self._run_id,
+            {pid: self._get_scopes(expired_timers) for pid, expired_timers in all_expired_timers.items()},
+        )
+
+        for worker_pid, expired_timers in all_expired_timers.items():
             logger.info("Reaping worker_pid=[%s]. Expired timers: %s", worker_pid, self._get_scopes(expired_timers))
             reaped_worker_pids.add(worker_pid)
             # In case we have multiple expired timers, we find the first timer

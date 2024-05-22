@@ -12,7 +12,7 @@ inline bool isCharCount(char c, const std::string& str, size_t start, int len) {
       std::count(str.begin() + start, str.begin() + start + len, c) == len;
 }
 
-inline c10::optional<char> parseOctal(const std::string& str, size_t pos) {
+inline std::optional<char> parseOctal(const std::string& str, size_t pos) {
   //\xxx where x are 0-7
   if (pos + 3 >= str.size())
     return c10::nullopt;

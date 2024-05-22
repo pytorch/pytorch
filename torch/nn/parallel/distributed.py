@@ -11,14 +11,13 @@ from collections import defaultdict, deque
 from contextlib import contextmanager
 from dataclasses import dataclass, fields, is_dataclass
 from enum import auto, Enum
-from typing import Any, Callable, List, Optional, Tuple, Type
+from typing import Any, Callable, List, Optional, Tuple, Type, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
 from torch.autograd import Function, Variable
 from torch.distributed.algorithms.join import Join, Joinable, JoinHook
 from torch.utils._pytree import tree_flatten, tree_unflatten
-from torch.utils.hooks import RemovableHandle
 
 RPC_AVAILABLE = False
 if dist.is_available():
@@ -43,6 +42,9 @@ from torch._utils import _get_device_index
 
 from ..modules import Module
 from .scatter_gather import gather, scatter_kwargs  # noqa: F401
+
+if TYPE_CHECKING:
+    from torch.utils.hooks import RemovableHandle
 
 __all__ = ["DistributedDataParallel"]
 
@@ -894,6 +896,7 @@ class DistributedDataParallel(Module, Joinable):
             torch._dynamo.trace_rules.LEGACY_MOD_INLINELIST.add(
                 "torch.nn.parallel.distributed"
             )
+            torch._dynamo.trace_rules.get_legacy_mod_inlinelist.cache_clear()
         self._force_to_disable_cpp_reducer = (
             optimize_ddp == "python_reducer_without_compiled_forward"
         )
@@ -926,6 +929,8 @@ class DistributedDataParallel(Module, Joinable):
                 param.grad.copy_(gradient)
 
         for index, param in enumerate(self._module_parameters):
+            if not param.requires_grad:
+                continue
             self._accum_grad_hooks.append(
                 param.register_post_accumulate_grad_hook(
                     functools.partial(
