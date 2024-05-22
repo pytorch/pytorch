@@ -24,6 +24,7 @@ class TracableCreateParameter(torch.autograd.Function):
 def tracable_create_parameter(tensor, placeholder):
     with torch.set_grad_enabled(placeholder.requires_grad):
         out = TracableCreateParameter.apply(tensor, placeholder)
+        out = out.clone()
     return out
 
 

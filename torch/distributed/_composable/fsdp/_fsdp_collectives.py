@@ -205,8 +205,8 @@ def foreach_all_gather_copy_out(
     ):
         fsdp_param.init_all_gather_outputs(
             all_gather_input_numels, all_gather_input_dtypes, world_size, device
-        )  # no-op after 1st call
-        fsdp_param.init_unsharded_param()  # no-op after 1st call (needed for compile)
+        )
+        fsdp_param.init_unsharded_param()  # needed for compile
         fsdp_param.alloc_all_gather_outputs()
     all_gather_output = all_gather_output.view(world_size, -1)
     # NOTE: This is the biggest difference between eager and compile code path.

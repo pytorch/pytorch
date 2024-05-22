@@ -2,6 +2,7 @@ import itertools
 from dataclasses import dataclass, field
 from enum import auto, Enum
 from typing import Any, cast, List, Optional, Sequence, Tuple
+import contextlib
 
 import torch
 import torch.nn as nn
@@ -163,6 +164,7 @@ class FSDPParam:
         self.all_gather_outputs: List[torch.Tensor] = []
         self.all_gather_output_storage_sizes: List[int] = []
         self.unsharded_accumulated_grad = None
+        self._unsharded_param = None
         self._param_fqn: Optional[str] = None  # prefixed from root module
         # TODO: Remove this padding logic once DTensor pads the local tensor:
         # https://github.com/pytorch/pytorch/issues/113045
@@ -317,9 +319,22 @@ class FSDPParam:
         self.all_gather_output_storage_sizes = [
             output.numel() * output.itemsize for output in self.all_gather_outputs
         ]
+        self.all_gather_input_numels = all_gather_input_numels
+        self.all_gather_input_dtypes = all_gather_input_dtypes
+        self.world_size = world_size
 
-    def init_unsharded_param(self):
-        if hasattr(self, "_unsharded_param"):  # after the 1st all-gather
+    def realloc_all_gather_outputs(self):
+        all_gather_input_numels = self.all_gather_input_numels
+        all_gather_input_dtypes = self.all_gather_input_dtypes
+        world_size = self.world_size
+        device = self.device
+        self.all_gather_outputs = [
+            torch.empty(torch.Size([numel * world_size]), dtype=dtype, device=device)
+            for numel, dtype in zip(all_gather_input_numels, all_gather_input_dtypes)
+        ]
+
+    def init_unsharded_param(self, mutate_existing=False):
+        if not mutate_existing and getattr(self, "_unsharded_param", None) is not None:  # after the 1st all-gather
             inner_tensor = self._sharded_local_tensor
             if (
                 torch._dynamo.compiled_autograd.compiled_autograd_enabled
@@ -360,7 +375,8 @@ class FSDPParam:
         unsharded_param = torch.as_strided(
             unsharded_tensor,
             self._orig_size,
-            make_contiguous_strides_for(self._orig_size),
+            self._contiguous_orig_stride,
+            # make_contiguous_strides_for(self._orig_size),
             storage_offset=0,
         )
         if self.is_dtensor:
@@ -371,8 +387,14 @@ class FSDPParam:
                 self._global_size,
                 self._global_stride,
             )
-        self._unsharded_param = nn.Parameter(unsharded_param)
-        self._unsharded_param.requires_grad_(self.sharded_param.requires_grad)
+        if mutate_existing:
+            maybe_preserve_version_counter = contextlib.nullcontext()
+            if not torch._dynamo.compiled_autograd.compiled_autograd_enabled:
+                maybe_preserve_version_counter = torch.autograd._unsafe_preserve_version_counter(self._unsharded_param)
+            with torch.no_grad(), maybe_preserve_version_counter:
+                self._unsharded_param.copy_(unsharded_param)
+        else:
+            self._unsharded_param = nn.Parameter(unsharded_param, requires_grad=self.sharded_param.requires_grad)
 
     def _unflatten_all_gather_outputs(self) -> Tuple[torch.Tensor, ...]:
         return tuple(
@@ -504,11 +526,8 @@ class FSDPParam:
         # TODO(yf225): support the len(self.all_gather_outputs) > 1 case (i.e. support custom fsdp_pre_all_gather)
         assert len(self.all_gather_outputs) == 1
         assert len(self.all_gather_output_storage_sizes) == 1
-        if not torch._dynamo.compiled_autograd.compiled_autograd_enabled:
+        if not torch.distributed._composable.fsdp._fsdp_state.no_storage_resize():
             alloc_storage(self.all_gather_outputs[0], self.all_gather_output_storage_sizes[0])
-        else:
-            free_storage(self._unsharded_param)
-            alloc_storage(self._unsharded_param, self.all_gather_output_storage_sizes[0])
 
     def free_unsharded_param(self) -> None:
         # for tensor in itertools.chain(
@@ -521,10 +540,8 @@ class FSDPParam:
         # because .all_gather_output and ._unsharded_param share the same storage.
         # We use ._unsharded_param under compile just to avoid having .all_gather_output as graph input.
         assert len(self.all_gather_outputs) == 1
-        if not torch._dynamo.compiled_autograd.compiled_autograd_enabled:
+        if not torch.distributed._composable.fsdp._fsdp_state.no_storage_resize():
             free_storage(self.all_gather_outputs[0])
-        else:
-            free_storage(self._unsharded_param)
 
     @property
     def all_gather_inputs(self) -> List[torch.Tensor]:  # 1D

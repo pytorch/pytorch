@@ -1600,6 +1600,15 @@ class BuiltinVariable(VariableTracker):
     def call_setattr(
         self, tx, obj: VariableTracker, name_var: VariableTracker, val: VariableTracker
     ):
+        # TODO(yf225): is this sound to do? should we do it somewhere earlier?
+        # should we mark MutableLocal when we create this TensorVariable? can we mark all TensorVariable as MutableLocal?
+        if (
+            name_var.is_python_constant()
+            and name_var.as_python_constant() == "grad"
+            and not tx.output.side_effects.is_attribute_mutation(obj)
+        ):
+            obj = tx.output.side_effects.track_object_existing(obj.proxy, obj)
+
         if isinstance(
             obj,
             (

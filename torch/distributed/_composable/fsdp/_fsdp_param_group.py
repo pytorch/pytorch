@@ -280,6 +280,19 @@ class FSDPParamGroup:
         if self._training_state == TrainingState.PRE_BACKWARD:
             return
         with torch.profiler.record_function("FSDP::pre_backward"):
+            # NOTE(yf225): it's important to run AGO buffer allocation and _unsharded_param mutation within compile,
+            # so that any complex aliasing relationship via fsdp_post_all_gather is faithfully captured in the graph.
+            # it's also important to not change the existing nn.Parameter identity in pre_backward,
+            # because whatever nn.Parameter we have before entering backward are already saved as inputs to the Compiled Autograd graph,
+            # and we must reuse them otherwise gradients in backward graph will not flow back to the right TensorVariable.
+            #
+            # In other words, these things are always part of BWD graph input:
+            # - all nn.Parameters
+            # - all sharded_params
+            if torch._dynamo.compiled_autograd.compiled_autograd_enabled:
+                for fsdp_param in self.fsdp_params:
+                    fsdp_param.realloc_all_gather_outputs()
+                    fsdp_param.init_unsharded_param(mutate_existing=True)
             self._training_state = TrainingState.PRE_BACKWARD
             self.unshard()  # no-op if prefetched
             self.wait_for_unshard()
@@ -339,6 +352,11 @@ class FSDPParamGroup:
             if fsdp_param.grad_offload_event is not None:
                 fsdp_param.grad_offload_event.synchronize()
                 fsdp_param.grad_offload_event = None
+            # NOTE(yf225): Setting _unsharded_param to None at the end of backward, so that we always
+            # redo AGO buffer allocation and _unsharded_param nn.Parameter creation in the next forward for this FSDPParamGroup.
+            # We do this so that those allocation ops are always part of FWD graph.
+            if torch.distributed._composable.fsdp._fsdp_state.no_storage_resize():
+                fsdp_param._unsharded_param = None
         self._post_forward_indices.clear()
 
     def _prefetch_unshard(self):
