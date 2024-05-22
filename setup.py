@@ -234,6 +234,7 @@ def _get_package_path(package_name):
             pass
     return None
 
+
 BUILD_LIBTORCH_WHL = False
 BUILD_PYTORCH_USING_LIBTORCH_WHL = False
 
@@ -1114,6 +1115,7 @@ def print_box(msg):
         print("|{}{}|".format(l, " " * (size - len(l))))
     print("-" * (size + 2))
 
+
 def main():
     global BUILD_LIBTORCH_WHL
     global BUILD_PYTORCH_USING_LIBTORCH_WHL
@@ -1131,15 +1133,17 @@ def main():
     if BUILD_TWO_WHEELS:
         setup_cmd = sys.argv[1]
 
-        if (
-            setup_cmd == "bdist_wheel"
-            or setup_cmd == "build_ext"
-            or setup_cmd == "sdist"
-            or setup_cmd == "develop"
-        ):
-            raise RuntimeError(
-                "At the moment the SPLIT_BUILD option only supports the clean and install commands. Please rerun setup.py using one of those two commands."
-            )
+    if (
+        setup_cmd == "build"
+        or setup_cmd == "build_ext"
+        or setup_cmd == "sdist"
+        or setup_cmd == "develop"
+    ):
+        raise RuntimeError(
+            "At the moment the SPLIT_BUILD option only supports the "
+            "clean and install commands. Please rerun setup.py using "
+            "one of those two commands."
+        )
 
         final_package_name = PACKAGE_NAME
         PACKAGE_NAME = "libtorch"
