@@ -6152,7 +6152,8 @@ else:
     @onlyNativeDeviceTypes
     def test_grad_scaler_pass_itself(self, device):
         device = torch.device(device)
-        GradScaler = torch.cuda.amp.GradScaler if "cuda" == device.type else torch.cpu.amp.GradScaler
+        device_type = "cuda" if "cuda" == device.type else "cpu"
+        GradScaler = partial(torch.amp.GradScaler, device=device_type)
 
         class _PlaceHolderOptimizer(torch.optim.Optimizer):
             tester = self
