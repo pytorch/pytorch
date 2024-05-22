@@ -17690,9 +17690,9 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_pca_lowrank,
            decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack, with_tf32_off,
-                       DecorateInfo(toleranceOverride({torch.float32: tol(atol=4e-02, rtol=4e-02)
+                       DecorateInfo(toleranceOverride({torch.float32: tol(atol=4e-02, rtol=4e-02),
                                                        torch.complex64: tol(atol=4e-02, rtol=4e-02)}),
-                                    'TestCommon', 'test_noncontiguous_samples'),],
+                                    'TestCommon', 'test_noncontiguous_samples'),
                        # FIXME This should be the following, but the toleranceOverride does not seem to do anything!
                        # DecorateInfo(toleranceOverride({torch.complex128: tol(atol=1e-04, rtol=1e-04)}),
                        #              'TestFwdGradients', 'test_fn_fwgrad_bwgrad'),
