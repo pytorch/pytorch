@@ -171,6 +171,7 @@ class FSDPParam:
             )
         )
 
+
     @torch.no_grad()
     def _init_sharded_param(self, param: nn.Parameter, device: torch.device):
         if param.device != device and param.device.type != "meta":
@@ -199,7 +200,6 @@ class FSDPParam:
                     "FSDP requires the DP and TP mesh to have the same parent mesh but got: \n"
                     f"DP's global mesh: {dp_global_mesh}\nTP's global mesh: {tp_global_mesh}"
                 )
-            self._global_mesh = dp_global_mesh
             if len(self._tp_spec.placements) != 1:
                 raise NotImplementedError(
                     f"FSDP only supports 1D TP, not {self._tp_spec.placements}"
@@ -207,13 +207,41 @@ class FSDPParam:
             global_placements: List[Placement] = [Replicate(), Replicate()]
             global_dp_mesh_dim = _mesh_resources.get_parent_mesh_dim(dp_mesh)
             global_tp_mesh_dim = _mesh_resources.get_parent_mesh_dim(tp_mesh)
+
+            def infer_spmd_mesh(global_mesh, global_dp_mesh_dim, global_tp_mesh_dim):
+                from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
+                pp_submesh_tensors = global_mesh.mesh.unbind(0)
+                spmd_mesh_dim_names = (
+                    global_mesh.mesh_dim_names[global_dp_mesh_dim],
+                    global_mesh.mesh_dim_names[global_tp_mesh_dim],
+                )
+                for spmd_mesh_tensor in pp_submesh_tensors:
+                    submesh = DeviceMesh(
+                        global_mesh.device_type,
+                        spmd_mesh_tensor,
+                        mesh_dim_names=spmd_mesh_dim_names,
+                        _init_backend=False,
+                    )
+                    if global_mesh.get_rank() in spmd_mesh_tensor:
+                        spmd_mesh = submesh
+                spmd_mesh._dim_group_infos = [
+                    global_mesh._dim_group_infos[global_dp_mesh_dim],
+                    global_mesh._dim_group_infos[global_tp_mesh_dim],
+                ]
+                spmd_mesh._parent_mesh = global_mesh
+                _mesh_resources.child_to_parent_mapping[spmd_mesh] = global_mesh
+                return spmd_mesh
+
+            spmd_mesh = infer_spmd_mesh(dp_global_mesh, global_dp_mesh_dim, global_tp_mesh_dim)
+            self._global_mesh = spmd_mesh
+
             assert global_dp_mesh_dim is not None  # mypy
             assert global_tp_mesh_dim is not None  # mypy
             # for PP, DP, TP case, dp mesh dim would be 1, tp mesh dim would be 2
             # DP/TP would only live in the inner most 2-3 dims (HSDP + TP would be 3)
             dp_tp_mesh_ndim = dp_mesh.ndim + tp_mesh.ndim
-            outer_mesh_ndim = self._global_mesh.ndim - dp_tp_mesh_ndim
-            if self._global_mesh.ndim > dp_tp_mesh_ndim:
+            outer_mesh_ndim = dp_global_mesh.ndim - dp_tp_mesh_ndim
+            if dp_global_mesh.ndim > dp_tp_mesh_ndim:
                 global_dp_mesh_dim = global_dp_mesh_dim - outer_mesh_ndim
                 global_tp_mesh_dim = global_tp_mesh_dim - outer_mesh_ndim
 

@@ -1105,6 +1105,7 @@ class TestFullyShardNDTraining(FSDPTest):
         model.parallelize(
             tp_mesh, dp_mesh, use_activation_checkpointing, reshard_after_forward
         )
+        print(f"?? mlp model param: {model[1].in_proj.weight}")
         optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=foreach)
 
         torch.manual_seed(42 + dp_pg.rank() + 1)
