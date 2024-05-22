@@ -526,8 +526,9 @@ class GraphModuleSerializer(metaclass=Final):
             # Sanity check for unhandled serialization.
             assert type(node.target) in _serialization_registry, f"Miss {type(node.target)} custom op seralization"
 
+            handler = _serialization_registry[type(node.target)]
             ex_node = Node(
-                target=_serialization_registry[type(node.target)](node.target),  # Jump to custom serialization function.
+                target=f"${handler.namespace()}:{handler.op_name(node.target)}",  # Jump to custom serialization function.
                 inputs=self.serialize_inputs(node.args, node.kwargs),
                 outputs=self.serialize_outputs(node),
                 metadata=self.serialize_metadata(node),
