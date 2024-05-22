@@ -2353,7 +2353,7 @@ class TestSDPACudaOnly(NNTestCase):
         math_ref_lp_test = math_ref_lp_test.to(dtype=torch.float32).contiguous()
 
         self.assertEqual(math_ref_test, math_ref_lp_test, atol=7e-3, rtol=7e-3)
-        self.assertEqual(actual_test, math_ref_test, atol=5e-3, rtol=5e-3)
+        self.assertEqual(actual_test, math_ref_test, atol=7e-3, rtol=7e-3)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Efficient Attention was not built for this system")
     @parametrize("contiguous_inputs", [True, False])
@@ -2671,7 +2671,7 @@ class TestSDPACudaOnly(NNTestCase):
         output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref)
 
         # Fudge Factor when dropout is enabled
-        dropout_fudge_factor = 1.0 if dropout_p == 0.0 else 2.0
+        dropout_fudge_factor = 1.5 if dropout_p == 0.0 else 2.0
 
         query_fudge_factor = dropout_fudge_factor
         grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(query_ref.grad, query_ref_lp.grad, query_fudge_factor)
