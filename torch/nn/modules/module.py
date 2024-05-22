@@ -798,6 +798,8 @@ class Module:
             return (should_use_swap_tensors
                     # subclasses may have multiple child tensors so we need to use swap_tensors
                     or is_traceable_wrapper_subclass(tensor_applied)
+                    or tensor.device.type == 'meta'
+                    or tensor_applied.device.type == 'meta'
                     or tensor.device.type == 'xla'
                     or tensor_applied.device.type == 'xla')
 
