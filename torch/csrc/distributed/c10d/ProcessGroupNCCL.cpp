@@ -931,7 +931,7 @@ void ProcessGroupNCCL::setSequenceNumberForGroup() {
 } // NCCL just starts sequence numbers at 0.
 
 uint64_t ProcessGroupNCCL::getSequenceNumberForGroup() {
-  return seq_;
+  return seqCollective_;
 }
 
 void ProcessGroupNCCL::registerOnCompletionHook(
@@ -2246,7 +2246,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
       device,
       rank,
       opType,
-      seq_,
+      seqCollective_,
       profilingTitle,
       profilingTitle != nullptr ? std::optional<std::vector<at::Tensor>>(inputs)
                                 : c10::nullopt,
@@ -2254,6 +2254,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
       enableTiming_.load(),
       dist_debug_level_);
   if (record) {
+    bool isP2P = isP2POp(opType);
     // Ideally record every work that we enqueue, rather than every work we
     // create.
     // - at the time of this PR we do not currently enqueue every created work
@@ -2270,13 +2271,15 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
     r->trace_id_ = NCCLTraceBuffer::get()->record(
         uid_,
         std::make_tuple(pg_name_, pg_desc_),
-        seq_,
+        seqCollective_,
+        seqP2P_,
         op_id_,
         profilingTitle ? profilingTitle : "",
         inputs,
         outputs,
         r->ncclStartEvent_.get(),
-        r->ncclEndEvent_.get());
+        r->ncclEndEvent_.get(),
+        isP2P);
   }
   return r;
 }
@@ -2328,10 +2331,6 @@ ProcessGroupNCCL::Options::Options(bool is_high_priority_stream)
 static constexpr int CoalActive = 0x01, CoalColl = 0x02, CoalP2P = 0x04;
 
 void ProcessGroupNCCL::startCoalescing() {
-  coalescedDevice_.set_index(-1);
-  coalescedComm_ = nullptr;
-  coalescing_state_ |= CoalActive;
-  groupStart();
   // Other collective ops bump seq_ before creating a work. Thus, if coalesced
   // ops bump seq_ only after initing a work they will collide with (reuse) the
   // seq_ of the last non-coalesced collective.  Previously, seq_ was bumped
@@ -2340,10 +2339,19 @@ void ProcessGroupNCCL::startCoalescing() {
   // same seq_ for those ops and its 'endCoalescing' op. Hence we bump during
   // start, which has one minor downside- we burn a seq_ if someone ever does a
   // 'start' and 'end' coalescing region without doing an operation inbetween.
-  seq_++;
 
-  // Don't bump op_id_ here, becuase startCoalescing isn't a logical operation.
+  // Don't bump op_id_ here, because startCoalescing isn't a logical operation.
   // Bump it for each logical op inside the coalescing group.
+  if (coalescing_state_ & CoalP2P) {
+    seqP2P_++;
+  } else {
+    seqCollective_++;
+  }
+
+  coalescedDevice_.set_index(-1);
+  coalescedComm_ = nullptr;
+  coalescing_state_ |= CoalActive;
+  groupStart();
 }
 
 // `optype` is for specifying a composite optype, such as ALLGATHER and
@@ -2441,7 +2449,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   errorIfCapturingNonCapturableNCCL(capture_status);
 
   // Bump collective counter
-  seq_++;
+  seqCollective_++;
   op_id_++;
 
   auto device = getDevice(input);
@@ -2596,9 +2604,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   errorIfCapturingNonCapturableNCCL(capture_status);
 
   // Bump collective counter
-  seq_++;
+  seqCollective_++;
+
   // For coalescingManager collectives, there is no individual c++ call per
-  // collective so there is no flight record and we increment seq_ and op_id_
+  // collective so there is no flight record and we increment seq*_ and op_id_
   // together. Compare this to startCoalesing/endCoalescing flow where we
   // increment seq_ once per group and increment op_id_ once per indvidual
   // operation within the group
@@ -2826,9 +2835,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     p2pTargetRank = isSendRecvSelf ? 0 : 1 - p2pRank;
 
     if (!coalescing_state_) {
-      // Bump sequence number. Don't do so if it's a batch P2P, it will be
-      // bumped in `endCoalescing`.
-      seq_++;
+      // Bump P2P sequence number. Don't do so if it's a batch P2P, it will be
+      // bumped in `startCoalescing`.
+      seqP2P_++;
     }
   }
 
@@ -2869,13 +2878,15 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     auto trace_id = NCCLTraceBuffer::get()->record(
         uid_,
         std::make_tuple(pg_name_, pg_desc_),
-        seq_,
+        seqCollective_,
+        seqP2P_,
         op_id_,
         profilingTitle,
         {tensor},
         {tensor},
         nullptr,
-        nullptr);
+        nullptr,
+        /*isP2P=*/true);
     // TODO(whc) if we want to make the per-p2p-op flightrecorder entries get
     // their timings/states updated by proxy when the Work obj representing the
     // coalesce group gets its update, we could accumulate these trace_ids
@@ -2894,19 +2905,21 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     // output, not sure what
     work->outputs_ = std::make_shared<std::vector<at::Tensor>>();
     work->outputs_->push_back(tensor);
-    // TODO(whc) becuase we don't pass output {tensor} to initWork, we tell
+    // TODO(whc) because we don't pass output {tensor} to initWork, we tell
     // initWork to not record, and then we manually call record passing all the
     // information it wants.
     work->trace_id_ = NCCLTraceBuffer::get()->record(
         uid_,
         std::make_tuple(pg_name_, pg_desc_),
-        seq_,
+        seqCollective_,
+        seqP2P_,
         op_id_,
         profilingTitle,
         {tensor},
         {tensor},
         work->ncclStartEvent_.get(),
-        work->ncclEndEvent_.get());
+        work->ncclEndEvent_.get(),
+        /*isP2P=*/true);
   }
 
   // is gpuGuard needed for the if block below, or can i swap them

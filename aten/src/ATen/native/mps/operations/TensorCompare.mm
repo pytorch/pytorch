@@ -276,8 +276,6 @@ static void isin_Tensor_Tensor_out_mps(const Tensor& elements,
                                        bool invert,
                                        const Tensor& out,
                                        string op_name) {
-  TORCH_CHECK(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS),
-              "isin_Tensor_Tensor_out supported on MPS from MacOs_14_0 onwards");
   if (elements.numel() == 0) {
     return;
   }
@@ -295,6 +293,10 @@ static void isin_Tensor_Tensor_out_mps(const Tensor& elements,
 
   TORCH_CHECK(elements.is_mps() && test_elements.is_mps());
   TORCH_CHECK(elements.dtype() == test_elements.dtype());
+  TORCH_CHECK(
+      !(!is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) && !supportedFloatingType(elements.scalar_type())),
+      "isin_Tensor_Tensor_out only works on floating types on MPS for pre MacOS_14_0. Received dtype: ",
+      elements.scalar_type());
 
   @autoreleasepool {
     string key =
