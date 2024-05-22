@@ -1,9 +1,11 @@
+import ast
 import dataclasses
 import inspect
 import math
 import operator
 import re
-import ast
+
+from inspect import Parameter
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Type
 
 import torch
@@ -434,17 +436,17 @@ def _get_torch_jit_trace_forward_signature(mod: torch.nn.Module):
     Get source code and parse argument names using AST.
     """
     ast_mod = ast.parse(mod.code)
-    ast_func_def = ast_mod.body[0]
+    ast_func_def: ast.FunctionDef = ast_mod.body[0]
 
     # Arguments type mappings. Used to map from AST to Python signature.
     # FIXME: Based on my understanding, TorchScript only supports explicit arguments
     # and it cannot take variable length arguments.
     arg_type_map = {
-        # "posonlyargs": inspect._POSITIONAL_ONLY,
-        "args": inspect._POSITIONAL_OR_KEYWORD,
-        # "vararg": inspect._VAR_POSITIONAL,
-        # "kwonlyargs": inspect._KEYWORD_ONLY,
-        # "kwarg": inspect._VAR_KEYWORD,
+        # "posonlyargs": Parameter.POSITIONAL_ONLY,
+        "args": Parameter.POSITIONAL_OR_KEYWORD,
+        # "vararg": Parameter.VAR_POSITIONAL,
+        # "kwonlyargs": Parameter.KEYWORD_ONLY,
+        # "kwarg": Parameter.VAR_KEYWORD,
     }
 
     # Traverse all argument types in AST tree and create associated parameters.
@@ -507,10 +509,20 @@ def placeholder_naming_pass(
     name_map: Dict[str, str] = {}
 
     # map user input names with mod.forward() signature
-    sig = inspect.signature(mod.forward) if not _is_torch_jit_trace else _get_torch_jit_trace_forward_signature(mod)
-    combined_args = (
-        sig.bind(*fake_args, **fake_kwargs).arguments
+    sig = (
+        inspect.signature(mod.forward)
+        if not _is_torch_jit_trace
+        else _get_torch_jit_trace_forward_signature(mod)
     )
+
+    # Sanity check for placeholder names coming from TorchScript.
+    if _is_torch_jit_trace:
+        assert len(sig.parameters) == len(fake_args) + len(fake_kwargs), (
+            "Arguments other than POSITIONAL_OR_KEYWORD kinds in forward() "
+            "are not supported in _get_torch_jit_trace_forward_signature"
+        )
+
+    combined_args = sig.bind(*fake_args, **fake_kwargs).arguments
 
     flat_args_with_path, _ = tree_flatten_with_path(combined_args)
     user_input_names = [
