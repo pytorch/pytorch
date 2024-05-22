@@ -1,14 +1,23 @@
 import json
 import logging
+import operator
 import os
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from unittest import mock
 
+import sympy
+
 import torch
+import torch._dynamo.config
 import torch._export
+import torch.export._trace
 import torch.utils._pytree as pytree
+from torch._dynamo.source import ConstantSource
 from torch._inductor.utils import is_cpu_device
+from torch._subclasses.fake_tensor import FakeTensor
+from torch.fx.experimental.sym_node import SymNode, sympy_is_contiguous_generic
+from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from .runtime.runtime_utils import cache_dir
 
 
@@ -30,6 +39,27 @@ def aoti_eager_op_conf_lock(op_func_name_with_overload: str):
     return FileLock(os.path.join(lock_dir, op_conf_lock_file), timeout=LOCK_TIMEOUT)
 
 
+def create_symtype(cls, pytype, shape_env, val, duck=True):
+    symbol = shape_env.create_symbol(
+        val,
+        source=ConstantSource(f"__testing_only{len(shape_env.var_to_val)}"),
+        dynamic_dim=DimDynamic.DUCK if duck else DimDynamic.DYNAMIC,
+        constraint_dim=None,
+    )
+    return cls(
+        SymNode(
+            symbol,
+            shape_env,
+            pytype,
+            hint=val,
+        )
+    )
+
+
+def create_symint(shape_env, i: int, duck=True):
+    return create_symtype(torch.SymInt, int, shape_env, i, duck=duck)
+
+
 def load_aoti_eager_cache(ns: str, op_func_name_with_overload: str, device_type: str):
     device_kernel_cache = aoti_eager_cache_dir(ns, device_type)
     op_conf = device_kernel_cache / f"{op_func_name_with_overload}.json"
@@ -41,6 +71,8 @@ def load_aoti_eager_cache(ns: str, op_func_name_with_overload: str, device_type:
             with open(op_conf) as f:
                 json_data = json.load(f)
                 for item in json_data:
+                    shape_env = ShapeEnv()
+
                     # Get absolution path for kernel library
                     kernel_lib_abs_path = device_kernel_cache / item["kernel_path"]
                     item["kernel_path"] = kernel_lib_abs_path.as_posix()
@@ -51,9 +83,33 @@ def load_aoti_eager_cache(ns: str, op_func_name_with_overload: str, device_type:
 
                     for metadata in item["meta_info"]:
                         if "is_dynamic" in metadata and metadata["is_dynamic"]:
-                            raise NotImplementedError(
-                                "Only support static shape for now"
-                            )
+                            assert isinstance(metadata["sizes_hint"], Dict)
+                            assert isinstance(metadata["strides_hint"], Dict)
+                            sizes_hint = list(metadata["sizes_hint"].values())
+                            strides_hint = list(metadata["strides_hint"].values())
+                            sympy_sizes_expr = [
+                                sympy.simplify(str_sym_size)
+                                for str_sym_size in metadata["sizes"].values()
+                            ]
+                            sympy_strides_expr = [
+                                sympy.simplify(str_sym_stride)
+                                for str_sym_stride in metadata["strides"].values()
+                            ]
+                            metadata["sizes"] = [
+                                # create_symint(shape_env, size_item)
+                                shape_env.create_symintnode(
+                                    sympy_sizes_expr[idx], hint=sizes_hint[idx]
+                                )
+                                for idx in range(len(sizes_hint))
+                            ]
+                            metadata["strides"] = [
+                                # create_symint(shape_env, stride_item)
+                                # for stride_item in strides_hint
+                                shape_env.create_symintnode(
+                                    sympy_strides_expr[idx], hint=strides_hint[idx]
+                                )
+                                for idx in range(len(sizes_hint))
+                            ]
                         if (
                             "device_type" in metadata
                             and metadata["device_type"] == "cpu"
@@ -90,7 +146,9 @@ def supported_scalar_types():
     return supported_scalar_types
 
 
-def extract_tensor_metadata(dynamic: bool, input: torch.Tensor) -> Dict[str, Any]:
+def extract_tensor_metadata(
+    dynamic: bool, input: torch.Tensor, fake_input: Union[FakeTensor, None]
+) -> Dict[str, Any]:
     metadata: Dict[str, Any] = {}
     metadata["is_dynamic"] = dynamic
 
@@ -101,21 +159,46 @@ def extract_tensor_metadata(dynamic: bool, input: torch.Tensor) -> Dict[str, Any
     else:
         metadata["device_index"] = input.device.index
     metadata["dtype"] = f"{input.dtype}"
-    metadata["sizes"] = list(input.size())
-    metadata["strides"] = list(input.stride())
+
+    if dynamic and fake_input is not None:
+        # If dynamic is specified, we expect all the size and strides are symbolic
+        sym_size = fake_input.size()
+        sym_strides = fake_input.stride()
+        metadata["sizes"] = {}
+        metadata["sizes_hint"] = {}
+        for idx, sym_item in enumerate(sym_size):
+            metadata["sizes"][idx] = str(sym_item)
+            metadata["sizes_hint"][idx] = input.size(idx)
+
+        metadata["strides"] = {}
+        metadata["strides_hint"] = {}
+        for idx, sym_item in enumerate(sym_strides):
+            metadata["strides"][idx] = str(sym_item)
+            metadata["strides_hint"][idx] = input.stride(idx)
+
+        sorted_strides_hint = dict(
+            sorted(metadata["strides_hint"].items(), key=operator.itemgetter(1))
+        )
+        tensor_sizes = list(input.size())
+        tensor_strides = list(input.stride())
+        tensor_layout = list(sorted_strides_hint.keys())
+        assert sympy_is_contiguous_generic(tensor_sizes, tensor_strides, tensor_layout)
+        metadata["dim_order"] = tensor_layout
+    else:
+        metadata["sizes"] = list(input.size())
+        metadata["strides"] = list(input.stride())
     metadata["requires_grad"] = input.requires_grad
     metadata["dispatch_key_set"] = torch._C._dispatch_keys(input).raw_repr()
     return metadata
 
 
 def extract_tensor_list_metadata(
-    dynamic: bool,
-    input: List[torch.Tensor],
+    dynamic: bool, input: List[torch.Tensor], fake_inputs: List[Union[FakeTensor, None]]
 ) -> Dict[str, Any]:
     metadata_list = []
-    for item in input:
+    for idx, item in enumerate(input):
         assert isinstance(item, torch.Tensor)
-        metadata_list.append(extract_tensor_metadata(dynamic, item))
+        metadata_list.append(extract_tensor_metadata(dynamic, item, fake_inputs[idx]))
 
     metadata: Dict[str, Any] = {}
     metadata["tensor_list"] = metadata_list
@@ -166,6 +249,19 @@ def extract_layout_metadata(input: torch.layout):
     return metadata
 
 
+def mark_tensor_dim_as_dynamic(flattened_inputs: list[Any]):
+    def _mark_tensor_dim_as_dynamic(input_item):
+        torch._dynamo.mark_dynamic(input_item, list(range(input_item.ndim)))
+
+    for input_item in flattened_inputs:
+        if isinstance(input_item, torch.Tensor):
+            _mark_tensor_dim_as_dynamic(input_item)
+        elif isinstance(input_item, list):
+            for item in input_item:
+                if isinstance(item, torch.Tensor):
+                    _mark_tensor_dim_as_dynamic(input_item)
+
+
 def aoti_compile_with_persistent_cache(
     ns: str,
     op_func_name_with_overload: str,
@@ -180,10 +276,6 @@ def aoti_compile_with_persistent_cache(
     remove_runtime_assertions: bool = False,
     disable_constraint_solver: bool = False,
 ):
-    """
-    Compile the given function with persistent cache for AOTI eager mode.
-    """
-    assert not dynamic, "Only support static shape for now"
     flattened_inputs = pytree.arg_tree_leaves(*args, **kwargs)
     if not all(
         isinstance(
@@ -234,33 +326,68 @@ def aoti_compile_with_persistent_cache(
         }
     )
 
+    dynamic = dynamic and not torch._dynamo.config.assume_static_by_default
+
     with mock.patch.dict(
         os.environ,
         {"TORCHINDUCTOR_CACHE_DIR": persistent_cache_lib.absolute().as_posix()},
+    ), torch._dynamo.config.patch(
+        automatic_dynamic_shapes=dynamic,
+        dynamic_shapes=dynamic,
     ):
         try:
-            kernel_lib_path = torch._export.aot_compile(
+            if dynamic:
+                mark_tensor_dim_as_dynamic(flattened_inputs)
+
+            gm = torch.export._trace._export_to_torch_ir(
                 f,
                 args,
                 kwargs,
-                dynamic_shapes=dynamic_shapes,
-                options=options,
-                remove_runtime_assertions=remove_runtime_assertions,
+                dynamic_shapes,
                 disable_constraint_solver=disable_constraint_solver,
-                # Some operations may have non-Tensor parameters like int, float, bool. These
-                # non-Tensor parameters will not be the input of the graph. Therefore, we do
-                # need to keep the same signature.
-                same_signature=False,
+                # Disabling this flag, because instead we can rely on the mapping
+                # dynamo_flat_name_to_original_fqn which is coming from Dynamo.
+                restore_fqn=False,
+                assume_static_by_default=torch._dynamo.config.assume_static_by_default,
             )
+
+            # Remove unused nodes
+            gm.graph.lint()
+            for node in reversed(gm.graph.nodes):
+                if len(node.users) == 0 and node.op != "output":
+                    gm.graph.erase_node(node)
+            gm.recompile()
+
+            with torch.no_grad():
+                kernel_lib_path = torch._inductor.aot_compile(gm, args, kwargs, options=options)  # type: ignore[arg-type]
+
+            # Get fake inputs to get symbolic shape information. The fake inputs will be mapped
+            # to the actual input tensors in the kernel metadata.
+            input_nodes = gm.graph.find_nodes(op="placeholder")
+            if dynamic:
+                assert all(
+                    hasattr(node.meta, "val") is not None for node in input_nodes
+                )
+            fake_inputs = [
+                node.meta.get("val") if dynamic else None for node in input_nodes
+            ]
 
             kernel_metadata_items = []
 
+            shape_env = ShapeEnv() if dynamic else None
+            tensor_offset = 0
             for idx, input in enumerate(flattened_inputs):
                 if isinstance(input, torch.Tensor):
-                    metadata = extract_tensor_metadata(dynamic, input)
+                    metadata = extract_tensor_metadata(
+                        dynamic, input, fake_inputs[tensor_offset]
+                    )
+                    tensor_offset = tensor_offset + 1
                 elif isinstance(input, list):
                     assert all(isinstance(item, torch.Tensor) for item in input)
-                    metadata = extract_tensor_list_metadata(dynamic, input)
+                    metadata = extract_tensor_list_metadata(
+                        dynamic, input, fake_inputs[tensor_offset:]
+                    )
+                    tensor_offset = tensor_offset + len(input)
                 elif isinstance(input, supported_scalar_types()):
                     metadata = extract_scalar_metadata(device_type, input)
                 elif isinstance(input, str):

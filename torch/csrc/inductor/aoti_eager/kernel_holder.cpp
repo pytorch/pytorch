@@ -19,6 +19,7 @@
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
+#include <torch/csrc/utils/python_symnode.h>
 
 namespace torch::inductor {
 
@@ -306,8 +307,6 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
     TORCH_INTERNAL_ASSERT(THPDtype_Check(data_type_obj.ptr()));
     auto data_type =
         reinterpret_cast<THPDtype*>(data_type_obj.ptr())->scalar_type;
-    auto sizes = metadata["sizes"].cast<std::vector<int64_t>>();
-    auto strides = metadata["strides"].cast<std::vector<int64_t>>();
     auto requires_grad = metadata["requires_grad"].cast<bool>();
     auto dispatch_key_set_raw_repr =
         metadata["dispatch_key_set"].cast<uint64_t>();
@@ -316,21 +315,80 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
     auto device = c10::Device(device_type);
     device.set_index(device_index);
 
-    auto tensor_metadata = TensorMetadata(
-        is_dynamic,
-        data_type,
-        device,
-        dispatch_key_set,
-        sizes,
-        strides,
-        requires_grad);
-
-    // Build guard for tensor check
     torch::dynamo::LocalState state;
     state.overrideDispatchKeySet(dispatch_key_set);
-    tensor_metadata.build_guard(state);
+    if (is_dynamic) {
+      auto sizes_py_obj = metadata["sizes"].cast<std::vector<py::object>>();
+      auto strides_py_obj = metadata["strides"].cast<std::vector<py::object>>();
+      std::vector<std::optional<c10::SymInt>> sym_sizes;
+      std::vector<std::optional<c10::SymInt>> sym_strides;
+      for (size_t idx = 0; idx < sizes_py_obj.size(); idx++) {
+        auto is_size_int = py::isinstance<py::int_>(sizes_py_obj[idx]);
+        auto is_stride_int = py::isinstance<py::int_>(strides_py_obj[idx]);
+        TORCH_INTERNAL_ASSERT(
+            torch::is_symint(py::handle(sizes_py_obj[idx])) || is_size_int);
+        TORCH_INTERNAL_ASSERT(
+            torch::is_symint(py::handle(strides_py_obj[idx])) || is_stride_int);
 
-    return tensor_metadata;
+        c10::SymInt sym_size_val;
+        if (is_size_int) {
+          auto int_val = sizes_py_obj[idx].cast<int64_t>();
+          TORCH_INTERNAL_ASSERT(int_val == 1);
+          sym_size_val = c10::SymInt(int_val);
+        } else {
+          sym_size_val = sizes_py_obj[idx].cast<c10::SymInt>();
+        }
+
+        if (sym_size_val.is_symbolic()) {
+          sym_sizes.emplace_back(std::nullopt);
+        } else {
+          sym_sizes.emplace_back(sym_size_val);
+        }
+
+        c10::SymInt sym_stride_val;
+        if (is_stride_int) {
+          auto int_val = strides_py_obj[idx].cast<int64_t>();
+          TORCH_INTERNAL_ASSERT(int_val == 1);
+          sym_stride_val = c10::SymInt(int_val);
+        } else {
+          sym_stride_val = strides_py_obj[idx].cast<c10::SymInt>();
+        }
+
+        if (sym_stride_val.is_symbolic()) {
+          sym_strides.emplace_back(std::nullopt);
+        } else {
+          sym_strides.emplace_back(sym_stride_val);
+        }
+      }
+
+      auto dim_order = metadata["dim_order"].cast<std::vector<int64_t>>();
+      auto tensor_metadata = TensorMetadata(
+          is_dynamic,
+          data_type,
+          device,
+          dispatch_key_set,
+          sym_sizes,
+          sym_strides,
+          dim_order,
+          requires_grad);
+      // Build guard for tensor check
+      tensor_metadata.build_guard(state);
+      return tensor_metadata;
+    } else {
+      auto sizes = metadata["sizes"].cast<std::vector<int64_t>>();
+      auto strides = metadata["strides"].cast<std::vector<int64_t>>();
+      auto tensor_metadata = TensorMetadata(
+          is_dynamic,
+          data_type,
+          device,
+          dispatch_key_set,
+          sizes,
+          strides,
+          requires_grad);
+      // Build guard for tensor check
+      tensor_metadata.build_guard(state);
+      return tensor_metadata;
+    }
   };
 
   TORCH_INTERNAL_ASSERT(py::isinstance<py::list>(result));
@@ -548,7 +606,7 @@ std::string AOTIPythonKernelHolder::produce_aoti_kernel_lib(
       py::str(ns_str).ptr(),
       py::str(op_name_with_overload_).ptr(),
       py::str(c10::DeviceTypeName(device_.type(), true)).ptr(),
-      py::bool_(false).ptr(),
+      py::bool_(true).ptr(),
       op_py_func.ptr(),
       args_kwargs.first.ptr(),
       args_kwargs.second.ptr(),
