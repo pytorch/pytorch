@@ -216,6 +216,7 @@ static inline float16_t reduce(float16x8_t x) {
 }
 
 /*
+ * NOTE [ GGML Copyright Notice ]
  * The below reduce overload and
  * fp16_gemv_trans_fp16_arith_by_dot_products function is adapted from
  * llama.cpp's ggml_vec_dot_f16 and surrounding utility functions, so
@@ -316,33 +317,55 @@ static inline float32x4_t f32_fma(float32x4_t a, float32x4_t b, float32x4_t c) {
 #endif
 }
 
-static void fp16_gemv_trans_fp32_arith(const int m, const int n, const float16_t* a, const int lda, const float16_t *x, float16_t* y, int incy) {
-  parallel_for(0, n / 4, 1, [&](int begin, int end) {
-    for (auto i =  begin * 4 ; i < end * 4; i += 4) {
-      float32x4_t sum0Vec = vdupq_n_f32(0);
-      float32x4_t sum1Vec = vdupq_n_f32(0);
-      float32x4_t sum2Vec = vdupq_n_f32(0);
-      float32x4_t sum3Vec = vdupq_n_f32(0);
-      const auto row0 = a + lda * (i + 0);
-      const auto row1 = a + lda * (i + 1);
-      const auto row2 = a + lda * (i + 2);
-      const auto row3 = a + lda * (i + 3);
-      for (auto j = 0; j < m; j += 4) {
-        float32x4_t xVec = vcvt_f32_f16(vld1_f16(x + j));
-        float32x4_t a0Vec = vcvt_f32_f16(vld1_f16(row0 + j));
-        sum0Vec = f32_fma(sum0Vec, a0Vec, xVec);
-        float32x4_t a1Vec = vcvt_f32_f16(vld1_f16(row1 + j));
-        sum1Vec = f32_fma(sum1Vec, a1Vec, xVec);
-        float32x4_t a2Vec = vcvt_f32_f16(vld1_f16(row2 + j));
-        sum2Vec = f32_fma(sum2Vec, a2Vec, xVec);
-        float32x4_t a3Vec = vcvt_f32_f16(vld1_f16(row3 + j));
-        sum3Vec = f32_fma(sum3Vec, a3Vec, xVec);
+// The below reduce overload and
+// fp16_gemv_trans_fp32_arith_by_dot_products are adapted from
+// llama.cpp's ggml_vec_dot_f32 and surrounding utility functions. See
+// NOTE [ GGML Copyright Notice ] above for the required notice.
+#define F32_ELEMENTS_PER_ITERATION 16
+#define F32_ELEMENTS_PER_REGISTER 4
+#define F32_REGISTERS_PER_ITERATION (F32_ELEMENTS_PER_ITERATION / F32_ELEMENTS_PER_REGISTER)
+static inline double reduce(float32x4_t x[F32_REGISTERS_PER_ITERATION]) {
+  int offset = F32_REGISTERS_PER_ITERATION / 2;
+  for (int i = 0; i < offset; ++i) {
+    x[i] = vaddq_f32(x[i], x[offset + i]);
+  }
+  offset /= 2;
+  for (int i = 0; i < offset; ++i) {
+    x[i] = vaddq_f32(x[i], x[offset + i]);
+  }
+  offset /= 2;
+  for (int i = 0; i < offset; ++i) {
+    x[i] = vaddq_f32(x[i], x[offset + i]);
+  }
+  offset /= 2;
+  for (int i = 0; i < offset; ++i) {
+    x[i] = vaddq_f32(x[i], x[offset + i]);
+  }
+  return vaddvq_f32(x[0]);
+}
+
+static void fp16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n, const float16_t* a, const int lda, const float16_t *x, float16_t* y, int incy) {
+  parallel_for(0, n, 1, [&](int begin, int end) {
+  for (int i = begin; i < end; ++i) {
+      float32x4_t sum[F32_REGISTERS_PER_ITERATION] = {vdupq_n_f32(0)};
+      float32x4_t ax[F32_REGISTERS_PER_ITERATION];
+      float32x4_t ay[F32_REGISTERS_PER_ITERATION];
+
+      const auto m_aligned = m & ~(F32_ELEMENTS_PER_ITERATION - 1);
+      for (int j = 0; j < m_aligned ; j += F32_ELEMENTS_PER_ITERATION) {
+        for (int k = 0; k < F32_REGISTERS_PER_ITERATION; ++k) {
+          ax[k] = vcvt_f32_f16(vld1_f16(x + j + k * F32_ELEMENTS_PER_REGISTER));
+          ay[k] = vcvt_f32_f16(vld1_f16(a + lda * i + j + k * F32_ELEMENTS_PER_REGISTER));
+          sum[k] = f32_fma(sum[k], ax[k], ay[k]);
+        }
       }
-      y[(i + 0) * incy] = reduce(sum0Vec);
-      y[(i + 1) * incy] = reduce(sum1Vec);
-      y[(i + 2) * incy] = reduce(sum2Vec);
-      y[(i + 3) * incy] = reduce(sum3Vec);
-    }
+      auto reducedSum = reduce(sum);
+
+      for (int j = m_aligned; j < m; ++j) {
+        reducedSum += x[j] * a[lda * i + j];
+      }
+      y[i * incy] = reducedSum;
+  }
   });
 }
 
@@ -363,9 +386,7 @@ void fp16_gemv_trans(
       return fp16_gemv_trans_fp16_arith_by_dot_products(m, n, a, lda, x, y, incy);
     }
 #endif
-    if (m % 4 == 0 && n % 4 == 0) {
-      return fp16_gemv_trans_fp32_arith(m, n, a, lda, x, y, incy);
-    }
+    return fp16_gemv_trans_fp32_arith_by_dot_products(m, n, a, lda, x, y, incy);
   }
   for (const auto i : c10::irange(n)) {
     float sum = 0;
