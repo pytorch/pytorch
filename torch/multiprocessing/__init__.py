@@ -39,11 +39,15 @@ from .spawn import (
     ProcessContext,
     ProcessExitedException,
     ProcessRaisedException,
-    spawn,
+    spawn as inner_spawn,
     SpawnContext,
     start_processes,
 )
 
+# re-exposing spawn() here because sphinx documentation is confused.
+# see https://github.com/pytorch/pytorch/issues/126899 for details
+def spawn(*args, **kwargs):
+    return inner_spawn(*args, **kwargs)
 
 if sys.platform == "darwin" or sys.platform == "win32":
     _sharing_strategy = "file_system"
