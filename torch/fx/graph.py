@@ -549,9 +549,13 @@ class CodeGen:
                 if isinstance(meta_val, FakeTensor):
                     stride_annotation = f"{stringify_shape(meta_val.stride())}" if include_stride else ""
                     device_annotation = f"{meta_val.device}" if include_device else ""
+                    maybe_parameter_python_obj_id = node.meta.get('parameter_python_obj_id')
+                    maybe_parameter_python_obj_id_annot = \
+                        f", param_id:{maybe_parameter_python_obj_id}" \
+                        if maybe_parameter_python_obj_id is not None else ""
                     maybe_type_annotation = \
                         f': "{dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}' \
-                        f'{stride_annotation}{device_annotation}"'
+                        f'{stride_annotation}{device_annotation}{maybe_parameter_python_obj_id_annot}"'
                 elif isinstance(meta_val, py_sym_types):
                     maybe_type_annotation = f': "Sym({meta_val})"'
                 elif isinstance(meta_val, TensorMetadata):

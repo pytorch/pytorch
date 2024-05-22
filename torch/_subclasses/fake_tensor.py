@@ -290,8 +290,10 @@ class FakeTensorConverter:
         # not yet supported in metatensors
         if t.is_quantized:
             raise UnsupportedFakeTensorException("quantized nyi in meta tensors")
+        parameter_python_obj_id = None
         if type(t) is torch.nn.Parameter:
             assert not make_constant
+            parameter_python_obj_id = id(t)
 
         def mk_fake_tensor(make_meta_t):
             # NB: don't use in_kernel_invocation_manager. to
@@ -309,6 +311,7 @@ class FakeTensorConverter:
                     # TODO: callback might be used in recursive contexts, in
                     # which case using t is wrong!  BUG!
                     constant=t if make_constant else None,
+                    parameter_python_obj_id=parameter_python_obj_id,
                 )
 
         out = self.meta_converter(
@@ -489,7 +492,15 @@ class FakeTensor(torch.Tensor):
         )
 
     @staticmethod
-    def __new__(cls, fake_mode, elem, device, constant=None, real_tensor=None):
+    def __new__(
+        cls, 
+        fake_mode, 
+        elem, 
+        device, 
+        constant=None, 
+        real_tensor=None, 
+        parameter_python_obj_id: Optional[int]=None,
+    ):
         self = torch.Tensor._make_subclass(
             cls,
             elem,
@@ -536,6 +547,7 @@ class FakeTensor(torch.Tensor):
         self.nonzero_memo = None
         self.item_memo = None
         self.unique_memo = None
+        self.parameter_python_obj_id = parameter_python_obj_id
 
         if FakeTensorConfig.debug:
             self._debug_trace = CapturedTraceback.extract()  # type: ignore[attr-defined]

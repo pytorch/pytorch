@@ -181,6 +181,13 @@ def set_meta(proxy, val):
         proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
     elif isinstance(val, torch.Tensor) and not val.is_sparse:
         proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
+
+    maybe_parameter_python_obj_id = getattr(val, 'parameter_python_obj_id')
+    if maybe_parameter_python_obj_id is not None:
+        # TODO(before land): find a better place for storing this
+        proxy.node.meta['parameter_python_obj_id'] = \
+            maybe_parameter_python_obj_id
+
     return proxy
 
 def thunkify(f, *args, **kwargs):
