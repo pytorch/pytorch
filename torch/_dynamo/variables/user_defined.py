@@ -1077,6 +1077,12 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
         return super().var_getattr(tx, name)
 
 
+class RemovableHandleClass:
+    # Dummy class to pass to python_type of RemovableHandleVariable
+    # Useful for isinstance check on hooks
+    pass
+
+
 class RemovableHandleVariable(VariableTracker):
     REMOVED = -1
 
@@ -1107,3 +1113,6 @@ class RemovableHandleVariable(VariableTracker):
             return
         # unreachable due to codegen.add_cache() when the hook is installed
         super().reconstruct(codegen)
+
+    def python_type(self):
+        return RemovableHandleClass
