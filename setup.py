@@ -88,29 +88,14 @@
 #     disables use of system-wide nccl (we will use our submoduled
 #     copy in third_party/nccl)
 #
-#   USE_IBVERBS
-#     toggle features related to distributed support
-#
-#   USE_OPENCV
-#     enables use of OpenCV for additional operators
-#
 #   USE_OPENMP=0
 #     disables use of OpenMP for parallelization
-#
-#   USE_FFMPEG
-#     enables use of ffmpeg for additional operators
 #
 #   USE_FLASH_ATTENTION=0
 #     disables building flash attention for scaled dot product attention
 #
 #   USE_MEM_EFF_ATTENTION=0
 #    disables building memory efficient attention for scaled dot product attention
-#
-#   USE_LEVELDB
-#     enables use of LevelDB for storage
-#
-#   USE_LMDB
-#     enables use of LMDB for storage
 #
 #   BUILD_BINARY
 #     enables the additional binaries/ build
@@ -147,9 +132,6 @@
 #
 #   MKL_THREADING
 #     MKL threading mode: SEQ, TBB or OMP (default)
-#
-#   USE_REDIS
-#     Whether to use Redis for distributed workflows (Linux only)
 #
 #   USE_ROCM_KERNEL_ASSERT=1
 #     Enable kernel assert in ROCm platform
