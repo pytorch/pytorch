@@ -97,4 +97,33 @@ class TORCH_API Store : public torch::CustomClassHolder {
   std::chrono::milliseconds timeout_;
 };
 
+/*
+StoreTimeoutGuard is a RAII guard that will set the store timeout and restore it
+when it returns.
+*/
+class StoreTimeoutGuard {
+ public:
+  explicit StoreTimeoutGuard(
+      Store& store,
+      const std::chrono::milliseconds& timeout)
+      : store_(store) {
+    oldTimeout_ = store.getTimeout();
+    store.setTimeout(timeout);
+  }
+
+  ~StoreTimeoutGuard() {
+    store_.setTimeout(oldTimeout_);
+  }
+
+  /* Disabling copy and move semantics */
+  StoreTimeoutGuard(const StoreTimeoutGuard&) = delete;
+  StoreTimeoutGuard& operator=(const StoreTimeoutGuard&) = delete;
+  StoreTimeoutGuard(StoreTimeoutGuard&&) = delete;
+  StoreTimeoutGuard& operator=(StoreTimeoutGuard&&) = delete;
+
+ private:
+  Store& store_;
+  std::chrono::milliseconds oldTimeout_;
+};
+
 } // namespace c10d
