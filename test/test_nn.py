@@ -1595,8 +1595,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             torch.__future__.set_overwrite_module_params_on_conversion(False)
 
     def test_swap_module_params_fails_after_forward(self):
-        torch.__future__.set_swap_module_params_on_conversion(True)
         try:
+            torch.__future__.set_swap_module_params_on_conversion(True)
             m = torch.nn.Linear(2, 3)
             inp = torch.randn(2, 2)
             # forward will init AccumulateGrad nodes, which bumps use_count of parameters' at::Tensors
@@ -8204,6 +8204,16 @@ class TestNNDeviceType(NNTestCase):
             inp = torch.empty([1, 1, 1, 0], dtype=dtype, device=device)
             weight = torch.empty([1, 0, 1], dtype=dtype, device=device)
             torch._C._nn.slow_conv3d(inp, weight, 1)
+
+        with self.assertRaisesRegex(RuntimeError, re.escape("2D kernel_size expected")):
+            torch._C._nn.thnn_conv2d(torch.rand([1, 1, 1, 1]), kernel_size=[], padding=[1, 1], stride=[1, 1],
+                                     weight=torch.rand([1, 1]))
+        with self.assertRaisesRegex(RuntimeError, re.escape("2D stride expected")):
+            torch._C._nn.thnn_conv2d(torch.rand([1, 1, 1, 1]), kernel_size=[1, 1], padding=[1, 1], stride=[],
+                                     weight=torch.rand([1, 1]))
+        with self.assertRaisesRegex(RuntimeError, re.escape("2D padding expected")):
+            torch._C._nn.thnn_conv2d(torch.rand([1, 1, 1, 1]), kernel_size=[1, 1], padding=[], stride=[1, 1],
+                                     weight=torch.rand([1, 1]))
 
     def test_InstanceNorm1d_general(self, device):
         b = random.randint(3, 5)
