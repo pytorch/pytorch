@@ -38,7 +38,7 @@ IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
 
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "DefaultLogsSpecs",
@@ -50,6 +50,8 @@ __all__ = [
     "get_std_cm",
     "MultiprocessContext",
     "SubprocessContext",
+    "LogsDest",
+    "LogsSpecs",
 ]
 
 class SignalException(Exception):
@@ -244,7 +246,7 @@ class DefaultLogsSpecs(LogsSpecs):
             if not log_dir:
                 log_dir = tempfile.mkdtemp(prefix="torchelastic_")
             elif not os.path.exists(log_dir):
-                os.makedirs(log_dir)
+                os.makedirs(log_dir, exist_ok=True)
             else:
                 if os.path.isfile(log_dir):
                     raise NotADirectoryError(f"log_dir: {log_dir} is a file")
@@ -260,7 +262,7 @@ class DefaultLogsSpecs(LogsSpecs):
         base_log_dir = log_dir or tempfile.mkdtemp(prefix="torchelastic_")
         os.makedirs(base_log_dir, exist_ok=True)
         dir = tempfile.mkdtemp(prefix=f"{rdzv_run_id}_", dir=base_log_dir)
-        log.info("log directory set to: %s", dir)
+        logger.info("log directory set to: %s", dir)
         return dir
 
     def reify(self, envs: Dict[int, Dict[str, str]],) -> LogsDest:
@@ -276,7 +278,7 @@ class DefaultLogsSpecs(LogsSpecs):
         if nprocs > 0:
             global_env = envs[0]
         else:
-            log.warning("Empty envs map provided when defining logging destinations.")
+            logger.warning("Empty envs map provided when defining logging destinations.")
         # Keys are always defined, but values can be missing in unit tests
         run_id = global_env.get("TORCHELASTIC_RUN_ID", "test_run_id")
         restart_count = global_env.get("TORCHELASTIC_RESTART_COUNT", "0")
@@ -355,7 +357,7 @@ class DefaultLogsSpecs(LogsSpecs):
 
                 error_file = os.path.join(clogdir, "error.json")
                 error_files[local_rank] = error_file
-                log.info("Setting worker%s reply file to: %s", local_rank, error_file)
+                logger.info("Setting worker%s reply file to: %s", local_rank, error_file)
                 envs[local_rank]["TORCHELASTIC_ERROR_FILE"] = error_file
 
         return LogsDest(stdouts, stderrs, tee_stdouts, tee_stderrs, error_files)
@@ -458,7 +460,7 @@ class PContext(abc.ABC):
     @abc.abstractmethod
     def _start(self) -> None:
         """Start processes using strategy defined in a particular context."""
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @abc.abstractmethod
     def _poll(self) -> Optional[RunProcsResult]:
@@ -469,7 +471,7 @@ class PContext(abc.ABC):
         successfully or any process fails. Returns ``None`` if
         all processes are still running.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def wait(self, timeout: float = -1, period: float = 1) -> Optional[RunProcsResult]:
         """
@@ -514,7 +516,7 @@ class PContext(abc.ABC):
     @abc.abstractmethod
     def pids(self) -> Dict[int, int]:
         """Return pids of processes mapped by their respective local_ranks."""
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @abc.abstractmethod
     def _close(self, death_sig: signal.Signals, timeout: int = 30) -> None:
@@ -522,7 +524,7 @@ class PContext(abc.ABC):
         Terminates all processes managed by this context and cleans up any
         meta resources (e.g. redirect, error_file files).
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def close(
         self, death_sig: Optional[signal.Signals] = None, timeout: int = 30
@@ -670,9 +672,13 @@ class MultiprocessContext(PContext):
             if self._is_done():
                 # we should ALWAYS have ALL the return values when all the processes are done
                 self._worker_finished_event.set()
-                # Wait untill all processes are finished. At this point workers finished executing
-                # user function
-                self._pc.join()
+
+                # At this point workers finished running the user function
+                # But the child process might still have not exited. Wait for them.
+                # pc.join() blocks [forever] until "a" proc exits. Loop until all of them exits.
+                while not self._pc.join():
+                    logger.debug("entrypoint fn finished, waiting for all child procs to exit...")
+
                 _validate_full_rank(
                     self._return_values, self.nprocs, "return_value queue"
                 )
@@ -692,7 +698,7 @@ class MultiprocessContext(PContext):
             failed_proc = self._pc.processes[failed_local_rank]
             error_filepath = self.error_files[failed_local_rank]
 
-            log.exception(
+            logger.exception(
                 "failed (exitcode: %s)"
                 " local_rank: %s (pid: %s)"
                 " of fn: %s (start_method: %s)",
@@ -724,7 +730,7 @@ class MultiprocessContext(PContext):
             return
         for proc in self._pc.processes:
             if proc.is_alive():
-                log.warning("Closing process %s via signal %s", proc.pid, death_sig.name)
+                logger.warning("Closing process %s via signal %s", proc.pid, death_sig.name)
                 try:
                     os.kill(proc.pid, death_sig)
                 except ProcessLookupError:
@@ -739,7 +745,7 @@ class MultiprocessContext(PContext):
             proc.join(time_to_wait)
         for proc in self._pc.processes:
             if proc.is_alive():
-                log.warning(
+                logger.warning(
                     "Unable to shutdown process %s via %s, forcefully exiting via %s",
                     proc.pid, death_sig, _get_kill_signal()
                 )
@@ -823,7 +829,7 @@ class SubprocessContext(PContext):
             )
             if result.is_failed():
                 first_failure = min(result.failures.values(), key=lambda f: f.timestamp)
-                log.error(
+                logger.error(
                     "failed (exitcode: %s)"
                     " local_rank: %s (pid: %s)"
                     " of binary: %s",
@@ -848,7 +854,7 @@ class SubprocessContext(PContext):
             return
         for handler in self.subprocess_handlers.values():
             if handler.proc.poll() is None:
-                log.warning(
+                logger.warning(
                     "Sending process %s closing signal %s", handler.proc.pid, death_sig.name
                 )
                 handler.close(death_sig=death_sig)
@@ -865,7 +871,7 @@ class SubprocessContext(PContext):
                 pass
         for handler in self.subprocess_handlers.values():
             if handler.proc.poll() is None:
-                log.warning(
+                logger.warning(
                     "Unable to shutdown process %s via %s, forcefully exiting via %s",
                     handler.proc.pid, death_sig, _get_kill_signal()
                 )

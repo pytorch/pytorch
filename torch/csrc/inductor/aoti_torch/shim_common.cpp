@@ -27,6 +27,8 @@
 #include <ATen/ops/bmm.h>
 #include <ATen/ops/convolution.h>
 #include <ATen/ops/empty_strided.h>
+#include <ATen/ops/fbgemm_linear_fp16_weight_fp32_activation.h>
+#include <ATen/ops/fbgemm_pack_gemm_matrix_fp16.h>
 #include <ATen/ops/from_blob.h>
 #include <ATen/ops/index_put.h>
 #include <ATen/ops/mm.h>
@@ -665,6 +667,32 @@ AOTITorchError aoti_torch_mm_out(
   });
 }
 
+AOTITorchError aoti_torch_cpu_wrapped_fbgemm_pack_gemm_matrix_fp16(
+    AtenTensorHandle weight,
+    AtenTensorHandle* out) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* weight_tensor = tensor_handle_to_tensor_pointer(weight);
+
+    *out = new_tensor_handle(at::fbgemm_pack_gemm_matrix_fp16(*weight_tensor));
+  });
+}
+
+AOTITorchError aoti_torch_cpu_wrapped_fbgemm_linear_fp16_weight(
+    AtenTensorHandle input,
+    AtenTensorHandle weight,
+    AtenTensorHandle bias,
+    int64_t out_channel,
+    AtenTensorHandle* out) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* input_tensor = tensor_handle_to_tensor_pointer(input);
+    at::Tensor* weight_tensor = tensor_handle_to_tensor_pointer(weight);
+    at::Tensor* bias_tensor = tensor_handle_to_tensor_pointer(bias);
+
+    *out = new_tensor_handle(at::fbgemm_linear_fp16_weight_fp32_activation(
+        *input_tensor, *weight_tensor, *bias_tensor));
+  });
+}
+
 AOTITorchError aoti_torch_nonzero(
     AtenTensorHandle self,
     AtenTensorHandle* out) {
@@ -747,7 +775,7 @@ AOTITorchError aoti_torch_index_put_out(
     const AtenTensorHandle values,
     bool accumulate) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    c10::List<c10::optional<at::Tensor>> indices_;
+    c10::List<std::optional<at::Tensor>> indices_;
     indices_.reserve(num_indices);
     for (size_t i = 0; i < num_indices; i++) {
       indices_.emplace_back(

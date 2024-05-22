@@ -11,7 +11,7 @@ std::unordered_map<std::string, ClientSocket> managers;
 std::string manager_executable_path;
 
 AllocInfo get_alloc_info(const char* filename) {
-  AllocInfo info = {0};
+  AllocInfo info = {};
   info.pid = getpid();
   info.free = false;
   size_t len = strlen(filename);

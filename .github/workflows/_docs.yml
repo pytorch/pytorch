@@ -194,7 +194,7 @@ jobs:
           retention-days: 14
           s3-bucket: doc-previews
           if-no-files-found: error
-          path: pytorch.github.io/docs/main/
+          path: pytorch_docs/main/
           s3-prefix: pytorch/pytorch/${{ github.event.pull_request.number }}
 
       - name: Upload C++ Docs Preview

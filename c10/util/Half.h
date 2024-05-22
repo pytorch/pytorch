@@ -16,7 +16,7 @@
 #include <c10/util/floating_point_utils.h>
 #include <type_traits>
 
-#if defined(__cplusplus) && (__cplusplus >= 201103L)
+#if defined(__cplusplus)
 #include <cmath>
 #elif !defined(__OPENCL_VERSION__)
 #include <math.h>
@@ -30,6 +30,7 @@
 #include <cstring>
 #include <iosfwd>
 #include <limits>
+#include <ostream>
 
 #ifdef __CUDACC__
 #include <cuda_fp16.h>
@@ -531,7 +532,10 @@ std::enable_if_t<is_complex<From>::value, bool> overflows(
              typename From::value_type>(f.imag());
 }
 
-C10_API std::ostream& operator<<(std::ostream& out, const Half& value);
+C10_API inline std::ostream& operator<<(std::ostream& out, const Half& value) {
+  out << (float)value;
+  return out;
+}
 
 } // namespace c10
 

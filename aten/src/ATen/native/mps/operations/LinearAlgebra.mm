@@ -25,7 +25,7 @@
 namespace at::native {
 namespace mps {
 namespace {
-static const char* METAL_LINALG = R"MATMUL_METAL(
+static MetalShaderLibrary lib(R"MATMUL_METAL(
 #include <metal_array>
 
 using namespace metal;
@@ -74,48 +74,12 @@ INSTANTIATE_NAIVE_MM(half);
 #if __METAL_VERSION__ >= 310
 INSTANTIATE_NAIVE_MM(bfloat);
 #endif
-)MATMUL_METAL";
-
-id<MTLLibrary> compileLinalgOpLibrary(id<MTLDevice> device) {
-  static id<MTLLibrary> linalgLibrary = nil;
-  if (linalgLibrary) {
-    return linalgLibrary;
-  }
-
-  NSError* error = nil;
-  MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
-  [options setLanguageVersion:is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) ? MTLLanguageVersion3_1
-                                                                                      : MTLLanguageVersion2_3];
-  linalgLibrary = [device newLibraryWithSource:[NSString stringWithCString:METAL_LINALG encoding:NSASCIIStringEncoding]
-                                       options:options
-                                         error:&error];
-  TORCH_CHECK(linalgLibrary, "Failed to create metal linalg library, error: ", [[error description] UTF8String]);
-  return linalgLibrary;
-}
-
-id<MTLComputePipelineState> matmulPipelineState(id<MTLDevice> device, ScalarType scalar_type) {
-  std::string kernel = "naive_matmul_" + mps::scalarToMetalTypeString(scalar_type);
-  static std::unordered_map<std::string, id<MTLComputePipelineState>> psoCache;
-  id<MTLComputePipelineState> pso = psoCache[kernel];
-  if (pso) {
-    return pso;
-  }
-
-  NSError* error = nil;
-  id<MTLLibrary> linalgLib = compileLinalgOpLibrary(device);
-  id<MTLFunction> matmulFunc = [linalgLib newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]];
-  TORCH_CHECK(matmulFunc, "Failed to create function state object for: ", kernel);
-  pso = [device newComputePipelineStateWithFunction:matmulFunc error:&error];
-  TORCH_CHECK(pso, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
-
-  psoCache[kernel] = pso;
-  return pso;
-}
+)MATMUL_METAL");
 
 Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
-  auto matmulPSO = matmulPipelineState(device, output.scalar_type());
+  auto matmulPSO = lib.getPipelineStateForFunc("naive_matmul_" + mps::scalarToMetalTypeString(output));
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       getMPSProfiler().beginProfileKernel(matmulPSO, "naive_matmul", {self, other});
@@ -430,6 +394,25 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
     return result;
   }
 
+  MPSShape* shape = nil;
+  bool doTranspose = false;
+
+  // Handle transposes for the second batch of matrices.
+  if (batch2.is_view() && !batch2.is_contiguous()) {
+    if (batch2.numel() == batch2._base().numel()) {
+      const IntArrayRef& viewSizes = batch2.sizes();
+
+      // Handle 3D and 4D tensors.
+      // For 4D tensors, first it must have been reshaped from 4D to 3D and then transposed.
+      int32_t baseTransposeStrideDim = batch2._base().dim() == 4 ? -3 : -2;
+      if (batch2._base().stride(0) == batch2.stride(0) &&
+          batch2._base().stride(baseTransposeStrideDim) == batch2.stride(-1)) {
+        shape = @[ @(viewSizes[0]), @(viewSizes[2]), @(viewSizes[1]) ];
+        doTranspose = true;
+      }
+    }
+  }
+
   MPSStream* stream = getCurrentMPSStream();
 
   struct CachedGraph : public mps::MPSCachedGraph {
@@ -440,14 +423,20 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
   };
 
   @autoreleasepool {
-    string key = "bmm_out_mps_impl" + getTensorsStringKey({batch1, batch2});
+    string key = "bmm_out_mps_impl" + getTensorsStringKey({batch1, batch2}, true, /*exclude_shape*/ true) +
+        std::to_string(doTranspose);
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* batch1Tensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, batch1);
-      MPSGraphTensor* batch2Tensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, batch2);
+      MPSGraphTensor* batch1Tensor = mps::mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(batch1.scalar_type()));
+      MPSGraphTensor* batch2Tensor = mps::mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(batch2.scalar_type()));
+      MPSGraphTensor* batch2TensorTranspose = batch2Tensor;
+
+      if (doTranspose) {
+        batch2TensorTranspose = [mpsGraph transposeTensor:batch2Tensor dimension:-1 withDimension:-2 name:nil];
+      }
 
       MPSGraphTensor* productTensor = [mpsGraph matrixMultiplicationWithPrimaryTensor:batch1Tensor
-                                                                      secondaryTensor:batch2Tensor
+                                                                      secondaryTensor:batch2TensorTranspose
                                                                                  name:@"MM/(batch1@batch2)"];
 
       newCachedGraph->batch1Tensor_ = batch1Tensor;
@@ -455,7 +444,7 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
       newCachedGraph->outputTensor_ = productTensor;
     });
     Placeholder batch1Placeholder = Placeholder(cachedGraph->batch1Tensor_, batch1);
-    Placeholder batch2Placeholder = Placeholder(cachedGraph->batch2Tensor_, batch2);
+    Placeholder batch2Placeholder = Placeholder(cachedGraph->batch2Tensor_, batch2, shape, !doTranspose);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);
 
     auto feeds = dictionaryFromPlaceholders(batch1Placeholder, batch2Placeholder);

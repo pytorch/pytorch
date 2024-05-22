@@ -97,7 +97,8 @@ PyObject* lookup(
         // TODO(anijain2305) - Clean this up when enable_cpp_guard_manager is
         // True by default
         if (cache_entry.root_mgr != nullptr) {
-          valid = run_root_guard_manager(cache_entry.root_mgr, f_locals);
+          valid = torch::dynamo::run_root_guard_manager(
+              cache_entry.root_mgr, f_locals);
         } else {
           valid = cache_entry.check_fn(locals).cast<bool>();
         }

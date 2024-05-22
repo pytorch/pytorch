@@ -1,18 +1,20 @@
 import collections.abc
 import copy
-from typing import Optional, List, Sequence
+from typing import Optional, List, Sequence, TYPE_CHECKING
 
 import torch
-from torch.distributed import distributed_c10d
+from torch.distributed import distributed_c10d as c10d
 from torch.distributed import rpc
 from torch.distributed._shard.sharding_spec._internals import (
     check_tensor,
     validate_non_overlapping_shards_metadata,
 )
 
-from torch.distributed._shard.metadata import ShardMetadata
 from .metadata import TensorProperties, ShardedTensorMetadata
 from .shard import Shard
+
+if TYPE_CHECKING:
+    from torch.distributed._shard.metadata import ShardMetadata
 
 def _parse_and_validate_remote_device(pg, remote_device):
     if remote_device is None:
@@ -23,20 +25,25 @@ def _parse_and_validate_remote_device(pg, remote_device):
     device = remote_device.device()
 
     # Validate rank, skip validation if rank is not part of process group.
-    if not distributed_c10d._rank_not_in_group(pg):
-        if rank is not None and (rank < 0 or rank >= distributed_c10d.get_world_size(pg)):
-            raise ValueError(f'Invalid rank: {rank}')
+    if rank is not None and not c10d._rank_not_in_group(pg):
+        pg_global_ranks = c10d.get_process_group_ranks(pg)
+        if rank not in pg_global_ranks:
+            raise ValueError(
+                f"Global rank {rank} does not exist in input process group: {pg_global_ranks}"
+            )
 
     if worker_name is not None:
         if not rpc._is_current_rpc_agent_set():
-            raise RuntimeError(f'RPC framework needs to be initialized for using worker names: {worker_name}')
+            raise RuntimeError(
+                f"RPC framework needs to be initialized for using worker names: {worker_name}"
+            )
 
         workers = rpc._get_current_rpc_agent().get_worker_infos()
         for worker in workers:
             if worker.name == worker_name:
                 return worker.id, device
 
-        raise ValueError(f'Invalid worker name: {worker_name}')
+        raise ValueError(f"Invalid worker name: {worker_name}")
 
     return rank, device
 
@@ -97,7 +104,7 @@ def build_metadata_from_local_shards(
     local_shards: List[Shard],
     global_size: torch.Size,
     current_rank: int,
-    pg: distributed_c10d.ProcessGroup
+    pg: c10d.ProcessGroup
 ) -> ShardedTensorMetadata:
 
     assert len(local_shards) > 0, "must have local shards!"
