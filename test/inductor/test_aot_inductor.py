@@ -1212,9 +1212,8 @@ class AOTInductorTestsTemplate:
                 return self.foo + x
 
         example_inputs = (torch.rand(4, 4, device=self.device),)
-        with config.patch({"aot_inductor.allow_buffer_mutation": True}):
-            torch._export.aot_compile(Model(self.device), example_inputs)
-            self.check_model(Model(self.device), example_inputs)
+        torch._export.aot_compile(Model(self.device), example_inputs)
+        self.check_model(Model(self.device), example_inputs)
 
     def test_non_tensor_input(self):
         def fn(a, b, alpha=1.0):
@@ -1246,9 +1245,8 @@ class AOTInductorTestsTemplate:
                 self.foo[5] = self.bar[0]
                 return x + self.bar, x * self.foo
 
-        with config.patch({"aot_inductor.allow_buffer_mutation": True}):
-            example_inputs = (torch.randn(10, device=self.device),)
-            self.check_model(Model(self.device), example_inputs)
+        example_inputs = (torch.randn(10, device=self.device),)
+        self.check_model(Model(self.device), example_inputs)
 
     def test_buffer_mutation_3(self):
         class KVCache(torch.nn.Module):
@@ -1288,8 +1286,7 @@ class AOTInductorTestsTemplate:
             torch.randn(1, 6, 1, 48, device=self.device),
             torch.randn(1, 6, 1, 48, device=self.device),
         )
-        with config.patch({"aot_inductor.allow_buffer_mutation": True}):
-            self.check_model(Model(self.device), example_inputs)
+        self.check_model(Model(self.device), example_inputs)
 
     @requires_multigpu()
     def test_replicate_on_devices(self):
@@ -2896,7 +2893,6 @@ CPU_TEST_FAILURES = {
     # minimal arrayref interface only works with CPU; test crashes.
     # https://github.com/pytorch/pytorch/issues/122983
     "test_multi_device": fail_minimal_arrayref_interface(is_skip=True),
-    "test_normal_functional": fail_with_and_without_stack_allocation(),
     # undefined symbol: _Z16aoti_torch_dtypeIN3c104HalfEEiv
     "test_non_contiguous_output_alias": fail_with_and_without_stack_allocation(
         is_skip=True
@@ -2960,10 +2956,6 @@ CPU_TEST_FAILURES = {
 CUDA_TEST_FAILURES = {
     # test_failures, xfail by default, set is_skip=True to skip
     "test_large_grid": fail_cuda(),
-    "test_normal_functional": fail_abi_compatible_cuda(),
-    # There is a double-free issue which will be fixed in another PR
-    # no ABI shim fn for torch.sort; remove this when adding one
-    "test_triton_kernel_multi_output_arg": fail_abi_compatible_cuda(is_skip=True),
     # no runtime checks for non_abi_compatible mode
     "test_runtime_checks": fail_non_abi_compatible_cuda(is_skip=True),
     "test_runtime_checks_complex": fail_non_abi_compatible_cuda(is_skip=True),
@@ -3027,6 +3019,7 @@ if not IS_FBCODE:
             "test_empty_graph": fail_minimal_arrayref_interface(is_skip=True),
             "test_large_weight": fail_minimal_arrayref_interface(is_skip=True),
             "test_large_mmaped_weights": fail_minimal_arrayref_interface(is_skip=True),
+            "test_normal_functional": fail_minimal_arrayref_interface(is_skip=True),
             "test_misc_1": fail_minimal_arrayref_interface(is_skip=True),
             "test_missing_output": fail_minimal_arrayref_interface(is_skip=True),
             "test_model_modified_weights": fail_minimal_arrayref_interface(
