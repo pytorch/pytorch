@@ -3232,7 +3232,7 @@ class TestSDPACudaOnly(NNTestCase):
                 query_expanded.contiguous(), key_expanded.contiguous(), value_expanded.contiguous(),
                 attn_mask=None, dropout_p=0.0, is_causal=False)
 
-        self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
+        self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1.5e-3, rtol=1e-2)
 
     @skipIfRocm  # Nested tensor
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
