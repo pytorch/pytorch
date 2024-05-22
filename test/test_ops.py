@@ -133,8 +133,6 @@ _ops_and_refs_with_no_numpy_ref = [op for op in ops_and_refs if op.ref is None]
 aten = torch.ops.aten
 
 def any_common_cpu_device_one():
-    # import pdb
-    # pdb.set_trace()
     return OpDTypes.any_common_cpu_xpu_one if TEST_XPU else OpDTypes.any_common_cpu_cuda_one
 
 def has_gpu_device(devices: List[str]):
