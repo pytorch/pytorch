@@ -108,10 +108,6 @@ _ref_test_ops = tuple(
     )
 )
 
-if TEST_XPU:
-    any_common_cpu_device_one = OpDTypes.any_common_cpu_xpu_one
-else:
-    any_common_cpu_device_one = OpDTypes.any_common_cpu_cuda_one
 
 
 
@@ -136,11 +132,13 @@ _ops_and_refs_with_no_numpy_ref = [op for op in ops_and_refs if op.ref is None]
 
 aten = torch.ops.aten
 
-# _xpu_computation_op_list = ["_refs.abs", "_refs.all", "item", "abs", "add", "_refs.fill"]
-# _xpu_computation_op_list = ["abs"]
-# _xpu_computation_ops = [
-#    op for op in ops_and_refs if op.name in _xpu_computation_op_list
-# ]
+def any_common_cpu_device_one():
+    # import pdb
+    # pdb.set_trace()
+    return OpDTypes.any_common_cpu_xpu_one if TEST_XPU else OpDTypes.any_common_cpu_cuda_one
+
+def has_gpu_device(devices: List[str]):
+    return "cuda" in devices or "xpu" in devices
 
 # Tests that apply to all operators and aren't related to any particular
 #   system
@@ -286,7 +284,7 @@ class TestCommon(TestCase):
             and op.formatted_name
             in ("signal_windows_exponential", "signal_windows_bartlett")
             and dtype == torch.float64
-            and ("cuda" in device or "xpu" in device)
+            and has_gpu_device(device)
         ):  # noqa: E121
             raise unittest.SkipTest("XXX: raises tensor-likes are not close.")
 
@@ -301,8 +299,7 @@ class TestCommon(TestCase):
     @onlyCUDAAndXPU
     @suppress_warnings
     @slowTest
-    @ops(_ops_and_refs_with_no_numpy_ref, dtypes=any_common_cpu_device_one)
-    #@ops(_xpu_computation_ops, dtypes=any_common_cpu_device_one)
+    @ops(_ops_and_refs_with_no_numpy_ref, dtypes=any_common_cpu_device_one())
     def test_compare_cpu(self, device, dtype, op):
         def to_cpu(arg):
             if isinstance(arg, torch.Tensor):
@@ -2683,8 +2680,8 @@ class TestFakeTensor(TestCase):
             self.assertEqual(strided_result.layout, torch.strided)
 
 
-#instantiate_device_type_tests(TestCommon, globals(), only_for="xpu")
-instantiate_device_type_tests(TestCompositeCompliance, globals(), only_for="xpu")
+instantiate_device_type_tests(TestCommon, globals(), only_for="xpu")
+#instantiate_device_type_tests(TestCompositeCompliance, globals(), only_for="xpu")
 #instantiate_device_type_tests(TestMathBits, globals())
 #instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")
 #instantiate_device_type_tests(TestFakeTensor, globals())

@@ -5,7 +5,8 @@ import collections.abc
 import math
 import operator
 import unittest
-from dataclasses import asdict, dataclass
+from dataclasses import InitVar, asdict, dataclass
+from typing import Dict, Optional
 from enum import Enum
 from functools import partial
 from itertools import product
@@ -25,7 +26,6 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types,
     floating_and_complex_types_and,
     floating_types,
-    empty_types,
 )
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
@@ -683,8 +683,11 @@ class OpInfo:
     # information about which tests to skip
     skips: Tuple = tuple()
 
-    # skip xpu by default
-    skipXPU: bool = True
+    # skip the test for a device
+    skip_device: Tuple = tuple()
+
+    # enable the test for a device
+    enable_skipped_device: Tuple = tuple()
 
     # decorators to apply to generated tests
     decorators: Tuple = tuple()
@@ -1021,18 +1024,13 @@ class OpInfo:
             else:
                 self.inplace_operator_variant = None
 
-        if self.skipXPU == True:
-            skip_dtypes= self.dtypesIfXPU
-            
+        # Skip XPU test by default
+        self.skip_device = ('xpu',)
+        for device in (set(self.skip_device).difference(set(self.enable_skipped_device))):
             if self.skips is not None:
-                #self.skips = (*self.skips, DecorateInfo(unittest.skip, 'TestCommon', 'test_compare_cpu',  device_type="xpu", dtypes=skip_dtypes))
-                self.skips = (*self.skips, DecorateInfo(unittest.skip, device_type="xpu", dtypes=None))
+                self.skips = (*self.skips, DecorateInfo(unittest.skip, device_type=device, dtypes=None))
             else:
-                #self.skips = (DecorateInfo(unittest.skip, 'TestCommon', 'test_compare_cpu',  device_type="xpu", dtypes=skip_dtypes))
-                self.skips = (DecorateInfo(unittest.skip, device_type="xpu", dtypes=None))
-            #print("Skip XPU backend on {} with {} and {}".format(self.name, skip_dtypes, self.skips))
-        else:
-            print("Won't skip XPU backend on op {}".format(self.name))
+                self.skips = (DecorateInfo(unittest.skip, device_type=device, dtypes=None))
 
         self.decorators = (*self.decorators, *self.skips)
 
@@ -1567,7 +1565,6 @@ class ReductionOpInfo(OpInfo):
             yield tuple(),
             {},
         ),
-        skipXPU: bool = True,
         # Options from the OpInfo base class
         **kwargs,
     ):
@@ -1591,7 +1588,7 @@ class ReductionOpInfo(OpInfo):
         # Override OpInfo defaults and call base class __init__
         kwargs.setdefault("inplace_variant", None)
         kwargs.setdefault("sample_inputs_func", sample_inputs_func)
-        super().__init__(name, promotes_int_to_float=promotes_int_to_float, skipXPU = skipXPU, **kwargs)
+        super().__init__(name, promotes_int_to_float=promotes_int_to_float, **kwargs)
 
         self.identity = identity
         self.nan_policy = nan_policy
@@ -2156,7 +2153,6 @@ class BinaryUfuncInfo(OpInfo):
         supports_rhs_python_scalar=True,  # Whether the operator allows Tensor x scalar inputs
         supports_one_python_scalar=False,  # Whether the operator allows scalar x tensor and tensor x scalar inputs
         supports_two_python_scalars=False,  # Whether the operator allows scalar x scalar inputs
-        skipXPU=True,
         **kwargs,
     ):
         self._original_binary_ufunc_args = locals().copy()
@@ -2177,7 +2173,6 @@ class BinaryUfuncInfo(OpInfo):
             sample_inputs_func=sample_inputs_func,
             reference_inputs_func=reference_inputs_func,
             error_inputs_func=make_error_inputs_elementwise_binary(error_inputs_func),
-            skipXPU=skipXPU,
             **kwargs,
         )
 
@@ -2506,7 +2501,6 @@ class UnaryUfuncInfo(OpInfo):
         reference_inputs_func=reference_inputs_elementwise_unary,
         sample_kwargs=lambda device, dtype, input: ({}, {}),
         reference_numerics_filter=None,  # Filters values in the range of the domain specified above but that should not be tested
-        skipXPU=True,
         **kwargs,
     ):
         self._original_unary_ufunc_args = locals().copy()
@@ -2516,7 +2510,6 @@ class UnaryUfuncInfo(OpInfo):
             dtypes=dtypes,
             sample_inputs_func=sample_inputs_func,
             reference_inputs_func=reference_inputs_func,
-            skipXPU=skipXPU,
             **kwargs,
         )
         
@@ -2651,7 +2644,6 @@ class SpectralFuncInfo(OpInfo):
         ndimensional: SpectralFuncType,
         sample_inputs_func=sample_inputs_spectral_ops,
         decorators=None,
-        skipXPU=True,
         **kwargs,
     ):
         self._original_spectral_func_args = dict(locals()).copy()
@@ -2672,7 +2664,6 @@ class SpectralFuncInfo(OpInfo):
             dtypes=dtypes,
             decorators=decorators,
             sample_inputs_func=sample_inputs_func,
-            skipXPU=skipXPU,
             **kwargs,
         )
         self.ref = ref
@@ -2691,7 +2682,6 @@ class ShapeFuncInfo(OpInfo):
         dtypesIfCUDA=None,
         dtypesIfROCM=None,
         sample_inputs_func=None,
-        skipXPU=True,
         **kwargs,
     ):
         super().__init__(
@@ -2700,7 +2690,6 @@ class ShapeFuncInfo(OpInfo):
             dtypesIfCUDA=dtypesIfCUDA,
             dtypesIfROCM=dtypesIfROCM,
             sample_inputs_func=sample_inputs_func,
-            skipXPU=skipXPU,
             **kwargs,
         )
         self.ref = ref
