@@ -265,7 +265,13 @@ from setuptools.dist import Distribution
 from tools.build_pytorch_libs import build_caffe2
 from tools.generate_torch_version import get_torch_version
 from tools.setup_helpers.cmake import CMake
-from tools.setup_helpers.env import build_type, LIBTORCH_PKG_NAME, IS_DARWIN, IS_LINUX, IS_WINDOWS
+from tools.setup_helpers.env import (
+    build_type,
+    IS_DARWIN,
+    IS_LINUX,
+    IS_WINDOWS,
+    LIBTORCH_PKG_NAME,
+)
 from tools.setup_helpers.generate_linker_script import gen_linker_script
 
 ################################################################################
