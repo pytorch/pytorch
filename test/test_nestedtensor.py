@@ -4359,6 +4359,32 @@ class TestNestedTensorSubclass(TestCase):
         self.assertTrue(torch.allclose(attn_output_eager, attn_output))
         self.assertTrue(torch.allclose(value_grad, value.grad))
 
+    @dtypes(torch.float64, torch.float32, torch.half)
+    @onlyCUDA
+    def test_fbgemm_jagged_to_padded_dense_kernels(self, device, dtype):
+        values = torch.randn(10, 5, device=device, dtype=dtype)
+        offsets = torch.tensor([0, 1, 3, 8, 10], device=device, dtype=torch.int64)
+        max_length = offsets.diff().max().item()
+        padding_value = 1.3
+
+        # convert jagged -> padded dense
+        padded = torch.ops.aten._jagged_to_padded_dense_forward(
+            values, [offsets], [max_length], padding_value
+        )
+
+        batch_size = offsets.shape[0] - 1
+        expected_padded_shape = (batch_size, max_length, values.shape[-1])
+        self.assertEqual(padded.shape, expected_padded_shape)
+
+        # convert padded dense -> jagged
+        total_L = values.shape[0]
+        output_jagged = torch.ops.aten._padded_dense_to_jagged_forward(
+            padded, [offsets], total_L
+        )
+
+        # should be equivalent to the original values
+        self.assertEqual(values, output_jagged)
+
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
     @unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
@@ -4471,31 +4497,6 @@ class TestNestedTensorSubclass(TestCase):
         for dynamic in [False, True, None]:
             self.assertFalse(_recompiles_for_inputs(f, (nt,), (nt2,), dynamic=dynamic))
 
-    @dtypes(torch.float64, torch.float32, torch.half)
-    @onlyCUDA
-    def test_fbgemm_jagged_to_padded_dense_kernels(self, device, dtype):
-        values = torch.randn(10, 5, device=device, dtype=dtype)
-        offsets = torch.tensor([0, 1, 3, 8, 10], device=device, dtype=torch.int64)
-        max_length = offsets.diff().max().item()
-        padding_value = 1.3
-
-        # convert jagged -> padded dense
-        padded = torch.ops.aten._fbgemm_jagged_to_padded_dense_forward(
-            values, [offsets], [max_length], padding_value
-        )
-
-        batch_size = offsets.shape[0] - 1
-        expected_padded_shape = (batch_size, max_length, values.shape[-1])
-        self.assertEqual(padded.shape, expected_padded_shape)
-
-        # convert padded dense -> jagged
-        total_L = values.shape[0]
-        output_jagged = torch.ops.aten._fbgemm_jagged_to_padded_dense_backward(
-            padded, [offsets], total_L
-        )
-
-        # should be equivalent to the original values
-        self.assertEqual(values, output_jagged)
 
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
