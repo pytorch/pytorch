@@ -1572,7 +1572,7 @@ def _set_gpu_runtime_env() -> None:
         and "CUDA_HOME" not in os.environ
         and "CUDA_PATH" not in os.environ
     ):
-        os.environ["CUDA_HOME"] = os.path.dirname(build_paths.cuda())
+        os.environ["CUDA_HOME"] = build_paths.cuda()
 
 
 def _get_python_include_dirs():
@@ -1586,6 +1586,23 @@ def _get_python_include_dirs():
     if not (include_dir / "Python.h").exists():
         warnings.warn(f"Can't find Python.h in {str(include_dir)}")
     return [str(include_dir)]
+
+
+def _transform_cuda_paths(lpaths):
+    # This handles two cases:
+    # 1. Meta internal cuda-12 where libs are in lib/cuda-12 and lib/cuda-12/stubs
+    # 2. Linux machines may have CUDA installed under either lib64/ or lib/
+    for i, path in enumerate(lpaths):
+        if (
+            "CUDA_HOME" in os.environ
+            and path.startswith(os.environ["CUDA_HOME"])
+            and not os.path.exists(f"{path}/libcudart_static.a")
+        ):
+            for root, dirs, files in os.walk(path):
+                if "libcudart_static.a" in files:
+                    lpaths[i] = os.path.join(path, root)
+                    lpaths.append(os.path.join(lpaths[i], "stubs"))
+                    break
 
 
 def get_include_and_linking_paths(
@@ -1627,17 +1644,7 @@ def get_include_and_linking_paths(
             if aot_mode:
                 ipaths += [os.path.dirname(cpp_prefix_path())]
                 if cuda and torch.version.hip is None:
-                    # This is a special treatment for Meta internal cuda-12 where all libs
-                    # are in lib/cuda-12 and lib/cuda-12/stubs
-                    for i, path in enumerate(lpaths):
-                        if path.startswith(
-                            os.environ["CUDA_HOME"]
-                        ) and not os.path.exists(f"{path}/libcudart_static.a"):
-                            for root, dirs, files in os.walk(path):
-                                if "libcudart_static.a" in files:
-                                    lpaths[i] = os.path.join(path, root)
-                                    lpaths.append(os.path.join(lpaths[i], "stubs"))
-                                    break
+                    _transform_cuda_paths(lpaths)
         if macros:
             if config.is_fbcode() and vec_isa != invalid_vec_isa:
                 cap = str(vec_isa).upper()
@@ -1746,7 +1753,7 @@ def get_include_and_linking_paths(
         if torch.version.hip is not None:
             ipaths.append(build_paths.rocm())
         else:
-            ipaths.append(build_paths.cuda())
+            ipaths.append(os.path.join(build_paths.cuda(), "include"))
         # We also need to bundle includes with absolute paths into a remote directory
         # (later on, we copy the include paths from cpp_extensions into our remote dir)
         ipaths.append("include")
@@ -2883,6 +2890,8 @@ class TritonCodeCache:
 def _cuda_compiler() -> Optional[str]:
     if cuda_env.nvcc_exist(config.cuda.cuda_cxx):
         return config.cuda.cuda_cxx
+    if config.is_fbcode():
+        return os.path.join(build_paths.cuda(), "bin", "nvcc")
     if cuda_env.nvcc_exist(os.getenv("CUDACXX")):
         return os.getenv("CUDACXX", "")
     if cuda_env.nvcc_exist(os.getenv("CUDA_HOME")):
@@ -2907,21 +2916,19 @@ def _cutlass_include_paths() -> List[str]:
 
 
 def _cuda_lib_options() -> List[str]:
+    _set_gpu_runtime_env()  # cpp_extension consults the env
     from torch.utils import cpp_extension
 
+    lpaths = cpp_extension.library_paths(cuda=True) + [
+        sysconfig.get_config_var("LIBDIR")
+    ]
     extra_ldflags: List[str] = []
     if is_linux():
-        extra_lib_dir = "lib64"
-        if not os.path.exists(
-            cpp_extension._join_cuda_home(extra_lib_dir)
-        ) and os.path.exists(cpp_extension._join_cuda_home("lib")):
-            # 64-bit CUDA may be installed in "lib"
-            # Note that it's also possible both don't exist (see _find_cuda_home) - in that case we stay with "lib64"
-            extra_lib_dir = "lib"
-        extra_ldflags.append(f"-L{cpp_extension._join_cuda_home(extra_lib_dir)}")
-        extra_ldflags.append(
-            f'-L{cpp_extension._join_cuda_home(extra_lib_dir, "stubs")}'
-        )
+        _transform_cuda_paths(lpaths)
+        for path in lpaths:
+            # -rpath ensures the DLL can find its dependencies when loaded, even
+            # if the library path is non-standard.
+            extra_ldflags.extend([f"-L{path}", "-Xlinker", f"-rpath={path}"])
         extra_ldflags.append("-lcuda")
         extra_ldflags.append("-lcudart")
     else:
@@ -2958,6 +2965,8 @@ def _nvcc_compiler_options() -> List[str]:
         "--expt-relaxed-constexpr",
         "-DNDEBUG",
     ]
+    if config.is_fbcode():
+        options.extend(["-ccbin", os.path.dirname(build_paths.gcc())])
     if config.cuda.enable_debug_info:
         options.extend(["-lineinfo", "-g", "-DCUTLASS_DEBUG_TRACE_LEVEL=1"])
     if config.cuda.enable_ptxas_info:
