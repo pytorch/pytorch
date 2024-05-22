@@ -234,6 +234,7 @@ def _get_package_path(package_name):
             pass
     return None
 
+
 BUILD_LIBTORCH_WHL = False
 BUILD_PYTORCH_USING_LIBTORCH_WHL = False
 
@@ -1156,6 +1157,18 @@ def main():
         )
 
     if BUILD_TWO_WHEELS:
+        setup_cmd = sys.argv[1]
+
+        if (
+            setup_cmd == "bdist_wheel"
+            or setup_cmd == "build_ext"
+            or setup_cmd == "sdist"
+            or setup_cmd == "develop"
+        ):
+            raise RuntimeError(
+                "At the moment the BUILD_TWO_WHEELS option only supports the clean and install commands. Please rerun setup.py using one of those two commands."
+            )
+
         final_package_name = PACKAGE_NAME
         PACKAGE_NAME = "libtorch"
         BUILD_LIBTORCH_WHL = True
@@ -1163,7 +1176,6 @@ def main():
         _main()
         BUILD_LIBTORCH_WHL = False
         BUILD_PYTORCH_USING_LIBTORCH_WHL = True
-        setup_cmd = sys.argv[1]
         sys.argv[1] = "clean"
         PACKAGE_NAME = final_package_name
         _main()
