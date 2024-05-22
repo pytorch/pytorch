@@ -597,7 +597,7 @@ class _PipelineStageBase(ABC):
         # (a) the user passed an extra arg or missed an arg
         # (b) the user did not pass a kwarg, which has a default value baked into expected_args
         expected_tensors_meta = [
-            e.meta if isinstance(e, RootArgPlaceholder) else e.buffer
+            e.meta if isinstance(e, _RootArgPlaceholder) else e.buffer
             for e in expected_args
         ]
         validate_tensors_metadata("forward input args", expected_tensors_meta, args)
