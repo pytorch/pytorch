@@ -22,8 +22,11 @@ def checkerboard(score, batch, head, token_q, token_kv):
 # Lets call flex_attention with this new score modification
 output = flex_attention(query, key, value, score_mod=checkerboard) # Output shape [B, H, N, d] = [8, 8, 2048, 64]
 
-# compiled_flex_attention = torch.compile(flex_attention)
-# out_compiled = compiled_flex_attention(query, key, value, score_mod=checkerboard)
+print("Run Non compiled flex attention")
+compiled_flex_attention = torch.compile(flex_attention)
+print("Compile Flex attention")
+out_compiled = compiled_flex_attention(query, key, value, score_mod=checkerboard)
+print("Run Compiled Flex attention")
 
 ## Manual Implementation of Flash Attention
 def eager_flash_attention(query, key, value, score_mod) -> torch.Tensor:
