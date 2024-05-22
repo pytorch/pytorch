@@ -103,8 +103,8 @@ class ExportedArtifact:
         ],
     ]
     out_spec: Optional[TreeSpec] = None,
-    constraints: Optional[Dict[str, str]] = None,
     module_call_signatures: Optional[Dict[str, ModuleCallSignature]] = None
+    fake_mode: Optional[FakeTensorMode] = None,
 
 
 DEFAULT_EXPORT_DYNAMO_CONFIG = ExportDynamoConfig()
@@ -130,6 +130,23 @@ def _ignore_backend_decomps():
     finally:
         torch.backends.mkldnn.set_flags(*orig_mkldnn_flag)
         torch.backends.nnpack.set_flags(*orig_nnpack_flag)
+
+
+def _add_runtime_assertions_to_cond_in_subgraph(range_constraints, gm, fake_mode):
+    # We can't get rid of this yet, since for some reason
+    # insert_deferred_runtime_assertions doesn't add assertions to cond
+    # subgraphs
+    if len(range_constraints) > 0:
+        stack_trace = (
+            'File "torch/_export/passes/add_runtime_assertions_for_constraints_pass.py", line 46, '
+            "in _AddRuntimeAssertionsForInlineConstraintsPass"
+        )
+        with fake_mode, gm._set_create_node_hook(
+            functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+        ):
+            res = _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints)(gm)
+        assert res is not None
+        gm = res.graph_module
 
 
 def _convert_input_to_fake(gm, args, kwargs):
@@ -1082,29 +1099,7 @@ def _strict_export(
     # The unbacked symint symbols are updated in aot_export
     # so we serialize them here instead of inside dynamo
 
-    gm.meta["inline_constraints"] = {
-        k: v
-        for k, v in dynamo_fake_mode.shape_env.var_to_range.items()
-        if free_unbacked_symbols(k)
-    }
     gm.meta["forward_arg_names"] = forward_arg_names
-
-    num_lifted = next(
-        (
-            i
-            for i, s in enumerate(export_graph_signature.input_specs)
-            if s.kind == InputKind.USER_INPUT
-        ),
-        len(export_graph_signature.input_specs),
-    )
-    combined_args = _combine_args(mod, args, kwargs)
-    range_constraints = make_constraints(
-        dynamo_fake_mode,
-        gm,
-        combined_args,
-        dynamic_shapes,
-        num_lifted,
-    )
 
     # Do some cleanups on the graph module to restore the state dict to the
     # expected form. Each of these steps should probably get fixed upstream.
@@ -1140,24 +1135,9 @@ def _strict_export(
         assert res is not None
         gm = res.graph_module
 
-    # We can't get rid of this yet, since for some reason
-    # insert_deferred_runtime_assertions doesn't add assertions to cond
-    # subgraphs
-    if len(range_constraints) > 0:
-        stack_trace = (
-            'File "torch/_export/passes/add_runtime_assertions_for_constraints_pass.py", line 46, '
-            "in _AddRuntimeAssertionsForInlineConstraintsPass"
-        )
-        with dynamo_fake_mode, gm._set_create_node_hook(
-            functools.partial(_node_metadata_hook, stack_trace=stack_trace)
-        ):
-            res = _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints)(gm)
-        assert res is not None
-        gm = res.graph_module
-
     aten_export_artifact.out_spec = orig_out_spec
-    aten_export_artifact.range_constraints = range_constraints
     aten_export_artifact.module_call_signatures = module_call_signatures
+    aten_export_artifact.fake_mode = dynamo_fake_mode
     return aten_export_artifact
 
 
@@ -1278,18 +1258,6 @@ def _non_strict_export(
                 for fqn, obj in aten_export_artifact.constants.items()
             }
 
-    aten_export_artifact.gm.meta["inline_constraints"] = {
-        k: v
-        for k, v in fake_mode.shape_env.var_to_range.items()
-        if free_unbacked_symbols(k)
-    }
-    num_lifted = len(
-        [
-            spec
-            for spec in aten_export_artifact.sig.input_specs
-            if spec.kind != InputKind.USER_INPUT
-        ]
-    )
     try:
         produce_guards_and_solve_constraints(
             fake_mode,
@@ -1301,15 +1269,6 @@ def _non_strict_export(
         )
     except (ConstraintViolationError, ValueRangeError) as e:
         raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: B904
-
-    combined_args = _combine_args(mod, args, kwargs)
-    range_constraints = make_constraints(
-        fake_mode,
-        aten_export_artifact.gm,
-        combined_args,
-        dynamic_shapes,
-        num_lifted,
-    )
 
     gm = aten_export_artifact.gm
 
@@ -1349,8 +1308,8 @@ def _non_strict_export(
     )
 
     aten_export_artifact.out_spec = out_spec
-    aten_export_artifact.range_constraints = range_constraints
     aten_export_artifact.module_call_signatures = module_call_signatures
+    aten_export_artifact.fake_mode = fake_mode
     return aten_export_artifact
 
 
@@ -1460,9 +1419,38 @@ def _export(
     gm = aten_export_artifact.gm
     export_graph_signature = aten_export_artifact.sig
     out_spec = aten_export_artifact.out_spec
-    range_constraints = aten_export_artifact.range_constraints
     module_call_signatures = aten_export_artifact.module_call_signatures
     constants = aten_export_artifact.constants
+    fake_mode = aten_export_artifact.fake_mode
+
+    # Make constratins.
+    gm.meta["inline_constraints"] = {
+        k: v
+        for k, v in fake_mode.shape_env.var_to_range.items()
+        if free_unbacked_symbols(k)
+    }
+    num_lifted = next(
+        (
+            i
+            for i, s in enumerate(export_graph_signature.input_specs)
+            if s.kind == InputKind.USER_INPUT
+        ),
+        len(export_graph_signature.input_specs),
+    )
+    combined_args = _combine_args(mod, args, kwargs)
+    range_constraints = make_constraints(
+        fake_mode,
+        gm,
+        combined_args,
+        dynamic_shapes,
+        num_lifted,
+    )
+    if strict:
+        _add_runtime_assertions_to_cond_in_subgraph(
+            range_constraints,
+            gm,
+            fake_mode,
+        )
 
     assert out_spec is not None
 
