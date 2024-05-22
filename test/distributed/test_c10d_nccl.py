@@ -333,8 +333,15 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         del pg
 
+    CUDA_12_AND_ABOVE = torch.cuda.is_available() and (
+        torch.version.cuda is not None and int(torch.version.cuda.split(".")[0]) >= 12
+    )
+
     @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_but_pass_in_sandcastle_if(
+        not (TEST_MULTIGPU and CUDA_12_AND_ABOVE),
+        "NCCL test requires 2+ GPUs and Device side assert could cause unexpected errors in lower versions of CUDA",
+    )
     @parametrize("type", [torch.float16, torch.float32, torch.float64])
     @skip_if_rocm
     def test_nan_assert(self, type):
