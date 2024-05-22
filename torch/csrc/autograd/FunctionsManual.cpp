@@ -792,7 +792,8 @@ Tensor prod_safe_zeros_backward(
       at::cat({ones, inp.narrow_symint(dim, 0, inp.sym_size(dim) - 1)}, dim);
   Tensor exclusive_normal = exclusive_normal_nocp.cumprod(dim);
 
-  Tensor narrow_reverse = inp.narrow_symint(dim, 1, inp.sym_size(dim) - 1).flip(dim);
+  Tensor narrow_reverse =
+      inp.narrow_symint(dim, 1, inp.sym_size(dim) - 1).flip(dim);
   Tensor exclusive_reverse_nocp =
       at::cat({std::move(ones), std::move(narrow_reverse)}, dim);
   Tensor exclusive_reverse = exclusive_reverse_nocp.cumprod(dim).flip(dim);

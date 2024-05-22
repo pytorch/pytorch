@@ -865,7 +865,7 @@ class TritonKernelOverrides(TritonOverrides):
             bounds=ValueRanges.wrap(other),
         )
         ret = ops.where(new_mask, result, other)
-        ret.mask_vars.remove(new_mask)
+        ret.mask_vars.discard(new_mask)
         return ret
 
     @staticmethod
