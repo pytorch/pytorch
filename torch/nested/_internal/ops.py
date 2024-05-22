@@ -1088,7 +1088,7 @@ def to_padded_tensor_default(func, *args, **kwargs):
         if values.dim() > 2:
             values = values.flatten(start_dim=1)
 
-        padded_out = torch.ops.aten._fbgemm_jagged_to_padded_dense_forward(
+        padded_out = torch.ops.aten._jagged_to_padded_dense_forward(
             values,
             [inp._offsets],
             [max_seq_len],
@@ -1129,7 +1129,7 @@ def _nested_from_padded_tensor_default(func, *args, **kwargs):
         padded = padded.unsqueeze(-1)
 
     if padded.is_cuda:
-        values = torch.ops.aten._fbgemm_dense_to_jagged_forward(
+        values = torch.ops.aten._padded_dense_to_jagged_forward(
             padded, [offsets], new_kwargs["sum_S"]
         )
 
