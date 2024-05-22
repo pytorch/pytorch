@@ -25,7 +25,11 @@ std::string XPUHooks::showConfig() const {
 
 int32_t XPUHooks::getGlobalIdxFromDevice(const at::Device& device) const {
   TORCH_CHECK(device.is_xpu(), "Only the XPU device type is expected.");
+#ifdef _WIN32
+  TORCH_CHECK(false, "DLPack is not supported on XPU on Windows.");
+#else
   return at::xpu::getGlobalIdxFromDevice(device.index());
+#endif
 }
 
 Generator XPUHooks::getXPUGenerator(DeviceIndex device_index) const {
@@ -38,7 +42,11 @@ const Generator& XPUHooks::getDefaultXPUGenerator(
 }
 
 Device XPUHooks::getDeviceFromPtr(void* data) const {
+#ifdef _WIN32
+  TORCH_CHECK(false, "DLPack is not supported on XPU on Windows.");
+#else
   return at::xpu::getDeviceFromPtr(data);
+#endif
 }
 
 c10::DeviceIndex XPUHooks::getNumGPUs() const {
