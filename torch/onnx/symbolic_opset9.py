@@ -6737,6 +6737,7 @@ def prim_device(g: jit_utils.GraphContext, *inputs, **kwargs) -> None:
 def prim_loop(g: jit_utils.GraphContext, *inputs, **attrs) -> List[_C.Value]:
     node = g.original_node
     env = g.env
+    values_in_env = g.values_in_env
     params_dict = g.params_dict
 
     operator_export_type = GLOBALS.operator_export_type
@@ -6771,6 +6772,7 @@ def prim_loop(g: jit_utils.GraphContext, *inputs, **attrs) -> List[_C.Value]:
             new_block_context.block,
             operator_export_type,
             env,
+            values_in_env,
             False,
         )
     fixed_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(
@@ -6790,6 +6792,7 @@ def prim_if(g: jit_utils.GraphContext, *inputs, **attrs) -> List[_C.Value]:
     n = g.original_node
     block = g.block
     env = g.env
+    values_in_env = g.values_in_env
     params_dict = g.params_dict
 
     operator_export_type = GLOBALS.operator_export_type
@@ -6833,6 +6836,7 @@ def prim_if(g: jit_utils.GraphContext, *inputs, **attrs) -> List[_C.Value]:
             block,
             operator_export_type,
             env,
+            values_in_env,
             True,
         )
         if_output_list = list(n.outputs())
@@ -6860,6 +6864,7 @@ def prim_if(g: jit_utils.GraphContext, *inputs, **attrs) -> List[_C.Value]:
                 new_block_context.block,
                 operator_export_type,
                 env,
+                values_in_env,
                 False,
             )
         fixed_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(
@@ -6930,8 +6935,11 @@ def onnx_placeholder(g: jit_utils.GraphContext, *inputs, **attrs):
     node = g.original_node
     block = g.block
     env = g.env
+    values_in_env = g.values_in_env
 
-    return torch._C._jit_onnx_convert_pattern_from_subblock(block, node, env)
+    return torch._C._jit_onnx_convert_pattern_from_subblock(
+        block, node, env, values_in_env
+    )
 
 
 @_onnx_symbolic("aten::resolve_conj")

@@ -80,10 +80,6 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, AT_INSTANTIATE_SORT_PAIRS_8)
 AT_INSTANTIATE_SORT_PAIRS(uint16_t, 8)
 AT_INSTANTIATE_SORT_PAIRS(uint32_t, 8)
 AT_INSTANTIATE_SORT_PAIRS(uint64_t, 8)
-
-// BFloat16 Radix sort is supported from ROCm 4.5 onwards
-#if !AT_ROCM_ENABLED() || (AT_ROCM_ENABLED() && ROCM_VERSION >= 40500)
 AT_INSTANTIATE_SORT_PAIRS(c10::BFloat16, 8)
-#endif
 
 } // namespace at::cuda::cub::detail

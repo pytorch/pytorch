@@ -252,7 +252,7 @@ def sig_for_ops(opname: str) -> List[str]:
             tname = "builtins." + tname
         return [f"def {opname}(self) -> {tname}: ..."]
     else:
-        raise Exception("unknown op", opname)
+        raise Exception("unknown op", opname)  # noqa: TRY002
 
 
 def generate_type_hints(sig_group: PythonSignatureGroup) -> List[str]:
@@ -798,6 +798,9 @@ def gen_pyi(
             "_functionalize_are_all_mutations_under_no_grad_or_inference_mode": [
                 "def _functionalize_are_all_mutations_under_no_grad_or_inference_mode(t: Tensor) -> _bool: ..."
             ],
+            "_functionalize_was_inductor_storage_resized": [
+                "def _functionalize_was_inductor_storage_resized(t: Tensor) -> _bool: ..."
+            ],
             "_functionalize_sync": ["def _functionalize_sync(t: Tensor) -> None: ..."],
             "_functionalize_was_storage_changed": [
                 "def _functionalize_was_storage_changed(tensor: Tensor) -> _bool: ..."
@@ -807,6 +810,9 @@ def gen_pyi(
             ],
             "_functionalize_apply_view_metas": [
                 "def _functionalize_apply_view_metas(tensor: Tensor,  base: Tensor) -> Tensor: ..."
+            ],
+            "_functionalize_is_symbolic": [
+                "def _functionalize_is_symbolic(tensor: Tensor) -> _bool: ..."
             ],
             "_enable_functionalization": [
                 "def _enable_functionalization(*, reapply_views: _bool = False): ..."
@@ -1064,14 +1070,14 @@ def gen_pyi(
             "new_tensor": [
                 f"def new_tensor(self, data: Any, {FACTORY_PARAMS}) -> Tensor: ..."
             ],
-            "__new__": ["def __new__(self, *args, **kwargs) -> Tensor: ..."],
+            "__new__": ["def __new__(cls, *args, **kwargs) -> Self: ..."],
             # new and __init__ have the same signatures differ only in return type
             # Adapted from legacy_tensor_ctor and legacy_tensor_new
             "new": [
-                f"def new(self, *args: Any, {DEVICE_PARAM}) -> Tensor: ...",
-                "def new(self, storage: Storage) -> Tensor: ...",
-                "def new(self, other: Tensor) -> Tensor: ...",
-                f"def new(self, size: _size, *, {DEVICE_PARAM}) -> Tensor: ...",
+                f"def new(cls, *args: Any, {DEVICE_PARAM}) -> Self: ...",
+                "def new(cls, storage: Storage) -> Self: ...",
+                "def new(cls, other: Tensor) -> Self: ...",
+                f"def new(cls, size: _size, *, {DEVICE_PARAM}) -> Self: ...",
             ],
             "__init__": [
                 f"def __init__(self, *args: Any, {DEVICE_PARAM}) -> None: ...",
@@ -1124,6 +1130,18 @@ def gen_pyi(
                     )
                 )
             ],
+            "xpu": [
+                "def xpu({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "self",
+                            "device: Optional[Union[_device, _int, str]] = None",
+                            "non_blocking: _bool = False",
+                            "memory_format: torch.memory_format = torch.preserve_format",
+                        ]
+                    )
+                )
+            ],
             "cpu": [
                 "def cpu(self, memory_format: torch.memory_format = torch.preserve_format) -> Tensor: ..."
             ],
@@ -1160,7 +1178,7 @@ def gen_pyi(
             "is_meta": ["is_meta: _bool"],
             "is_mps": ["is_mps: _bool"],
             "is_mtia": ["is_mtia: _bool"],
-            "is_ort": ["is_ort: _bool"],
+            "is_maia": ["is_maia: _bool"],
             "is_mkldnn": ["is_mkldnn: _bool"],
             "is_vulkan": ["is_vulkan: _bool"],
             "is_ipu": ["is_ipu: _bool"],

@@ -38,14 +38,14 @@ class TestUnbackedSymints(InductorTestCase):
 
     @skipCUDAIf(not HAS_CUDA, "requires cuda")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
-    def test_expand_mismatch(self, device):
+    def test_expand_ok_with_runtime_assert(self, device):
         def fn(x):
             nz = x.nonzero()
-            return nz.expand([-1, 128])
+            torch._check(nz.size(0) == 128)
+            return nz.expand([128, -1, 2])
 
         x = make_tensor(32, 4, device=device, dtype=torch.float32, exclude_zero=True)
-        with self.assertRaises(torch._dynamo.exc.TorchRuntimeError):
-            actual = torch.compile(fn, fullgraph=True)(x)
+        actual = torch.compile(fn, fullgraph=True)(x)
 
     @skipCUDAIf(not HAS_CUDA, "requires cuda")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
@@ -187,6 +187,32 @@ class TestUnbackedSymints(InductorTestCase):
         actual = torch.compile(fn, fullgraph=True)(*example_inputs)
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
+
+    @skipCUDAIf(not HAS_CUDA, "requires cuda")
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_vertical_pointwise_reduction_fusion(self, device):
+        # Tests fusing a pointwise & reduction op with unbacked numel/rnumel.
+        def fn(x, y, repeats):
+            u0 = repeats.item()
+            unbacked = y.expand(u0, *y.shape)  # [u0, 1, 16]
+
+            # Note: We add x to both pointwise and reduction. Otherwise, the
+            # scheduler will refuse to fuse ops whose only common buffer has
+            # unbacked symints.
+            pointwise = unbacked + x
+            reduction = torch.sum(pointwise + x)
+            return pointwise, reduction
+
+        example_inputs = (
+            torch.randn(32, 16).cuda(),
+            torch.randn(1, 16).cuda(),
+            torch.tensor(32).cuda(),
+        )
+
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
 
 instantiate_device_type_tests(

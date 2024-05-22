@@ -104,9 +104,12 @@ class PlacementStrategy:
         return self.input_specs[index]
 
     def __str__(self) -> str:
-        input_specs_str = _pretty_print_spec(self.input_specs)
+        if self.input_specs is not None:
+            input_specs_str = f"{_pretty_print_spec(self.input_specs)} -> "
+        else:
+            input_specs_str = ""
         output_spec_str = _pretty_print_spec(self.output_specs)
-        return f"{input_specs_str} -> {output_spec_str}"
+        return f"{input_specs_str}{output_spec_str}"
 
 
 class StrategyType:
@@ -129,8 +132,8 @@ class OpStrategy(StrategyType):
 
     def __str__(self) -> str:
         strategy_list_str = ", ".join([str(strategy) for strategy in self.strategies])
-        mesh_shape = self.output_mesh_shape
-        return f"OpStrategy:[{strategy_list_str}] @ mesh: {mesh_shape}"
+        mesh_shape = self.mesh_shape
+        return f"[{strategy_list_str}] @ mesh: {mesh_shape}"
 
     def max_num_shards(self) -> int:
         """
@@ -139,7 +142,7 @@ class OpStrategy(StrategyType):
         return max(strategy.output_spec.num_shards for strategy in self.strategies)
 
     @property
-    def output_mesh_shape(self):
+    def mesh_shape(self):
         output_spec = self.strategies[0].output_specs
         if isinstance(output_spec, DTensorSpec):
             return output_spec.mesh.shape
@@ -151,11 +154,11 @@ class OpStrategy(StrategyType):
             return output_spec[0].mesh.shape
 
     @property
-    def output_ndim(self):
+    def ndim(self):
         return self.strategies[0].output_spec.ndim
 
     @property
-    def output_shape(self):
+    def shape(self):
         return self.strategies[0].output_spec.shape
 
 
@@ -246,9 +249,10 @@ class OpSchema:
         return tuple(item for item in self.args_schema if isinstance(item, DTensorSpec))
 
     def __repr__(self) -> str:
+        args_schema = ", ".join([str(arg_schema) for arg_schema in self.args_schema])
         return (
             f"OpSchema(op={self.op},"
-            f" args_schema={self.args_schema},"
+            f" args_schema=({args_schema}),"
             f" kwargs_schema={self.kwargs_schema})"
         )
 
@@ -262,11 +266,11 @@ class OpSchema:
             elif isinstance(arg, OpStrategy):
                 assert len(arg.strategies) == 1
                 args_sharding.append(_pretty_print_spec(arg.strategies[0].output_specs))
-                mesh_shape = arg.output_mesh_shape
+                mesh_shape = arg.mesh_shape
             elif isinstance(arg, TupleStrategy):
                 first_op_strtgy = arg.childs[0]
                 assert isinstance(first_op_strtgy, OpStrategy)
-                mesh_shape = first_op_strtgy.output_mesh_shape
+                mesh_shape = first_op_strtgy.mesh_shape
                 args_sharding.append(str(arg))
             else:
                 args_sharding.append(str(arg))

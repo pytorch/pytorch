@@ -1,5 +1,15 @@
 import itertools
-from typing import Any, Callable, Generic, Literal, Optional, Tuple, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generic,
+    Literal,
+    Optional,
+    Tuple,
+    TypeVar,
+    Union,
+)
 from unittest.mock import patch
 
 import sympy
@@ -7,7 +17,6 @@ from typing_extensions import Protocol
 
 import torch
 import torch.utils._pytree as pytree
-from torch.fx.graph import inplace_methods, magic_methods
 from .utils import IndentedBuffer, reduction_num_outputs, sympy_index_symbol, sympy_str
 
 T = TypeVar("T")
@@ -133,6 +142,12 @@ class OpsHandler(Protocol[T]):
         """
         Reinterpret cast x to dtype (reinterpreting the bits in memory as another dtype.)
         src_dtype must be the original type of x.
+        """
+        ...
+
+    def identity(self, x: T) -> T:
+        """
+        Returns x as is.  This is used to trigger CSE.
         """
         ...
 
@@ -398,9 +413,6 @@ class OpsHandler(Protocol[T]):
     def trunc(self, x0: T) -> T:
         ...
 
-    def truncdiv(self, x0: T, x1: T) -> T:
-        ...
-
     def ceil(self, x0: T) -> T:
         ...
 
@@ -437,18 +449,6 @@ class OpsHandler(Protocol[T]):
     def mul(self, x0: T, x1: T) -> T:
         ...
 
-    def floordiv(self, x0: T, x1: T) -> T:
-        ...
-
-    def truediv(self, x0: T, x1: T) -> T:
-        ...
-
-    def div(self, x0: T, x1: T) -> T:
-        ...
-
-    def mod(self, x0: T, x1: T) -> T:
-        ...
-
     def pow(self, x0: T, x1: T) -> T:
         ...
 
@@ -459,6 +459,185 @@ class OpsHandler(Protocol[T]):
         ...
 
     def xor(self, x0: T, x1: T) -> T:
+        ...
+
+    # These are metaprogrammed by MockHandler._init_cls
+    def lshift(self, x0: T, x1: T) -> T:
+        ...
+
+    def rshift(self, x0: T, x1: T) -> T:
+        ...
+
+    def getitem(self, x0: T, x1: T) -> T:
+        # TODO: this is probably just illegal lol
+        ...
+
+    def matmul(self, x0: T, x1: T) -> T:
+        # TODO: this is probably just illegal lol
+        ...
+
+    def invert(self, x0: T) -> T:
+        ...
+
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # These are "special" operators.  These only exist if the target
+    # language actually supports the operator.  Keep this in sync with
+    # pointwise_overrides_data.
+
+    def airy_ai(self, x: T) -> T:
+        ...
+
+    def bessel_j0(self, x: T) -> T:
+        ...
+
+    def bessel_j1(self, x: T) -> T:
+        ...
+
+    def bessel_y0(self, x: T) -> T:
+        ...
+
+    def bessel_y1(self, x: T) -> T:
+        ...
+
+    def digamma(self, x: T) -> T:
+        ...
+
+    def erfcx(self, x: T) -> T:
+        ...
+
+    def fma(self, x: T, y: T, z: T) -> T:
+        ...
+
+    def igamma(self, x: T, y: T) -> T:
+        ...
+
+    def igammac(self, x: T, y: T) -> T:
+        ...
+
+    def gammainc(self, x: T, y: T) -> T:
+        ...
+
+    def gammaincc(self, x: T, y: T) -> T:
+        ...
+
+    def i0(self, x: T) -> T:
+        ...
+
+    def i0e(self, x: T) -> T:
+        ...
+
+    def i1(self, x: T) -> T:
+        ...
+
+    def i1e(self, x: T) -> T:
+        ...
+
+    def log_ndtr(self, x: T) -> T:
+        ...
+
+    def modified_bessel_i0(self, x: T) -> T:
+        ...
+
+    def modified_bessel_i1(self, x: T) -> T:
+        ...
+
+    def modified_bessel_k0(self, x: T) -> T:
+        ...
+
+    def modified_bessel_k1(self, x: T) -> T:
+        ...
+
+    def ndtr(self, x: T) -> T:
+        ...
+
+    def ndtri(self, x: T) -> T:
+        ...
+
+    def polygamma(self, x: T, y: T) -> T:
+        ...
+
+    def scaled_modified_bessel_k0(self, x: T) -> T:
+        ...
+
+    def scaled_modified_bessel_k1(self, x: T) -> T:
+        ...
+
+    def spherical_bessel_j0(self, x: T) -> T:
+        ...
+
+    def zeta(self, x: T, y: T) -> T:
+        ...
+
+    def chebyshev_polynomial_t(self, x: T, y: T) -> T:
+        ...
+
+    def chebyshev_polynomial_u(self, x: T, y: T) -> T:
+        ...
+
+    def chebyshev_polynomial_v(self, x: T, y: T) -> T:
+        ...
+
+    def chebyshev_polynomial_w(self, x: T, y: T) -> T:
+        ...
+
+    def legendre_polynomial_p(self, x: T, y: T) -> T:
+        ...
+
+    def shifted_chebyshev_polynomial_t(self, x: T, y: T) -> T:
+        ...
+
+    def shifted_chebyshev_polynomial_u(self, x: T, y: T) -> T:
+        ...
+
+    def shifted_chebyshev_polynomial_v(self, x: T, y: T) -> T:
+        ...
+
+    def shifted_chebyshev_polynomial_w(self, x: T, y: T) -> T:
+        ...
+
+    def hermite_polynomial_h(self, x: T, y: T) -> T:
+        ...
+
+    def hermite_polynomial_he(self, x: T, y: T) -> T:
+        ...
+
+    def laguerre_polynomial_l(self, x: T, y: T) -> T:
+        ...
+
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # These operators are a bit special, because they are conventionally
+    # natively supported in both Python and C, but the semantics differ so
+    # care must be taken
+
+    def truncdiv(self, x0: T, x1: T) -> T:
+        """C-style trunc division between integers only.  Computes the true
+        division of two numbers and rounds the result to zero.
+        """
+        ...
+
+    def floordiv(self, x0: T, x1: T) -> T:
+        """Python-style floor division between integers only.  Computes the
+        true division of two numbers and floors the result.
+        """
+        ...
+
+    def truediv(self, x0: T, x1: T) -> T:
+        """True division between floats.  Integer inputs are NOT valid: to do
+        Python style (int, int) -> float division, promote the inputs to float
+        first."""
+        ...
+
+    def div(self, x0: T, x1: T) -> T:
+        """TODO: to be removed.  This renders as / no matter what the backend is
+        which is incoherent."""
+        ...
+
+    def mod(self, x0: T, x1: T) -> T:
+        """C-style modulus, take sign from LHS (x0)."""
+        ...
+
+    def remainder(self, x0: T, x1: T) -> T:
+        """Python-style modulus, take sign from RHS (x1)."""
         ...
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -568,9 +747,27 @@ class MockHandler:
 
             return inner
 
-        for name, format_string in itertools.chain(
-            magic_methods.items(), inplace_methods.items()
-        ):
+        for name, format_string in {
+            "add": "{} + {}",
+            "sub": "{} - {}",
+            "mul": "{} * {}",
+            "floordiv": "{} // {}",
+            "truediv": "{} / {}",
+            "mod": "{} % {}",  # careful, depending on target semantics varies
+            "pow": "{} ** {}",
+            "lshift": "{} << {}",
+            "rshift": "{} >> {}",
+            "and_": "{} & {}",
+            "or_": "{} | {}",
+            "xor": "{} ^ {}",
+            "eq": "{} == {}",
+            "ne": "{} != {}",
+            "lt": "{} < {}",
+            "gt": "{} > {}",
+            "le": "{} <= {}",
+            "ge": "{} >= {}",
+            "neg": "-{}",
+        }.items():
             setattr(cls, name, make_handler(format_string))
 
 
@@ -711,4 +908,43 @@ class ExtractConstantsHandler(NoopHandler):
 
 
 def _typecheck_ExtractConstantsHandler(h: ExtractConstantsHandler) -> OpsHandler[Any]:
+    return h
+
+
+class SimpleCSEHandler(WrapperHandler[T]):
+    """Wraps the underlying handler with a CSE pass
+
+    NOTE: Compared to codegen level CSE this is simplified as it
+    doesn't support stores which require load cache invalidation.
+    """
+
+    def __init__(self, inner: OpsHandler[T]):
+        super().__init__(inner)
+        self.cse_cache: Dict[str, Union[T, Tuple[T, ...]]] = {}
+        self.mock = MockHandler()
+
+    def indirect_indexing(self, *args, **kwargs) -> sympy.Expr:
+        return super().indirect_indexing(*args, **kwargs)  # type: ignore[misc]
+
+    def store(self, *args, **kwargs) -> T:
+        raise NotImplementedError("store not implemented")
+
+    def store_reduction(self, *args, **kwargs) -> T:
+        raise NotImplementedError("store not implemented")
+
+    def __getattr__(self, name) -> Callable[..., Any]:
+        def inner(*args, **kwargs):
+            key = getattr(self.mock, name)(*args, **kwargs)
+            val = self.cse_cache.get(key)
+            if val is not None:
+                return val
+
+            val = getattr(self._inner, name)(*args, **kwargs)
+            self.cse_cache[key] = val
+            return val
+
+        return inner
+
+
+def _typecheck_SimpleCSEHandler(h: SimpleCSEHandler[Any]) -> OpsHandler[Any]:
     return h
