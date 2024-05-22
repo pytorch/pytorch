@@ -2721,7 +2721,7 @@ class CppVecKernelChecker(CppVecKernel):
                 self.disable_masked_vec(f"{load_dtype} not supported by masked vectorization")
 
             if has_free_symbols(self.ranges):
-                self.disable_masked_vec(f"Symbolic ranges not supported by masked vectorization")
+                self.disable_masked_vec(f"Symbolic ranges not supported by masked load")
 
             if len(self.itervars) == 0:
                 self.disable_vec("not a loop")
@@ -2738,6 +2738,9 @@ class CppVecKernelChecker(CppVecKernel):
 
     def store(self, name, index, value, mode=None):
         with RecordOptimizationContext(__name__) as node_ctx:
+            if has_free_symbols(self.ranges):
+                self.disable_masked_vec(f"Symbolic ranges not supported by masked store")
+
             if len(self.itervars) == 0:
                 self.disable_vec("not a loop")
                 return self.simd_vec
@@ -2762,6 +2765,9 @@ class CppVecKernelChecker(CppVecKernel):
             return self.simd_vec
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
+        if has_free_symbols(self.ranges):
+                self.disable_masked_vec(f"Symbolic ranges not supported by masked reduction")
+
         if not (
             (dtype == torch.float and src_dtype == torch.float)
             or (dtype == torch.int64 and src_dtype == torch.int64)
