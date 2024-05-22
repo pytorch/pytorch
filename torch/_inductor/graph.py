@@ -1303,6 +1303,8 @@ class GraphLowering(torch.fx.Interpreter):
                                 torch.ops.aten.mkldnn_rnn_layer.default,
                                 torch.ops.onednn.qlinear_pointwise.default,
                                 torch.ops.onednn.qlinear_pointwise.tensor,
+                                torch.ops.onednn.qlinear_pointwise.binary,
+                                torch.ops.onednn.qlinear_pointwise.binary_tensor,
                             ]
                             need_fixed_channels_last_layout += [
                                 torch.ops.mkldnn._convolution_pointwise.default,
@@ -1654,14 +1656,10 @@ class GraphLowering(torch.fx.Interpreter):
         self.scheduler.codegen()
 
     def count_bytes(self):
-        from .scheduler import Scheduler
-
-        scheduler = Scheduler(self.buffers)
-
         total_bytes = 0
         node_counts = []
         node_runtimes = []
-        for node in scheduler.nodes:
+        for node in self.scheduler.nodes:
             num_bytes = node.get_read_write_buffers_sizes()
             total_bytes += num_bytes
             node_counts.append((node, num_bytes // 4))
