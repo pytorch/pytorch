@@ -1016,7 +1016,6 @@ class CUDAGraphNode:
 
             cached_t = self.cached_tensor_outputs[i]
             if cached_t is not None:
-
                 # this output represents a fresh allocated tensor.
                 # We return the same TensorImpl from run to run to avoid overhead.
                 # autograd.Function will reset the Autograd meta of output tensors
