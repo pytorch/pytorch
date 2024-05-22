@@ -3433,6 +3433,7 @@ static void linalg_lstsq_out_info(
     if (input.numel() == 0) {
         auto output_shape = input.sizes().vec();
         output_shape.back() = other.size(-1);
+        rank.zero_();
         solution.zero_();
     } else {
         auto [U, S, Vh] = at::_linalg_svd(input, false, true, "gesvd");
@@ -3487,7 +3488,7 @@ static void linalg_lstsq_out_info(
     solution.set_(solution.storage(), solution_view.storage_offset(),
                   solution_view.sizes(), solution_view.strides());
   } else {
-    solution = at::zeros({solution.size(-1), n}, solution.options());
+    solution.zero_(); // this is incorrect. How do we proceed?
   }
   if (m == 0) {
     solution.zero_();
