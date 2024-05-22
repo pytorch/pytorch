@@ -2,7 +2,6 @@
 import logging
 import operator
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
@@ -185,7 +184,9 @@ class _PipelineStageBase(ABC):
         """
         return self.stage_index == self.num_stages - 1
 
-    def _configure_outputs_meta(self, outputs_meta: Iterable[torch.Tensor]):
+    def _configure_outputs_meta(
+        self, outputs_meta: Union[List[torch.Tensor], Tuple[torch.Tensor]]
+    ):
         """
         Track the output shapes/dtype of this stage since they determine the send operation(s) which must match
         recv operations of the next stage.  The next stage _will_ be freezing its recv buffers based on its initial
