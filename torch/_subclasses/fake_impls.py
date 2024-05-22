@@ -291,8 +291,9 @@ def _unique(
 
             maxval = sys.maxsize - 1
 
-            if not has_free_symbols(arg.numel()):
-                maxval = int(arg.numel())
+            numel = arg.numel() if dim is None else arg.size(dim)
+            if not has_free_symbols(numel):
+                maxval = int(numel)
 
             _constrain_range_for_size(nnz, max=maxval)
 
@@ -304,13 +305,14 @@ def _unique(
     else:
         ret = [arg.new_empty(*arg.shape[:dim], nnz, *arg.shape[dim + 1:])]
 
-    if return_inverse:
+    return_if_dim_and_cpu = dim is not None and arg.fake_device == torch.device('cpu')
+    if return_inverse or return_if_dim_and_cpu:
         inverse = arg.new_empty(arg.shape if dim is None else (arg.shape[dim],))
     else:
         inverse = arg.new_empty(0)
     ret.append(inverse)
 
-    if return_counts:
+    if return_counts or return_if_dim_and_cpu:
         counts = arg.new_empty(ret[0].shape if dim is None else (ret[0].shape[dim],))
     else:
         counts = arg.new_empty(0)
@@ -342,7 +344,8 @@ def unique_dim(
         fake_mode,
         func,
         arg,
-        dim,
+        # normalize dim to be non-negative
+        dim if dim >= 0 else arg.ndim + dim,
         sorted,
         return_inverse,
         return_counts
