@@ -1467,7 +1467,6 @@ class CUDAGraphNode:
     def remove_node_cached_tensors(self):
         for t in self.cached_tensor_outputs:
             if t is not None:
-                # print("Different attrs", set(dir(t)) - set(dir(ab)))
                 torch._C._remove_cached_tensor(t)
         self.cached_tensor_outputs.clear()
 
@@ -1989,21 +1988,10 @@ class CUDAGraphTreeManager:
         return node.run_first_inputs(new_inputs)
 
     def execute_node(self, node: CUDAGraphNode, new_inputs) -> List[Optional[Tensor]]:
-        log.debug(
-            "executing %d of graph recording id %d",
-            node.wrapped_function.id.id,
-            node.id.id,
-        )
         self.current_node = node
         self.path_state = ExecutionState.EXECUTION
         self.update_generation()
-        out = node.run(new_inputs)
-        log.debug(
-            "done executing %d of graph recording id %d",
-            node.wrapped_function.id.id,
-            node.id.id,
-        )
-        return out
+        return node.run(new_inputs)
 
     def run_eager(self, new_inputs, function_id: FunctionID):
         # this is only stored on current node, because when we start a new path,
