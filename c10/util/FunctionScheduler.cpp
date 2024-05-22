@@ -36,7 +36,7 @@ std::chrono::time_point<std::chrono::steady_clock> Run::time() const {
 
 /* FunctionScheduler */
 
-FunctionScheduler::FunctionScheduler() = default;
+FunctionScheduler::FunctionScheduler() : _queue(&Run::lt) {};
 
 FunctionScheduler::~FunctionScheduler() {
   stop();
