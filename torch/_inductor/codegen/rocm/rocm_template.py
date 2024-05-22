@@ -68,7 +68,7 @@ class ROCmTemplate(KernelTemplate):
             kernel_name=kernel_name,
         ) as kernel:
             code = self.render(kernel=kernel, **kwargs)
-            _, call_args, _ = kernel.args.python_argdefs()
+            _, call_args, _, _ = kernel.args.python_argdefs()
             log.debug("Autotune key: %s, Generated Code:\n%s", kernel_hash_name, code)
             log.debug(
                 "Args: cpp_argdefs: %s, python_argdefs: %s",
