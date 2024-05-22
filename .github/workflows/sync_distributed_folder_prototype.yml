@@ -1,0 +1,21 @@
+name: Sync Distributed Folder
+
+on:
+  #push:
+  #  branches:
+  #    - 'main'
+  #  paths:
+  #    - 'torch/distributed/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 'fbcode/pytorch-stable-prototype'
+      - run: .github/scripts/sync_distributed_folder_prototype.sh
