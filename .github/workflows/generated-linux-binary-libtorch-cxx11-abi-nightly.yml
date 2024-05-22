@@ -55,11 +55,11 @@ jobs:
       build_environment: linux-binary-libtorch-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    libtorch-cpu-shared-with-deps-cxx11-abi-test:  # Testing
-      if: ${{ github.repository_owner == 'pytorch'}}
-      needs: libtorch-cpu-shared-with-deps-cxx11-abi-build
-      uses: ./.github/workflows/_binary-test-linux.yml
-      with:
+  libtorch-cpu-shared-with-deps-cxx11-abi-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: libtorch-cpu-shared-with-deps-cxx11-abi-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
@@ -118,11 +118,11 @@ jobs:
       build_environment: linux-binary-libtorch-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    libtorch-cuda11_8-shared-with-deps-cxx11-abi-test:  # Testing
-      if: ${{ github.repository_owner == 'pytorch'}}
-      needs: libtorch-cuda11_8-shared-with-deps-cxx11-abi-build
-      uses: ./.github/workflows/_binary-test-linux.yml
-      with:
+  libtorch-cuda11_8-shared-with-deps-cxx11-abi-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: libtorch-cuda11_8-shared-with-deps-cxx11-abi-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
@@ -183,11 +183,11 @@ jobs:
       build_environment: linux-binary-libtorch-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    libtorch-cuda12_1-shared-with-deps-cxx11-abi-test:  # Testing
-      if: ${{ github.repository_owner == 'pytorch'}}
-      needs: libtorch-cuda12_1-shared-with-deps-cxx11-abi-build
-      uses: ./.github/workflows/_binary-test-linux.yml
-      with:
+  libtorch-cuda12_1-shared-with-deps-cxx11-abi-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: libtorch-cuda12_1-shared-with-deps-cxx11-abi-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
@@ -248,11 +248,11 @@ jobs:
       build_environment: linux-binary-libtorch-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    libtorch-cuda12_4-shared-with-deps-cxx11-abi-test:  # Testing
-      if: ${{ github.repository_owner == 'pytorch'}}
-      needs: libtorch-cuda12_4-shared-with-deps-cxx11-abi-build
-      uses: ./.github/workflows/_binary-test-linux.yml
-      with:
+  libtorch-cuda12_4-shared-with-deps-cxx11-abi-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: libtorch-cuda12_4-shared-with-deps-cxx11-abi-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
@@ -313,9 +313,9 @@ jobs:
       build_environment: linux-binary-libtorch-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    libtorch-rocm6_0-shared-with-deps-cxx11-abi-test:  # Testing
-      if: ${{ github.repository_owner == 'pytorch'}}
-      needs: libtorch-rocm6_0-shared-with-deps-cxx11-abi-build
+  libtorch-rocm6_0-shared-with-deps-cxx11-abi-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: libtorch-rocm6_0-shared-with-deps-cxx11-abi-build
       runs-on: linux.rocm.gpu
       timeout-minutes: 240
       env:
@@ -419,9 +419,9 @@ jobs:
       build_environment: linux-binary-libtorch-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    libtorch-rocm6_1-shared-with-deps-cxx11-abi-test:  # Testing
-      if: ${{ github.repository_owner == 'pytorch'}}
-      needs: libtorch-rocm6_1-shared-with-deps-cxx11-abi-build
+  libtorch-rocm6_1-shared-with-deps-cxx11-abi-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: libtorch-rocm6_1-shared-with-deps-cxx11-abi-build
       runs-on: linux.rocm.gpu
       timeout-minutes: 240
       env:

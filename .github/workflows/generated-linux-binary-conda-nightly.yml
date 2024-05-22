@@ -54,11 +54,11 @@ jobs:
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    conda-py3_8-cpu-test:  # Testing
-      if: ${{ github.repository_owner == 'pytorch'}}
-      needs: conda-py3_8-cpu-build
-      uses: ./.github/workflows/_binary-test-linux.yml
-      with:
+  conda-py3_8-cpu-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: conda-py3_8-cpu-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
@@ -115,11 +115,11 @@ jobs:
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    conda-py3_8-cuda11_8-test:  # Testing
-      if: ${{ github.repository_owner == 'pytorch'}}
-      needs: conda-py3_8-cuda11_8-build
-      uses: ./.github/workflows/_binary-test-linux.yml
-      with:
+  conda-py3_8-cuda11_8-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: conda-py3_8-cuda11_8-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
@@ -178,11 +178,11 @@ jobs:
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    conda-py3_8-cuda12_1-test:  # Testing
-      if: ${{ github.repository_owner == 'pytorch'}}
-      needs: conda-py3_8-cuda12_1-build
-      uses: ./.github/workflows/_binary-test-linux.yml
-      with:
+  conda-py3_8-cuda12_1-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: conda-py3_8-cuda12_1-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
@@ -241,11 +241,11 @@ jobs:
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    conda-py3_8-cuda12_4-test:  # Testing
-      if: ${{ github.repository_owner == 'pytorch'}}
-      needs: conda-py3_8-cuda12_4-build
-      uses: ./.github/workflows/_binary-test-linux.yml
-      with:
+  conda-py3_8-cuda12_4-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: conda-py3_8-cuda12_4-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
@@ -302,11 +302,11 @@ jobs:
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    conda-py3_9-cpu-test:  # Testing
-      if: ${{ github.repository_owner == 'pytorch'}}
-      needs: conda-py3_9-cpu-build
-      uses: ./.github/workflows/_binary-test-linux.yml
-      with:
+  conda-py3_9-cpu-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: conda-py3_9-cpu-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
@@ -363,11 +363,11 @@ jobs:
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    conda-py3_9-cuda11_8-test:  # Testing
-      if: ${{ github.repository_owner == 'pytorch'}}
-      needs: conda-py3_9-cuda11_8-build
-      uses: ./.github/workflows/_binary-test-linux.yml
-      with:
+  conda-py3_9-cuda11_8-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: conda-py3_9-cuda11_8-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
@@ -426,11 +426,11 @@ jobs:
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    conda-py3_9-cuda12_1-test:  # Testing
-      if: ${{ github.repository_owner == 'pytorch'}}
-      needs: conda-py3_9-cuda12_1-build
-      uses: ./.github/workflows/_binary-test-linux.yml
-      with:
+  conda-py3_9-cuda12_1-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: conda-py3_9-cuda12_1-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
@@ -489,11 +489,11 @@ jobs:
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    conda-py3_9-cuda12_4-test:  # Testing
-      if: ${{ github.repository_owner == 'pytorch'}}
-      needs: conda-py3_9-cuda12_4-build
-      uses: ./.github/workflows/_binary-test-linux.yml
-      with:
+  conda-py3_9-cuda12_4-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: conda-py3_9-cuda12_4-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
@@ -550,11 +550,11 @@ jobs:
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    conda-py3_10-cpu-test:  # Testing
-      if: ${{ github.repository_owner == 'pytorch'}}
-      needs: conda-py3_10-cpu-build
-      uses: ./.github/workflows/_binary-test-linux.yml
-      with:
+  conda-py3_10-cpu-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: conda-py3_10-cpu-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
@@ -611,11 +611,11 @@ jobs:
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    conda-py3_10-cuda11_8-test:  # Testing
-      if: ${{ github.repository_owner == 'pytorch'}}
-      needs: conda-py3_10-cuda11_8-build
-      uses: ./.github/workflows/_binary-test-linux.yml
-      with:
+  conda-py3_10-cuda11_8-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: conda-py3_10-cuda11_8-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
@@ -674,11 +674,11 @@ jobs:
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    conda-py3_10-cuda12_1-test:  # Testing
-      if: ${{ github.repository_owner == 'pytorch'}}
-      needs: conda-py3_10-cuda12_1-build
-      uses: ./.github/workflows/_binary-test-linux.yml
-      with:
+  conda-py3_10-cuda12_1-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: conda-py3_10-cuda12_1-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
@@ -737,11 +737,11 @@ jobs:
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    conda-py3_10-cuda12_4-test:  # Testing
-      if: ${{ github.repository_owner == 'pytorch'}}
-      needs: conda-py3_10-cuda12_4-build
-      uses: ./.github/workflows/_binary-test-linux.yml
-      with:
+  conda-py3_10-cuda12_4-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: conda-py3_10-cuda12_4-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
@@ -798,11 +798,11 @@ jobs:
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    conda-py3_11-cpu-test:  # Testing
-      if: ${{ github.repository_owner == 'pytorch'}}
-      needs: conda-py3_11-cpu-build
-      uses: ./.github/workflows/_binary-test-linux.yml
-      with:
+  conda-py3_11-cpu-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: conda-py3_11-cpu-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
@@ -859,11 +859,11 @@ jobs:
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    conda-py3_11-cuda11_8-test:  # Testing
-      if: ${{ github.repository_owner == 'pytorch'}}
-      needs: conda-py3_11-cuda11_8-build
-      uses: ./.github/workflows/_binary-test-linux.yml
-      with:
+  conda-py3_11-cuda11_8-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: conda-py3_11-cuda11_8-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
@@ -922,11 +922,11 @@ jobs:
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    conda-py3_11-cuda12_1-test:  # Testing
-      if: ${{ github.repository_owner == 'pytorch'}}
-      needs: conda-py3_11-cuda12_1-build
-      uses: ./.github/workflows/_binary-test-linux.yml
-      with:
+  conda-py3_11-cuda12_1-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: conda-py3_11-cuda12_1-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
@@ -985,11 +985,11 @@ jobs:
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    conda-py3_11-cuda12_4-test:  # Testing
-      if: ${{ github.repository_owner == 'pytorch'}}
-      needs: conda-py3_11-cuda12_4-build
-      uses: ./.github/workflows/_binary-test-linux.yml
-      with:
+  conda-py3_11-cuda12_4-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: conda-py3_11-cuda12_4-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
@@ -1046,11 +1046,11 @@ jobs:
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    conda-py3_12-cpu-test:  # Testing
-      if: ${{ github.repository_owner == 'pytorch'}}
-      needs: conda-py3_12-cpu-build
-      uses: ./.github/workflows/_binary-test-linux.yml
-      with:
+  conda-py3_12-cpu-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: conda-py3_12-cpu-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
@@ -1107,11 +1107,11 @@ jobs:
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    conda-py3_12-cuda11_8-test:  # Testing
-      if: ${{ github.repository_owner == 'pytorch'}}
-      needs: conda-py3_12-cuda11_8-build
-      uses: ./.github/workflows/_binary-test-linux.yml
-      with:
+  conda-py3_12-cuda11_8-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: conda-py3_12-cuda11_8-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
@@ -1170,11 +1170,11 @@ jobs:
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    conda-py3_12-cuda12_1-test:  # Testing
-      if: ${{ github.repository_owner == 'pytorch'}}
-      needs: conda-py3_12-cuda12_1-build
-      uses: ./.github/workflows/_binary-test-linux.yml
-      with:
+  conda-py3_12-cuda12_1-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: conda-py3_12-cuda12_1-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
@@ -1233,11 +1233,11 @@ jobs:
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    conda-py3_12-cuda12_4-test:  # Testing
-      if: ${{ github.repository_owner == 'pytorch'}}
-      needs: conda-py3_12-cuda12_4-build
-      uses: ./.github/workflows/_binary-test-linux.yml
-      with:
+  conda-py3_12-cuda12_4-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: conda-py3_12-cuda12_4-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
