@@ -2818,8 +2818,7 @@ def register_custom_op_serialization(
 
     if namespace not in _serialization_registry:
         _serialization_registry[namespace] = {}
-    _serialization_registry[namespace][op_name] = serialization_fn
-
+    _serialization_registry[op_type] = op_handler
 
 # Registry to store all custom serialization implementations.
 # The registry maps a operation to its serialization function (a callable), in their own
