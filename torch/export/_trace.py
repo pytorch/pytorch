@@ -90,6 +90,23 @@ class ExportDynamoConfig:
     )
 
 
+@dataclasses.dataclass
+class ExportedArtifact:
+    gm: torch.fx.GraphModule
+    sig: ExportGraphSignature
+    constants: Dict[
+        str,
+        Union[
+            torch.Tensor,
+            FakeScriptObject,
+            torch.ScriptObject,
+        ],
+    ]
+    out_spec: Optional[TreeSpec] = None,
+    constraints: Optional[Dict[str, str]] = None,
+    module_call_signatures: Optional[Dict[str, ModuleCallSignature]] = None
+
+
 DEFAULT_EXPORT_DYNAMO_CONFIG = ExportDynamoConfig()
 DEFAULT_EXPORT_DYNAMO_CONFIG.reorderable_logging_functions = {
     logging.critical,
@@ -646,20 +663,7 @@ def _export_to_aten_ir(
             constants,
         )
 
-    @dataclasses.dataclass
-    class _ExportedArtifact:
-        gm: torch.fx.GraphModule
-        sig: ExportGraphSignature
-        constants: Dict[
-            str,
-            Union[
-                torch.Tensor,
-                FakeScriptObject,
-                torch.ScriptObject,
-            ],
-        ]
-
-    return _ExportedArtifact(
+    return ExportedArtifact(
         gm,
         export_graph_signature,
         constants,
@@ -1020,7 +1024,7 @@ def _strict_export(
 
     # Fix the graph output signature to be tuple if scalar
     out_spec = orig_out_spec = gm_torch_level._out_spec
-    assert out_spec is not None
+
     # aot_export expect the return type to always be a tuple.
     if out_spec.type not in (list, tuple):
         out_spec = pytree.TreeSpec(tuple, None, [out_spec])
@@ -1151,12 +1155,10 @@ def _strict_export(
         assert res is not None
         gm = res.graph_module
 
-    return (
-        aten_export_artifact,
-        range_constraints,
-        orig_out_spec,
-        module_call_signatures,
-    )
+    aten_export_artifact.out_spec = orig_out_spec
+    aten_export_artifact.range_constraints = range_constraints
+    aten_export_artifact.module_call_signatures = module_call_signatures
+    return aten_export_artifact
 
 
 def _non_strict_export(
@@ -1309,8 +1311,6 @@ def _non_strict_export(
         num_lifted,
     )
 
-    assert out_spec is not None
-
     gm = aten_export_artifact.gm
 
     gm.meta["forward_arg_names"] = forward_arg_names
@@ -1348,7 +1348,10 @@ def _non_strict_export(
         mod, aten_export_artifact.sig, aten_export_artifact.constants
     )
 
-    return aten_export_artifact, range_constraints, out_spec, module_call_signatures
+    aten_export_artifact.out_spec = out_spec
+    aten_export_artifact.range_constraints = range_constraints
+    aten_export_artifact.module_call_signatures = module_call_signatures
+    return aten_export_artifact
 
 
 @_log_export_wrapper
@@ -1439,12 +1442,7 @@ def _export(
 
     # Call the appropriate export function based on the strictness of tracing.
     export_func = _strict_export if strict else _non_strict_export
-    (
-        aten_export_artifact,
-        range_constraints,
-        out_spec,
-        module_call_signatures,
-    ) = export_func(
+    aten_export_artifact = export_func(
         mod,
         args,
         kwargs,
@@ -1458,10 +1456,15 @@ def _export(
         _is_torch_jit_trace,
     )
 
-    assert out_spec is not None
-
+    # Decompose here for readability.
     gm = aten_export_artifact.gm
     export_graph_signature = aten_export_artifact.sig
+    out_spec = aten_export_artifact.out_spec
+    range_constraints = aten_export_artifact.range_constraints
+    module_call_signatures = aten_export_artifact.module_call_signatures
+    constants = aten_export_artifact.constants
+
+    assert out_spec is not None
 
     _verify_nn_module_stack(gm)
     _verify_stack_trace(gm)
