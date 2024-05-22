@@ -1090,6 +1090,7 @@ def _strict_export(
         should_insert_runtime_assertion=False,
     )
 
+    # Decompose for readability.
     gm = aten_export_artifact.gm
     export_graph_signature = aten_export_artifact.sig
     constants = aten_export_artifact.constants
@@ -1121,8 +1122,8 @@ def _strict_export(
     _rewrite_dynamo_tensor_constants(
         orig_mod_buffers=set(mod.buffers()),
         traced_mod_buffers=dict(gm_torch_level.named_buffers()),
-        graph_signature=aten_export_artifact.sig,
-        constants=aten_export_artifact.constants,
+        graph_signature=export_graph_signature,
+        constants=constants,
     )
     # 2. Restore FQN of param/buffers
     param_buffer_table: Dict[str, str] = _get_param_buffer_mapping(mod, gm_torch_level)
@@ -1130,7 +1131,7 @@ def _strict_export(
 
     # 3. Remove non-persistent buffers from the graph signature
     _rewrite_non_persistent_buffers(
-        mod, aten_export_artifact.sig, aten_export_artifact.constants
+        mod, export_graph_signature, constants
     )
 
     # 4. Rewrite constants to have the same FQN as the original module.
