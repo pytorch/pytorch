@@ -1016,6 +1016,15 @@ class CUDAGraphNode:
 
             cached_t = self.cached_tensor_outputs[i]
             if cached_t is not None:
+
+                # this output represents a fresh allocated tensor.
+                # We return the same TensorImpl from run to run to avoid overhead.
+                # autograd.Function will reset the Autograd meta of output tensors
+                # as part of aot_autograd, but _backward_hooks are stored on tensors separately,
+                # so we need to manually reset hooks.
+                if cached_t._backward_hooks is not None:
+                    cached_t._backward_hooks = None
+
                 # No need to update weakrefs, already correctly initialized
                 outputs.append(cached_t)
                 continue
@@ -1459,6 +1468,7 @@ class CUDAGraphNode:
     def remove_node_cached_tensors(self):
         for t in self.cached_tensor_outputs:
             if t is not None:
+                # print("Different attrs", set(dir(t)) - set(dir(ab)))
                 torch._C._remove_cached_tensor(t)
         self.cached_tensor_outputs.clear()
 
@@ -1980,10 +1990,21 @@ class CUDAGraphTreeManager:
         return node.run_first_inputs(new_inputs)
 
     def execute_node(self, node: CUDAGraphNode, new_inputs) -> List[Optional[Tensor]]:
+        log.debug(
+            "executing %d of graph recording id %d",
+            node.wrapped_function.id.id,
+            node.id.id,
+        )
         self.current_node = node
         self.path_state = ExecutionState.EXECUTION
         self.update_generation()
-        return node.run(new_inputs)
+        out = node.run(new_inputs)
+        log.debug(
+            "done executing %d of graph recording id %d",
+            node.wrapped_function.id.id,
+            node.id.id,
+        )
+        return out
 
     def run_eager(self, new_inputs, function_id: FunctionID):
         # this is only stored on current node, because when we start a new path,

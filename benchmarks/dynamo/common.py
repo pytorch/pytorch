@@ -2413,9 +2413,6 @@ class BenchmarkRunner:
                 limit_all_gathers=True,
                 auto_wrap_policy=self.get_fsdp_auto_wrap_policy(self.args.only),
             )
-            if torch._inductor.config.triton.cudagraphs:
-                log.warning("Disabling cudagraphs for FSDP compatibility")
-                torch._inductor.config.triton.cudagraphs = False
         return model
 
     def check_accuracy(
