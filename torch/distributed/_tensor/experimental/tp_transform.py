@@ -346,7 +346,6 @@ def _generate_default_output_sharding(
             FakeTensor, create_output_spec, node.meta["val"]
         ),
         redistribute_schema=new_op_schema,
-        failed_reason=f"{node.op} does not have sharding strategy registered",
         needs_redistribute=True,
     )
 
