@@ -1577,7 +1577,6 @@ SKIP_XFAIL_SUBTESTS_WITH_MATCHER_AND_MODEL_TYPE: tuple[
         matcher=lambda sample: len(sample.input.shape) == 0
         and sample.kwargs.get("as_tuple", False) is False,
         reason="Output 'shape' do not match: torch.Size([0, 1]) != torch.Size([0, 0]).",
-        model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
     ),
     xfail(
         "scatter_add",
