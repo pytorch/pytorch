@@ -2780,26 +2780,25 @@ def gather(x, dim, index, sparse_grad=False):
     # sparse_grad doesn't affect forward computation,
     # and backward tracing is taken care of by AOT Autograd
     assert isinstance(x, TensorBox)
-    if index.get_numel() == 0:
-        return new_empty(x, [0])
+    if index.get_numel() != 0:
+        assert index.get_dtype() == torch.int64
 
-    assert index.get_dtype() == torch.int64
     size = x.get_size()
     offset = len(size) == 0
     dim = _validate_dim(x, dim, offset)
 
+    if offset:
+        x = expand(x, index.get_size())
+        size = x.get_size()
+
     x_loader = x.make_loader()
     index_loader = index.make_loader()
 
-    if offset:
-        def fn(idx):
-            return x_loader([])
-    else:
-        def fn(idx):
-            idx = list(idx)
-            if len(idx) != 0:
-                idx[dim] = ops.indirect_indexing(index_loader(idx), size[dim])
-            return x_loader(idx)
+    def fn(idx):
+        idx = list(idx)
+        if len(idx) != 0:
+            idx[dim] = ops.indirect_indexing(index_loader(idx), size[dim])
+        return x_loader(idx)
 
     return Pointwise.create(
         device=x.get_device(),
