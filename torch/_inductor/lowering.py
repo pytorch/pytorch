@@ -5083,6 +5083,7 @@ def mutate_to(changed, val, unsafe_alias=False):
         changed_data.data = val.data
         return changed
 
+    V.graph.buffer_mutation = True
     ir.MutationLayoutSHOULDREMOVE.realize_into(
         val, changed_data, unsafe_alias=unsafe_alias
     )
@@ -5919,7 +5920,7 @@ def associative_scan(combine_fn: ir.Subgraph, input, dim: int):
     kwargs["dtypes"] = tuple(x.get_dtype() for x in input)
     kwargs["inner_fns"] = tuple(x.make_loader() for x in input)
     result = ir.Scan.create(**kwargs, combine_fn=wrapped_combine_fn)
-    if result is None:
+    if result[0] is None:
         raise RuntimeError("Unable to generate code for associative_scan op")
     return result
 
