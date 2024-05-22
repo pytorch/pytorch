@@ -276,11 +276,14 @@ class SymNode:
     def or_(self, other) -> "SymNode":
         return self._or_(other)  # type: ignore[attr-defined]
 
-    def truediv(self, other) -> "SymNode":
-        return self._truediv(other)  # type: ignore[attr-defined]
+    def float_truediv(self, other) -> "SymNode":
+        return self._float_truediv(other)  # type: ignore[attr-defined]
 
-    def floordiv(self, other) -> "SymNode":
-        return self._floordiv(other)  # type: ignore[attr-defined]
+    def int_truediv(self, other) -> "SymNode":
+        return self._int_truediv(other)  # type: ignore[attr-defined]
+
+    def int_floordiv(self, other) -> "SymNode":
+        return self._int_floordiv(other)  # type: ignore[attr-defined]
 
     def lshift(self, other) -> "SymNode":
         return self._lshift(other)  # type: ignore[attr-defined]
@@ -360,6 +363,13 @@ class SymNode:
 
     def sym_and(self, other):
         return self.and_(other)
+
+    # There is no int_truediv available from C++
+    def truediv(self, other):
+        return self.float_truediv(other)
+
+    def floordiv(self, other) -> "SymNode":
+        return self.int_floordiv(other)
 
     def is_non_overlapping_and_dense(self, sizes, strides):
         return self.is_non_overlapping_and_dense_indicator(sizes, strides).eq(to_node(self, 1))  # type: ignore[attr-defined]
@@ -477,7 +487,7 @@ METHOD_TO_OPERATOR = {
     "eq": operator.eq,
     "floor": math.floor,
     "trunc": math.trunc,
-    "floordiv": operator.floordiv,
+    "int_floordiv": operator.floordiv,
     "ge": operator.ge,
     "gt": operator.gt,
     "is_integer": lambda x: x.is_integer(),
@@ -498,7 +508,8 @@ METHOD_TO_OPERATOR = {
     "sym_max": sym_max,
     "sym_min": sym_min,
     "sym_not": sym_not,
-    "truediv": operator.truediv,
+    "float_truediv": operator.truediv,
+    "int_truediv": operator.truediv,
 }
 
 unary_magic_methods = {
@@ -559,13 +570,14 @@ also_bool_magic_methods = {"eq"}
 bool_magic_methods = only_bool_magic_methods | also_bool_magic_methods
 
 # Methods that are only for float
-only_float_magic_methods = {"is_integer"}
+only_float_magic_methods = {"is_integer", "round"}
 
 
 magic_methods_on_operator_with_trailing_underscore = {"and", "or"}
 
 
-always_float_magic_methods = {"truediv", "sym_float", "pow"}
+# TODO: pow is not always float...
+always_float_magic_methods = {"int_truediv", "float_truediv", "sym_float", "pow"}
 
 for name in math_op_names:
     sym_name = f"sym_{name}"
@@ -590,10 +602,16 @@ always_bool_magic_methods = {
 # Methods that have a `__foo__` as well as `__rfoo__`
 
 
-def _sympy_truediv(a, b):
-    from torch.utils._sympy.functions import TrueDiv
+def _sympy_float_truediv(a, b):
+    from torch.utils._sympy.functions import FloatTrueDiv
 
-    return TrueDiv(a, b)
+    return FloatTrueDiv(a, b)
+
+
+def _sympy_int_truediv(a, b):
+    from torch.utils._sympy.functions import IntTrueDiv
+
+    return IntTrueDiv(a, b)
 
 
 def _sympy_floordiv(a, b):
@@ -646,8 +664,9 @@ reflectable_magic_methods = {
     "pow": _sympy_pow,
     "and": _sympy_and,
     "or": _sympy_or,
-    "truediv": _sympy_truediv,
-    "floordiv": _sympy_floordiv,
+    "float_truediv": _sympy_float_truediv,
+    "int_truediv": _sympy_int_truediv,
+    "int_floordiv": _sympy_floordiv,
     "lshift": _sympy_lshift,
     "rshift": _sympy_rshift,
 }
@@ -677,10 +696,12 @@ def _sympy_floor(a):
     return _floor_ceil_helper(a, sympy.floor)
 
 
+# NB: this is Python trunc semantics which returns an int.  Do NOT use this to
+# represent torch.trunc (which is float to float)
 def _sympy_trunc(a):
-    from torch.utils._sympy.functions import Trunc
+    from torch.utils._sympy.functions import TruncToInt
 
-    return Trunc(a)
+    return TruncToInt(a)
 
 
 def _sympy_ceil(a):
@@ -780,11 +801,11 @@ def _sympy_round(number, ndigits=None):
 
 
 def _sympy_sym_float(a):
-    # Cannot use sympy.Float(a) here, coz it expects python literals
-    # Multiply by 1.0 to cast to float. This is needed when the input
-    # is a SymInt which has the assumption that it is integer and
-    # SymPy will otherwise assume that return value cannot be a float.
-    return a * 1.0
+    from torch.utils._sympy.functions import ToFloat
+
+    # NB: Cannot use a * 1.0 here, because 0 * 1.0 is 0 which incorrectly
+    # reports that it is an integer
+    return ToFloat(a)
 
 
 def _sympy_is_integer(a):
@@ -1259,6 +1280,32 @@ def _make_user_magic(method, user_type):
             return x.node.is_constant()
         return False
 
+    # Promotion rules for binary operations.  NB: we preserve PYTHON semantics
+    #   - if args are same type, do nothing
+    #   - if one arg is float, promote other arg to float
+    #       - nb: this applies to floordiv, even though output is integral
+    #       (it's still float)
+    #   - pow is funny business
+    #       - if both ints
+    #       - trigger a guard on exponent >= 0
+    #           - if non-negative, output is int
+    #           - otherwise, output is float
+    #   - otherwise, promote other arg to float
+    #       - nb: complex is impossible to handle correctly lol, with
+    #       negative base and integral float need to diverge semantics and
+    #       just always return complex.  Neener neener pretend this problem
+    #       doesn't exist
+    #   - equality is pain: Python does the fancy thing where it unpacks the
+    #     mantissa from the float and then compares that against the int.
+    #     Which means it is able to tell that
+    #     9007199254740993 != 9007199254740992. (rather than if the LHS was
+    #     promoted to float, in which case it would have truncated to the RHS
+    #     and subsequently been equal).  We'll model this exactly by having
+    #     special mixed type equality operations.  Unfortunately, we need to
+    #     do this for all comparison operations (maybe I'll only implement
+    #     compare)
+    #   - sym_ite mumble mumble really shouldn't allow mixed but whatever
+
     if method in bool_becomes_int_magic_methods:
 
         def promote(x):
@@ -1271,6 +1318,34 @@ def _make_user_magic(method, user_type):
 
         def promote(x):
             return x
+
+    def promote2(self, other):
+        # Notably missing from this list eq and other relations.
+        # CPython has fancy implementations for these to get as much precision
+        # as possible instead of just promoting to float64 and praying, so we
+        # need to handle them specially too.
+        # Also, note that int_truediv doesn't go through this path: both
+        # arguments are "int" so there isn't any promotion
+        if method not in [
+            "add",
+            "sub",
+            "mul",
+            "mod",
+            "pow",
+            "float_truediv",
+            "int_floordiv",
+            "sym_min",
+            "sym_max",
+        ]:
+            return self, other
+        f_self = isinstance(self, (float, torch.SymFloat))
+        f_other = isinstance(other, (float, torch.SymFloat))
+        if f_self or f_other:
+            if not f_self:
+                self = torch.sym_float(self)
+            if not f_other:
+                other = torch.sym_float(other)
+        return self, other
 
     # Before and after performing the operation, check if any operands are constant.
     # If so, extract out the constant values first. If `self` itself is a
@@ -1289,6 +1364,7 @@ def _make_user_magic(method, user_type):
         sym_node_log.debug("MAGIC %s %s %s", method, self, other)
         self = promote(self)
         other = promote(other)
+        self, other = promote2(self, other)
         if is_constant(self):
             return (method_to_operator(method))(get_constant(self), other)
         if is_constant(other):
@@ -1302,6 +1378,7 @@ def _make_user_magic(method, user_type):
     def rbinary_magic_impl(self, other):
         self = promote(self)
         other = promote(other)
+        self, other = promote2(self, other)
         if is_constant(self):
             return (method_to_operator(method))(get_constant(self), other)
         if is_constant(other):

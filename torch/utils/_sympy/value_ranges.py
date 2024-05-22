@@ -25,6 +25,8 @@ import torch
 
 from torch._prims_common import dtype_to_type
 from .functions import (
+    FloatTrueDiv,
+    IntTrueDiv,
     OpaqueUnaryFn_acos,
     OpaqueUnaryFn_asinh,
     OpaqueUnaryFn_atan,
@@ -36,6 +38,8 @@ from .functions import (
     OpaqueUnaryFn_tanh,
     Round,
     RoundDecimal,
+    ToFloat,
+    TruncToInt,
 )
 from .interp import sympy_interp
 
@@ -120,6 +124,8 @@ class ValueRanges(Generic[_T]):
     lower: _T
     upper: _T
     is_bool: bool
+    is_int: bool
+    is_float: bool
 
     @overload
     def __init__(self: ValueRanges[sympy.Expr], lower: ExprIn, upper: ExprIn) -> None:
@@ -142,8 +148,17 @@ class ValueRanges(Generic[_T]):
         # Because this is a frozen class
         object.__setattr__(self, "lower", lower)
         object.__setattr__(self, "upper", upper)
+        # Unlike bool/int in Python, we don't report bools are ints
         object.__setattr__(self, "is_bool", isinstance(lower, SympyBoolean))
-        assert isinstance(upper, SympyBoolean) == self.is_bool
+        if self.is_bool:
+            assert isinstance(upper, SympyBoolean), upper
+        object.__setattr__(
+            self, "is_int", not self.is_bool and isinstance(lower, sympy.Integer)
+        )
+        if self.is_int:
+            assert isinstance(upper, sympy.Integer), upper
+        object.__setattr__(self, "is_float", not self.is_bool and not self.is_int)
+        assert self.is_bool or self.is_int or self.is_float, lower
 
     def boolify(self) -> ValueRanges[SympyBoolean]:
         if vr_is_bool(self):
@@ -185,6 +200,8 @@ class ValueRanges(Generic[_T]):
         if self == ValueRanges.unknown():
             return other
         assert self.is_bool == other.is_bool, (self, other)
+        assert self.is_int == other.is_int, (self, other)
+        assert self.is_float == other.is_float, (self, other)
         if self.is_bool:
             return ValueRanges(
                 sympy.Or(self.lower, other.lower), sympy.And(self.upper, other.upper)
@@ -371,6 +388,14 @@ class SymPyValueRangeAnalysis:
         return ValueRanges.wrap(value)
 
     @staticmethod
+    def to_int(a):
+        return ValueRanges.increasing_map(a, TruncToInt)
+
+    @staticmethod
+    def to_float(a):
+        return ValueRanges.increasing_map(a, ToFloat)
+
+    @staticmethod
     def not_(a):
         a = ValueRanges.wrap(a)
         a = a.boolify()
@@ -449,9 +474,16 @@ class SymPyValueRangeAnalysis:
 
         return ValueRanges.coordinatewise_monotone_map(a, b, safe_mul)
 
-    @classmethod
-    def div(cls, a, b):
-        return cls.truediv(a, b)
+    @staticmethod
+    def int_truediv(a, b):
+        a = ValueRanges.wrap(a)
+        b = ValueRanges.wrap(b)
+        if 0 in b or (
+            (-sympy.oo in a or sympy.oo in a) and (-sympy.oo in b or sympy.oo in b)
+        ):
+            return ValueRanges.unknown()
+        else:
+            return ValueRanges.coordinatewise_monotone_map(a, b, IntTrueDiv)
 
     @staticmethod
     def truediv(a, b):
@@ -462,7 +494,7 @@ class SymPyValueRangeAnalysis:
         ):
             return ValueRanges.unknown()
         else:
-            return ValueRanges.coordinatewise_monotone_map(a, b, operator.truediv)
+            return ValueRanges.coordinatewise_monotone_map(a, b, FloatTrueDiv)
 
     @staticmethod
     def floordiv(a, b):

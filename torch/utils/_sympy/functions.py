@@ -2,20 +2,21 @@ import math
 
 import sympy
 from sympy import S
-from sympy.core.logic import fuzzy_and, fuzzy_not, fuzzy_or
 
 __all__ = [
     "FloorDiv",
     "ModularIndexing",
     "CleanDiv",
     "CeilDiv",
+    "IntTrueDiv",
     "Pow",
-    "TrueDiv",
+    "FloatTrueDiv",
     "LShift",
     "RShift",
     "IsNonOverlappingAndDenseIndicator",
     "Round",
     "RoundDecimal",
+    "ToFloat",
 ]
 
 
@@ -25,19 +26,29 @@ def fuzzy_eq(x, y):
     return x == y
 
 
+# It would be nice to have assertions on whether or not inputs is_integer
+# However, with bugs like https://github.com/sympy/sympy/issues/26620 sympy
+# sometimes inconsistently reports floats an integers.
+#
+# What we can assume from sympy is that if something is an int, it
+# definitely is is_integer, but if it is a float it may or may not
+# be is_integer.  So we are unable to do strong asserts that things
+# are NOT integers.
+
+
 class FloorDiv(sympy.Function):
     """
     We maintain this so that:
     1. We can use divisibility guards to simplify FloorDiv(a, b) to a / b.
     2. Printing out the expression is nicer (compared to say, representing a//b as (a - a % b) / b)
+
+    NB: This is Python-style floor division, round to -Inf
     """
 
     nargs = (2,)
     precedence = 50  # precedence of mul  # noqa: F811
 
-    # Default return type for SymPy assumptions.
-    # https://docs.sympy.org/latest/guides/assumptions.html#implementing-assumptions-handlers
-    is_real = True
+    is_integer = True
 
     @property
     def base(self):
@@ -52,29 +63,14 @@ class FloorDiv(sympy.Function):
         divisor = printer.parenthesize(self.divisor, self.precedence)
         return f"({base}//{divisor})"
 
-    # SymPy assumptions based on argument types.
-    def _eval_is_real(self):
-        return fuzzy_or([self.base.is_real, self.divisor.is_real])
-
-    def _eval_is_integer(self):
-        return fuzzy_and([self.base.is_integer, self.divisor.is_integer])
-
     # Automatic evaluation.
     # https://docs.sympy.org/latest/guides/custom-functions.html#best-practices-for-eval
     @classmethod
     def eval(cls, base, divisor):
-        def check_supported_type(x):
-            if (
-                x.is_integer is False and x.is_real is False and x.is_complex
-            ) or x.is_Boolean:
-                raise TypeError(
-                    f"unsupported operand type(s) for //: "
-                    f"'{type(base).__name__}' and '{type(divisor).__name__}'"
-                    f", expected integer or real"
-                )
-
-        check_supported_type(base)
-        check_supported_type(divisor)
+        # python test/test_dynamic_shapes.py -k TestDimConstraints.test_dim_constraints_solve_full
+        # Assert riggered by inequality solver
+        # assert base.is_integer, base
+        # assert divisor.is_integer, divisor
 
         # We don't provide the same error message as in Python because SymPy
         # makes it difficult to check the types.
@@ -85,20 +81,12 @@ class FloorDiv(sympy.Function):
             return sympy.S.Zero
         if base.is_integer and divisor == 1:
             return base
-        if base.is_real and divisor == 1:
-            return sympy.floor(base)
         if base.is_integer and divisor == -1:
             return sympy.Mul(base, -1)
         if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return base // divisor
-        if isinstance(base, (sympy.Integer, sympy.Float)) and isinstance(
-            divisor, (sympy.Integer, sympy.Float)
-        ):
-            return sympy.floor(base / divisor)
         if isinstance(base, FloorDiv):
             return FloorDiv(base.args[0], base.args[1] * divisor)
-        if isinstance(divisor, sympy.Rational) and divisor.p == 1:
-            return sympy.floor(base * divisor.q)
 
         if isinstance(base, sympy.Add):
             for a in base.args:
@@ -126,6 +114,10 @@ class ModularIndexing(sympy.Function):
 
     @classmethod
     def eval(cls, base, divisor, modulus):
+        assert base.is_integer, base
+        assert divisor.is_integer, divisor
+        assert modulus.is_integer, modulus
+
         if base == 0 or modulus == 1:
             return sympy.Integer(0)
 
@@ -205,20 +197,25 @@ class Mod(sympy.Function):
 
     nargs = (2,)
 
+    is_integer = True
+
     @classmethod
     def eval(cls, p, q):
         # This was adapted from: sympy/core/mod.py
 
+        # Triggered by
+        # python test/test_dynamic_shapes.py -k TestDimConstraints.test_dim_constraints_solve_full
+        # assert p.is_integer, p
+        # assert q.is_integer, q
+
         if q.is_zero:
             raise ZeroDivisionError("Modulo by zero")
-        # If either of them is NaN or infinite.
-        if p is S.NaN or q is S.NaN or p.is_finite is False or q.is_finite is False:
-            return S.NaN
+
         # Three cases:
         #   1. p == 0
         #   2. p is either q or -q
         #   3. p is integer and q == 1
-        if p is S.Zero or p in (q, -q) or (p.is_integer and q == 1):
+        if p is S.Zero or p in (q, -q) or q == 1:
             return S.Zero
 
         # Evaluate if they are both literals.
@@ -244,10 +241,6 @@ class Mod(sympy.Function):
         if less.is_Boolean and bool(less) and r.is_positive:
             return p
 
-    def _eval_is_integer(self):
-        p, q = self.args
-        return fuzzy_and([p.is_integer, q.is_integer, fuzzy_not(q.is_zero)])  # type: ignore[attr-defined]
-
     def _eval_is_nonnegative(self):
         return True if self.args[1].is_positive else None  # type: ignore[attr-defined]
 
@@ -272,6 +265,8 @@ class CeilDiv(sympy.Function):
     is_integer = True
 
     def __new__(cls, base, divisor):
+        assert base.is_integer, base
+        assert divisor.is_integer, divisor
         if sympy.gcd(base, divisor) == divisor:
             return CleanDiv(base, divisor)
         else:
@@ -279,16 +274,26 @@ class CeilDiv(sympy.Function):
 
 
 class LShift(sympy.Function):
+    is_integer = True
+
     @classmethod
     def eval(cls, base, shift):
+        assert base.is_integer, base
+        assert shift.is_integer, shift
+
         if shift < 0:
             raise ValueError("negative shift count")
         return base * 2**shift
 
 
 class RShift(sympy.Function):
+    is_integer = True
+
     @classmethod
     def eval(cls, base, shift):
+        assert base.is_integer, base
+        assert shift.is_integer, shift
+
         if shift < 0:
             raise ValueError("negative shift count")
         return base // 2**shift
@@ -296,6 +301,8 @@ class RShift(sympy.Function):
 
 # Overloaded to be compatible with regular Python.
 # https://github.com/pytorch/pytorch/issues/90900
+#
+# TODO: deal with pow
 class Pow(sympy.Function):
     @classmethod
     def eval(cls, base, exp):
@@ -309,13 +316,45 @@ class Pow(sympy.Function):
 
 # Overloaded to be compatible with regular Python.
 # https://github.com/pytorch/pytorch/issues/90900
-class TrueDiv(sympy.Function):
+#
+# In particular, sympy division is willing to simplify x/x == 1
+# where 1 is an integer, but this must be a float if x was float.
+class FloatTrueDiv(sympy.Function):
+    is_integer = False
+
     @classmethod
     def eval(cls, base, divisor):
+        # assert base.is_integer is not True, base
+        # assert divisor.is_integer is not True, divisor
+
         if divisor.is_zero:
             raise ZeroDivisionError("division by zero")
-        else:
-            return base / divisor
+
+        if isinstance(base, sympy.Number) and isinstance(divisor, sympy.Number):
+            return sympy.Float(float(base) / float(divisor))
+
+
+# Overloaded to be compatible with regular Python.  We distinguish this from
+# FloatTrueDiv, because the code generation has to be different for this case:
+# Python has a fancy algorithm for integer true division that isn't just
+# "promote both arguments to float and use float division", so you need to
+# codegen it differently.  While technically you can work it out from the
+# types of the input, this is often inconvenient to do in Inductor codegen,
+# so just have a different operator
+# NB: Right now, Inductor codegen doesn't implement this correctly lol
+class IntTrueDiv(sympy.Function):
+    is_integer = False
+
+    @classmethod
+    def eval(cls, base, divisor):
+        assert base.is_integer, base
+        assert divisor.is_integer, divisor
+
+        if divisor.is_zero:
+            raise ZeroDivisionError("division by zero")
+
+        if isinstance(base, sympy.Number) and isinstance(divisor, sympy.Number):
+            return sympy.Float(int(base) / int(divisor))
 
 
 # TODO: As an indicator, this != 0 implies == 1 (and vice versa).
@@ -350,45 +389,80 @@ class IsNonOverlappingAndDenseIndicator(sympy.Function):
         return None
 
 
-class Trunc(sympy.Function):
+# NB: this is inconsistent with math.trunc in Python
+class TruncToFloat(sympy.Function):
+    is_integer = False
+
+    @classmethod
+    def eval(cls, number):
+        # assert number.is_integer is not True, number
+        if isinstance(number, sympy.Number):
+            # NB: It is safe to use truncation to integer, which is what
+            # math.trunc does, as Python integers are arbitrary precision and
+            # so we are guaranteed not to lose precision when we do this
+            return sympy.Float(math.trunc(float(number)))
+
+
+class TruncToInt(sympy.Function):
     is_integer = True
 
     @classmethod
     def eval(cls, number):
-        if number.is_integer:
-            return number
-        elif isinstance(number, sympy.Number):
+        # assert number.is_integer is not True, number
+        if isinstance(number, sympy.Number):
             return sympy.Integer(math.trunc(float(number)))
 
 
+# This is float -> float.  This is inconsistent with Python builtin round,
+# which returns an integer when there are no digits, but consistent with
+# torch.round, which always returns a float.  To simulate Python style
+# semantics, do a float round and then cast the result to an integer, c.f.,
+#
+#   x = PyFloat_AsDouble(self);
+#   if (o_ndigits == Py_None) {
+#       /* single-argument round or with None ndigits:
+#        * round to nearest integer */
+#       rounded = round(x);
+#       if (fabs(x-rounded) == 0.5)
+#           /* halfway case: round to even */
+#           rounded = 2.0*round(x/2.0);
+#       return PyLong_FromDouble(rounded);
+#   }
+#
+# NB: this is illegal to put on integer inputs, just don't apply this function
+# in that case
 class Round(sympy.Function):
-    is_integer = True
+    is_integer = False
 
     @classmethod
     def eval(cls, number):
-        if number.is_integer:
-            return number
-        elif isinstance(number, sympy.Number):
-            return sympy.Integer(round(float(number)))
+        # assert number.is_integer is not True, number
 
-    def __int__(self):
-        # This will only ever be called when computing size hints. At that point, self.args[0] should be a number and
-        # no longer an expression. If it were, the float call would fail and the caller would handle this further.
-        return round(float(self.args[0]))  # type: ignore[arg-type]
+        if isinstance(number, sympy.Float):
+            return sympy.Float(round(float(number)))
 
 
+# NB: Like Round, this only ever returns floats
 class RoundDecimal(sympy.Function):
+    is_integer = False
+
     @classmethod
     def eval(cls, number, ndigits):
-        if number.is_integer and ndigits >= 0:
-            return number
-        elif isinstance(number, sympy.Number) and isinstance(ndigits, sympy.Integer):
-            value_type, output_type = (
-                (int, sympy.Integer)
-                if isinstance(number, sympy.Integer)
-                else (float, sympy.Float)
-            )
-            return output_type(round(value_type(number), int(ndigits)))
+        # assert number.is_integer is not True, number
+
+        if isinstance(number, sympy.Float) and isinstance(ndigits, sympy.Integer):
+            return sympy.Float(round(float(number), int(ndigits)))
+
+
+class ToFloat(sympy.Function):
+    is_integer = False
+
+    @classmethod
+    def eval(cls, number):
+        assert number.is_integer, number
+
+        if isinstance(number, sympy.Integer):
+            return sympy.Float(int(number))
 
 
 def make_opaque_unary_fn(name):

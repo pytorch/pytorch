@@ -574,6 +574,17 @@ class OpOverrides:
         return ops.where(cond, ops.add(r, b), r)
 
     @staticmethod
+    def to_int(a):
+        return ops.to_dtype(ops.trunc(a), torch.int64)
+
+    @staticmethod
+    def int_truediv(a, b):
+        # TODO: this is wrong
+        # TODO: an easy bandaid is to generate runtime asserts that it's
+        # <= 2**53, which is when this equation is correct
+        return ops.truediv(a, b)
+
+    @staticmethod
     def load_seed(name, offset):
         return ops.load(name, sympy.Integer(offset))
 

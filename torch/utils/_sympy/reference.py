@@ -7,6 +7,8 @@ from torch.utils._sympy.functions import (
     OpaqueUnaryFn_exp,
     OpaqueUnaryFn_log,
     OpaqueUnaryFn_sqrt,
+    ToFloat,
+    TruncToInt,
 )
 
 
@@ -67,6 +69,14 @@ class ReferenceAnalysis:
     @staticmethod
     def square(x):
         return x * x
+
+    @staticmethod
+    def to_int(x):
+        return TruncToInt(x)
+
+    @staticmethod
+    def to_float(x):
+        return ToFloat(x)
 
     @staticmethod
     def mod(x, y):

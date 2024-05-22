@@ -267,6 +267,30 @@ class SymInt:
 
     # Magic methods installed by torch.fx.experimental.sym_node
 
+    def __truediv__(self, other):
+        if isinstance(other, (builtins.float, SymFloat)):
+            return sym_float(self).__float_truediv__(other)
+        assert isinstance(other, (builtins.int, SymInt))
+        return self.__int_truediv__(other)
+
+    def __rtruediv__(self, other):
+        if isinstance(other, (builtins.float, SymFloat)):
+            return sym_float(self).__rfloat_truediv__(other)
+        assert isinstance(other, (builtins.int, SymInt))
+        return self.__rint_truediv__(other)
+
+    def __floordiv__(self, other):
+        if isinstance(other, (builtins.float, SymFloat)):
+            return math.floor(sym_float(self) / other)
+        assert isinstance(other, (builtins.int, SymInt))
+        return self.__int_floordiv__(other)
+
+    def __rfloordiv__(self, other):
+        if isinstance(other, (builtins.float, SymFloat)):
+            return math.floor(other / sym_float(self))
+        assert isinstance(other, (builtins.int, SymInt))
+        return self.__rint_floordiv__(other)
+
     def __eq__(self, other: object) -> builtins.bool:
         raise AssertionError("type stub not overridden")
 
@@ -286,6 +310,18 @@ class SymInt:
         raise AssertionError("type stub not overridden")
 
     def __mul__(self, other) -> "SymInt":
+        raise AssertionError("type stub not overridden")
+
+    def __int_truediv__(self, other) -> "SymFloat":
+        raise AssertionError("type stub not overridden")
+
+    def __rint_truediv__(self, other) -> "SymFloat":
+        raise AssertionError("type stub not overridden")
+
+    def __int_floordiv__(self, other) -> "SymFloat":
+        raise AssertionError("type stub not overridden")
+
+    def __rint_floordiv__(self, other) -> "SymFloat":
         raise AssertionError("type stub not overridden")
 
     def __sym_max__(self, other):
@@ -322,6 +358,18 @@ class SymFloat:
         # class has a field named node that stores SymNode
         self.node = node
 
+    def __truediv__(self, other):
+        return self.__float_truediv__(sym_float(other))
+
+    def __rtruediv__(self, other):
+        return self.__rfloat_truediv__(sym_float(other))
+
+    def __floordiv__(self, other):
+        return math.floor(self / sym_float(other))
+
+    def __rfloordiv__(self, other):
+        return math.floor(sym_float(other) / self)
+
     def __bool__(self):
         return self.node.bool_()
 
@@ -340,6 +388,12 @@ class SymFloat:
         raise AssertionError("type stub not overridden")
 
     def __ge__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __float_truediv__(self, other) -> "SymFloat":
+        raise AssertionError("type stub not overridden")
+
+    def __rfloat_truediv__(self, other) -> "SymFloat":
         raise AssertionError("type stub not overridden")
 
     def __trunc__(self):
@@ -475,7 +529,12 @@ def sym_int(a):
     return py_int(a)  # type: ignore[operator]
 
 def sym_max(a, b):
-    """ SymInt-aware utility for max()."""
+    """
+    SymInt-aware utility for max which avoids branching on a < b.
+    Unlike builtins.max(), this only works for int/float, and it always
+    promotes to float if any argument is float (unlike builtins.max, which
+    will faithfully preserve the type of the input argument).
+    """
     from .overrides import has_torch_function, handle_torch_function
 
     if has_torch_function((a, b)):
@@ -483,14 +542,19 @@ def sym_max(a, b):
     if isinstance(a, (SymInt, SymFloat)):
         return a.__sym_max__(b)
     elif isinstance(b, (SymInt, SymFloat)):
-        # NB: If you actually care about preserving output type exactly
-        # if you do something like max(0, 0.0), it is NOT sound to treat
-        # min/max as commutative
+        # Due to promotion semantics, this is operator is commutative:
+        # max(1, 1.0) === max(1.0, 1) === 1.0
         return b.__sym_max__(a)
-    return builtins.max(a, b)  # type: ignore[operator]
+    # TODO: Probably can make bool work too, just lazy
+    assert isinstance(a, (builtins.int, builtins.float))
+    assert isinstance(b, (builtins.int, builtins.float))
+    if isinstance(a, builtins.float) or isinstance(b, builtins.float):
+        return builtins.float(builtins.max(a, b))
+    else:
+        return builtins.max(a, b)
 
 def sym_min(a, b):
-    """ SymInt-aware utility for max()."""
+    """ SymInt-aware utility for min()."""
     from .overrides import has_torch_function, handle_torch_function
 
     if has_torch_function((a, b)):
@@ -499,7 +563,12 @@ def sym_min(a, b):
         return a.__sym_min__(b)
     elif isinstance(b, (SymInt, SymFloat)):
         return b.__sym_min__(a)
-    return builtins.min(a, b)  # type: ignore[operator]
+    assert isinstance(a, (builtins.int, builtins.float))
+    assert isinstance(b, (builtins.int, builtins.float))
+    if isinstance(a, builtins.float) or isinstance(b, builtins.float):
+        return builtins.float(builtins.min(a, b))
+    else:
+        return builtins.min(a, b)
 
 # Drop in replacement for math.sqrt, math.sin, math.cos etc
 current_module = sys.modules[__name__]
