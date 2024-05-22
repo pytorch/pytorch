@@ -2234,6 +2234,7 @@ class TestImports(TestCase):
                            "torch.onnx._internal.fx",  # depends on onnx-script
                            "torch._inductor.triton_helpers",  # depends on triton
                            "torch._inductor.codegen.cuda",  # depends on cutlass
+                           "torch._C._onednn_graph",  # fails with 'torch._C' is not a package
                            ]
         # See https://github.com/pytorch/pytorch/issues/77801
         if not sys.version_info >= (3, 9):

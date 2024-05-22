@@ -11,6 +11,11 @@
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 #if (!defined(FBCODE_CAFFE2) && defined(BUILD_ONEDNN_GRAPH))
+// oneDNN Graph has two backends - DNNL backend that uses oneDNN primitives,
+// and Graph Compiler. By default, only the DNNL backend is built.
+#if defined(BUILD_ONEDNN_GRAPH_COMPILER)
+#include <ideep/python/binding.hpp>
+#endif
 #include <torch/csrc/jit/codegen/onednn/interface.h>
 #endif
 #include <c10/core/SymNodeImpl.h>
@@ -2248,6 +2253,9 @@ void initJITBindings(PyObject* module) {
   initStaticModuleBindings(module);
   initTensorExprBindings(module);
   // initNvFuserPythonBindings(module);
+#if (!defined(FBCODE_CAFFE2) && defined(BUILD_ONEDNN_GRAPH_COMPILER))
+  ideep::initOnednnGraphPythonBindings(module);
+#endif
 
   setPrintHandler([](const std::string& str) {
     py::gil_scoped_acquire acquire;

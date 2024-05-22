@@ -64,8 +64,19 @@ IF(NOT MKLDNN_FOUND)
   IF(NOT APPLE AND NOT WIN32 AND NOT BUILD_LITE_INTERPRETER)
     MESSAGE("-- Will build oneDNN Graph")
     SET(LLGA_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep/mkl-dnn")
-    SET(BUILD_ONEDNN_GRAPH ON)
+    SET(BUILD_ONEDNN_GRAPH 1)
     SET(ONEDNN_BUILD_GRAPH ON CACHE BOOL "" FORCE)
+    IF(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 11)
+      # With gcc 11, oneDNN v3.4.2 creates a symbol that causes a symbol resolution issue
+      # when libtorch_python is privately linked with libdnnl.a.
+      # But it's safe to release PyTorch with gcc 9 because that symbol wouldn't be present in such binaries.
+      # Remove this check when oneDNN v3.5 would be used,
+      # as oneDNN v3.5 already includes a patch that'd allow us to use gcc11+ for building with Graph Compiler.
+      MESSAGE("-- Will build oneDNN Graph Compiler as well")
+      SET(ONEDNN_EXPERIMENTAL_GRAPH_COMPILER_BACKEND ON CACHE BOOL "" FORCE)
+      SET(ONEDNN_EXPERIMENTAL_GRAPH_COMPILER_CPU_JIT "builtin" CACHE STRING "" FORCE)
+      SET(BUILD_ONEDNN_GRAPH_COMPILER 1)
+    ENDIF(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 11)
   ENDIF(NOT APPLE AND NOT WIN32 AND NOT BUILD_LITE_INTERPRETER)
 
   FIND_PACKAGE(BLAS)

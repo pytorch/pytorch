@@ -646,6 +646,13 @@ class WrapperCodeGen(CodeGen):
     def generate_fallback_kernel(self, fallback_kernel, args):
         self.generate_extern_kernel_alloc(fallback_kernel, args)
 
+    # Since opaque kernels may not have origin node available, this method is
+    # the opaque node equivalent for generate_extern_kernel_alloc()
+    def generate_opaque_kernel_alloc(self, extern_kernel_name, opaque_kernel, args):
+        self.writeline(
+            f"{self.declare}{extern_kernel_name} = {opaque_kernel}({', '.join(args)}){self.ending}"
+        )
+
     def generate_extern_kernel_alloc(self, extern_kernel, args):
         output_name = extern_kernel.get_name()
         origin_node = extern_kernel.get_origin_node()

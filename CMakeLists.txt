@@ -719,7 +719,10 @@ if(USE_FBGEMM AND ((CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND CMAKE_SIZEOF_VO
   set(USE_FBGEMM OFF)
 endif()
 
+# oneDNN Graph has two backends - DNNL backend & Graph Compiler.
+# When oneDNN version in PyTorch would be upgraded to oneDNN v3.5, we can use just one of these flags.
 set(BUILD_ONEDNN_GRAPH OFF)
+set(BUILD_ONEDNN_GRAPH_COMPILER OFF)
 
 if(MSVC)
   # The source code is in utf-8 encoding

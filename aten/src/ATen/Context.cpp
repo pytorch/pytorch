@@ -320,6 +320,14 @@ bool Context::hasMKLDNN() {
 #endif
 }
 
+bool Context::hasOneDNNGraph() {
+#if AT_ONEDNN_GRAPH_ENABLED()
+  return true;
+#else
+  return false;
+#endif
+}
+
 bool Context::hasOpenMP() {
 #ifdef _OPENMP
   return true;

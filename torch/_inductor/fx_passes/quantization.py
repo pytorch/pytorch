@@ -6,12 +6,23 @@ import operator
 from typing import Any, Tuple
 
 import torch
+
 from torch._dynamo.utils import counters
 from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.fx.node import map_arg
+from .. import config
 from ..lowering import lowerings as L, require_channels_last
-from ..pattern_matcher import Arg, CallFunction, filter_nodes, KeywordArg, ListOf, Match
-from ..utils import pad_listlike
+from ..pattern_matcher import (
+    _return_true,
+    Arg,
+    CallFunction,
+    filter_nodes,
+    Ignored,
+    KeywordArg,
+    ListOf,
+    Match,
+)
+from ..utils import is_avx512_bf16_supported, is_onednn_graph_supported, pad_listlike
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
 
@@ -64,6 +75,15 @@ def _get_pattern_output_dtype(match: Match):
     return output_dtype
 
 
+@functools.lru_cache(None)
+def _use_onednn_graph_bf16_fusions(match: Match):
+    """
+    Whether the machine supports AVX512_BF16 ISA.
+    Some fusions would only be enabled on machines that support AVX512_BF16 ISA
+    """
+    return is_avx512_bf16_supported()
+
+
 def _may_generate_pattern_with_dtype_convert(
     pattern, dtype=Arg(), with_dtype_convert=True, users=1
 ):
@@ -76,6 +96,14 @@ def _may_generate_pattern_with_dtype_convert(
         )
     else:
         return pattern
+
+
+def _generate_softmax_pattern(input):
+    amax_output = CallFunction(aten.amax.default, input, [-1], True)
+    sub_output = CallFunction(aten.sub.Tensor, input, amax_output)
+    exp_output = CallFunction(aten.exp.default, sub_output, _users=2)
+    sum_dim_IntList = CallFunction(aten.sum.dim_IntList, exp_output, Ignored(), True)
+    return CallFunction(aten.div.Tensor, exp_output, sum_dim_IntList)
 
 
 def _may_generate_pattern_with_reshape(pattern, reshape_size=Arg(), with_reshape=True):
@@ -114,17 +142,26 @@ def _unary_fusion_pattern(unary_fusion, call_fn, users, is_bf16):
     return unary_fusion(computation_call)
 
 
-def get_dequantize_per_tensor_activation_pattern(is_tensor_overload=False):
+def get_dequantize_per_tensor_activation_pattern(
+    is_tensor_overload=False,
+    input=KeywordArg("x"),
+    zp=KeywordArg("x_zp"),
+    scale=KeywordArg("x_scale"),
+    min=KeywordArg("x_quant_min"),
+    max=KeywordArg("x_quant_max"),
+    dtype=KeywordArg("x_dq_dtype"),
+    # dtype_convert=False,
+):
     dequantize_per_tensor_activation_pattern = CallFunction(
         quantized_decomposed.dequantize_per_tensor.tensor
         if is_tensor_overload
         else quantized_decomposed.dequantize_per_tensor.default,
-        KeywordArg("x"),
-        KeywordArg("x_scale"),
-        KeywordArg("x_zp"),
-        KeywordArg("x_quant_min"),
-        KeywordArg("x_quant_max"),
-        KeywordArg("x_dq_dtype"),
+        input,
+        scale,
+        zp,
+        min,
+        max,
+        dtype,
     )
     return dequantize_per_tensor_activation_pattern
 
@@ -256,7 +293,15 @@ def generate_pattern_with_unary(computation_call, unary_post_op):
     return computation_call
 
 
-def generate_pattern_with_output_quant(computation_call, with_dtype_convert=False):
+def generate_pattern_with_output_quant(
+    computation_call,
+    with_dtype_convert=False,
+    inv_scale=KeywordArg("o_inv_scale"),
+    zp=KeywordArg("o_zp"),
+    qmin=KeywordArg("o_qmin"),
+    qmax=KeywordArg("o_qmax"),
+    qdtype=KeywordArg("o_dtype"),
+):
     quantized_op_output_pattern_pt2e = CallFunction(
         quantized_decomposed.quantize_per_tensor.default,
         _may_generate_pattern_with_dtype_convert(
@@ -264,11 +309,11 @@ def generate_pattern_with_output_quant(computation_call, with_dtype_convert=Fals
             Arg(),
             with_dtype_convert,
         ),
-        KeywordArg("o_inv_scale"),
-        KeywordArg("o_zp"),
-        KeywordArg("o_qmin"),
-        KeywordArg("o_qmax"),
-        KeywordArg("o_dtype"),
+        inv_scale,
+        zp,
+        qmin,
+        qmax,
+        qdtype,
     )
     return quantized_op_output_pattern_pt2e
 
@@ -919,7 +964,13 @@ def _register_quantization_binary_fusion():
                 generate_pattern_with_binary(
                     aten.add.Tensor,
                     get_dequantize_qconv_pt2e_pattern(1),
-                    dequantize_accum_pattern,
+                    get_dequantize_per_tensor_activation_pattern(
+                        is_tensor_overload=False,
+                        input=KeywordArg("accum"),
+                        dtype=KeywordArg("accum_dq_dtype"),
+                        zp=KeywordArg("accum_zp"),
+                        scale=KeywordArg("accum_scale"),
+                    ),
                     int8_mixed_bf16_with_inplace_add,
                 ),
             ),
@@ -930,7 +981,13 @@ def _register_quantization_binary_fusion():
                     generate_pattern_with_binary(
                         aten.add.Tensor,
                         get_dequantize_qconv_pt2e_pattern(1),
-                        dequantize_accum_pattern,
+                        get_dequantize_per_tensor_activation_pattern(
+                            is_tensor_overload=False,
+                            input=KeywordArg("accum"),
+                            dtype=KeywordArg("accum_dq_dtype"),
+                            zp=KeywordArg("accum_zp"),
+                            scale=KeywordArg("accum_scale"),
+                        ),
                         int8_mixed_bf16_with_inplace_add,
                     ),
                     aten.relu.default,
@@ -2589,3 +2646,516 @@ def quant_lift_up(graph_module: torch.fx.GraphModule):
 
     graph_module.graph.lint()
     graph_module.recompile()
+
+
+def _generate_bert_large_uint8_inference_pattern(use_amp=False):
+    """
+    Generate the oneDNN Graph BERT MHA fusion pattern which corresponds to
+    https://github.com/oneapi-src/oneDNN/blob/main/src/graph/backend/graph_compiler/patterns/mha_pattern.hpp#L1611-L1637
+    """
+    dequantized_query = _may_generate_pattern_with_dtype_convert(
+        get_dequantize_per_tensor_activation_pattern(
+            is_tensor_overload=False,
+            input=KeywordArg("query"),
+            dtype=KeywordArg("deq_dtype"),
+            zp=KeywordArg("query_zps"),
+            scale=KeywordArg("query_scale"),
+            min=KeywordArg("qmin"),
+            max=KeywordArg("qmax"),
+        ),
+        with_dtype_convert=use_amp,
+        dtype=torch.bfloat16,
+    )
+    expand_default = CallFunction(aten.expand.default, dequantized_query, Ignored())
+    clone_default = CallFunction(
+        aten.clone.default, expand_default, memory_format=torch.contiguous_format
+    )
+    view_default = CallFunction(aten.reshape.default, clone_default, Ignored())
+    dequantized_key = _may_generate_pattern_with_dtype_convert(
+        get_dequantize_per_tensor_activation_pattern(
+            is_tensor_overload=False,
+            input=KeywordArg("key"),
+            dtype=KeywordArg("deq_dtype"),
+            zp=KeywordArg("key_zps"),
+            scale=KeywordArg("key_scale"),
+            min=KeywordArg("qmin"),
+            max=KeywordArg("qmax"),
+        ),
+        with_dtype_convert=use_amp,
+        dtype=torch.bfloat16,
+    )
+    expand_default_1 = CallFunction(aten.expand.default, dequantized_key, Ignored())
+    clone_default_1 = CallFunction(
+        aten.clone.default, expand_default_1, memory_format=torch.contiguous_format
+    )
+    view_default_1 = CallFunction(aten.reshape.default, clone_default_1, Ignored())
+    # first matmul
+    first_matmul = CallFunction(aten.bmm.default, view_default, view_default_1)
+    view_default_2 = CallFunction(aten.reshape.default, first_matmul, Ignored())
+    scaled_matmul = CallFunction(
+        aten.div.Tensor, view_default_2, KeywordArg("inv_scale")
+    )
+    qk_scale_attn_mask = CallFunction(
+        aten.add.Tensor, scaled_matmul, KeywordArg("attn_mask"), _users=2
+    )
+    softmax_output = _generate_softmax_pattern(qk_scale_attn_mask)
+    # This clone is due to dropout
+    clone_default_2 = CallFunction(aten.clone.default, softmax_output)
+    quantized_softmax_output = generate_pattern_with_output_quant(
+        clone_default_2,
+        with_dtype_convert=False,
+        inv_scale=KeywordArg("post_softmax_q_scale"),
+        zp=KeywordArg("post_softmax_q_zps"),
+        qmin=KeywordArg("qmin"),
+        qmax=KeywordArg("qmax"),
+        qdtype=KeywordArg("qdtype"),
+    )
+    post_softmax_quantized_dequantized = _may_generate_pattern_with_dtype_convert(
+        get_dequantize_per_tensor_activation_pattern(
+            is_tensor_overload=False,
+            input=quantized_softmax_output,
+            dtype=KeywordArg("deq_dtype"),
+            zp=KeywordArg("post_softmax_deq_zps"),
+            scale=KeywordArg("post_softmax_deq_scale"),
+            min=KeywordArg("qmin"),
+            max=KeywordArg("qmax"),
+        ),
+        with_dtype_convert=use_amp,
+        dtype=torch.bfloat16,
+    )
+    expand_default_2 = CallFunction(
+        aten.expand.default, post_softmax_quantized_dequantized, Ignored()
+    )
+    view_default_3 = CallFunction(aten.reshape.default, expand_default_2, Ignored())
+    dequantized_value = _may_generate_pattern_with_dtype_convert(
+        get_dequantize_per_tensor_activation_pattern(
+            is_tensor_overload=False,
+            input=KeywordArg("value"),
+            dtype=KeywordArg("deq_dtype"),
+            min=KeywordArg("qmin"),
+            max=KeywordArg("qmax"),
+            zp=KeywordArg("value_zps"),
+            scale=KeywordArg("value_scale"),
+        ),
+        with_dtype_convert=use_amp,
+        dtype=torch.bfloat16,
+    )
+    expand_default_3 = CallFunction(aten.expand.default, dequantized_value, Ignored())
+    clone_default_2 = CallFunction(
+        aten.clone.default, expand_default_3, memory_format=torch.contiguous_format
+    )
+    view_default_4 = CallFunction(aten.reshape.default, clone_default_2, Ignored())
+    second_matmul = CallFunction(aten.bmm.default, view_default_3, view_default_4)
+    view_default_5 = CallFunction(aten.reshape.default, second_matmul, Ignored())
+    permute_default = CallFunction(aten.permute.default, view_default_5, Ignored())
+    clone_default_3 = CallFunction(
+        aten.clone.default, permute_default, memory_format=torch.contiguous_format
+    )
+    output = generate_pattern_with_output_quant(
+        clone_default_3,
+        with_dtype_convert=False,
+        inv_scale=KeywordArg("post_qkv_q_scale"),
+        zp=KeywordArg("post_qkv_q_zps"),
+        qmin=KeywordArg("qmin"),
+        qmax=KeywordArg("qmax"),
+        qdtype=KeywordArg("qdtype"),
+    )
+    return output
+
+
+def _register_bert_large_mha_int8_pass():
+    """
+    Replace BERT MHA pattern with a fused kernel
+    Note that the pattern is larger than just the MHA, and corresponds to
+    https://github.com/oneapi-src/oneDNN/blob/main/src/graph/backend/graph_compiler/patterns/mha_pattern.hpp#L1611-L1637
+
+    When using oneDNN Graph, this graph can be visualized with the environment variable ONEDNN_GRAPH_DUMP=2,
+    if oneDNN is built with a CMake option that enables graph dump
+    """
+
+    @register_freezing_graph_pattern(
+        _generate_bert_large_uint8_inference_pattern(use_amp=True),
+        extra_check=_use_onednn_graph_bf16_fusions,
+        pass_number=0,
+    )
+    @register_freezing_graph_pattern(
+        _generate_bert_large_uint8_inference_pattern(use_amp=False),
+        extra_check=_return_true,
+        pass_number=0,
+    )
+    def bert_large_int8(match: Match, *args, **kwargs):
+        assert (
+            is_onednn_graph_supported() and config.onednn_graph
+        ), "oneDNN Graph must be supported"
+        # Is int8-bf16?
+        is_int8_bf16 = False
+        dtype_conversion_nodes = filter_nodes(
+            match.nodes, torch.ops.prims.convert_element_type.default
+        )
+        for each_node in dtype_conversion_nodes:
+            if each_node.args[1] == torch.bfloat16:
+                is_int8_bf16 = True
+        qdtype = kwargs["qdtype"]
+        graph = match.graph
+        output_node = match.output_node()
+        output_dims = output_node.meta["val"].size()
+        output_strides = output_node.meta["val"].stride()
+
+        with graph.inserting_before(match.nodes[0]):
+            inv_scale_tensor_node = graph.call_function(
+                torch.ops.aten.scalar_tensor.default,
+                args=tuple([kwargs["inv_scale"]]),  # noqa: C409
+            )
+            if is_int8_bf16:
+                attn_mask_bf16_node = graph.call_function(
+                    torch.ops.prims.convert_element_type.default,
+                    args=tuple([kwargs["attn_mask"], torch.bfloat16]),  # noqa: C409
+                )
+        scale_scalar_tensor = torch.tensor(kwargs["inv_scale"])
+        attn_mask_input = kwargs["attn_mask"].meta["val"]
+        query, key, value, attn_mask, inv_scale = (
+            kwargs["query"].meta["val"],
+            kwargs["key"].meta["val"],
+            kwargs["value"].meta["val"],
+            attn_mask_input.to(torch.bfloat16) if is_int8_bf16 else attn_mask_input,
+            scale_scalar_tensor.to(torch.bfloat16)
+            if is_int8_bf16
+            else scale_scalar_tensor,
+        )
+        fused_kernel = None
+        # It's possible that onednn_graph was not imported if Inductor config was modified later
+        # so we can't rely on the environment variable TORCHINDUCTOR_ONEDNN_GRAPH
+        try:
+            fused_kernel = OnednnGraphPartitionModule(
+                f"onednn_graph_{output_node.name}"  # noqa: F823
+            )
+            # While importing oneDNN here isn't necessary for functionality,
+            # mypy necessitated the following statement
+            import torch._C._onednn_graph as onednn_graph  # type: ignore[import-not-found]
+        except NameError:  # noqa: F823
+            import torch._C._onednn_graph as onednn_graph  # type: ignore[import-not-found]
+            from .onednn_graph_fuser import OnednnGraphPartitionModule
+
+            fused_kernel = OnednnGraphPartitionModule(
+                f"onednn_graph_{output_node.name}"
+            )
+
+        query_lt = fused_kernel.create_logical_tensor_from_tensor(query)
+        key_lt = fused_kernel.create_logical_tensor_from_tensor(key)
+        value_lt = fused_kernel.create_logical_tensor_from_tensor(value)
+        attn_mask_lt = fused_kernel.create_logical_tensor_from_tensor(attn_mask)
+        inv_scale_lt = fused_kernel.create_logical_tensor_from_tensor(inv_scale)
+        output_lt = fused_kernel.create_logical_tensor(
+            qdtype,
+            output_dims,
+            output_strides,
+        )
+
+        dequantize_query_lt_f32 = fused_kernel.create_logical_tensor(
+            torch.float32, query.size(), query.stride()
+        )
+        dequantize_query_op = fused_kernel.create_op(
+            onednn_graph.op.Dequantize, "dequantize_query"
+        )
+        dequantize_query_op.set_attr(onednn_graph.op.scales, [kwargs["query_scale"]])
+        dequantize_query_op.set_attr(onednn_graph.op.zps, [kwargs["query_zps"]])
+        dequantize_query_op.add_inputs([query_lt])
+        dequantize_query_op.add_outputs([dequantize_query_lt_f32])
+        fused_kernel.add_op(dequantize_query_op)
+
+        if is_int8_bf16:
+            dequantize_query_lt_bf16 = fused_kernel.create_logical_tensor(
+                torch.bfloat16, query.size(), query.stride()
+            )  # type: ignore[possibly-undefined]
+
+            typecast_query_bf16 = fused_kernel.create_op(
+                onednn_graph.op.TypeCast, "typecast_query_bf16"
+            )
+            typecast_query_bf16.add_inputs([dequantize_query_lt_f32])
+            typecast_query_bf16.add_outputs([dequantize_query_lt_bf16])
+            fused_kernel.add_op(typecast_query_bf16)
+
+        dequantize_key_lt_f32 = fused_kernel.create_logical_tensor(
+            torch.float32, key.size(), key.stride()
+        )
+
+        dequantize_key_op = fused_kernel.create_op(
+            onednn_graph.op.Dequantize, "dequantize_key"
+        )
+        dequantize_key_op.set_attr(onednn_graph.op.scales, [kwargs["key_scale"]])
+        dequantize_key_op.set_attr(onednn_graph.op.zps, [kwargs["key_zps"]])
+        dequantize_key_op.add_inputs([key_lt])
+        dequantize_key_op.add_outputs([dequantize_key_lt_f32])
+        fused_kernel.add_op(dequantize_key_op)
+
+        if is_int8_bf16:
+            dequantize_key_lt_bf16 = fused_kernel.create_logical_tensor(
+                torch.bfloat16, key.size(), key.stride()
+            )  # type: ignore[possibly-undefined]
+            typecast_key_bf16 = fused_kernel.create_op(
+                onednn_graph.op.TypeCast, "typecast_key_bf16"
+            )
+            typecast_key_bf16.add_inputs([dequantize_key_lt_f32])
+            typecast_key_bf16.add_outputs([dequantize_key_lt_bf16])
+            fused_kernel.add_op(typecast_key_bf16)
+
+        dequantize_value_lt_f32 = fused_kernel.create_logical_tensor(
+            torch.float32, value.size(), value.stride()
+        )
+        dequantize_value_op = fused_kernel.create_op(
+            onednn_graph.op.Dequantize, "dequantize_value"
+        )
+        dequantize_value_op.set_attr(onednn_graph.op.scales, [kwargs["value_scale"]])
+        dequantize_value_op.set_attr(onednn_graph.op.zps, [kwargs["value_zps"]])
+        dequantize_value_op.add_inputs([value_lt])
+        dequantize_value_op.add_outputs([dequantize_value_lt_f32])
+        fused_kernel.add_op(dequantize_value_op)
+
+        if is_int8_bf16:
+            dequantize_value_lt_bf16 = fused_kernel.create_logical_tensor(
+                torch.bfloat16, value.size(), value.stride()
+            )  # type: ignore[possibly-undefined]
+
+            typecast_value_bf16 = fused_kernel.create_op(
+                onednn_graph.op.TypeCast, "typecast_value_bf16"
+            )
+            typecast_value_bf16.add_inputs([dequantize_value_lt_f32])
+            typecast_value_bf16.add_outputs([dequantize_value_lt_bf16])
+            fused_kernel.add_op(typecast_value_bf16)
+
+        qk_matmul_lt = fused_kernel.create_logical_tensor(
+            torch.bfloat16 if is_int8_bf16 else torch.float32,
+            torch.matmul(query, key).size(),
+            torch.matmul(query, key).stride(),
+        )
+
+        qk_matmul_op = fused_kernel.create_op(onednn_graph.op.MatMul, "qk_matmul")
+        qk_matmul_op.add_inputs(
+            [
+                dequantize_query_lt_bf16 if is_int8_bf16 else dequantize_query_lt_f32,  # type: ignore[possibly-undefined]
+                dequantize_key_lt_bf16 if is_int8_bf16 else dequantize_key_lt_f32,  # type: ignore[possibly-undefined]
+            ]
+        )
+        qk_matmul_op.add_outputs([qk_matmul_lt])
+        fused_kernel.add_op(qk_matmul_op)
+
+        post_scale_lt = fused_kernel.create_logical_tensor(
+            torch.bfloat16 if is_int8_bf16 else torch.float32,
+            qk_matmul_lt.get_dims(),
+            qk_matmul_lt.get_strides(),
+        )
+        inv_scale_op = fused_kernel.create_op(onednn_graph.op.Divide, "inv_scale")
+        inv_scale_op.add_inputs([qk_matmul_lt, inv_scale_lt])
+        inv_scale_op.add_outputs([post_scale_lt])
+        fused_kernel.add_op(inv_scale_op)
+
+        post_attn_mask_lt = fused_kernel.create_logical_tensor(
+            torch.bfloat16 if is_int8_bf16 else torch.float32,
+            post_scale_lt.get_dims(),
+            post_scale_lt.get_strides(),
+            onednn_graph.logical_tensor.property_type.variable,
+        )
+
+        attn_mask_op = fused_kernel.create_op(onednn_graph.op.Add, "attn_mask_add")
+
+        attn_mask_op.add_inputs([post_scale_lt, attn_mask_lt])
+        attn_mask_op.add_outputs([post_attn_mask_lt])
+        fused_kernel.add_op(attn_mask_op)
+
+        softmax_output_lt = fused_kernel.create_logical_tensor(
+            torch.bfloat16 if is_int8_bf16 else torch.float32,
+            post_attn_mask_lt.get_dims(),
+            post_attn_mask_lt.get_strides(),
+            onednn_graph.logical_tensor.property_type.variable,
+        )
+
+        softmax_op = fused_kernel.create_op(onednn_graph.op.SoftMax, "softmax")
+
+        softmax_op.add_inputs([post_attn_mask_lt])
+        softmax_op.set_attr(onednn_graph.op.axis, -1)
+        softmax_op.add_outputs([softmax_output_lt])
+        fused_kernel.add_op(softmax_op)
+
+        if is_int8_bf16:
+            post_softmax_typecast_lt = fused_kernel.create_logical_tensor(
+                torch.float32,
+                softmax_output_lt.get_dims(),
+                softmax_output_lt.get_strides(),
+                onednn_graph.logical_tensor.property_type.variable,
+            )  # type: ignore[possibly-undefined]
+
+            post_softmax_typecast_op = fused_kernel.create_op(
+                onednn_graph.op.TypeCast, "typecast_softmax_output_fp32"
+            )
+
+            post_softmax_typecast_op.add_inputs([softmax_output_lt])
+            post_softmax_typecast_op.add_outputs([post_softmax_typecast_lt])
+            fused_kernel.add_op(post_softmax_typecast_op)
+
+        post_softmax_quantize_lt = fused_kernel.create_logical_tensor(
+            qdtype,
+            softmax_output_lt.get_dims(),
+            softmax_output_lt.get_strides(),
+            onednn_graph.logical_tensor.property_type.variable,
+        )
+
+        post_softmax_quantize_op = fused_kernel.create_op(
+            onednn_graph.op.Quantize, "quantize_post_softmax"
+        )
+
+        post_softmax_quantize_op.set_attr(
+            onednn_graph.op.scales, [kwargs["post_softmax_q_scale"]]
+        )
+        post_softmax_quantize_op.set_attr(
+            onednn_graph.op.zps, [kwargs["post_softmax_q_zps"]]
+        )
+        post_softmax_quantize_op.add_inputs(
+            [post_softmax_typecast_lt if is_int8_bf16 else softmax_output_lt]  # type: ignore[possibly-undefined]
+        )
+        post_softmax_quantize_op.add_outputs([post_softmax_quantize_lt])
+        fused_kernel.add_op(post_softmax_quantize_op)
+
+        post_softmax_dequantize_lt = fused_kernel.create_logical_tensor(
+            torch.float32,
+            softmax_output_lt.get_dims(),
+            softmax_output_lt.get_strides(),
+            onednn_graph.logical_tensor.property_type.variable,
+        )
+
+        post_softmax_dequantize_op = fused_kernel.create_op(
+            onednn_graph.op.Dequantize, "dequantize_post_softmax"
+        )
+
+        post_softmax_dequantize_op.set_attr(
+            onednn_graph.op.scales, [kwargs["post_softmax_deq_scale"]]
+        )
+        post_softmax_dequantize_op.set_attr(
+            onednn_graph.op.zps, [kwargs["post_softmax_deq_zps"]]
+        )
+        post_softmax_dequantize_op.add_inputs([post_softmax_quantize_lt])
+        post_softmax_dequantize_op.add_outputs([post_softmax_dequantize_lt])
+        fused_kernel.add_op(post_softmax_dequantize_op)
+
+        if is_int8_bf16:
+            post_softmax_dequantize_bf16_lt = fused_kernel.create_logical_tensor(
+                torch.bfloat16,
+                softmax_output_lt.get_dims(),
+                softmax_output_lt.get_strides(),
+                onednn_graph.logical_tensor.property_type.variable,
+            )  # type: ignore[possibly-undefined]
+
+            typecast_before_qkv = fused_kernel.create_op(
+                onednn_graph.op.TypeCast, "typecast_before_qkv"
+            )
+
+            typecast_before_qkv.add_inputs([post_softmax_dequantize_lt])
+            typecast_before_qkv.add_outputs([post_softmax_dequantize_bf16_lt])
+            fused_kernel.add_op(typecast_before_qkv)
+
+        post_attn_lt = fused_kernel.create_logical_tensor(
+            torch.bfloat16 if is_int8_bf16 else torch.float32,
+            query.size(),
+            query.stride(),
+            onednn_graph.logical_tensor.property_type.variable,
+        )
+
+        second_matmul = fused_kernel.create_op(onednn_graph.op.MatMul, "second_matmul")
+        second_matmul.add_inputs(
+            [
+                post_softmax_dequantize_bf16_lt  # type: ignore[possibly-undefined]
+                if is_int8_bf16
+                else post_softmax_dequantize_lt,
+                dequantize_value_lt_bf16 if is_int8_bf16 else dequantize_value_lt_f32,  # type: ignore[possibly-undefined]
+            ]
+        )
+        second_matmul.add_outputs([post_attn_lt])
+
+        fused_kernel.add_op(second_matmul)
+
+        post_attn_transpose_lt = fused_kernel.create_logical_tensor(
+            torch.bfloat16 if is_int8_bf16 else torch.float32,
+            query.permute([0, 2, 1, 3]).size(),
+            query.permute([0, 2, 1, 3]).stride(),
+            onednn_graph.logical_tensor.property_type.variable,
+        )
+
+        post_attn_transpose = fused_kernel.create_op(
+            onednn_graph.op.StaticTranspose, "post_attn_transpose"
+        )
+        post_attn_transpose.set_attr(onednn_graph.op.order, [0, 2, 1, 3])
+        post_attn_transpose.add_inputs([post_attn_lt])
+        post_attn_transpose.add_outputs([post_attn_transpose_lt])
+        fused_kernel.add_op(post_attn_transpose)
+
+        post_attn_transpose_contiguous_lt = fused_kernel.create_logical_tensor(
+            torch.bfloat16 if is_int8_bf16 else torch.float32,
+            output_dims,
+            output_strides,
+            onednn_graph.logical_tensor.property_type.variable,
+        )
+
+        post_attn_transpose_contiguous = fused_kernel.create_op(
+            onednn_graph.op.Reorder, "post_attn_transpose_contiguous"
+        )
+        post_attn_transpose_contiguous.add_inputs([post_attn_transpose_lt])
+        post_attn_transpose_contiguous.add_outputs([post_attn_transpose_contiguous_lt])
+
+        fused_kernel.add_op(post_attn_transpose_contiguous)
+
+        if is_int8_bf16:
+            pre_final_quantize_lt = fused_kernel.create_logical_tensor(
+                torch.float32,
+                output_dims,
+                output_strides,
+                onednn_graph.logical_tensor.property_type.variable,
+            )  # type: ignore[possibly-undefined]
+            typecast_before_quantize = fused_kernel.create_op(
+                onednn_graph.op.TypeCast, "typecast_before_final_quantize"
+            )
+            typecast_before_quantize.add_inputs([post_attn_transpose_contiguous_lt])
+            typecast_before_quantize.add_outputs([pre_final_quantize_lt])
+            fused_kernel.add_op(typecast_before_quantize)
+
+        pre_output_quantize = fused_kernel.create_op(
+            onednn_graph.op.Quantize, "pre_output_quantize"
+        )
+        pre_output_quantize.set_attr(
+            onednn_graph.op.scales, [kwargs["post_qkv_q_scale"]]
+        )
+        pre_output_quantize.set_attr(onednn_graph.op.zps, [kwargs["post_qkv_q_zps"]])
+        pre_output_quantize.add_inputs(
+            [
+                pre_final_quantize_lt  # type: ignore[possibly-undefined]
+                if is_int8_bf16
+                else post_attn_transpose_contiguous_lt
+            ]
+        )
+        pre_output_quantize.add_outputs([output_lt])
+
+        fused_kernel.add_op(pre_output_quantize)
+
+        fused_kernel.graph.finalize()
+        fused_kernel.create_partition()
+        all_input_lts = [query_lt, key_lt, value_lt, attn_mask_lt, inv_scale_lt]
+        all_output_lts = [output_lt]
+        fused_kernel.input_logical_tensors = all_input_lts
+        fused_kernel.output_logical_tensors = all_output_lts
+        fused_kernel.compile_partition()
+
+        new_args = tuple(  # noqa: C409
+            [
+                [
+                    kwargs["query"],
+                    kwargs["key"],
+                    kwargs["value"],
+                    attn_mask_bf16_node if is_int8_bf16 else kwargs["attn_mask"],  # type: ignore[possibly-undefined]
+                    inv_scale_tensor_node,
+                ]
+            ]
+        )
+        fusion_output_node = graph.call_function(fused_kernel, args=new_args)
+
+        output_node.replace_all_uses_with(fusion_output_node)
+        fusion_output_node.meta.update(output_node.meta)
+        graph.erase_node(output_node)
+        counters["inductor"]["onednn_graph_bert_int8_mha_fusion"] += 1
