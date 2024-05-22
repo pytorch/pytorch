@@ -69,7 +69,7 @@ jobs:
       build_name: manywheel-py3_8-cuda11_8
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
 
   manywheel-py3_8-cuda12_1-build:
@@ -109,5 +109,5 @@ jobs:
       build_name: manywheel-py3_8-cuda12_1
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}

@@ -68,5 +68,5 @@ jobs:
       build_name: libtorch-cpu-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
       runs_on: linux.4xlarge
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}

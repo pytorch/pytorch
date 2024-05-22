@@ -75,7 +75,7 @@ jobs:
       build_environment: linux-s390x-binary-manywheel
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cpu-s390x-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -138,7 +138,7 @@ jobs:
       build_environment: linux-s390x-binary-manywheel
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cpu-s390x-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -201,7 +201,7 @@ jobs:
       build_environment: linux-s390x-binary-manywheel
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cpu-s390x-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -264,7 +264,7 @@ jobs:
       build_environment: linux-s390x-binary-manywheel
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cpu-s390x-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -327,7 +327,7 @@ jobs:
       build_environment: linux-s390x-binary-manywheel
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cpu-s390x-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
