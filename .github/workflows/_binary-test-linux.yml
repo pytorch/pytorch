@@ -212,7 +212,7 @@ jobs:
           docker-image: ${{ inputs.DOCKER_IMAGE }}
 
       - name: Test Pytorch binary
-        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' && !contains(inputs.GPU_ARCH_TYPE, 'cuda-aarch64')}}
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
         uses: ./pytorch/.github/actions/test-pytorch-binary
 
       - name: Teardown Linux
