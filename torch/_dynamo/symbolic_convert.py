@@ -651,6 +651,7 @@ class InstructionTranslatorBase(
     inconsistent_side_effects: bool
     current_speculation: Optional[SpeculationEntry]
     dispatch_table: List[Any]
+    exn_vt_stack: List[VariableTracker]
     exec_recorder: Optional[ExecutionRecorder]
     strict_checks_fn: Optional[Callable[[VariableTracker], bool]]
 
@@ -800,6 +801,15 @@ class InstructionTranslatorBase(
         try:
             self.dispatch_table[inst.opcode](self, inst)
             return not self.output.should_exit
+        except exc.ObservedException:
+            if inst.exn_tab_entry is not None:
+                self.jump(inst.exn_tab_entry)
+                self.push(self.exn_vt_stack[-1])
+                return True
+            # else:
+            #     breakpoint()
+            #     # self.parent.push(self.pop())
+            raise
         except ReturnValueOp:
             return False
         except Unsupported:
@@ -989,8 +999,8 @@ class InstructionTranslatorBase(
                 assert name in self.f_builtins
                 self.exec_recorder.builtins[name] = self.f_builtins[name]
 
-        if inst.argval == "AssertionError":
-            unimplemented("assert with non-string message")
+        # if inst.argval == "AssertionError":
+        #     unimplemented("assert with non-string message")
 
         if name in self.symbolic_globals:
             variable = self.output.side_effects[self.symbolic_globals[name]]
@@ -1238,9 +1248,45 @@ class InstructionTranslatorBase(
                 isinstance(val, BuiltinVariable) and val.fn is StopIteration
             ) or isinstance(val, variables.StopIterationVariable):
                 raise exc.UserStopIteration
+            if isinstance(val, variables.ExceptionVariable):
+                # TODO (anijain2305) - There is some stack cleanup code here -
+                # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L5762.
+                # Not sure what it means.
+                self.exn_vt_stack.append(val)
+                if not self.current_instruction.exn_tab_entry:
+                    # No exception handler, raise an exception to be caught by the parent frame
+                    raise exc.ObservedException
+                self.jump(self.current_instruction.exn_tab_entry)
+                self.push(val)
+                return
             unimplemented(f"raise {exc}")
         else:
             unimplemented("raise ... from ...")
+
+    def PUSH_EXC_INFO(self, inst):
+        val = self.pop()
+
+        if self.exn_vt_stack:
+            self.push(self.exn_vt_stack.pop())
+
+        self.push(val)
+
+    def POP_EXCEPT(self, inst):
+        val = self.pop()
+        assert isinstance(val, variables.ExceptionVariable)
+
+    def CHECK_EXC_MATCH(self, inst):
+        assert len(self.stack) >= 2
+        expected_class = self.pop()
+        exn = self.stack[-1]
+
+        if (
+            isinstance(expected_class, BuiltinVariable)
+            and expected_class.fn is exn.exc_type
+        ):
+            self.push(ConstantVariable(True))
+        else:
+            self.push(ConstantVariable(False))
 
     def COMPARE_OP(self, inst):
         self.push(compare_op_handlers[inst.argval](self, self.popn(2), {}))
@@ -2062,6 +2108,7 @@ class InstructionTranslatorBase(
         self.kw_names = None
         self.accept_prefix_inst = True
         self.prefix_insts = []
+        self.exn_vt_stack = []
 
         # Properties of the input/output code
         self.instructions: List[Instruction] = instructions
@@ -2571,6 +2618,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         try:
             with strict_ctx:
                 tracer.run()
+        except exc.ObservedException as e:
+            msg = f"Observed exception DURING INLING {code} : {e}"
+            parent.exn_vt_stack.extend(tracer.exn_vt_stack)
+            log.debug(msg)
+            raise
         except exc.SkipFrame as e:
             msg = f"SKIPPED INLINING {code}: {e}"
             log.debug(msg)
