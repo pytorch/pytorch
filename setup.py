@@ -234,7 +234,6 @@ def _get_package_path(package_name):
             pass
     return None
 
-
 BUILD_LIBTORCH_WHL = False
 BUILD_PYTORCH_USING_LIBTORCH_WHL = False
 
@@ -1114,33 +1113,6 @@ def print_box(msg):
     for l in lines:
         print("|{}{}|".format(l, " " * (size - len(l))))
     print("-" * (size + 2))
-
-
-def rename_torch_packages(package_list):
-    """
-    Create a dictionary from a list of package names, renaming packages where
-    the top-level package is 'torch' to 'libtorchsplit'.
-
-    Args:
-        package_list (list of str): The list of package names.
-
-    Returns:
-        dict: A dictionary where keys are the package names with 'torch' replaced by 'libtorchsplit',
-              and values are the original package names, only including those where the
-              top-level name is 'torch'.
-    """
-    result = {}
-    for package in package_list:
-        # Split the package name by dots to handle subpackages or modules
-        parts = package.split(".")
-        # Check if the top-level package is 'torch'
-        if parts[0] == "torch":
-            # Replace 'torch' with 'libtorchsplit' in the top-level package name
-            new_key = "libtorchsplit" + package[len("torch") :]
-            result[new_key] = package
-
-    return result
-
 
 def main():
     global BUILD_LIBTORCH_WHL
