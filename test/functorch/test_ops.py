@@ -2130,6 +2130,10 @@ class TestOperators(TestCase):
                 cotangents = torch.randn_like(result, device=device)
                 self._compare_jacobians_of_vjp(fn, (cotangents, input))
 
+    @unittest.skip(
+        "The test fails in CI but does not repro on dev machines. "
+        "Check https://github.com/pytorch/pytorch/pull/126586 for more details"
+    )
     def test_extremal_numerics_l1_loss(self, device):
         N, C, H, W = 3, 4, 5, 6
         shapes = ((N, C), (N, C, H), (N, C, H, W))
