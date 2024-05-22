@@ -16,7 +16,6 @@ from torch.fx.node import map_aggregate
 from torch.fx.passes.split_module import split_module
 
 from ._backward import _null_coalesce_accumulate, stage_backward
-from ._debug import PIPPY_VERBOSITY
 from ._unflatten import _outline_submodules
 from ._utils import QualnameMapMixin
 from .microbatch import split_args_kwargs_into_chunks, TensorChunkSpec
@@ -304,7 +303,7 @@ def _pipe_split():
     return None
 
 
-@torch.library.impl_abstract("pippy::_pipe_split")  # type: ignore[no-redef]
+@torch.library.register_fake("pippy::_pipe_split")  # type: ignore[no-redef]
 def _pipe_split():  # noqa: F811
     return None
 
@@ -687,9 +686,7 @@ class Pipe(QualnameMapMixin, torch.nn.Module):
             logger.info("Auto-splitting model")
             traced = split_policy(traced)  # type: ignore[arg-type]
 
-        if PIPPY_VERBOSITY == "DEBUG":
-            logger.debug("Traced original model:")
-            traced.print_readable()
+        logger.debug(traced.print_readable(print_output=False))
 
         # Deduplicate `get_attr` nodes that refer to the same parameter . Downstream code for moving
         # parameters relies on the invariant that parameter accesses happen once. This is not necessarily

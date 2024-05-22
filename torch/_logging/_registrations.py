@@ -123,6 +123,12 @@ register_artifact(
     visible=True,
 )
 register_artifact(
+    "kernel_code",
+    "Prints the code that Inductor generates (on a per-kernel basis)",
+    off_by_default=True,
+    visible=True,
+)
+register_artifact(
     "schedule",
     "Inductor scheduler information. Useful if working on Inductor fusion algo",
     off_by_default=True,

@@ -490,6 +490,18 @@ class CallMethodKey:
 
 
 @dataclass(frozen=True)
+class InnerTensorKey:
+    inner_name: str
+
+    def __str__(self) -> str:
+        return f".{self.inner_name}"
+
+    def get(self, o: Any) -> Any:
+        """Get the inner tensor attribute"""
+        return getattr(o, self.inner_name)
+
+
+@dataclass(frozen=True)
 class DivideByKey:
     divisor: int
 
@@ -537,6 +549,14 @@ def compute_unbacked_bindings(shape_env, example_value, old_example_value=None, 
                             a[i], path + (pytree.SequenceKey(i),),
                             real=real[i] if real is not None else None
                         )
+                    )
+            elif is_traceable_wrapper_subclass(a):
+                # TODO: Determine if this is correct
+                attrs, _ = a.__tensor_flatten__()
+                for attr in attrs:
+                    sub = getattr(a, attr)
+                    r.update(
+                        free_unbacked_symbols_with_path(sub, path + (InnerTensorKey(attr),))
                     )
             elif isinstance(a, torch.Tensor):
                 r.update(
@@ -2478,7 +2498,7 @@ class ShapeEnv:
 
         def maybe_transform_fake(fake: TrackedFake):
             inner_fake = fake.fake \
-                if isinstance(fake.fake, torch.SymInt) \
+                if isinstance(fake.fake, (torch.SymInt, torch.SymFloat)) \
                 else FakeTensorMeta.from_fake(fake.fake)
             # Even though TrackedFake accepts either a Union[SymInt, FakeTensor], here we give it a
             # FakeTensorMeta for two reasons:
@@ -3146,7 +3166,7 @@ class ShapeEnv:
     @record_shapeenv_event()
     def create_unspecified_symbol(
         self,
-        val: Union[int, SymInt],
+        val: Union[int, SymInt, float, SymFloat],
         source: Source,
         dynamic_dim: DimDynamic = DimDynamic.DUCK,
         constraint_dim: DimConstraint = None,  # NB: includes None
@@ -4352,7 +4372,7 @@ class ShapeEnv:
             )
         fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(True)
         if expr.is_integer:
-            msg = "Could extract specialized integer from data-dependent expression"
+            msg = "Could not extract specialized integer from data-dependent expression"
         else:
             msg = "Could not guard on data-dependent expression"
         return GuardOnDataDependentSymNode(
@@ -4499,7 +4519,7 @@ class ShapeEnv:
                 "symbolic_shape_specialization",
                 metadata_fn=lambda: {
                     "symbol": repr(a),
-                    "sources": [s.name() for s in self.var_to_sources[a]],
+                    "sources": [s.name() for s in self.var_to_sources.get(a, [])],
                     "value": repr(tgt),
                     "reason": msg,
                     "stack": structured.from_traceback(CapturedTraceback.extract(skip=1).summary()),
