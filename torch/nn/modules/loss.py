@@ -447,10 +447,6 @@ class KLDivLoss(_Loss):
           same shape as the input.
 
     Examples::
-
-        >>> import torch
-        >>> import torch.nn as nn
-        >>> import torch.nn.functional as F
         
         >>> kl_loss = nn.KLDivLoss(reduction="batchmean")
         >>> # input should be a distribution in the log space
