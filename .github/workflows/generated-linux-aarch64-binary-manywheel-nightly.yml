@@ -76,7 +76,7 @@ jobs:
       runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cpu-aarch64-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -183,7 +183,7 @@ jobs:
       runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cpu-aarch64-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -290,7 +290,7 @@ jobs:
       runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cpu-aarch64-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -397,7 +397,7 @@ jobs:
       runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cpu-aarch64-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -504,7 +504,7 @@ jobs:
       runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cpu-aarch64-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:

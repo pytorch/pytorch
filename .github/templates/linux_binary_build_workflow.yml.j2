@@ -96,12 +96,12 @@ jobs:
       runs_on: linux.4xlarge
       {%- endif %}
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
     {%- else %}
-      runs-on: linux.rocm.gpu
-      timeout-minutes: !{{ common.timeout_minutes }}
-      !{{ upload.binary_env(config) }}
-      steps:
+    runs-on: linux.rocm.gpu
+    timeout-minutes: !{{ common.timeout_minutes }}
+    !{{ upload.binary_env(config) }}
+    steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: !{{ common.download_artifact_action }}

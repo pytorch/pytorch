@@ -70,7 +70,7 @@ jobs:
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
 
   manywheel-py3_8-cuda12_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -110,4 +110,4 @@ jobs:
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}

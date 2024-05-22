@@ -72,7 +72,7 @@ jobs:
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -133,7 +133,7 @@ jobs:
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cpu-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -196,7 +196,7 @@ jobs:
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cuda11_8-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -259,7 +259,7 @@ jobs:
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cuda12_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -322,7 +322,7 @@ jobs:
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cuda12_4-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -368,9 +368,9 @@ jobs:
   manywheel-py3_8-rocm6_0-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-rocm6_0-build
-      runs-on: linux.rocm.gpu
-      timeout-minutes: 240
-      env:
+    runs-on: linux.rocm.gpu
+    timeout-minutes: 240
+    env:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
@@ -382,7 +382,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.0-main
       DESIRED_PYTHON: "3.8"
-      steps:
+    steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v3
@@ -471,9 +471,9 @@ jobs:
   manywheel-py3_8-rocm6_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-rocm6_1-build
-      runs-on: linux.rocm.gpu
-      timeout-minutes: 240
-      env:
+    runs-on: linux.rocm.gpu
+    timeout-minutes: 240
+    env:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
@@ -485,7 +485,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
       DESIRED_PYTHON: "3.8"
-      steps:
+    steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v3
@@ -588,7 +588,7 @@ jobs:
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -649,7 +649,7 @@ jobs:
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cpu-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -712,7 +712,7 @@ jobs:
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda11_8-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -775,7 +775,7 @@ jobs:
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda12_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -838,7 +838,7 @@ jobs:
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda12_4-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -884,9 +884,9 @@ jobs:
   manywheel-py3_9-rocm6_0-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-rocm6_0-build
-      runs-on: linux.rocm.gpu
-      timeout-minutes: 240
-      env:
+    runs-on: linux.rocm.gpu
+    timeout-minutes: 240
+    env:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
@@ -898,7 +898,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.0-main
       DESIRED_PYTHON: "3.9"
-      steps:
+    steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v3
@@ -987,9 +987,9 @@ jobs:
   manywheel-py3_9-rocm6_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-rocm6_1-build
-      runs-on: linux.rocm.gpu
-      timeout-minutes: 240
-      env:
+    runs-on: linux.rocm.gpu
+    timeout-minutes: 240
+    env:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
@@ -1001,7 +1001,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
       DESIRED_PYTHON: "3.9"
-      steps:
+    steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v3
@@ -1104,7 +1104,7 @@ jobs:
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1165,7 +1165,7 @@ jobs:
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cpu-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1228,7 +1228,7 @@ jobs:
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda11_8-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1291,7 +1291,7 @@ jobs:
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda12_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1354,7 +1354,7 @@ jobs:
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda12_4-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1400,9 +1400,9 @@ jobs:
   manywheel-py3_10-rocm6_0-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-rocm6_0-build
-      runs-on: linux.rocm.gpu
-      timeout-minutes: 240
-      env:
+    runs-on: linux.rocm.gpu
+    timeout-minutes: 240
+    env:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
@@ -1414,7 +1414,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.0-main
       DESIRED_PYTHON: "3.10"
-      steps:
+    steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v3
@@ -1503,9 +1503,9 @@ jobs:
   manywheel-py3_10-rocm6_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-rocm6_1-build
-      runs-on: linux.rocm.gpu
-      timeout-minutes: 240
-      env:
+    runs-on: linux.rocm.gpu
+    timeout-minutes: 240
+    env:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
@@ -1517,7 +1517,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
       DESIRED_PYTHON: "3.10"
-      steps:
+    steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v3
@@ -1620,7 +1620,7 @@ jobs:
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1681,7 +1681,7 @@ jobs:
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cpu-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1744,7 +1744,7 @@ jobs:
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda11_8-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1807,7 +1807,7 @@ jobs:
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda12_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1870,7 +1870,7 @@ jobs:
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda12_4-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1916,9 +1916,9 @@ jobs:
   manywheel-py3_11-rocm6_0-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_11-rocm6_0-build
-      runs-on: linux.rocm.gpu
-      timeout-minutes: 240
-      env:
+    runs-on: linux.rocm.gpu
+    timeout-minutes: 240
+    env:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
@@ -1930,7 +1930,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.0-main
       DESIRED_PYTHON: "3.11"
-      steps:
+    steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v3
@@ -2019,9 +2019,9 @@ jobs:
   manywheel-py3_11-rocm6_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_11-rocm6_1-build
-      runs-on: linux.rocm.gpu
-      timeout-minutes: 240
-      env:
+    runs-on: linux.rocm.gpu
+    timeout-minutes: 240
+    env:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
@@ -2033,7 +2033,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
       DESIRED_PYTHON: "3.11"
-      steps:
+    steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v3
@@ -2136,7 +2136,7 @@ jobs:
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -2197,7 +2197,7 @@ jobs:
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cpu-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -2260,7 +2260,7 @@ jobs:
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda11_8-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -2323,7 +2323,7 @@ jobs:
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda12_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -2386,7 +2386,7 @@ jobs:
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda12_4-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -2432,9 +2432,9 @@ jobs:
   manywheel-py3_12-rocm6_0-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_12-rocm6_0-build
-      runs-on: linux.rocm.gpu
-      timeout-minutes: 240
-      env:
+    runs-on: linux.rocm.gpu
+    timeout-minutes: 240
+    env:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
@@ -2446,7 +2446,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.0-main
       DESIRED_PYTHON: "3.12"
-      steps:
+    steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v3
@@ -2535,9 +2535,9 @@ jobs:
   manywheel-py3_12-rocm6_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_12-rocm6_1-build
-      runs-on: linux.rocm.gpu
-      timeout-minutes: 240
-      env:
+    runs-on: linux.rocm.gpu
+    timeout-minutes: 240
+    env:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
@@ -2549,7 +2549,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
       DESIRED_PYTHON: "3.12"
-      steps:
+    steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v3

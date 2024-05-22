@@ -72,7 +72,7 @@ jobs:
       build_environment: linux-binary-conda
       runs_on: linux.4xlarge
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_8-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -134,7 +134,7 @@ jobs:
       build_environment: linux-binary-conda
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_8-cuda11_8-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -197,7 +197,7 @@ jobs:
       build_environment: linux-binary-conda
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_8-cuda12_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -260,7 +260,7 @@ jobs:
       build_environment: linux-binary-conda
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_8-cuda12_4-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -320,7 +320,7 @@ jobs:
       build_environment: linux-binary-conda
       runs_on: linux.4xlarge
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_9-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -382,7 +382,7 @@ jobs:
       build_environment: linux-binary-conda
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_9-cuda11_8-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -445,7 +445,7 @@ jobs:
       build_environment: linux-binary-conda
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_9-cuda12_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -508,7 +508,7 @@ jobs:
       build_environment: linux-binary-conda
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_9-cuda12_4-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -568,7 +568,7 @@ jobs:
       build_environment: linux-binary-conda
       runs_on: linux.4xlarge
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_10-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -630,7 +630,7 @@ jobs:
       build_environment: linux-binary-conda
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_10-cuda11_8-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -693,7 +693,7 @@ jobs:
       build_environment: linux-binary-conda
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_10-cuda12_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -756,7 +756,7 @@ jobs:
       build_environment: linux-binary-conda
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_10-cuda12_4-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -816,7 +816,7 @@ jobs:
       build_environment: linux-binary-conda
       runs_on: linux.4xlarge
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_11-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -878,7 +878,7 @@ jobs:
       build_environment: linux-binary-conda
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_11-cuda11_8-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -941,7 +941,7 @@ jobs:
       build_environment: linux-binary-conda
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_11-cuda12_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1004,7 +1004,7 @@ jobs:
       build_environment: linux-binary-conda
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_11-cuda12_4-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1064,7 +1064,7 @@ jobs:
       build_environment: linux-binary-conda
       runs_on: linux.4xlarge
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_12-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1126,7 +1126,7 @@ jobs:
       build_environment: linux-binary-conda
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_12-cuda11_8-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1189,7 +1189,7 @@ jobs:
       build_environment: linux-binary-conda
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_12-cuda12_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1252,7 +1252,7 @@ jobs:
       build_environment: linux-binary-conda
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_12-cuda12_4-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
