@@ -224,48 +224,68 @@ def dynamo_timed(original_function=None, phase_name=None, fwd_only=True):
             key = func.__qualname__
             if key not in compilation_time_metrics:
                 compilation_time_metrics[key] = []
-            with torch.profiler.record_function(f"{key} (dynamo_timed)"):
-                t0 = time.time()
-                r = func(*args, **kwargs)
-                time_spent = time.time() - t0
-            compilation_time_metrics[key].append(time_spent)
-            if phase_name:
-                frame_key = str(curr_frame)
-                # fwd only compilation stages: entire_frame_compile, backend_compile.
-                # use frame_key as time aggregation key.
-                if fwd_only:
-                    _add_time_spent(frame_key, phase_name, time_spent)
-                else:
-                    # fwd + bwd compilation stages: inductor_compile, code_gen.
-                    # use frame_key as time aggregation key for fwd graphs;
-                    # use compile_id as time aggregation key for bwd graphs.
-                    if torch._guards.TracingContext.try_get() is not None:
-                        aot_graph_name = str(
-                            torch._guards.TracingContext.get().aot_graph_name
-                        )
-                        if "forward" in aot_graph_name or "inference" in aot_graph_name:
-                            _add_time_spent(frame_key, phase_name, time_spent)
-                        elif "backward" in aot_graph_name:
-                            compile_id = str(
-                                torch._guards.CompileContext.current_compile_id()
-                            )
-                            _add_time_spent(compile_id, phase_name, time_spent)
 
-                            # log backward compilation metrics at the end of `inductor_compile` of bwd graph,
-                            # one record for one bwd graph.
-                            if phase_name == "inductor_compile":
-                                inductor_compile_time = frame_phase_timing[
-                                    compile_id
-                                ].get("inductor_compile", None)
-                                code_gen_time = frame_phase_timing[compile_id].get(
-                                    "code_gen", None
+            fail_type: Optional[str] = None
+            fail_reason: Optional[str] = None
+            time_spent = float("-inf")
+            try:
+                with torch.profiler.record_function(f"{key} (dynamo_timed)"):
+                    t0 = time.time()
+                    r = func(*args, **kwargs)
+                    time_spent = time.time() - t0
+                compilation_time_metrics[key].append(time_spent)
+            except Exception as e:
+                fail_type = str(type(e))
+                fail_reason = str(e)
+                raise
+            finally:
+                if phase_name:
+                    frame_key = str(curr_frame)
+                    # fwd only compilation stages: entire_frame_compile, backend_compile.
+                    # use frame_key as time aggregation key.
+                    if fwd_only and fail_type is None:
+                        _add_time_spent(frame_key, phase_name, time_spent)
+                    else:
+                        # fwd + bwd compilation stages: inductor_compile, code_gen.
+                        # use frame_key as time aggregation key for fwd graphs;
+                        # use compile_id as time aggregation key for bwd graphs.
+                        if torch._guards.TracingContext.try_get() is not None:
+                            aot_graph_name = str(
+                                torch._guards.TracingContext.get().aot_graph_name
+                            )
+                            if (
+                                "forward" in aot_graph_name
+                                or "inference" in aot_graph_name
+                            ) and fail_type is None:
+                                _add_time_spent(frame_key, phase_name, time_spent)
+                            elif "backward" in aot_graph_name:
+                                compile_id = str(
+                                    torch._guards.CompileContext.current_compile_id()
                                 )
-                                metrics = BwdCompilationMetrics(
-                                    compile_id,
-                                    inductor_compile_time,
-                                    code_gen_time,
-                                )
-                                record_compilation_metrics(metrics)
+                                if fail_type is None:
+                                    _add_time_spent(compile_id, phase_name, time_spent)
+
+                                # log backward compilation metrics at the end of `inductor_compile` of bwd graph,
+                                # one record for one bwd graph.
+                                if phase_name == "inductor_compile":
+                                    if fail_type is None:
+                                        inductor_compile_time = frame_phase_timing[
+                                            compile_id
+                                        ].get("inductor_compile", None)
+                                        code_gen_time = frame_phase_timing[
+                                            compile_id
+                                        ].get("code_gen", None)
+                                    else:
+                                        inductor_compile_time = None
+                                        code_gen_time = None
+                                    metrics = BwdCompilationMetrics(
+                                        compile_id,
+                                        inductor_compile_time,
+                                        code_gen_time,
+                                        fail_type,
+                                        fail_reason,
+                                    )
+                                    record_compilation_metrics(metrics)
 
             return r
 
@@ -675,6 +695,8 @@ class BwdCompilationMetrics:
     compile_id: str
     inductor_compile_time_s: Optional[float]
     code_gen_time_s: Optional[float]
+    fail_type: Optional[str]
+    fail_reason: Optional[str]
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
