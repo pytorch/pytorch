@@ -13,7 +13,7 @@ if __name__ == "__main__":
     # use decorator with default profiler or optional profile arguments.
     @strobelight(sample_each=100, stop_at_error=False)
     @torch.compile()
-    def work() -> None:
+    def work():
         for i in range(100):
             torch._dynamo.reset()
             for j in range(5):
