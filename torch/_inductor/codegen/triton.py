@@ -13,7 +13,6 @@ import sympy
 
 import torch
 import torch._logging
-import torch.utils._pytree as pytree
 from torch._dynamo.utils import preserve_rng_state
 
 from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
@@ -1650,13 +1649,22 @@ class TritonKernel(SIMDKernel):
         )
 
         if not self.persistent_reduction:
-            partial_reduce_vars = pytree.tree_map(
-                self.reduction_resize,
-                cse_multiple(
-                    f"tl.reduce(({csv(broadcasted_values)}), {dim}, {combine_helper_fn})",
-                    len(values),
-                    None,
-                ),
+
+            def sum_fn(a, b):
+                return [ops.add(ai, bi) for ai, bi in zip(a, b)]
+
+            sum_helper_fn = self._lift_helper(sum_fn, len(values))
+            pre_reduce_vars = ", ".join(
+                f"{scan_var} * (rbase == (RBLOCK - 1))"
+                for scan_var in partial_scan_vars
+            )
+            # tl.reduce doesn't work for non-commutative operators, so instead
+            # of repeating the scan op as a reduction, we use sum to select the
+            # last scan value
+            partial_reduce_vars = cse_multiple(
+                f"tl.reduce(({pre_reduce_vars}), -1, {sum_helper_fn}, keep_dims=True)",
+                len(values),
+                masks,
             )
             accs_next = combine_fn(tuple(accumulators), partial_reduce_vars)
             full_scan_vars = combine_fn(tuple(accumulators), partial_scan_vars)
@@ -1724,7 +1732,7 @@ class TritonKernel(SIMDKernel):
 
     def codegen_kernel_benchmark(self, num_gb, grid=None):
         result = IndentedBuffer()
-        argdefs, call_args, signature = self.args.python_argdefs()
+        argdefs, call_args, signature, _ = self.args.python_argdefs()
 
         result.writelines(["", "", "def get_args():"])
         with result.indent():
@@ -1909,7 +1917,7 @@ class TritonKernel(SIMDKernel):
             if config.benchmark_kernel:
                 code.splice(self.imports_for_benchmark_kernel())
 
-        argdefs, _, signature = self.args.python_argdefs()
+        argdefs, _, signature, _ = self.args.python_argdefs()
         # maps actual expression to SizeArg if it is in sizevars replacements
         for i, arg in enumerate(signature):
             if isinstance(arg, SizeArg):
@@ -2078,7 +2086,7 @@ class TritonKernel(SIMDKernel):
     def _get_grid_fn(self):
         return "grid"
 
-    def add_numel_to_call_args_and_grid(self, name, call_args, grid):
+    def add_numel_to_call_args_and_grid(self, name, call_args, arg_types, grid):
         # TODO(jansel): if there are constants, we shouldn't bother passing them as args
         for tree in self.range_trees:
             if isinstance(tree.numel, (sympy.Integer, sympy.Symbol)):
@@ -2088,23 +2096,25 @@ class TritonKernel(SIMDKernel):
 
             if tree.prefix != "r" or self.inside_reduction:
                 call_args.append(expr)
+                arg_types.append(type(expr))
             if tree.grid_dim is not None:
                 grid.append(expr)
 
     def get_call_args(self):
-        _, call_args, _ = self.args.python_argdefs()
+        # arg_types is needed for cpp wrapper codegen
+        _, call_args, _, arg_types = self.args.python_argdefs()
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
                 call_args[i] = call_args[i] + ".item()"
 
-        return call_args
+        return call_args, arg_types
 
     def call_kernel(self, name: str, node: Optional[IRNode] = None):
         wrapper = V.graph.wrapper_code
-        call_args = self.get_call_args()
+        call_args, arg_types = self.get_call_args()
         grid: List[Any] = []
-        self.add_numel_to_call_args_and_grid(name, call_args, grid)
+        self.add_numel_to_call_args_and_grid(name, call_args, arg_types, grid)
         current_device = V.graph.scheduler.current_device
 
         if self.args.workspace_arg is not None:
@@ -2121,6 +2131,7 @@ class TritonKernel(SIMDKernel):
             current_device.index,
             cuda=True,
             triton=True,
+            arg_types=arg_types,
             grid_fn=self._get_grid_fn(),
             triton_meta=self.triton_meta,
         )
@@ -2130,7 +2141,7 @@ class TritonKernel(SIMDKernel):
 
     def codegen_nan_check(self):
         wrapper = V.graph.wrapper_code
-        _, call_args, arg_types = self.args.python_argdefs()
+        _, call_args, arg_types, _ = self.args.python_argdefs()
         for arg, arg_type in zip(call_args, arg_types):
             if isinstance(arg_type, TensorArg):
                 line = f"assert not {arg}.isnan().any().item()"

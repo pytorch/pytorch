@@ -2,7 +2,7 @@ import collections
 import typing
 from dataclasses import fields
 from enum import auto, Enum
-from typing import Optional
+from typing import Dict, List, Optional, Union
 
 
 # NOTE: if these fail asserts submit a PR to increase them
@@ -127,3 +127,33 @@ class DeviceProperties(typing.NamedTuple):
             index=device.index,
             cc=device_interface.get_compute_capability(device),
         )
+
+
+class HalideInputSpec(typing.NamedTuple):
+    ctype: str
+    name: str
+    numel: Optional[str] = None
+
+    def bindings_type(self):
+        if self.ctype == "half*":
+            return "void*"  # half not defined
+        return self.ctype
+
+    def halide_type(self):
+        if self.ctype == "half*":
+            return "halide_type_t(halide_type_float, 16)"  # half not defined
+        return f"halide_type_of<{self.ctype.replace('*', '')}>()"
+
+
+class HalideMeta(typing.NamedTuple):
+    argtypes: List[HalideInputSpec]
+    target: str
+    scheduler: str
+    scheduler_flags: Dict[str, Union[int, str]]
+
+    def args(self):
+        """Command line args to pass to halide generator"""
+        args = [f"target={self.target}", f"autoscheduler={self.scheduler}"]
+        for k, v in self.scheduler_flags.items():
+            args.append(f"autoscheduler.{k}={v}")
+        return args

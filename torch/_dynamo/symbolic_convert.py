@@ -343,9 +343,11 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         ):
             error_msg: VariableTracker = self.pop()
             # Skip over things like `assert True`
-            if value.is_python_constant() and bool(value.as_python_constant()):
-                self.jump(inst)
-                return
+            if value.is_python_constant():
+                if bool(value.as_python_constant()):
+                    return self.jump(inst)
+                else:
+                    jump_graph_break(self, inst, value)
 
             # TODO maybe should respect DtoH sync intention of users later??
             # Manually insert torch._assert_async instead of python assert and jump over
