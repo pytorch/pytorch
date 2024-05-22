@@ -1430,10 +1430,10 @@ def _export(
         )
 
     # Make module signatures.
-    module_call_signatures = {
-        fqn: ModuleCallSignature(inputs=[], outputs=[], **specs)
-        for fqn, specs in module_call_specs.items()
-    }
+    module_call_signatures = {}
+    for fqn, specs in module_call_specs.items():
+        mod_fqn = _strip_root(fqn) if not strict else fqn
+        module_call_signatures[mod_fqn] = ModuleCallSignature(inputs=[], outputs=[], **specs)
 
     if len(preserve_module_call_signature) > 0:
         if not strict:
