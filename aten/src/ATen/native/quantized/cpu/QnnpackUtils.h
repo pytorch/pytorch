@@ -38,7 +38,7 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
       std::unique_ptr<qnnpack::PackBMatrix> w,
       at::Tensor orig_weight,
       at::Tensor bias,
-      c10::optional<double> input_scale,
+      std::optional<double> input_scale,
       at::Tensor w_scales,
       std::vector<uint8_t>&& w_zps)
       : w(std::move(w)),
@@ -57,7 +57,7 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
   at::Tensor orig_weight;
   at::Tensor bias_;
   bool per_channel_;
-  c10::optional<double> input_scale;
+  std::optional<double> input_scale;
   at::Tensor w_scales;
   std::vector<uint8_t> w_zero_points;
   std::vector<float> requantization_scales;
@@ -76,15 +76,15 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
   at::Tensor apply_dynamic(at::Tensor input, bool reduce_range=false) override;
   at::Tensor apply_dynamic_relu(at::Tensor input, bool reduce_range=false) override;
 
-  std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
+  std::tuple<at::Tensor, std::optional<at::Tensor>> unpack() override;
 
-  c10::optional<at::Tensor> bias() override {
+  std::optional<at::Tensor> bias() override {
     return bias_;
   }
 
   static c10::intrusive_ptr<LinearPackedParamsBase> prepack(
       at::Tensor weight,
-      c10::optional<at::Tensor> bias);
+      std::optional<at::Tensor> bias);
 
   bool per_channel() const {
     return per_channel_;
@@ -125,7 +125,7 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
       torch::List<int64_t> dilation,
       int64_t groups,
       bool transpose,
-      c10::optional<double> input_scale,
+      std::optional<double> input_scale,
       std::vector<int64_t> kernel,
       at::Tensor w_scale,
       std::vector<uint8_t>&& w_zps,
@@ -302,7 +302,7 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
   int64_t groups_;
   bool transpose_;
   bool is_per_channel_;
-  c10::optional<double> input_scale;
+  std::optional<double> input_scale;
   std::vector<int64_t> kernel_;
   at::Tensor w_scales;
   std::vector<uint8_t> w_zero_points;
@@ -323,11 +323,11 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
       const at::Tensor& input,
       bool reduce_range=false) override;
 
-  std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
+  std::tuple<at::Tensor, std::optional<at::Tensor>> unpack() override;
 
   static c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> prepack(
       at::Tensor weight,
-      c10::optional<at::Tensor> bias,
+      std::optional<at::Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> output_padding,
@@ -438,7 +438,7 @@ Tensor qnnpack_avg_pool2d(
     IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override);
+    std::optional<int64_t> divisor_override);
 } // qnnp_avgpool_helper
 } // namespace native
 } // namespace at

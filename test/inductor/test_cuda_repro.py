@@ -14,6 +14,7 @@ from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
 from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx_inner
+from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.utils import run_and_get_code
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
@@ -31,7 +32,7 @@ try:
         import triton
         from triton import language as tl
     except ImportError:
-        raise unittest.SkipTest("requires triton")  # noqa: TRY200
+        raise unittest.SkipTest("requires triton")  # noqa: B904
 
     try:
         from . import test_torchinductor
@@ -381,12 +382,8 @@ class CudaReproTests(TestCase):
         https://github.com/pytorch/torchdynamo/issues/1670
         """
         from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
-        from torch._inductor.triton_heuristics import (
-            CachingAutotuner,
-            grid,
-            HeuristicType,
-        )
-        from torch._inductor.utils import instance_descriptor
+        from torch._inductor.runtime.hints import HeuristicType, instance_descriptor
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner, grid
 
         def autotune(configs, meta):
             def decorator(fn):
@@ -409,7 +406,7 @@ class CudaReproTests(TestCase):
             ],
             meta={
                 "signature": {0: "*fp32", 1: "*fp32", 2: "i32"},
-                "device": 0,
+                "device": DeviceProperties.create(torch.device("cuda")),
                 "configs": [instance_descriptor(divisible_by_16=(0, 1), equal_to_1=())],
                 "constants": {},
             },
@@ -1137,6 +1134,32 @@ class CudaReproTests(TestCase):
         ]
         fn(*args)
         torch.cuda.synchronize()  # shake out Triton Error [CUDA]: misaligned address
+
+    def test_non_commutative_scan_op(self):
+        from torch._higher_order_ops.associative_scan import associative_scan
+
+        a = torch.randn(1024, 8192, dtype=torch.float64, device="cuda")
+        b = torch.randn(1024, 8192, dtype=torch.float64, device="cuda")
+
+        def baseline(v, u):
+            A = []
+            A.append(b[:, 0])
+            for i in range(1, v.shape[1]):
+                A.append(a[:, i] * A[i - 1] + b[:, i])
+            return torch.stack(A, dim=1)
+
+        def combine_fn(i, j):
+            ia, ib = i
+            ja, jb = j
+            return ia * ja, ib * ja + jb
+
+        @torch.compile
+        def compiled_scan(a, b):
+            return associative_scan(combine_fn, (a, b), dim=-1)[1]
+
+        out1 = baseline(a, b)
+        out2 = compiled_scan(a, b)
+        self.assertEqual(out1, out2)
 
 
 if __name__ == "__main__":

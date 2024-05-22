@@ -1,7 +1,9 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import contextlib
 import functools
 import operator
-from typing import cast, Dict, List, Optional, Sequence, Tuple
+import warnings
+from typing import cast, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
 
 import torch
 
@@ -24,7 +26,9 @@ from torch.distributed._tensor.tp_conv import (
     convolution_backward_handler,
     convolution_handler,
 )
-from torch.distributed.device_mesh import DeviceMesh
+
+if TYPE_CHECKING:
+    from torch.distributed.device_mesh import DeviceMesh
 
 try:
     from torch.utils import _cxx_pytree as pytree
@@ -179,15 +183,23 @@ class OpDispatcher:
 
             # run local op computation with potentially modified args/kwargs
             local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
-            if op_call in self._random_ops and is_rng_supported_mesh(mesh):
-                if not random._rng_tracker:
+            if op_call in self._random_ops:
+                if not random._rng_tracker and is_rng_supported_mesh(mesh):
                     # Default to `OffsetBasedRNGTracker` if the parallelism API
                     # did not already construct one
                     random._rng_tracker = random.OffsetBasedRNGTracker(mesh.device_type)
+
+                first_arg, first_local_arg = cast(dtensor.DTensor, args[0]), cast(
+                    torch.Tensor, local_tensor_args[0]
+                )
+                rng_context = (
+                    random._rng_tracker._distribute_region(first_arg._spec)
+                    if random._rng_tracker and not first_local_arg.is_meta
+                    else contextlib.nullcontext()
+                )
+
                 # For DTensor random operator, run it within a distribute region
-                with random._rng_tracker._distribute_region(
-                    cast(dtensor.DTensor, args[0])._spec
-                ):
+                with rng_context:
                     local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
             else:
                 local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
@@ -285,6 +297,41 @@ class OpDispatcher:
         local_kwargs: Dict[str, object] = {}
         mesh: Optional[DeviceMesh] = None
 
+        def try_get_replicate_spec(
+            tensor_arg: torch.Tensor, mesh: "DeviceMesh"
+        ) -> DTensorSpec:
+            # tensor_arg is an instance of torch.Tensor and could be an arg or kwarg.
+            if tensor_arg.numel() == 1 and tensor_arg.ndim == 1:
+                warnings.warn(
+                    "Found a non-scalar tensor with numel=1 and ndim!=0, "
+                    "we are implicitly creating a replicated DTensor for it. "
+                    "However, please consider changing it to a scalar tensor "
+                    "or explicitly create a DTensor under distributed enviroment."
+                )
+
+            # if the arg.numel() == 1, arg.ndim could be 0 or 1.
+            if (
+                tensor_arg.ndim <= 1
+                and tensor_arg.numel() == 1
+                or self._allow_implicit_replication
+            ):
+                # scalar tensor can be safely treated as replicated
+                replication_spec = DTensorSpec(
+                    mesh,
+                    (Replicate(),) * mesh.ndim,
+                    tensor_meta=TensorMeta(
+                        shape=tensor_arg.shape,
+                        stride=tensor_arg.stride(),
+                        dtype=tensor_arg.dtype,
+                    ),
+                )
+            else:
+                raise RuntimeError(
+                    f"{op_call}: got mixed torch.Tensor and DTensor, need to convert all"
+                    " torch.Tensor to DTensor before calling distributed operators!"
+                )
+            return replication_spec
+
         for arg in args_list:
             if isinstance(arg, dtensor.DTensor):
                 args_schema.append(arg._spec)
@@ -297,24 +344,9 @@ class OpDispatcher:
                 else:
                     mesh = arg.device_mesh
             elif isinstance(arg, torch.Tensor):
-                if arg.ndim == 0 or self._allow_implicit_replication:
-                    mesh = mesh or try_find_mesh_from_args(op_call, args_list)
-                    # scalar tensor can be safely treated as replicated
-                    args_schema.append(
-                        DTensorSpec(
-                            mesh,
-                            (Replicate(),) * mesh.ndim,
-                            tensor_meta=TensorMeta(
-                                shape=arg.shape, stride=arg.stride(), dtype=arg.dtype
-                            ),
-                        )
-                    )
-                    local_args.append(arg)
-                else:
-                    raise RuntimeError(
-                        f"{op_call}: got mixed torch.Tensor and DTensor, need to convert all"
-                        " torch.Tensor to DTensor before calling distributed operators!"
-                    )
+                mesh = mesh or try_find_mesh_from_args(op_call, args_list)
+                args_schema.append(try_get_replicate_spec(arg, mesh))
+                local_args.append(arg)
             else:
                 args_schema.append(arg)
                 local_args.append(arg)
@@ -331,10 +363,9 @@ class OpDispatcher:
                 else:
                     mesh = v.device_mesh
             elif isinstance(v, torch.Tensor):
-                raise RuntimeError(
-                    f"{op_call}: got mixed torch.Tensor and DTensor, need to convert all"
-                    " torch.Tensor to DTensor before calling distributed operators!"
-                )
+                mesh = mesh or try_find_mesh_from_args(op_call, args_list)
+                kwargs_schema[k] = try_get_replicate_spec(v, mesh)
+                local_kwargs[k] = v
             else:
                 kwargs_schema[k] = v
                 local_kwargs[k] = v

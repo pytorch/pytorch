@@ -1,6 +1,6 @@
 import contextlib
 import functools
-from typing import List, Optional
+from typing import List, Optional, TYPE_CHECKING
 
 import torch
 from torch._dynamo.external_utils import call_backward, call_hook
@@ -21,9 +21,24 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
-from torch.fx.proxy import Proxy
+from torch.fx.traceback import preserve_node_meta, set_stack_trace
+from torch.utils._traceback import CapturedTraceback
+
+if TYPE_CHECKING:
+    from torch.fx.proxy import Proxy
 
 compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
+verbose_log = getArtifactLogger(__name__, "compiled_autograd_verbose")
+
+
+def snapshot_verbose_logging_enabled():
+    return torch._logging._internal.log_state.is_artifact_enabled(
+        "compiled_autograd_verbose"
+    )
+
+
+def cpp_verbose_log_fn(msg: str) -> None:
+    verbose_log.debug(msg)
 
 
 def maybe_clone(x):
@@ -89,6 +104,7 @@ class AutogradCompilerInstance:
         self.stack.enter_context(self.proxy_mode.sym_mode)
         self.stack.enter_context(self.proxy_mode)
         self.stack.enter_context(disable_autocast_cache())
+        self.stack.enter_context(preserve_node_meta())
         return inputs, sizes
 
     def proxy_call_backward(
@@ -99,12 +115,12 @@ class AutogradCompilerInstance:
         backward_idx: int,
     ):
         assert self.hooks_proxy is not None
-        backward_fn = self.hooks_proxy[backward_idx]  # type: ignore[index]
+        backward_c_function = self.hooks_proxy[backward_idx]  # type: ignore[index]
         proxies = self.fx_tracer.create_proxy(
             kind="call_function",
             target=call_backward,
             args=(
-                backward_fn,
+                backward_c_function,
                 self.to_proxy(saved_tensors),
                 *self.to_proxy(inputs),
             ),
@@ -203,6 +219,9 @@ class AutogradCompilerInstance:
         compiled_autograd_log.info(
             "%s", lazy_format_graph_code("Compiled autograd graph", graph)
         )
+        verbose_log.debug(
+            "%s", lazy_format_graph_code("Compiled autograd graph", graph)
+        )
         trace_structured(
             "compiled_autograd_graph",
             payload_fn=lambda: graph.print_readable(print_output=False),
@@ -245,6 +264,14 @@ class AutogradCompilerInstance:
         track_tensor_tree(bw_state, proxy, constant=None, tracer=self.fx_tracer)
         return bw_state
 
+    def set_node_origin(self, node_name, node_index):
+        raw_stack_trace = CapturedTraceback.extract().format()[-1]
+        new_code = f"{node_name} (NodeCall {node_index})"
+        new_stack_trace = raw_stack_trace.replace(
+            "raw_stack_trace = CapturedTraceback.extract().format()[-1]", new_code
+        )
+        set_stack_trace(new_stack_trace)
+
 
 compiled_autograd_enabled = False
 
@@ -269,6 +296,8 @@ def enable(compiler_fn):
     prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
         functools.partial(AutogradCompilerInstance, compiler_fn)
     )
+    if snapshot_verbose_logging_enabled():
+        torch._C._dynamo.compiled_autograd.set_verbose_logger(cpp_verbose_log_fn)
     global compiled_autograd_enabled, compiled_autograd_enabled_count
     compiled_autograd_enabled = True
     compiled_autograd_enabled_count += 1
@@ -293,3 +322,11 @@ def disable():
         if prior:
             compiled_autograd_enabled = True
         torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
+
+
+# return to starting state of a new process
+def reset() -> None:
+    compiled_autograd_enable = False
+    assert compiled_autograd_enabled_count == 0
+    torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
+    torch._C._dynamo.compiled_autograd.set_verbose_logger(None)

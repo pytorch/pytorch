@@ -473,7 +473,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
     }
   }
 
-  const auto target_device = [&]() -> c10::optional<Device> {
+  const auto target_device = [&]() -> std::optional<Device> {
     // note(crcrpar): zero-size arrays come with nullptr.
     // ref:
     // https://numba.readthedocs.io/en/stable/cuda/cuda_array_interface.html#cuda-array-interface-version-3

@@ -13,13 +13,13 @@ There’s four main use cases
 * You’re writing a new operator that isn’t supposed to be part of the public PyTorch API.
 * You’re writing a new operator but don’t want to change the core pytorch code base, say you’re developing a shared library with operators.
 * You’re writing a C++ extension for PyTorch or you’re using inline c++ in your .py model files.
-* You’re writing a backend library like XLA or ORT that adds new kernels to all operators defined in `native_functions.yaml`.
+* You’re writing a backend library like XLA or MAIA that adds new kernels to all operators defined in `native_functions.yaml`.
 
 For these use cases, the custom operator API is the better solution.
 
 ### What is the price for using the custom operator API instead of `native_functions.yaml`?
 
-If you’re just using the custom operator API to add new kernels for existing operators (e.g. the XLA/ORT example above), then you’re fine and don’t pay any price. If, however, you define a new operator purely using the custom op API, i.e. your operator never shows up in `native_functions.yaml`, then you need to be aware of a few caveats.
+If you’re just using the custom operator API to add new kernels for existing operators (e.g. the XLA/MAIA example above), then you’re fine and don’t pay any price. If, however, you define a new operator purely using the custom op API, i.e. your operator never shows up in `native_functions.yaml`, then you need to be aware of a few caveats.
 
 * It will not get a C++ API generated. There will not be `Tensor::your_op()` methods or `at::your_op()` functions to call your operator.
 * The API for calling the operator from Python looks a little bit different. It needs to be called through `torch.ops.your_op()` instead of `torch._C`.

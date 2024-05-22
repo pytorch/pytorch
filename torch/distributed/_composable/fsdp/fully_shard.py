@@ -1,3 +1,4 @@
+import functools
 from typing import Any, cast, Optional, Union
 
 import typing_extensions
@@ -5,7 +6,7 @@ import typing_extensions
 import torch
 import torch.nn as nn
 from torch.distributed._composable import contract
-from torch.distributed._tensor import DeviceMesh, DTensor
+from torch.distributed._tensor import DeviceMesh
 
 from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo
@@ -136,7 +137,7 @@ def fully_shard(
     # Place FSDP leftmost for highest priority in the method resolution order
     cls = module.__class__
     dct = {"__deepcopy__": unimplemented_deepcopy}
-    new_cls = type(f"FSDP{cls.__name__}", (FSDP, cls), dct)
+    new_cls = type(f"FSDP{cls.__name__}", (FSDPModule, cls), dct)
     module.__class__ = new_cls
     return module
 
@@ -147,14 +148,14 @@ def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> typing_extensions.Never
     )
 
 
-class FSDP:
+class FSDPModule:
     def __new__(cls, *args, **kwargs):
         """
         Override ``__new__`` to remove the FSDP class and directly construct
         the original class for cases like indexing into a container module.
         """
         # Use index 2 since 0 is the dynamically constructed `FSDP<...>` class
-        # and index 1 is the `FSDP` class itself
+        # and index 1 is the `FSDPModule` class itself
         orig_cls = cls.__mro__[2]
         self = orig_cls.__new__(orig_cls, *args, **kwargs)
         self.__init__(*args, **kwargs)
@@ -207,7 +208,7 @@ class FSDP:
         state._state_ctx.is_last_backward = is_last_backward
 
     def set_requires_gradient_sync(
-        self, requires_gradient_sync: bool, recurse: bool = True
+        self, requires_gradient_sync: bool, *, recurse: bool = True
     ) -> None:
         """
         Sets if the module should sync gradients. This can be used to implement
@@ -223,33 +224,30 @@ class FSDP:
         self_module = cast(nn.Module, self)
         modules = list(self_module.modules()) if recurse else [self_module]
         for module in modules:
-            if isinstance(module, FSDP):
+            if isinstance(module, FSDPModule):
                 state = module._get_fsdp_state()
                 if fsdp_param_group := state._fsdp_param_group:
                     fsdp_param_group.reduce_grads = requires_gradient_sync
                     fsdp_param_group.all_reduce_grads = requires_gradient_sync
 
     def set_requires_all_reduce(
-        self, requires_all_reduce: bool, recurse: bool = True
+        self, requires_all_reduce: bool, *, recurse: bool = True
     ) -> None:
         """
         Sets if the module should all-reduce gradients. This can be used to
         implement gradient accumulation with only reduce-scatter but not
         all-reduce for HSDP.
         """
-        # TODO: post_reduce_output += fsdp_param.sharded_param.grad
-        # after reduce-scatter and before all-reduce
-        raise NotImplementedError("requires_all_reduce is not yet supported in HSDP")
         self_module = cast(nn.Module, self)
         modules = list(self_module.modules()) if recurse else [self_module]
         for module in modules:
-            if isinstance(module, FSDP):
+            if isinstance(module, FSDPModule):
                 state = module._get_fsdp_state()
                 if fsdp_param_group := state._fsdp_param_group:
                     fsdp_param_group.all_reduce_grads = requires_all_reduce
 
     def set_reshard_after_backward(
-        self, reshard_after_backward: bool, recurse: bool = True
+        self, reshard_after_backward: bool, *, recurse: bool = True
     ) -> None:
         """
         Sets if the module should reshard parameters after backward. This can
@@ -265,7 +263,7 @@ class FSDP:
         self_module = cast(nn.Module, self)
         modules = list(self_module.modules()) if recurse else [self_module]
         for module in modules:
-            if isinstance(module, FSDP):
+            if isinstance(module, FSDPModule):
                 state = module._get_fsdp_state()
                 if fsdp_param_group := state._fsdp_param_group:
                     fsdp_param_group.reshard_after_backward = reshard_after_backward
@@ -286,26 +284,7 @@ class FSDP:
         # https://github.com/pytorch/pytorch/issues/113045
         with torch.no_grad():
             for fsdp_param in fsdp_param_group.fsdp_params:
-                module_info = fsdp_param._module_info
-                new_param = getattr(module_info.module, module_info.param_name)
-                if new_param is not fsdp_param.sharded_param:
-                    raise AssertionError(
-                        "Expects swap_tensors to preserve object but got "
-                        f"{new_param} instead of {fsdp_param.sharded_param}"
-                    )
-                local_tensor = new_param._local_tensor
-                padded_sharded_size = fsdp_param.padded_sharded_param_size
-                if local_tensor.size() != padded_sharded_size:
-                    padded_local_tensor = local_tensor.new_zeros(padded_sharded_size)
-                    padded_local_tensor[: local_tensor.size(0)].copy_(local_tensor)
-                    local_tensor = padded_local_tensor
-                if fsdp_param.pin_memory and not local_tensor.is_pinned():
-                    local_tensor = local_tensor.cpu().pin_memory()
-                fsdp_param._sharded_param_data = local_tensor.view(-1)
-                assert isinstance(fsdp_param.sharded_param, DTensor)  # mypy
-                fsdp_param.sharded_param._local_tensor = local_tensor[
-                    : fsdp_param.sharded_size[0]
-                ]
+                fsdp_param.reset_sharded_param()
         return ret
 
 
@@ -333,3 +312,35 @@ class UnshardHandle:
             self._fsdp_param_group.wait_for_unshard()
             # Avoid keeping a reference
             self._fsdp_param_group = None
+
+
+def register_fsdp_forward_method(module: nn.Module, method_name: str) -> None:
+    """
+    Registers a method on ``module`` to be a forward method for FSDP.
+
+    FSDP only knows to run its pre-forward and post-forward hooks on the
+    default :meth:`nn.Module.forward` method. This function patches a user
+    specified method to run the pre/post-forward hooks before/after the method,
+    respectively. If ``module`` is not an :class:`FSDPModule`, then this is a
+    no-op.
+
+    Args:
+        module (nn.Module): Module to register the forward method on.
+        method_name (str): Name of the forward method.
+    """
+    if not isinstance(module, FSDPModule):
+        # Make no-op to allow including both when using/not using FSDP
+        return
+    if not hasattr(module, method_name):
+        raise ValueError(f"{type(module)} does not have a method {method_name}")
+    orig_method = getattr(module, method_name)
+
+    @functools.wraps(orig_method)
+    def wrapped_method(self, *args, **kwargs):
+        fsdp_state = self._get_fsdp_state()
+        args, kwargs = fsdp_state._pre_forward(self, args, kwargs)
+        out = orig_method(*args, **kwargs)
+        return fsdp_state._post_forward(self, args, out)
+
+    # Use `__get__` to make `wrapped_method` an instance method
+    setattr(module, method_name, wrapped_method.__get__(module, type(module)))
