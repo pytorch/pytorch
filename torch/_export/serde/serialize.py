@@ -520,7 +520,7 @@ class GraphModuleSerializer(metaclass=Final):
                 outputs=self.serialize_hoo_outputs(node),
                 metadata=self.serialize_metadata(node),
             )
-        elif isinstance(node.target, CustomOpHandler):
+        elif type(node.target) in _serialize_registry:
             custom_op_handler = node.target
 
             # Sanity check for unhandled serialization.
