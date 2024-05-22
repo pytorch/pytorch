@@ -8,6 +8,7 @@ from typing import Callable, List, Optional
 import torch
 from torch import multiprocessing as mp
 from torch._dynamo import reset
+from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.testing import reset_rng_state
 from torch._inductor import config
 from torch._inductor.autotune_process import (
@@ -718,6 +719,42 @@ class TestMaxAutotune(TestCase):
         ref = x1 @ y1 + x2 @ y2
         act = f(x1, y1, x2, y2)
         self.assertTrue(torch.allclose(ref, act, atol=4 * 1e-3, rtol=4 * 1e-3))
+
+    @config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="",
+        autotune_fallback_to_aten=False,
+    )
+    def test_no_valid_choices(self):
+        a = torch.zeros([2, 2], device="cuda")
+        b = torch.zeros([2, 2], device="cuda")
+        with self.assertRaises(BackendCompilerFailed) as context:
+            torch.compile(lambda a, b: a.matmul(b))(a, b)
+        self.assertIn("NoValidChoicesError", str(context.exception))
+
+    @parametrize("multi_template", (True, False))
+    @config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON",
+        autotune_fallback_to_aten=False,
+    )
+    def test_inf_timing(self, multi_template):
+        from unittest.mock import patch
+
+        lookup = AlgorithmSelectorCache.lookup
+
+        def mock_lookup(self, *args, **kwargs):
+            timings = lookup(self, *args, **kwargs)
+            return {choice: float("inf") for choice in timings.keys()}
+
+        a = torch.zeros([16, 16], device="cuda")
+        b = torch.zeros([16, 16], device="cuda")
+        with patch.object(AlgorithmSelectorCache, "lookup", mock_lookup), config.patch(
+            benchmark_epilogue_fusion=multi_template
+        ):
+            with self.assertRaises(BackendCompilerFailed) as context:
+                torch.compile(lambda a, b: a.matmul(b))(a, b)
+            self.assertIn("NoValidChoicesError", str(context.exception))
 
 
 class TestBenchmarkRequest(BenchmarkRequest):
