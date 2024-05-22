@@ -173,7 +173,7 @@ if RUN_CPU:
         slow: bool = False
         func_inputs: list = None
         code_string_count: dict = {}
-        skip = None
+        skip: str = None
 
     for item in [
         BaseTest("test_add_complex"),
@@ -373,6 +373,7 @@ if RUN_CPU:
             item.slow,
             item.func_inputs,
             item.code_string_count,
+            skip=item.skip,
         )
 
     test_torchinductor.copy_tests(
