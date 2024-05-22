@@ -78,7 +78,10 @@ on:
 jobs:
   build:
     runs-on: ${{ inputs.runs_on }}
-    timeout-minutes: 600
+    ${{ if inputs.GPU_ARCH_TYPE == 'cuda-aarch64' }}
+      timeout-minutes: 360
+    ${{ if inputs.GPU_ARCH_TYPE != 'cuda-aarch64' }}
+      timeout-minutes: 210
     env:
       PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
       BUILDER_ROOT: ${{ inputs.BUILDER_ROOT }}
@@ -190,9 +193,9 @@ jobs:
       - name: Checkout pytorch/builder to builder dir
         uses: malfet/checkout@silent-checkout
         with:
-          ref: set-max-jobs-clean
+          ref: main
           submodules: recursive
-          repository: tinglvv/builder
+          repository: pytorch/builder
           path: builder
           quiet-checkout: true
 
