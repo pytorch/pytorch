@@ -255,7 +255,7 @@ def expand_to_full_mesh_op_strategy(
         assert len(input_specs) == len(input_args_strategy)
         # check inputs shardable
         inputs_shardable = all(
-            is_tensor_shardable(inp.output_shape, s)
+            is_tensor_shardable(inp.shape, s)
             for inp, s in zip(input_args_strategy, input_specs)
         )
 
