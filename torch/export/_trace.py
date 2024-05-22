@@ -102,9 +102,9 @@ class ExportedArtifact:
             torch.ScriptObject,
         ],
     ]
-    out_spec: Optional[TreeSpec] = None,
-    fake_mode: Optional[FakeTensorMode] = None,
-    module_call_specs: Optional[Dict[str, Dict[str, pytree.TreeSpec]]] = None,
+    out_spec: Optional[TreeSpec] = (None,)
+    fake_mode: Optional[FakeTensorMode] = (None,)
+    module_call_specs: Optional[Dict[str, Dict[str, pytree.TreeSpec]]] = (None,)
 
 
 DEFAULT_EXPORT_DYNAMO_CONFIG = ExportDynamoConfig()
@@ -164,7 +164,7 @@ def _rewrite_node(gm):
     for node in gm.graph.nodes:
         if node.target == torch.ops.higher_order._export_tracepoint:
             if "path" in node.kwargs:
-                path = __strip_root(node.kwargs["path"])
+                path = _strip_root(node.kwargs["path"])
                 with gm.graph.inserting_before(node):
                     new_node = gm.graph.create_node(
                         "call_function",
@@ -1072,6 +1072,9 @@ def _strict_export(
     # Fix the graph output signature to be tuple if scalar
     out_spec = orig_out_spec = gm_torch_level._out_spec
 
+    # Used to get rid of lint type error.
+    assert out_spec is not None
+
     # aot_export expect the return type to always be a tuple.
     if out_spec.type not in (list, tuple):
         out_spec = pytree.TreeSpec(tuple, None, [out_spec])
@@ -1141,9 +1144,7 @@ def _strict_export(
     _replace_param_buffer_names(param_buffer_table, export_graph_signature)
 
     # 3. Remove non-persistent buffers from the graph signature
-    _rewrite_non_persistent_buffers(
-        mod, export_graph_signature, constants
-    )
+    _rewrite_non_persistent_buffers(mod, export_graph_signature, constants)
 
     # 4. Rewrite constants to have the same FQN as the original module.
     _remap_constants(constant_attrs, export_graph_signature, constants)
