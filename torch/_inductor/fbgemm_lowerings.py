@@ -184,7 +184,7 @@ def make_offset_generator(
 
 def register_jagged_ops():
     # pyre-ignore[56]
-    @register_lowering(torch.ops.aten._fbgemm_jagged_to_padded_dense_forward.default)
+    @register_lowering(torch.ops.aten._jagged_to_padded_dense_forward.default)
     def _jagged_to_padded_dense_forward(
         jagged_values: TensorBox,
         jagged_offsets: List[TensorBox],
@@ -207,7 +207,7 @@ def register_jagged_ops():
             or not is_integer_type(jagged_offsets[0])
         ):
             return fallback_handler(
-                torch.ops.aten._fbgemm_jagged_to_padded_dense_forward.default,
+                torch.ops.aten._jagged_to_padded_dense_forward.default,
                 add_to_fallback_set=False,
             )(
                 jagged_values,
@@ -328,29 +328,15 @@ def register_jagged_ops():
         )
 
     # pyre-ignore[56]
-    @register_lowering(torch.ops.aten._fbgemm_dense_to_jagged_forward)
+    @register_lowering(torch.ops.aten._padded_dense_to_jagged_forward)
     def _dense_to_jagged_forward(
         dense: TensorBox,
         jagged_offsets: List[TensorBox],
         jagged_len: Optional[int] = None,
     ) -> TensorBox:
         return _dense_to_jagged_forward_impl(
-            fallback_op=torch.ops.aten._fbgemm_dense_to_jagged_forward.default,
+            fallback_op=torch.ops.aten._padded_dense_to_jagged_forward.default,
             dense=dense,
-            jagged_offsets=jagged_offsets,
-            jagged_len=jagged_len,
-        )
-
-    # pyre-ignore[56]
-    @register_lowering(torch.ops.aten._fbgemm_jagged_to_padded_dense_backward.default)
-    def _jagged_to_padded_dense_backward(
-        grad_output: TensorBox,
-        jagged_offsets: List[TensorBox],
-        jagged_len: Optional[int] = None,
-    ) -> TensorBox:
-        return _dense_to_jagged_forward_impl(
-            fallback_op=torch.ops.aten._fbgemm_jagged_to_padded_dense_backward.default,
-            dense=grad_output,
             jagged_offsets=jagged_offsets,
             jagged_len=jagged_len,
         )

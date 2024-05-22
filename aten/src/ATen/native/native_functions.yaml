@@ -14655,17 +14655,12 @@
     NestedTensorCUDA: NestedTensor_to_padded_tensor_cuda
   autogen: to_padded_tensor.out
 
-- func: _fbgemm_jagged_to_padded_dense_forward(Tensor values, Tensor[] offsets, SymInt[] max_lengths, float padding_value=0.0) -> Tensor
+- func: _jagged_to_padded_dense_forward(Tensor values, Tensor[] offsets, SymInt[] max_lengths, float padding_value=0.0) -> Tensor
   variants: function
   dispatch:
     CUDA: _fbgemm_jagged_to_padded_dense_forward
 
-- func: _fbgemm_jagged_to_padded_dense_backward(Tensor grad_output, Tensor[] offsets, SymInt total_L) -> Tensor
-  variants: function
-  dispatch:
-    CUDA: _fbgemm_jagged_to_padded_dense_backward
-
-- func: _fbgemm_dense_to_jagged_forward(Tensor dense, Tensor[] offsets, SymInt? total_L=None) -> Tensor
+- func: _padded_dense_to_jagged_forward(Tensor dense, Tensor[] offsets, SymInt? total_L=None) -> Tensor
   variants: function
   dispatch:
     CUDA: _fbgemm_dense_to_jagged_forward_symint
