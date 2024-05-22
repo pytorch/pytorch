@@ -243,7 +243,7 @@ if BUILD_LIBTORCH_WHL:
 
 if BUILD_PYTORCH_USING_LIBTORCH_WHL:
     os.environ["BUILD_LIBTORCHLESS"] = "ON"
-    os.environ["LIBTORCH_LIB_PATH"] = f"{_get_package_path('libtorchsplit')}/lib"
+    os.environ["LIBTORCH_LIB_PATH"] = f"{_get_package_path('libtorch')}/lib"
 
 python_min_version = (3, 8, 0)
 python_min_version_str = ".".join(map(str, python_min_version))
@@ -349,7 +349,7 @@ cmake_python_include_dir = sysconfig.get_path("include")
 # Version, create_version_file, and package_name
 ################################################################################
 
-DEFAULT_PACKAGE_NAME = "libtorchsplit" if BUILD_LIBTORCH_WHL else "torch"
+DEFAULT_PACKAGE_NAME = "libtorch" if BUILD_LIBTORCH_WHL else "torch"
 
 package_name = os.getenv("TORCH_PACKAGE_NAME", DEFAULT_PACKAGE_NAME)
 package_type = os.getenv("PACKAGE_TYPE", "wheel")
@@ -1122,33 +1122,6 @@ def print_box(msg):
         print("|{}{}|".format(l, " " * (size - len(l))))
     print("-" * (size + 2))
 
-
-def rename_torch_packages(package_list):
-    """
-    Create a dictionary from a list of package names, renaming packages where
-    the top-level package is 'torch' to 'libtorchsplit'.
-
-    Args:
-        package_list (list of str): The list of package names.
-
-    Returns:
-        dict: A dictionary where keys are the package names with 'torch' replaced by 'libtorchsplit',
-              and values are the original package names, only including those where the
-              top-level name is 'torch'.
-    """
-    result = {}
-    for package in package_list:
-        # Split the package name by dots to handle subpackages or modules
-        parts = package.split(".")
-        # Check if the top-level package is 'torch'
-        if parts[0] == "torch":
-            # Replace 'torch' with 'libtorchsplit' in the top-level package name
-            new_key = "libtorchsplit" + package[len("torch") :]
-            result[new_key] = package
-
-    return result
-
-
 def main():
     if BUILD_LIBTORCH_WHL and BUILD_PYTORCH_USING_LIBTORCH_WHL:
         raise RuntimeError(
@@ -1167,7 +1140,7 @@ def main():
     ]
 
     if BUILD_PYTORCH_USING_LIBTORCH_WHL:
-        install_requires.append("libtorchsplit")
+        install_requires.append("libtorch")
 
     use_prioritized_text = str(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD", ""))
     if (
@@ -1476,9 +1449,9 @@ def main():
             if parts[0] == "torch":
                 modified_packages.append(DEFAULT_PACKAGE_NAME + package[len("torch") :])
         packages = modified_packages
-        package_dir = {"libtorchsplit": "torch"}
-        torch_package_dir_name = "libtorchsplit"
-        package_data = {"libtorchsplit": torch_package_data}
+        package_dir = {"libtorch": "torch"}
+        torch_package_dir_name = "libtorch"
+        package_data = {"libtorch": torch_package_data}
         extensions = []
     else:
         torch_package_dir_name = "torch"
