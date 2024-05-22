@@ -2370,7 +2370,8 @@ class GraphModule(torch.nn.Module):
             return _reduce_max(flattened)
 
         def fn(pred, pytree_in):
-            return torch.cond(pred, true_fn, false_fn, [pytree_in])
+            # return torch.cond(pred, true_fn, false_fn, [pytree_in])
+            return control_flow.cond(pred, true_fn, false_fn, [pytree_in])
 
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
@@ -2404,7 +2405,10 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
 
     def test_cond_pytree_operands_with_non_tensor_leaves(self):
         def fn(pred, pytree_in):
-            return torch.cond(
+            # return torch.cond(
+            #     pred, lambda x: x[0] + 1, lambda x: x[0] * 2, (pytree_in,)
+            # )
+            return control_flow.cond(
                 pred, lambda x: x[0] + 1, lambda x: x[0] * 2, (pytree_in,)
             )
 

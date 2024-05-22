@@ -1,3 +1,4 @@
+# TODO: Currently cond is not fully exposed under torch, e.g. torch.cond, but it causes import errors 
 # from torch import cond  # noqa: F401
 from torch._higher_order_ops.cond import cond
 from torch._higher_order_ops.cond import UnsupportedAliasMutationException  # noqa: F401

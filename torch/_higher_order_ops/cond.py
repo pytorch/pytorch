@@ -41,9 +41,9 @@ from torch.fx.experimental.proxy_tensor import (
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils._python_dispatch import _get_current_dispatch_mode
-from torch._higher_order_ops.map import _stack_pytree, _unstack_pytree
+from torch.fx.experimental.proxy_tensor import _temp_remove_pre_dispatch_torch_function_mode
 
-# @exposed_in("torch")
+@exposed_in("torch")
 def cond(pred, true_fn, false_fn, operands):
     r"""
     Conditionally applies `true_fn` or `false_fn`.
@@ -108,8 +108,6 @@ def cond(pred, true_fn, false_fn, operands):
     .. warning::
         Temporal Limitations:
 
-        - `cond` only supports **inference** right now. Autograd will be supported in the future.
-
         - The **output** of branches must be a **single Tensor**. Pytree of tensors will be supported in the future.
 
     """
@@ -142,14 +140,12 @@ def cond(pred, true_fn, false_fn, operands):
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("torch.cond requires dynamo support.")
 
-    # with _set_compilation_env():
-    #     with torch._dynamo.utils.disable_cache_limit():
-    #         with _temp_remove_pre_dispatch_torch_function_mode():
-    #             return torch.compile(cond_op, backend="eager", fullgraph=True)(
-    #                 pred, true_fn, false_fn, operands
-    #             )
-    return cond_op(pred, true_fn, false_fn, operands)
-    # return cond_wrapper(pred, true_fn, false_fn, operands)
+    with _set_compilation_env():
+        with torch._dynamo.utils.disable_cache_limit():
+            with _temp_remove_pre_dispatch_torch_function_mode():
+                return torch.compile(cond_op, backend="eager", fullgraph=True)(
+                    pred, true_fn, false_fn, operands
+                )
 
 """
 We're going to define a `cond_op` operation.
@@ -214,10 +210,9 @@ def create_fw_bw_graph(true_fn, false_fn, operands):
                 return t
 
             num_mapped_args = len(operands)
-
             unwrapped_mapped_operands = pytree.tree_map(_from_fun, operands)
-            example_operands = _unstack_pytree(unwrapped_mapped_operands)[0]
-            # example_operands = unwrapped_mapped_operands
+            # example_operands = _unstack_pytree(unwrapped_mapped_operands)[0]
+            example_operands = unwrapped_mapped_operands
 
             #Note, the true_fn and the false_fn produce the same output
             #shape, thus we can simply generate the example outputs from the true_fn.
