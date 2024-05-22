@@ -227,10 +227,9 @@ class TensorVariable(VariableTracker):
 
                 return SourcelessBuilder.create(tx, example_value)
 
-        # if name == "grad_fn" and not self.source.subguards_allowed():
-        #     return variables.ConstantVariable(None)
-
         if not (self.source and self.source.subguards_allowed()):
+            if name == "grad_fn":
+                return variables.ConstantVariable(None)
             raise NotImplementedError
 
         # For local source, we associate the real value. We use this real value
