@@ -49,8 +49,9 @@ find_file(
   )
 
 # Find SYCL library fullname.
-# TODO: we can drop this workaround once an open-source release
-# for Windows has a fix for the issue.
+# On both Linux and Windows, the current version of SYCL runtime is 7.
+# On Linux, libsycl.so symbolic links to libsycl.so.7.
+# On Windows, sycl7.dll version suffix is used.
 foreach(sycl_lib_version "" 7)
     set(SYCL_LIBRARY_NAME "sycl${sycl_lib_version}")
 
