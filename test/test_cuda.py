@@ -1720,7 +1720,7 @@ torch.cuda.synchronize()
     def test_autocast_custom_enabled(self):
         class MyMM(torch.autograd.Function):
             @staticmethod
-            @torch.cuda.amp.custom_fwd
+            @torch.amp.custom_fwd(device="cuda")
             def forward(ctx, a, b):
                 self.assertTrue(a.dtype is torch.float32)
                 self.assertTrue(b.dtype is torch.float32)
@@ -1729,7 +1729,7 @@ torch.cuda.synchronize()
                 return a.mm(b)
 
             @staticmethod
-            @torch.cuda.amp.custom_bwd
+            @torch.amp.custom_bwd(device="cuda")
             def backward(ctx, grad):
                 self.assertTrue(torch.is_autocast_enabled())
                 a, b = ctx.saved_tensors
@@ -1753,7 +1753,7 @@ torch.cuda.synchronize()
     def test_autocast_custom_cast_inputs(self):
         class MyMM(torch.autograd.Function):
             @staticmethod
-            @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
+            @torch.amp.custom_fwd(device="cuda", cast_inputs=torch.float32)
             def forward(ctx, a, container, expect_type):
                 b = container[1][0]
                 self.assertTrue(a.dtype is expect_type)
@@ -1763,7 +1763,7 @@ torch.cuda.synchronize()
                 return a.mm(b)
 
             @staticmethod
-            @torch.cuda.amp.custom_bwd
+            @torch.amp.custom_bwd(device="cuda")
             def backward(ctx, grad):
                 self.assertFalse(torch.is_autocast_enabled())
                 a, b = ctx.saved_tensors
