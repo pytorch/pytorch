@@ -7,7 +7,6 @@ from . import trace_rules, variables
 from .comptime import comptime
 from .eval_frame import DisableContext, innermost_fn, RunOnlyContext
 from .exc import IncorrectUsage
-from .external_utils import is_compiling
 
 if TYPE_CHECKING:
     from torch._C._dynamo.eval_frame import (  # noqa: F401
@@ -273,7 +272,7 @@ def mark_static(t, index=None):
     Unlike mark_dynamic, this can be done inside a graph, in which case it
     induces specialization on the tensor.
     """
-    if is_compiling():
+    if torch.compiler.is_compiling():
         if index is None:
             for s in t.size():
                 comptime.force_static(s)

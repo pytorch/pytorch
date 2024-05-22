@@ -1,10 +1,14 @@
-import warnings
+from typing_extensions import deprecated
 
 import torch
 
 __all__ = ["GradScaler"]
 
 
+@deprecated(
+    "`torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.",
+    category=FutureWarning,
+)
 class GradScaler(torch.amp.GradScaler):
     r"""
     See :class:`torch.amp.GradScaler`.
@@ -19,9 +23,6 @@ class GradScaler(torch.amp.GradScaler):
         growth_interval: int = 2000,
         enabled: bool = True,
     ) -> None:
-        warnings.warn(
-            "torch.cuda.amp.GradScaler(args...) is deprecated. Please use torch.amp.GradScaler('cuda', args...) instead."
-        )
         super().__init__(
             "cuda",
             init_scale=init_scale,

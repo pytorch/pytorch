@@ -3,6 +3,7 @@ from typing import Callable, List, Optional, Tuple, Union
 import math
 import warnings
 import importlib
+from typing_extensions import deprecated
 
 try:
     import numpy as np
@@ -1371,7 +1372,7 @@ def dropout2d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
                     "and silence this warning, please use dropout instead. Note that dropout2d "
                     "exists to provide channel-wise dropout on inputs with 2 spatial dimensions, "
                     "a channel dimension, and an optional batch dimension (i.e. 3D or 4D inputs).")
-        warnings.warn(warn_msg)
+        warnings.warn(warn_msg, FutureWarning)
 
     # TODO: Properly support no-batch-dim inputs. For now, these are NOT supported; passing
     # a 3D input will perform dropout1d behavior instead. This was done historically and the
@@ -1415,7 +1416,7 @@ def dropout3d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
                     "and silence this warning, please use dropout instead. Note that dropout3d "
                     "exists to provide channel-wise dropout on inputs with 3 spatial dimensions, "
                     "a channel dimension, and an optional batch dimension (i.e. 4D or 5D inputs).")
-        warnings.warn(warn_msg)
+        warnings.warn(warn_msg, FutureWarning)
 
     is_batched = inp_dim == 5
     if not is_batched:
@@ -1818,7 +1819,9 @@ See :class:`~torch.nn.Softplus` for more details.
 
 def _get_softmax_dim(name: str, ndim: int, stacklevel: int) -> int:
     warnings.warn(
-        f"Implicit dimension choice for {name} has been deprecated. Change the call to include dim=X as an argument.",
+        f"Implicit dimension choice for {name} has been deprecated. "
+        "Change the call to include dim=X as an argument.",
+        FutureWarning,
         stacklevel=stacklevel,
     )
     if ndim == 0 or ndim == 1 or ndim == 3:
@@ -1933,7 +1936,7 @@ def gumbel_softmax(logits: Tensor, tau: float = 1, hard: bool = False, eps: floa
     if has_torch_function_unary(logits):
         return handle_torch_function(gumbel_softmax, (logits,), logits, tau=tau, hard=hard, eps=eps, dim=dim)
     if eps != 1e-10:
-        warnings.warn("`eps` parameter is deprecated and has no effect.")
+        warnings.warn("`eps` parameter is deprecated and has no effect.", FutureWarning)
 
     gumbels = (
         -torch.empty_like(logits, memory_format=torch.legacy_contiguous_format).exponential_().log()
@@ -2381,7 +2384,8 @@ def embedding_bag(
         warnings.warn(
             "Argument order of nn.functional.embedding_bag was changed. "
             "Usage `embedding_bag(weight, input, ...)` is deprecated, "
-            "and should now be `embedding_bag(input, weight, ...)`."
+            "and should now be `embedding_bag(input, weight, ...)`.",
+            FutureWarning,
         )
         weight, input = input, weight
 
@@ -3764,6 +3768,10 @@ def upsample(input: Tensor, size: Optional[List[int]] = None, scale_factor: Opti
     pass
 
 
+@deprecated(
+    "`nn.functional.upsample` is deprecated. Use `nn.functional.interpolate` instead.",
+    category=FutureWarning,
+)
 def upsample(input, size=None, scale_factor=None, mode="nearest", align_corners=None):  # noqa: F811
     r"""Upsample input.
 
@@ -3823,7 +3831,6 @@ def upsample(input, size=None, scale_factor=None, mode="nearest", align_corners=
         affects the outputs.
 
     """
-    warnings.warn("nn.functional.upsample is deprecated. Use nn.functional.interpolate instead.")
     return interpolate(input, size, scale_factor, mode, align_corners)
 
 
@@ -4123,6 +4130,10 @@ def upsample_nearest(input: Tensor, size: Optional[List[int]] = None, scale_fact
     pass
 
 
+@deprecated(
+    "`nn.functional.upsample_nearest` is deprecated. Use `nn.functional.interpolate` instead.",
+    category=FutureWarning,
+)
 def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
     r"""Upsamples the input, using nearest neighbours' pixel values.
 
@@ -4142,8 +4153,6 @@ def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
     Note:
         {backward_reproducibility_note}
     """
-    # DeprecationWarning is ignored by default
-    warnings.warn("nn.functional.upsample_nearest is deprecated. Use nn.functional.interpolate instead.")
     return interpolate(input, size, scale_factor, mode="nearest")
 
 
@@ -4179,6 +4188,10 @@ def upsample_bilinear(  # noqa: F811
     pass
 
 
+@deprecated(
+    "`nn.functional.upsample_bilinear` is deprecated. Use `nn.functional.interpolate` instead.",
+    category=FutureWarning,
+)
 def upsample_bilinear(input, size=None, scale_factor=None):  # noqa: F811
     r"""Upsamples the input, using bilinear upsampling.
 
@@ -4198,8 +4211,6 @@ def upsample_bilinear(input, size=None, scale_factor=None):  # noqa: F811
     Note:
         {backward_reproducibility_note}
     """
-    # DeprecationWarning is ignored by default
-    warnings.warn("nn.functional.upsample_bilinear is deprecated. Use nn.functional.interpolate instead.")
     return interpolate(input, size, scale_factor, mode="bilinear", align_corners=True)
 
 
@@ -5177,7 +5188,8 @@ def _canonical_mask(
             if _mask_dtype != other_type:
                 warnings.warn(
                     f"Support for mismatched {mask_name} and {other_name} "
-                    "is deprecated. Use same type for both instead."
+                    "is deprecated. Use same type for both instead.",
+                    FutureWarning,
                 )
         if not _mask_is_float:
             mask = (

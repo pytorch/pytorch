@@ -1,7 +1,7 @@
 import contextlib
-import warnings
 from collections import defaultdict
 from typing import Any, Dict, Iterator, Optional, Set, Tuple, Union
+from typing_extensions import deprecated
 
 import torch
 from torch import Tensor
@@ -148,6 +148,12 @@ def _reparametrize_module(
         )
 
 
+@deprecated(
+    "`torch.nn.utils.stateless.functional_call` is deprecated as of PyTorch 2.0 "
+    "and will be removed in a future version of PyTorch. "
+    "Please use `torch.func.functional_call` instead which is a drop-in replacement.",
+    category=FutureWarning,
+)
 def functional_call(
     module: "torch.nn.Module",
     parameters_and_buffers: Dict[str, Tensor],
@@ -216,12 +222,6 @@ def functional_call(
     Returns:
         Any: the result of calling ``module``.
     """
-    warnings.warn(
-        "This API is deprecated as of PyTorch 2.0 and will be removed in a future "
-        "version of PyTorch. Please use torch.func.functional_call instead "
-        "which is a drop-in replacement for this API."
-    )
-
     return _functional_call(
         module,
         parameters_and_buffers,

@@ -1,11 +1,16 @@
-import warnings
 from typing import Any
+from typing_extensions import deprecated
 
 import torch
 
 __all__ = ["autocast"]
 
 
+@deprecated(
+    "`torch.cpu.amp.autocast(args...)` is deprecated. "
+    "Please use `torch.amp.autocast('cpu', args...)` instead.",
+    category=FutureWarning,
+)
 class autocast(torch.amp.autocast_mode.autocast):
     r"""
     See :class:`torch.autocast`.
@@ -23,10 +28,6 @@ class autocast(torch.amp.autocast_mode.autocast):
             self.device = "cpu"
             self.fast_dtype = dtype
             return
-        warnings.warn(
-            "torch.cpu.amp.autocast(args...) is deprecated. Please use torch.amp.autocast('cpu', args...) instead.",
-            DeprecationWarning,
-        )
         super().__init__(
             "cpu", enabled=enabled, dtype=dtype, cache_enabled=cache_enabled
         )
