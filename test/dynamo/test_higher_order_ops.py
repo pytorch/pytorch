@@ -3058,6 +3058,19 @@ class GraphModule(torch.nn.Module):
             )
             self.assertEqual(actual, expected)
 
+    @unittest.expectedFailure
+    def test_jacrev_aot_eager(self):
+        counters.clear()
+
+        def wrapper_fn(x):
+            return torch.func.jacrev(torch.sin)(x)
+
+        x = torch.randn(4, 3)
+        actual = wrapper_fn(x)
+        expected = torch.compile(wrapper_fn, backend="aot_eager")(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(len(counters["graph_break"]), 0)
+
     def test_jacrev(self):
         counters.clear()
 
@@ -3558,6 +3571,19 @@ class GraphModule(torch.nn.Module):
                 },
             )
             self.assertEqual(actual, expected)
+
+    def test_vjp_aot_eager(self):
+        counters.clear()
+
+        def wrapper_fn(x):
+            out, vjpfunc = torch.func.vjp(torch.sin, x)
+            return out, vjpfunc(x)
+
+        x = torch.randn(4, 3)
+        actual = wrapper_fn(x)
+        expected = torch.compile(wrapper_fn, backend="aot_eager")(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(len(counters["graph_break"]), 0)
 
     def test_grad(self):
         counters.clear()
@@ -4329,6 +4355,18 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    def test_jacfwd_aot_eager(self):
+        counters.clear()
+
+        def wrapper_fn(x):
+            return torch.func.jacfwd(torch.sin)(x)
+
+        x = torch.randn(4, 3)
+        actual = wrapper_fn(x)
+        expected = torch.compile(wrapper_fn, backend="aot_eager")(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(len(counters["graph_break"]), 0)
+
     def test_jacfwd_two_tensors_argnums(self):
         counters.clear()
 
@@ -5073,6 +5111,18 @@ class GraphModule(torch.nn.Module):
         expected = wrapper_fn(x)
         actual = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=True)(x)
         self.assertEqual(actual, expected)
+
+    def test_jvp_aot_eager(self):
+        counters.clear()
+
+        def wrapper_fn(x):
+            return torch.func.jvp(torch.sin, (x,), (x,))
+
+        x = torch.randn(4, 3)
+        actual = wrapper_fn(x)
+        expected = torch.compile(wrapper_fn, backend="aot_eager")(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(len(counters["graph_break"]), 0)
 
     def test_jvp_disable_capture(self):
         counters.clear()
