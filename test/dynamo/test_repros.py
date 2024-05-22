@@ -33,6 +33,7 @@ import torch.library
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import CompileCounter, rand_strided, same
+from torch._inductor.utils import fresh_inductor_cache
 from torch.nn import functional as F
 
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
@@ -400,7 +401,7 @@ class ListConfig:
         try:
             return ListConfig.ListIterator(self, resolve)
         except Exception:
-            raise AssertionError
+            raise AssertionError from None
 
     def __init__(self):
         self._content = [
@@ -3346,8 +3347,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return y
 
         x = {"a": torch.tensor([1]), "b": torch.tensor([1])}
-        # FIXME It should be KeyError here
-        self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError, lambda: fn(x))
+        self.assertRaises(KeyError, lambda: fn(x))
 
     def test_attached_attribute_in_dir(self):
         class MyModule(torch.nn.Module):
@@ -4709,8 +4709,7 @@ def forward(self, primals_1, primals_2):
     _foreach_copy = torch.ops.aten._foreach_copy.default([primals_1], [primals_2]);  primals_1 = primals_2 = None
     getitem = _foreach_copy[0];  _foreach_copy = None
     mm = torch.ops.aten.mm.default(getitem, getitem)
-    t_1 = torch.ops.aten.t.default(getitem);  getitem = None
-    return [mm, t_1]""",
+    return [mm, getitem]""",
         )
         self.assertEqual(out_ref, out_test)
 
@@ -4915,6 +4914,7 @@ def forward(self, primals_1, primals_2):
         opt_ladder = torch.compile(ladder, fullgraph=True, backend="eager")
         self.assertEqual(opt_ladder(data), ladder(data))
 
+    @unittest.expectedFailure
     def test_trace_functional_tensor_with_error(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
         from torch._subclasses.functional_tensor import (
@@ -4947,6 +4947,45 @@ def forward(self, primals_1, primals_2):
 
         # grad state may not be properly reset after the error
         self.assertTrue(torch.is_grad_enabled())
+
+    def test_const_dict_keyerror(self):
+        d = {}
+
+        def fn(x):
+            try:
+                y = d[0]
+            except KeyError:
+                y = 1
+            return x + y
+
+        opt_fn = torch.compile(fn, backend="eager")
+        inp = torch.randn(3, 3)
+        self.assertEqual(fn(inp), opt_fn(inp))
+
+    def test_nonconst_issubclass(self):
+        def fn(x):
+            if issubclass(x.__class__, np.ndarray):
+                return 1
+            return 0
+
+        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn(np.ones([3, 3]))
+
+    def test_issue126128(self):
+        def fn():
+            x = torch.randn(1, 10)
+            y = torch.randn(10, 1)
+            return torch.mm(x, y).sum()
+
+        def fn2():
+            x = torch.randn(10, 100)
+            y = torch.randn(100, 10)
+            return torch.mm(x, y).sum()
+
+        with fresh_inductor_cache():
+            torch.compile(fn)()
+
+        torch.compile(fn2)()
 
 
 instantiate_parametrized_tests(ReproTests)

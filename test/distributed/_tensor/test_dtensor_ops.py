@@ -468,7 +468,6 @@ dtensor_fails = {
     xfail("take"),
     xfail("tensor_split"),
     xfail("to_sparse"),
-    xfail("topk"),
     xfail("trace"),
     xfail("trapezoid"),
     xfail("trapz"),
