@@ -742,7 +742,8 @@ struct PrivatePool {
 };
 
 BlockState::BlockState(Block* block)
-    : stream(block->stream),
+    : device(block->device),
+      stream(block->stream),
       stream_uses(block->stream_uses),
       size(block->size),
       ptr(block->ptr),
