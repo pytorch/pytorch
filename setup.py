@@ -1133,29 +1133,29 @@ def main():
     if BUILD_TWO_WHEELS:
         setup_cmd = sys.argv[1]
 
-    if (
-        setup_cmd == "build"
-        or setup_cmd == "build_ext"
-        or setup_cmd == "sdist"
-        or setup_cmd == "develop"
-    ):
-        raise RuntimeError(
-            "At the moment the SPLIT_BUILD option only supports the "
-            "clean and install commands. Please rerun setup.py using "
-            "one of those two commands."
-        )
+        if (
+            setup_cmd == "build"
+            or setup_cmd == "build_ext"
+            or setup_cmd == "sdist"
+            or setup_cmd == "develop"
+        ):
+            raise RuntimeError(
+                "At the moment the SPLIT_BUILD option only supports the "
+                "clean and install commands. Please rerun setup.py using "
+                "one of those two commands."
+            )
 
-        final_package_name = PACKAGE_NAME
-        PACKAGE_NAME = "libtorchsplit"
-        BUILD_LIBTORCH_WHL = True
-        BUILD_PYTORCH_USING_LIBTORCH_WHL = False
-        _main()
-        BUILD_LIBTORCH_WHL = False
-        BUILD_PYTORCH_USING_LIBTORCH_WHL = True
-        sys.argv[1] = "clean"
-        PACKAGE_NAME = final_package_name
-        _main()
-        sys.argv[1] = setup_cmd
+            final_package_name = PACKAGE_NAME
+            PACKAGE_NAME = "libtorchsplit"
+            BUILD_LIBTORCH_WHL = True
+            BUILD_PYTORCH_USING_LIBTORCH_WHL = False
+            _main()
+            BUILD_LIBTORCH_WHL = False
+            BUILD_PYTORCH_USING_LIBTORCH_WHL = True
+            sys.argv[1] = "clean"
+            PACKAGE_NAME = final_package_name
+            _main()
+            sys.argv[1] = setup_cmd
     _main()
 
 

@@ -3247,7 +3247,7 @@ class CppKernelProxy(CppKernel):
             for node in nodes:
                 if node.group[1] in [
                     (group, reduction_group),
-                    (group + reduction_group, ()),
+                    (tuple(itertools.chain(group, reduction_group)), ()),
                 ]:
                     assert not in_suffix
                     node.run(vars, reduction_vars)
