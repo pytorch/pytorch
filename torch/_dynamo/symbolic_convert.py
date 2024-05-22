@@ -1282,6 +1282,7 @@ class InstructionTranslatorBase(
 
         if (
             isinstance(expected_class, BuiltinVariable)
+            and isinstance(exn, variables.ExceptionVariable)
             and expected_class.fn is exn.exc_type
         ):
             self.push(ConstantVariable(True))
