@@ -2903,6 +2903,11 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         if self._default_dtype_check_enabled:
             assert torch.get_default_dtype() == torch.float
 
+        # reset dynamo cache to avoid issues like
+        # https://github.com/pytorch/pytorch/issues/125967#issuecomment-2118483919
+        # which depends on test order.
+        torch._dynamo.reset()
+
     def tearDown(self):
         # There exists test cases that override TestCase.setUp
         # definition, so we cannot assume that _check_invariants
