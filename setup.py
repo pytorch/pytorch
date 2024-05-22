@@ -202,10 +202,11 @@
 #   BUILD_LIBTORCH_WHL
 #      Builds libtorch.so and its dependencies as a wheel
 #
-#   BUILD_PYTORCH_USING_LIBTORCH_WHL
-#      Builds pytorch as a wheel using libtorch.so from a seperate wheel [not supported yet]
+#   BUILD_PYTHON_ONLY
+#      Builds pytorch as a wheel using libtorch.so from a seperate wheel
 
 import os
+import pkgutil
 import sys
 
 if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
@@ -216,14 +217,33 @@ if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
 
 import platform
 
+
+def _get_package_path(package_name):
+    loader = pkgutil.find_loader(package_name)
+    if loader:
+        # The package might be a namespace package, so get_data may fail
+        try:
+            file_path = loader.get_filename()
+            return os.path.dirname(file_path)
+        except AttributeError:
+            pass
+    return None
+
+
 BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
-BUILD_PYTORCH_USING_LIBTORCH_WHL = False
+BUILD_PYTORCH_USING_LIBTORCH_WHL = os.getenv("BUILD_PYTHON_ONLY", "0") == "1"
+
 
 # set up appropriate env variables
 if BUILD_LIBTORCH_WHL:
     # Set up environment variables for ONLY building libtorch.so and not libtorch_python.so
     # functorch is not supported without python
     os.environ["BUILD_FUNCTORCH"] = "OFF"
+
+
+if BUILD_PYTORCH_USING_LIBTORCH_WHL:
+    os.environ["BUILD_LIBTORCHLESS"] = "ON"
+    os.environ["LIBTORCH_LIB_PATH"] = f"{_get_package_path('libtorch')}/lib"
 
 python_min_version = (3, 8, 0)
 python_min_version_str = ".".join(map(str, python_min_version))
@@ -1102,34 +1122,12 @@ def print_box(msg):
         print("|{}{}|".format(l, " " * (size - len(l))))
     print("-" * (size + 2))
 
-
-def rename_torch_packages(package_list):
-    """
-    Create a dictionary from a list of package names, renaming packages where
-    the top-level package is 'torch' to 'libtorch'.
-
-    Args:
-        package_list (list of str): The list of package names.
-
-    Returns:
-        dict: A dictionary where keys are the package names with 'torch' replaced by 'libtorch',
-              and values are the original package names, only including those where the
-              top-level name is 'torch'.
-    """
-    result = {}
-    for package in package_list:
-        # Split the package name by dots to handle subpackages or modules
-        parts = package.split(".")
-        # Check if the top-level package is 'torch'
-        if parts[0] == "torch":
-            # Replace 'torch' with 'libtorch' in the top-level package name
-            new_key = "libtorch" + package[len("torch") :]
-            result[new_key] = package
-
-    return result
-
-
 def main():
+    if BUILD_LIBTORCH_WHL and BUILD_PYTORCH_USING_LIBTORCH_WHL:
+        raise RuntimeError(
+            "Conflict: 'BUILD_LIBTORCH_WHL' and 'BUILD_PYTHON_ONLY' can't both be 1. Set one to 0 and rerun."
+        )
+
     # the list of runtime dependencies required by this built package
     install_requires = [
         "filelock",
@@ -1140,6 +1138,9 @@ def main():
         "fsspec",
         'mkl>=2021.1.1,<=2021.4.0; platform_system == "Windows"',
     ]
+
+    if BUILD_PYTORCH_USING_LIBTORCH_WHL:
+        install_requires.append("libtorch")
 
     use_prioritized_text = str(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD", ""))
     if (
@@ -1386,6 +1387,7 @@ def main():
             [
                 "lib/libtorch_python*",
                 "lib/*shm*",
+                "lib/libtorch_global_deps*",
             ]
         )
     else:
