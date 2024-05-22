@@ -8,9 +8,6 @@ from typing import Any, Dict, Optional
 
 import torch
 
-from torch.utils.strobelight.cli_function_profiler import StrobelightCLIFunctionProfiler
-from torch.utils.strobelight.compile_time_profiler import StrobelightCompileTimeProfiler
-
 log = logging.getLogger(__name__)
 
 if os.environ.get("TORCH_COMPILE_STROBELIGHT", False):
@@ -20,7 +17,7 @@ if os.environ.get("TORCH_COMPILE_STROBELIGHT", False):
         )
     else:
         log.info("Strobelight profiler is enabled via environment variable")
-        StrobelightCompileTimeProfiler.enable(StrobelightCLIFunctionProfiler)
+        torch.utils.strobelight.StrobelightCompileTimeProfiler.enable()
 
 # this arbitrary-looking assortment of functionality is provided here
 # to have a central place for overrideable behavior. The motivating
@@ -81,7 +78,7 @@ def compile_time_strobelight_meta(phase_name):
         def wrapper_function(*args, **kwargs):
             if "skip" in kwargs:
                 kwargs["skip"] = kwargs["skip"] + 1
-            return StrobelightCompileTimeProfiler.profile_compile_time(
+            return torch.utils.strobelight.StrobelightCompileTimeProfiler.profile_compile_time(
                 function, phase_name, *args, **kwargs
             )
 
