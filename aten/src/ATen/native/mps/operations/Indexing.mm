@@ -302,8 +302,7 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
   TORCH_CHECK(self.dim() <= maxDimensions, "nonzero is not supported for tensor with more than ", 16, " dimensions");
   TORCH_CHECK(out_.is_mps());
 
-  if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) && self.numel() < nonZeroMaxSize &&
-      !self.is_complex()) {
+  if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) && self.numel() < nonZeroMaxSize && !self.is_complex()) {
     // If conditions are met, use native nonzero op for better performance
     return nonzero_out_native_mps(self, out_);
   }
