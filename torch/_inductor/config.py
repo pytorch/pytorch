@@ -1,6 +1,6 @@
 import os  # noqa: C101
 import sys
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Set, Union
+from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING, Union
 
 import torch
 
@@ -816,13 +816,13 @@ class cuda:
 
 
 class rocm:
-    # Offload arch list for device code compilation, e.g. ["gfx941", "gfx942"]. 
+    # Offload arch list for device code compilation, e.g. ["gfx941", "gfx942"].
     # If empty, the `native` arch is used
     arch: List[str] = []
 
     # Enable for CDNA3 only for now
     # Processor name reference: https://llvm.org/docs/AMDGPUUsage.html#processors
-    supported_arch: Set[str] = {'gfx940', 'gfx941', 'gfx942'}
+    supported_arch: Set[str] = {"gfx940", "gfx941", "gfx942"}
 
     # Optimization level, use to balance compilation speed and runtime performance
     compile_opt_level = "-O2"
@@ -845,7 +845,8 @@ class rocm:
     # Path to ROCm installation, if None, use env variable ROCM_HOME
     rocm_home: Optional[str] = None
 
-    # Path to Composable Kernel library (by default it is checked out as a submodule)
+    # Path to Composable Kernel library.
+    # The default path only works under PyTorch local development environment.
     ck_dir = os.environ.get(
         "TORCHINDUCTOR_CK_DIR",
         os.path.abspath(

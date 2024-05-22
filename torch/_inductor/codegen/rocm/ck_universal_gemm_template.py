@@ -6,15 +6,16 @@ import sympy
 
 import torch
 from torch._inductor import config
-from torch._inductor.codegen.rocm.ck_library import gen_ops_library, gen_ops_preselected
 from torch._inductor.codegen.rocm.ck_template import CKTemplate
-from torch._inductor.codegen.rocm.ck_universal_gemm_op import CKGemmOperation
 from torch._inductor.codegen.rocm.rocm_kernel import ROCmTemplateKernel
 from torch._inductor.ir import Buffer, Layout
 
-log = logging.getLogger(__name__)
+from ...utils import IndentedBuffer, try_import_ck_lib
 
-from ...utils import IndentedBuffer
+_, gen_ops_library, gen_ops_preselected, CKGemmOperation = try_import_ck_lib()
+
+
+log = logging.getLogger(__name__)
 
 
 def is_static_int(number):

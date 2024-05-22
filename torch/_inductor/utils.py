@@ -993,6 +993,30 @@ def _rocm_native_device_arch_name(device):
     return torch.cuda.get_device_properties(device).gcnArchName
 
 
+def try_import_ck_lib():
+    try:
+        from ck4inductor.universal_gemm.gen_instances import (
+            gen_ops_library,
+            gen_ops_preselected,
+        )
+        from ck4inductor.universal_gemm.op import CKGemmOperation
+
+        package_exists = True
+    except ImportError:
+
+        def gen_ops_library():
+            return []
+
+        def gen_ops_preselected():
+            return []
+
+        class CKGemmOperation:
+            pass
+
+        package_exists = False
+    return package_exists, gen_ops_library, gen_ops_preselected, CKGemmOperation
+
+
 def use_ck_template(layout, m, n, k):
     # config knobs check 1
     if not use_max_autotune():
@@ -1009,8 +1033,12 @@ def use_ck_template(layout, m, n, k):
     # hardware check
     # if config arch list is not specified, get the native arch from the device properties
     native_arch = _rocm_native_device_arch_name(layout.device)
-    requested_archs = {k.split(':')[0]: k for k in config.rocm.arch} or {native_arch.split(':')[0]: native_arch} 
-    requested_supported_archs = [requested_archs[k] for k in requested_archs.keys() & config.rocm.supported_arch]
+    requested_archs = {k.split(":")[0]: k for k in config.rocm.arch} or {
+        native_arch.split(":")[0]: native_arch
+    }
+    requested_supported_archs = [
+        requested_archs[k] for k in requested_archs.keys() & config.rocm.supported_arch
+    ]
     if not requested_supported_archs:
         return False
     # supported input dtypes
@@ -1019,11 +1047,15 @@ def use_ck_template(layout, m, n, k):
     # TBD: investigate if we need to disable backend based on number of available CUs similar to `is_big_gpu`
     # check if shape is static and gemm size is not 0
     from .virtualized import V
+
     gemm_size = V.graph.sizevars.size_hint(m * n * k, fallback=-1)
     if gemm_size <= 0:
         return False
     # TBD: investigate if backend needs to be disabled for small gemms similar to CUTLASS
-    return True
+
+    ck_package_exists, _, _, _ = try_import_ck_lib()
+
+    return ck_package_exists
 
 
 def use_aten_gemm_kernels():
