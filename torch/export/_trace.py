@@ -982,7 +982,6 @@ def _strict_export(
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]],
     preserve_module_call_signature: Tuple[str, ...],
     pre_dispatch: bool,
-    forward_arg_names: Optional[List[str]],
     original_state_dict: Dict[str, Any],
     orig_in_spec: TreeSpec,
     _disable_forced_specializations: Optional[bool],
@@ -1116,11 +1115,6 @@ def _strict_export(
                     for k, v in params_buffers_to_node_meta[buffer_name].items():
                         node.meta[k] = v
 
-    # The unbacked symint symbols are updated in aot_export
-    # so we serialize them here instead of inside dynamo
-
-    gm.meta["forward_arg_names"] = forward_arg_names
-
     # Do some cleanups on the graph module to restore the state dict to the
     # expected form. Each of these steps should probably get fixed upstream.
     # 1. Remove tensor constants that were added as buffers.
@@ -1158,7 +1152,6 @@ def _non_strict_export(
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]],
     preserve_module_call_signature: Tuple[str, ...],
     pre_dispatch: bool,
-    forward_arg_names: Optional[List[str]],
     original_state_dict: Dict[str, Any],
     orig_in_spec: TreeSpec,
     _disable_forced_specializations: Optional[bool],
@@ -1280,10 +1273,6 @@ def _non_strict_export(
     except (ConstraintViolationError, ValueRangeError) as e:
         raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: B904
 
-    gm = aten_export_artifact.gm
-
-    gm.meta["forward_arg_names"] = forward_arg_names
-
     _rewrite_non_persistent_buffers(
         mod, aten_export_artifact.sig, aten_export_artifact.constants
     )
@@ -1389,7 +1378,6 @@ def _export(
         dynamic_shapes,
         preserve_module_call_signature,
         pre_dispatch,
-        forward_arg_names,
         original_state_dict,
         orig_in_spec,
         _disable_forced_specializations,
@@ -1404,7 +1392,11 @@ def _export(
     fake_mode = aten_export_artifact.fake_mode
     module_call_specs = aten_export_artifact.module_call_specs
 
-    # Make constratins.
+    # Add forward args metadata.
+    gm.meta["forward_arg_names"] = forward_arg_names
+
+    # The unbacked symint symbols are updated in aot_export
+    # so we serialize them here instead of inside dynamo.
     gm.meta["inline_constraints"] = {
         k: v
         for k, v in fake_mode.shape_env.var_to_range.items()
