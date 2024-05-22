@@ -158,6 +158,10 @@ function install_torchvision() {
   fi
 }
 
+function install_torchao() {
+  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/ao.git"
+}
+
 function install_tlparse() {
   pip_install --user "tlparse==0.3.7"
   PATH="$(python -m site --user-base)/bin:$PATH"

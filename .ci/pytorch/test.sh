@@ -1358,14 +1358,17 @@ elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
     PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id"
   fi
 elif [[ "${TEST_CONFIG}" == *torchao_huggingface* ]]; then
+  install_torchao
   install_torchvision
   id=$((SHARD_NUMBER-1))
   test_torchao_benchmark huggingface "$id"
 elif [[ "${TEST_CONFIG}" == *torchao_timm* ]]; then
+  install_torchao
   install_torchvision
   id=$((SHARD_NUMBER-1))
   test_torchao_benchmark timm_models "$id"
 elif [[ "${TEST_CONFIG}" == *torchao_torchbench* ]]; then
+  install_torchao
   install_torchaudio cuda
   install_torchvision
   id=$((SHARD_NUMBER-1))
