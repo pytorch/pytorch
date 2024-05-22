@@ -64,8 +64,13 @@ def check_node_safe(node: Node):
                 f"Unsupported call_method method {node.target}: {method_name}"
             )
     # Cache safe
-    elif node.op in ("placeholder", "get_attr", "output"):
-        # TODO: not all call_modules may be safe
+    elif node.op in ("placeholder", "get_attr", "call_module" "output"):
+        # Assumption today for call_module being a safe op:
+        # (1) today the only call_module ops that can show up in a graph come from "built-in-nn-modules"
+        # that dynamo assumes are safe to trace. If dynamo assumes they are safely to blindly trace, then
+        # they should be safe to cache as well.
+        # (2) in the steady-state (some time in H2?) we shouldn't see these anymore, once inline builtin nn modules by default
+        # (3) We do not allow user made nn modules in the graph today, only function calls.
         pass
     else:
         raise BypassAOTAutogradCache(f"Unsupported node op {node.op}")
