@@ -58,7 +58,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SymTypes,
 )
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
-from torch.utils._sympy.symbol import free_symbol_is_type, SymT
+from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
@@ -2751,7 +2751,11 @@ class FixedLayout(Layout):
             for idx, stride, sz in zip(index, self.stride, self.size):
                 # If there is indirect indexing we have to perform the
                 # idx wrapping and check that 0 <= idx < 1 checks
-                if not (sz == 1 and free_symbol_is_type(idx, SymT.TMP)):
+                if not (
+                    sz == 1
+                    and isinstance(idx, sympy.Symbol)
+                    and symbol_is_type(idx, SymT.TMP)
+                ):
                     result = result + idx * stride
             return result
 
