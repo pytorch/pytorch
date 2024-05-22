@@ -7383,6 +7383,26 @@ class TestTorch(TestCase):
     def test_invalid_generator_raises(self):
         self.assertRaises(RuntimeError, lambda: torch.Generator('opengl'))
 
+    def test_pickle_generator(self) -> None:
+        devices = ['cpu']
+        if torch.cuda.is_available():
+            devices += ['cuda']
+
+        for device in devices:
+            with self.subTest(device=device):
+                generator = torch.Generator(device=device).manual_seed(12345)
+                if device != "cpu":
+                    generator.set_offset(100)
+                torch.randn((100, 100), generator=generator, device=device)  # progress the RNG state
+
+                reserialized: torch.Generator = pickle.loads(pickle.dumps(generator))
+
+                self.assertEqual(generator.device, reserialized.device)
+                self.assertEqual(generator.initial_seed(), reserialized.initial_seed())
+                if device != "cpu":
+                    self.assertEqual(generator.get_offset(), reserialized.get_offset())
+                torch.testing.assert_close(generator.get_state(), reserialized.get_state())
+
     def _sobol_reference_samples(self, scramble: bool) -> torch.Tensor:
         if not scramble:
             # theoretical values from Joe Kuo 2010
