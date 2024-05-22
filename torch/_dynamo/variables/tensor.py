@@ -227,8 +227,8 @@ class TensorVariable(VariableTracker):
 
                 return SourcelessBuilder.create(tx, example_value)
 
-        if name == "grad_fn" and not self.source.subguards_allowed():
-            return variables.ConstantVariable(None)
+        # if name == "grad_fn" and not self.source.subguards_allowed():
+        #     return variables.ConstantVariable(None)
 
         if not (self.source and self.source.subguards_allowed()):
             raise NotImplementedError
