@@ -42,7 +42,7 @@
 #include <ATen/ops/view_as_real.h>
 #endif
 
-constexpr auto nonZeroMaxSize == 1UL << 24;
+constexpr auto nonZeroMaxSize = 1UL << 24;
 
 namespace at::native {
 namespace mps {
