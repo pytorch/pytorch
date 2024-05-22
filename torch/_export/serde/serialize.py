@@ -528,8 +528,8 @@ class GraphModuleSerializer(metaclass=Final):
 
             ex_node = Node(
                 target=_serialization_registry[type(node.target)](node.target),  # Jump to custom serialization function.
-                inputs=self.serialize_hoo_inputs(node.args, node.kwargs),
-                outputs=self.serialize_hoo_outputs(node),
+                inputs=self.serialize_inputs(node.args, node.kwargs),
+                outputs=self.serialize_outputs(node),
                 metadata=self.serialize_metadata(node),
             )
         else:
