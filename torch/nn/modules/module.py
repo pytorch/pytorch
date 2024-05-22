@@ -1918,7 +1918,7 @@ class Module:
             if module is not None:
                 module.state_dict(destination=destination, prefix=prefix + name + '.', keep_vars=keep_vars)
         for hook in self._state_dict_hooks.values():
-            hook_result = hook(self, destination, prefix, local_metadata)
+            hook(self, destination, prefix, local_metadata)
         return destination
 
     def _register_load_state_dict_pre_hook(self, hook, with_module=False):
@@ -2018,9 +2018,7 @@ class Module:
                 :meth:`~torch.nn.Module.load_state_dict`
         """
         for hook in self._load_state_dict_pre_hooks.values():
-            hook_result = hook(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
-            if hook_result is not None:
-                state_dict = hook_result
+            hook(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
 
         persistent_buffers = {k: v for k, v in self._buffers.items() if k not in self._non_persistent_buffers_set}
         local_name_params = itertools.chain(self._parameters.items(), persistent_buffers.items())

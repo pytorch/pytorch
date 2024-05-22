@@ -336,7 +336,7 @@ class BaseSchedulerNode:
             isinstance(self, (SchedulerNode,))
             and config.inplace_buffers
             and (
-                not isinstance(V.kernel, torch._inductor.codegen.triton.TritonKernel)
+                not isinstance(V.kernel, torch._inductor.codegen.simd.SIMDKernel)
                 or getattr(V.kernel, "mutations", None) is not None
             )
         ):
@@ -390,7 +390,7 @@ class BaseSchedulerNode:
                             )
                             # mutations not tracked in cpp kernels
                             if isinstance(
-                                V.kernel, torch._inductor.codegen.triton.TritonKernel
+                                V.kernel, torch._inductor.codegen.simd.SIMDKernel
                             ):
                                 V.kernel.mutations.add(input_node.get_name())
                                 V.kernel.mutations.add(self.get_name())
@@ -948,7 +948,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def get_template_node(self):
         for node in self.snodes:
             if node.is_template():
-                return node
+                return node.get_template_node()
         return None
 
     def get_device(self):
@@ -1163,7 +1163,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         self.node.get_store_function()(self.node.make_loader()())
 
     def can_free(self):
-        return NotImplementedError
+        raise NotImplementedError
 
     def is_foreach(self):
         return True
@@ -1752,7 +1752,9 @@ class Scheduler:
             del V.graph.name_to_buffer[replaced_name]
             new_node.name = orig_name
 
-            V.graph.buffers.remove(orig_node)
+            orig = V.graph.buffers.index(orig_node)
+            V.graph.buffers.remove(new_node)
+            V.graph.buffers[orig] = new_node
             V.graph.name_to_buffer[orig_name] = new_node
 
         for i, node in enumerate(self.nodes):
