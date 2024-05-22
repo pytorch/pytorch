@@ -1,4 +1,3 @@
-
 #ifdef USE_C10D_NCCL
 
 #include <exception>
@@ -64,6 +63,10 @@ std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
     {at::kLong, ncclInt64},
     {at::kHalf, ncclHalf},
     {at::kBool, ncclUint8},
+    {at::kFloat8_e5m2, ncclUint8},
+    {at::kFloat8_e4m3fn, ncclUint8},
+    {at::kFloat8_e4m3fnuz, ncclUint8},
+    {at::kFloat8_e5m2fnuz, ncclUint8},
 #if HAS_NCCL_BF16_DATATYPE
     {at::kBFloat16, ncclBfloat16},
 #endif
@@ -352,9 +355,9 @@ std::string dump_nccl_trace() {
 }
 #endif
 
-c10::optional<std::function<void(std::function<void(const std::string&)>)>>&
+std::optional<std::function<void(std::function<void(const std::string&)>)>>&
 get_cpp_trace_dumper() {
-  static c10::optional<
+  static std::optional<
       std::function<void(std::function<void(const std::string&)>)>>
       dumper(c10::nullopt);
   return dumper;
@@ -431,7 +434,7 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
     OpType opType,
     uint64_t seq,
     const char* profilingTitle,
-    const c10::optional<std::vector<at::Tensor>>& inputs,
+    const std::optional<std::vector<at::Tensor>>& inputs,
     bool desyncDebug,
     bool enableTiming,
     DebugLevel distDebugLevel)
@@ -546,7 +549,7 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
 }
 
 bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
-    c10::optional<std::chrono::milliseconds> timeout) {
+    std::optional<std::chrono::milliseconds> timeout) {
   auto currentTimepoint = std::chrono::steady_clock::now();
   auto timeElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
       currentTimepoint - workStartTime_);
@@ -748,6 +751,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // both timeout and other errors.
   dumpOnException_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
+  enableNanCheck_ = getCvarBool(TORCH_NCCL_NAN_CHECK, false);
   heartbeat_ = 1ULL;
   monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, true));
   heartbeatTimeoutInSec_ =
@@ -836,6 +840,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
             << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << ncclTraceBufferSize_
             << ", TORCH_NCCL_COORD_CHECK_MILSEC: " << coordCheckIntervalMilSec_
+            << ", TORCH_NCCL_NAN_CHECK: " << enableNanCheck_
             << ", PG Name: " << options_->group_name;
 
   if (options_->global_ranks_in_group.empty()) {
@@ -926,7 +931,7 @@ void ProcessGroupNCCL::setSequenceNumberForGroup() {
 } // NCCL just starts sequence numbers at 0.
 
 uint64_t ProcessGroupNCCL::getSequenceNumberForGroup() {
-  return seq_;
+  return seqCollective_;
 }
 
 void ProcessGroupNCCL::registerOnCompletionHook(
@@ -1036,7 +1041,7 @@ void ProcessGroupNCCL::waitForFutureOrTimeout(
 
 void ProcessGroupNCCL::abortCommsFromMap(
     std::unordered_map<std::string, std::shared_ptr<NCCLComm>>& ncclCommsMap,
-    c10::optional<std::string> abortReason) {
+    std::optional<std::string> abortReason) {
   // The process may control multiple devices, loop through the communicators on
   // each device
   for (auto& it : ncclCommsMap) {
@@ -1069,7 +1074,7 @@ void ProcessGroupNCCL::abortCommsFromMap(
 }
 
 // Abort all communicators on this rank
-bool ProcessGroupNCCL::abort(c10::optional<std::string> abortReason) {
+bool ProcessGroupNCCL::abort(std::optional<std::string> abortReason) {
   // Remove record from global ncclCommDevIdxMapMutex before aboarting,
   // so that a new cache segment would not register to already aborded
   // communicators. Note that ncclCommDevIdxMap is a global container which may
@@ -1088,7 +1093,7 @@ bool ProcessGroupNCCL::abort(c10::optional<std::string> abortReason) {
   return true;
 }
 
-void ProcessGroupNCCL::shutdown(c10::optional<std::string> reason) {
+void ProcessGroupNCCL::shutdown(std::optional<std::string> reason) {
   // Don't join threads here since the purpose of this method is to abort all
   // communicators and signal the threads to exit. Joining on the threads could
   // potentially block and hence avoid it in this method.
@@ -1188,7 +1193,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
                                             : heartbeatTimeoutInSec_ * 1000;
   auto lastTimePollStore = std::chrono::steady_clock::now();
   auto lastTimeHeartBeatCheck = std::chrono::steady_clock::now();
-  c10::optional<DumpPipe> dumpPipe = c10::nullopt;
+  std::optional<DumpPipe> dumpPipe = c10::nullopt;
   if (uid_ == 0) {
     // DumpPipe is one per-trainer process, and its convenient to name them
     // after 'global' ranks in the system, So we assume processgroup (uid)==0 is
@@ -1565,6 +1570,8 @@ void ProcessGroupNCCL::watchdogHandler() {
       data.strings["last_enqueued_work_name"] = lastEnqueuedWorkName_;
       data.strings["last_started_work_name"] = lastStartedWorkName_;
       data.strings["last_completed_work_name"] = lastCompletedWorkName_;
+      data.strings["pg_name"] = pg_name_;
+      data.strings["pg_desc"] = pg_desc_;
       logger->log(data);
       lastStatusUpdateTime = std::chrono::steady_clock::now();
     }
@@ -2239,14 +2246,15 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
       device,
       rank,
       opType,
-      seq_,
+      seqCollective_,
       profilingTitle,
-      profilingTitle != nullptr ? c10::optional<std::vector<at::Tensor>>(inputs)
+      profilingTitle != nullptr ? std::optional<std::vector<at::Tensor>>(inputs)
                                 : c10::nullopt,
       desyncDebug_,
       enableTiming_.load(),
       dist_debug_level_);
   if (record) {
+    bool isP2P = isP2POp(opType);
     // Ideally record every work that we enqueue, rather than every work we
     // create.
     // - at the time of this PR we do not currently enqueue every created work
@@ -2263,13 +2271,15 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
     r->trace_id_ = NCCLTraceBuffer::get()->record(
         uid_,
         std::make_tuple(pg_name_, pg_desc_),
-        seq_,
+        seqCollective_,
+        seqP2P_,
         op_id_,
         profilingTitle ? profilingTitle : "",
         inputs,
         outputs,
         r->ncclStartEvent_.get(),
-        r->ncclEndEvent_.get());
+        r->ncclEndEvent_.get(),
+        isP2P);
   }
   return r;
 }
@@ -2321,10 +2331,6 @@ ProcessGroupNCCL::Options::Options(bool is_high_priority_stream)
 static constexpr int CoalActive = 0x01, CoalColl = 0x02, CoalP2P = 0x04;
 
 void ProcessGroupNCCL::startCoalescing() {
-  coalescedDevice_.set_index(-1);
-  coalescedComm_ = nullptr;
-  coalescing_state_ |= CoalActive;
-  groupStart();
   // Other collective ops bump seq_ before creating a work. Thus, if coalesced
   // ops bump seq_ only after initing a work they will collide with (reuse) the
   // seq_ of the last non-coalesced collective.  Previously, seq_ was bumped
@@ -2333,10 +2339,19 @@ void ProcessGroupNCCL::startCoalescing() {
   // same seq_ for those ops and its 'endCoalescing' op. Hence we bump during
   // start, which has one minor downside- we burn a seq_ if someone ever does a
   // 'start' and 'end' coalescing region without doing an operation inbetween.
-  seq_++;
 
-  // Don't bump op_id_ here, becuase startCoalescing isn't a logical operation.
+  // Don't bump op_id_ here, because startCoalescing isn't a logical operation.
   // Bump it for each logical op inside the coalescing group.
+  if (coalescing_state_ & CoalP2P) {
+    seqP2P_++;
+  } else {
+    seqCollective_++;
+  }
+
+  coalescedDevice_.set_index(-1);
+  coalescedComm_ = nullptr;
+  coalescing_state_ |= CoalActive;
+  groupStart();
 }
 
 // `optype` is for specifying a composite optype, such as ALLGATHER and
@@ -2424,6 +2439,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     OpType opType,
     const char* profilingTitle,
     bool avoidRecordStreams) {
+  if (enableNanCheck_) {
+    checkForNan(input);
+  }
   // Environment setting by the user may add onto collective call's option
   avoidRecordStreams |= avoidRecordStreams_;
   c10::cuda::CaptureStatus capture_status =
@@ -2431,7 +2449,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   errorIfCapturingNonCapturableNCCL(capture_status);
 
   // Bump collective counter
-  seq_++;
+  seqCollective_++;
   op_id_++;
 
   auto device = getDevice(input);
@@ -2586,9 +2604,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   errorIfCapturingNonCapturableNCCL(capture_status);
 
   // Bump collective counter
-  seq_++;
+  seqCollective_++;
+
   // For coalescingManager collectives, there is no individual c++ call per
-  // collective so there is no flight record and we increment seq_ and op_id_
+  // collective so there is no flight record and we increment seq*_ and op_id_
   // together. Compare this to startCoalesing/endCoalescing flow where we
   // increment seq_ once per group and increment op_id_ once per indvidual
   // operation within the group
@@ -2779,6 +2798,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     PreProcess pre,
     PostProcess post,
     const char* profilingTitle) {
+  if (enableNanCheck_) {
+    checkForNan(tensor);
+  }
   // avoidRecordStreams_ note:
   // send, recv, and irecv should be ok with avoidRecordStreams,
   // However, for isend, I don't think the API requires the user
@@ -2813,9 +2835,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     p2pTargetRank = isSendRecvSelf ? 0 : 1 - p2pRank;
 
     if (!coalescing_state_) {
-      // Bump sequence number. Don't do so if it's a batch P2P, it will be
-      // bumped in `endCoalescing`.
-      seq_++;
+      // Bump P2P sequence number. Don't do so if it's a batch P2P, it will be
+      // bumped in `startCoalescing`.
+      seqP2P_++;
     }
   }
 
@@ -2856,13 +2878,15 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     auto trace_id = NCCLTraceBuffer::get()->record(
         uid_,
         std::make_tuple(pg_name_, pg_desc_),
-        seq_,
+        seqCollective_,
+        seqP2P_,
         op_id_,
         profilingTitle,
         {tensor},
         {tensor},
         nullptr,
-        nullptr);
+        nullptr,
+        /*isP2P=*/true);
     // TODO(whc) if we want to make the per-p2p-op flightrecorder entries get
     // their timings/states updated by proxy when the Work obj representing the
     // coalesce group gets its update, we could accumulate these trace_ids
@@ -2881,19 +2905,21 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     // output, not sure what
     work->outputs_ = std::make_shared<std::vector<at::Tensor>>();
     work->outputs_->push_back(tensor);
-    // TODO(whc) becuase we don't pass output {tensor} to initWork, we tell
+    // TODO(whc) because we don't pass output {tensor} to initWork, we tell
     // initWork to not record, and then we manually call record passing all the
     // information it wants.
     work->trace_id_ = NCCLTraceBuffer::get()->record(
         uid_,
         std::make_tuple(pg_name_, pg_desc_),
-        seq_,
+        seqCollective_,
+        seqP2P_,
         op_id_,
         profilingTitle,
         {tensor},
         {tensor},
         work->ncclStartEvent_.get(),
-        work->ncclEndEvent_.get());
+        work->ncclEndEvent_.get(),
+        /*isP2P=*/true);
   }
 
   // is gpuGuard needed for the if block below, or can i swap them
@@ -3029,6 +3055,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_sparse(
     const AllreduceOptions& opts) {
   TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   auto tensor = tensors.back();
+  TORCH_CHECK(
+      !isFloat8Type(tensor.scalar_type()),
+      "Float8 dtypes are not currenlty supported for NCCL reductions");
 #ifdef IS_NCCLX
   tensor = tensor.coalesce();
   at::Tensor outputTensor =
@@ -3143,7 +3172,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
       return c10::make_intrusive<IntraNodeCommWork>();
     }
   }
-
+  TORCH_CHECK(
+      !isFloat8Type(tensor.scalar_type()),
+      "Float8 dtypes are not currenlty supported for NCCL reductions");
   // @lint-ignore CLANGTIDY
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
@@ -3170,6 +3201,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
     std::vector<at::Tensor>& tensors,
     const AllreduceCoalescedOptions& opts) {
   auto total_numel = check_gpu_tensors_same_device(tensors);
+  TORCH_CHECK(
+      !isFloat8Type(tensors.back().scalar_type()),
+      "Float8 dtypes are not currenlty supported for NCCL reductions");
 
   // @lint-ignore CLANGTIDY
   RECORD_PARAM_COMMS_DATA(
@@ -3542,6 +3576,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
   check_gpu_single_tensor(outputTensor);
   // @lint-ignore CLANGTIDY
   auto inputTensors_ = inputTensors.back();
+  TORCH_CHECK(
+      !isFloat8Type(outputTensor.scalar_type()),
+      "Float8 dtypes are not currenlty supported for NCCL reductions");
 
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
@@ -3653,6 +3690,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
 
   // @lint-ignore CLANGTIDY
   const auto& tensor = outputTensor;
+  TORCH_CHECK(
+      !isFloat8Type(tensor.scalar_type()),
+      "Float8 dtypes are not currenlty supported for NCCL reductions");
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
@@ -3713,6 +3753,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_tensor_coalesced(
     std::vector<at::Tensor>& outputs,
     std::vector<at::Tensor>& inputs,
     const ReduceScatterOptions& opts) {
+  TORCH_CHECK(
+      !isFloat8Type(inputs.back().scalar_type()),
+      "Float8 dtypes are not currenlty supported for NCCL reductions");
   return collectiveCoalesced(
       inputs,
       outputs,

@@ -549,6 +549,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return StrictModeHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "associative_scan":
             return AssociativeScanHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "call_torchbind":
+            return CallTorchbindHigherOrderVariable(value, source, **kwargs)
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
@@ -766,6 +768,34 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             {},
             flat_example_value,
             true_treespec,
+        )
+
+
+class CallTorchbindHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    def __init__(self, hop, source, script_obj_var, method_name):
+        super().__init__(hop, source)
+        self.script_obj_var = script_obj_var
+        self.method_name = method_name
+
+    def call_function(
+        self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
+    ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
+        args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
+
+        args_proxy = [arg.as_proxy() for arg in args]
+        kwargs_proxy = {k: v.as_proxy() for k, v in kwargs.items()}
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                self.value,
+                args=tuple(
+                    [self.script_obj_var.as_proxy(), self.method_name] + args_proxy
+                ),
+                kwargs=kwargs_proxy,
+            ),
         )
 
 

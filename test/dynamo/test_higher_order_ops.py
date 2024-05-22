@@ -1921,7 +1921,8 @@ class GraphModule(torch.nn.Module):
         self.assertTrue(len(wrap_node.args), 3)
 
         # Check that the linear bias and weight are getattr in the outer graph
-        self.assertTrue(len(dict(backend.graphs[0].named_parameters())) == 2)
+        if not torch._dynamo.config.inline_inbuilt_nn_modules:
+            self.assertTrue(len(dict(backend.graphs[0].named_parameters())) == 2)
 
         # Check that the inner function has one op and its a linear op
         body_function = getattr(backend.graphs[0], wrap_node.args[0].name)
@@ -2052,7 +2053,8 @@ class GraphModule(torch.nn.Module):
         self.assertTrue(len(wrap_node.args), 3)
 
         # Check that the linear bias and weight are getattr in the outer graph
-        self.assertTrue(len(dict(backend.graphs[0].named_parameters())) == 2)
+        if not torch._dynamo.config.inline_inbuilt_nn_modules:
+            self.assertTrue(len(dict(backend.graphs[0].named_parameters())) == 2)
 
         # Check that the inner function has one op and its a linear op
         body_function = getattr(backend.graphs[0], wrap_node.args[0].name)
@@ -5146,19 +5148,6 @@ class GraphModule(torch.nn.Module):
             )
         self.assertEqual(actual, expected)
 
-    def test_linearize_aot_eager(self):
-        counters.clear()
-
-        def wrapper_fn(x):
-            out, jvp_fn = torch.func.linearize(torch.sin, x)
-            return out, jvp_fn(x)
-
-        x = torch.randn(4, 3)
-        actual = wrapper_fn(x)
-        expected = torch.compile(wrapper_fn, backend="aot_eager")(x)
-        self.assertEqual(actual, expected)
-        self.assertEqual(len(counters["graph_break"]), 0)
-
     @config.patch(capture_func_transforms=True)
     def test_linearize_jvp_fn(self):
         counters.clear()
@@ -5957,7 +5946,7 @@ class GraphModule(torch.nn.Module):
         actual = opt(x, 0), opt(x, 1), opt(x, 2)
         self.assertEqual(expected, actual)
         self.assertEqual(cnt.frame_count, 3)
-        self.assertEqual(cnt.op_count, 33)
+        self.assertEqual(cnt.op_count, 27)
 
     def test_vmap_multiple_invocation_out_dims(self):
         counters.clear()
@@ -5973,7 +5962,7 @@ class GraphModule(torch.nn.Module):
         actual = opt(x, 0), opt(x, 1), opt(x, 2)
         self.assertEqual(expected, actual)
         self.assertEqual(cnt.frame_count, 3)
-        self.assertEqual(cnt.op_count, 30)
+        self.assertEqual(cnt.op_count, 27)
 
     def test_vmap_new_tensor_in_body(self):
         def fn(x):

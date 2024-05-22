@@ -168,7 +168,7 @@ static void debugDumpFusionGroup(const std::string& msg, Node* n) {
   }
 }
 
-static c10::optional<Node*> tryMerge(
+static std::optional<Node*> tryMerge(
     Node* fusion_group,
     Node* to_merge,
     AliasDb* aliasDb) {

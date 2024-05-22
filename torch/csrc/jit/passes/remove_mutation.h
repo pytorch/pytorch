@@ -11,7 +11,7 @@ namespace jit {
 struct TORCH_API MutationRemover {
   MutationRemover(
       std::shared_ptr<Graph> graph,
-      c10::optional<std::function<bool(Node*)>> mutation_filter = c10::nullopt)
+      std::optional<std::function<bool(Node*)>> mutation_filter = c10::nullopt)
       : mutation_filter_(mutation_filter),
         aliasDb_(nullptr),
         graph_(std::move(graph)) {}
@@ -55,7 +55,7 @@ struct TORCH_API MutationRemover {
     return aliasDb_.get();
   }
 
-  c10::optional<std::function<bool(Node*)>> mutation_filter_;
+  std::optional<std::function<bool(Node*)>> mutation_filter_;
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
   std::shared_ptr<Graph> graph_;
 };
@@ -71,7 +71,7 @@ TORCH_API bool RemoveListMutation(const std::shared_ptr<Graph>& graph);
 // return true if graph is modified
 TORCH_API bool RemoveTensorMutation(
     const std::shared_ptr<Graph>& graph,
-    c10::optional<std::function<bool(Node*)>> mutation_filter = c10::nullopt);
+    std::optional<std::function<bool(Node*)>> mutation_filter = c10::nullopt);
 
 // Replaces in-place aten activation ops with their functional equivalence
 TORCH_API bool InplaceToFunctionalActivation(

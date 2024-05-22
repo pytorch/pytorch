@@ -169,7 +169,7 @@ void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack
     new_dims.push_back(getPhysicalDim(self, self_bdim.has_value(), dim));
   }
   bool is_scalar_case = logical_dim == 0 && dims.size() == 1 && is_allowed_dim_on_scalar_tensor(dims[0]);
-  c10::optional<bool> maybe_keepdim;
+  std::optional<bool> maybe_keepdim;
   if (is_scalar_case) {
     // NOTE: [boxed_reduction_batch_rule scalar tensor handling]
     // Reduction operations in PyTorch have an edge case where they allow
@@ -321,9 +321,9 @@ static std::tuple<Tensor,optional<int64_t>> searchsorted_batch_rule(
     optional<int64_t> self_bdim,
     bool out_int32,
     bool right,
-    c10::optional<c10::string_view> side,
-    const c10::optional<Tensor>& sorter,
-    c10::optional<int64_t> sorter_bdim) {
+    std::optional<c10::string_view> side,
+    const std::optional<Tensor>& sorter,
+    std::optional<int64_t> sorter_bdim) {
   auto buckets_logical_rank = rankWithoutBatchDim(sorted_sequence, sorted_sequence_bdim);
   auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
 

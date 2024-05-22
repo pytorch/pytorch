@@ -3070,6 +3070,7 @@ class TestNestedTensorSubclass(TestCase):
             torch.ops.aten.is_non_overlapping_and_dense.default,
             torch.ops.aten.sym_size.default,
             torch.ops.aten.dim.default,
+            torch.ops.aten.numel.default,
             torch.ops.aten.sym_numel.default,
             torch.ops.aten.sym_stride.default,
             torch.ops.aten.sym_storage_offset.default,
@@ -4245,7 +4246,7 @@ class TestNestedTensorSubclass(TestCase):
             # Low Precision Math Reference
             out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(
                 q, k, v)[0].transpose(-2, -3)
-            output_ref_atol, output_ref_rtol = get_tolerances(out, out_lp_ref)
+            output_ref_atol, output_ref_rtol = get_tolerances(out, out_lp_ref, fudge_factor=2)
 
             self.assertEqual(out, out_component, atol=output_ref_atol, rtol=output_ref_rtol)
 

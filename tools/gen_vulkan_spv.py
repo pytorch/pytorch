@@ -222,8 +222,7 @@ def preprocess(
                 blank_lines -= 1
             python_lines.append(
                 python_indent
-                + "print(%s, file=OUT_STREAM)"
-                % escape(input_line[len(python_indent) :])
+                + f"print({escape(input_line[len(python_indent) :])}, file=OUT_STREAM)"
             )
         last_indent = input_indent
 

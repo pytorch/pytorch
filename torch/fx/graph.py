@@ -984,6 +984,9 @@ class Graph:
         name = self._graph_namespace.create_name(candidate, None)
         n = Node(self, name, op, target, args, kwargs, type_expr)
 
+        if self.owning_module is not None and getattr(self.owning_module, "_create_node_hook", None) is not None:
+            self.owning_module._create_node_hook(n)
+
         self._graph_namespace.associate_name_with_obj(name, n)
 
         self._insert(n)

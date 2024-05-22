@@ -407,7 +407,7 @@ TORCH_IMPL_FUNC(lgamma_out_mps)(const Tensor& self, const Tensor& output_) {
     return;
   }
 
-  if (!self.is_contiguous()) {
+  if (mps::needsGather(output_)) {
     output = output.contiguous();
     needs_output_copy = true;
   }
@@ -447,7 +447,7 @@ TORCH_IMPL_FUNC(digamma_out_mps)(const Tensor& self, const Tensor& output_) {
     return;
   }
 
-  if (!self.is_contiguous()) {
+  if (mps::needsGather(output_)) {
     output = output.contiguous();
     needs_output_copy = true;
   }
@@ -488,7 +488,7 @@ TORCH_IMPL_FUNC(polygamma_out_mps)(const int64_t order, const Tensor& self, cons
     return;
   }
 
-  if (!self.is_contiguous()) {
+  if (mps::needsGather(output_)) {
     output = output.contiguous();
     needs_output_copy = true;
   }

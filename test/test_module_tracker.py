@@ -25,10 +25,12 @@ class TestModuleTracker(TestCase):
             def __init__(self):
                 super().__init__()
                 self.a = Foo()
-                self.b = Foo()
+                self.b = torch.nn.ModuleDict({"nest": Foo()})
+                self.c = torch.nn.ModuleList([Foo()])
 
             def forward(self, x):
-                return self.b(self.a(x))
+                x = self.c[0](x)
+                return self.b["nest"](self.a(x))
 
         mod = Mod()
 
@@ -43,22 +45,34 @@ class TestModuleTracker(TestCase):
         self.assertEqual(
             seen_fw,
             [
+                ({"Global", "Mod", "Mod.c.0"}, False),
                 ({"Global", "Mod", "Mod.a"}, False),
-                ({"Global", "Mod", "Mod.b"}, False),
+                ({"Global", "Mod", "Mod.b.nest"}, False),
+                ({"Global", "Mod", "Mod.c.0"}, False),
                 ({"Global", "Mod", "Mod.a"}, False),
-                ({"Global", "Mod", "Mod.b"}, False),
+                ({"Global", "Mod", "Mod.b.nest"}, False),
             ],
         )
 
         self.assertEqual(
             seen_bw,
             [
-                ({"Global", "Mod", "Mod.b"}, True),
+                ({"Global", "Mod", "Mod.b.nest"}, True),
                 ({"Global", "Mod", "Mod.a"}, True),
-                ({"Global", "Mod", "Mod.b"}, True),
+                ({"Global", "Mod", "Mod.c.0"}, True),
+                ({"Global", "Mod", "Mod.b.nest"}, True),
                 ({"Global", "Mod", "Mod.a"}, True),
+                ({"Global", "Mod", "Mod.c.0"}, True),
             ],
         )
+
+    def test_bw_detection(self):
+        mod = torch.nn.Linear(2, 2)
+
+        with ModuleTracker() as tracker:
+            mod(torch.rand(2, requires_grad=True)).sum().backward()
+            self.assertFalse(tracker.is_bw)
+            self.assertEqual(tracker.parents, {"Global"})
 
 
 if __name__ == "__main__":
