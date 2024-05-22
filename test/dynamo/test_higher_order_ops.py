@@ -3058,7 +3058,6 @@ class GraphModule(torch.nn.Module):
             )
             self.assertEqual(actual, expected)
 
-    @unittest.expectedFailure
     def test_jacrev_aot_eager(self):
         counters.clear()
 

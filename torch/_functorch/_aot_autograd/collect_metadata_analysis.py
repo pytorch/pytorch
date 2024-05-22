@@ -15,7 +15,7 @@ from typing import Callable, DefaultDict, Dict, List
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
-from torch._C._functorch import is_functorch_wrapped_tensor
+from torch._C._functorch import is_functorch_wrapped_tensor, unwrap_if_dead
 from torch._guards import detect_fake_mode
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
@@ -382,6 +382,12 @@ def run_functionalized_fw_and_collect_metadata(
         # This misinterpretation leads to an 'alias_of_input' flag, causing an unnecessary as_strided() call to be generated,
         # which could lead to issues later in the code.
         for o in flat_f_outs:
+            # Fix PyTorch issue #126882
+            # In some situations, the functorch-wrapped tensor "o" might have been captured from an outer scope
+            # where the original conditions are no longer valid. In these cases, we need to unwrap the tensor
+            # because its wrapper is no longer valid (i.e., lvl == -2).
+            if isinstance(o, torch.Tensor) and is_functorch_wrapped_tensor(o):
+                o = unwrap_if_dead(o)
             functional_tensor_storage_changed = isinstance(
                 o, FunctionalTensor
             ) and torch._functionalize_was_storage_changed(  # type: ignore[attr-defined]
