@@ -675,7 +675,7 @@ class WrapperCodeGen(CodeGen):
         self.writeline(f"{kernel}({', '.join(args)})")
 
     def generate_user_defined_triton_kernel(
-        self, kernel_name, grid, configs, args, triton_meta
+        self, kernel_name, grid, configs, args, triton_meta, arg_types=None
     ):
         grid, code = user_defined_kernel_grid_fn_code(
             kernel_name, configs, grid, wrapper=self
@@ -1686,6 +1686,10 @@ class WrapperCodeGen(CodeGen):
     @staticmethod
     def statically_known_int_or_none(x):
         try:
+            if getattr(x, "free_symbols", None):
+                # _maybe_evaluate_static will return (s0 // (2 // s0)) as 2, but
+                # the actual codegen will still generate the full expression here.
+                return None
             val = V.graph._shape_env._maybe_evaluate_static(x)
             return int(val)
         except Exception:

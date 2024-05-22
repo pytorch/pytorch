@@ -249,7 +249,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             torch.cpu.amp.autocast,
         ):
             return AutocastModeVariable.create(self.value, args, kwargs)
-        elif self.value in (
+        elif 0 and self.value in (  # TODO: pearu hack
             torch.profiler.profile,
             torch.profiler.record_function,
             torch.autograd.profiler.profile,
