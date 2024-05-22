@@ -231,7 +231,7 @@ def _get_package_path(package_name):
 
 
 BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
-BUILD_PYTORCH_USING_LIBTORCH_WHL = os.getenv("BUILD_PYTHON_ONLY", "0") == "1"
+BUILD_PYTHON_ONLY = os.getenv("BUILD_PYTHON_ONLY", "0") == "1"
 
 
 # set up appropriate env variables
@@ -241,7 +241,7 @@ if BUILD_LIBTORCH_WHL:
     os.environ["BUILD_FUNCTORCH"] = "OFF"
 
 
-if BUILD_PYTORCH_USING_LIBTORCH_WHL:
+if BUILD_PYTHON_ONLY:
     os.environ["BUILD_LIBTORCHLESS"] = "ON"
     os.environ["LIBTORCH_LIB_PATH"] = f"{_get_package_path('libtorch')}/lib"
 
@@ -1123,7 +1123,7 @@ def print_box(msg):
     print("-" * (size + 2))
 
 def main():
-    if BUILD_LIBTORCH_WHL and BUILD_PYTORCH_USING_LIBTORCH_WHL:
+    if BUILD_LIBTORCH_WHL and BUILD_PYTHON_ONLY:
         raise RuntimeError(
             "Conflict: 'BUILD_LIBTORCH_WHL' and 'BUILD_PYTHON_ONLY' can't both be 1. Set one to 0 and rerun."
         )
@@ -1139,7 +1139,7 @@ def main():
         'mkl>=2021.1.1,<=2021.4.0; platform_system == "Windows"',
     ]
 
-    if BUILD_PYTORCH_USING_LIBTORCH_WHL:
+    if BUILD_PYTHON_ONLY:
         install_requires.append("libtorch")
 
     use_prioritized_text = str(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD", ""))
@@ -1382,7 +1382,7 @@ def main():
         "utils/model_dump/*.mjs",
     ]
 
-    if BUILD_PYTORCH_USING_LIBTORCH_WHL:
+    if BUILD_PYTHON_ONLY:
         torch_package_data.extend(
             [
                 "lib/libtorch_python*",
