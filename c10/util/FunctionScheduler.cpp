@@ -1,4 +1,3 @@
-#include "FunctionScheduler.h"
 #include <c10/util/FunctionScheduler.h>
 
 namespace c10 {
@@ -56,7 +55,7 @@ std::chrono::microseconds FunctionScheduler::getNextWaitTime() {
   }
 
   auto now = std::chrono::steady_clock::now();
-  return std::chrono::duration_cast<std::chrono::milliseconds>(
+  return std::chrono::duration_cast<std::chrono::microseconds>(
       _next_run->time() - now);
 }
 
