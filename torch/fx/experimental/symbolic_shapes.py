@@ -1774,10 +1774,12 @@ class DimConstraints:
             assert isinstance(solution, sympy.Eq), f"Expected an equality constraint for {s}, got {solution}"
             symbol, val = solution.args
             assert symbol == s, f"Expected a constraint on {s} instead of on {symbol}"
-            # because this is univariate, the solution is a specialization
-            self._static_results.add(f"{self._dcp.symbol_to_source[s][0].name()} == {val}")
-            # add this as a substitution to simplify other constraints
-            self._substitutions[s] = val
+            # really don't force specializations here
+            if not (_disable_forced_specializations and s in self._marked_dynamic):
+                # because this is univariate, the solution is a specialization
+                self._static_results.add(f"{self._dcp.symbol_to_source[s][0].name()} == {val}")
+                # add this as a substitution to simplify other constraints
+                self._substitutions[s] = val
 
             # simplify multivariate inequalities: some of them will now become univariate!
             multivariate_inequalities = self._multivariate_inequalities
