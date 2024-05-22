@@ -268,12 +268,8 @@ def _unique(
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
-    if dim is None:
-        arg_dim = arg
-    else:
-        arg_dim = arg.new_empty((arg.shape[dim],))
-
-    if (nnz := arg.unique_memo) is None:
+    # Do not use a memo for unique_dim
+    if dim is not None or (nnz := arg.unique_memo) is None:
         # Avoid importing sympy at a module level
         from torch.fx.experimental.symbolic_shapes import (
             _constrain_range_for_size,
@@ -295,27 +291,30 @@ def _unique(
 
             maxval = sys.maxsize - 1
 
-            if not has_free_symbols(arg_dim.numel()):
-                maxval = int(arg_dim.numel())
+            if not has_free_symbols(arg.numel()):
+                maxval = int(arg.numel())
 
             _constrain_range_for_size(nnz, max=maxval)
 
-        arg.unique_memo = nnz
+        if dim is None:
+            arg.unique_memo = nnz
 
     if dim is None:
         ret = [arg.new_empty((nnz,))]
     else:
-        ret = [arg.new_empty(*arg.shape[:dim], nnz, *arg.shape[dim+1:])]
+        ret = [arg.new_empty(*arg.shape[:dim], nnz, *arg.shape[dim + 1:])]
 
     if return_inverse:
-        ret.append(torch.empty_like(arg_dim))
+        inverse = arg.new_empty(arg.shape if dim is None else (arg.shape[dim],))
     else:
-        ret.append(arg.new_empty(0))
+        inverse = arg.new_empty(0)
+    ret.append(inverse)
 
     if return_counts:
-        ret.append(torch.empty_like(arg_dim))
+        counts = arg.new_empty(ret[0].shape if dim is None else (ret[0].shape[dim],))
     else:
-        ret.append(arg.new_empty(0))
+        counts = arg.new_empty(0)
+    ret.append(counts)
 
     return tuple(ret)
 
