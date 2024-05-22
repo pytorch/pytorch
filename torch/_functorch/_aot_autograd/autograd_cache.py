@@ -27,11 +27,14 @@ class BypassAOTAutogradCache(Exception):
 
 def check_node_safe(node: Node):
     """
-    Checks that the node only uses supported operators.
+    Checks that the node only uses supported operators. We are starting with very
+    conservative cacheability constraints, and incrementally adding more support as we expand.
     """
 
     def is_torch_function(target):
-        return type(target).__name__.startswith("builtin")
+        is_builtin_fun_or_type = type(target).__name__ == "builtin_function_or_method"
+        # TODO: handle torch.nn.functional and other non inlined targets, which don't compile down to a builtin
+        return is_builtin_fun_or_type
 
     def is_tensor(target):
         # Tensors always have example values in meta field
@@ -46,14 +49,22 @@ def check_node_safe(node: Node):
                 f"Unsupported call_function target {node.target}"
             )
     elif node.op == "call_method":
+        method_name = node.target
         method_target = node.args[0]
+        # Only support method calls on base tensors
         if not is_tensor(method_target):
-            # We support only method calls on tensors and symints
             raise BypassAOTAutogradCache(
                 f"Unsupported call_method target {method_target}"
             )
+        if (
+            type(method_name) != str
+            and type(method_name).__name__ != "method_descriptor"
+        ):
+            raise BypassAOTAutogradCache(
+                f"Unsupported call_method method {node.target}: {method_name}"
+            )
     # Cache safe
-    elif node.op in ("placeholder", "call_module", "get_attr", "output"):
+    elif node.op in ("placeholder", "get_attr", "output"):
         # TODO: not all call_modules may be safe
         pass
     else:
