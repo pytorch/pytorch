@@ -78,9 +78,9 @@ on:
 jobs:
   build:
     runs-on: ${{ inputs.runs_on }}
-    if: ${{ inputs.GPU_ARCH_TYPE == 'cuda-aarch64' }}
+    ${{ if inputs.GPU_ARCH_TYPE == 'cuda-aarch64' }}:
       timeout-minutes: 360
-    if: ${{ inputs.GPU_ARCH_TYPE != 'cuda-aarch64' }}
+    ${{ if inputs.GPU_ARCH_TYPE != 'cuda-aarch64' }}:
       timeout-minutes: 210
     env:
       PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
