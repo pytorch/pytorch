@@ -2671,6 +2671,8 @@ class CppVecKernelChecker(CppVecKernel):
 
         self.simd_vec = True
 
+        self.simd_masked_vec = True
+
         self.fast_vec_list = []
         for k, v in CppVecOverrides.__dict__.items():
             if isinstance(v, staticmethod):
@@ -2689,10 +2691,23 @@ class CppVecKernelChecker(CppVecKernel):
             torch.int64,
         ]
 
+        self.supported_dtypes_for_masked_vec: List[torch.dtype] = [
+            torch.float,
+            torch.bfloat16,
+            torch.float16,
+            torch.bool,
+        ]
+
     def disable_vec(self, msg=None):
         if schedule_log.isEnabledFor(logging.DEBUG):
             schedule_log.debug("Disabled vectorization: %s", msg)
         self.simd_vec = False
+        self.simd_masked_vec = False
+
+    def disable_masked_vec(self, msg=None):
+        if schedule_log.isEnabledFor(logging.DEBUG):
+            schedule_log.debug("Disabled masked vectorization: %s", msg)
+        self.simd_masked_vec = False
 
     def load(self, name: str, index: sympy.Expr):
         with RecordOptimizationContext(__name__) as node_ctx:
@@ -2702,6 +2717,12 @@ class CppVecKernelChecker(CppVecKernel):
 
             opt_ctx.dtype = load_dtype
             var = self.cse.newvar()
+
+            if load_dtype not in self.supported_dtypes_for_masked_vec:
+                self.disable_masked_vec(f"{load_dtype} not supported by masked vectorization")
+
+            if has_free_symbols(self.ranges):
+                self.disable_masked_vec(f"Symbolic ranges not supported by masked vectorization")
 
             if len(self.itervars) == 0:
                 self.disable_vec("not a loop")
@@ -3268,6 +3289,7 @@ class CppKernelProxy(CppKernel):
             tiling_indices = select_tiling_indices(tiling_factor)
             if tiling_indices:
                 could_vec = True
+                could_masked_vec = True
                 for tiling_indice in tiling_indices:
                     with CppVecKernelChecker(
                         deepcopy(self.kernel_group.args),
@@ -3277,21 +3299,22 @@ class CppKernelProxy(CppKernel):
                     ) as vec_checker:
                         run(vec_checker)
                         could_vec = could_vec and vec_checker.simd_vec
+                        could_masked_vec = could_masked_vec and vec_checker.simd_masked_vec
                         if not could_vec:
                             break
                 if could_vec:
                     if len(tiling_indices) == 1:
-                        return [tiling_factor], tiling_indices
+                        return [tiling_factor], tiling_indices, could_masked_vec
                     if len(tiling_indices) == 2:
-                        return [tiling_factor, tiling_factor], tiling_indices
-            return [], []
+                        return [tiling_factor, tiling_factor], tiling_indices, could_masked_vec
+            return [], [], False
 
         # Kernels share the same global contexts like V.graph.wrapper_code, V.kernel.args.
         # But the generated scalar kernel has updated these global contexts. Hence, the other kernels
         # should not do this again to avoid context conflict. By now, we only control the
         # config.inplace_buffers. In the future, we could maintain more contexts.
         with torch._inductor.config.patch(inplace_buffers=False):
-            tiling_factors, tiling_indices = select_tiling(vec_dtype)
+            tiling_factors, tiling_indices, could_masked_vec = select_tiling(vec_dtype)
             assert len(tiling_factors) == len(tiling_indices)
             if len(tiling_indices) == 1:
                 vec_kernel = codegen_kernel(
@@ -3303,10 +3326,7 @@ class CppKernelProxy(CppKernel):
                 )
                 main_loop.set_kernel(vec_kernel)
                 main_loop.simd_vec = True
-                if has_free_symbols(tail_loop.size):
-                    tail_loop.set_kernel(scalar_kernel)
-                    tail_loop.simd_omp = True
-                else:
+                if could_masked_vec:
                     tail_loop.steps = tail_loop.size - tail_loop.offset
                     masked_vec_kernel = codegen_kernel(
                         CppVecKernel,
@@ -3317,6 +3337,9 @@ class CppKernelProxy(CppKernel):
                     )
                     tail_loop.set_kernel(masked_vec_kernel)
                     tail_loop.simd_vec = True
+                else:
+                    tail_loop.set_kernel(scalar_kernel)
+                    tail_loop.simd_omp = True
                 # We chop the loop into two cubes by the nelements - main loop and tail loop.
                 # Regarding the main loop, it is straightforward that it could be vectorized with
                 # nelements. But for the tail loop, it still could be vectorized. For example,
