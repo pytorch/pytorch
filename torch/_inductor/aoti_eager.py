@@ -96,15 +96,12 @@ def load_aoti_eager_cache(ns: str, op_func_name_with_overload: str, device_type:
                                 for str_sym_stride in metadata["strides"].values()
                             ]
                             metadata["sizes"] = [
-                                # create_symint(shape_env, size_item)
                                 shape_env.create_symintnode(
                                     sympy_sizes_expr[idx], hint=sizes_hint[idx]
                                 )
                                 for idx in range(len(sizes_hint))
                             ]
                             metadata["strides"] = [
-                                # create_symint(shape_env, stride_item)
-                                # for stride_item in strides_hint
                                 shape_env.create_symintnode(
                                     sympy_strides_expr[idx], hint=strides_hint[idx]
                                 )
@@ -160,7 +157,8 @@ def extract_tensor_metadata(
         metadata["device_index"] = input.device.index
     metadata["dtype"] = f"{input.dtype}"
 
-    if dynamic and fake_input is not None:
+    if dynamic:
+        assert fake_input is not None
         # If dynamic is specified, we expect all the size and strides are symbolic
         sym_size = fake_input.size()
         sym_strides = fake_input.stride()
