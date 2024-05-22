@@ -965,8 +965,12 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         ) -> torch.Tensor:
             """Input tensors assumed to have shape (batch_size, seq_len, n_head, embed_dim)"""
             attn_mask = torch.ones(
-                query.size(0), 1, query.size(1), key.size(1),
-                dtype=torch.bool, device=query.device
+                query.size(0),
+                1,
+                query.size(1),
+                key.size(1),
+                dtype=torch.bool,
+                device=query.device
             ).tril(diagonal=0)
             attn_mask = attn_mask.masked_fill(
                 torch.logical_not(attn_mask), -float("inf")
@@ -978,10 +982,13 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             attention_scores = attention_scores / math.sqrt(q.size(-1))
             attention_scores = attention_scores + attn_mask
             attention_probs = torch.nn.functional.softmax(attention_scores, -1)
-            attention_probs = torch.nn.functional.dropout(attention_probs, 0.1, training=False)
+            attention_probs = torch.nn.functional.dropout(
+                attention_probs, p=0.1, training=False
+            )
             return torch.matmul(attention_probs, v)
 
         self._check_common(dot_prod_attention)
+
 
 if HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION:
 
