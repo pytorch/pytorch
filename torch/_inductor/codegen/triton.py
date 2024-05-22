@@ -1732,7 +1732,7 @@ class TritonKernel(SIMDKernel):
 
     def codegen_kernel_benchmark(self, num_gb, grid=None):
         result = IndentedBuffer()
-        argdefs, call_args, signature = self.args.python_argdefs()
+        argdefs, call_args, signature, _ = self.args.python_argdefs()
 
         result.writelines(["", "", "def get_args():"])
         with result.indent():
@@ -1784,7 +1784,8 @@ class TritonKernel(SIMDKernel):
             grid_arg = f"{extra_args_str}grid=grid({', '.join(grid)})"
         else:
             grid_arg = f"grid={grid}"
-        index = V.graph.scheduler.current_device.index
+        current_device = V.graph.scheduler.get_current_device_or_throw()
+        index = current_device.index
         with result.indent():
             result.writeline(f"with {V.graph.device_ops.device_guard(index)}:")
             with result.indent():
@@ -1917,7 +1918,7 @@ class TritonKernel(SIMDKernel):
             if config.benchmark_kernel:
                 code.splice(self.imports_for_benchmark_kernel())
 
-        argdefs, _, signature = self.args.python_argdefs()
+        argdefs, _, signature, _ = self.args.python_argdefs()
         # maps actual expression to SizeArg if it is in sizevars replacements
         for i, arg in enumerate(signature):
             if isinstance(arg, SizeArg):
@@ -1948,7 +1949,9 @@ class TritonKernel(SIMDKernel):
         )
         triton_meta = {
             "signature": triton_meta_signature,
-            "device": DeviceProperties.create(V.graph.scheduler.current_device),
+            "device": DeviceProperties.create(
+                V.graph.scheduler.get_current_device_or_throw()
+            ),
             "constants": {},
         }
 
@@ -2086,7 +2089,7 @@ class TritonKernel(SIMDKernel):
     def _get_grid_fn(self):
         return "grid"
 
-    def add_numel_to_call_args_and_grid(self, name, call_args, grid):
+    def add_numel_to_call_args_and_grid(self, name, call_args, arg_types, grid):
         # TODO(jansel): if there are constants, we shouldn't bother passing them as args
         for tree in self.range_trees:
             if isinstance(tree.numel, (sympy.Integer, sympy.Symbol)):
@@ -2096,24 +2099,26 @@ class TritonKernel(SIMDKernel):
 
             if tree.prefix != "r" or self.inside_reduction:
                 call_args.append(expr)
+                arg_types.append(type(expr))
             if tree.grid_dim is not None:
                 grid.append(expr)
 
     def get_call_args(self):
-        _, call_args, _ = self.args.python_argdefs()
+        # arg_types is needed for cpp wrapper codegen
+        _, call_args, _, arg_types = self.args.python_argdefs()
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
                 call_args[i] = call_args[i] + ".item()"
 
-        return call_args
+        return call_args, arg_types
 
     def call_kernel(self, name: str, node: Optional[IRNode] = None):
         wrapper = V.graph.wrapper_code
-        call_args = self.get_call_args()
+        call_args, arg_types = self.get_call_args()
         grid: List[Any] = []
-        self.add_numel_to_call_args_and_grid(name, call_args, grid)
-        current_device = V.graph.scheduler.current_device
+        self.add_numel_to_call_args_and_grid(name, call_args, arg_types, grid)
+        current_device = V.graph.scheduler.get_current_device_or_throw()
 
         if self.args.workspace_arg is not None:
             ws = self.args.workspace_arg
@@ -2129,6 +2134,7 @@ class TritonKernel(SIMDKernel):
             current_device.index,
             cuda=True,
             triton=True,
+            arg_types=arg_types,
             grid_fn=self._get_grid_fn(),
             triton_meta=self.triton_meta,
         )
@@ -2138,7 +2144,7 @@ class TritonKernel(SIMDKernel):
 
     def codegen_nan_check(self):
         wrapper = V.graph.wrapper_code
-        _, call_args, arg_types = self.args.python_argdefs()
+        _, call_args, arg_types, _ = self.args.python_argdefs()
         for arg, arg_type in zip(call_args, arg_types):
             if isinstance(arg_type, TensorArg):
                 line = f"assert not {arg}.isnan().any().item()"
@@ -2222,9 +2228,8 @@ class TritonScheduling(SIMDScheduling):
             compile_wrapper = IndentedBuffer()
             compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
             compile_wrapper.splice(src_code, strip=True)
-            compile_wrapper.writeline(
-                f"''', device_str='{V.graph.scheduler.current_device.type}')"
-            )
+            current_device = V.graph.scheduler.get_current_device_or_throw()
+            compile_wrapper.writeline(f"''', device_str='{current_device.type}')")
 
             metadata_comment = f"# kernel path: {kernel_path}"
             origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)

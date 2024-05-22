@@ -2011,6 +2011,15 @@ def set_default_tensor_type(tensor_type):
     finally:
         torch.set_default_tensor_type(saved_tensor_type)
 
+@contextlib.contextmanager
+def futureLazyCloneGuard(mode=True):
+    try:
+        restore = torch._C._get_future_copy_instead_of_conditional_view()
+        torch._C._set_future_copy_instead_of_conditional_view(mode)
+        yield
+    finally:
+        torch._C._set_future_copy_instead_of_conditional_view(restore)
+
 def iter_indices(tensor):
     if tensor.dim() == 0:
         return range(0)
