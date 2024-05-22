@@ -2102,10 +2102,6 @@ class DeviceCachingAllocator {
   void free_block(
       Block* block,
       const std::shared_ptr<GatheredContext>& context) {
-    TORCH_INTERNAL_ASSERT(!block->allocated);
-    TORCH_INTERNAL_ASSERT(block->event_count == 0);
-    TORCH_INTERNAL_ASSERT(block->stream_uses.empty());
-
     TORCH_INTERNAL_ASSERT(
         !block->allocated && block->event_count == 0 &&
         block->stream_uses.empty());
@@ -2777,10 +2773,10 @@ class DeviceCachingAllocator {
     if (C10_UNLIKELY(!needs_events_deferred_until_no_capture.empty())) {
       for (auto* block : needs_events_deferred_until_no_capture) {
         TORCH_INTERNAL_ASSERT(!block->stream_uses.empty());
-        remove_cudagraph_stream_uses(block);
         // only streams recorded before cudagraph will be used to insert events
         // since we know all streams recorded during cudagraph must have completed
-        // insert_events(block);
+        remove_cudagraph_stream_uses(block);
+        insert_events(block);
         if (block->event_count == 0) {
           free_block(block, context);
         }
