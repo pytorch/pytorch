@@ -544,10 +544,12 @@ class MultiProcessTestCase(TestCase):
     # Constructor patches current instance test method to
     # assume the role of the main process and join its subprocesses,
     # or run the underlying test function.
-    def __init__(self, methodName: str = "runTest") -> None:
-        super().__init__(methodName)
-        fn = getattr(self, methodName)
-        setattr(self, methodName, self.join_or_run(fn))
+    def __init__(self, method_name: str = "runTest", methodName: str = "runTest") -> None:
+        if methodName != "runTest":
+            method_name = methodName
+        super().__init__(method_name)
+        fn = getattr(self, method_name)
+        setattr(self, method_name, self.join_or_run(fn))
 
     def setUp(self) -> None:
         super().setUp()
