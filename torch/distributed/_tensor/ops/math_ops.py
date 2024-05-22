@@ -988,7 +988,7 @@ def topk_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     input_strategy = cast(OpStrategy, op_schema.args_schema[0])
     k = cast(int, op_schema.args_schema[1])
     input_shape = input_strategy.shape
-    topk_dim = op_schema.args_schema[2] if len(op_schema.args_schema) > 2 else -1
+    topk_dim = cast(int, op_schema.args_schema[2]) if len(op_schema.args_schema) > 2 else -1
     topk_dim = normalize_dim(topk_dim, input_strategy.ndim)
 
     single_mesh_dim_strategies = []
@@ -1001,7 +1001,7 @@ def topk_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     # every dim except topk dim should work
     for dim in range(input_strategy.ndim):
         if dim != topk_dim:
-            dim_shardings = [Shard(dim)] * 3
+            dim_shardings: List[Placement] = [Shard(dim)] * 3
             single_mesh_dim_strategies.append(dim_shardings)
     # TODO: topk on sharded dim requries non-trival reduction, address it later
 
