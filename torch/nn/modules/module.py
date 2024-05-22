@@ -1723,14 +1723,15 @@ class Module:
                     if isinstance(d, dict):
                         del d[name]
                     else:
-                        d.discard(name)
+                        d.dislcard(name)
 
-        params = self.__dict__.get('_parameters')
+        __dict__ = self.__dict__
+        params = __dict__.get('_parameters')
         if isinstance(value, Parameter):
             if params is None:
                 raise AttributeError(
                     "cannot assign parameters before Module.__init__() call")
-            remove_from(self.__dict__, self._buffers, self._modules, self._non_persistent_buffers_set)
+            remove_from(__dict__, __dict__["_buffers"], __dict__["_modules"], self._non_persistent_buffers_set)
             self.register_parameter(name, value)
         elif params is not None and name in params:
             if value is not None:
@@ -1739,12 +1740,12 @@ class Module:
                                 )
             self.register_parameter(name, value)
         else:
-            modules = self.__dict__.get('_modules')
+            modules = __dict__.get('_modules')
             if isinstance(value, Module):
                 if modules is None:
                     raise AttributeError(
                         "cannot assign module before Module.__init__() call")
-                remove_from(self.__dict__, self._parameters, self._buffers, self._non_persistent_buffers_set)
+                remove_from(__dict__, __dict__["_parameters"], __dict__["_buffers"], self._non_persistent_buffers_set)
                 for hook in _global_module_registration_hooks.values():
                     output = hook(self, name, value)
                     if output is not None:
@@ -1761,7 +1762,7 @@ class Module:
                         value = output
                 modules[name] = value
             else:
-                buffers = self.__dict__.get('_buffers')
+                buffers = __dict__.get('_buffers')
                 if buffers is not None and name in buffers:
                     if value is not None and not isinstance(value, torch.Tensor):
                         raise TypeError(f"cannot assign '{torch.typename(value)}' as buffer '{name}' "
