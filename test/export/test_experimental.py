@@ -2,6 +2,10 @@
 # flake8: noqa
 import unittest
 
+from dataclasses import dataclass
+
+from typing import List, Dict, Tuple
+
 import torch
 import torch._dynamo
 from torch._dynamo.test_case import run_tests, TestCase
@@ -134,9 +138,50 @@ def forward(self, arg0_1, arg1_1):
         exported_module = _convert_ts_to_export_experimental(
             traced_module_by_torchscript, inps
         )
-        print(exported_module.graph)
 
         self.assertTrue(torch.allclose(exported_module(inps), model_to_trace(inps)))
+
+    def test_torchscript_module_export_various_inputs_with_annotated_input_names(self):
+
+        def _check_equality_and_annotations(m_func, inps):
+            # Original module.
+            model_to_trace = m_func()
+
+            # ExportedProgram from TorchScript module.
+            traced_module_by_torchscript = torch.jit.trace(m_func(), example_inputs=inps)
+            exported_module = _convert_ts_to_export_experimental(
+                traced_module_by_torchscript, inps
+            )
+
+            # ExportedProgram from original module.
+            original_exported_module = torch.export.export(m_func(), inps)
+
+            # Check whether input annotations are the same as tracing the original module.
+            orig_ph_name_list = [n.name for n in original_exported_module.graph.nodes if n.op == "placeholder"]
+            ph_name_list = [n.name for n in exported_module.graph.nodes if n.op == "placeholder"]
+            self.assertEqual(orig_ph_name_list, ph_name_list)
+
+            # Check results equality.
+            self.assertTrue(torch.allclose(exported_module(*inps), model_to_trace(*inps)))
+
+        # Tuple
+        class MTuple(torch.nn.Module):
+            def forward(self, x: Tuple[torch.Tensor]):
+                return x[0] + x[1]
+        _check_equality_and_annotations(MTuple, ((torch.randn(4), torch.randn(4)),))
+
+        # List
+        class MList(torch.nn.Module):
+            def forward(self, x: List[torch.Tensor]):
+                return x[0] + x[1]
+        _check_equality_and_annotations(MList, ([torch.randn(4), torch.randn(4)],))
+
+        # Dict
+        class MDict(torch.nn.Module):
+            def forward(self, x: Dict[str, torch.Tensor]):
+                return x["0"] + x["1"]
+        _check_equality_and_annotations(MDict, ({"0": torch.randn(4), "1": torch.randn(4)},))
+
 
 
 if __name__ == "__main__":
