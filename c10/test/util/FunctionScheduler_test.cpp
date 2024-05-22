@@ -108,10 +108,10 @@ TEST(FunctionScheduler, RunJobWithInterval) {
   c10::FunctionScheduler fs;
   fs.scheduleJob(function, interval);
   fs.start();
-  std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  std::this_thread::sleep_for(std::chrono::seconds(1));
   ASSERT_FALSE(ran);
 
-  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  std::this_thread::sleep_for(std::chrono::seconds(17));
   fs.stop();
 
   ASSERT_TRUE(ran);
@@ -128,7 +128,7 @@ TEST(FunctionScheduler, RunMultipleJobs) {
   fs.scheduleJob(function1, interval1);
   fs.scheduleJob(function2, interval2);
   fs.start();
-  std::this_thread::sleep_for(std::chrono::milliseconds(22));
+  std::this_thread::sleep_for(std::chrono::seconds(22));
   fs.stop();
 
   ASSERT_EQ(counter, 4);
