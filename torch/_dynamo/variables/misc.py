@@ -700,7 +700,11 @@ class GetAttrVariable(VariableTracker):
 
             # Return the default value for get
             if name == "get":
-                return args[1]
+                if len(args) == 2:
+                    return args[1]
+                else:
+                    return variables.ConstantVariable(None)
+
         elif (
             name == "__contains__"
             and self.name == "__dict__"
