@@ -173,7 +173,7 @@ def find_package_path(package_name):
     if loader:
         # The package might be a namespace package, so get_data may fail
         try:
-            file_path = loader.get_filename()
+            file_path = loader.get_filename()  # type: ignore[attr-defined]
             return os.path.dirname(file_path)
         except AttributeError:
             pass
@@ -205,9 +205,8 @@ def load_shared_libraries(library_path):
                 ctypes.CDLL(so_path)
             else:
                 ctypes.CDLL(so_path, mode=ctypes.RTLD_GLOBAL)
-            print(f"Successfully loaded {so_path}")
-        except OSError as e:
-            print(f"Failed to load {so_path}: {e}")
+        except OSError as err:
+            print(f"Failed to load {so_path}: {err}")
 
 # See Note [Global dependencies]
 def _load_global_deps() -> None:
@@ -1315,7 +1314,7 @@ def _check_tensor_all(cond, message=None):  # noqa: F811
 
 # For Python Array API (https://data-apis.org/array-api/latest/API_specification/constants.html) and
 # NumPy consistency (https://numpy.org/devdocs/reference/constants.html)
-from math import e , nan , inf , pi
+from math import e, nan , inf , pi
 newaxis: None = None
 __all__.extend(['e', 'pi', 'nan', 'inf', 'newaxis'])
 
