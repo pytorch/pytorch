@@ -175,6 +175,7 @@ exclude_patterns = [
     'tools/test/gen_oplist_test.py',
     'tools/test/test_selective_build.py',
     'tools/strobelight/examples/cli_function_profiler_example.py',
+    'tools/strobelight/examples/compile_time_profile_example.py',
 ]
 command = [
     'python3',
