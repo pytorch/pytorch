@@ -37,7 +37,6 @@ from torch._dynamo.testing import (
     rand_strided,
     same,
     skipIfPy312,
-    xfailIfPy312,
 )
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
 from torch._inductor.fx_passes import pad_mm
@@ -9510,7 +9509,6 @@ class CommonTemplate:
 
         self.common(fn, (inp, offsets), check_lowp=False)
 
-    @xfailIfPy312
     @requires_gpu()
     @config.patch(assume_aligned_inputs=False)
     def test_config_option_dont_assume_alignment(self):
