@@ -33,7 +33,11 @@ static void warn_invalid_fp32_precision(const std::string& backend, std::string&
   }
 }
 
-static void fp32_precision_valid_check(const std::string& backend, const std::string& op, const std::string& precision=std::string()) {
+static void fp32_precision_valid_check(
+    const std::string& backend,
+    const std::string& op,
+    std::string& precision,
+    bool rewrite_precision = false) {
   static std::vector<std::string> backends = {"generic", "mkldnn", "cuda"};
   static std::vector<std::string> operators = {"conv", "matmul", "rnn", "all"};
 
@@ -42,14 +46,37 @@ static void fp32_precision_valid_check(const std::string& backend, const std::st
   TORCH_CHECK(std::find(operators.begin(), operators.end(), op) != operators.end(), "Invalid operator: ", op);
 
   if (precision.size() != 0) {
+    bool invalid = false;
     if (backend == "generic") {
       TORCH_CHECK(op == "all", "Invalid operation for generic backend: ", op);
     } else if (backend == "cuda") {
-      TORCH_CHECK(std::find(cuda_precisions.begin(), cuda_precisions.end(), precision) != cuda_precisions.end(),
-        "Invalid precision for CUDA backend: ", precision);
+      invalid =
+          std::find(
+              cuda_precisions.begin(), cuda_precisions.end(), precision) ==
+          cuda_precisions.end();
     } else if (backend == "mkldnn") {
-      TORCH_CHECK(std::find(mkldnn_precisions.begin(), mkldnn_precisions.end(), precision) != mkldnn_precisions.end(),
-        "Invalid precision for MKLDNN backend: ", precision);
+      invalid =
+          std::find(
+              mkldnn_precisions.begin(), mkldnn_precisions.end(), precision) ==
+          mkldnn_precisions.end();
+    }
+    if (invalid) {
+      if (rewrite_precision) {
+        precision = "default";
+        TORCH_WARN(
+            "Invalid precision for ",
+            backend,
+            " precision: ",
+            precision,
+            " reset precision to default");
+      } else {
+        TORCH_CHECK(
+            false,
+            "Invalid precision for ",
+            backend,
+            " precision: ",
+            precision);
+      }
     }
   }
 }
@@ -144,12 +171,11 @@ bool Context::allowTF32CuDNN(const std::string& op) const {
     bool allow_tf32_rnn = float32Precision("cuda", "rnn") == "tf32";
     bool allow_tf32_conv = float32Precision("cuda", "conv") == "tf32";
     TORCH_CHECK(
-        allow_tf32_rnn == allow_tf32_conv,
-        "Invalid status, you can check the detail at",
-        "https://github.com/pytorch/pytorch/blob/main/docs/source/notes/cuda.rst#tensorfloat-32-tf32-on-ampere-and-later-devices");
-    TORCH_CHECK(
-        allow_tf32_rnn == allow_tf32_cudnn,
-        "Invalid status, you can check the detail at",
+        allow_tf32_rnn == allow_tf32_conv || allow_tf32_rnn == allow_tf32_cudnn,
+        "You are checking whether allow_tf32 is enabled for cudnn backend without a specific operator name. ",
+        "But the current status indicate that cudnn conv and cudnn rnn have different TF32 status with cudnn",
+        "This indicate you have used mix of legacy API and new API to set the TF32 status. ",
+        "We suggest to only use the new API to set the TF32 status, you can check the usage at ",
         "https://github.com/pytorch/pytorch/blob/main/docs/source/notes/cuda.rst#tensorfloat-32-tf32-on-ampere-and-later-devices");
   } else {
     return float32Precision("cuda", op) == "tf32";
@@ -259,7 +285,10 @@ bool Context::allowTF32CuBLAS() const {
   bool allow_tf32 = float32Precision("cuda", "matmul") == "tf32" ? true : false;
   TORCH_CHECK(
       legacy_allow_tf32 == allow_tf32,
-      "Invalid status, you can check the detail at",
+      "You are checking whether allow_tf32 is enabled for cublas matmul. ",
+      "From Pytorch 2.4 we introduced an new set of API to set the TF32 status for cublas matmul. ",
+      "Current status indicate that you have used mix of legacy API and new API to set the TF32 status for cublas matmul. ",
+      "We suggest to only use the new API to set the TF32 status, you can check the usage at ",
       "https://github.com/pytorch/pytorch/blob/main/docs/source/notes/cuda.rst#tensorfloat-32-tf32-on-ampere-and-later-devices");
   return allow_tf32;
 }
@@ -279,13 +308,15 @@ Float32MatmulPrecision Context::float32MatmulPrecision() const {
 }
 
 std::string Context::float32Precision(const std::string& backend, const std::string& op) const {
-  fp32_precision_valid_check(backend, op);
+  std::string p = "";
+  fp32_precision_valid_check(backend, op, p);
   auto precision = fp32_precision.find(backend)->second.find(op)->second;
   if (precision == "default")
     precision = fp32_precision.find(backend)->second.find("all")->second;
   if (precision == "default")
     precision = fp32_precision.find("generic")->second.find("all")->second;
-  warn_invalid_fp32_precision(backend, precision);
+  fp32_precision_valid_check(
+      backend, op, precision, /*rewrite_precision=*/true);
   return precision;
 }
 
@@ -320,7 +351,8 @@ void Context::setFloat32MatmulPrecision(const std::string &s) {
 }
 
 void Context::setFloat32Precision(const std::string& p, const std::string& backend, const std::string& op) {
-  fp32_precision_valid_check(backend, op, p);
+  std::string precision_non_const = p;
+  fp32_precision_valid_check(backend, op, precision_non_const);
   fp32_precision[backend][op] = p;
 }
 
