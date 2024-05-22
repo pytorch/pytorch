@@ -4,7 +4,17 @@ import itertools
 import operator
 import warnings
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+)
 
 import torch
 import torch.nn.functional as F
@@ -20,7 +30,6 @@ from torch.ao.quantization.observer import (
     PlaceholderObserver,
 )
 from torch.ao.quantization.pt2e.graph_utils import find_sequential_partitions
-from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
 from torch.ao.quantization.quantizer.quantizer import (
     QuantizationAnnotation,
     QuantizationSpec,
@@ -42,6 +51,9 @@ from torch.fx.passes.utils.source_matcher_utils import (
     get_source_partitions,
     SourcePartition,
 )
+
+if TYPE_CHECKING:
+    from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
 
 __all__ = [
     "X86InductorQuantizer",
@@ -82,7 +94,9 @@ default_quantizable_ops = propagation_quantizable_ops | {
 
 # A superset of default_quantizable_ops includes operators support the int8 data type
 # but not enabled by default recipe of X86InductorQuantizer.
-quantizable_ops = default_quantizable_ops
+quantizable_ops = default_quantizable_ops | {
+    torch.ops.aten.matmul.default,
+}
 
 QUANT_ANNOTATION_KEY = "quantization_annotation"
 
@@ -109,6 +123,12 @@ def _map_module_function_to_aten_operator_type():
                 torch.flatten,
             ],
             torch.ops.aten.flatten.using_ints,
+        ),
+        (
+            [
+                torch.matmul,
+            ],
+            torch.ops.aten.matmul.default,
         ),
     )
     for map_item in map_list:
@@ -286,9 +306,9 @@ class X86InductorQuantizer(Quantizer):
 
     @classmethod
     def get_supported_quantization_configs(cls) -> List[QuantizationConfig]:
-        op_configs: Set[QuantizationConfig] = set({})
-        for spec, _ in cls.supported_config_and_operators:
-            op_configs.add(spec)
+        op_configs: Set[QuantizationConfig] = {
+            spec for spec, _ in cls.supported_config_and_operators
+        }
         return list(op_configs)
 
     @classmethod
@@ -309,6 +329,14 @@ class X86InductorQuantizer(Quantizer):
     def set_global(self, quantization_config: QuantizationConfig):
         self.global_config = quantization_config
         return self
+
+    def get_global_quantization_config(self):
+        if not isinstance(self.global_config, QuantizationConfig):
+            warnings.warn(
+                "The global_config for X86InductorQuantizer is currently invalid. \
+                Please ensure that you use set_global to establish the global quantization configuration."
+            )
+        return self.global_config
 
     def set_function_type_qconfig(
         self,
@@ -499,6 +527,7 @@ class X86InductorQuantizer(Quantizer):
         # Step1: Recipe of fusion patterns like conv/linear.
         self._annotate_conv2d_fusion_pattern(model)
         self._annotate_linear_fusion_pattern(model)
+        self._annotate_matmul(model)
 
         # Step2: Recipe to propagate annotation for patterns beside conv/linear.
         # Go through all the nodes from start to end.
@@ -749,8 +778,27 @@ class X86InductorQuantizer(Quantizer):
         if config := self._get_aten_operator_qconfig(torch.ops.aten.linear.default):
             if config.input_activation and not config.input_activation.is_dynamic:
                 # <TODO> Weiwen: Dynamic Quant of linear unary will be supported in next step
+                self._annotate_linear_binary_unary(model, config)
                 self._annotate_linear_unary(model, config)
             self._annotate_linear(model, config)
+
+    def _annotate_matmul(self, model: torch.fx.GraphModule):
+        if config := self._get_aten_operator_qconfig(torch.ops.aten.matmul.default):
+            for node in model.graph.nodes:
+                if node.target == torch.ops.aten.matmul.default and not _is_annotated(
+                    [node]
+                ):
+                    input_qspec_map = {}
+                    matmul_node = node
+                    for input_node in matmul_node.args:
+                        input_qspec_map[input_node] = get_input_act_qspec(config)
+                    matmul_node.meta[
+                        QUANT_ANNOTATION_KEY
+                    ] = _X86InductorQuantizationAnnotation(
+                        input_qspec_map=input_qspec_map,
+                        _annotated=True,
+                        _is_output_of_quantized_pattern=True,
+                    )
 
     def _annotate_conv2d_binary_unary(
         self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
@@ -1105,6 +1153,87 @@ class X86InductorQuantizer(Quantizer):
                 _annotated=True,
                 _is_output_of_quantized_pattern=True,
             )
+
+    def _annotate_linear_binary_unary(
+        self,
+        gm: torch.fx.GraphModule,
+        quantization_config: QuantizationConfig,
+    ) -> None:
+        # linear + binary_op + (optional) unary op
+        binary_op_list = [operator.add]
+        unary_op_list = [torch.nn.ReLU, None]
+        combinations = itertools.product(binary_op_list, unary_op_list)
+        for binary_op, unary_op in combinations:
+            has_unary = unary_op is not None
+            seq_partition = [torch.nn.Linear, binary_op]
+            if has_unary:
+                seq_partition.append(unary_op)
+            fused_partitions = find_sequential_partitions(gm, seq_partition)
+            for fused_partition in fused_partitions:
+                unary_partition, unary_node = None, None
+                if has_unary:
+                    (
+                        linear_partition,
+                        binary_partition,
+                        unary_partition,
+                    ) = fused_partition
+                    (
+                        linear_node,
+                        binary_node,
+                        unary_node,
+                    ) = self._get_output_nodes_of_partitions(
+                        [linear_partition, binary_partition, unary_partition]
+                    )
+                else:
+                    linear_partition, binary_partition = fused_partition
+                    linear_node, binary_node = self._get_output_nodes_of_partitions(
+                        [linear_partition, binary_partition]
+                    )
+                if len(linear_node.users) != 1:
+                    # Linear Node should only has 1 user node
+                    continue
+                (
+                    linear_node_idx,
+                    extra_input_node_idx,
+                ) = self._get_input_idx_for_binary_node(linear_node, binary_node)
+                if (linear_node_idx is None) or (extra_input_node_idx is None):
+                    continue
+                if linear_node != binary_node.args[linear_node_idx]:
+                    raise ValueError(
+                        f"{linear_node} doesn't match input of binary node"
+                    )
+                assert isinstance(linear_node, Node)
+                if (
+                    linear_node.op != "call_function"
+                    or linear_node.target != torch.ops.aten.linear.default
+                ):
+                    # No linear node found to be fused with add
+                    continue
+                node_list = (
+                    [binary_node, linear_node]
+                    if unary_node is None
+                    else [unary_node, binary_node, linear_node]
+                )
+                if _is_annotated(node_list):
+                    continue
+                self._annotate_linear_node_helper(
+                    linear_node, False, quantization_config
+                )
+                # We don't insert q-dq before the binary input node due to accuracy issues
+                binary_node.meta[
+                    QUANT_ANNOTATION_KEY
+                ] = _X86InductorQuantizationAnnotation(
+                    input_qspec_map={},
+                    _annotated=True,
+                    _is_output_of_quantized_pattern=(not has_unary),
+                )
+                if unary_node is not None:
+                    unary_node.meta[
+                        QUANT_ANNOTATION_KEY
+                    ] = _X86InductorQuantizationAnnotation(
+                        _annotated=True,
+                        _is_output_of_quantized_pattern=True,
+                    )
 
     def validate(self, model: torch.fx.GraphModule) -> None:
         pass

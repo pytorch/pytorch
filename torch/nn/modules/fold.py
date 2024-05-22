@@ -41,7 +41,7 @@ class Fold(Module):
       sides for :attr:`padding` number of points for each dimension before
       reshaping.
 
-    * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
+    * :attr:`dilation` controls the spacing between the kernel points; also known as the \u00e0 trous algorithm.
       It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
 
     Args:
@@ -186,7 +186,7 @@ class Unfold(Module):
       sides for :attr:`padding` number of points for each dimension before
       reshaping.
 
-    * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
+    * :attr:`dilation` controls the spacing between the kernel points; also known as the \u00e0 trous algorithm.
       It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
 
     Args:

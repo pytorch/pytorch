@@ -14,7 +14,7 @@ __all__ = ["Namespace"]
 
 
 @total_ordering
-class Namespace(metaclass=abc.ABCMeta):
+class Namespace(metaclass=abc.ABCMeta):  # noqa: B024
     """Namespace for isolating skip tensors used by :meth:`isolate()
     <torchpipe.skip.skippable.Skippable.isolate>`.
     """

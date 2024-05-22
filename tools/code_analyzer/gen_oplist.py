@@ -34,7 +34,7 @@ def throw_if_any_op_includes_overloads(selective_builder: SelectiveBuilder) -> N
         if op.include_all_overloads:
             ops.append(op_name)
     if ops:
-        raise Exception(
+        raise Exception(  # noqa: TRY002
             (
                 "Operators that include all overloads are "
                 + "not allowed since --allow-include-all-overloads "

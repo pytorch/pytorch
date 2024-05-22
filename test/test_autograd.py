@@ -79,6 +79,7 @@ from torch.testing._internal.common_utils import (
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
+from torch.utils.cpp_extension import load_inline
 from torch.utils.hooks import RemovableHandle
 
 
@@ -399,7 +400,7 @@ class TestAutograd(TestCase):
         @staticmethod
         @once_differentiable
         def backward(ctx, input):
-            raise Exception("Simulate error on backward pass")
+            raise Exception("Simulate error on backward pass")  # noqa: TRY002
 
     def test_custom_function_exception(self):
         t1 = torch.rand((3, 3), requires_grad=True)
@@ -2611,7 +2612,7 @@ class TestAutograd(TestCase):
 
                 except UnrecoverableException:
                     self.assertFalse(torch.is_grad_enabled())
-                    raise SecondaryException
+                    raise SecondaryException from None
 
         @torch.enable_grad()
         def coro_enable_grad(n=10):
@@ -2623,7 +2624,7 @@ class TestAutograd(TestCase):
 
                 except UnrecoverableException:
                     self.assertTrue(torch.is_grad_enabled())
-                    raise SecondaryException
+                    raise SecondaryException from None
 
         with torch.enable_grad():
             coro = coro_no_grad()
@@ -4628,11 +4629,11 @@ Done""",
         self.assertEqual(avg.count, 4)
         self.assertEqual(avg.cpu_time_total, 30)
         self.assertEqual(avg.self_cpu_time_total, 30)
-        self.assertEqual(avg.cuda_time_total, 0)
+        self.assertEqual(avg.device_time_total, 0)
 
         # average stats
         self.assertEqual(avg.cpu_time, 7.5)
-        self.assertEqual(avg.cuda_time_total, 0)
+        self.assertEqual(avg.device_time_total, 0)
 
     def test_profiler_shapes(self):
         print("")
@@ -4696,9 +4697,7 @@ Done""",
         )  # make it us which is profiler default
         print("Total time based on python measurements: ", _format_time(total_time_us))
         print(
-            "CPU time measurement python side overhead: {:.2f}%".format(
-                (total_time_us / prof.self_cpu_time_total - 1.0) * 100.0
-            )
+            f"CPU time measurement python side overhead: {(total_time_us / prof.self_cpu_time_total - 1.0) * 100.0:.2f}%"
         )
 
         if sys.platform != "win32":
@@ -6918,7 +6917,7 @@ for shape in [(1,), ()]:
         a = torch.randn(2, 2, requires_grad=True)
 
         with self.assertRaisesRegex(
-            Exception, "Checkpointing is not compatible with .grad()"
+            Exception, "torch.utils.checkpoint is incompatible"
         ):
             b = checkpoint(torch.exp, a, use_reentrant=True).sum()
             torch.autograd.grad(b, (a,))
@@ -9509,6 +9508,59 @@ for shape in [(1,), ()]:
         t2 = torch.rand(2, requires_grad=True)
         t3 = torch.rand(2, requires_grad=True)
         t4 = torch.rand(2, requires_grad=True)
+
+        # Ensure we properly detect all types of Nodes here
+        # C++ Node
+        t1 = t1.mul(2)
+
+        # Python custom Function
+        class Foo(Function):
+            @staticmethod
+            def forward(ctx, a):
+                return a.clone()
+
+            @staticmethod
+            def backward(ctx, gO):
+                return gO
+
+        t2 = Foo.apply(t2)
+
+        # C++ Node
+        t3 = torch._C._functions.UndefinedGrad()(t3)
+
+        # C++ Custom Op
+        cpp_source = """
+struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
+  static torch::Tensor forward(
+      torch::autograd::AutogradContext* ctx,
+      const torch::Tensor& x) {
+    return x.clone();
+  }
+
+  static torch::autograd::variable_list backward(
+      torch::autograd::AutogradContext *ctx,
+      torch::autograd::variable_list grad_output) {
+    return grad_output;
+  }
+};
+
+torch::Tensor custom_op_backed_by_autograd_fn(torch::Tensor x) {
+  return CustomOpAutogradFunction::apply(x);
+}
+
+TORCH_LIBRARY(test_autograd_cpp_node, m) {
+    m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
+}
+        """
+
+        module = load_inline(
+            name="test_autograd_cpp_node",
+            cpp_sources=cpp_source,
+            functions="custom_op_backed_by_autograd_fn",
+            verbose=True,
+        )
+
+        t4 = torch.ops.test_autograd_cpp_node.custom_op_backed_by_autograd_fn(t4)
 
         res = [None] * 4
         count = [0]
