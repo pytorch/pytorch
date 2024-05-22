@@ -158,7 +158,7 @@ class TritonTemplateKernel(TritonKernel):
         if self.use_jit:
             return "@triton.jit"
 
-        argdefs, _, signature = self.args.python_argdefs()
+        argdefs, _, signature, _ = self.args.python_argdefs()
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
             "device": DeviceProperties.create(self.output_node.get_device()),
@@ -461,7 +461,7 @@ class TritonTemplateKernel(TritonKernel):
 
     def call_kernel(self, name: str, node: Optional[ir.IRNode] = None):
         wrapper = V.graph.wrapper_code
-        _, call_args, _ = self.args.python_argdefs()
+        _, call_args, _, arg_types = self.args.python_argdefs()
         call_args = [str(a) for a in call_args]
 
         for i in range(len(call_args)):
@@ -485,6 +485,7 @@ class TritonTemplateKernel(TritonKernel):
                 name,
                 call_args,
                 device_index=V.graph.scheduler.current_device.index,
+                arg_types=arg_types,
                 grid=grid,
                 triton_meta=self.triton_meta,
             )

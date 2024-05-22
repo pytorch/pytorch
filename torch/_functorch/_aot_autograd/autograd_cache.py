@@ -153,7 +153,7 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
 
 def autograd_cache_hash(
     gm: torch.fx.GraphModule,
-    example_inputs: List[torch.Tensor],
+    example_inputs,
     config: AOTConfig,
     # TODO: add args and parameters
 ) -> str:

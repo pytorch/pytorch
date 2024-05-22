@@ -5,8 +5,8 @@ import torch._dynamo
 import torch._dynamo.test_case
 
 import torch._functorch._aot_autograd
-from torch._functorch import config as functorch_config
 import torch.distributed as dist
+from torch._functorch import config as functorch_config
 from torch._functorch._aot_autograd.autograd_cache import (
     autograd_cache_hash,
     BypassAOTAutogradCache,
@@ -113,10 +113,10 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         c2 = self.gen_cache_key(fn, config2)
         self.assertNotEqual(c1, c2)
 
-
     def test_different_inputs(self):
         def fn(x):
             return x.cos().sin()
+
         config = self.default_config()
         c1 = self.gen_cache_key(fn, config, inputs=[torch.ones(3)])
         c2 = self.gen_cache_key(fn, config, inputs=[torch.ones(2)])
@@ -125,6 +125,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
     def test_different_global_configs(self):
         def fn(x):
             return x.cos().sin()
+
         config = self.default_config()
 
         c1 = self.gen_cache_key(fn, config)
@@ -150,7 +151,6 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         with torch.no_grad():
             c2 = self.gen_cache_key(fn, config)
         self.assertNotEqual(c1, c2)
-
 
     def test_incompatible_function(self):
         @torch._dynamo.allow_in_graph
