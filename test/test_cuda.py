@@ -3436,13 +3436,15 @@ exit(2)
                     grads_graphed = [[g.clone() for g in gs] for gs in grads]
 
                 # Gradient Scaler
-                scaler_for_control = torch.cuda.amp.GradScaler(init_scale=128.0)
+                scaler_for_control = torch.amp.GradScaler(
+                    device="cuda", init_scale=128.0
+                )
                 with torch.no_grad():
                     scaler_for_control._lazy_init_scale_growth_tracker(
                         torch.device("cuda")
                     )
 
-                scaler_for_graphed = torch.cuda.amp.GradScaler()
+                scaler_for_graphed = torch.amp.GradScaler(device="cuda")
                 scaler_for_graphed.load_state_dict(scaler_for_control.state_dict())
                 with torch.no_grad():
                     scaler_for_graphed._lazy_init_scale_growth_tracker(
@@ -4718,7 +4720,7 @@ class TestCudaOptims(TestCase):
     def test_graph_grad_scaling(self, device, dtype, optim_info, foreach, fused):
         torch.cuda.empty_cache()
 
-        scaler = torch.cuda.amp.GradScaler(init_scale=4.0)
+        scaler = torch.amp.GradScaler(device="cuda", init_scale=4.0)
         g = torch.cuda.CUDAGraph()
         s = torch.cuda.Stream()
 
