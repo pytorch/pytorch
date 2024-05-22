@@ -207,6 +207,7 @@ if RUN_CUDA:
         BaseTest("test_mm_views"),
         BaseTest("test_multi_device"),
         BaseTest("test_multi_threading"),
+        BaseTest("test_pow3"),
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest("test_randint"),
         BaseTest("test_reduction1"),  # Reduction
