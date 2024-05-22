@@ -169,7 +169,8 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     XPUCachingAllocator::recordStream(data_ptr, xpu_stream);
   }
 
-  double elapsedTime(void* event1, void* event2) const override {
+  double elapsedTime(void* event1, void* event2, const DeviceIndex device_index)
+      const override {
     TORCH_CHECK_NOT_IMPLEMENTED(
         false, "elapsedTime is not supported by XPU backend.");
   }
