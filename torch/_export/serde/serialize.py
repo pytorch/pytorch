@@ -2823,4 +2823,5 @@ def register_custom_op_serialization(
 # Registry to store all custom serialization implementations.
 # The registry maps a operation to its serialization function (a callable), in their own
 # namespace to avoid conflicts.
-_serialization_registry: Dict[str, Dict[str, Callable]] = {}
+_deserialization_registry: Dict[str, CustomOpHandler] = {}
+_serialization_registry: Dict[Type[Any], CustomOpHandler] = {}
