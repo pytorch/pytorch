@@ -227,6 +227,23 @@ class AOTInductorModelBase {
       auto opaque_metadata_size = this->opaque_metadata_size(i);
 
       AtenTensorHandle tensor_handle;
+#ifdef AOTI_USE_CREATE_TENSOR_FROM_BLOB_V1
+      // When opaque_metadata_size is not 0, we need to have the
+      // aoti_torch_create_tensor_from_blob_v2 available
+      AOTI_RUNTIME_CHECK(
+          opaque_metadata_size == 0,
+          "Expect opaque_metadata_size to be 0 when AOTI_USE_CREATE_TENSOR_FROM_BLOB_V1 is defined");
+      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
+          internal_ptr,
+          ndim,
+          size,
+          stride,
+          offset,
+          dtype,
+          device_type_,
+          device_idx_,
+          &tensor_handle));
+#else
       AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob_v2(
           internal_ptr,
           ndim,
@@ -240,6 +257,7 @@ class AOTInductorModelBase {
           layout,
           opaque_metadata_ptr,
           opaque_metadata_size));
+#endif // AOTI_USE_CREATE_TENSOR_FROM_BLOB_V1
       constants_map_->emplace(std::move(name), tensor_handle);
     }
     if (constants_map_) {

@@ -311,6 +311,10 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(self.device), example_inputs)
 
+    @unittest.skipIf(
+        IS_FBCODE,
+        "Not yet runnable in fbcode when the model.so is newly generated while older PyTorch is used",
+    )
     def test_freezing(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
@@ -330,6 +334,10 @@ class AOTInductorTestsTemplate:
         with config.patch({"freezing": True}):
             self.check_model(Model(self.device), example_inputs)
 
+    @unittest.skipIf(
+        IS_FBCODE,
+        "Not yet runnable in fbcode when the model.so is newly generated while older PyTorch is used",
+    )
     def test_conv_freezing(self):
         for dtype, groups in itertools.product([torch.bfloat16, torch.float], [1, 2]):
             iC = 2
@@ -352,6 +360,10 @@ class AOTInductorTestsTemplate:
             with config.patch({"freezing": True}):
                 self.check_model(Model(self.device), example_inputs)
 
+    @unittest.skipIf(
+        IS_FBCODE,
+        "Not yet runnable in fbcode when the model.so is newly generated while older PyTorch is used",
+    )
     def test_deconv_freezing(self):
         dtypes = [torch.float]
         if torch.ops.mkldnn._is_mkldnn_bf16_supported():
@@ -376,6 +388,10 @@ class AOTInductorTestsTemplate:
             with config.patch({"freezing": True}):
                 self.check_model(Model(self.device), example_inputs)
 
+    @unittest.skipIf(
+        IS_FBCODE,
+        "Not yet runnable in fbcode when the model.so is newly generated while older PyTorch is used",
+    )
     def test_linear_freezing(self):
         for dtype in [torch.float32, torch.bfloat16]:
 
