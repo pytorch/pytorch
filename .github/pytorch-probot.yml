@@ -18,6 +18,7 @@ ciflow_push_tags:
 - ciflow/unstable
 - ciflow/xpu
 - ciflow/torchbench
+- ciflow/torchao
 retryable_workflows:
 - pull
 - trunk

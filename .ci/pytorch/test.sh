@@ -518,7 +518,7 @@ test_torchao_perf_for_dashboard() {
       for torchao_backend in "${torchao_backends[@]}"; do
         if [[ "$DASHBOARD_TAG" == *${torchao_backend}-true* ]]; then
           python "benchmarks/dynamo/$suite.py" \
-              "${target_flag[@]}" --"$mode" --"$dtype" --quantization ${torchao_backend} "$@" \
+              "${target_flag[@]}" --"$mode" --"$dtype" --quantization "${torchao_backend}" "$@" \
               --output "$TEST_REPORTS_DIR/${backend}_${torchao_backend}_${suite}_${dtype}_${mode}_cuda_${target}.csv"
         fi
       done
