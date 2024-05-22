@@ -2736,13 +2736,14 @@ class DeviceCachingAllocator {
     cuda_events.clear();
   }
 
-  void remove_cudagraph_stream_uses(Block *block) {
+  void remove_cudagraph_stream_uses(Block* block) {
     // remove stream uses added during cudagraph capture
     // (i.e., block->stream_uses - block->cudagraph_stream_uses)
     stream_set streams(std::move(block->stream_uses));
     AT_ASSERT(block->stream_uses.empty());
     for (auto& stream : streams) {
-      if (block->cudagraph_stream_uses.find(stream) == block->cudagraph_stream_uses.end()) {
+      if (block->cudagraph_stream_uses.find(stream) ==
+          block->cudagraph_stream_uses.end()) {
         block->stream_uses.insert(stream);
       }
     }
@@ -2769,12 +2770,13 @@ class DeviceCachingAllocator {
   }
 
   void insert_events_deferred_until_no_capture(
-    const std::shared_ptr<GatheredContext>& context) {
+      const std::shared_ptr<GatheredContext>& context) {
     if (C10_UNLIKELY(!needs_events_deferred_until_no_capture.empty())) {
       for (auto* block : needs_events_deferred_until_no_capture) {
         TORCH_INTERNAL_ASSERT(!block->stream_uses.empty());
         // only streams recorded before cudagraph will be used to insert events
-        // since we know all streams recorded during cudagraph must have completed
+        // since we know all streams recorded during cudagraph must have
+        // completed
         remove_cudagraph_stream_uses(block);
         insert_events(block);
         if (block->event_count == 0) {

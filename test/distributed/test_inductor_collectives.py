@@ -152,15 +152,17 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             return x * y
 
         options = {
-            'triton.cudagraphs': True,
-            'triton.cudagraph_trees': True,
+            "triton.cudagraphs": True,
+            "triton.cudagraph_trees": True,
         }
 
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
-            compiled_func = torch.compile(func, backend='inductor', fullgraph=True, options=options, dynamic=None)
+            compiled_func = torch.compile(
+                func, backend="inductor", fullgraph=True, options=options, dynamic=None
+            )
 
             for nelem in [1024, 2048, 4096]:
-                x = torch.randn(nelem, device='cuda', dtype=torch.bfloat16)
+                x = torch.randn(nelem, device="cuda", dtype=torch.bfloat16)
                 golden_out = eager_func(x)
 
                 for _ in range(3):
