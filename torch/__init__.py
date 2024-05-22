@@ -39,7 +39,6 @@ else:
 
 from typing import Any, Callable, Dict, Optional, Set, Tuple, Type, TYPE_CHECKING, Union, List
 import builtins
-from tools.setup_helpers.env import LIBTORCH_PKG_NAME
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage',
@@ -170,6 +169,8 @@ def _preload_cuda_deps(lib_folder, lib_name):
 
 # See Note [Global dependencies]
 def _load_global_deps() -> None:
+
+    LIBTORCH_PKG_NAME = "libtorchsplit"
 
     def find_package_path(package_name):
         loader = pkgutil.find_loader(package_name)
