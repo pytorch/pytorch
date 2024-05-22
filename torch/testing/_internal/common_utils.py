@@ -103,7 +103,7 @@ try:
     has_pytest = True
 except ImportError:
     has_pytest = False
-
+from tools.setup_helpers.env import LIBTORCH_PKG_NAME
 
 # Class to keep track of test flags configurable by environment variables.
 # Flags set here are intended to be read-only and should not be modified after
@@ -1177,7 +1177,7 @@ IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
 IS_X86 = platform.machine() in ('x86_64', 'i386')
 IS_ARM64 = platform.machine() in ('arm64', 'aarch64')
-IS_SPLIT_BUILD = pkgutil.find_loader("libtorchsplit") is not None
+IS_SPLIT_BUILD = pkgutil.find_loader(LIBTORCH_PKG_NAME) is not None
 
 def is_avx512_vnni_supported():
     if sys.platform != 'linux':
