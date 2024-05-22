@@ -275,6 +275,7 @@ class FakeTensorConverter:
         *,
         source=None,
         symbolic_context=None,
+        trace=True,
     ):
         # see note [Tensor Fakification and Symbol Caching]
         if not symbolic_context and not source and shape_env:
@@ -317,6 +318,7 @@ class FakeTensorConverter:
             callback=mk_fake_tensor,
             source=source,
             symbolic_context=symbolic_context,
+            trace=trace,
         )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
@@ -1829,6 +1831,7 @@ class FakeTensorMode(TorchDispatchMode):
         static_shapes=None,
         source: Optional[Source] = None,
         symbolic_context=None,
+        trace=True,
     ):
         shape_env: Optional[ShapeEnv] = self.shape_env
         if static_shapes is None:
@@ -1844,6 +1847,7 @@ class FakeTensorMode(TorchDispatchMode):
             shape_env=shape_env,
             source=source,
             symbolic_context=symbolic_context,
+            trace=trace,
         )
 
 
