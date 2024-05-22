@@ -1302,9 +1302,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C.parse_schema",
         "torch._C.parse_type_comment",
         "torch._C.read_vitals",
-        "torch._C.set_flush_denormal",
-        "torch._C.set_num_interop_threads",
-        "torch._C.set_num_threads",
         "torch._C.set_vital",
         "torch._C.unify_type_list",
         "torch._C.vitals_enabled",
@@ -2430,7 +2427,10 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cpu.synchronize",
         "torch.cuda._check_capability",
         "torch.cuda._check_cubins",
+        "torch.cuda._device_count_amdsmi",
         "torch.cuda._device_count_nvml",
+        "torch.cuda._get_amdsmi_handler",
+        "torch.cuda._get_amdsmi_device_index",
         "torch.cuda._get_device",
         "torch.cuda._get_generator",
         "torch.cuda._get_nvml_device_index",
@@ -2461,7 +2461,9 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cuda._memory_viz.trace",
         "torch.cuda._nvml_based_avail",
         "torch.cuda._parse_visible_devices",
+        "torch.cuda._raw_device_count_amdsmi",
         "torch.cuda._raw_device_count_nvml",
+        "torch.cuda._raw_device_uuid_amdsmi",
         "torch.cuda._raw_device_uuid_nvml",
         "torch.cuda._register_triton_kernels",
         "torch.cuda._set_rng_state_offset",
@@ -3295,6 +3297,13 @@ FBCODE_INLINE_FILES_IN_SKIPPED_DIRS_RE = re.compile(
     f".*({'|'.join(map(re.escape, FBCODE_INLINE_FILES_IN_SKIPPED_DIRS))})"
 )
 
+# torch.optim is a special case,
+# we usually want to inline it, but the directory
+# structure does not match the module structure
+# and we want to skip the functions in optim/lr_scheduler.py
+# this has precedence over all other rules in check_file
+FORCE_SKIP_FILES = {f"{_module_dir(torch)}optim/lr_scheduler.py"}
+
 
 def _recompile_re():
     global SKIP_DIRS_RE
@@ -3328,6 +3337,8 @@ def check_file(filename, is_inlined_call=False):
     """Should skip this file?"""
     if filename is None:
         return SkipResult(True, "filename is None")
+    if filename in FORCE_SKIP_FILES:
+        return SkipResult(True, "FORCE_SKIP_FILES")
     if any(filename.startswith(d) for d in get_legacy_mod_inlinelist()):
         return SkipResult(
             False,

@@ -1178,6 +1178,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         fsdp_out = fsdp_model(inp)
         self.assertEqual(local_out, fsdp_out)
 
+    @patch.object(config, "guard_nn_modules", True)
     def test_fsdp_dup_tensors_diff_source(self):
         """
         Tests that FSDP-managed modules' parameters and buffers with different

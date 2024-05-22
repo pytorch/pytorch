@@ -126,7 +126,8 @@ struct MTIAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     (void)stream;
   }
 
-  double elapsedTime(void* event1, void* event2) const override {
+  double elapsedTime(void* event1, void* event2, const c10::DeviceIndex device_index) const override {
+    (void)device_index;
     uint64_t elapsed_time = 1e6;
     return (double)(elapsed_time / 1e6);
   }

@@ -41,6 +41,7 @@ except ModuleNotFoundError:
 import torch
 import torch.utils._device
 from torch._dynamo.source import (
+    is_from_flatten_script_object_source,
     is_from_local_source,
     is_from_optimizer_source,
     TensorProperty,
@@ -72,6 +73,7 @@ from .source import (
     ChainedSource,
     ConstDictKeySource,
     DefaultsSource,
+    FlattenScriptObjectSource,
     FSDPNNModuleSource,
     GetItemSource,
     GlobalSource,
@@ -84,6 +86,7 @@ from .source import (
     NumpyTensorSource,
     ODictGetItemSource,
     OptimizerSource,
+    ScriptObjectQualifiedNameSource,
     ShapeEnvSource,
     TupleIteratorGetItemSource,
     TypeSource,
@@ -256,6 +259,7 @@ CLOSURE_VARS = {
     "utils_device": torch.utils._device,
     "device": torch.device,
     "___from_numpy": from_numpy,
+    "___as_tensor": torch.as_tensor,
     "torch": torch,
     "inspect": inspect,
 }
@@ -957,6 +961,22 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, FlattenScriptObjectSource):
+            assert base_guard_manager  # to make mypy happy
+            return base_guard_manager.lambda_manager(
+                python_lambda=lambda x: x.__obj_flatten__(),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, ScriptObjectQualifiedNameSource):
+            assert base_guard_manager  # to make mypy happy
+            return base_guard_manager.lambda_manager(
+                python_lambda=lambda x: x._type().qualified_name(),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, TupleIteratorGetItemSource):
             assert base_guard_manager  # to make mypy happy
             return base_guard_manager.tuple_iterator_getitem_manager(
@@ -1103,6 +1123,26 @@ class GuardBuilder(GuardBuilderBase):
                 )
         else:
             self._produce_guard_code(guard, [code])
+
+    def NOT_PRESENT_IN_GENERIC_DICT(self, guard: Guard, attr=None) -> None:
+        assert attr is not None
+        ref = self.arg_ref(guard)
+        val = self.get(guard.name)
+        assert isinstance(val, torch.nn.Module)
+
+        base_manager = self.get_guard_manager(guard)
+
+        mod_dict_source = f"{guard.name}.__dict__"
+        mod_generic_dict_manager = base_manager.get_generic_dict_manager(
+            source=mod_dict_source,
+            example_value=val.__dict__,
+            guard_manager_enum=GuardManagerType.GUARD_MANAGER,
+        )
+
+        code = f"not ___dict_contains({attr!r}, {ref}.__dict__)"
+        mod_generic_dict_manager.add_dict_contains_guard(
+            False, attr, get_verbose_code_parts(code, guard)
+        )
 
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
@@ -1693,8 +1733,18 @@ class GuardBuilder(GuardBuilderBase):
                 self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
+        # For tensors that are part of the Dynamo extracted Fx graph module, an
+        # ID_MATCH suffices. Once we turn on inline_inbuilt_nn_modules, these
+        # will be lifted as inputs and have a TENSOR_MATCH guard.
+        # For FSDP modules, we must use TENSOR_MATCH because FSDP module is
+        # traced using UnspecializedNNModuleVariable and therefore lifts the
+        # params as inputs.
+        # For numpy tensors, always use TENSOR_MATCH because __from_numpy leads
+        # to a new tensor everytime and therefore id differs.
         if (
-            not torch._dynamo.config.guard_nn_modules and guard.is_nn_module()
+            guard.is_nn_module()
+            and not guard.is_fsdp_module()
+            and not isinstance(guard.originating_source, NumpyTensorSource)
         ) or match_on_id_for_tensor(guard):
             self.ID_MATCH(guard)
         else:
@@ -2602,6 +2652,14 @@ def make_dupe_guard(obj_source, dupe_source):
     if dupe_source and dupe_source != obj_source:
         ser_source_is_local = is_from_local_source(dupe_source)
         source_is_local = is_from_local_source(obj_source)
+        if is_from_flatten_script_object_source(
+            dupe_source
+        ) or is_from_flatten_script_object_source(obj_source):
+            raise exc.UnsafeScriptObjectError(
+                f"{obj_source.name()} is alising {dupe_source.name()}. This is not supported."
+                f" Please do a clone for corresponding input."
+            )
+
         # Note - both must be local, or global, or we will run afoul of a lack of merging in how we currently
         # reconcile guards builder scopes in compile_check_fn. This technically means we miss a guard here,
         # so maybe we should do this refactor before we land this...

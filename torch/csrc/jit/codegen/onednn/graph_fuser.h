@@ -39,7 +39,7 @@ class GraphRewriter {
   std::pair<graph_node_list::iterator, bool> scanNode(
       Node* consumer,
       graph_node_list::iterator workblock_begin);
-  c10::optional<Node*> tryMerge(Node* consumer, Node* producer);
+  std::optional<Node*> tryMerge(Node* consumer, Node* producer);
 };
 
 // This pass creates the subgraphs for oneDNN Graph Fusion Nodes.

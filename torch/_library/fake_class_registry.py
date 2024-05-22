@@ -65,8 +65,35 @@ class FakeClassRegistry:
 global_fake_class_registry = FakeClassRegistry()
 
 
+# TODO: add this check at compile time for __obj_flatten__.
+def _check_valid_flat_script_obj(flat_x):
+    if not isinstance(flat_x, tuple):
+        raise RuntimeError("Expect flat x to be a tuple.")
+
+    for tp in flat_x:
+        if not isinstance(tp, tuple):
+            raise RuntimeError("Expect flat x to be a tuple of tuples.")
+
+        if not len(tp) == 2 or not isinstance(tp[0], str):
+            raise RuntimeError(
+                "Expect element of flat x to be a tuple of two elements with first element being a string"
+            )
+
+
 def to_fake_obj(fake_mode, x: torch.ScriptObject) -> FakeScriptObject:
-    fake_x = _fake_obj_from_real(fake_mode, x)
+    import torch.utils._pytree as pytree
+
+    flat_x = x.__obj_flatten__()  # type: ignore[attr-defined]
+
+    _check_valid_flat_script_obj(flat_x)
+
+    fake_flattened = pytree.tree_map_only(
+        torch.Tensor,
+        lambda t: fake_mode.from_tensor(t),
+        flat_x,
+    )
+
+    fake_x = _find_fake_class_for_script_object(x).__obj_unflatten__(fake_flattened)
 
     def _call_torchbind(method_name):
         from torch._higher_order_ops.torchbind import call_torchbind
@@ -107,8 +134,10 @@ def register_fake_class(qualname, fake_class: Optional[HasStaticMethodFromReal] 
     returns an instance of the fake class. All tensors in the fake object should also
     be properly fakified with to_fake_tensor() in from_real.
 
+
     Examples:
         # For a custom class Foo defined in test_custom_class_registration.cpp:
+
         TORCH_LIBRARY(_TorchScriptTesting, m) {
           m.class_<TensorQueue>("_TensorQueue")
             .def(torch::init<at::Tensor>())
@@ -117,6 +146,7 @@ def register_fake_class(qualname, fake_class: Optional[HasStaticMethodFromReal] 
             .def("top", &TensorQueue::top)
             .def("size", &TensorQueue::size)
             .def("clone_queue", &TensorQueue::clone_queue)
+            .def("__obj_flatten__", &TensorQueue::__obj_flatten__)
             .def_pickle(
                 // __getstate__
                 [](const c10::intrusive_ptr<TensorQueue>& self)
@@ -134,14 +164,12 @@ def register_fake_class(qualname, fake_class: Optional[HasStaticMethodFromReal] 
 
         @torch._library.register_fake_class("_TorchScriptTesting::_TensorQueue")
         class FakeTensorQueue:
-            def __init__(self, q):
-                self.queue = q
+            def __init__(self, queue):
+                self.queue = queue
 
             @classmethod
-            def from_real(cls, real_tq):
-                ctx = torch.library.get_ctx()
-                fake_queue = [ctx.to_fake_tensor(t) for t in real_tq.clone_queue()]
-                return cls(fake_queue)
+            def __obj_unflatten__(cls, flattened_ctx):
+                return cls(**dict(ctx))
 
             def push(self, x):
                 self.queue.append(x)
@@ -152,6 +180,11 @@ def register_fake_class(qualname, fake_class: Optional[HasStaticMethodFromReal] 
             def size(self):
                 return len(self.queue)
 
+    In this example, the original TensorQeue need to addd a __obj_flatten__ method
+    to the class TensorQueue and the flattend result is passed into FakeTensorQueue's
+    __obj_unflatten__ as inputs to create a fake class. This protocol allows pytorch to look
+    at the contents of the script object and properly handle them in the subsystems
+    like dynamo, aot_aotugrad or more.
     """
 
     def inner(fake_class: HasStaticMethodFromReal):
@@ -162,7 +195,9 @@ def register_fake_class(qualname, fake_class: Optional[HasStaticMethodFromReal] 
 
         from_method = getattr(fake_class, _CONVERT_FROM_REAL_NAME, None)
         if not from_method:
-            raise RuntimeError(f"{fake_class} doesn't define a classmethod from_real.")
+            raise RuntimeError(
+                f"{fake_class} doesn't define a classmethod {_CONVERT_FROM_REAL_NAME}."
+            )
 
         if not isinstance(fake_class.__dict__[_CONVERT_FROM_REAL_NAME], classmethod):
             raise RuntimeError(
@@ -221,7 +256,7 @@ def _find_fake_class_for_script_object(x: torch.ScriptObject) -> Any:
     return fake_class
 
 
-_CONVERT_FROM_REAL_NAME = "from_real"
+_CONVERT_FROM_REAL_NAME = "__obj_unflatten__"
 
 
 def _fake_obj_from_real(fake_mode, x) -> Any:

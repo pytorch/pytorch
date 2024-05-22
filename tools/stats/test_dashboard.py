@@ -12,7 +12,6 @@ import requests
 
 from tools.stats.upload_stats_lib import (
     _get_request_headers,
-    download_gha_artifacts,
     download_s3_artifacts,
     get_job_id,
     unzip,
@@ -67,12 +66,6 @@ def get_td_exclusions(
             "test-jsons", workflow_run_id, workflow_run_attempt
         )
         for path in s3_paths:
-            unzip(path)
-
-        artifact_paths = download_gha_artifacts(
-            "test-jsons", workflow_run_id, workflow_run_attempt
-        )
-        for path in artifact_paths:
             unzip(path)
 
         grouped_tests: Dict[str, Any] = defaultdict(lambda: defaultdict(set))
