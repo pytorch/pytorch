@@ -776,10 +776,8 @@ class X86InductorQuantizer(Quantizer):
 
     def _annotate_linear_fusion_pattern(self, model: torch.fx.GraphModule):
         if config := self._get_aten_operator_qconfig(torch.ops.aten.linear.default):
-            if config.input_activation and not config.input_activation.is_dynamic:
-                # <TODO> Weiwen: Dynamic Quant of linear unary will be supported in next step
-                self._annotate_linear_binary_unary(model, config)
-                self._annotate_linear_unary(model, config)
+            self._annotate_linear_binary_unary(model, config)
+            self._annotate_linear_unary(model, config)
             self._annotate_linear(model, config)
 
     def _annotate_matmul(self, model: torch.fx.GraphModule):

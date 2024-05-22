@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import dataclasses
 import inspect
 import os
 import re
@@ -78,6 +79,11 @@ class CachedMetricsDeltas:
     generated_cpp_vec_kernel_count: int
     ir_nodes_pre_fusion: int
     cpp_to_dtype_count: int
+    num_bytes_accessed: int
+
+
+def get_metric_fields():
+    return [field.name for field in dataclasses.fields(CachedMetricsDeltas)]
 
 
 class CachedMetricsHelper:
@@ -88,40 +94,21 @@ class CachedMetricsHelper:
     """
 
     def __init__(self):
-        global generated_kernel_count
-        global generated_cpp_vec_kernel_count
-        global ir_nodes_pre_fusion
-        global cpp_to_dtype_count
-
-        self.generated_kernel_count = generated_kernel_count
-        self.generated_cpp_vec_kernel_count = generated_cpp_vec_kernel_count
-        self.ir_nodes_pre_fusion = ir_nodes_pre_fusion
-        self.cpp_to_dtype_count = cpp_to_dtype_count
+        self.cached_metrics = {}
+        for metric in get_metric_fields():
+            self.cached_metrics[metric] = globals()[metric]
 
     def get_deltas(self) -> CachedMetricsDeltas:
-        global generated_kernel_count
-        global generated_cpp_vec_kernel_count
-        global ir_nodes_pre_fusion
-        global cpp_to_dtype_count
+        delta_metrics = {}
+        for metric in get_metric_fields():
+            delta_metrics[metric] = globals()[metric] - self.cached_metrics[metric]
 
-        return CachedMetricsDeltas(
-            generated_kernel_count - self.generated_kernel_count,
-            generated_cpp_vec_kernel_count - self.generated_cpp_vec_kernel_count,
-            ir_nodes_pre_fusion - self.ir_nodes_pre_fusion,
-            cpp_to_dtype_count - self.cpp_to_dtype_count,
-        )
+        return CachedMetricsDeltas(**delta_metrics)
 
     @staticmethod
     def apply_deltas(delta: CachedMetricsDeltas):
-        global generated_kernel_count
-        global generated_cpp_vec_kernel_count
-        global ir_nodes_pre_fusion
-        global cpp_to_dtype_count
-
-        generated_kernel_count += delta.generated_kernel_count
-        generated_cpp_vec_kernel_count += delta.generated_cpp_vec_kernel_count
-        ir_nodes_pre_fusion += delta.ir_nodes_pre_fusion
-        cpp_to_dtype_count += delta.cpp_to_dtype_count
+        for metric in get_metric_fields():
+            globals()[metric] += getattr(delta, metric)
 
 
 REGISTERED_METRIC_TABLES: Dict[str, MetricTable] = {}
