@@ -2,6 +2,7 @@
 
 #include <c10/core/DeviceType.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/Array.h>
 
 #include <atomic>
 #include <utility>
@@ -35,7 +36,19 @@
 //
 // TODO: CPU instruction set selection should be folded into whatever
 // the main dispatch mechanism is.
-
+//
+// Supported device types for registration:
+//   - CPU: Central Processing Unit
+//   - CUDA: NVIDIA GPUs
+//   - HIP: AMD GPUs
+//   - MPS: Apple Silicon GPUs (Metal Performance Shaders)
+//   - PrivateUse1: Reserved for private/custom device types
+//
+// If you want to update the list of supported devices, add a new dispatch_ptr
+// member in DispatchStubImpl.h and update the get_call_ptr switch.
+// As well you will need to update the inlined list in 'is_device_supported`
+//
+//
 // ignore warnings about DispatchStub::DEFAULT, AVX, AVX2 defined elsewhere
 C10_CLANG_DIAGNOSTIC_PUSH()
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wundefined-var-template")
@@ -177,6 +190,18 @@ public:
   // Returns true if the dispatcher has a kernel registered for this device
   // type.
   bool is_device_supported(const c10::DeviceType device_type) {
+    constexpr auto supported_devices = c10::array_of<c10::DeviceType>(
+        c10::DeviceType::CPU,
+        c10::DeviceType::CUDA,
+        c10::DeviceType::HIP,
+        c10::DeviceType::MPS,
+        c10::DeviceType::PrivateUse1
+    );
+    // Check if the device type is supported.
+    if (std::find(supported_devices.begin(), supported_devices.end(), device_type) == supported_devices.end()) {
+        return false;
+    }
+    // Check if there is a kernel registered for this device type.
     FnPtr call_ptr = get_call_ptr(device_type);
     return call_ptr != nullptr;
   };
