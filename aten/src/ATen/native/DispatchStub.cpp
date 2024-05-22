@@ -92,7 +92,7 @@ CPUCapability get_cpu_capability() {
 }
 
 void* DispatchStubImpl::get_call_ptr(
-  DeviceType device_type
+  const DeviceType device_type
   , void *DEFAULT
 #ifdef HAVE_AVX512_CPU_DEFINITION
   , void *AVX512

@@ -131,7 +131,7 @@ struct DispatchStub<rT (*)(Args...), T> {
   DispatchStub& operator=(const DispatchStub&) = delete;
 
 private:
-  FnPtr get_call_ptr(c10::DeviceType device_type) {
+  FnPtr get_call_ptr(const c10::DeviceType device_type) {
     return reinterpret_cast<FnPtr>(
       impl.get_call_ptr(device_type
       , reinterpret_cast<void*>(DEFAULT)
@@ -173,6 +173,13 @@ public:
   void set_privateuse1_dispatch_ptr(FnPtr fn_ptr) {
     impl.privateuse1_dispatch_ptr = reinterpret_cast<void*>(fn_ptr);
   }
+
+  // Returns true if the dispatcher has a kernel registered for this device
+  // type.
+  bool is_device_supported(const c10::DeviceType device_type) {
+    FnPtr call_ptr = get_call_ptr(device_type);
+    return call_ptr != nullptr;
+  };
 
   static TORCH_API FnPtr DEFAULT;
 #ifdef HAVE_AVX512_CPU_DEFINITION
