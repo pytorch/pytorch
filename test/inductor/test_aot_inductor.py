@@ -1212,9 +1212,8 @@ class AOTInductorTestsTemplate:
                 return self.foo + x
 
         example_inputs = (torch.rand(4, 4, device=self.device),)
-        with config.patch({"aot_inductor.allow_buffer_mutation": True}):
-            torch._export.aot_compile(Model(self.device), example_inputs)
-            self.check_model(Model(self.device), example_inputs)
+        torch._export.aot_compile(Model(self.device), example_inputs)
+        self.check_model(Model(self.device), example_inputs)
 
     def test_non_tensor_input(self):
         def fn(a, b, alpha=1.0):
@@ -1246,9 +1245,8 @@ class AOTInductorTestsTemplate:
                 self.foo[5] = self.bar[0]
                 return x + self.bar, x * self.foo
 
-        with config.patch({"aot_inductor.allow_buffer_mutation": True}):
-            example_inputs = (torch.randn(10, device=self.device),)
-            self.check_model(Model(self.device), example_inputs)
+        example_inputs = (torch.randn(10, device=self.device),)
+        self.check_model(Model(self.device), example_inputs)
 
     def test_buffer_mutation_3(self):
         class KVCache(torch.nn.Module):
@@ -1288,8 +1286,7 @@ class AOTInductorTestsTemplate:
             torch.randn(1, 6, 1, 48, device=self.device),
             torch.randn(1, 6, 1, 48, device=self.device),
         )
-        with config.patch({"aot_inductor.allow_buffer_mutation": True}):
-            self.check_model(Model(self.device), example_inputs)
+        self.check_model(Model(self.device), example_inputs)
 
     @requires_multigpu()
     def test_replicate_on_devices(self):

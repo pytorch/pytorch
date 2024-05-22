@@ -108,6 +108,7 @@ else:
 
 
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
+kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
 
 LOCK_TIMEOUT = 600
 
@@ -1943,10 +1944,14 @@ class AotCodeCompiler:
                 run_command_and_check(cmd)
             log.debug("aot constant binary command: %s", cmd)
 
-            if config.aot_inductor.allow_buffer_mutation:
+            if graph.buffer_mutation:
                 # .data section is between .text and .bss. When the size of .data is large,
                 # during the linking, the relocation of .text against .bss may overflow.
                 # Rename it to .ldata so that it won't be in between the .text and .bss section
+                if len(consts) > 2_000_000_000:
+                    raise ValueError(
+                        "Models with buffer mutation included doesn't support constants greater than 2GB!"
+                    )
                 rename_data = " .data=.ldata"
             else:
                 # if no buffer mutation is needed, we could instead set the data region
@@ -3105,6 +3110,7 @@ class AsyncCompile:
         return cls.pool().submit(task)
 
     def triton(self, kernel_name: str, source_code: str, device_str: str = "cuda"):
+        kernel_code_log.info("Triton Kernel:\n%s", source_code)
         _compile_start()
         _set_triton_ptxas_path()
 
@@ -3128,6 +3134,7 @@ class AsyncCompile:
         return MultiKernelCall(*args, **kwargs)
 
     def cpp(self, source_code: str):
+        kernel_code_log.info("CPP Kernel:\n%s", source_code)
         if config.compile_threads <= 1:
             return CppCodeCache.load(source_code).kernel
         else:
@@ -3135,6 +3142,7 @@ class AsyncCompile:
             return LambdaFuture(lambda: get_result().kernel)
 
     def cpp_pybinding(self, argtypes: List[str], source_code: str):
+        kernel_code_log.info("CPP+Bindings Kernel:\n%s", source_code)
         if config.compile_threads <= 1:
             return CppPythonBindingsCodeCache.load_pybinding(argtypes, source_code)
         else:
@@ -3144,6 +3152,8 @@ class AsyncCompile:
             return LambdaFuture(get_result)
 
     def cuda(self, source_code, dst_file_ext):
+        kernel_code_log.info("CUDA Kernel:\n%s", source_code)
+
         def task():
             return CUDACodeCache.load(source_code, dst_file_ext)[0]
 
@@ -3179,7 +3189,5 @@ if (
     or os.environ.get("TORCH_WARM_POOL", "1") != "1"
 ):
     pass
-elif sys.version_info >= (3, 12):
-    log.info("AsyncCompile.warm_pool() is broken on 3.12+.")
 else:
     AsyncCompile.warm_pool()
