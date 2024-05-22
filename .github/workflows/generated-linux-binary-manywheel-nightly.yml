@@ -55,7 +55,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cpu-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_8-cpu-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -115,7 +115,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cpu-cxx11-abi-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_8-cpu-cxx11-abi-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -178,7 +178,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cuda11_8-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_8-cuda11_8-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -241,7 +241,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cuda12_1-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_8-cuda12_1-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -304,7 +304,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cuda12_4-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_8-cuda12_4-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -366,7 +366,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-rocm6_0-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_8-rocm6_0-build
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
@@ -469,7 +469,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-rocm6_1-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_8-rocm6_1-build
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
@@ -571,7 +571,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cpu-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_9-cpu-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -631,7 +631,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cpu-cxx11-abi-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_9-cpu-cxx11-abi-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -694,7 +694,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda11_8-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_9-cuda11_8-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -757,7 +757,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda12_1-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_9-cuda12_1-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -820,7 +820,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda12_4-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_9-cuda12_4-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -882,7 +882,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-rocm6_0-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_9-rocm6_0-build
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
@@ -985,7 +985,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-rocm6_1-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_9-rocm6_1-build
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
@@ -1087,7 +1087,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cpu-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_10-cpu-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -1147,7 +1147,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cpu-cxx11-abi-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_10-cpu-cxx11-abi-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -1210,7 +1210,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda11_8-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_10-cuda11_8-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -1273,7 +1273,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda12_1-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_10-cuda12_1-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -1336,7 +1336,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda12_4-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_10-cuda12_4-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -1398,7 +1398,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-rocm6_0-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_10-rocm6_0-build
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
@@ -1501,7 +1501,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-rocm6_1-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_10-rocm6_1-build
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
@@ -1603,7 +1603,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cpu-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_11-cpu-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -1663,7 +1663,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cpu-cxx11-abi-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_11-cpu-cxx11-abi-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -1726,7 +1726,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda11_8-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_11-cuda11_8-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -1789,7 +1789,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda12_1-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_11-cuda12_1-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -1852,7 +1852,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda12_4-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_11-cuda12_4-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -1914,7 +1914,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-rocm6_0-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_11-rocm6_0-build
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
@@ -2017,7 +2017,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-rocm6_1-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_11-rocm6_1-build
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
@@ -2119,7 +2119,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cpu-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_12-cpu-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -2179,7 +2179,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cpu-cxx11-abi-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_12-cpu-cxx11-abi-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -2242,7 +2242,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda11_8-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_12-cuda11_8-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -2305,7 +2305,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda12_1-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_12-cuda12_1-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -2368,7 +2368,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda12_4-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_12-cuda12_4-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -2430,7 +2430,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-rocm6_0-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_12-rocm6_0-build
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
@@ -2533,7 +2533,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-rocm6_1-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_12-rocm6_1-build
     runs-on: linux.rocm.gpu
     timeout-minutes: 240

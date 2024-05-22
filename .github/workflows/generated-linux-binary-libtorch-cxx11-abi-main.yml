@@ -51,7 +51,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cpu-shared-with-deps-cxx11-abi-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: libtorch-cpu-shared-with-deps-cxx11-abi-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
