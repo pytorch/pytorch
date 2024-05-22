@@ -2,7 +2,6 @@
 import itertools
 
 import torch
-import torch._dynamo.testing
 
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
