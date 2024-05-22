@@ -38,7 +38,6 @@ from torch._dynamo.testing import (
     rand_strided,
     same,
     skipIfPy312,
-    xfailIfPy312,
 )
 from torch._inductor.aoti_eager import (
     aoti_compile_with_persistent_cache,
@@ -9585,7 +9584,6 @@ class CommonTemplate:
 
         self.common(fn, (inp, offsets), check_lowp=False)
 
-    @xfailIfPy312
     @requires_gpu()
     @config.patch(assume_aligned_inputs=False)
     def test_config_option_dont_assume_alignment(self):
