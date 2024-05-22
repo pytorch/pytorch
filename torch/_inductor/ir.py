@@ -4402,7 +4402,7 @@ class ExternKernel(InputsKernel):
                     ), "Invalid arg_properties accessing"
                     type_ = self.arg_properties[i].get("type")
                     args.append(
-                        V.graph.wrapper_code.val_to_cpp_arg_str(  # type: ignore[arg-type]
+                        V.graph.wrapper_code.val_to_arg_str(  # type: ignore[arg-type]
                             x, type_
                         )
                     )
@@ -4437,7 +4437,7 @@ class ExternKernel(InputsKernel):
                         else None
                     )
                     kwargs.append(
-                        V.graph.wrapper_code.val_to_cpp_arg_str(  # type: ignore[arg-type]
+                        V.graph.wrapper_code.val_to_arg_str(  # type: ignore[arg-type]
                             v, type_
                         )
                     )
@@ -5412,7 +5412,7 @@ class FallbackKernel(ExternKernelAlloc):
         if V.graph.cpp_wrapper and isinstance(self.op_overload, torch._ops.OpOverload):
             args = self.fill_non_provided_args(args, kwargs)
             args = [
-                V.graph.wrapper_code.val_to_cpp_arg_str(x, param.real_type)
+                V.graph.wrapper_code.val_to_arg_str(x, param.real_type)
                 for param, x in zip(self.op_overload._schema.arguments, args)
             ]
         else:
