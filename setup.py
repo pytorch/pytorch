@@ -1166,7 +1166,7 @@ def main():
             or setup_cmd == "develop"
         ):
             raise RuntimeError(
-                "At the moment the BUILD_TWO_WHEELS option only supports the clean and install commands. Please rerun setup.py using one of those two commands."
+                "At the moment the SPLIT_BUILD option only supports the clean and install commands. Please rerun setup.py using one of those two commands."
             )
 
         final_package_name = PACKAGE_NAME
