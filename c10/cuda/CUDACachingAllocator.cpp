@@ -204,8 +204,6 @@ struct Block {
   c10::DeviceIndex device; // gpu
   cudaStream_t stream; // allocation stream
   stream_set stream_uses; // streams on which the block was used
-  stream_set cudagraph_stream_uses; // streams on which the block was
-                                    // used while cudagraph capturing
   size_t size; // block size in bytes
   size_t requested_size; // memory originally requested
   BlockPool* pool{nullptr}; // owning memory pool
@@ -928,6 +926,10 @@ class DeviceCachingAllocator {
 
   std::vector<AllocatorTraceTracker> trace_trackers_;
 
+  // mapping from block to a stream_set, containing streams on which the block
+  // was used while cudagraph capturing
+  std::unordered_map<Block*, stream_set> block_to_cudagraph_stream_uses;
+
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   DeviceCachingAllocator()
@@ -1366,7 +1368,7 @@ class DeviceCachingAllocator {
     }
     block->stream_uses.insert(stream);
     if (C10_UNLIKELY(!captures_underway.empty())) {
-      block->cudagraph_stream_uses.insert(stream);
+      block_to_cudagraph_stream_uses[block].insert(stream);
     }
   }
 
@@ -2742,12 +2744,12 @@ class DeviceCachingAllocator {
     stream_set streams(std::move(block->stream_uses));
     AT_ASSERT(block->stream_uses.empty());
     for (auto& stream : streams) {
-      if (block->cudagraph_stream_uses.find(stream) ==
-          block->cudagraph_stream_uses.end()) {
+      if (block_to_cudagraph_stream_uses[block].find(stream) ==
+          block_to_cudagraph_stream_uses[block].end()) {
         block->stream_uses.insert(stream);
       }
     }
-    block->cudagraph_stream_uses.clear();
+    block_to_cudagraph_stream_uses[block].clear();
   }
 
   void insert_events(Block* block) {
@@ -2776,7 +2778,8 @@ class DeviceCachingAllocator {
         TORCH_INTERNAL_ASSERT(!block->stream_uses.empty());
         // only streams recorded before cudagraph will be used to insert events
         // since we know all streams recorded during cudagraph must have
-        // completed
+        // completed (refer to Section 3.2.8.7.3.1 Cross-stream Dependencies and
+        // Events in CUDA Programming Guide).
         remove_cudagraph_stream_uses(block);
         insert_events(block);
         if (block->event_count == 0) {
