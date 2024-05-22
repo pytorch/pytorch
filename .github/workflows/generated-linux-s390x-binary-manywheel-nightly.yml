@@ -57,11 +57,11 @@ jobs:
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==8.9.2.26; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.20.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_8-cpu-s390x-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
-    needs: manywheel-py3_8-cpu-s390x-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
+    manywheel-py3_8-cpu-s390x-test:  # Testing
+      if: ${{ github.repository_owner == 'pytorch'}}
+      needs: manywheel-py3_8-cpu-s390x-build
+        uses: ./.github/workflows/_binary-test-linux.yml
+        with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
@@ -71,12 +71,12 @@ jobs:
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
       DESIRED_PYTHON: "3.8"
-      build_name: manywheel-py3_8-cpu-s390x
-      build_environment: linux-s390x-binary-manywheel
-      runs_on: linux.s390x
-      ALPINE_IMAGE: "docker.io/s390x/alpine"
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
+        build_name: manywheel-py3_8-cpu-s390x
+        build_environment: linux-s390x-binary-manywheel
+          runs_on: linux.s390x
+          ALPINE_IMAGE: "docker.io/s390x/alpine"
+        secrets:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cpu-s390x-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -120,11 +120,11 @@ jobs:
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==8.9.2.26; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.20.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_9-cpu-s390x-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
-    needs: manywheel-py3_9-cpu-s390x-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
+    manywheel-py3_9-cpu-s390x-test:  # Testing
+      if: ${{ github.repository_owner == 'pytorch'}}
+      needs: manywheel-py3_9-cpu-s390x-build
+        uses: ./.github/workflows/_binary-test-linux.yml
+        with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
@@ -134,12 +134,12 @@ jobs:
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
       DESIRED_PYTHON: "3.9"
-      build_name: manywheel-py3_9-cpu-s390x
-      build_environment: linux-s390x-binary-manywheel
-      runs_on: linux.s390x
-      ALPINE_IMAGE: "docker.io/s390x/alpine"
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
+        build_name: manywheel-py3_9-cpu-s390x
+        build_environment: linux-s390x-binary-manywheel
+          runs_on: linux.s390x
+          ALPINE_IMAGE: "docker.io/s390x/alpine"
+        secrets:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cpu-s390x-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -183,11 +183,11 @@ jobs:
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==8.9.2.26; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.20.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_10-cpu-s390x-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
-    needs: manywheel-py3_10-cpu-s390x-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
+    manywheel-py3_10-cpu-s390x-test:  # Testing
+      if: ${{ github.repository_owner == 'pytorch'}}
+      needs: manywheel-py3_10-cpu-s390x-build
+        uses: ./.github/workflows/_binary-test-linux.yml
+        with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
@@ -197,12 +197,12 @@ jobs:
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
       DESIRED_PYTHON: "3.10"
-      build_name: manywheel-py3_10-cpu-s390x
-      build_environment: linux-s390x-binary-manywheel
-      runs_on: linux.s390x
-      ALPINE_IMAGE: "docker.io/s390x/alpine"
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
+        build_name: manywheel-py3_10-cpu-s390x
+        build_environment: linux-s390x-binary-manywheel
+          runs_on: linux.s390x
+          ALPINE_IMAGE: "docker.io/s390x/alpine"
+        secrets:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cpu-s390x-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -246,11 +246,11 @@ jobs:
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==8.9.2.26; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.20.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_11-cpu-s390x-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
-    needs: manywheel-py3_11-cpu-s390x-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
+    manywheel-py3_11-cpu-s390x-test:  # Testing
+      if: ${{ github.repository_owner == 'pytorch'}}
+      needs: manywheel-py3_11-cpu-s390x-build
+        uses: ./.github/workflows/_binary-test-linux.yml
+        with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
@@ -260,12 +260,12 @@ jobs:
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
       DESIRED_PYTHON: "3.11"
-      build_name: manywheel-py3_11-cpu-s390x
-      build_environment: linux-s390x-binary-manywheel
-      runs_on: linux.s390x
-      ALPINE_IMAGE: "docker.io/s390x/alpine"
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
+        build_name: manywheel-py3_11-cpu-s390x
+        build_environment: linux-s390x-binary-manywheel
+          runs_on: linux.s390x
+          ALPINE_IMAGE: "docker.io/s390x/alpine"
+        secrets:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cpu-s390x-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -309,11 +309,11 @@ jobs:
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==8.9.2.26; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.20.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_12-cpu-s390x-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
-    needs: manywheel-py3_12-cpu-s390x-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
+    manywheel-py3_12-cpu-s390x-test:  # Testing
+      if: ${{ github.repository_owner == 'pytorch'}}
+      needs: manywheel-py3_12-cpu-s390x-build
+        uses: ./.github/workflows/_binary-test-linux.yml
+        with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
@@ -323,12 +323,12 @@ jobs:
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
       DESIRED_PYTHON: "3.12"
-      build_name: manywheel-py3_12-cpu-s390x
-      build_environment: linux-s390x-binary-manywheel
-      runs_on: linux.s390x
-      ALPINE_IMAGE: "docker.io/s390x/alpine"
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
+        build_name: manywheel-py3_12-cpu-s390x
+        build_environment: linux-s390x-binary-manywheel
+          runs_on: linux.s390x
+          ALPINE_IMAGE: "docker.io/s390x/alpine"
+        secrets:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cpu-s390x-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
