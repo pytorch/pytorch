@@ -1726,32 +1726,35 @@ class Module:
                         d.discard(name)
 
         __dict__ = self.__dict__
-        params = __dict__.get('_parameters')
-        if isinstance(value, Parameter):
-            if params is None:
+        params = __dict__.get("_parameters")
+        is_init = params is not None
+        if not is_init:
+            if isinstance(value, Parameter):
                 raise AttributeError(
                     "cannot assign parameters before Module.__init__() call")
+            if isinstance(value, Module):
+                raise AttributeError(
+                    "cannot assign module before Module.__init__() call")
+            return super().__setattr__(name, value)
+        if isinstance(value, Parameter):
             remove_from(__dict__, __dict__["_buffers"], __dict__["_modules"], self._non_persistent_buffers_set)
             self.register_parameter(name, value)
-        elif params is not None and name in params:
+        elif name in params:
             if value is not None:
                 raise TypeError(f"cannot assign '{torch.typename(value)}' as parameter '{name}' "
                                 "(torch.nn.Parameter or None expected)"
                                 )
             self.register_parameter(name, value)
         else:
-            modules = __dict__.get('_modules')
+            modules = __dict__["_modules"]
             if isinstance(value, Module):
-                if modules is None:
-                    raise AttributeError(
-                        "cannot assign module before Module.__init__() call")
-                remove_from(__dict__, __dict__["_parameters"], __dict__["_buffers"], self._non_persistent_buffers_set)
+                remove_from(__dict__, params, __dict__["_buffers"], self._non_persistent_buffers_set)
                 for hook in _global_module_registration_hooks.values():
                     output = hook(self, name, value)
                     if output is not None:
                         value = output
                 modules[name] = value
-            elif modules is not None and name in modules:
+            elif name in modules:
                 if value is not None:
                     raise TypeError(f"cannot assign '{torch.typename(value)}' as child module '{name}' "
                                     "(torch.nn.Module or None expected)"
@@ -1762,8 +1765,8 @@ class Module:
                         value = output
                 modules[name] = value
             else:
-                buffers = __dict__.get('_buffers')
-                if buffers is not None and name in buffers:
+                buffers = __dict__["_buffers"]
+                if name in buffers:
                     if value is not None and not isinstance(value, torch.Tensor):
                         raise TypeError(f"cannot assign '{torch.typename(value)}' as buffer '{name}' "
                                         "(torch.Tensor or None expected)"
