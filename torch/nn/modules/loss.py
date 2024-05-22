@@ -448,9 +448,10 @@ class KLDivLoss(_Loss):
 
     Examples::
 
-        >>> import torch.nn.functional as F
-        >>> from torch import nn
         >>> import torch
+        >>> import torch.nn import nn
+        >>> import torch.nn.functional as F
+        
         >>> kl_loss = nn.KLDivLoss(reduction="batchmean")
         >>> # input should be a distribution in the log space
         >>> input = F.log_softmax(torch.randn(3, 5, requires_grad=True), dim=1)
