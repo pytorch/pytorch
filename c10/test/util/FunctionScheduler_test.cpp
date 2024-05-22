@@ -1,7 +1,6 @@
 #include <c10/util/FunctionScheduler.h>
 #include <gtest/gtest.h>
 #include <chrono>
-#include <memory>
 #include <thread>
 
 TEST(Job, Initialization) {
@@ -56,7 +55,7 @@ TEST(FunctionScheduler, Initialization) {
 
 TEST(FunctionScheduler, ScheduleJob) {
   std::function<void()> function = []() {};
-  std::chrono::microseconds interval(10);
+  std::chrono::seconds interval(10);
 
   c10::FunctionScheduler fs;
   int job_id = fs.scheduleJob(function, interval);
@@ -67,7 +66,7 @@ TEST(FunctionScheduler, ScheduleJob) {
 
 TEST(FunctionScheduler, RemoveJob) {
   std::function<void()> function = []() {};
-  std::chrono::microseconds interval(10);
+  std::chrono::seconds interval(10);
 
   c10::FunctionScheduler fs;
 
@@ -90,7 +89,7 @@ TEST(FunctionScheduler, StartAndStop) {
 TEST(FunctionScheduler, RunJobImmediately) {
   bool ran = false;
   std::function<void()> function = [&ran]() { ran = true; };
-  std::chrono::microseconds interval(0);
+  std::chrono::seconds interval(0);
 
   c10::FunctionScheduler fs;
   fs.scheduleJob(function, interval);
@@ -104,15 +103,15 @@ TEST(FunctionScheduler, RunJobImmediately) {
 TEST(FunctionScheduler, RunJobWithInterval) {
   bool ran = false;
   std::function<void()> function = [&ran]() { ran = true; };
-  std::chrono::microseconds interval(1000);
+  std::chrono::seconds interval(15);
 
   c10::FunctionScheduler fs;
   fs.scheduleJob(function, interval);
   fs.start();
-  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  std::this_thread::sleep_for(std::chrono::milliseconds(1));
   ASSERT_FALSE(ran);
 
-  std::this_thread::sleep_for(std::chrono::milliseconds(1010));
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
   fs.stop();
 
   ASSERT_TRUE(ran);
@@ -122,14 +121,14 @@ TEST(FunctionScheduler, RunMultipleJobs) {
   int counter = 0; // TODO should be atomic if multiple threads exist?
   std::function<void()> function1 = [&counter]() { counter++; };
   std::function<void()> function2 = [&counter]() { counter += 2; };
-  std::chrono::microseconds interval1(200); // 200ms, 400ms
-  std::chrono::microseconds interval2(300); // 300ms
+  std::chrono::seconds interval1(10); // 10s, 20s
+  std::chrono::seconds interval2(15); // 15s
 
   c10::FunctionScheduler fs;
   fs.scheduleJob(function1, interval1);
   fs.scheduleJob(function2, interval2);
   fs.start();
-  std::this_thread::sleep_for(std::chrono::milliseconds(550));
+  std::this_thread::sleep_for(std::chrono::milliseconds(22));
   fs.stop();
 
   ASSERT_EQ(counter, 4);
