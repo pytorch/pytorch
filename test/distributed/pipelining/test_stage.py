@@ -83,10 +83,12 @@ class StageTest(MultiProcContinousTest):
 
         x = torch.randn(batch_size, d_hid, device=self.device)
 
+        split_spec = mod.split_spec if hasattr(mod, "split_spec") else None
         pipe = pipeline(
             mod,
             chunks,
             example_args=(x,),
+            split_spec=split_spec,
         )
 
         stage = PipelineStage(
@@ -203,9 +205,9 @@ class StageTest(MultiProcContinousTest):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_manual(self):
-        full_mod = MultiMLP(d_hid).to(self.device)
-        stage_mod = full_mod.get_submodule(f"mlp{self.rank}")
-        stage_mod.to(self.device)
+        full_mod = MultiMLP(d_hid, n_layers=self.world_size)
+        full_mod.to(self.device)
+        stage_mod = full_mod.get_submodule(f"layers.{self.rank}")
 
         x = torch.randn(batch_size, d_hid, device=self.device)
 
