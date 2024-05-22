@@ -367,8 +367,6 @@ def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
 @register_lowering(torch.ops.higher_order.flex_attention, type_promotion_kind=None)
 def flex_attention(*args, **kwargs):
     query, key, value, subgraph, *other_buffers = args
-    for buf in [query, key, value]:
-        buf.realize()
     placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
         for name, dtype in [
@@ -642,8 +640,6 @@ def flex_attention_backward(*args, **kwargs):
         joint_graph,
         *other_buffers,
     ) = args
-    for buf in [query, key, value, grad_out]:
-        buf.realize()
 
     device = query.get_device()
     dtype = query.get_dtype()
