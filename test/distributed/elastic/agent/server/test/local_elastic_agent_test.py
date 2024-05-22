@@ -85,6 +85,16 @@ def dummy_compute() -> torch.Tensor:
     return torch.rand(100, 100)
 
 
+def dummy_compute_simulate_rank_failure() -> torch.Tensor:
+    """
+    fails rank 1 once
+    in other cases, returns a predefined size random Tensor
+    """
+    if os.environ["RANK"] == "1" and os.environ["TORCHELASTIC_RESTART_COUNT"] == "0":
+        os.kill(os.getpid(), 9)
+    return torch.rand(100, 100)
+
+
 def _fatal_signal_function(expected_error_index: int, sig: int):
     rank = int(os.environ["RANK"])
     if rank == expected_error_index:
@@ -1440,3 +1450,19 @@ class LocalElasticAgentTest(unittest.TestCase):
     )
     def test_shutdown_called_etcd_v2(self):
         self.run_test_with_backend(backend="etcd-v2", test_to_run=self.shutdown_called)
+
+    def fail_rank_one_once(self):
+        res = self.run_agent(
+            Conf(entrypoint=dummy_compute_simulate_rank_failure, local_world_size=2),
+            max_restarts=3,
+        )
+        self.assertFalse(res.is_failed())
+        for return_value in res.return_values.values():
+            self.assertIsInstance(return_value, torch.Tensor)
+            self.assertEqual((100, 100), return_value.shape)
+
+    @skip_but_pass_in_sandcastle_if(
+        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
+    )
+    def test_rank_restart_after_failure(self):
+        self.run_test_with_backend(backend="c10d", test_to_run=self.fail_rank_one_once)

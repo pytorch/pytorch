@@ -185,7 +185,7 @@ class C10OperatorWrapper final : public Operator<Context> {
   template <class T>
   IValue get_nontensor_argument_(
       const std::string& name,
-      const c10::optional<IValue>& default_value) {
+      const std::optional<IValue>& default_value) {
     if (default_value.has_value()) {
       return this->template GetSingleArgument<T>(name, default_value->to<T>());
     } else {

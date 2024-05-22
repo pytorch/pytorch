@@ -180,7 +180,7 @@ class ParametrizationList(ModuleList):
                 # add the new parameters to the optimizer after registering the parametrization
                 # (this is documented)
                 if isinstance(original, Parameter):
-                    originali = Parameter(originali)
+                    originali = Parameter(originali, original.requires_grad)
                 originali.requires_grad_(original.requires_grad)
                 _register_parameter_or_buffer(self, f"original{i}", originali)
 

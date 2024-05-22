@@ -166,8 +166,6 @@ TEST(MathTest, GemmNoTransTrans) {
 
 namespace {
 
-constexpr float kEps = 1e-5;
-
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class GemmBatchedTest
     : public testing::TestWithParam<testing::tuple<bool, bool>> {
