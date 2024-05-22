@@ -1284,46 +1284,71 @@ def _optimize_runtime_with_given_memory(
     memory: List[float],
     runtimes: List[float],
     max_memory: float,
-) -> torch.Tensor:
-    """
-    Given a list of operator names, their corresponding runtimes, and the
-    maximum amount of memory available, returns the subset of operators to save
-    s.t. we spend the least time recomputing while staying under the memory
-    budget.
-    Uses https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.milp.html
-    """
-    import numpy as np
-    from scipy.optimize import Bounds, LinearConstraint, milp
+) -> Tuple[float, List[int], List[int]]:
+    SOLVER = "milp"
+    if SOLVER == "greedy":
+        n = len(runtimes)
+        items = list(range(n))
 
-    memory = np.array(memory)
-    runtimes = np.array(runtimes)
-    c = -runtimes  # type: ignore[operator]
+        # Sort items based on the ratio of runtime to memory in descending order
+        items = sorted(items, key=lambda i: runtimes[i] / memory[i], reverse=True)
 
-    memory_constraint = LinearConstraint(A=memory, ub=max_memory)
-    constraints = [memory_constraint]
+        total_memory = 0.0
+        total_runtime = 0.0
+        items_to_save = []
+        items_to_allow_recomputing = []
 
-    integrality = np.ones_like(c)
-    res = milp(
-        c=c, constraints=constraints, integrality=integrality, bounds=Bounds(0, 1)
-    )
-    if not res.success:
-        raise RuntimeError("Somehow scipy solving failed")
-    return res.x
+        for i in items:
+            if total_memory + memory[i] <= max_memory:
+                total_memory += memory[i]
+                total_runtime += runtimes[i]
+                items_to_save.append(i)
+            else:
+                items_to_allow_recomputing.append(i)
+        return total_runtime, items_to_save, items_to_allow_recomputing
+    else:
+        import numpy as np
+        from scipy.optimize import Bounds, LinearConstraint, milp
+
+        np_memory = np.array(memory)
+        np_runtimes = np.array(runtimes)
+        c = -np_runtimes  # type: ignore[operator]
+
+        memory_constraint = LinearConstraint(A=np_memory, ub=np.array(max_memory))
+        constraints = [memory_constraint]
+
+        integrality = np.ones_like(c)
+        res = milp(
+            c=c, constraints=constraints, integrality=integrality, bounds=Bounds(0, 1)
+        )
+        if not res.success:
+            raise RuntimeError("Somehow scipy solving failed")
+
+        items_to_save = []
+        items_to_allow_recomputing = []
+        for idx, i in enumerate(res.x):
+            if i == 1:
+                items_to_save.append(idx)
+            else:
+                items_to_allow_recomputing.append(idx)
+        return -res.fun, items_to_save, items_to_allow_recomputing
 
 
 from torch.utils._mode_utils import no_dispatch
 
-RUNTIME_MODE = "analytical"
-
 
 def estimate_runtime(node):
+    RUNTIME_MODE = config.memory_budget_runtime_estimator
+
     def materialize_arg(x):
         if isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.Tensor):
-            shape = x.meta['val'].shape
+            shape = list(x.meta["val"].shape)
+
             def realize_symbol(d):
                 return d if isinstance(d, int) else d.node.int
+
             shape = [realize_symbol(s) for s in shape]
-            return x.meta['val'].new_zeros(shape)
+            return x.meta["val"].new_zeros(shape)
         return x
 
     if RUNTIME_MODE == "placeholder":
@@ -1331,6 +1356,7 @@ def estimate_runtime(node):
 
     if RUNTIME_MODE == "profile":
         from triton.testing import do_bench
+
         with no_dispatch():
             args, kwargs = pytree.tree_map(materialize_arg, (node.args, node.kwargs))
             ms = do_bench(lambda: node.target(*args, **kwargs))
@@ -1444,15 +1470,15 @@ def choose_saved_values_set(
     def print_budget_real_mem(act_size, name=""):
         print(f"{get_mem_ratio(act_size):.2f}: {act_size:.2f}GB ({name})")
 
-    print_budget_real_mem(
-        estimate_activations_size(runtime_optimized_saved_values), "default"
-    )
-    print_budget_real_mem(
-        estimate_activations_size(more_aggressive_saved_values), "more aggressive"
-    )
-    print_budget_real_mem(
-        estimate_activations_size(aggressive_recomputation_saved_values), "aggressive"
-    )
+    # print_budget_real_mem(
+    #     estimate_activations_size(runtime_optimized_saved_values), "default"
+    # )
+    # print_budget_real_mem(
+    #     estimate_activations_size(more_aggressive_saved_values), "more aggressive"
+    # )
+    # print_budget_real_mem(
+    #     estimate_activations_size(aggressive_recomputation_saved_values), "aggressive"
+    # )
 
     all_recomputable_banned_nodes = sorted(
         recomputable_banned_nodes, key=_size_of, reverse=True
@@ -1465,13 +1491,16 @@ def choose_saved_values_set(
     from torch.utils._mode_utils import no_dispatch
 
     with no_dispatch():
-        banned_nodes = _optimize_runtime_with_given_memory(
+        (
+            expected_runtime,
+            saved_node_idxs,
+            recomputable_node_idxs,
+        ) = _optimize_runtime_with_given_memory(
             memories, runtimes, max(memory_budget, 0)
         )
         dont_ban = set()
-        for idx, i in enumerate(banned_nodes.tolist()):
-            if not i:
-                dont_ban.add(all_recomputable_banned_nodes[idx])
+        for idx in recomputable_node_idxs:
+            dont_ban.add(all_recomputable_banned_nodes[idx])
         predicted_saved_nodes = set(all_recomputable_banned_nodes) - dont_ban
         # print([(i, get_normalized_size(_size_of(i))) for i in dont_ban])
         estimated_activations_saved = estimate_activations_size(
@@ -1489,15 +1518,15 @@ def choose_saved_values_set(
         # unsure about this) that's because estimated is just only including
         # tensors we actually banned from recompute, but there may be other
         # tensors that we choose to save.
-        print(f"desired: {cur_memory_budget} ")
-        print(f"allow recomputing: {dont_ban}")
-        print(f"estimated: {estimate_activations_size(predicted_saved_nodes)}")
-        print(
-            f"estimated ratio: {estimate_activations_size(predicted_saved_nodes)/(max_act_size - min_act_size)}"
-        )
-        print(f"actual: {estimate_activations_size(saved_values) - min_act_size}")
-        print(f"actual ratio: {get_mem_ratio(estimate_activations_size(saved_values))}")
-        print_budget_real_mem(estimate_activations_size(saved_values), "milp")
+        # print(f"desired: {cur_memory_budget} ")
+        # print(f"allow recomputing: {dont_ban}")
+        # print(f"estimated: {estimate_activations_size(predicted_saved_nodes)}")
+        # print(
+        #     f"estimated ratio: {estimate_activations_size(predicted_saved_nodes)/(max_act_size - min_act_size)}"
+        # )
+        # print(f"actual: {estimate_activations_size(saved_values) - min_act_size}")
+        # print(f"actual ratio: {get_mem_ratio(estimate_activations_size(saved_values))}")
+        # print_budget_real_mem(estimate_activations_size(saved_values), "milp")
 
         return saved_values
 
@@ -1620,7 +1649,7 @@ def min_cut_rematerialization_partition(
         if isinstance(node.meta.get("memory_budget", None), float):
             memory_budget = node.meta["memory_budget"]
             break
-    print("Memory Budget: ", memory_budget)
+    # print("Memory Budget: ", memory_budget)
 
     saved_values = choose_saved_values_set(
         joint_graph, node_info, memory_budget=memory_budget
