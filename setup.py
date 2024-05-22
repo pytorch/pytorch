@@ -204,6 +204,11 @@
 #
 #   BUILD_PYTHON_ONLY
 #      Builds pytorch as a wheel using libtorch.so from a seperate wheel
+#
+#   SPLIT_BUILD
+#      Runs setup.py xxx once using BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 and
+#      once again with BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1. This overwrites
+#       the options in BUILD_LIBTORCH_WHL and BUILD_PYTHON_ONLY
 
 import os
 import pkgutil
@@ -229,21 +234,8 @@ def _get_package_path(package_name):
             pass
     return None
 
-
-BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
-BUILD_PYTORCH_USING_LIBTORCH_WHL = os.getenv("BUILD_PYTHON_ONLY", "0") == "1"
-
-
-# set up appropriate env variables
-if BUILD_LIBTORCH_WHL:
-    # Set up environment variables for ONLY building libtorch.so and not libtorch_python.so
-    # functorch is not supported without python
-    os.environ["BUILD_FUNCTORCH"] = "OFF"
-
-
-if BUILD_PYTORCH_USING_LIBTORCH_WHL:
-    os.environ["BUILD_LIBTORCHLESS"] = "ON"
-    os.environ["LIBTORCH_LIB_PATH"] = f"{_get_package_path('libtorchsplit')}/lib"
+BUILD_LIBTORCH_WHL = False
+BUILD_PYTORCH_USING_LIBTORCH_WHL = False
 
 python_min_version = (3, 8, 0)
 python_min_version_str = ".".join(map(str, python_min_version))
@@ -257,7 +249,6 @@ import filecmp
 import glob
 import importlib
 import json
-import os
 import shutil
 import subprocess
 import sysconfig
@@ -352,10 +343,10 @@ cmake_python_include_dir = sysconfig.get_path("include")
 
 DEFAULT_PACKAGE_NAME = "libtorchsplit" if BUILD_LIBTORCH_WHL else "torch"
 
-package_name = os.getenv("TORCH_PACKAGE_NAME", DEFAULT_PACKAGE_NAME)
+PACKAGE_NAME = os.getenv("TORCH_PACKAGE_NAME", DEFAULT_PACKAGE_NAME)
 package_type = os.getenv("PACKAGE_TYPE", "wheel")
 version = get_torch_version()
-report(f"Building wheel {package_name}-{version}")
+report(f"Building wheel {PACKAGE_NAME}-{version}")
 
 cmake = CMake()
 
@@ -1151,10 +1142,46 @@ def rename_torch_packages(package_list):
 
 
 def main():
-    if BUILD_LIBTORCH_WHL and BUILD_PYTORCH_USING_LIBTORCH_WHL:
+    global BUILD_LIBTORCH_WHL
+    global BUILD_PYTORCH_USING_LIBTORCH_WHL
+    global PACKAGE_NAME
+
+    BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
+    BUILD_PYTORCH_USING_LIBTORCH_WHL = os.getenv("BUILD_PYTHON_ONLY", "0") == "1"
+    BUILD_TWO_WHEELS = os.getenv("SPLIT_BUILD", "0") == "1"
+
+    if BUILD_LIBTORCH_WHL and BUILD_PYTORCH_USING_LIBTORCH_WHL:  # noqa: F823
         raise RuntimeError(
             "Conflict: 'BUILD_LIBTORCH_WHL' and 'BUILD_PYTHON_ONLY' can't both be 1. Set one to 0 and rerun."
         )
+
+    if BUILD_TWO_WHEELS:
+        final_package_name = PACKAGE_NAME
+        PACKAGE_NAME = "libtorchsplit"
+        BUILD_LIBTORCH_WHL = True
+        BUILD_PYTORCH_USING_LIBTORCH_WHL = False
+        _main()
+        BUILD_LIBTORCH_WHL = False
+        BUILD_PYTORCH_USING_LIBTORCH_WHL = True
+        setup_cmd = sys.argv[1]
+        sys.argv[1] = "clean"
+        PACKAGE_NAME = final_package_name
+        _main()
+        sys.argv[1] = setup_cmd
+    _main()
+
+
+def _main():
+    print(f"BUILD_LIBTORCH_WHL - {BUILD_LIBTORCH_WHL}")
+    print(f"BUILD_PYTORCH_USING_LIBTORCH_WHL - {BUILD_PYTORCH_USING_LIBTORCH_WHL}")
+    # set up appropriate env variables
+    if BUILD_LIBTORCH_WHL:
+        # Set up environment variables for ONLY building libtorch.so and not libtorch_python.so
+        # functorch is not supported without python
+        os.environ["BUILD_FUNCTORCH"] = "OFF"
+    if BUILD_PYTORCH_USING_LIBTORCH_WHL:
+        os.environ["BUILD_LIBTORCHLESS"] = "ON"
+        os.environ["LIBTORCH_LIB_PATH"] = f"{_get_package_path('libtorchsplit')}/lib"
 
     # the list of runtime dependencies required by this built package
     install_requires = [
@@ -1475,7 +1502,7 @@ def main():
         for package in packages:
             parts = package.split(".")
             if parts[0] == "torch":
-                modified_packages.append(DEFAULT_PACKAGE_NAME + package[len("torch") :])
+                modified_packages.append("libtorchsplit" + package[len("torch") :])
         packages = modified_packages
         package_dir = {"libtorchsplit": "torch"}
         torch_package_dir_name = "libtorchsplit"
@@ -1491,9 +1518,8 @@ def main():
                 "python/serialized_test/data/operator_test/*.zip",
             ],
         }
-
     setup(
-        name=package_name,
+        name=torch_package_dir_name,
         version=version,
         description=(
             "Tensors and Dynamic neural networks in "
