@@ -103,8 +103,8 @@ class ExportedArtifact:
         ],
     ]
     out_spec: Optional[TreeSpec] = None,
-    module_call_signatures: Optional[Dict[str, ModuleCallSignature]] = None
     fake_mode: Optional[FakeTensorMode] = None,
+    module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = None,
 
 
 DEFAULT_EXPORT_DYNAMO_CONFIG = ExportDynamoConfig()
@@ -147,6 +147,26 @@ def _add_runtime_assertions_to_cond_in_subgraph(range_constraints, gm, fake_mode
             res = _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints)(gm)
         assert res is not None
         gm = res.graph_module
+
+
+def _rewrite_node(gm):
+    for node in gm.graph.nodes:
+        if node.target == torch.ops.higher_order._export_tracepoint:
+            if "path" in node.kwargs:
+                path = strip_root(node.kwargs["path"])
+                with gm.graph.inserting_before(node):
+                    new_node = gm.graph.create_node(
+                        "call_function",
+                        torch.ops.higher_order._export_tracepoint,
+                        args=node.args,
+                        kwargs={
+                            "path": path,
+                            "kind": node.kwargs["kind"],
+                        },
+                    )
+                    new_node.meta = node.meta
+                    node.replace_all_uses_with(new_node)
+                    gm.graph.erase_node(node)
 
 
 def _convert_input_to_fake(gm, args, kwargs):
@@ -1125,19 +1145,9 @@ def _strict_export(
     # 5. Rename constants nodes in graph module from buffers to constants
     _rename_constants_nodes(gm, export_graph_signature)
 
-    module_call_signatures = {
-        fqn: ModuleCallSignature(inputs=[], outputs=[], **specs)
-        for fqn, specs in gm_torch_level.meta["module_call_specs"].items()
-    }
-
-    if len(preserve_module_call_signature) > 0:
-        res = CollectTracepointsPass(module_call_signatures, export_graph_signature)(gm)
-        assert res is not None
-        gm = res.graph_module
-
     aten_export_artifact.out_spec = orig_out_spec
-    aten_export_artifact.module_call_signatures = module_call_signatures
     aten_export_artifact.fake_mode = dynamo_fake_mode
+    aten_export_artifact.module_call_specs = gm_torch_level.meta["module_call_specs"]
     return aten_export_artifact
 
 
@@ -1273,43 +1283,14 @@ def _non_strict_export(
     gm = aten_export_artifact.gm
 
     gm.meta["forward_arg_names"] = forward_arg_names
-    module_call_signatures = {
-        strip_root(fqn): ModuleCallSignature(inputs=[], outputs=[], **specs)
-        for fqn, specs in module_call_specs.items()
-    }
-
-    if len(preserve_module_call_signature) > 0:
-        for node in gm.graph.nodes:
-            if node.target == torch.ops.higher_order._export_tracepoint:
-                if "path" in node.kwargs:
-                    path = strip_root(node.kwargs["path"])
-                    with gm.graph.inserting_before(node):
-                        new_node = gm.graph.create_node(
-                            "call_function",
-                            torch.ops.higher_order._export_tracepoint,
-                            args=node.args,
-                            kwargs={
-                                "path": path,
-                                "kind": node.kwargs["kind"],
-                            },
-                        )
-                        new_node.meta = node.meta
-                        node.replace_all_uses_with(new_node)
-                        gm.graph.erase_node(node)
-
-        res = CollectTracepointsPass(module_call_signatures, aten_export_artifact.sig)(
-            gm
-        )
-        assert res is not None
-        gm = res.graph_module
 
     _rewrite_non_persistent_buffers(
         mod, aten_export_artifact.sig, aten_export_artifact.constants
     )
 
     aten_export_artifact.out_spec = out_spec
-    aten_export_artifact.module_call_signatures = module_call_signatures
     aten_export_artifact.fake_mode = fake_mode
+    aten_export_artifact.module_call_specs = module_call_specs
     return aten_export_artifact
 
 
@@ -1419,9 +1400,9 @@ def _export(
     gm = aten_export_artifact.gm
     export_graph_signature = aten_export_artifact.sig
     out_spec = aten_export_artifact.out_spec
-    module_call_signatures = aten_export_artifact.module_call_signatures
     constants = aten_export_artifact.constants
     fake_mode = aten_export_artifact.fake_mode
+    module_call_specs = aten_export_artifact.module_call_specs
 
     # Make constratins.
     gm.meta["inline_constraints"] = {
@@ -1451,6 +1432,19 @@ def _export(
             gm,
             fake_mode,
         )
+
+    # Make module signatures.
+    module_call_signatures = {
+        fqn: ModuleCallSignature(inputs=[], outputs=[], **specs)
+        for fqn, specs in module_call_specs.items()
+    }
+
+    if len(preserve_module_call_signature) > 0:
+        if not strict:
+            _rewrite_node(gm)
+        res = CollectTracepointsPass(module_call_signatures, export_graph_signature)(gm)
+        assert res is not None
+        gm = res.graph_module
 
     assert out_spec is not None
 
