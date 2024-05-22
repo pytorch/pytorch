@@ -52,7 +52,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cuda11_8-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_8-cuda11_8-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -92,7 +92,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cuda12_1-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: manywheel-py3_8-cuda12_1-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:

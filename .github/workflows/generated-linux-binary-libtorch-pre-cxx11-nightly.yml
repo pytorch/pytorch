@@ -56,7 +56,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cpu-shared-with-deps-pre-cxx11-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: libtorch-cpu-shared-with-deps-pre-cxx11-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -119,7 +119,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cuda11_8-shared-with-deps-pre-cxx11-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: libtorch-cuda11_8-shared-with-deps-pre-cxx11-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -184,7 +184,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cuda12_1-shared-with-deps-pre-cxx11-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: libtorch-cuda12_1-shared-with-deps-pre-cxx11-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -249,7 +249,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cuda12_4-shared-with-deps-pre-cxx11-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: libtorch-cuda12_4-shared-with-deps-pre-cxx11-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -314,7 +314,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-rocm6_0-shared-with-deps-pre-cxx11-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: libtorch-rocm6_0-shared-with-deps-pre-cxx11-build
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
@@ -420,7 +420,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-rocm6_1-shared-with-deps-pre-cxx11-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' and config["gpu_arch_type"] != "cuda-aarch64"}}
     needs: libtorch-rocm6_1-shared-with-deps-pre-cxx11-build
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
