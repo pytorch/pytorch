@@ -30,7 +30,6 @@ from torch.onnx._internal import _beartype, jit_utils, registration
 # see Note [Edit Symbolic Files] in symbolic_helper.py
 
 __all__ = [
-    "bitwise_and",
     "col2im",
 ]
 
@@ -40,7 +39,7 @@ _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=18)
 @_onnx_symbolic("aten::__and_")
 @_onnx_symbolic("aten::bitwise_and")
 @_beartype.beartype
-def bitwise_and(g: jit_utils.GraphContext, self, other):
+def __and_(g: jit_utils.GraphContext, self, other):
     # do type promotion (scalars don't seem to apply)
     args = [self, other]
     # type promotion doesn't happen with torch.bitwise_and(tensor, scalar)
