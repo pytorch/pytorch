@@ -87,6 +87,7 @@ _LINKER_SCRIPT = os.path.join(_TORCH_PATH, "_inductor/script.ld")
 if config.is_fbcode():
     from triton.fb import build_paths
     from triton.fb.build import _run_build_command
+    import triton.fb.fb_memcache
 
     from torch._inductor.fb.utils import (
         log_global_cache_errors,
@@ -992,7 +993,7 @@ class FxGraphCache:
                     import triton
 
                     if config.is_fbcode():
-                        remote_cache = triton.runtime.fb_memcache.FbMemcacheRemoteFxGraphCacheBackend(
+                        remote_cache = triton.fb.fb_memcache.FbMemcacheRemoteFxGraphCacheBackend(
                             cache_id
                         )
                     else:

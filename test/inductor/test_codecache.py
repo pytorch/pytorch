@@ -194,7 +194,7 @@ class TestFxGraphCache(TestCase):
                 num_put += 1
 
         cache_module = (
-            "triton.runtime.fb_memcache.FbMemcacheRemoteFxGraphCacheBackend"
+            "triton.fb.fb_memcache.FbMemcacheRemoteFxGraphCacheBackend"
             if config.is_fbcode()
             else "triton.runtime.cache.RedisRemoteCacheBackend"
         )

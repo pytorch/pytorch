@@ -375,7 +375,7 @@ def should_use_remote_fx_graph_cache():
         return False
 
     try:
-        from triton.runtime.fb_memcache import MEMCACHE_VERSION
+        from triton.fb.fb_memcache import MEMCACHE_VERSION
     except ModuleNotFoundError:
         return False
 
