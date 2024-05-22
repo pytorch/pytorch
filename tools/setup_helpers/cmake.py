@@ -124,8 +124,13 @@ class CMake:
         build_test: bool,
         my_env: Dict[str, str],
         rerun: bool,
+        build_libtorchless: bool = False,
+        libtorch_path: string = None
     ) -> None:
         "Runs cmake to generate native build files."
+
+        if build_libtorchless and libtorch_path is None:
+            raise RuntimeError("libtorch_path cannot be None when building pytorch without libtorch.")
 
         if rerun and os.path.isfile(self._cmake_cache_file):
             os.remove(self._cmake_cache_file)
@@ -262,6 +267,9 @@ class CMake:
                 if key not in build_options:
                     build_options[key] = val
 
+        if libtorch_path is not None:
+            build_options["LIBTORCH_LIB_PATH"] = libtorch_path
+
         # The default value cannot be easily obtained in CMakeLists.txt. We set it here.
         py_lib_path = sysconfig.get_path("purelib")
         cmake_prefix_path = build_options.get("CMAKE_PREFIX_PATH", None)
@@ -286,6 +294,7 @@ class CMake:
                 # Most library detection should go to CMake script, except this one, which Python can do a much better job
                 # due to NumPy's inherent Pythonic nature.
                 "USE_NUMPY": USE_NUMPY,
+                "BUILD_LIBTORCHLESS": build_libtorchless
             }
         )
 
