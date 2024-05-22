@@ -1760,6 +1760,10 @@ class CppWrapperCpu(WrapperCodeGen):
 
     def codegen_device_copy(self, src, dst):
         if config.abi_compatible:
+            # aoti_torch_tensor_copy_ takes AtenTensorHandle as input,
+            # while stack-allocation results in ArrayRefTensor
+            # so disable stack allocation here
+            self.allow_stack_allocation = False
             self.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_tensor_copy_(expensive_copy_to_tensor_if_needed({src}), {dst}));"
             )
