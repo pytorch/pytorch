@@ -3306,7 +3306,7 @@ FORCE_SKIP_FILES = {f"{_module_dir(torch)}optim/lr_scheduler.py"}
 
 def _recompile_re():
     global SKIP_DIRS_RE
-    SKIP_DIRS_RE = re.compile(rf"^[^\s]*({'|'.join(map(re.escape, SKIP_DIRS))})")
+    SKIP_DIRS_RE = re.compile(rf"^[^\s<]*({'|'.join(map(re.escape, SKIP_DIRS))})")
 
 
 def add(import_name: str):
