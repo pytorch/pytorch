@@ -6321,8 +6321,13 @@ def meta_channel_shuffle(input, groups):
     )
 
 
-@register_meta(aten._fbgemm_jagged_to_padded_dense_forward.default)
-def meta__fbgemm_jagged_to_padded_dense_forward(values: Tensor, offsets: List[Tensor], max_lengths: List[int], padding_value: float=0.0):
+@register_meta(aten._jagged_to_padded_dense_forward.default)
+def meta__jagged_to_padded_dense_forward(
+    values: Tensor,
+    offsets: List[Tensor],
+    max_lengths: List[int],
+    padding_value: float = 0.0,
+):
     # only one jagged dim is supported for now
     assert len(offsets) == 1
     assert len(max_lengths) == 1
@@ -6333,17 +6338,10 @@ def meta__fbgemm_jagged_to_padded_dense_forward(values: Tensor, offsets: List[Te
     return values.new_empty(output_shape)
 
 
-@register_meta(aten._fbgemm_jagged_to_padded_dense_backward.default)
-def meta__fbgemm_jagged_to_padded_dense_backward(grad_output: Tensor, offsets: List[Tensor], total_L: int):
-    # only one jagged dim is supported for now
-    assert len(offsets) == 1
-
-    output_shape = (total_L, *grad_output.shape[2:])
-    return grad_output.new_empty(output_shape)
-
-
-@register_meta(aten._fbgemm_dense_to_jagged_forward.default)
-def meta__fbgemm_dense_to_jagged_forward(padded: Tensor, offsets: List[Tensor], total_L: Optional[int]=None):
+@register_meta(aten._padded_dense_to_jagged_forward.default)
+def meta__padded_dense_to_jagged_forward(
+    padded: Tensor, offsets: List[Tensor], total_L: Optional[int] = None
+):
     # only one jagged dim is supported for now
     assert len(offsets) == 1
 
@@ -6356,7 +6354,8 @@ def meta__fbgemm_dense_to_jagged_forward(padded: Tensor, offsets: List[Tensor], 
             total_L, min=1, max=None
         )
 
-    return meta__fbgemm_jagged_to_padded_dense_backward(padded, [offsets], total_L)
+    output_shape = (total_L, *padded.shape[2:])
+    return padded.new_empty(output_shape)
 
 
 def _create_unary_float_meta_func(func):
