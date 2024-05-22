@@ -253,6 +253,14 @@ class TestAutocastCPU(TestCase):
                 cpu_autocast_output = getattr(torch, op)(*args, **maybe_kwargs)
             self.assertEqual(generic_autocast_output, cpu_autocast_output)
 
+    def test_cpu_autocast_deprecated_warning(self):
+        with self.assertWarnsRegex(
+            DeprecationWarning,
+            r"torch.cpu.amp.autocast\(args...\) is deprecated. Please use torch.amp.autocast\('cpu', args...\) instead.",
+        ):
+            with torch.cpu.amp.autocast():
+                _ = torch.ones(10)
+
 
 class CustomLinear(torch.autograd.Function):
     @staticmethod

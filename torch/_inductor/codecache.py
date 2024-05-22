@@ -564,23 +564,27 @@ class FxGraphCachePickler(pickle.Pickler):
 
 
 @functools.lru_cache(None)
-def get_inductor_code_hash() -> bytes:
+def torch_key():
     """
-    Compute a hash of all inductor code modules. Used by the FxGraph cache
-    so any inductor code changes would result in new cache keys.
+    Compute a key that contains relevant information about torch source files
     """
-    inductor_root = os.path.dirname(__file__)
+    if not config.is_fbcode():
+        inductor_root = os.path.dirname(__file__)
 
-    contents: Dict[str, bytes] = {}
-    for lib in pkgutil.iter_modules([inductor_root]):
-        spec = lib.module_finder.find_spec(lib.name, None)
-        assert spec is not None
-        module = spec.origin
-        assert module is not None
-        with open(module, "rb") as f:
-            contents[module] = f.read()
+        contents: Dict[str, bytes] = {torch.__version__: b""}
+        for lib in pkgutil.iter_modules([inductor_root]):
+            spec = lib.module_finder.find_spec(lib.name, None)
+            assert spec is not None
+            module = spec.origin
+            assert module is not None
+            with open(module, "rb") as f:
+                contents[module] = f.read()
 
-    return hashlib.sha256(pickle.dumps(contents)).digest()
+        return hashlib.sha256(pickle.dumps(contents)).digest()
+
+    from libfb.py import parutil
+
+    return parutil.get_file_contents("torch/src_hash.txt").rstrip()
 
 
 @dataclasses.dataclass
@@ -645,11 +649,9 @@ class FxGraphHashDetails:
         )
 
         # Also hash on various system info (including the triton compiler version).
-        self.torch_version = torch.__version__
+        self.torch_version = torch_key()
         self.system_info = CacheBase.get_system()
 
-        # And the inductor configuration and code.
-        self.inductor_code_hash = get_inductor_code_hash()
         try:
             self.inductor_config = config.save_config()
         except (TypeError, AttributeError) as e:
@@ -732,11 +734,12 @@ class FxGraphCache:
         return os.path.join(FxGraphCache._get_tmp_dir(), key[1:3], key)
 
     @staticmethod
-    def _filter_symints(inputs: List[Any]) -> List[torch.SymInt]:
+    def _filter_backed_symints(inputs: List[Any]) -> List[torch.SymInt]:
         """
-        Get the SymInt objects from the input list.
+        Get the backed SymInt objects from the input list. Note that we can never
+        have guards that depend on unbacked symint.
         """
-        return [s for s in inputs if isinstance(s, torch.SymInt)]
+        return [s for s in inputs if isinstance(s, torch.SymInt) and has_hint(s)]
 
     @staticmethod
     def _get_shape_env() -> Optional[ShapeEnv]:
@@ -762,8 +765,7 @@ class FxGraphCache:
         shape_env = FxGraphCache._get_shape_env()
         assert shape_env is not None
 
-        symints = FxGraphCache._filter_symints(example_inputs)
-        assert all(has_hint(s) for s in symints)
+        symints = FxGraphCache._filter_backed_symints(example_inputs)
         hints = [hint_int(s) for s in symints]
 
         def iterate_over_candidates() -> Generator[CompiledFxGraph, None, None]:
@@ -883,7 +885,7 @@ class FxGraphCache:
         # Tensor arg with a symbolic shape will have a SymInt arg for the graph.
         shape_env = FxGraphCache._get_shape_env()
         assert shape_env is not None
-        symints = FxGraphCache._filter_symints(example_inputs)
+        symints = FxGraphCache._filter_backed_symints(example_inputs)
         disk_compiled_graph.guards_expr = shape_env.produce_guards_expression(symints)
 
         try:
@@ -1922,12 +1924,19 @@ class AotCodeCompiler:
                 run_command_and_check(cmd)
             log.debug("aot constant binary command: %s", cmd)
 
-            # .data section is between .text and .bss. When the size of .data is large,
-            # during the linking, the relocation of .text against .bss may overflow.
-            # Rename it to .ldata so that it won't be in between the .text and .bss section
+            if config.aot_inductor.allow_buffer_mutation:
+                # .data section is between .text and .bss. When the size of .data is large,
+                # during the linking, the relocation of .text against .bss may overflow.
+                # Rename it to .ldata so that it won't be in between the .text and .bss section
+                rename_data = " .data=.ldata"
+            else:
+                # if no buffer mutation is needed, we could instead set the data region
+                # as read-only (i.e. .lrodata) which could accomodate larger size of data
+                # to be linked.
+                rename_data = " .data=.lrodata,alloc,load,readonly,data,contents"
             cmd = (
                 f"{objcopy_command} --rename-section"
-                " .data=.ldata"
+                f"{rename_data}"
                 " --set-section-alignment .data=64"  # following the gAlignment of CPU in c10/core/alignment.h
                 f" {consts_o} {consts_o}"
             )
@@ -1959,6 +1968,14 @@ class AotCodeCompiler:
             return consts_o
 
         def _compile_consts_darwin(consts: bytes) -> str:
+            if config.aot_inductor.debug_dump_consts_bin:
+                _, _binary_constants_path = write(
+                    consts,
+                    "bin",
+                    specified_dir=specified_output_path,
+                )
+                log.debug("binary constants path: %s", _binary_constants_path)
+
             is_large_consts = len(consts) > 1024
             consts_asm = "\t.section\t__DATA,__data\n"
             consts_asm += "\t.globl\t__binary_constants_bin_start\n"
