@@ -121,10 +121,12 @@ int FunctionScheduler::scheduleJob(std::unique_ptr<Job> job) {
   return job_id;
 }
 
+
+template<class Rep, class Period>
 int FunctionScheduler::scheduleJob(
     std::function<void()> function,
-    std::chrono::seconds seconds) {
-  auto interval = std::chrono::duration_cast<std::chrono::microseconds>(seconds);
+    std::chrono::duration<Rep, Period> const &duration) {
+  auto interval = std::chrono::duration_cast<std::chrono::microseconds>(duration);
   auto job = std::make_unique<Job>(std::move(function), interval);
   return scheduleJob(std::move(job));
 }

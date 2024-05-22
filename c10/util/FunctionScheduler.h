@@ -68,9 +68,10 @@ class FunctionScheduler {
   FunctionScheduler();
   ~FunctionScheduler();
 
+  template<class Rep, class Period>
   int scheduleJob(
       std::function<void()> function,
-      std::chrono::seconds interval);
+      std::chrono::duration<Rep, Period> const &duration);
 
   int removeJob(int id);
 
