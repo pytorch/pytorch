@@ -48,9 +48,9 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cpu-shared-with-deps-cxx11-abi
       build_environment: linux-binary-libtorch-cxx11-abi
+      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    timeout-minutes: 210
   libtorch-cpu-shared-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-with-deps-cxx11-abi-build
