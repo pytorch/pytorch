@@ -265,7 +265,13 @@ from setuptools.dist import Distribution
 from tools.build_pytorch_libs import build_caffe2
 from tools.generate_torch_version import get_torch_version
 from tools.setup_helpers.cmake import CMake
-from tools.setup_helpers.env import build_type, LIBTORCH_PKG_NAME, IS_DARWIN, IS_LINUX, IS_WINDOWS
+from tools.setup_helpers.env import (
+    build_type,
+    IS_DARWIN,
+    IS_LINUX,
+    IS_WINDOWS,
+    LIBTORCH_PKG_NAME,
+)
 from tools.setup_helpers.generate_linker_script import gen_linker_script
 
 ################################################################################
@@ -342,7 +348,7 @@ cmake_python_include_dir = sysconfig.get_path("include")
 # Version, create_version_file, and package_name
 ################################################################################
 
-DEFAULT_PACKAGE_NAME = "libtorchsplit" if BUILD_LIBTORCH_WHL else "torch"
+DEFAULT_PACKAGE_NAME = LIBTORCH_PKG_NAME if BUILD_LIBTORCH_WHL else "torch"
 
 PACKAGE_NAME = os.getenv("TORCH_PACKAGE_NAME", DEFAULT_PACKAGE_NAME)
 package_type = os.getenv("PACKAGE_TYPE", "wheel")
@@ -1181,7 +1187,7 @@ def _main():
     ]
 
     if BUILD_PYTHON_ONLY:
-        install_requires.append("libtorchsplit")
+        install_requires.append(LIBTORCH_PKG_NAME)
 
     use_prioritized_text = str(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD", ""))
     if (
@@ -1490,9 +1496,9 @@ def _main():
             if parts[0] == "torch":
                 modified_packages.append(LIBTORCH_PKG_NAME + package[len("torch") :])
         packages = modified_packages
-        package_dir = {"libtorchsplit": "torch"}
-        torch_package_dir_name = "libtorchsplit"
-        package_data = {"libtorchsplit": torch_package_data}
+        package_dir = {LIBTORCH_PKG_NAME: "torch"}
+        torch_package_dir_name = LIBTORCH_PKG_NAME
+        package_data = {LIBTORCH_PKG_NAME: torch_package_data}
         extensions = []
     else:
         torch_package_dir_name = "torch"
