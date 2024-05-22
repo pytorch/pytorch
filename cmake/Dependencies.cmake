@@ -479,62 +479,6 @@ if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(s390x|ppc64le)$")
   list(APPEND Caffe2_DEPENDENCY_LIBS cpuinfo)
 endif()
 
-# ---[ QNNPACK
-if(USE_QNNPACK)
-  set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
-
-  if(NOT DEFINED QNNPACK_SOURCE_DIR)
-    set(QNNPACK_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/QNNPACK" CACHE STRING "QNNPACK source directory")
-  endif()
-
-  if(NOT TARGET qnnpack)
-    if(NOT USE_SYSTEM_PTHREADPOOL AND USE_INTERNAL_PTHREADPOOL_IMPL)
-      set(QNNPACK_CUSTOM_THREADPOOL ON CACHE BOOL "")
-    endif()
-
-    set(QNNPACK_BUILD_TESTS OFF CACHE BOOL "")
-    set(QNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
-    set(QNNPACK_LIBRARY_TYPE "static" CACHE STRING "")
-    add_subdirectory(
-      "${QNNPACK_SOURCE_DIR}"
-      "${CONFU_DEPENDENCIES_BINARY_DIR}/QNNPACK")
-
-    # TODO: See https://github.com/pytorch/pytorch/issues/56285
-    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-      target_compile_options(qnnpack PRIVATE -Wno-deprecated-declarations)
-    endif()
-
-    # We build static versions of QNNPACK and pthreadpool but link
-    # them into a shared library for Caffe2, so they need PIC.
-    set_property(TARGET qnnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
-    set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
-
-    if(QNNPACK_CUSTOM_THREADPOOL)
-      target_compile_definitions(
-        qnnpack PRIVATE
-        pthreadpool_t=legacy_pthreadpool_t
-        pthreadpool_function_1d_t=legacy_pthreadpool_function_1d_t
-        pthreadpool_function_1d_tiled_t=legacy_pthreadpool_function_1d_tiled_t
-        pthreadpool_function_2d_t=legacy_pthreadpool_function_2d_t
-        pthreadpool_function_2d_tiled_t=legacy_pthreadpool_function_2d_tiled_t
-        pthreadpool_function_3d_tiled_t=legacy_pthreadpool_function_3d_tiled_t
-        pthreadpool_function_4d_tiled_t=legacy_pthreadpool_function_4d_tiled_t
-        pthreadpool_create=legacy_pthreadpool_create
-        pthreadpool_destroy=legacy_pthreadpool_destroy
-        pthreadpool_get_threads_count=legacy_pthreadpool_get_threads_count
-        pthreadpool_compute_1d=legacy_pthreadpool_compute_1d
-        pthreadpool_parallelize_1d=legacy_pthreadpool_parallelize_1d
-        pthreadpool_compute_1d_tiled=legacy_pthreadpool_compute_1d_tiled
-        pthreadpool_compute_2d=legacy_pthreadpool_compute_2d
-        pthreadpool_compute_2d_tiled=legacy_pthreadpool_compute_2d_tiled
-        pthreadpool_compute_3d_tiled=legacy_pthreadpool_compute_3d_tiled
-        pthreadpool_compute_4d_tiled=legacy_pthreadpool_compute_4d_tiled)
-    endif()
-  endif()
-
-  list(APPEND Caffe2_DEPENDENCY_LIBS qnnpack)
-endif()
-
 # ---[ Caffe2 Int8 operators (enabled by USE_QNNPACK) depend on gemmlowp and neon2sse headers
 if(USE_QNNPACK)
   set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
