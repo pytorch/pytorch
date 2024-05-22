@@ -2809,7 +2809,7 @@ class CustomOpHandler:
 
 def register_custom_op_serialization(
     op_handler: CustomOpHandler,
-    serialization_fn: Callable[[Tuple[GraphModuleSerializer, torch.fx.Node], Node], Node],
+    op_type,
 ):
     """Register custom serialization method for a node."""
     assert isinstance(op_handler, CustomOpHandler), f"Expected CustomOpHandler, got {type(op_handler)}."
