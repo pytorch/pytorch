@@ -20,8 +20,8 @@ enum class NeuronType {
 };
 
 static inline NeuronType neuronType(
-    c10::optional<c10::Scalar> output_min,
-    c10::optional<c10::Scalar> output_max) {
+    std::optional<c10::Scalar> output_min,
+    std::optional<c10::Scalar> output_max) {
   float inf_max = std::numeric_limits<float>::infinity();
   float inf_min = -std::numeric_limits<float>::infinity();
   float output_max_ =

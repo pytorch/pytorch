@@ -149,7 +149,7 @@ std::tuple<Tensor,optional<int64_t>> flip_batch_rule(const Tensor& self, optiona
 const Tensor& resize__plumbing(
     const Tensor& self,
     IntArrayRef size,
-    c10::optional<MemoryFormat> optional_memory_format) {
+    std::optional<MemoryFormat> optional_memory_format) {
   TORCH_CHECK(
       !optional_memory_format.has_value() ||
       optional_memory_format == c10::MemoryFormat::Contiguous,
@@ -217,7 +217,7 @@ std::tuple<Tensor, optional<int64_t>> squeeze_batch_rule(const Tensor& self, opt
   }
 
   auto result = self.view_symint(squeezed_sizes);
-  return std::make_tuple(std::move(result), c10::optional<int64_t>(new_batch_idx));
+  return std::make_tuple(std::move(result), std::optional<int64_t>(new_batch_idx));
 }
 
 std::tuple<Tensor, optional<int64_t>> squeeze_dims_batch_rule(
@@ -335,8 +335,8 @@ std::tuple<Tensor,optional<int64_t>> slice_batch_rule(
     const Tensor& self,
     optional<int64_t> self_bdim,
     int64_t dim,
-    c10::optional<c10::SymInt> start,
-    c10::optional<c10::SymInt> end,
+    std::optional<c10::SymInt> start,
+    std::optional<c10::SymInt> end,
     c10::SymInt step) {
   auto self_ = moveBatchDimToFront(self, self_bdim);
   dim = getPhysicalDim(self, self_bdim.has_value(), dim);

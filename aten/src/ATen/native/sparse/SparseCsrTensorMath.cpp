@@ -326,7 +326,7 @@ Tensor& normal_sparse_csr_(
     Tensor& self,
     double mean,
     double std,
-    c10::optional<Generator> gen) {
+    std::optional<Generator> gen) {
   return unary_op_inplace(self, &Tensor::normal_, mean, std, gen);
 }
 
@@ -1000,7 +1000,7 @@ struct Reduction...Op {
   inline scalar_t identity() const { return ...; }
 };
 
-Tensor _sparse_csr_..._cpu(const Tensor& input, IntArrayRef dims_to_sum, bool keepdim, c10::optional<ScalarType> dtype) {
+Tensor _sparse_csr_..._cpu(const Tensor& input, IntArrayRef dims_to_sum, bool keepdim, std::optional<ScalarType> dtype) {
   ...
       result = reduce_sparse_csr_cpu_template<scalar_t>(input_, dims_to_sum, keepdim, Reduction...Op<scalar_t>());
   ...
@@ -1336,7 +1336,7 @@ struct ReductionMulOp {
 
 }  // namespace
 
-Tensor _sparse_csr_sum_cpu(const Tensor& input, IntArrayRef dims_to_sum, bool keepdim, c10::optional<ScalarType> dtype) {
+Tensor _sparse_csr_sum_cpu(const Tensor& input, IntArrayRef dims_to_sum, bool keepdim, std::optional<ScalarType> dtype) {
   ScalarType dtype_ = dtype.value_or(input.scalar_type());
   Tensor input_ = at::sparse_csr::to_type(input, dtype_);
   Tensor result;
@@ -1352,7 +1352,7 @@ Tensor _sparse_csr_sum_cpu(const Tensor& input, IntArrayRef dims_to_sum, bool ke
   return result;
 }
 
-Tensor _sparse_csr_prod_cpu(const Tensor& input, IntArrayRef dims_to_reduce, bool keepdim, c10::optional<ScalarType> dtype) {
+Tensor _sparse_csr_prod_cpu(const Tensor& input, IntArrayRef dims_to_reduce, bool keepdim, std::optional<ScalarType> dtype) {
   ScalarType dtype_ = dtype.value_or(input.scalar_type());
   Tensor input_ = input.to(dtype_);
   Tensor result;

@@ -106,6 +106,7 @@ libtorch_profiler_sources = [
     "torch/csrc/profiler/standalone/execution_trace_observer.cpp",
     "torch/csrc/profiler/standalone/itt_observer.cpp",
     "torch/csrc/profiler/standalone/nvtx_observer.cpp",
+    "torch/csrc/profiler/standalone/privateuse1_observer.cpp",
     "torch/csrc/profiler/stubs/base.cpp",
     "torch/csrc/profiler/orchestration/vulkan.cpp",
     "torch/csrc/profiler/perf.cpp",
@@ -486,6 +487,7 @@ libtorch_core_sources = sorted(
 # These files are the only ones that are supported on Windows.
 libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/Backend.cpp",
+    "torch/csrc/distributed/c10d/control_collectives/StoreCollectives.cpp",
     "torch/csrc/distributed/c10d/FileStore.cpp",
     "torch/csrc/distributed/c10d/Functional.cpp",
     "torch/csrc/distributed/c10d/GlooDeviceFactory.cpp",
@@ -673,12 +675,14 @@ libtorch_cuda_distributed_base_sources = [
 # These files are only supported on Linux (and others) but not on Windows.
 libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/NCCLUtils.cpp",
+    "torch/csrc/distributed/c10d/ProcessGroupCudaP2P.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupUCC.cpp",
     "torch/csrc/distributed/c10d/UCCTracing.cpp",
     "torch/csrc/distributed/c10d/UCCUtils.cpp",
     "torch/csrc/distributed/c10d/intra_node_comm.cpp",
     "torch/csrc/distributed/c10d/intra_node_comm.cu",
+    "torch/csrc/distributed/c10d/Utils.cu",
     "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
     "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
 ]
@@ -825,6 +829,7 @@ libtorch_python_core_sources = [
     "torch/csrc/mtia/Module.cpp",
     "torch/csrc/inductor/aoti_runner/pybind.cpp",
     "torch/csrc/inductor/aoti_eager/kernel_holder.cpp",
+    "torch/csrc/inductor/aoti_eager/kernel_meta_info.cpp",
     "torch/csrc/jit/backends/backend_init.cpp",
     "torch/csrc/jit/python/init.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
@@ -1171,6 +1176,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/quantized/cpu/kernels/QuantizedOpKernels.cpp",
     "aten/src/ATen/native/cpu/FusedAdamKernel.cpp",
     "aten/src/ATen/native/cpu/FusedSGDKernel.cpp",
+    "aten/src/ATen/native/cpu/FusedAdagradKernel.cpp",
 ]
 
 # This aten native source file list will not go through aten codegen process
@@ -1407,6 +1413,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/xnnpack/Shim.cpp",
     "aten/src/ATen/native/FusedAdam.cpp",
     "aten/src/ATen/native/FusedSGD.cpp",
+    "aten/src/ATen/native/FusedAdagrad.cpp",
     # Files not in native, but depends on native symbols
     # "aten/src/ATen/TensorIndexing.cpp",
     "aten/src/ATen/TensorIterator.cpp",

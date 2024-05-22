@@ -40,7 +40,6 @@ if(USE_CUDA)
   set(CAFFE2_USE_CUDNN ${USE_CUDNN})
   set(CAFFE2_USE_CUSPARSELT ${USE_CUSPARSELT})
   set(CAFFE2_USE_NVRTC ${USE_NVRTC})
-  set(CAFFE2_USE_TENSORRT ${USE_TENSORRT})
   include(${CMAKE_CURRENT_LIST_DIR}/public/cuda.cmake)
   if(CAFFE2_USE_CUDA)
     # A helper variable recording the list of Caffe2 dependent libraries
@@ -63,11 +62,6 @@ if(USE_CUDA)
     else()
       caffe2_update_option(USE_CUSPARSELT OFF)
     endif()
-    if(CAFFE2_USE_TENSORRT)
-      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::tensorrt)
-    else()
-      caffe2_update_option(USE_TENSORRT OFF)
-    endif()
     find_program(SCCACHE_EXECUTABLE sccache)
     if(SCCACHE_EXECUTABLE)
       # Using RSP/--options-file renders output noncacheable by sccache
@@ -84,12 +78,10 @@ if(USE_CUDA)
     caffe2_update_option(USE_CUDNN OFF)
     caffe2_update_option(USE_CUSPARSELT OFF)
     caffe2_update_option(USE_NVRTC OFF)
-    caffe2_update_option(USE_TENSORRT OFF)
     set(CAFFE2_USE_CUDA OFF)
     set(CAFFE2_USE_CUDNN OFF)
     set(CAFFE2_USE_CUSPARSELT OFF)
     set(CAFFE2_USE_NVRTC OFF)
-    set(CAFFE2_USE_TENSORRT OFF)
   endif()
 endif()
 
@@ -485,62 +477,6 @@ if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(s390x|ppc64le)$")
     set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
   endif()
   list(APPEND Caffe2_DEPENDENCY_LIBS cpuinfo)
-endif()
-
-# ---[ QNNPACK
-if(USE_QNNPACK)
-  set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
-
-  if(NOT DEFINED QNNPACK_SOURCE_DIR)
-    set(QNNPACK_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/QNNPACK" CACHE STRING "QNNPACK source directory")
-  endif()
-
-  if(NOT TARGET qnnpack)
-    if(NOT USE_SYSTEM_PTHREADPOOL AND USE_INTERNAL_PTHREADPOOL_IMPL)
-      set(QNNPACK_CUSTOM_THREADPOOL ON CACHE BOOL "")
-    endif()
-
-    set(QNNPACK_BUILD_TESTS OFF CACHE BOOL "")
-    set(QNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
-    set(QNNPACK_LIBRARY_TYPE "static" CACHE STRING "")
-    add_subdirectory(
-      "${QNNPACK_SOURCE_DIR}"
-      "${CONFU_DEPENDENCIES_BINARY_DIR}/QNNPACK")
-
-    # TODO: See https://github.com/pytorch/pytorch/issues/56285
-    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-      target_compile_options(qnnpack PRIVATE -Wno-deprecated-declarations)
-    endif()
-
-    # We build static versions of QNNPACK and pthreadpool but link
-    # them into a shared library for Caffe2, so they need PIC.
-    set_property(TARGET qnnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
-    set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
-
-    if(QNNPACK_CUSTOM_THREADPOOL)
-      target_compile_definitions(
-        qnnpack PRIVATE
-        pthreadpool_t=legacy_pthreadpool_t
-        pthreadpool_function_1d_t=legacy_pthreadpool_function_1d_t
-        pthreadpool_function_1d_tiled_t=legacy_pthreadpool_function_1d_tiled_t
-        pthreadpool_function_2d_t=legacy_pthreadpool_function_2d_t
-        pthreadpool_function_2d_tiled_t=legacy_pthreadpool_function_2d_tiled_t
-        pthreadpool_function_3d_tiled_t=legacy_pthreadpool_function_3d_tiled_t
-        pthreadpool_function_4d_tiled_t=legacy_pthreadpool_function_4d_tiled_t
-        pthreadpool_create=legacy_pthreadpool_create
-        pthreadpool_destroy=legacy_pthreadpool_destroy
-        pthreadpool_get_threads_count=legacy_pthreadpool_get_threads_count
-        pthreadpool_compute_1d=legacy_pthreadpool_compute_1d
-        pthreadpool_parallelize_1d=legacy_pthreadpool_parallelize_1d
-        pthreadpool_compute_1d_tiled=legacy_pthreadpool_compute_1d_tiled
-        pthreadpool_compute_2d=legacy_pthreadpool_compute_2d
-        pthreadpool_compute_2d_tiled=legacy_pthreadpool_compute_2d_tiled
-        pthreadpool_compute_3d_tiled=legacy_pthreadpool_compute_3d_tiled
-        pthreadpool_compute_4d_tiled=legacy_pthreadpool_compute_4d_tiled)
-    endif()
-  endif()
-
-  list(APPEND Caffe2_DEPENDENCY_LIBS qnnpack)
 endif()
 
 # ---[ Caffe2 Int8 operators (enabled by USE_QNNPACK) depend on gemmlowp and neon2sse headers
@@ -1213,18 +1149,7 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
     list(APPEND HIP_CXX_FLAGS -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
     list(APPEND HIP_CXX_FLAGS -std=c++17)
-    if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "6.0.0")
-      list(APPEND HIP_CXX_FLAGS -DHIPBLAS_V2)
-    endif()
-    if(HIPBLASLT_CUSTOM_DATA_TYPE)
-      list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_CUSTOM_DATA_TYPE)
-    endif()
-    if(HIPBLASLT_CUSTOM_COMPUTE_TYPE)
-      list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_CUSTOM_COMPUTE_TYPE)
-    endif()
-    if(HIPBLASLT_HAS_GETINDEXFROMALGO)
-      list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_HAS_GETINDEXFROMALGO)
-    endif()
+    list(APPEND HIP_CXX_FLAGS -DHIPBLAS_V2)
     if(HIP_NEW_TYPE_ENUMS)
       list(APPEND HIP_CXX_FLAGS -DHIP_NEW_TYPE_ENUMS)
     endif()
@@ -1256,9 +1181,7 @@ if(USE_ROCM)
 
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       ${PYTORCH_HIP_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB} ${ROCM_ROCTX_LIB})
-    if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "5.7.0")
-      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS ${hipblaslt_LIBRARIES})
-    endif()
+    list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS ${hipblaslt_LIBRARIES})
 
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       roc::hipblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver)
@@ -1279,18 +1202,6 @@ if(USE_ROCM)
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()
-endif()
-
-# ---[ ROCm
-if(USE_ROCM AND ROCM_VERSION_DEV VERSION_LESS "5.2.0")
-  # We check again for USE_ROCM because it might have been set to OFF
-  # in the if above
-  include_directories(SYSTEM ${HIP_PATH}/include)
-  include_directories(SYSTEM ${HIPBLAS_PATH}/include)
-  include_directories(SYSTEM ${HIPFFT_PATH}/include)
-  include_directories(SYSTEM ${HIPSPARSE_PATH}/include)
-  include_directories(SYSTEM ${HIPRAND_PATH}/include)
-  include_directories(SYSTEM ${THRUST_PATH})
 endif()
 
 # ---[ NCCL
@@ -1325,11 +1236,10 @@ endif()
 # ---[ CUB
 if(USE_CUDA)
   find_package(CUB)
-  if(CUB_FOUND)
-    include_directories(SYSTEM ${CUB_INCLUDE_DIRS})
-  else()
-    include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/cub)
+  if(NOT CUB_FOUND)
+    message(FATAL_ERROR "Cannot find CUB.")
   endif()
+  include_directories(SYSTEM ${CUB_INCLUDE_DIRS})
 endif()
 
 if(USE_DISTRIBUTED AND USE_TENSORPIPE)
@@ -1451,25 +1361,6 @@ if(USE_NNAPI AND NOT ANDROID)
   caffe2_update_option(USE_NNAPI OFF)
 endif()
 
-if(USE_ZSTD)
-  if(USE_SYSTEM_ZSTD)
-    find_package(zstd REQUIRED)
-    if(TARGET zstd::libzstd_shared)
-      set(ZSTD_TARGET zstd::libzstd_shared)
-    else()
-      set(ZSTD_TARGET zstd::libzstd_static)
-    endif()
-    list(APPEND Caffe2_DEPENDENCY_LIBS ${ZSTD_TARGET})
-    get_property(ZSTD_INCLUDE_DIR TARGET ${ZSTD_TARGET} PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
-    include_directories(SYSTEM ${ZSTD_INCLUDE_DIR})
-  else()
-    list(APPEND Caffe2_DEPENDENCY_LIBS libzstd_static)
-    include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/zstd/lib)
-    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/zstd/build/cmake)
-    set_property(TARGET libzstd_static PROPERTY POSITION_INDEPENDENT_CODE ON)
-  endif()
-endif()
-
 # ---[ Onnx
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   if(EXISTS "${CAFFE2_CUSTOM_PROTOC_EXECUTABLE}")
@@ -1534,27 +1425,6 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   list(APPEND Caffe2_DEPENDENCY_LIBS foxi_loader)
   # Recover the build shared libs option.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
-endif()
-
-# --[ TensorRT integration with onnx-trt
-function(add_onnx_tensorrt_subdir)
-  # We pass the paths we found to onnx tensorrt.
-  set(CUDNN_INCLUDE_DIR "${CUDNN_INCLUDE_PATH}")
-  set(CUDNN_LIBRARY "${CUDNN_LIBRARY_PATH}")
-  set(CMAKE_VERSION_ORIG "{CMAKE_VERSION}")
-  # TODO: this WAR is for https://github.com/pytorch/pytorch/issues/18524
-  set(CMAKE_VERSION "3.9.0")
-  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx-tensorrt EXCLUDE_FROM_ALL)
-  set(CMAKE_VERSION "{CMAKE_VERSION_ORIG}")
-endfunction()
-if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
-  if(USE_TENSORRT)
-    add_onnx_tensorrt_subdir()
-    include_directories("${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx-tensorrt")
-    caffe2_interface_library(nvonnxparser_static onnx_trt_library)
-    list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_trt_library)
-    set(CAFFE2_USE_TRT 1)
-  endif()
 endif()
 
 # --[ ATen checks
@@ -1622,22 +1492,23 @@ if(NOT INTERN_BUILD_MOBILE)
 
   set(CUDA_ATTACH_VS_BUILD_RULE_TO_CUDA_FILE OFF)
 
-  if(USE_MAGMA)
-    find_package(MAGMA)
-  endif()
-  if((USE_CUDA OR USE_ROCM) AND MAGMA_FOUND)
-    set(USE_MAGMA 1)
-    message(STATUS "Compiling with MAGMA support")
-    message(STATUS "MAGMA INCLUDE DIRECTORIES: ${MAGMA_INCLUDE_DIR}")
-    message(STATUS "MAGMA LIBRARIES: ${MAGMA_LIBRARIES}")
-    message(STATUS "MAGMA V2 check: ${MAGMA_V2}")
+  if(USE_CUDA OR USE_ROCM)
+    if(USE_MAGMA)
+      find_package(MAGMA)
+      if(MAGMA_FOUND)
+        message(STATUS "Compiling with MAGMA support")
+        message(STATUS "MAGMA INCLUDE DIRECTORIES: ${MAGMA_INCLUDE_DIR}")
+        message(STATUS "MAGMA LIBRARIES: ${MAGMA_LIBRARIES}")
+        message(STATUS "MAGMA V2 check: ${MAGMA_V2}")
+      else()
+        message(STATUS "MAGMA not found. Compiling without MAGMA support")
+        caffe2_update_option(USE_MAGMA OFF)
+      endif()
+    endif()
   elseif(USE_MAGMA)
     message(WARNING
       "Not compiling with MAGMA. Suppress this warning with "
       "-DUSE_MAGMA=OFF.")
-    caffe2_update_option(USE_MAGMA OFF)
-  else()
-    message(STATUS "MAGMA not found. Compiling without MAGMA support")
     caffe2_update_option(USE_MAGMA OFF)
   endif()
 
@@ -1710,9 +1581,6 @@ if(NOT INTERN_BUILD_MOBILE)
     if(MKLDNN_FOUND)
       set(AT_MKLDNN_ENABLED 1)
       include_directories(AFTER SYSTEM ${MKLDNN_INCLUDE_DIR})
-      if(BUILD_CAFFE2_OPS)
-        list(APPEND Caffe2_DEPENDENCY_LIBS caffe2::mkldnn)
-      endif(BUILD_CAFFE2_OPS)
     else()
       message(WARNING "MKLDNN could not be found.")
       caffe2_update_option(USE_MKLDNN OFF)
