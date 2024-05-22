@@ -1446,7 +1446,7 @@ def _export(
 
     _verify_nn_module_stack(gm)
     _verify_stack_trace(gm)
-    if strict or not _is_torch_jit_trace:
+    if not _is_torch_jit_trace:
         _verify_placeholder_names(gm, export_graph_signature)
     exported_program = ExportedProgram(
         root=gm,
