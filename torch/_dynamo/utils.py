@@ -186,8 +186,7 @@ def print_time_report():
 
 
 def _add_time_spent(key, phase_name, time_spent):
-    if key not in frame_phase_timing:
-        frame_phase_timing[key] = {}
+    frame_phase_timing.setdefault(key, {})
     if phase_name not in frame_phase_timing[key]:
         frame_phase_timing[key][phase_name] = time_spent
     else:
@@ -210,6 +209,9 @@ def _add_time_spent(key, phase_name, time_spent):
 # phase_names record an extra record into a separate compilation timing structure,
 # one keyed on frame+name rather than function.
 # The frame is incremented outside of this function, in def increment_frame() above.
+# `fwd_only` is used to identify if this phase or function is only called
+# during compiling fwd graphs, e.g, `entire_frame_compile` and `backend_compile`.
+# The other phases (`inductor_compile` and `code_gen`) are called for both fwd and bwd graphs.
 
 
 def dynamo_timed(original_function=None, phase_name=None, fwd_only=True):
@@ -229,7 +231,7 @@ def dynamo_timed(original_function=None, phase_name=None, fwd_only=True):
             compilation_time_metrics[key].append(time_spent)
             if phase_name:
                 frame_key = str(curr_frame)
-                # fwd only compilation stages: entire_frame_compile, backend_compile_time.
+                # fwd only compilation stages: entire_frame_compile, backend_compile.
                 # use frame_key as time aggregation key.
                 if fwd_only:
                     _add_time_spent(frame_key, phase_name, time_spent)
