@@ -73,7 +73,7 @@ jobs:
       build_name: libtorch-cpu-shared-with-deps-cxx11-abi
       build_environment: linux-binary-libtorch-cxx11-abi
       runs_on: linux.4xlarge
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cpu-shared-with-deps-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -137,7 +137,7 @@ jobs:
       build_name: libtorch-cuda11_8-shared-with-deps-cxx11-abi
       build_environment: linux-binary-libtorch-cxx11-abi
       runs_on: linux.4xlarge.nvidia.gpu
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cuda11_8-shared-with-deps-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -202,7 +202,7 @@ jobs:
       build_name: libtorch-cuda12_1-shared-with-deps-cxx11-abi
       build_environment: linux-binary-libtorch-cxx11-abi
       runs_on: linux.4xlarge.nvidia.gpu
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cuda12_1-shared-with-deps-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -267,7 +267,7 @@ jobs:
       build_name: libtorch-cuda12_4-shared-with-deps-cxx11-abi
       build_environment: linux-binary-libtorch-cxx11-abi
       runs_on: linux.4xlarge.nvidia.gpu
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cuda12_4-shared-with-deps-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -332,14 +332,14 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       steps:
-        - name: Setup ROCm
-          uses: ./.github/actions/setup-rocm
-        - uses: actions/download-artifact@v3
-          name: Download Build Artifacts
-          with:
-            name: libtorch-rocm6_0-shared-with-deps-cxx11-abi
-            path: "${{ runner.temp }}/artifacts/"
-        - name: Checkout PyTorch
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+      - uses: actions/download-artifact@v3
+        name: Download Build Artifacts
+        with:
+          name: libtorch-rocm6_0-shared-with-deps-cxx11-abi
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -351,7 +351,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-        - name: Checkout tinglvv/builder
+      - name: Checkout tinglvv/builder
         uses: malfet/checkout@silent-checkout
         with:
           ref: set-max-jobs-clean
@@ -364,17 +364,17 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-        - name: ROCm set GPU_FLAG
-          run: |
-            echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-        - name: Pull Docker image
-          uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-          with:
-            docker-image: pytorch/libtorch-cxx11-builder:rocm6.0-main
-        - name: Test Pytorch binary
-          uses: ./pytorch/.github/actions/test-pytorch-binary
-        - name: Teardown ROCm
-          uses: ./.github/actions/teardown-rocm
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: pytorch/libtorch-cxx11-builder:rocm6.0-main
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
   libtorch-rocm6_0-shared-with-deps-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -438,14 +438,14 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       steps:
-        - name: Setup ROCm
-          uses: ./.github/actions/setup-rocm
-        - uses: actions/download-artifact@v3
-          name: Download Build Artifacts
-          with:
-            name: libtorch-rocm6_1-shared-with-deps-cxx11-abi
-            path: "${{ runner.temp }}/artifacts/"
-        - name: Checkout PyTorch
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+      - uses: actions/download-artifact@v3
+        name: Download Build Artifacts
+        with:
+          name: libtorch-rocm6_1-shared-with-deps-cxx11-abi
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -457,7 +457,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-        - name: Checkout tinglvv/builder
+      - name: Checkout tinglvv/builder
         uses: malfet/checkout@silent-checkout
         with:
           ref: set-max-jobs-clean
@@ -470,17 +470,17 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-        - name: ROCm set GPU_FLAG
-          run: |
-            echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-        - name: Pull Docker image
-          uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-          with:
-            docker-image: pytorch/libtorch-cxx11-builder:rocm6.1-main
-        - name: Test Pytorch binary
-          uses: ./pytorch/.github/actions/test-pytorch-binary
-        - name: Teardown ROCm
-          uses: ./.github/actions/teardown-rocm
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: pytorch/libtorch-cxx11-builder:rocm6.1-main
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
   libtorch-rocm6_1-shared-with-deps-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:

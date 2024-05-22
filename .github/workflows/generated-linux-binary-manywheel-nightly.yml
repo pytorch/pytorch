@@ -71,7 +71,7 @@ jobs:
       build_name: manywheel-py3_8-cpu
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -132,7 +132,7 @@ jobs:
       build_name: manywheel-py3_8-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cpu-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -195,7 +195,7 @@ jobs:
       build_name: manywheel-py3_8-cuda11_8
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cuda11_8-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -258,7 +258,7 @@ jobs:
       build_name: manywheel-py3_8-cuda12_1
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cuda12_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -321,7 +321,7 @@ jobs:
       build_name: manywheel-py3_8-cuda12_4
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cuda12_4-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -383,14 +383,14 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.0-main
       DESIRED_PYTHON: "3.8"
       steps:
-        - name: Setup ROCm
-          uses: ./.github/actions/setup-rocm
-        - uses: actions/download-artifact@v3
-          name: Download Build Artifacts
-          with:
-            name: manywheel-py3_8-rocm6_0
-            path: "${{ runner.temp }}/artifacts/"
-        - name: Checkout PyTorch
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+      - uses: actions/download-artifact@v3
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_8-rocm6_0
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -402,7 +402,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-        - name: Checkout tinglvv/builder
+      - name: Checkout tinglvv/builder
         uses: malfet/checkout@silent-checkout
         with:
           ref: set-max-jobs-clean
@@ -415,17 +415,17 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-        - name: ROCm set GPU_FLAG
-          run: |
-            echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-        - name: Pull Docker image
-          uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-          with:
-            docker-image: pytorch/manylinux-builder:rocm6.0-main
-        - name: Test Pytorch binary
-          uses: ./pytorch/.github/actions/test-pytorch-binary
-        - name: Teardown ROCm
-          uses: ./.github/actions/teardown-rocm
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: pytorch/manylinux-builder:rocm6.0-main
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
   manywheel-py3_8-rocm6_0-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -486,14 +486,14 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
       DESIRED_PYTHON: "3.8"
       steps:
-        - name: Setup ROCm
-          uses: ./.github/actions/setup-rocm
-        - uses: actions/download-artifact@v3
-          name: Download Build Artifacts
-          with:
-            name: manywheel-py3_8-rocm6_1
-            path: "${{ runner.temp }}/artifacts/"
-        - name: Checkout PyTorch
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+      - uses: actions/download-artifact@v3
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_8-rocm6_1
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -505,7 +505,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-        - name: Checkout tinglvv/builder
+      - name: Checkout tinglvv/builder
         uses: malfet/checkout@silent-checkout
         with:
           ref: set-max-jobs-clean
@@ -518,17 +518,17 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-        - name: ROCm set GPU_FLAG
-          run: |
-            echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-        - name: Pull Docker image
-          uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-          with:
-            docker-image: pytorch/manylinux-builder:rocm6.1-main
-        - name: Test Pytorch binary
-          uses: ./pytorch/.github/actions/test-pytorch-binary
-        - name: Teardown ROCm
-          uses: ./.github/actions/teardown-rocm
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: pytorch/manylinux-builder:rocm6.1-main
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
   manywheel-py3_8-rocm6_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -587,7 +587,7 @@ jobs:
       build_name: manywheel-py3_9-cpu
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -648,7 +648,7 @@ jobs:
       build_name: manywheel-py3_9-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cpu-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -711,7 +711,7 @@ jobs:
       build_name: manywheel-py3_9-cuda11_8
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda11_8-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -774,7 +774,7 @@ jobs:
       build_name: manywheel-py3_9-cuda12_1
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda12_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -837,7 +837,7 @@ jobs:
       build_name: manywheel-py3_9-cuda12_4
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda12_4-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -899,14 +899,14 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.0-main
       DESIRED_PYTHON: "3.9"
       steps:
-        - name: Setup ROCm
-          uses: ./.github/actions/setup-rocm
-        - uses: actions/download-artifact@v3
-          name: Download Build Artifacts
-          with:
-            name: manywheel-py3_9-rocm6_0
-            path: "${{ runner.temp }}/artifacts/"
-        - name: Checkout PyTorch
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+      - uses: actions/download-artifact@v3
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_9-rocm6_0
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -918,7 +918,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-        - name: Checkout tinglvv/builder
+      - name: Checkout tinglvv/builder
         uses: malfet/checkout@silent-checkout
         with:
           ref: set-max-jobs-clean
@@ -931,17 +931,17 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-        - name: ROCm set GPU_FLAG
-          run: |
-            echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-        - name: Pull Docker image
-          uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-          with:
-            docker-image: pytorch/manylinux-builder:rocm6.0-main
-        - name: Test Pytorch binary
-          uses: ./pytorch/.github/actions/test-pytorch-binary
-        - name: Teardown ROCm
-          uses: ./.github/actions/teardown-rocm
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: pytorch/manylinux-builder:rocm6.0-main
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
   manywheel-py3_9-rocm6_0-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1002,14 +1002,14 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
       DESIRED_PYTHON: "3.9"
       steps:
-        - name: Setup ROCm
-          uses: ./.github/actions/setup-rocm
-        - uses: actions/download-artifact@v3
-          name: Download Build Artifacts
-          with:
-            name: manywheel-py3_9-rocm6_1
-            path: "${{ runner.temp }}/artifacts/"
-        - name: Checkout PyTorch
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+      - uses: actions/download-artifact@v3
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_9-rocm6_1
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -1021,7 +1021,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-        - name: Checkout tinglvv/builder
+      - name: Checkout tinglvv/builder
         uses: malfet/checkout@silent-checkout
         with:
           ref: set-max-jobs-clean
@@ -1034,17 +1034,17 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-        - name: ROCm set GPU_FLAG
-          run: |
-            echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-        - name: Pull Docker image
-          uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-          with:
-            docker-image: pytorch/manylinux-builder:rocm6.1-main
-        - name: Test Pytorch binary
-          uses: ./pytorch/.github/actions/test-pytorch-binary
-        - name: Teardown ROCm
-          uses: ./.github/actions/teardown-rocm
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: pytorch/manylinux-builder:rocm6.1-main
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
   manywheel-py3_9-rocm6_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1103,7 +1103,7 @@ jobs:
       build_name: manywheel-py3_10-cpu
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1164,7 +1164,7 @@ jobs:
       build_name: manywheel-py3_10-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cpu-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1227,7 +1227,7 @@ jobs:
       build_name: manywheel-py3_10-cuda11_8
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda11_8-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1290,7 +1290,7 @@ jobs:
       build_name: manywheel-py3_10-cuda12_1
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda12_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1353,7 +1353,7 @@ jobs:
       build_name: manywheel-py3_10-cuda12_4
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda12_4-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1415,14 +1415,14 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.0-main
       DESIRED_PYTHON: "3.10"
       steps:
-        - name: Setup ROCm
-          uses: ./.github/actions/setup-rocm
-        - uses: actions/download-artifact@v3
-          name: Download Build Artifacts
-          with:
-            name: manywheel-py3_10-rocm6_0
-            path: "${{ runner.temp }}/artifacts/"
-        - name: Checkout PyTorch
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+      - uses: actions/download-artifact@v3
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_10-rocm6_0
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -1434,7 +1434,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-        - name: Checkout tinglvv/builder
+      - name: Checkout tinglvv/builder
         uses: malfet/checkout@silent-checkout
         with:
           ref: set-max-jobs-clean
@@ -1447,17 +1447,17 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-        - name: ROCm set GPU_FLAG
-          run: |
-            echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-        - name: Pull Docker image
-          uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-          with:
-            docker-image: pytorch/manylinux-builder:rocm6.0-main
-        - name: Test Pytorch binary
-          uses: ./pytorch/.github/actions/test-pytorch-binary
-        - name: Teardown ROCm
-          uses: ./.github/actions/teardown-rocm
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: pytorch/manylinux-builder:rocm6.0-main
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
   manywheel-py3_10-rocm6_0-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1518,14 +1518,14 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
       DESIRED_PYTHON: "3.10"
       steps:
-        - name: Setup ROCm
-          uses: ./.github/actions/setup-rocm
-        - uses: actions/download-artifact@v3
-          name: Download Build Artifacts
-          with:
-            name: manywheel-py3_10-rocm6_1
-            path: "${{ runner.temp }}/artifacts/"
-        - name: Checkout PyTorch
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+      - uses: actions/download-artifact@v3
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_10-rocm6_1
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -1537,7 +1537,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-        - name: Checkout tinglvv/builder
+      - name: Checkout tinglvv/builder
         uses: malfet/checkout@silent-checkout
         with:
           ref: set-max-jobs-clean
@@ -1550,17 +1550,17 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-        - name: ROCm set GPU_FLAG
-          run: |
-            echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-        - name: Pull Docker image
-          uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-          with:
-            docker-image: pytorch/manylinux-builder:rocm6.1-main
-        - name: Test Pytorch binary
-          uses: ./pytorch/.github/actions/test-pytorch-binary
-        - name: Teardown ROCm
-          uses: ./.github/actions/teardown-rocm
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: pytorch/manylinux-builder:rocm6.1-main
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
   manywheel-py3_10-rocm6_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1619,7 +1619,7 @@ jobs:
       build_name: manywheel-py3_11-cpu
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1680,7 +1680,7 @@ jobs:
       build_name: manywheel-py3_11-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cpu-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1743,7 +1743,7 @@ jobs:
       build_name: manywheel-py3_11-cuda11_8
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda11_8-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1806,7 +1806,7 @@ jobs:
       build_name: manywheel-py3_11-cuda12_1
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda12_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1869,7 +1869,7 @@ jobs:
       build_name: manywheel-py3_11-cuda12_4
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda12_4-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1931,14 +1931,14 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.0-main
       DESIRED_PYTHON: "3.11"
       steps:
-        - name: Setup ROCm
-          uses: ./.github/actions/setup-rocm
-        - uses: actions/download-artifact@v3
-          name: Download Build Artifacts
-          with:
-            name: manywheel-py3_11-rocm6_0
-            path: "${{ runner.temp }}/artifacts/"
-        - name: Checkout PyTorch
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+      - uses: actions/download-artifact@v3
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_11-rocm6_0
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -1950,7 +1950,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-        - name: Checkout tinglvv/builder
+      - name: Checkout tinglvv/builder
         uses: malfet/checkout@silent-checkout
         with:
           ref: set-max-jobs-clean
@@ -1963,17 +1963,17 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-        - name: ROCm set GPU_FLAG
-          run: |
-            echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-        - name: Pull Docker image
-          uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-          with:
-            docker-image: pytorch/manylinux-builder:rocm6.0-main
-        - name: Test Pytorch binary
-          uses: ./pytorch/.github/actions/test-pytorch-binary
-        - name: Teardown ROCm
-          uses: ./.github/actions/teardown-rocm
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: pytorch/manylinux-builder:rocm6.0-main
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
   manywheel-py3_11-rocm6_0-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -2034,14 +2034,14 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
       DESIRED_PYTHON: "3.11"
       steps:
-        - name: Setup ROCm
-          uses: ./.github/actions/setup-rocm
-        - uses: actions/download-artifact@v3
-          name: Download Build Artifacts
-          with:
-            name: manywheel-py3_11-rocm6_1
-            path: "${{ runner.temp }}/artifacts/"
-        - name: Checkout PyTorch
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+      - uses: actions/download-artifact@v3
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_11-rocm6_1
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -2053,7 +2053,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-        - name: Checkout tinglvv/builder
+      - name: Checkout tinglvv/builder
         uses: malfet/checkout@silent-checkout
         with:
           ref: set-max-jobs-clean
@@ -2066,17 +2066,17 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-        - name: ROCm set GPU_FLAG
-          run: |
-            echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-        - name: Pull Docker image
-          uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-          with:
-            docker-image: pytorch/manylinux-builder:rocm6.1-main
-        - name: Test Pytorch binary
-          uses: ./pytorch/.github/actions/test-pytorch-binary
-        - name: Teardown ROCm
-          uses: ./.github/actions/teardown-rocm
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: pytorch/manylinux-builder:rocm6.1-main
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
   manywheel-py3_11-rocm6_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -2135,7 +2135,7 @@ jobs:
       build_name: manywheel-py3_12-cpu
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2196,7 +2196,7 @@ jobs:
       build_name: manywheel-py3_12-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cpu-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2259,7 +2259,7 @@ jobs:
       build_name: manywheel-py3_12-cuda11_8
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda11_8-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2322,7 +2322,7 @@ jobs:
       build_name: manywheel-py3_12-cuda12_1
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda12_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2385,7 +2385,7 @@ jobs:
       build_name: manywheel-py3_12-cuda12_4
       build_environment: linux-binary-manywheel
       runs_on: linux.4xlarge.nvidia.gpu
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda12_4-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2447,14 +2447,14 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.0-main
       DESIRED_PYTHON: "3.12"
       steps:
-        - name: Setup ROCm
-          uses: ./.github/actions/setup-rocm
-        - uses: actions/download-artifact@v3
-          name: Download Build Artifacts
-          with:
-            name: manywheel-py3_12-rocm6_0
-            path: "${{ runner.temp }}/artifacts/"
-        - name: Checkout PyTorch
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+      - uses: actions/download-artifact@v3
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_12-rocm6_0
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -2466,7 +2466,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-        - name: Checkout tinglvv/builder
+      - name: Checkout tinglvv/builder
         uses: malfet/checkout@silent-checkout
         with:
           ref: set-max-jobs-clean
@@ -2479,17 +2479,17 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-        - name: ROCm set GPU_FLAG
-          run: |
-            echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-        - name: Pull Docker image
-          uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-          with:
-            docker-image: pytorch/manylinux-builder:rocm6.0-main
-        - name: Test Pytorch binary
-          uses: ./pytorch/.github/actions/test-pytorch-binary
-        - name: Teardown ROCm
-          uses: ./.github/actions/teardown-rocm
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: pytorch/manylinux-builder:rocm6.0-main
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
   manywheel-py3_12-rocm6_0-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -2550,14 +2550,14 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
       DESIRED_PYTHON: "3.12"
       steps:
-        - name: Setup ROCm
-          uses: ./.github/actions/setup-rocm
-        - uses: actions/download-artifact@v3
-          name: Download Build Artifacts
-          with:
-            name: manywheel-py3_12-rocm6_1
-            path: "${{ runner.temp }}/artifacts/"
-        - name: Checkout PyTorch
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+      - uses: actions/download-artifact@v3
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_12-rocm6_1
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -2569,7 +2569,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-        - name: Checkout tinglvv/builder
+      - name: Checkout tinglvv/builder
         uses: malfet/checkout@silent-checkout
         with:
           ref: set-max-jobs-clean
@@ -2582,17 +2582,17 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-        - name: ROCm set GPU_FLAG
-          run: |
-            echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-        - name: Pull Docker image
-          uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-          with:
-            docker-image: pytorch/manylinux-builder:rocm6.1-main
-        - name: Test Pytorch binary
-          uses: ./pytorch/.github/actions/test-pytorch-binary
-        - name: Teardown ROCm
-          uses: ./.github/actions/teardown-rocm
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: pytorch/manylinux-builder:rocm6.1-main
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
   manywheel-py3_12-rocm6_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:

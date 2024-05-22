@@ -95,33 +95,33 @@ jobs:
       {%- else %}
       runs_on: linux.4xlarge
       {%- endif %}
-      secrets:
+    secrets:
         github-token: ${{ secrets.GITHUB_TOKEN }}
     {%- else %}
       runs-on: linux.rocm.gpu
       timeout-minutes: !{{ common.timeout_minutes }}
       !{{ upload.binary_env(config) }}
       steps:
-        - name: Setup ROCm
-          uses: ./.github/actions/setup-rocm
-        - uses: !{{ common.download_artifact_action }}
-          name: Download Build Artifacts
-          with:
-            name: !{{ config["build_name"] }}
-            path: "${{ runner.temp }}/artifacts/"
-        !{{ common.checkout(deep_clone=False, directory="pytorch") }}
-        !{{ common.checkout(deep_clone=False, directory="builder", repository=common.builder_repo, branch=common.builder_branch) }}
-        - name: ROCm set GPU_FLAG
-          run: |
-            echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-        - name: Pull Docker image
-          uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-          with:
-            docker-image: !{{ config["container_image"] }}
-        - name: Test Pytorch binary
-          uses: ./pytorch/.github/actions/test-pytorch-binary
-        - name: Teardown ROCm
-          uses: ./.github/actions/teardown-rocm
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+      - uses: !{{ common.download_artifact_action }}
+        name: Download Build Artifacts
+        with:
+          name: !{{ config["build_name"] }}
+          path: "${{ runner.temp }}/artifacts/"
+      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
+      !{{ common.checkout(deep_clone=False, directory="builder", repository=common.builder_repo, branch=common.builder_branch) }}
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: !{{ config["container_image"] }}
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
     {%- endif %}
   {%- endif %}
 
