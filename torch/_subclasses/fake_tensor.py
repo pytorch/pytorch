@@ -251,10 +251,10 @@ class FakeTensorConverter:
         del self.constant_storage_mapping[weak_st]
 
     def _get_memo(self, t):
-        tid = self.meta_converter.describer.lookup_tensor.get(t)
-        if tid is None:
+        tdesc = self.meta_converter.describer.lookup_tensor.get(t)
+        if tdesc is None:
             return None
-        return self.tensor_memo.get(tid)
+        return self.tensor_memo.get(tdesc.id)
 
     def set_tensor_memo(self, t, v):
         tid = self.meta_converter.describer.get_tensor_id(t)
