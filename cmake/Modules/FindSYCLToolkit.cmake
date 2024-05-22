@@ -51,7 +51,7 @@ find_file(
 # Find SYCL library fullname.
 # TODO: we can drop this workaround once an open-source release
 # for Windows has a fix for the issue.
-foreach(sycl_lib_version "" 7 6)
+foreach(sycl_lib_version "" 7)
     set(SYCL_LIBRARY_NAME "sycl${sycl_lib_version}")
 
     find_library(
