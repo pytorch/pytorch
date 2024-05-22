@@ -1,8 +1,12 @@
 import math
+from typing import Tuple
 
 import torch
 
-from .common import ExprPrinter
+from ..utils import IndentedBuffer
+from ..virtualized import V
+
+from .common import CSEVariable, ExprPrinter
 
 DTYPE_TO_CPP = {
     torch.float32: "float",
@@ -232,3 +236,22 @@ def value_to_cpp(value, cpp_type):
         return f"std::numeric_limits<{cpp_type}>::quiet_NaN()"
     else:
         return f"static_cast<{cpp_type}>({repr(value)})"
+
+
+def unify_mask_base_type(
+    buffer: IndentedBuffer,
+    vars: Tuple[CSEVariable, ...],
+    dtype=torch.float,
+):
+    """
+    Given list of cse variables,
+    Cast each to new mask base dtype and return casted cse variable.
+    """
+    new_vars = tuple(
+        V.kernel.cse.generate(
+            buffer,
+            f"{V.kernel._get_mask_cast(var, dtype)}",
+        )
+        for var in vars
+    )
+    return new_vars
