@@ -234,7 +234,7 @@ class StrobelightCLIFunctionProfiler:
         except Exception as error:
             logger.warning("error during stop_strobelight", exc_info=True)
 
-    # Return true if strobelight started and is running.
+    # Return true if strobelight started and is running. Never throw.
     def _start_strobelight(self) -> bool:
         strobelight_started = False
         try:
@@ -254,29 +254,35 @@ class StrobelightCLIFunctionProfiler:
     def profile(self, work_function: Any, *args: Any, **kwargs: Any) -> Any:
         self.current_run_id = None
 
-        if StrobelightCLIFunctionProfiler._lock.locked():
-            if self.stop_at_error:
-                raise StrobelightCLIProfilerError("simultaneous runs not supported")
+        if locked := StrobelightCLIFunctionProfiler._lock.acquire(False):
+            if not locked:
+                if self.stop_at_error:
+                    raise StrobelightCLIProfilerError("concurrent runs not supported")
 
-            return work_function(*args, **kwargs)
+                logger.warning("concurrent runs not supported")
+                return work_function(*args, **kwargs)
 
-        with StrobelightCLIFunctionProfiler._lock:
             started = self._start_strobelight()
             if not started:
                 if self.stop_at_error:
+                    StrobelightCLIFunctionProfiler._lock.release()
                     raise StrobelightCLIProfilerError(
                         "failed to start strobelight profiling"
                     )
-                return work_function(*args, **kwargs)
+                result = work_function(*args, **kwargs)
+                StrobelightCLIFunctionProfiler._lock.release()
+                return result
 
             try:
                 logger.debug("collection started")
                 result = work_function(*args, **kwargs)
                 self._stop_strobelight_no_throw(collect_results=True)
+                StrobelightCLIFunctionProfiler._lock.release()
                 return result
             except Exception as error:
                 logger.warning("work function throw exception", exc_info=True)
                 self._stop_strobelight_no_throw(collect_results=False)
+                StrobelightCLIFunctionProfiler._lock.release()
                 raise error
 
 
