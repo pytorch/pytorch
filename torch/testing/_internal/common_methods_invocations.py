@@ -2135,9 +2135,9 @@ def sample_inputs_svd_lowrank(op_info, device, dtype, requires_grad=False, **kwa
         # we can only use k for q.
         # This issues could be resolved with using a rank-revealing SVD
         # which does not include "zero" singular values.
-        yield SampleInput(a, args=(b,), kwargs=dict(q=k, M=None), output_process_fn_grad=fn)
+        yield SampleInput(a, b, q=k, M=None).with_metadata(output_process_fn_grad=fn)
         M = make_tensor((*batch, m, n), dtype=dtype, device=device, requires_grad=requires_grad)
-        yield SampleInput(a, args=(b,), kwargs=dict(q=k, M=M), output_process_fn_grad=fn)
+        yield SampleInput(a, b, q=k, M=M).with_metadata(output_process_fn_grad=fn)
 
 def chunk_iter(iterable, size):
     it = iter(iterable)
