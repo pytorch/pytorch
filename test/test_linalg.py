@@ -314,7 +314,6 @@ class TestLinalg(TestCase):
             m = a.size(-2)
             n = a.size(-1)
             res = torch.linalg.lstsq(a, b, rcond=rcond, driver=driver)
-            print('after lstsq')
             sol = res.solution
 
             # Only checks gelsd, gelss, gelsy drivers
