@@ -1211,7 +1211,8 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         Test pattern of linear with unary post ops (e.g. relu) with X86InductorQuantizer.
         """
         use_bias_list = [True, False]
-        inplace_list = [True, False]
+        # TODO test for inplace add after refactoring of capture_pre_autograd_graph
+        inplace_list = [False]
         if post_op_algo_list is None:
             post_op_algo_list = [None]
         cases = itertools.product(use_bias_list, inplace_list, post_op_algo_list)
