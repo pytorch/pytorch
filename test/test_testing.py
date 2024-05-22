@@ -2234,8 +2234,10 @@ class TestImports(TestCase):
                            "torch.onnx._internal.fx",  # depends on onnx-script
                            "torch._inductor.triton_helpers",  # depends on triton
                            "torch._inductor.codegen.cuda",  # depends on cutlass
-                           "torch._C._onednn_graph",  # fails with 'torch._C' is not a package
                            ]
+        if not torch._C._has_onednn_graph:
+            # fails with RuntimeError if oneDNN Graph is not built
+            ignored_modules.append("torch._inductor.fx_passes.onednn_graph_fuser")
         # See https://github.com/pytorch/pytorch/issues/77801
         if not sys.version_info >= (3, 9):
             ignored_modules.append("torch.utils.benchmark")
