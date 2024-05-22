@@ -104,7 +104,7 @@ class ExportedArtifact:
     ]
     out_spec: Optional[TreeSpec] = None,
     fake_mode: Optional[FakeTensorMode] = None,
-    module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = None,
+    module_call_specs: Optional[Dict[str, Dict[str, pytree.TreeSpec]]] = None,
 
 
 DEFAULT_EXPORT_DYNAMO_CONFIG = ExportDynamoConfig()
@@ -132,6 +132,17 @@ def _ignore_backend_decomps():
         torch.backends.nnpack.set_flags(*orig_nnpack_flag)
 
 
+def _fixup_key(x):
+    return "L__self__" + _strip_root(x)
+
+
+def _strip_root(x):
+    if isinstance(x, str) and x.startswith("_export_root"):
+        stripped = x[len("_export_root") :]
+        return stripped[1:] if stripped.startswith(".") else stripped
+    return x
+
+
 def _add_runtime_assertions_to_cond_in_subgraph(range_constraints, gm, fake_mode):
     # We can't get rid of this yet, since for some reason
     # insert_deferred_runtime_assertions doesn't add assertions to cond
@@ -153,7 +164,7 @@ def _rewrite_node(gm):
     for node in gm.graph.nodes:
         if node.target == torch.ops.higher_order._export_tracepoint:
             if "path" in node.kwargs:
-                path = strip_root(node.kwargs["path"])
+                path = __strip_root(node.kwargs["path"])
                 with gm.graph.inserting_before(node):
                     new_node = gm.graph.create_node(
                         "call_function",
@@ -1162,15 +1173,6 @@ def _non_strict_export(
 
     module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
 
-    def strip_root(x):
-        if isinstance(x, str) and x.startswith("_export_root"):
-            stripped = x[len("_export_root") :]
-            return stripped[1:] if stripped.startswith(".") else stripped
-        return x
-
-    def fixup_key(x):
-        return "L__self__" + strip_root(x)
-
     def _tuplify_outputs(aot_export):
         def _aot_export_non_strict(mod, args, kwargs=None, **flags):
             kwargs = kwargs or {}
@@ -1204,20 +1206,20 @@ def _non_strict_export(
                 gm, sig = aot_export(wrapped_mod, args, kwargs=kwargs, **flags)
                 log.debug("Exported program from AOTAutograd:\n%s", gm)
 
-            sig.parameters = pytree.tree_map(strip_root, sig.parameters)
-            sig.buffers = pytree.tree_map(strip_root, sig.buffers)
-            sig.inputs_to_buffers = pytree.tree_map(strip_root, sig.inputs_to_buffers)
+            sig.parameters = pytree.tree_map(_strip_root, sig.parameters)
+            sig.buffers = pytree.tree_map(_strip_root, sig.buffers)
+            sig.inputs_to_buffers = pytree.tree_map(_strip_root, sig.inputs_to_buffers)
             sig.inputs_to_parameters = pytree.tree_map(
-                strip_root, sig.inputs_to_parameters
+                _strip_root, sig.inputs_to_parameters
             )
-            sig.buffers_to_mutate = pytree.tree_map(strip_root, sig.buffers_to_mutate)
+            sig.buffers_to_mutate = pytree.tree_map(_strip_root, sig.buffers_to_mutate)
             for node in gm.graph.nodes:
                 if "nn_module_stack" in node.meta:
                     nn_module_stack = node.meta["nn_module_stack"]
                     node.meta["nn_module_stack"] = {
-                        fixup_key(key): val
+                        _fixup_key(key): val
                         for key, val in pytree.tree_map(
-                            strip_root, nn_module_stack
+                            _strip_root, nn_module_stack
                         ).items()
                     }
 
