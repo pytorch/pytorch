@@ -416,6 +416,10 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             except exc.UserAttributeErrorException:
                 # if __bool__ is missing, trying __len__ to infer a truth value.
                 x = value.var_getattr(self, "__len__")
+            else:
+                if isinstance(x, GetAttrVariable):
+                    # if __bool__ is missing, trying __len__ to infer a truth value.
+                    x = value.var_getattr(self, "__len__")
 
             # __bool__ or __len__ is function
             if isinstance(x, UserMethodVariable):
