@@ -554,6 +554,7 @@ class TestStateDictHooks(TestCase):
     def test_load_state_dict_pre_hook(self):
         m = nn.Linear(10, 10)
         m_state_dict = m.state_dict()
+        m_for_state_dict_hook = nn.Linear(10, 10).state_dict()
 
         m_load = nn.Linear(10, 10)
 
@@ -587,6 +588,22 @@ class TestStateDictHooks(TestCase):
             nonlocal hook_called
             hook_called += 1
 
+        def hook_with_module_returns_state_dict(
+            module,
+            state_dict,
+            prefix,
+            local_metadata,
+            strict,
+            missing_keys,
+            unexpected_keys,
+            error_msgs,
+        ):
+            self.assertEqual(m_state_dict, state_dict)
+            self.assertTrue(m_load is module)
+            nonlocal hook_called
+            hook_called += 1
+            return m_for_state_dict_hook
+
         hook_called = 0
         # Test private API since this sets with_module=False which diverges from public API
         m_load._register_load_state_dict_pre_hook(hook_without_module)
@@ -597,6 +614,12 @@ class TestStateDictHooks(TestCase):
         m_load.register_load_state_dict_pre_hook(hook_with_module)
         m_load.load_state_dict(m_state_dict)
         self.assertEqual(2, hook_called)
+
+        hook_called = 0
+        m_load.register_load_state_dict_pre_hook(hook_with_module_returns_state_dict)
+        m_load.load_state_dict(m_state_dict)
+        self.assertEqual(3, hook_called)
+        self.assertEqual(m_load.state_dict(), m_for_state_dict_hook)
 
     def test_no_extra_ref_to_module(self):
         try:
