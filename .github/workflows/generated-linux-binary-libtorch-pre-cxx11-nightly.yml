@@ -53,9 +53,9 @@ jobs:
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cpu-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
+      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    timeout-minutes: 210
   libtorch-cpu-shared-with-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-with-deps-pre-cxx11-build
@@ -117,9 +117,9 @@ jobs:
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cuda11_8-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
+      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    timeout-minutes: 210
   libtorch-cuda11_8-shared-with-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_8-shared-with-deps-pre-cxx11-build
@@ -183,9 +183,9 @@ jobs:
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cuda12_1-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
+      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    timeout-minutes: 210
   libtorch-cuda12_1-shared-with-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda12_1-shared-with-deps-pre-cxx11-build
@@ -249,9 +249,9 @@ jobs:
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cuda12_4-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
+      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    timeout-minutes: 210
   libtorch-cuda12_4-shared-with-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda12_4-shared-with-deps-pre-cxx11-build
@@ -315,9 +315,9 @@ jobs:
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-rocm6_0-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
+      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    timeout-minutes: 210
   libtorch-rocm6_0-shared-with-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-rocm6_0-shared-with-deps-pre-cxx11-build
@@ -422,9 +422,9 @@ jobs:
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-rocm6_1-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
+      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    timeout-minutes: 210
   libtorch-rocm6_1-shared-with-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-rocm6_1-shared-with-deps-pre-cxx11-build
