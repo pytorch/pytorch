@@ -54,8 +54,8 @@ jobs:
     manywheel-py3_8-cuda11_8-test:  # Testing
       if: ${{ github.repository_owner == 'pytorch'}}
       needs: manywheel-py3_8-cuda11_8-build
-        uses: ./.github/workflows/_binary-test-linux.yml
-        with:
+      uses: ./.github/workflows/_binary-test-linux.yml
+      with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
@@ -66,11 +66,11 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
       DESIRED_PYTHON: "3.8"
-        build_name: manywheel-py3_8-cuda11_8
-        build_environment: linux-binary-manywheel
-          runs_on: linux.4xlarge.nvidia.gpu
-        secrets:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+      build_name: manywheel-py3_8-cuda11_8
+      build_environment: linux-binary-manywheel
+      runs_on: linux.4xlarge.nvidia.gpu
+      secrets:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
 
   manywheel-py3_8-cuda12_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -94,8 +94,8 @@ jobs:
     manywheel-py3_8-cuda12_1-test:  # Testing
       if: ${{ github.repository_owner == 'pytorch'}}
       needs: manywheel-py3_8-cuda12_1-build
-        uses: ./.github/workflows/_binary-test-linux.yml
-        with:
+      uses: ./.github/workflows/_binary-test-linux.yml
+      with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
@@ -106,8 +106,8 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
       DESIRED_PYTHON: "3.8"
-        build_name: manywheel-py3_8-cuda12_1
-        build_environment: linux-binary-manywheel
-          runs_on: linux.4xlarge.nvidia.gpu
-        secrets:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+      build_name: manywheel-py3_8-cuda12_1
+      build_environment: linux-binary-manywheel
+      runs_on: linux.4xlarge.nvidia.gpu
+      secrets:
+        github-token: ${{ secrets.GITHUB_TOKEN }}

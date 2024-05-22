@@ -60,8 +60,8 @@ jobs:
     manywheel-py3_8-cpu-s390x-test:  # Testing
       if: ${{ github.repository_owner == 'pytorch'}}
       needs: manywheel-py3_8-cpu-s390x-build
-        uses: ./.github/workflows/_binary-test-linux.yml
-        with:
+      uses: ./.github/workflows/_binary-test-linux.yml
+      with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
@@ -71,12 +71,12 @@ jobs:
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
       DESIRED_PYTHON: "3.8"
-        build_name: manywheel-py3_8-cpu-s390x
-        build_environment: linux-s390x-binary-manywheel
-          runs_on: linux.s390x
-          ALPINE_IMAGE: "docker.io/s390x/alpine"
-        secrets:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+      build_name: manywheel-py3_8-cpu-s390x
+      build_environment: linux-s390x-binary-manywheel
+      runs_on: linux.s390x
+      ALPINE_IMAGE: "docker.io/s390x/alpine"
+      secrets:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cpu-s390x-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -123,8 +123,8 @@ jobs:
     manywheel-py3_9-cpu-s390x-test:  # Testing
       if: ${{ github.repository_owner == 'pytorch'}}
       needs: manywheel-py3_9-cpu-s390x-build
-        uses: ./.github/workflows/_binary-test-linux.yml
-        with:
+      uses: ./.github/workflows/_binary-test-linux.yml
+      with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
@@ -134,12 +134,12 @@ jobs:
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
       DESIRED_PYTHON: "3.9"
-        build_name: manywheel-py3_9-cpu-s390x
-        build_environment: linux-s390x-binary-manywheel
-          runs_on: linux.s390x
-          ALPINE_IMAGE: "docker.io/s390x/alpine"
-        secrets:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+      build_name: manywheel-py3_9-cpu-s390x
+      build_environment: linux-s390x-binary-manywheel
+      runs_on: linux.s390x
+      ALPINE_IMAGE: "docker.io/s390x/alpine"
+      secrets:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cpu-s390x-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -186,8 +186,8 @@ jobs:
     manywheel-py3_10-cpu-s390x-test:  # Testing
       if: ${{ github.repository_owner == 'pytorch'}}
       needs: manywheel-py3_10-cpu-s390x-build
-        uses: ./.github/workflows/_binary-test-linux.yml
-        with:
+      uses: ./.github/workflows/_binary-test-linux.yml
+      with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
@@ -197,12 +197,12 @@ jobs:
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
       DESIRED_PYTHON: "3.10"
-        build_name: manywheel-py3_10-cpu-s390x
-        build_environment: linux-s390x-binary-manywheel
-          runs_on: linux.s390x
-          ALPINE_IMAGE: "docker.io/s390x/alpine"
-        secrets:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+      build_name: manywheel-py3_10-cpu-s390x
+      build_environment: linux-s390x-binary-manywheel
+      runs_on: linux.s390x
+      ALPINE_IMAGE: "docker.io/s390x/alpine"
+      secrets:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cpu-s390x-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -249,8 +249,8 @@ jobs:
     manywheel-py3_11-cpu-s390x-test:  # Testing
       if: ${{ github.repository_owner == 'pytorch'}}
       needs: manywheel-py3_11-cpu-s390x-build
-        uses: ./.github/workflows/_binary-test-linux.yml
-        with:
+      uses: ./.github/workflows/_binary-test-linux.yml
+      with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
@@ -260,12 +260,12 @@ jobs:
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
       DESIRED_PYTHON: "3.11"
-        build_name: manywheel-py3_11-cpu-s390x
-        build_environment: linux-s390x-binary-manywheel
-          runs_on: linux.s390x
-          ALPINE_IMAGE: "docker.io/s390x/alpine"
-        secrets:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+      build_name: manywheel-py3_11-cpu-s390x
+      build_environment: linux-s390x-binary-manywheel
+      runs_on: linux.s390x
+      ALPINE_IMAGE: "docker.io/s390x/alpine"
+      secrets:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cpu-s390x-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -312,8 +312,8 @@ jobs:
     manywheel-py3_12-cpu-s390x-test:  # Testing
       if: ${{ github.repository_owner == 'pytorch'}}
       needs: manywheel-py3_12-cpu-s390x-build
-        uses: ./.github/workflows/_binary-test-linux.yml
-        with:
+      uses: ./.github/workflows/_binary-test-linux.yml
+      with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
@@ -323,12 +323,12 @@ jobs:
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
       DESIRED_PYTHON: "3.12"
-        build_name: manywheel-py3_12-cpu-s390x
-        build_environment: linux-s390x-binary-manywheel
-          runs_on: linux.s390x
-          ALPINE_IMAGE: "docker.io/s390x/alpine"
-        secrets:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+      build_name: manywheel-py3_12-cpu-s390x
+      build_environment: linux-s390x-binary-manywheel
+      runs_on: linux.s390x
+      ALPINE_IMAGE: "docker.io/s390x/alpine"
+      secrets:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cpu-s390x-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
