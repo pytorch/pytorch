@@ -447,7 +447,6 @@ class KLDivLoss(_Loss):
           same shape as the input.
 
     Examples::
-        
         >>> kl_loss = nn.KLDivLoss(reduction="batchmean")
         >>> # input should be a distribution in the log space
         >>> input = F.log_softmax(torch.randn(3, 5, requires_grad=True), dim=1)
