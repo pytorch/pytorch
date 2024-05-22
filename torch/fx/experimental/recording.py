@@ -277,7 +277,7 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
                         raise
 
             except Exception:
-                log.exception(
+                log.error(  # noqa: G201
                     "failed while running %s(*%s, **%s)",
                     name,
                     args[1:],
