@@ -333,6 +333,44 @@ class TestFullyShardCommunication(FSDPTest):
             bwd_comm_counts[c10d_ops._reduce_scatter_base_], num_blocks + 1
         )
 
+    @skip_if_lt_x_gpu(2)
+    def test_manual_reshard_with_reshard_after_forward_false(self):
+        """
+        Tests that we can manually call ``reshard`` on FSDP modules that were
+        initialized with ``reshard_after_forward=False`` and still run unshard.
+        """
+        torch.manual_seed(42)
+        model_args = ModelArgs()
+        model = Transformer(model_args)
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard(module, reshard_after_forward=False)
+        model = fully_shard(model, reshard_after_forward=False)
+        num_fsdp_modules = sum(
+            isinstance(module, FSDPModule) for module in model.modules()
+        )
+
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+        with CommDebugMode() as fwd_comm_mode:
+            loss = model(inp)
+        fwd_comm_counts = fwd_comm_mode.get_comm_counts()
+        self.assertEqual(len(fwd_comm_counts), 1)
+        self.assertEqual(fwd_comm_counts[c10d_ops._allgather_base_], num_fsdp_modules)
+
+        for module in model.modules():
+            if isinstance(module, FSDPModule):
+                module.reshard()
+
+        with CommDebugMode() as bwd_comm_mode:
+            loss.sum().backward()
+        bwd_comm_counts = bwd_comm_mode.get_comm_counts()
+        self.assertEqual(len(bwd_comm_counts), 2)
+        self.assertEqual(bwd_comm_counts[c10d_ops._allgather_base_], num_fsdp_modules)
+        self.assertEqual(
+            bwd_comm_counts[c10d_ops._reduce_scatter_base_], num_fsdp_modules
+        )
+
 
 class TestFullyShardBackwardPrefetch(FSDPTest):
     @property
