@@ -827,7 +827,8 @@ class MetaConverter:
                 # Dense -> Dense view case uses as_strided() to construct view relationship.
                 # TODO: Change this logic to use view replay for consistency?
                 # It's likely there is no view func available.
-                return base.as_strided(sizes, strides, storage_offset)
+                with maybe_suppress():
+                    return base.as_strided(sizes, strides, storage_offset)
 
             from torch._dynamo.source import EphemeralSource
             from torch.fx.experimental.symbolic_shapes import (
@@ -926,6 +927,8 @@ class MetaConverter:
             # Replay the view, swapping out any non-symbolic SymInts or real tensors
             # for symbolic SymInts or fake tensors.
             assert t.view_func is not None
+            # NB: we do NOT suppress guards here, we need to remove ephemeral
+            # sources
             fake_t = t.view_func(base, symint_visitor_fn, tensor_visitor_fn)
 
             # Ensure the output has symbolic shapes according to the outer symbolic context.
@@ -1248,14 +1251,14 @@ class MetaConverter:
                         if t.is_leaf:
                             # Leaf views that track view metadata are created by
                             # creating a view inside a no_grad block
-                            with torch.no_grad(), maybe_suppress():
+                            with torch.no_grad():
                                 r = view_from_base(base, t)
                             # As it's a leaf, we can directly assign requires_grad
                             r.requires_grad = t.requires_grad
                         else:
                             if t.base.requires_grad == t.requires_grad:
                                 # Easy case, just run the view op
-                                with torch.enable_grad(), maybe_suppress():
+                                with torch.enable_grad():
                                     r = view_from_base(base, t)
 
                                 # NB: We don't actaully faithfully replicate
@@ -1270,7 +1273,7 @@ class MetaConverter:
                                 with torch.no_grad():
                                     mid = base.view(base.shape)
                                 mid.requires_grad = t.requires_grad
-                                with torch.enable_grad(), maybe_suppress():
+                                with torch.enable_grad():
                                     r = view_from_base(mid, t)
                         # The CreationMeta influences whether or not inplace
                         # mutation is an error or not.  So we need to make

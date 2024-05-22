@@ -24,7 +24,6 @@ from torch.nested._internal.nested_tensor import (
     jagged_from_list,
     jagged_from_tensor_and_lengths,
     nested_view_from_values_offsets,
-    NestedTensor,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -1558,13 +1557,31 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
 
             # varies based on the type of view
             guard_str = "\n".join(guards)
-            if (
-                isinstance(nt_view._base, NestedTensor)
-                or nt_view_name == "subclass_dense"
-            ):
+            if nt_view_name == "subclass_dense":
                 self.assertExpectedInline(guard_str, """Eq(s3 - 1, s0)""")
+            elif nt_view_name == "dense_subclass_dense_subclass":
+                self.assertExpectedInline(
+                    guard_str,
+                    """\
+Eq(s5 - 1, s2)
+Eq(s11 - 1, s6)
+Eq(s10, s8)""",
+                )
+            elif nt_view_name.startswith("base_is_nt_True"):
+                self.assertExpectedInline(
+                    guard_str,
+                    """\
+Eq(s3 - 1, s0)
+Eq(zf1, zf4)""",
+                )
             else:
-                self.assertExpectedInline(guard_str, """""")
+                self.assertExpectedInline(
+                    guard_str,
+                    """\
+Eq(s4 - 1, s1)
+Eq(s10 - 1, s5)
+Eq(s9, s7)""",
+                )
             return gm
 
         torch._dynamo.reset()
