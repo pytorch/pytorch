@@ -24,6 +24,7 @@ import threading
 import types
 import warnings
 from collections import defaultdict, deque, namedtuple, OrderedDict
+from operator import itemgetter
 from typing import (
     Any,
     Callable,
@@ -1542,7 +1543,7 @@ def arg_tree_leaves(*args: PyTree, **kwargs: PyTree) -> List[Any]:
     leaves: List[Any] = []
     for a in args:
         leaves.extend(tree_iter(a))
-    for a in kwargs.values():
+    for _, a in sorted(kwargs.items(), key=itemgetter(0)):
         leaves.extend(tree_iter(a))
     return leaves
 
