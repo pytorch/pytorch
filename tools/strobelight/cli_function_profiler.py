@@ -1,3 +1,5 @@
+# mypy: disallow-untyped-defs
+
 import functools
 import logging
 import os
@@ -6,8 +8,6 @@ import subprocess
 import time
 from threading import Lock
 from typing import Any, List, Optional, Sequence
-
-# mypy: disallow-untyped-defs
 
 __all__ = [
     "strobelight",
@@ -35,8 +35,8 @@ class StrobelightCLIProfilerError(Exception):
 
 
 def _pid_namespace_link(pid: Optional[int] = None) -> str:
-    PID_NAMESPACE_PATH = "/proc/{}/ns/pid"
     """Returns the link to the process's namespace, example: pid:[4026531836]"""
+    PID_NAMESPACE_PATH = "/proc/{}/ns/pid"
     pid = pid or os.getpid()
     return os.readlink(PID_NAMESPACE_PATH.format(pid))
 
@@ -126,15 +126,12 @@ class StrobelightCLIFunctionProfiler:
                 f"failed to start strobelight profiling, error in run_async:{output}"
             )
 
-        match = re.search("INFO Run Id:.*", output)
-        if match:
-            inner_match = re.search(r"-?\d+$", match.group(0))
-            if inner_match:
-                self.current_run_id = int(inner_match.group(0))
-                return
+        if match := re.search(r"INFO Run Id: (-?\d+)", output):
+            self.current_run_id = int(match.group(1))
+            return
 
         raise StrobelightCLIProfilerError(
-            "failed to start strobelight profiling, unexpected result format"
+            f"failed to start strobelight profiling, unexpected result {output}"
         )
 
     def _wait_for_running(self, counter: int = 0) -> None:
@@ -154,8 +151,7 @@ class StrobelightCLIFunctionProfiler:
                 f"failed to start strobelight profiling, error in wait_for_running:{output}"
             )
 
-        match = re.search("Profile run status: (.*)", output)
-        if match:
+        if match := re.search("Profile run status: (.*)", output):
             current_status = match.group(1)
             if current_status == "RUNNING":
                 return
@@ -166,7 +162,7 @@ class StrobelightCLIFunctionProfiler:
             else:
                 raise StrobelightCLIProfilerError(f"unexpected {current_status} phase")
 
-        raise StrobelightCLIProfilerError("unreachable")
+        raise StrobelightCLIProfilerError(f"unexpected output\n: {output} ")
 
     def _stop_run(self) -> None:
         command = ["strobeclient", "stopRun", "--run-id", str(self.current_run_id)]
@@ -180,8 +176,7 @@ class StrobelightCLIFunctionProfiler:
                 f"failed to stop strobelight profiling, return code is not 0 :{output}"
             )
 
-        match = re.search("INFO ::1:(.*)", output)
-        if match:
+        if match := re.search("INFO ::1:(.*)", output):
             current_status = match.group(1)
             if current_status.__contains__("Success!"):
                 return
@@ -190,7 +185,7 @@ class StrobelightCLIFunctionProfiler:
                     f"failed to stop strobelight profiling, got {current_status} result"
                 )
 
-        raise StrobelightCLIProfilerError("unreachable")
+        raise StrobelightCLIProfilerError(f"unexpected output\n: {output} ")
 
     def _get_results(self) -> None:
         command = ["strobeclient", "getRunStatus", "--run-id", str(self.current_run_id)]
@@ -204,8 +199,7 @@ class StrobelightCLIFunctionProfiler:
                 f"failed to extract profiling results, return code is not 0 : {output}"
             )
 
-        match = re.search("INFO ::1:(.*)", output)
-        if match:
+        if match := re.search("INFO ::1:(.*)", output):
             current_status = match.group(1)
             if current_status.__contains__("Profile run status: PROCESSING"):
                 time.sleep(10)

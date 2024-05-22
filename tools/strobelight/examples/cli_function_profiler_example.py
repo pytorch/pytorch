@@ -11,10 +11,10 @@ if __name__ == "__main__":
         return x * y + z
 
     # use decorator with default profiler or optional profile arguments.
-    @strobelight(sample_each=100, stop_at_error=False)
+    @strobelight(sample_each=10000, stop_at_error=False)
     @torch.compile()
     def work():
-        for i in range(100):
+        for i in range(10):
             torch._dynamo.reset()
             for j in range(5):
                 torch._dynamo.reset()
