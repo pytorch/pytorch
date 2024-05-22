@@ -2815,9 +2815,6 @@ def register_custom_op_serialization(
     assert isinstance(op_handler, CustomOpHandler), f"Expected CustomOpHandler, got {type(op_handler)}."
 
     namespace = op_handler.namespace()
-    # FIXME: hardcoded target because currently custom op serialization only handles
-    # node.target during serialization.
-    op_name = op_handler.op_name("target")
 
     if namespace not in _serialization_registry:
         _serialization_registry[namespace] = {}
