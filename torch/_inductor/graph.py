@@ -1656,14 +1656,10 @@ class GraphLowering(torch.fx.Interpreter):
         self.scheduler.codegen()
 
     def count_bytes(self):
-        from .scheduler import Scheduler
-
-        scheduler = Scheduler(self.buffers)
-
         total_bytes = 0
         node_counts = []
         node_runtimes = []
-        for node in scheduler.nodes:
+        for node in self.scheduler.nodes:
             num_bytes = node.get_read_write_buffers_sizes()
             total_bytes += num_bytes
             node_counts.append((node, num_bytes // 4))
