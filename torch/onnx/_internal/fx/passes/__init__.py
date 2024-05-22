@@ -12,7 +12,8 @@ __all__ = [
     "Functionalize",
     "Modularize",
     "MovePlaceholderToFront",
-    "RemoveAssertions," "RemoveInputMutation",
+    "RemoveAssertions",
+    "RemoveInputMutation",
     "RestoreParameterAndBufferNames",
     "ReplaceGetAttrWithPlaceholder",
 ]

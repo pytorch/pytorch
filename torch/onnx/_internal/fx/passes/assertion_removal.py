@@ -8,7 +8,10 @@ from torch.onnx._internal.fx import _pass
 class RemoveAssertions(_pass.Transform):
     """This pass removes all assertion and check nodes from the FX graph."""
 
-    _ATEN_ASSERTION_TARGETS = {torch.ops.aten.sym_constrain_range_for_size.default, torch.ops.aten._assert_async.msg}
+    _ATEN_ASSERTION_TARGETS = {
+        torch.ops.aten.sym_constrain_range_for_size.default,
+        torch.ops.aten._assert_async.msg,
+    }
 
     @_beartype.beartype
     def _run(self, *args, **kwargs) -> torch.fx.GraphModule:
