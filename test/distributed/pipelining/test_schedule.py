@@ -123,10 +123,12 @@ class ScheduleTest(MultiProcContinousTest):
             ref_loss.backward()
 
         # Create a pipeline
+        split_spec = mod.split_spec if hasattr(mod, "split_spec") else None
         pipe = pipeline(
             mod,
             chunks,
             example_args=(x,),
+            split_spec=split_spec,
         )
 
         stage = PipelineStage(
@@ -176,7 +178,7 @@ class ScheduleTest(MultiProcContinousTest):
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
     def test_grad_with_manual(self, ScheduleClass):
-        full_mod = MultiMLP(d_hid)
+        full_mod = MultiMLP(d_hid, n_layers=self.world_size)
         full_mod.to(self.device)
 
         ref_mod = copy.deepcopy(full_mod)
@@ -195,8 +197,8 @@ class ScheduleTest(MultiProcContinousTest):
             ref_loss = loss_fn(ref_out, target)
             ref_loss.backward()
 
-        # Get a submodule, e.g. mlp0 or mlp1
-        submod_name = f"mlp{self.rank}"
+        # Get a submodule, e.g. `layers.0` or `layers.1`
+        submod_name = f"layers.{self.rank}"
         stage_module = full_mod.get_submodule(submod_name)
         # Create a pipeline stage to wrap that submodule
         stage = ManualPipelineStage(
