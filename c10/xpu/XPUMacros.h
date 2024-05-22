@@ -13,8 +13,8 @@
 #define C10_XPU_EXPORT __declspec(dllexport)
 #define C10_XPU_IMPORT __declspec(dllimport)
 #else
-#define C10_CUDA_EXPORT
-#define C10_CUDA_IMPORT
+#define C10_XPU_EXPORT
+#define C10_XPU_IMPORT
 #endif
 #else // _WIN32
 #if defined(__GNUC__)
