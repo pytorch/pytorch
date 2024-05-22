@@ -190,7 +190,7 @@ jobs:
       - name: Checkout pytorch/builder to builder dir
         uses: malfet/checkout@silent-checkout
         with:
-          ref: set-max-jobs
+          ref: set-max-jobs-clean
           submodules: recursive
           repository: tinglvv/builder
           path: builder

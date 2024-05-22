@@ -89,7 +89,7 @@ jobs:
       - name: Checkout tinglvv/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: set-max-jobs
+          ref: set-max-jobs-clean
           submodules: recursive
           repository: tinglvv/builder
           path: builder
@@ -207,7 +207,7 @@ jobs:
       - name: Checkout tinglvv/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: set-max-jobs
+          ref: set-max-jobs-clean
           submodules: recursive
           repository: tinglvv/builder
           path: builder
@@ -325,7 +325,7 @@ jobs:
       - name: Checkout tinglvv/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: set-max-jobs
+          ref: set-max-jobs-clean
           submodules: recursive
           repository: tinglvv/builder
           path: builder
@@ -443,7 +443,7 @@ jobs:
       - name: Checkout tinglvv/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: set-max-jobs
+          ref: set-max-jobs-clean
           submodules: recursive
           repository: tinglvv/builder
           path: builder
@@ -561,7 +561,7 @@ jobs:
       - name: Checkout tinglvv/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: set-max-jobs
+          ref: set-max-jobs-clean
           submodules: recursive
           repository: tinglvv/builder
           path: builder
