@@ -40,9 +40,6 @@ class PipelineSchedule(ABC):
         if stage.is_last and self._has_backward:
             loss = self._compute_loss(output, target_mbs[mb_index])  # type: ignore[index]
             self._internal_losses.append(loss)
-            logger.debug(
-                f"[{stage.stage_index}] Loss of microbatch {mb_index}: {loss}"  # noqa: G004
-            )
 
     def _maybe_get_loss(self, stage, mb_index):
         valid_index = 0 <= mb_index < len(self._internal_losses)
