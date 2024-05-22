@@ -1468,45 +1468,6 @@ at::Tensor _fbgemm_jagged_to_padded_dense_forward(
   return padded_values;
 }
 
-at::Tensor _fbgemm_jagged_to_padded_dense_backward(
-    const Tensor& grad_output,
-    TensorList offsets,
-    int64_t total_L) {
-  auto grad_padded_values = grad_output;
-  at::cuda::OptionalCUDAGuard device_guard;
-  device_guard.set_index(grad_padded_values.get_device());
-
-  // Canonicalize padded_values by unsqueeze the last dim if the inner dense
-  // dimension is 1 and folded.
-  const bool D_folded = grad_padded_values.dim() == offsets.size() + 1;
-  Tensor grad_padded_values_view =
-      D_folded ? grad_padded_values.unsqueeze(-1) : grad_padded_values;
-  int32_t D = grad_padded_values_view.size(-1);
-
-  // Initialize with zeros so output will be zero for the portion truncated
-  // in forward.
-  auto grad_values =
-      at::zeros_symint({total_L, D}, grad_padded_values.options());
-
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      at::ScalarType::Half,
-      at::ScalarType::BFloat16,
-      grad_padded_values.scalar_type(),
-      "jagged_to_dense_backward_kernel",
-      [&] {
-        jagged_dense_elementwise_jagged_output_<scalar_t>(
-            grad_values, // dummy not used in the lambda function
-            offsets.vec(),
-            grad_padded_values_view,
-            grad_values,
-            [] __device__(scalar_t /*unused*/, scalar_t y) -> scalar_t {
-              return y;
-            });
-      });
-
-  return D_folded ? grad_values.squeeze(-1) : grad_values;
-}
-
 Tensor _fbgemm_dense_to_jagged_forward_symint(
     const Tensor& dense,
     TensorList offsets,
