@@ -211,7 +211,6 @@ def create_fw_bw_graph(true_fn, false_fn, operands):
 
             num_mapped_args = len(operands)
             unwrapped_mapped_operands = pytree.tree_map(_from_fun, operands)
-            # example_operands = _unstack_pytree(unwrapped_mapped_operands)[0]
             example_operands = unwrapped_mapped_operands
 
             #Note, the true_fn and the false_fn produce the same output
@@ -285,8 +284,9 @@ def create_fw_bw_graph(true_fn, false_fn, operands):
 
             def fw_with_masks(*args):
                 fw_out = false_fn(*args)
-                
-                fw_out = [fw_out]
+                # fw_out = [fw_out]
+                if type(fw_out) != list and type(fw_out) != tuple:
+                    fw_out = [fw_out]
                 return fw_out, [
                     True
                     if isinstance(ret, torch.Tensor) and ret.requires_grad

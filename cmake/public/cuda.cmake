@@ -57,8 +57,6 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.12.0)
 endif()
 
 find_package(CUDAToolkit REQUIRED)
-add_library(CUDA::nvToolsExt INTERFACE IMPORTED)
-set_property(TARGET CUDA::nvToolsExt APPEND PROPERTY INTERFACE_INCLUDE_DIRECTORIES "${CUDAToolkit_nvToolsExt_INCLUDE_DIRS}")
 
 cmake_policy(POP)
 

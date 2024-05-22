@@ -266,7 +266,75 @@ class TestControlFlow(TestCase):
 
         for pred, fn in zip([torch.tensor(False), torch.tensor(True)], [false_fn, true_fn]):
             x = torch.randn(4, requires_grad=True)
-            result = cond(pred, true_fn, false_fn, [x])
+            result = cond(pred, true_fn, false_fn, (x,))
+            self.assertEqual(result, fn(x))
+            
+            grad_out = torch.ones_like(result)
+            grads = torch.autograd.grad(result, (x,), grad_out)
+            expected_grads = torch.autograd.grad(fn(x), (x,), grad_out)
+            self.assertEqual(expected_grads, grads)
+            
+    def test_cond_autograd_complex(self):
+        def true_fn(x):
+            return torch.abs((x**2).sin())
+
+        relu = torch.nn.ReLU()
+        def false_fn(x):
+            return relu((x+42).cos())
+
+        for pred, fn in zip([torch.tensor(False), torch.tensor(True)], [false_fn, true_fn]):
+            x = torch.randn(4, requires_grad=True)
+            result = cond(pred, true_fn, false_fn, (x,))
+            self.assertEqual(result, fn(x))
+            
+            grad_out = torch.ones_like(result)
+            grads = torch.autograd.grad(result, (x,), grad_out)
+            expected_grads = torch.autograd.grad(fn(x), (x,), grad_out)
+            self.assertEqual(expected_grads, grads)
+            
+    def test_cond_autograd_inner_fn(self):
+        def true_fn(x):
+            return torch.abs((x**2).sin())
+
+        def false_fn(x):
+            def inner_fn(x):
+                return x**2
+            return torch.abs(inner_fn(x).sin())
+
+        x = torch.randn(4, requires_grad=True)
+        pred = torch.tensor(False)
+        fn = false_fn
+        result_false = cond(pred, true_fn, false_fn, (x,))
+        self.assertEqual(result_false, fn(x))
+        
+        grad_out = torch.ones_like(result_false)
+        grads_false = torch.autograd.grad(result_false, (x,), grad_out)
+        expected_grads = torch.autograd.grad(fn(x), (x,), grad_out)
+        self.assertEqual(expected_grads, grads_false)
+        
+        pred = torch.tensor(True)
+        fn = true_fn
+        result_true = cond(pred, true_fn, false_fn, (x,))
+        self.assertEqual(result_true, fn(x))
+        self.assertEqual(result_false, result_true)
+        
+        grad_out = torch.ones_like(result_true)
+        grads_true = torch.autograd.grad(result_true, (x,), grad_out)
+        expected_grads = torch.autograd.grad(fn(x), (x,), grad_out)
+        self.assertEqual(expected_grads, grads_true)
+        self.assertEqual(grads_false, grads_true)
+        
+    def test_cond_autograd_inner_tensor(self):
+        def true_fn(x):
+            return torch.abs((x**2).sin())
+
+        def false_fn(x):
+            y = torch.ones(4, requires_grad=False) * 42
+            return (x*y).cos()
+
+        for pred, fn in zip([torch.tensor(False), torch.tensor(True)], [false_fn, true_fn]):
+            x = torch.randn(4, requires_grad=True)
+            result = cond(pred, true_fn, false_fn, (x,))
             self.assertEqual(result, fn(x))
             
             grad_out = torch.ones_like(result)
@@ -284,7 +352,7 @@ class TestControlFlow(TestCase):
 
         for pred, fn in zip([torch.tensor(False, device='cuda'), torch.tensor(True, device='cuda')], [false_fn, true_fn]):
             x = torch.randn(4, requires_grad=True, device='cuda')
-            result = cond(pred, true_fn, false_fn, [x])
+            result = cond(pred, true_fn, false_fn, (x,))
             self.assertEqual(result, fn(x))
             
             grad_out = torch.ones_like(result)
@@ -510,6 +578,52 @@ class TestControlFlowTraced(TestCase):
 
         graph = make_fx(f, tracing_mode="symbolic")(x, torch.tensor(False))
         self.assertEqual(graph(x, torch.tensor(True)), f(x, torch.tensor(True)))
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    def test_cond_simple_with_linear_compile_check_graph(self):
+        from torch._dynamo.testing import EagerAndRecordGraphs
+        
+        def true_fn(x):
+            return x.sin()
+
+        def false_fn(x):
+            return x.cos()
+
+        x = torch.randn(4)
+
+        backend = EagerAndRecordGraphs()
+        torch.compile(cond, backend=backend)(torch.tensor(False), true_fn, false_fn, (x,))
+        self.assertEqual(len(backend.graphs), 1)
+        gm = backend.graphs[0]
+        
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, L_pred_ : torch.Tensor, L_operands_0_ : torch.Tensor):
+    l_pred_ = L_pred_
+    l_operands_0_ = L_operands_0_
+    cond_true_0 = self.cond_true_0
+    cond_false_0 = self.cond_false_0
+    cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, [l_operands_0_]);  l_pred_ = cond_true_0 = cond_false_0 = l_operands_0_ = None
+    getitem = cond[0];  cond = None
+    return (getitem,)""",  # noqa: B950
+        )
+        self.assertExpectedInline(
+            gm.cond_true_0.code.strip(),
+            """\
+def forward(self, l_operands_0_):
+    l_operands_0__1 = l_operands_0_
+    sin = l_operands_0__1.sin();  l_operands_0__1 = None
+    return (sin,)""",  # noqa: B950
+        )
+        self.assertExpectedInline(
+            gm.cond_false_0.code.strip(),
+            """\
+def forward(self, l_operands_0_):
+    l_operands_0__1 = l_operands_0_
+    cos = l_operands_0__1.cos();  l_operands_0__1 = None
+    return (cos,)""",  # noqa: B950
+        )
 
     def test_while_loop_nested_traced(self):
         fn, inp = WHILE_LOOP_TESTS["nested"]
