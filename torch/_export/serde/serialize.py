@@ -27,6 +27,7 @@ from typing import (
     Set,
     Tuple,
     Union,
+    Type,
 )
 
 import sympy
@@ -521,15 +522,12 @@ class GraphModuleSerializer(metaclass=Final):
             )
         elif isinstance(node.target, CustomOpHandler):
             custom_op_handler = node.target
-            namespace = custom_op_handler.namespace()
-            op_name = custom_op_handler.op_name("target")
 
             # Sanity check for unhandled serialization.
-            assert namespace in _serialization_registry, f"Miss {namespace} CustomOpHandler"
-            assert op_name in _serialization_registry[namespace], f"Miss {op_name} seralization under {namespace} CustomOpHandler"
+            assert type(node.target) in _serialization_registry, f"Miss {type(node.target)} custom op seralization"
 
             ex_node = Node(
-                target=_serialization_registry[namespace][op_name](node.target), # Jump to custom serialization function.
+                target=_serialization_registry[type(node.target)](node.target),  # Jump to custom serialization function.
                 inputs=self.serialize_hoo_inputs(node.args, node.kwargs),
                 outputs=self.serialize_hoo_outputs(node),
                 metadata=self.serialize_metadata(node),
@@ -2800,28 +2798,26 @@ class CustomOpHandler:
     """
     Base class for handling custom operators.
     """
+    @classmethod
     def namespace(cls):
         raise NotImplementedError(f"{cls.__class__} namespace() must be implemented")
 
-    def op_name(cls, name):
+    @classmethod
+    def op_name(cls, op_type):
         raise NotImplementedError(f"{cls.__class__} op_name() must be implemented")
 
 
 def register_custom_op_serialization(
     op_handler: CustomOpHandler,
-    op_type,
+    op_type: Type[Any],
 ):
     """Register custom serialization method for a node."""
     assert isinstance(op_handler, CustomOpHandler), f"Expected CustomOpHandler, got {type(op_handler)}."
-
-    namespace = op_handler.namespace()
-
-    if namespace not in _serialization_registry:
-        _serialization_registry[namespace] = {}
     _serialization_registry[op_type] = op_handler
 
 # Registry to store all custom serialization implementations.
 # The registry maps a operation to its serialization function (a callable), in their own
 # namespace to avoid conflicts.
-_deserialization_registry: Dict[str, CustomOpHandler] = {}
 _serialization_registry: Dict[Type[Any], CustomOpHandler] = {}
+# FIXME: add custom op support for deserialization later.
+_deserialization_registry: Dict[str, CustomOpHandler] = {}

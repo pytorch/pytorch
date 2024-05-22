@@ -64,7 +64,7 @@ class TestSerialize(TestCase):
             def namespace(self):
                 return "foo"
 
-            def op_name(self, op_name):
+            def op_name(self, op_type):
                 return "target"
 
             def serialize_target(self, target):
@@ -79,8 +79,7 @@ class TestSerialize(TestCase):
         # Register the custom op handler.
         foo_custom_op = FooCustomOp()
         torch._export.serde.serialize.register_custom_op_serialization(
-            foo_custom_op,
-            foo_custom_op.serialize_target,
+            foo_custom_op, type(foo_custom_op)
         )
 
         # Inject the custom operator.
