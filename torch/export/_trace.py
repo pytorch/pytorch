@@ -102,9 +102,9 @@ class ExportedArtifact:
             torch.ScriptObject,
         ],
     ]
-    out_spec: Optional[TreeSpec] = (None,)
-    fake_mode: Optional[FakeTensorMode] = (None,)
-    module_call_specs: Optional[Dict[str, Dict[str, pytree.TreeSpec]]] = (None,)
+    out_spec: Optional[TreeSpec] = None  # type: ignore[Incompatible types in assignment]
+    fake_mode: Optional[FakeTensorMode] = None  # type: ignore[Incompatible types in assignment]
+    module_call_specs: Optional[Dict[str, Dict[str, pytree.TreeSpec]]] = None  # type: ignore[Incompatible types in assignment]
 
 
 DEFAULT_EXPORT_DYNAMO_CONFIG = ExportDynamoConfig()
@@ -1433,7 +1433,9 @@ def _export(
     module_call_signatures = {}
     for fqn, specs in module_call_specs.items():
         mod_fqn = _strip_root(fqn) if not strict else fqn
-        module_call_signatures[mod_fqn] = ModuleCallSignature(inputs=[], outputs=[], **specs)
+        module_call_signatures[mod_fqn] = ModuleCallSignature(
+            inputs=[], outputs=[], **specs
+        )
 
     if len(preserve_module_call_signature) > 0:
         if not strict:
