@@ -10,8 +10,6 @@ from typing import Any, Optional
 
 from tools.strobelight.cli_function_profiler import StrobelightCLIFunctionProfiler
 
-# mypy: disallow-untyped-defs
-
 __can_extern__ = True
 
 __all__ = ["StrobelightCompileTimeProfiler"]

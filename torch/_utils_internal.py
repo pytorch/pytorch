@@ -6,11 +6,10 @@ import sys
 import tempfile
 from typing import Any, Dict, Optional
 
-from tools.strobelight.cli_function_profiler import StrobelightCLIFunctionProfiler
-
-from tools.strobelight.compile_time_profiler import StrobelightCompileTimeProfiler
-
 import torch
+
+from torch.utils.strobelight.cli_function_profiler import StrobelightCLIFunctionProfiler
+from torch.utils.strobelight.compile_time_profiler import StrobelightCompileTimeProfiler
 
 log = logging.getLogger(__name__)
 

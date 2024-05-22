@@ -92,7 +92,6 @@ class StrobelightCLIFunctionProfiler:
         # Tracks the strobelight run id of the most recent run
         self.current_run_id: Optional[int] = None
         self.profile_result: Optional[List[str]] = None
-
         self.sample_tags = sample_tags
 
     def _run_async(self) -> None:
@@ -211,6 +210,7 @@ class StrobelightCLIFunctionProfiler:
                 raise StrobelightCLIProfilerError(
                     f"failed to extract profiling results, unexpected response {output}"
                 )
+
         self.profile_result = []
         for item in re.findall(
             r"(Total samples(.*)|GraphProfiler(.*)|Icicle view \(python stack\)(.*))",

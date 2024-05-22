@@ -10,10 +10,12 @@ if __name__ == "__main__":
         return x * y + z
 
     @torch.compile()
-    def work():
-        for i in range(10):
+    def work(n):
+        for i in range(100):
             for j in range(5):
-                fn(torch.rand(j, j), torch.rand(j, j), torch.rand(j, j))
+                fn(torch.rand(n, n), torch.rand(n, n), torch.rand(n, n))
 
-    # compilation will happen 3 times.
-    work()
+    # Strobelight will be called only 3 times because dynamo will be disabled after
+    # 3rd iteration.
+    for i in range(1, 20):
+        work(i)
