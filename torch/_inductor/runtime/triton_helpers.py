@@ -195,7 +195,7 @@ def bucketize_binary_search(
     while full_range > 1:
         mid = (high + low) // 2
         mask = mid < OFFSETS_SIZE
-        bucket_upper_bound = tl.load(offsets_ptr + mid, mask=mask)
+        bucket_upper_bound = tl.load(offsets_ptr + mid, mask=mask, other=0.0)
         if right:
             is_above = values >= bucket_upper_bound
         else:

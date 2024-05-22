@@ -417,8 +417,8 @@ class CudaReproTests(TestCase):
             block_start = pid * XBLOCK
             offsets = block_start + tl.arange(0, XBLOCK)
             mask = offsets < xnumel
-            x = tl.load(in_out_ptr0 + offsets, mask=mask)
-            y = tl.load(in_ptr0 + offsets, mask=mask)
+            x = tl.load(in_out_ptr0 + offsets, mask=mask, other=0.0)
+            y = tl.load(in_ptr0 + offsets, mask=mask, other=0.0)
             output = x + y
             tl.store(in_out_ptr0 + offsets, output, mask=mask)
 
