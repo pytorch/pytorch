@@ -113,19 +113,25 @@ class MicroPipelineTPTest(TestCase):
         assert "reduce_scatter_tensor" not in code
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @parametrize("shard_dim", [0, 1])
     @fresh_inductor_cache()
-    def test_dtensor_seq_par(self):
+    def test_dtensor_seq_par(self, shard_dim: int):
         model = MLPModule(device="cuda", bias=False)
         device_mesh = DeviceMesh(
             "cuda",
             torch.arange(0, self.world_size),
         )
         parallelize_plan = {
-            "net1": ColwiseParallel(input_layouts=Shard(0)),
-            "net2": RowwiseParallel(output_layouts=Shard(0)),
+            "net1": ColwiseParallel(input_layouts=Shard(shard_dim)),
+            "net2": RowwiseParallel(output_layouts=Shard(shard_dim)),
         }
         model = parallelize_module(model, device_mesh, parallelize_plan)
-        inp = torch.rand(8, 10, device="cuda")
+        if shard_dim == 0:
+            inp = torch.rand(8, 10, device="cuda")
+        elif shard_dim == 1:
+            inp = torch.rand(2, 8, 10, device="cuda")
+        else:
+            raise AssertionError("Invalid shard_dim")
 
         with test_with_non_cuda_p2p_group():
             compiled = torch.compile(model)
