@@ -3321,7 +3321,6 @@ def add(import_name: str):
     origin = module_spec.origin
     if origin is None:
         return
-    global SKIP_DIRS_RE
     SKIP_DIRS.append(_strip_init_py(origin))
     _recompile_re()
 
