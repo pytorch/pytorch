@@ -1,13 +1,16 @@
 import functools
+import operator
 import re
 from collections import deque
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, TYPE_CHECKING
 
-from torch.autograd import _KinetoEvent
 from torch.autograd.profiler import profile
 
 from torch.profiler import DeviceType
+
+if TYPE_CHECKING:
+    from torch.autograd import _KinetoEvent
 
 
 def _traverse(tree, next_fn, children_fn=lambda x: x.children, reverse: bool = False):
@@ -182,7 +185,7 @@ class BasicEvaluation:
                 return event.start_ns()
             if hasattr(event, "start_time_ns"):
                 return event.start_time_ns
-            raise Exception("Unknown Event Type")
+            raise Exception("Unknown Event Type")  # noqa: TRY002
 
         queue_depth_list: List[Interval] = []
         all_events.sort(key=new_old_event_comparator)
@@ -316,7 +319,7 @@ class BasicEvaluation:
                 event
                 for _, event in sorted(
                     zip(heuristic_score_list, event_list),
-                    key=lambda x: x[0],
+                    key=operator.itemgetter(0),
                     reverse=True,
                 )
             ]

@@ -93,6 +93,7 @@ def _reparametrize_module(
     *,
     tie_weights: bool = False,
     strict: bool = False,
+    stack_weights: bool = False,
 ) -> Iterator[None]:
     if tie_weights:
         untied_parameters_and_buffers = _untie_named_tensors_map(
@@ -127,6 +128,11 @@ def _reparametrize_module(
         )
         yield
     finally:
+        if stack_weights:
+            # When stacking is enabled, we will restore the weights in LIFO order.
+            orig_parameters_and_buffers = dict(
+                reversed(orig_parameters_and_buffers.items())
+            )
         new_parameters_and_buffers, _ = accessor.swap_tensors_dict(
             orig_parameters_and_buffers, allow_missing=True
         )

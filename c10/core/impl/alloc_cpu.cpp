@@ -3,7 +3,6 @@
 #include <c10/core/alignment.h>
 #include <c10/util/Flags.h>
 #include <c10/util/Logging.h>
-#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <c10/util/numa.h>
 
@@ -54,8 +53,8 @@ void memset_junk(void* data, size_t num) {
 #if defined(__linux__) && !defined(__ANDROID__)
 static inline bool is_thp_alloc_enabled() {
   static bool value = [&] {
-    auto env = c10::utils::check_env("THP_MEM_ALLOC_ENABLE");
-    return env.has_value() ? env.value() : 0;
+    const char* ptr = std::getenv("THP_MEM_ALLOC_ENABLE");
+    return ptr != nullptr ? std::atoi(ptr) : 0;
   }();
   return value;
 }

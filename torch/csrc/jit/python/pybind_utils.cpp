@@ -55,7 +55,7 @@ IValue listToIValue(py::handle obj) {
   return c10::impl::toList<T>(rs);
 }
 
-IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
+IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
   switch (type->kind()) {
     case TypeKind::TensorType: {
       if (obj.ptr() == Py_None) {
@@ -114,6 +114,16 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       if (torch::is_symfloat(py::handle(obj))) {
         return py::cast<c10::SymFloat>(obj).guard_float(__FILE__, __LINE__);
       }
+      if (THPVariable_Check(obj.ptr())) {
+        auto var = py::cast<autograd::Variable>(obj);
+        // NB: We carefully test if the storage is meta, because that is
+        // always accurate even if you have a fake tensor (which is the
+        // primary case we are trying to detect here)
+        if (var.storage().device_type() == c10::kMeta) {
+          throw py::cast_error(
+              "cannot extract float from tensor with meta storage");
+        }
+      }
       return py::cast<double>(obj);
     case TypeKind::ComplexType: {
       auto c_obj = py::cast<std::complex<double>>(obj.ptr());
@@ -144,6 +154,13 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       }
       if (torch::is_symint(py::handle(obj))) {
         return py::cast<c10::SymInt>(obj).guard_int(__FILE__, __LINE__);
+      }
+      if (THPVariable_Check(obj.ptr())) {
+        auto var = py::cast<autograd::Variable>(obj);
+        if (var.storage().device_type() == c10::kMeta) {
+          throw py::cast_error(
+              "cannot extract int from tensor with meta storage");
+        }
       }
       return py::cast<int64_t>(obj);
     case TypeKind::LayoutType: {
@@ -194,6 +211,13 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     case TypeKind::BoolType:
       if (torch::is_symbool(obj.ptr())) {
         return py::cast<c10::SymBool>(obj).guard_bool(__FILE__, __LINE__);
+      }
+      if (THPVariable_Check(obj.ptr())) {
+        auto var = py::cast<autograd::Variable>(obj);
+        if (var.storage().device_type() == c10::kMeta) {
+          throw py::cast_error(
+              "cannot extract bool from tensor with meta storage");
+        }
       }
       return py::cast<bool>(obj);
     case TypeKind::TupleType: {
@@ -778,7 +802,7 @@ py::object invokeOperatorFromPython(
     const std::vector<std::shared_ptr<Operator>>& operations,
     py::args args,
     const py::kwargs& kwargs,
-    c10::optional<c10::DispatchKey> dk) {
+    std::optional<c10::DispatchKey> dk) {
   auto [found_op, stack] = getOpWithStack(operations, args, kwargs);
   {
     pybind11::gil_scoped_release no_gil_guard;
@@ -857,7 +881,7 @@ py::object _get_operation_for_overload_or_packet(
     py::args args,
     const py::kwargs& kwargs,
     bool is_overload,
-    c10::optional<c10::DispatchKey> dk) {
+    std::optional<c10::DispatchKey> dk) {
   std::string ns = symbol.ns().toUnqualString();
   std::string method_name = symbol.toUnqualString();
   std::string overload_name = operations[0]->schema().overload_name();

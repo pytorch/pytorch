@@ -15,6 +15,7 @@ from torch.distributed._shard.metadata import ShardMetadata
 
 import torch.distributed._shard.sharded_tensor.metadata as sharded_tensor_meta
 from torch.distributed._shard.op_registry_utils import _decorator_func
+import operator
 
 if TYPE_CHECKING:
     # Only include ShardedTensor when do type checking, exclude it
@@ -214,7 +215,7 @@ def _infer_sharding_spec_from_shards_metadata(shards_metadata):
     if chunk_sharding_dim is not None:
         # Ensure we infer the correct placement order from offsets
         placements = [
-            x for _, x in sorted(zip(chunk_offset_list, placements), key=lambda e: e[0])
+            x for _, x in sorted(zip(chunk_offset_list, placements), key=operator.itemgetter(0))
         ]
 
         from .chunk_sharding_spec import ChunkShardingSpec
