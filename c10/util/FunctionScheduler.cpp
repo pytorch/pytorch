@@ -164,7 +164,9 @@ void FunctionScheduler::stop() {
   // `FunctionScheduler::run` so it
   // exits the loop.
   _cond.notify_one();
-  _thread.join();
+  if (_thread.joinable()) {
+    _thread.join();
+  }
 
   // clear queue
   while (!_queue.empty())
