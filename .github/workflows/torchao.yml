@@ -1,11 +1,9 @@
-name: torchao-A100-perf-nightly
+name: torchao
 
 on:
   push:
     tags:
       - ciflow/torchao/*
-  # NB: GitHub has an upper limit of 10 inputs here, so before we can sort it
-  # out, let try to run torchao cudagraphs_low_precision as part of cudagraphs
   workflow_dispatch:
     inputs:
       noquant:
@@ -72,7 +70,7 @@ jobs:
     secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
-  linux-focal-cuda12_1-py3_10-gcc9-torchao-test-nightly:
+  linux-focal-cuda12_1-py3_10-gcc9-torchao-test:
     name: cuda12.1-py3.10-gcc9-sm80
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-focal-cuda12_1-py3_10-gcc9-torchao-build
