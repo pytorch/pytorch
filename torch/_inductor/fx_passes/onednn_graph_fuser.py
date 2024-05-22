@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, Tuple
 
 import torch
 
@@ -150,7 +150,7 @@ class OnednnGraphPartitionModule(InductorImplicitFallback):
         self,
         dtype: torch.dtype,
         sizes: torch.Size,
-        strides: tuple[int, ...],
+        strides: Tuple[int, ...],
         property_type=onednn_graph.logical_tensor.property_type.variable,
     ):
         """Creates a logical tensor (oneDNN Graph counterpart of a FakeTensor)"""
