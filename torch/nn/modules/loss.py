@@ -449,7 +449,7 @@ class KLDivLoss(_Loss):
     Examples::
 
         >>> import torch
-        >>> import torch.nn import nn
+        >>> import torch.nn as nn
         >>> import torch.nn.functional as F
         
         >>> kl_loss = nn.KLDivLoss(reduction="batchmean")
