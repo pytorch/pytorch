@@ -236,7 +236,7 @@ def _get_package_path(package_name):
 
 
 BUILD_LIBTORCH_WHL = False
-BUILD_PYTORCH_USING_LIBTORCH_WHL = False
+BUILD_PYTHON_ONLY = False
 
 python_min_version = (3, 8, 0)
 python_min_version_str = ".".join(map(str, python_min_version))
@@ -265,7 +265,7 @@ from setuptools.dist import Distribution
 from tools.build_pytorch_libs import build_caffe2
 from tools.generate_torch_version import get_torch_version
 from tools.setup_helpers.cmake import CMake
-from tools.setup_helpers.env import build_type, IS_DARWIN, IS_LINUX, IS_WINDOWS
+from tools.setup_helpers.env import build_type, LIBTORCH_PKG_NAME, IS_DARWIN, IS_LINUX, IS_WINDOWS
 from tools.setup_helpers.generate_linker_script import gen_linker_script
 
 ################################################################################
@@ -1118,14 +1118,14 @@ def print_box(msg):
 
 def main():
     global BUILD_LIBTORCH_WHL
-    global BUILD_PYTORCH_USING_LIBTORCH_WHL
+    global BUILD_PYTHON_ONLY
     global PACKAGE_NAME
 
     BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
-    BUILD_PYTORCH_USING_LIBTORCH_WHL = os.getenv("BUILD_PYTHON_ONLY", "0") == "1"
+    BUILD_PYTHON_ONLY = os.getenv("BUILD_PYTHON_ONLY", "0") == "1"
     BUILD_TWO_WHEELS = os.getenv("SPLIT_BUILD", "0") == "1"
 
-    if BUILD_LIBTORCH_WHL and BUILD_PYTORCH_USING_LIBTORCH_WHL:  # noqa: F823
+    if BUILD_LIBTORCH_WHL and BUILD_PYTHON_ONLY:  # noqa: F823
         raise RuntimeError(
             "Conflict: 'BUILD_LIBTORCH_WHL' and 'BUILD_PYTHON_ONLY' can't both be 1. Set one to 0 and rerun."
         )
@@ -1146,12 +1146,12 @@ def main():
             )
 
             final_package_name = PACKAGE_NAME
-            PACKAGE_NAME = "libtorchsplit"
+            PACKAGE_NAME = LIBTORCH_PKG_NAME
             BUILD_LIBTORCH_WHL = True
-            BUILD_PYTORCH_USING_LIBTORCH_WHL = False
+            BUILD_PYTHON_ONLY = False
             _main()
             BUILD_LIBTORCH_WHL = False
-            BUILD_PYTORCH_USING_LIBTORCH_WHL = True
+            BUILD_PYTHON_ONLY = True
             sys.argv[1] = "clean"
             PACKAGE_NAME = final_package_name
             _main()
@@ -1160,16 +1160,14 @@ def main():
 
 
 def _main():
-    print(f"BUILD_LIBTORCH_WHL - {BUILD_LIBTORCH_WHL}")
-    print(f"BUILD_PYTORCH_USING_LIBTORCH_WHL - {BUILD_PYTORCH_USING_LIBTORCH_WHL}")
     # set up appropriate env variables
     if BUILD_LIBTORCH_WHL:
         # Set up environment variables for ONLY building libtorch.so and not libtorch_python.so
         # functorch is not supported without python
         os.environ["BUILD_FUNCTORCH"] = "OFF"
-    if BUILD_PYTORCH_USING_LIBTORCH_WHL:
+    if BUILD_PYTHON_ONLY:
         os.environ["BUILD_LIBTORCHLESS"] = "ON"
-        os.environ["LIBTORCH_LIB_PATH"] = f"{_get_package_path('libtorchsplit')}/lib"
+        os.environ["LIBTORCH_LIB_PATH"] = f"{_get_package_path(LIBTORCH_PKG_NAME)}/lib"
 
     # the list of runtime dependencies required by this built package
     install_requires = [
@@ -1182,7 +1180,7 @@ def _main():
         'mkl>=2021.1.1,<=2021.4.0; platform_system == "Windows"',
     ]
 
-    if BUILD_PYTORCH_USING_LIBTORCH_WHL:
+    if BUILD_PYTHON_ONLY:
         install_requires.append("libtorchsplit")
 
     use_prioritized_text = str(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD", ""))
@@ -1425,7 +1423,7 @@ def _main():
         "utils/model_dump/*.mjs",
     ]
 
-    if BUILD_PYTORCH_USING_LIBTORCH_WHL:
+    if BUILD_PYTHON_ONLY:
         torch_package_data.extend(
             [
                 "lib/libtorch_python*",
@@ -1490,7 +1488,7 @@ def _main():
         for package in packages:
             parts = package.split(".")
             if parts[0] == "torch":
-                modified_packages.append("libtorchsplit" + package[len("torch") :])
+                modified_packages.append(LIBTORCH_PKG_NAME + package[len("torch") :])
         packages = modified_packages
         package_dir = {"libtorchsplit": "torch"}
         torch_package_dir_name = "libtorchsplit"
