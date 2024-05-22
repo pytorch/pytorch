@@ -15,7 +15,6 @@ endif()
 
 string(COMPARE EQUAL "${SYCL_ROOT}" "" nosyclfound)
 if(nosyclfound)
-  message(FATAL_ERROR "Cannot find a SYCL library")
   set(SYCL_FOUND False)
   set(SYCL_REASON_FAILURE "SYCL library not set!!")
   set(SYCL_NOT_FOUND_MESSAGE "${SYCL_REASON_FAILURE}")
@@ -50,27 +49,25 @@ find_file(
   )
 
 # Find SYCL library fullname.
-if(WIN32)
-  # TODO: we can drop this workaround once an open-source release
-  # for Windows has a fix for the issue.
-  foreach(sycl_lib_version "" 7 6)
-      if(UPPERCASE_CMAKE_BUILD_TYPE STREQUAL "DEBUG")
-          set(SYCL_LIBRARY_NAME "sycl${sycl_lib_version}d")
-      else()
-          set(SYCL_LIBRARY_NAME "sycl${sycl_lib_version}")
-      endif()
+# TODO: we can drop this workaround once an open-source release
+# for Windows has a fix for the issue.
+foreach(sycl_lib_version "" 7 6)
+    set(SYCL_LIBRARY_NAME "sycl${sycl_lib_version}")
 
-      find_library(
-        SYCL_LIBRARY
-        NAMES ${SYCL_LIBRARY_NAME}
-        HINTS ${SYCL_LIBRARY_DIR}
-        NO_DEFAULT_PATH
-      )
+    find_library(
+      SYCL_LIBRARY
+      NAMES ${SYCL_LIBRARY_NAME}
+      HINTS ${SYCL_LIBRARY_DIR}
+      NO_DEFAULT_PATH
+    )
 
-      if(EXISTS "${SYCL_LIBRARY}")
-          break()
-      endif()
-  endforeach()
+    if(EXISTS "${SYCL_LIBRARY}")
+        set(SYCL_LIBRARY_FOUND TRUE)
+        break()
+    endif()
+endforeach()
+if(NOT SYCL_LIBRARY_FOUND)
+  message(FATAL_ERROR "Cannot find a SYCL library")
 endif()
 
 find_library(
