@@ -1723,7 +1723,7 @@ class Module:
                     if isinstance(d, dict):
                         del d[name]
                     else:
-                        d.dislcard(name)
+                        d.discard(name)
 
         __dict__ = self.__dict__
         params = __dict__.get('_parameters')
