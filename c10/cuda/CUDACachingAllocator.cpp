@@ -2748,7 +2748,7 @@ class DeviceCachingAllocator {
         block->stream_uses.insert(stream);
       }
     }
-    block_to_cudagraph_stream_uses[block].clear();
+    block_to_cudagraph_stream_uses.erase(block);
   }
 
   void insert_events(Block* block) {
