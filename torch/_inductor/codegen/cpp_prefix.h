@@ -55,10 +55,14 @@ struct Welford {
 
 template <typename T>
 struct IsVecType: std::false_type {};
+template <typename T>
+struct Is2VecType: std::false_type {};
 
 #if INDUCTOR_USE_VECTOR_TYPES()
 template <typename T>
 struct IsVecType<at::vec::Vectorized<T>>: std::true_type {};
+template <typename T>
+struct Is2VecType<at::vec::VectorizedN<T, 2>>: std::true_type {};
 #endif
 
 template <typename T>
@@ -217,6 +221,21 @@ Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> 
   result.index = acc.index;
 
   return result;
+}
+
+template <typename scalar_t>
+Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::VectorizedN<scalar_t, 2>> acc) {
+  auto Welford0 = Welford<at::vec::Vectorized<scalar_t>>{
+    acc.mean[0],
+    acc.m2[0],
+    acc.index
+  };
+  auto Welford1 = Welford<at::vec::Vectorized<scalar_t>>{
+    acc.mean[1],
+    acc.m2[1],
+    acc.index
+  };
+  return welford_vec_reduce_all(welford_combine(Welford0, Welford1));
 }
 #endif
 
