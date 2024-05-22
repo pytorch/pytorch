@@ -281,15 +281,13 @@ static void fp16_gemv_trans_fp16_arith_by_dot_products(const int m, const int n,
   parallel_for(0, n, 1, [&](int begin, int end) {
   for (int i = begin; i < end; ++i) {
       float16x8_t sum[F16_REGISTERS_PER_ITERATION] = {vdupq_n_f16(0)};
-      float16x8_t ax[F16_REGISTERS_PER_ITERATION];
-      float16x8_t ay[F16_REGISTERS_PER_ITERATION];
 
       const auto m_aligned = m & ~(F16_ELEMENTS_PER_ITERATION - 1);
       for (int j = 0; j < m_aligned ; j += F16_ELEMENTS_PER_ITERATION) {
         for (int k = 0; k < F16_REGISTERS_PER_ITERATION; ++k) {
-          ax[k] = vld1q_f16(x + j + k * F16_ELEMENTS_PER_REGISTER);
-          ay[k] = vld1q_f16(a + lda * i + j + k * F16_ELEMENTS_PER_REGISTER);
-          sum[k] = f16_fma(sum[k], ax[k], ay[k]);
+          const auto temp_x = vld1q_f16(x + j + k * F16_ELEMENTS_PER_REGISTER);
+          const auto temp_a = vld1q_f16(a + lda * i + j + k * F16_ELEMENTS_PER_REGISTER);
+          sum[k] = f16_fma(sum[k], temp_x, temp_a);
         }
       }
       auto reducedSum = reduce(sum);
@@ -348,15 +346,13 @@ static void fp16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n,
   parallel_for(0, n, 1, [&](int begin, int end) {
   for (int i = begin; i < end; ++i) {
       float32x4_t sum[F32_REGISTERS_PER_ITERATION] = {vdupq_n_f32(0)};
-      float32x4_t ax[F32_REGISTERS_PER_ITERATION];
-      float32x4_t ay[F32_REGISTERS_PER_ITERATION];
 
       const auto m_aligned = m & ~(F32_ELEMENTS_PER_ITERATION - 1);
       for (int j = 0; j < m_aligned ; j += F32_ELEMENTS_PER_ITERATION) {
         for (int k = 0; k < F32_REGISTERS_PER_ITERATION; ++k) {
-          ax[k] = vcvt_f32_f16(vld1_f16(x + j + k * F32_ELEMENTS_PER_REGISTER));
-          ay[k] = vcvt_f32_f16(vld1_f16(a + lda * i + j + k * F32_ELEMENTS_PER_REGISTER));
-          sum[k] = f32_fma(sum[k], ax[k], ay[k]);
+          const auto temp_x = vcvt_f32_f16(vld1_f16(x + j + k * F32_ELEMENTS_PER_REGISTER));
+          const auto temp_a = vcvt_f32_f16(vld1_f16(a + lda * i + j + k * F32_ELEMENTS_PER_REGISTER));
+          sum[k] = f32_fma(sum[k], temp_x, temp_a);
         }
       }
       auto reducedSum = reduce(sum);
