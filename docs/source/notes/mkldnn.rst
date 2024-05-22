@@ -59,14 +59,14 @@ To get an idea of the precision and speed, see the example code and benchmark da
 
   # Do matmul at BF16 mode.
   torch.backends.mkldnn.matmul.fp32_precision = 'bf16'
-  ab_bf16 = a @ b  # takes 0.145s on SPR
+  ab_bf16 = a @ b  # ~2.545x speed up on SPR
   error = (ab_bf16 - ab_full).abs().max()  # 1.3704
   relative_error = error / mean  # 0.0170
   print(error, relative_error)
 
   # Do matmul FP32 mode.
   torch.backends.mkldnn.matmul.fp32_precision = 'default'
-  ab_fp32 = a @ b  # takes 0.369s on SPR
+  ab_fp32 = a @ b
   error = (ab_fp32 - ab_full).abs().max()  # 0.0003
   relative_error = error / mean  # 0.00000317
   print(error, relative_error)
