@@ -815,6 +815,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             subobj = inspect.getattr_static(self.value, name)
         return subobj
 
+    def has_key_in_generic_dict(self, tx, key):
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
+            mutated_attr = tx.output.side_effects.load_attr(self, key, deleted_ok=True)
+            return not isinstance(mutated_attr, variables.DeletedVariable)
+
+        return key in self.value.__dict__
+
     def var_getattr(self, tx, name):
         from .. import trace_rules
         from . import ConstantVariable
