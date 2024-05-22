@@ -714,14 +714,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
               v_t,
               c10::nullopt,
               c10::nullopt,
-              c10::nullopt,
-              c10::nullopt,
               max_seqlen_batch_q,
               max_seqlen_batch_k,
               dropout_p,
               is_causal,
               return_debug_mask,
-              scale);
+              scale,
+              c10::nullopt,
+              c10::nullopt);
   // Reshape output to convert nnz to batch_size and seq_len
   Tensor attention = output.transpose(1,2);
 
@@ -837,9 +837,7 @@ _flash_attention_forward(
     const Tensor& key,
     const Tensor& value,
     const std::optional<Tensor>& cumulative_sequence_length_q,
-    const std::optional<Tensor>& cumulative_sequence_length_k,
-    std::optional<Tensor>& seqused_k,
-    std::optional<Tensor>& alibi_slopes,
+    const std::optional<Tensor>& cumulative_sequence_length_k,    
     int64_t max_seqlen_batch_q,
     int64_t max_seqlen_batch_k,
     double dropout_p,
@@ -847,11 +845,17 @@ _flash_attention_forward(
     bool return_debug_mask,
     std::optional<double> scale,
     std::optional<int64_t> window_size_left,
-    std::optional<int64_t> window_size_right) {
+    std::optional<int64_t> window_size_right,
+    const std::optional<Tensor>& _seqused_k,
+    const std::optional<Tensor>& _alibi_slopes
+    ) {
 #if defined(USE_FLASH_ATTENTION)
   const auto softmax_scale =
       sdp::calculate_scale(query, scale).as_float_unchecked();
   std::optional<Tensor> out = c10::nullopt;
+
+  std::optional<Tensor> seqused_k = _seqused_k;
+  std::optional<Tensor> alibi_slopes = _alibi_slopes;
 
   const int non_null_window_left = window_size_left.has_value() ? window_size_left.value() : -1;
   const int non_null_window_right = window_size_right.has_value() ? window_size_right.value() : -1;
