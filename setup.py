@@ -257,7 +257,6 @@ import filecmp
 import glob
 import importlib
 import json
-import os
 import shutil
 import subprocess
 import sysconfig
