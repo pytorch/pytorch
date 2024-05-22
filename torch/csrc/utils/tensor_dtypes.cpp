@@ -1,14 +1,11 @@
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
-#include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/tensor_dtypes.h>
-#include <torch/csrc/utils/tensor_types.h>
 
-namespace torch {
-namespace utils {
+namespace torch::utils {
 
 std::pair<std::string, std::string> getDtypeNames(at::ScalarType scalarType) {
   switch (scalarType) {
@@ -125,5 +122,4 @@ void initializeDtypes() {
   }
 }
 
-} // namespace utils
-} // namespace torch
+} // namespace torch::utils
