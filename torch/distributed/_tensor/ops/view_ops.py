@@ -596,7 +596,7 @@ def register_op_strategy_map(
     def reshape_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
         rules = dim_map(*op_schema.args_schema, **op_schema.kwargs_schema)
         input_strategy = cast(OpStrategy, op_schema.args_schema[0])
-        global_in_shape = input_strategy.output_shape
+        global_in_shape = input_strategy.shape
         assert global_in_shape is not None, "Shape required."
 
         output_strategy = OpStrategy([])
