@@ -309,6 +309,7 @@ class TestPublicBindings(TestCase):
             "torch.onnx._internal.fx.op_validation",
             "torch.onnx._internal.fx.passes",
             "torch.onnx._internal.fx.passes._utils",
+            "torch.onnx._internal.fx.passes.assertion_removal",
             "torch.onnx._internal.fx.passes.decomp",
             "torch.onnx._internal.fx.passes.functionalization",
             "torch.onnx._internal.fx.passes.modularization",
