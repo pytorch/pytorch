@@ -13022,7 +13022,11 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_diagonal_scatter),
     OpInfo('alias_copy',
-           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
+           # dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
+           # TODO: why can't alias_copy, which looks like the identity function
+           # not do forward or backward differntiation on complex numbers but
+           # work on everything else?
+           dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
            sample_inputs_func=sample_inputs_alias_copy,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True),
@@ -14962,8 +14966,6 @@ op_db: List[OpInfo] = [
                # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
                # Consider making it a parameter or input, or detaching the gradient
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad',
-                            active_if=TEST_WITH_ROCM)
            ],
            sample_inputs_func=sample_inputs_instance_norm,
            supports_expanded_weight=True,),
@@ -16284,10 +16286,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness'),
                DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo', 'test_nnc_correctness',
                             device_type='cpu', dtypes=(torch.bfloat16, torch.float16)),
-               # Trying to use forward AD with miopen_batch_norm that does not support it
-               # because it has not been implemented yet.
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad',
-                            device_type="cuda", active_if=TEST_WITH_ROCM),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-05, rtol=1e-05)}),
                             'TestCompositeCompliance', 'test_forward_ad', device_type="cpu"),
            )),

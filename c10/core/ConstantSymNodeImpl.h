@@ -69,14 +69,14 @@ class C10_API ConstantSymNodeImpl : public SymNodeImpl {
       return ::std::get<bool>(value_) ? "true" : "false";
     }
   }
-  c10::optional<int64_t> constant_int() override {
+  std::optional<int64_t> constant_int() override {
     if constexpr (is_int_()) {
       return ::std::get<int64_t>(value_);
     } else {
       return c10::nullopt;
     }
   }
-  c10::optional<bool> constant_bool() override {
+  std::optional<bool> constant_bool() override {
     if constexpr (is_bool_()) {
       return ::std::get<bool>(value_);
     } else {

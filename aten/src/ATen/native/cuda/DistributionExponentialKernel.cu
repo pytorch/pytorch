@@ -5,7 +5,7 @@
 
 namespace at::native {
 
-void exponential_kernel(TensorIteratorBase& iter, double lambda, c10::optional<Generator> gen) {
+void exponential_kernel(TensorIteratorBase& iter, double lambda, std::optional<Generator> gen) {
   auto generator = get_generator_or_default<CUDAGeneratorImpl>(gen, cuda::detail::getDefaultCUDAGenerator());
   at::native::templates::cuda::exponential_kernel(iter, lambda, generator);
 }
