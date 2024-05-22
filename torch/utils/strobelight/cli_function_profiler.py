@@ -9,12 +9,6 @@ import time
 from threading import Lock
 from typing import Any, List, Optional, Sequence
 
-__all__ = [
-    "strobelight",
-    "StrobelightCLIProfilerError",
-    "StrobelightCLIFunctionProfiler",
-]
-
 logger = logging.getLogger("strobelight_function_profiler")
 
 console_handler = logging.StreamHandler()
