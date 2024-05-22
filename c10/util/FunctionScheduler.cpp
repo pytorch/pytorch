@@ -166,7 +166,10 @@ void FunctionScheduler::stop() {
   // exits the loop.
   _cond.notify_one();
   _thread.join();
-  // TODO: clear queue
+
+  // clear queue
+  while (!_queue.empty())
+    _queue.pop();
 }
 
 bool FunctionScheduler::isRunning() const {
