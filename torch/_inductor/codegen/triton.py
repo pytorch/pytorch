@@ -1960,6 +1960,8 @@ class TritonKernel(SIMDKernel):
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
             "no_x_dim": self.no_x_dim,
+            "num_load": self.num_load,
+            "num_reduction": self.num_reduction,
             **self.inductor_meta_common(),
         }
 
