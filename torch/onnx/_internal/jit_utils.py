@@ -7,7 +7,7 @@ from __future__ import annotations
 import dataclasses
 import re
 import typing
-from typing import Any, Dict, Iterable, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
 
 import torch
 from torch import _C
@@ -34,6 +34,9 @@ class GraphContext:
         original_node: Current node that is being converted from.
         params_dict: Mapping from graph initializer name to IValue.
         env: Mapping from Torch domain graph Value to ONNX domain graph Value.
+        values_in_env: Set of all values in env, for constant-time lookups.
+        new_nodes: List that tracks all new nodes that are added (used to make
+            sure metadata is propagated to all new nodes).
     """
 
     graph: _C.Graph
@@ -42,6 +45,8 @@ class GraphContext:
     original_node: _C.Node
     params_dict: Dict[str, "_C.IValue"]
     env: Dict[_C.Value, _C.Value]
+    values_in_env: Set[_C.Value]
+    new_nodes: List[_C.Node] = dataclasses.field(default_factory=list)
 
     # Relay methods from _C.Graph for compatibility with symbolic functions that expect
     # a _C.Graph
@@ -253,6 +258,7 @@ def _add_op(
         n_outputs=outputs,
         shape_inference=GLOBALS.onnx_shape_inference,
     )
+    graph_context.new_nodes.append(node)
 
     if outputs == 1:
         return node.output()

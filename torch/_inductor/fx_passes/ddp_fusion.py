@@ -2,6 +2,7 @@
 import collections
 import inspect
 import logging
+import math
 import operator
 from dataclasses import dataclass
 from functools import partial
@@ -329,10 +330,7 @@ def _scatter_fused_allreduce_waits(
                 aten.split,
                 (
                     fused_wait_node,
-                    [
-                        int(cast(torch.Size, cb.shape).numel())
-                        for cb in orig_comm_blocks
-                    ],
+                    [math.prod(cast(List[int], cb.shape)) for cb in orig_comm_blocks],
                 ),
             )
         with graph.inserting_after(split_node):

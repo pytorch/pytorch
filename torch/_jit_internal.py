@@ -355,7 +355,7 @@ def get_annotation_str(annotation):
         return f"{get_annotation_str(annotation.value)}[{get_annotation_str(subscript_slice)}]"
     elif isinstance(annotation, ast.Tuple):
         return ",".join([get_annotation_str(elt) for elt in annotation.elts])
-    elif isinstance(annotation, (ast.Constant, ast.NameConstant)):
+    elif isinstance(annotation, ast.Constant):
         return f"{annotation.value}"
 
     # If an AST node is not handled here, it's probably handled in ScriptTypeParser.
@@ -380,7 +380,12 @@ def get_type_hint_captures(fn):
     # This may happen in cases where the function is synthesized dynamically at runtime.
     src = loader.get_source(fn)
     if src is None:
-        src = inspect.getsource(fn)
+        try:
+            src = inspect.getsource(fn)
+        except OSError as e:
+            raise OSError(
+                f"Failed to get source for {fn} using inspect.getsource"
+            ) from e
 
     # Gather a dictionary of parameter name -> type, skipping any parameters whose annotated
     # types are strings. These are only understood by TorchScript in the context of a type annotation
@@ -874,7 +879,11 @@ def _check_overload_body(func):
         return isinstance(x, ast.Pass)
 
     def is_ellipsis(x):
-        return isinstance(x, ast.Expr) and isinstance(x.value, ast.Ellipsis)
+        return (
+            isinstance(x, ast.Expr)
+            and isinstance(x.value, ast.Constant)
+            and x.value.value is Ellipsis
+        )
 
     if len(body) != 1 or not (is_pass(body[0]) or is_ellipsis(body[0])):
         msg = (
@@ -981,7 +990,7 @@ def _get_overloaded_methods(method, mod_class):
     mod_class_fileno = get_source_lines_and_file(mod_class)[1]
     mod_end_fileno = mod_class_fileno + len(get_source_lines_and_file(mod_class)[0])
     if not (method_line_no >= mod_class_fileno and method_line_no <= mod_end_fileno):
-        raise Exception(
+        raise AssertionError(
             "Overloads are not useable when a module is redeclared within the same file: "
             + str(method)
         )

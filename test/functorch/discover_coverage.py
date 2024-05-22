@@ -365,8 +365,7 @@ def get_all_tested_ops():
     result = set({})
     for op in get_covered_ops(overridable_outplace_we_care_about).values():
         opinfos = op_to_opinfo[op]
-        for opinfo in opinfos:
-            result.add(opinfo.name)
+        result.update(opinfo.name for opinfo in opinfos)
     return result
 
 
