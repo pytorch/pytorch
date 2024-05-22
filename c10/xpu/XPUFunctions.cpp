@@ -54,9 +54,7 @@ inline void initGlobalDevicePoolState() {
   }
 
 #ifdef _WIN32
-  // TODO: default context feature is disabled by default on Windows. We should
-  // switch to the default context when this feature is enabled by default on
-  // Windows.
+  // default context feature is disabled by default on Windows.
   std::vector<sycl::device> deviceList;
   for (auto it = gDevicePool.devices.begin(); it != gDevicePool.devices.end();
        ++it) {
