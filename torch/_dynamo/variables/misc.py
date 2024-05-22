@@ -713,8 +713,6 @@ class GetAttrVariable(VariableTracker):
             key = args[0].as_python_constant()
             obj._check_for_getattribute()
             if obj.has_key_in_generic_dict(tx, key):
-                if key == "a":
-                    breakpoint()
                 return variables.ConstantVariable(True)
             else:
                 return variables.ConstantVariable(False)

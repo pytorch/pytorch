@@ -227,6 +227,9 @@ class TensorVariable(VariableTracker):
 
                 return SourcelessBuilder.create(tx, example_value)
 
+        if name == "grad_fn" and not self.source.subguards_allowed():
+            return variables.ConstantVariable(None)
+
         if not (self.source and self.source.subguards_allowed()):
             raise NotImplementedError
 
@@ -363,7 +366,7 @@ class TensorVariable(VariableTracker):
         # For attributes (not methods) that were not caught in the special handling above,
         # (e.g. tensor.real), we handle these generically, assuming that the output type is
         # a tensor.
-        if result is None and name != "grad":
+        if result is None and name not in ("grad", "grad_fn"):
 
             def try_generic_attr_handling():
                 from .builder import wrap_fx_proxy
