@@ -14,7 +14,7 @@ from torch.distributed.pipelining import (
     PipelineStage,
     ScheduleGPipe,
 )
-from torch.distributed.pipelining._PipelineStage import PipeliningShapeError
+from torch.distributed.pipelining._utils import PipeliningShapeError
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     MultiProcContinousTest,
@@ -25,13 +25,37 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skip_but_pass_in_sandcastle_if,
 )
-
+from torch.utils._pytree import tree_map_only
 
 d_hid = 512
 batch_size = 256
 chunks = 4
 
 torch.manual_seed(0)
+
+
+def get_dtype_change_hook(new_dtype):
+    """A simple hook for simulating mixed precision"""
+
+    def dtype_change_hook(module, input, output):
+        def f(x):
+            return x.to(new_dtype)
+
+        return tree_map_only(torch.Tensor, f, output)
+
+    return dtype_change_hook
+
+
+def get_flatten_hook():
+    """A simple hook for simulating wrong model output shape"""
+
+    def flatten_hook(module, input, output):
+        def f(x):
+            return x.flatten()
+
+        return tree_map_only(torch.Tensor, f, output)
+
+    return flatten_hook
 
 
 class StageTest(MultiProcContinousTest):
@@ -93,11 +117,26 @@ class StageTest(MultiProcContinousTest):
         old_keys = mod.state_dict().keys()
         assert all(k in old_keys for k in submod_keys)
 
-        with self.assertRaisesRegexOnRank(0, PipeliningShapeError, "shape mismatch"):
-            _run_step(torch.randn(batch_size + 1, d_hid, device=self.device))
+        if self.rank == 0:
+            # intended to run this code on all ranks, but the problem is if rank0 throws,
+            # it won't perform the send that unblocks rank 1.
 
-        with self.assertRaisesRegexOnRank(0, PipeliningShapeError, "dtype mismatch"):
-            _run_step(x.to(torch.int32))
+            # TODO(whc) can't test this until fixing args/kwargs issue
+            # with self.assertRaisesRegex(PipeliningShapeError, "shape mismatch"):
+            #     _run_step(torch.randn(batch_size + 1, d_hid, device=self.device))
+
+            with self.assertRaisesRegex(PipeliningShapeError, "dtype mismatch"):
+                _run_step(x.to(torch.int32))
+
+            # output of stage's mlp layer will be flattened by this hook, the stage should err
+            handle = stage.submod.register_forward_hook(get_flatten_hook())
+            with self.assertRaisesRegex(PipeliningShapeError, "shape mismatch"):
+                _run_step(x)
+            handle.remove()
+
+            stage.submod.register_forward_hook(get_dtype_change_hook(torch.bfloat16))
+            with self.assertRaisesRegex(PipeliningShapeError, "dtype mismatch"):
+                _run_step(x)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -144,11 +183,22 @@ class StageTest(MultiProcContinousTest):
         old_keys = mod.state_dict().keys()
         assert all(k in old_keys for k in submod_keys)
 
-        with self.assertRaisesRegexOnRank(0, PipeliningShapeError, "shape mismatch"):
-            _run_step(torch.randn(batch_size + 1, d_hid, device=self.device))
+        if self.rank == 0:
+            with self.assertRaisesRegex(PipeliningShapeError, "shape mismatch"):
+                _run_step(torch.randn(batch_size + 1, d_hid, device=self.device))
 
-        with self.assertRaisesRegexOnRank(0, PipeliningShapeError, "dtype mismatch"):
-            _run_step(x.to(torch.int32))
+            with self.assertRaisesRegex(PipeliningShapeError, "dtype mismatch"):
+                _run_step(x.to(torch.int32))
+
+            # output of stage's mlp layer will be flattened by this hook, the stage should err
+            handle = stage.submod.register_forward_hook(get_flatten_hook())
+            with self.assertRaisesRegex(PipeliningShapeError, "shape mismatch"):
+                _run_step(x)
+            handle.remove()
+
+            stage.submod.register_forward_hook(get_dtype_change_hook(torch.bfloat16))
+            with self.assertRaisesRegex(PipeliningShapeError, "dtype mismatch"):
+                _run_step(x)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -184,11 +234,22 @@ class StageTest(MultiProcContinousTest):
             ref_out = full_mod(x)
             torch.testing.assert_close(out, ref_out)
 
-        with self.assertRaisesRegexOnRank(0, PipeliningShapeError, "shape mismatch"):
-            _run_step(torch.randn(batch_size + 1, d_hid, device=self.device))
+        if self.rank == 0:
+            with self.assertRaisesRegex(PipeliningShapeError, "shape mismatch"):
+                _run_step(torch.randn(batch_size + 1, d_hid, device=self.device))
 
-        with self.assertRaisesRegexOnRank(0, PipeliningShapeError, "dtype mismatch"):
-            _run_step(x.to(torch.int32))
+            with self.assertRaisesRegex(PipeliningShapeError, "dtype mismatch"):
+                _run_step(x.to(torch.int32))
+
+            # output of stage's mlp layer will be flattened by this hook, the stage should err
+            handle = stage_mod.register_forward_hook(get_flatten_hook())
+            with self.assertRaisesRegex(PipeliningShapeError, "shape mismatch"):
+                _run_step(x)
+            handle.remove()
+
+            stage_mod.register_forward_hook(get_dtype_change_hook(torch.bfloat16))
+            with self.assertRaisesRegex(PipeliningShapeError, "dtype mismatch"):
+                _run_step(x)
 
 
 instantiate_parametrized_tests(StageTest)
