@@ -602,18 +602,20 @@ def _tree_map(
     return tree_map(f, tree, *dynamic_shapes, is_leaf=is_leaf)
 
 
-def _combine_args(f, args, kwargs):
+def _combine_args(f, args, kwargs, _is_torch_jit_trace=False):
     # combine args and kwargs following the signature of f, as it happens
     # in the body of f when called with *args, **kwargs
     if isinstance(f, ExportedProgram):
         f = f.module()
-    signature = (
-        inspect.signature(f.forward)
-        if isinstance(f, torch.nn.Module)
-        else inspect.signature(f)
-    )
-    kwargs = kwargs if kwargs is not None else {}
-    return signature.bind(*args, **kwargs).arguments
+    if not _is_torch_jit_trace:
+        signature = (
+            inspect.signature(f.forward)
+            if isinstance(f, torch.nn.Module)
+            else inspect.signature(f)
+        )
+        kwargs = kwargs if kwargs is not None else {}
+        return signature.bind(*args, **kwargs).arguments
+    return args
 
 
 class ShapesCollection:
@@ -692,6 +694,7 @@ def _process_dynamic_shapes(
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
+    _is_torch_jit_trace=False,
 ) -> Optional[List[Constraint]]:
     from torch._dynamo.exc import UserError, UserErrorType
 
@@ -720,7 +723,7 @@ def _process_dynamic_shapes(
             if solution is not None:
                 return int(solution[1])  # type: ignore[call-overload]
             else:
-                raise UserError(  # noqa: TRY200
+                raise UserError(  # noqa: B904
                     UserErrorType.CONSTRAINT_VIOLATION,
                     f"Expected shape[{i}] = {tensor.shape[i]} of input Tensor to be "
                     f"of the form {expr}, where {symbol} is an integer",
@@ -858,7 +861,9 @@ def _process_dynamic_shapes(
 
         _tree_map(assoc_shape, combined_args, dynamic_shapes)
 
-    combined_args = _combine_args(f, args, kwargs)
+    combined_args = _combine_args(
+        f, args, kwargs, _is_torch_jit_trace=_is_torch_jit_trace
+    )
     if not isinstance(dynamic_shapes, dict):
         assert isinstance(dynamic_shapes, (tuple, list))
         combined_args = type(dynamic_shapes)(combined_args.values())  # type: ignore[assignment, misc]

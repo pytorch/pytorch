@@ -1890,7 +1890,6 @@ def forward(self, arg0_1):
         gm = make_fx(g, tracing_mode="real")(
             torch.tensor(True), torch.ones(3, 2, 4), torch.ones(4)
         )
-        breakpoint()
         pred = torch.tensor(False)
         x = torch.randn(3, 2, 4)
         y = torch.randn(4)
