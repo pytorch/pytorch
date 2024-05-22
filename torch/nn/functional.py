@@ -3160,8 +3160,8 @@ def binary_cross_entropy(
         reduction_enum = _Reduction.get_enum(reduction)
     if target.size() != input.size():
         raise ValueError(
-            "Using a target size ({}) that is different to the input size ({}) is deprecated. "
-            "Please ensure they have the same size.".format(target.size(), input.size())
+            f"Using a target size ({target.size()}) that is different to the input size ({input.size()}) is deprecated. "
+            "Please ensure they have the same size."
         )
 
     if weight is not None:
@@ -3210,7 +3210,7 @@ def binary_cross_entropy_with_logits(
             operations. For a target of size [B, C, H, W] (where B is batch size) pos_weight of
             size [B, C, H, W] will apply different pos_weights to each element of the batch or
             [C, H, W] the same pos_weights across the batch. To apply the same positive weight
-            along all spacial dimensions for a 2D multi-class target [C, H, W] use: [C, 1, 1].
+            along all spatial dimensions for a 2D multi-class target [C, H, W] use: [C, 1, 1].
             Default: ``None``
 
     Examples::
@@ -5015,6 +5015,24 @@ greater than 0.0 is specified. The optional scale argument can only be specified
         return attn_weight @ value
 
 .. warning:: This function is beta and subject to change.
+
+.. warning::
+
+    This function always applies dropout according to the specified ``dropout_p`` argument.
+    To disable dropout during evaluation, be sure to pass a value of ``0.0`` when the module
+    that makes the function call is not in training mode.
+
+    For example:
+
+    .. code-block:: python
+
+        class MyModel(nn.Module):
+            def __init__(self, p=0.5):
+                super().__init__()
+                self.p = p
+
+            def forward(self, ...):
+                return F.scaled_dot_product_attention(..., dropout_p=(self.p if self.training else 0.0))
 
 Note:
 

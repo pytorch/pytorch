@@ -1020,7 +1020,7 @@ class GraphInfoPrettyPrinter:
             else ""
         )
 
-        return f"{node_count} {'X' if has_mismatch else '✓'} {error_node_kind}"
+        return f"{node_count} {'X' if has_mismatch else chr(0x2713)} {error_node_kind}"
 
     @_beartype.beartype
     def _graph_id_segment_str(self) -> str:
@@ -1148,13 +1148,13 @@ class OnnxTestCaseRepro:
         structure is as follows:
 
         dir
-        ├── test_<name>
-        │   ├── model.onnx
-        │   └── test_data_set_0
-        │       ├── input_0.pb
-        │       ├── input_1.pb
-        │       ├── output_0.pb
-        │       └── output_1.pb
+        \u251c\u2500\u2500 test_<name>
+        \u2502   \u251c\u2500\u2500 model.onnx
+        \u2502   \u2514\u2500\u2500 test_data_set_0
+        \u2502       \u251c\u2500\u2500 input_0.pb
+        \u2502       \u251c\u2500\u2500 input_1.pb
+        \u2502       \u251c\u2500\u2500 output_0.pb
+        \u2502       \u2514\u2500\u2500 output_1.pb
 
         Args:
             proto: ONNX model proto.
@@ -1244,19 +1244,19 @@ class GraphInfo:
         Example::
 
             ==================================== Tree: =====================================
-            5 X   __2 X    __1 ✓
+            5 X   __2 X    __1 \u2713
             id:  |  id: 0 |  id: 00
                  |        |
                  |        |__1 X (aten::relu)
                  |           id: 01
                  |
-                 |__3 X    __1 ✓
+                 |__3 X    __1 \u2713
                     id: 1 |  id: 10
                           |
                           |__2 X     __1 X (aten::relu)
                              id: 11 |  id: 110
                                     |
-                                    |__1 ✓
+                                    |__1 \u2713
                                        id: 111
             =========================== Mismatch leaf subgraphs: ===========================
             ['01', '110']
@@ -1354,13 +1354,13 @@ class GraphInfo:
         The repro directory will contain the following files::
 
             dir
-            ├── test_<name>
-            │   ├── model.onnx
-            │   └── test_data_set_0
-            │       ├── input_0.pb
-            │       ├── input_1.pb
-            │       ├── output_0.pb
-            │       └── output_1.pb
+            \u251c\u2500\u2500 test_<name>
+            \u2502   \u251c\u2500\u2500 model.onnx
+            \u2502   \u2514\u2500\u2500 test_data_set_0
+            \u2502       \u251c\u2500\u2500 input_0.pb
+            \u2502       \u251c\u2500\u2500 input_1.pb
+            \u2502       \u251c\u2500\u2500 output_0.pb
+            \u2502       \u2514\u2500\u2500 output_1.pb
 
         Args:
             repro_dir: The directory to export the repro files to. Defaults to current
@@ -1825,19 +1825,19 @@ def find_mismatch(
         Greatest absolute difference: 0.2328854203224182 at index (1, 2) (up to 1e-07 allowed)
         Greatest relative difference: 0.699536174352349 at index (1, 3) (up to 0.001 allowed)
         ==================================== Tree: =====================================
-        5 X   __2 X    __1 ✓
+        5 X   __2 X    __1 \u2713
         id:  |  id: 0 |  id: 00
              |        |
              |        |__1 X (aten::relu)
              |           id: 01
              |
-             |__3 X    __1 ✓
+             |__3 X    __1 \u2713
                 id: 1 |  id: 10
                       |
                       |__2 X     __1 X (aten::relu)
                          id: 11 |  id: 110
                                 |
-                                |__1 ✓
+                                |__1 \u2713
                                    id: 111
         =========================== Mismatch leaf subgraphs: ===========================
         ['01', '110']
