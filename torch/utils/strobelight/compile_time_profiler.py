@@ -118,7 +118,7 @@ class StrobelightCompileTimeProfiler:
     @classmethod
     def _log_stats(cls) -> None:
         logger.info(
-            "%s strobelight success runs out of %s non-recursive invocations.",
+            "%s strobelight success runs out of %s non-recursive compilation events.",
             cls.success_profile_count,
             cls.success_profile_count + cls.failed_profile_count,
         )
