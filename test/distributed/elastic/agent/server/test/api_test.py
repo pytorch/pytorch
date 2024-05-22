@@ -126,7 +126,9 @@ class TestAgent(SimpleElasticAgent):
         self.stop_workers_call_count = 0
         self.start_workers_call_count = 0
 
-    def _stop_workers(self, worker_group: WorkerGroup) -> None:
+    def _stop_workers(
+        self, worker_group: WorkerGroup, is_restart: bool = False
+    ) -> None:
         # workers are fake, nothing to stop; just clear the rdzv info
         worker_group.group_rank = None
         worker_group.group_world_size = None

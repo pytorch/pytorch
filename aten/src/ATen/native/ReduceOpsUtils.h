@@ -77,7 +77,7 @@ inline bool _dimreduce_return_trivial_no_ident(Tensor &result, const Tensor &sel
   return false;
 }
 
-inline c10::optional<Tensor> _allreduce_return_trivial(
+inline std::optional<Tensor> _allreduce_return_trivial(
     const Tensor& self,
     const Scalar& ident) {
   // Return identity
@@ -102,7 +102,7 @@ static inline void check_scalar_type_device_layout_equal(const Tensor& out, cons
   OPTION_TYPE_EQUALITY_CHECK(layout, out.options(), self.options());
 }
 
-static inline Tensor integer_upcast(const Tensor& self, c10::optional<ScalarType> dtype) {
+static inline Tensor integer_upcast(const Tensor& self, std::optional<ScalarType> dtype) {
   ScalarType scalarType = self.scalar_type();
   TORCH_CHECK(!isBarebonesUnsignedType(scalarType), "integer upcasting for uint16, uint32 and uint64 is not currently implemented");
   ScalarType upcast_scalarType = dtype.value_or(at::isIntegralType(scalarType, /*includeBool=*/true) ? ScalarType::Long : scalarType);
@@ -323,7 +323,7 @@ static C10_UNUSED void zero_numel_tensor_resize(Tensor& result, Tensor& result_i
 
 inline ScalarType get_dtype_from_self(
     const Tensor& self,
-    const c10::optional<ScalarType>& dtype,
+    const std::optional<ScalarType>& dtype,
     bool promote_integers) {
   if (dtype.has_value()) {
     return dtype.value();
@@ -335,7 +335,7 @@ inline ScalarType get_dtype_from_self(
   return src_type;
 }
 
-inline ScalarType get_dtype_from_result(Tensor& result, c10::optional<ScalarType> dtype) {
+inline ScalarType get_dtype_from_result(Tensor& result, std::optional<ScalarType> dtype) {
   TORCH_CHECK(result.defined(), "Cannot create a new tensor inside a reduction op. You likely tried to call an operator with an out argument but the out argument was an undefined tensor.");
   if (dtype.has_value()) {
     return dtype.value();

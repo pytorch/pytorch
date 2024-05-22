@@ -14,9 +14,18 @@ constexpr size_t kDefaultBufferSize = 10ull * 1024 * 1024;
 using NvlMesh = std::array<std::array<size_t, kMaxDevices>, kMaxDevices>;
 using HybridCubeMesh = std::array<std::array<int, 4>, kMaxDevices>;
 
-enum class Topology { UNKNOWN = 0, FULLY_CONNECTED = 1, HYBRID_CUBE_MESH = 2 };
+enum class Topology : uint8_t {
+  UNKNOWN = 0,
+  FULLY_CONNECTED = 1,
+  HYBRID_CUBE_MESH = 2
+};
 
-enum class AllReduceAlgo { NONE = 0, ONE_SHOT = 1, TWO_SHOT = 2, HCM = 3 };
+enum class AllReduceAlgo : uint8_t {
+  NONE = 0,
+  ONE_SHOT = 1,
+  TWO_SHOT = 2,
+  HCM = 3
+};
 
 class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
  public:
@@ -24,7 +33,7 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
       c10::intrusive_ptr<c10d::Store> store,
       size_t rank,
       size_t worldSize,
-      c10::optional<size_t> bufferSize = c10::nullopt);
+      std::optional<size_t> bufferSize = c10::nullopt);
 
   ~IntraNodeComm() override;
 
@@ -52,7 +61,7 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
   /**
    * Perform a barrier among the specified ranks.
    */
-  void barrier(c10::optional<std::vector<int64_t>> ranks = c10::nullopt);
+  void barrier(std::optional<std::vector<int64_t>> ranks = c10::nullopt);
 
   /**
    * Puts the given tensor into the p2p buffer of the current rank at the

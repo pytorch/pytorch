@@ -252,7 +252,7 @@ def github_data(pr_number):
         }
       }
     }
-    """
+    """  # noqa: UP031
         % pr_number
     )
     query = run_query(query)

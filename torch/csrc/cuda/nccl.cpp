@@ -821,7 +821,7 @@ void all2all_single_equal_split(
   const auto* sendbuff = reinterpret_cast<const char*>(input.const_data_ptr());
   auto* recvbuff = reinterpret_cast<char*>(output.data_ptr());
   auto comm = to_nccl_comm(_comm);
-#if defined(USE_ROCM) && ROCM_VERSION >= 50000
+#if defined(USE_ROCM)
   NCCL_CHECK(ncclAllToAll(sendbuff, recvbuff, count, type, comm, stream));
 #else
   NCCL_CHECK(ncclCommCount(comm, &numranks));

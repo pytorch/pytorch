@@ -90,19 +90,26 @@ def svd_lowrank(
 ) -> Tuple[Tensor, Tensor, Tensor]:
     r"""Return the singular value decomposition ``(U, S, V)`` of a matrix,
     batches of matrices, or a sparse matrix :math:`A` such that
-    :math:`A \approx U diag(S) V^T`. In case :math:`M` is given, then
+    :math:`A \approx U \operatorname{diag}(S) V^{\text{H}}`. In case :math:`M` is given, then
     SVD is computed for the matrix :math:`A - M`.
 
     .. note:: The implementation is based on the Algorithm 5.1 from
               Halko et al, 2009.
 
-    .. note:: To obtain repeatable results, reset the seed for the
-              pseudorandom number generator
+    .. note:: For an adequate approximation of a k-rank matrix
+              :math:`A`, where k is not known in advance but could be
+              estimated, the number of :math:`Q` columns, q, can be
+              choosen according to the following criteria: in general,
+              :math:`k <= q <= min(2*k, m, n)`. For large low-rank
+              matrices, take :math:`q = k + 5..10`.  If k is
+              relatively small compared to :math:`min(m, n)`, choosing
+              :math:`q = k + 0..2` may be sufficient.
 
-    .. note:: The input is assumed to be a low-rank matrix.
+    .. note:: This is a randomized method. To obtain repeatable results,
+              set the seed for the pseudorandom number generator
 
     .. note:: In general, use the full-rank SVD implementation
-              :func:`torch.linalg.svd` for dense matrices due to its 10-fold
+              :func:`torch.linalg.svd` for dense matrices due to its 10x
               higher performance characteristics. The low-rank SVD
               will be useful for huge sparse matrices that
               :func:`torch.linalg.svd` cannot handle.
@@ -181,7 +188,7 @@ def pca_lowrank(
 
     This function returns a namedtuple ``(U, S, V)`` which is the
     nearly optimal approximation of a singular value decomposition of
-    a centered matrix :math:`A` such that :math:`A = U diag(S) V^T`.
+    a centered matrix :math:`A` such that :math:`A \approx U \operatorname{diag}(S) V^{\text{H}}`
 
     .. note:: The relation of ``(U, S, V)`` to PCA is as follows:
 

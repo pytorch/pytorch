@@ -2440,8 +2440,20 @@ class TestLinalg(TestCase):
             self.assertEqual(A, a, rtol=1e-7, atol=2e-7)
 
             # check if svd_lowrank produces same singular values as linalg.svdvals
-            S = torch.linalg.svdvals(a)
+            U, S, Vh = torch.linalg.svd(a, full_matrices=False)
+            V = Vh.mH
             self.assertEqual(s, S)
+
+            if density == 1:
+                # actual_rank is known only for dense inputs
+                #
+                # check if pairs (u, U) and (v, V) span the same
+                # subspaces, respectively
+                u, v = u[..., :actual_rank], v[..., :actual_rank]
+                U, V = U[..., :actual_rank], V[..., :actual_rank]
+                expected_ones = u.mH.matmul(U).det().abs()
+                self.assertEqual(expected_ones, torch.ones_like(expected_ones))
+                self.assertEqual(v.mH.matmul(V).det().abs(), torch.ones_like(expected_ones))
 
         all_batches = [(), (1,), (3,), (2, 3)]
         for actual_rank, size, all_batches in [  # noqa: B020

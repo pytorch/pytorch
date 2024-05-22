@@ -235,15 +235,7 @@ std::vector<Tensor> foreach_tensor_sub_scalarlist_kernel_cuda(
       });
 }
 
-FOREACH_BINARY_OP_SCALARLIST(
-    all_types_half_bfloat16,
-    clamp_max,
-    minimum,
-    false);
-FOREACH_BINARY_OP_SCALARLIST(
-    all_types_half_bfloat16,
-    clamp_min,
-    maximum,
-    false);
+FOREACH_BINARY_OP_SCALARLIST(all_types_half_bfloat16, clamp_max, minimum, true);
+FOREACH_BINARY_OP_SCALARLIST(all_types_half_bfloat16, clamp_min, maximum, true);
 
 } // namespace at::native
