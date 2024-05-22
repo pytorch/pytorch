@@ -775,7 +775,7 @@ AOTITorchError aoti_torch_index_put_out(
     const AtenTensorHandle values,
     bool accumulate) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    c10::List<c10::optional<at::Tensor>> indices_;
+    c10::List<std::optional<at::Tensor>> indices_;
     indices_.reserve(num_indices);
     for (size_t i = 0; i < num_indices; i++) {
       indices_.emplace_back(

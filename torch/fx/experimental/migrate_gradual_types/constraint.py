@@ -152,7 +152,7 @@ class TGreatestUpperBound(Constraint):
         self.rhs2 = rhs2
 
     def __repr__(self):
-        return f'{self.res} = {self.rhs1}⊔*{self.rhs2}'
+        return f'{self.res} = {self.rhs1}\u2294*{self.rhs2}'
 
     def __eq__(self, other):
         if isinstance(other, TGreatestUpperBound):
@@ -180,7 +180,7 @@ class DGreatestUpperBound(Constraint):
         self.rhs2 = rhs2
 
     def __repr__(self):
-        return f'{self.res} = {self.rhs1}⊔{self.rhs2}'
+        return f'{self.res} = {self.rhs1}\u2294{self.rhs2}'
 
     def __eq__(self, other):
         if isinstance(other, DGreatestUpperBound):

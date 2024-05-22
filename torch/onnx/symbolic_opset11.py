@@ -1037,6 +1037,7 @@ def index_copy(g: jit_utils.GraphContext, self, dim, index, source):
     return scatter(g, self, dim, expanded_index, source)
 
 
+@_onnx_symbolic("aten::bitwise_right_shift")
 @_onnx_symbolic("aten::__rshift_")
 @_beartype.beartype
 def __rshift_(g: jit_utils.GraphContext, self, other):
@@ -1071,6 +1072,7 @@ def __rshift_(g: jit_utils.GraphContext, self, other):
     return rshift
 
 
+@_onnx_symbolic("aten::bitwise_left_shift")
 @_onnx_symbolic("aten::__lshift_")
 @_beartype.beartype
 def __lshift_(g: jit_utils.GraphContext, self, other):
@@ -1379,10 +1381,10 @@ def normal(
     pin_memory=None,
 ):
     # If you can sample from a given distribution with mean 0 and variance 1, then you can easily sample from a
-    # scale-location transformation of that distribution, which has mean μ and variance σ's square. If x is a sample
+    # scale-location transformation of that distribution, which has mean mu and variance sigma's square. If x is a sample
     # from a mean 0 and variance 1 distribution then
-    #       σx+μ
-    # is a sample with mean μ and variance σ's square.
+    #       sigma x+mu
+    # is a sample with mean mu and variance sigma's square.
     if sizes is not None and not symbolic_helper._is_none(sizes):
         mean = opset9.expand(g, mean, sizes, None)
     result = opset9.mul(g, std, g.op("RandomNormalLike", mean))

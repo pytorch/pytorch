@@ -5598,7 +5598,7 @@ a")
         g = parse_ir(graph_str)
         m = self.createFunctionFromGraph(g)
         self.getExportImportCopy(m)
-        with self.assertRaisesRegex(RuntimeError, "isInt"):
+        with self.assertRaisesRegex(RuntimeError, "expected int"):
             m()
 
 
@@ -15679,7 +15679,7 @@ dedent """
     def test_unicode_comments(self):
         @torch.jit.script
         def test(self, a):
-            # 🤷🤷🤷🤷
+            # shrug
             return torch.nn.functional.relu(a)
 
     def test_get_set_state_with_tensors(self):

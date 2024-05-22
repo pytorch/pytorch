@@ -972,14 +972,14 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
 
     @skip_if_lt_x_gpu(2)
     def test_fsdp_unsupported_module_cls(self):
-        regex = r"FSDP does not support containers that do not implement forward"
+        regex = r"FSDP will not all-gather parameters for containers that do not implement forward"
         model = nn.ModuleList([MLP(8, torch.device("cpu")) for _ in range(3)])
-        with self.assertRaisesRegex(ValueError, regex):
-            FSDP(model)
+        with self.assertWarnsRegex(UserWarning, regex):
+            FSDP(model, device_id="cuda")
         model = nn.ModuleDict(
             {"1": MLP(8, torch.device("cpu")), "2": MLP(8, torch.device("cpu"))}
         )
-        with self.assertRaisesRegex(ValueError, regex):
+        with self.assertWarnsRegex(UserWarning, regex):
             FSDP(model)
 
 

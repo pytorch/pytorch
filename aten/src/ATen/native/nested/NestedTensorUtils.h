@@ -119,7 +119,7 @@ inline std::vector<IntArrayRef> NestedTensor_get_sizes(
   if (orig_dim == 0) {
     return sizes;
   }
-  const int64_t* sizemat_ptr = sizemat.data_ptr<int64_t>();
+  const int64_t* sizemat_ptr = sizemat.const_data_ptr<int64_t>();
 
   for (const auto i : c10::irange(ntensors)) {
     sizes[i] = IntArrayRef(sizemat_ptr, sizemat_ptr + orig_dim);
@@ -152,7 +152,7 @@ inline std::vector<IntArrayRef> NestedTensor_get_strides(
   if (orig_dim == 0) {
     return strides;
   }
-  const int64_t* stridemat_ptr = stridemat.data_ptr<int64_t>();
+  const int64_t* stridemat_ptr = stridemat.const_data_ptr<int64_t>();
   for (const auto i : c10::irange(ntensors)) {
     strides[i] = IntArrayRef(stridemat_ptr, stridemat_ptr + orig_dim);
     stridemat_ptr += orig_dim;
@@ -340,10 +340,10 @@ inline TensorNode get_nested_tensor_structure(at::Tensor tensor) {
 
 inline Tensor wrap_tensor_node(
     TensorNode tensor_node,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory) {
   TORCH_CHECK(
       !tensor_node.is_leaf(), "Expected TensorNode to wrap a list of Tensors.");
   TensorOptions options_ =
