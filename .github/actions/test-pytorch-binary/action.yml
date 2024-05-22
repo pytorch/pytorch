@@ -35,7 +35,7 @@ runs:
           "${DOCKER_IMAGE}"
         )
 
-        if [[ "${GPU_ARCH_TYPE}" != "rocm" && "${BUILD_ENVIRONMENT}" != "linux-aarch64-binary-manywheel" ]]; then
+        if [[ "${GPU_ARCH_TYPE}" != "rocm" && "${BUILD_ENVIRONMENT}" != "linux-aarch64-binary-manywheel" && "${BUILD_ENVIRONMENT}" != "linux-s390x-binary-manywheel" ]]; then
           # Propagate download.pytorch.org IP to container. This is only needed on Linux non aarch64 runner
           grep download.pytorch.org /etc/hosts | docker exec -i "${container_name}" bash -c "/bin/cat >> /etc/hosts"
         fi
@@ -44,3 +44,12 @@ runs:
         # Generate test script
         docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
         docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
+
+    - name: Cleanup docker
+      if: always() && env.BUILD_ENVIRONMENT == 'linux-s390x-binary-manywheel'
+      shell: bash
+      run: |
+        # on s390x stop the container for clean worker stop
+        # ignore expansion of "docker ps -q" since it could be empty
+        # shellcheck disable=SC2046
+        docker stop $(docker ps -q) || true

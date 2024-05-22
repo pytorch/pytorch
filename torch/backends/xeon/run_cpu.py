@@ -134,7 +134,7 @@ from os.path import expanduser
 from typing import Dict, List
 
 from torch.distributed.elastic.multiprocessing import (
-    DefaultLogsSpecs,
+    DefaultLogsSpecs as _DefaultLogsSpecs,
     start_processes,
     Std,
 )
@@ -594,6 +594,9 @@ won't take effect even if it is set explicitly."
         launch_args = {}
         launch_envs: Dict[int, Dict] = {}
         launch_tee = {}
+        # check whether is launched from torchrun with --nproc-per-node <num workers>
+        local_size = int(os.environ.get("LOCAL_WORLD_SIZE", 1))
+        local_rank = int(os.environ.get("LOCAL_RANK", 0))
         for i in range(args.ninstances):
             cmd = []
             cur_process_cores = ""
@@ -619,6 +622,15 @@ won't take effect even if it is set explicitly."
                     ]
 
                 core_ranges: List[Dict] = []
+                if local_size > 1:
+                    total_num_cores = len(core_list)
+                    cores_per_rank = total_num_cores // local_size
+                    assert (
+                        cores_per_rank >= 1
+                    ), "At least one core needs to be assigned to each rank"
+                    core_list = core_list[
+                        cores_per_rank * local_rank : cores_per_rank * (local_rank + 1)
+                    ]
                 for core in core_list:
                     if len(core_ranges) == 0:
                         range_elem = {"start": core, "end": core}
@@ -670,7 +682,7 @@ won't take effect even if it is set explicitly."
             entrypoint=entrypoint,
             args=launch_args,
             envs=launch_envs,
-            logs_specs=DefaultLogsSpecs(log_dir=args.log_path, tee=launch_tee),
+            logs_specs=_DefaultLogsSpecs(log_dir=args.log_path, tee=launch_tee),
         )
         ctx.wait()
 

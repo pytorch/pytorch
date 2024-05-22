@@ -1292,7 +1292,7 @@ class TestModuleHookNN(NNTestCase):
         try:
             mod(inp.detach(), inp)
         except Exception as ex:
-            self.fail("Unexpected exception: %s" % ex)
+            self.fail(f"Unexpected exception: {ex}")
 
     def test_hook_extra_input(self):
         class MyModule(nn.Module):
