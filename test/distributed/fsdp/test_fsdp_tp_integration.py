@@ -169,7 +169,7 @@ class TestTPFSDPIntegration(FSDPTest):
             dist.all_reduce(grad, op=dist.ReduceOp.SUM, group=tp_pg)
             grad = grad.to(grad_device)
             flat_param.grad[~sharded_mask] = grad[~sharded_mask]
-            # Average *all* gradient elements to match the FSDP only semantics
+            # Average *all* gradient elements to match the FSDP only  semantics
             flat_param.grad /= tp_world_size
 
     def _get_grads_as_flattened(
