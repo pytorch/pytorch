@@ -125,6 +125,7 @@ class TensorVariable(VariableTracker):
         is_quantized,
         is_sparse,
         class_type,
+        has_grad_fn,
         size=None,
         stride=None,
         is_contiguous=None,
@@ -144,6 +145,7 @@ class TensorVariable(VariableTracker):
         self.is_contiguous = is_contiguous
         self.is_sparse = is_sparse
         self.class_type = class_type
+        self.has_grad_fn = has_grad_fn
         if _is_name_set is None:
             # no need to rename inputs
             _is_name_set = self.proxy.node.op == "placeholder"
@@ -170,6 +172,7 @@ class TensorVariable(VariableTracker):
             "is_quantized": value.is_quantized,
             "is_sparse": value.is_sparse,
             "class_type": type(value),
+            "has_grad_fn": value.grad_fn is not None,
         }
         if is_sparse_any(value) and not has_free_symbols(value):
             props["size"] = tuple(
@@ -312,6 +315,12 @@ class TensorVariable(VariableTracker):
 
     def method_attr_data(self, tx):
         return self.call_method(tx, "detach", [], {})
+
+    def method_attr_grad_fn(self, tx):
+        if self.has_grad_fn:
+            unimplemented("TensorVariable has a grad_fn")
+        else:
+            return variables.ConstantVariable(None)
 
     def method_attr__version(self, tx):
         from ..tensor_version_op import _tensor_version
