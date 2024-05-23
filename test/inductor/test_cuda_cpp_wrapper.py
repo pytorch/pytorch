@@ -98,7 +98,6 @@ if TEST_WITH_ROCM:
 if config.abi_compatible:
     xfail_list = [
         "test_profiler_mark_wrapper_call_cuda",
-        "test_scaled_dot_product_attention_cuda_dynamic_shapes",
     ]
     for test_name in xfail_list:
         test_failures_cuda_wrapper[test_name] = test_torchinductor.TestFailure(
@@ -207,6 +206,7 @@ if RUN_CUDA:
         BaseTest("test_mm_views"),
         BaseTest("test_multi_device"),
         BaseTest("test_multi_threading"),
+        BaseTest("test_pow3"),
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest("test_randint"),
         BaseTest("test_reduction1"),  # Reduction
