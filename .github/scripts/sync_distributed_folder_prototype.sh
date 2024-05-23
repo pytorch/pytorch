@@ -1,7 +1,12 @@
 #!/bin/bash
 
-ORIG_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-git checkout fbcode/pytorch-stable-prototype
+set -eu
+
+SYNC_BRANCH=fbcode/pytorch-stable-prototype
+
+git fetch origin "$SYNC_BRANCH"
+git checkout "$SYNC_BRANCH"
+
 for SHA in $(git log 4333e122d4b74cdf84351ed2907045c6a767b4cd..main --pretty="%h" --reverse -- torch/distributed torch/csrc/distributed test/distributed test/cpp/c10d benchmarks/distributed)
 do
     # `git merge-base --is-ancestor` exits with code 0 if the given SHA is an ancestor, and non-0 otherwise
@@ -13,7 +18,7 @@ do
     echo "Copying $SHA"
     git cherry-pick -x "$SHA"
 done
+
 if [[ "${WITH_PUSH}" == true ]]; then
   git push
 fi
-git checkout "$ORIG_BRANCH"
