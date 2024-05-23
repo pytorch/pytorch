@@ -1,7 +1,11 @@
 #!/bin/bash
 set -x
 
-WHEELHOUSE_DIR=/artifacts
+if [ -z "$1" ]; then
+    echo "Need wheel location argument" && exit 1
+fi
+
+WHEELHOUSE_DIR=$1
 PATCHELF_BIN=patchelf
 ROCM_LIB=backends/amd/lib
 ROCM_LD=backends/amd/llvm/bin

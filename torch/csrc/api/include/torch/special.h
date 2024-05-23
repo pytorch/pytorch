@@ -596,7 +596,7 @@ inline Tensor& log1p_out(Tensor& result, const Tensor& self) {
 inline Tensor log_softmax(
     const Tensor& self,
     int64_t dim,
-    c10::optional<ScalarType> dtype) {
+    std::optional<ScalarType> dtype) {
   return torch::special_log_softmax(self, dim, dtype);
 }
 
@@ -611,7 +611,7 @@ inline Tensor log_softmax(
 inline Tensor softmax(
     const Tensor& self,
     int64_t dim,
-    c10::optional<ScalarType> dtype) {
+    std::optional<ScalarType> dtype) {
   return torch::special_softmax(self, dim, dtype);
 }
 

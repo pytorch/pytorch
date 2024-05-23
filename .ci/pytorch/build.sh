@@ -44,11 +44,6 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   fi
 fi
 
-if [[ ${BUILD_ENVIRONMENT} == *"caffe2"* ]]; then
-  echo "Caffe2 build is ON"
-  export BUILD_CAFFE2=ON
-fi
-
 if [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
   export ATEN_THREADING=TBB
   export USE_TBB=1
@@ -294,6 +289,9 @@ else
       fi
       WERROR=1 python setup.py bdist_wheel
     else
+      if [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
+        source .ci/pytorch/install_cache_xla.sh
+      fi
       python setup.py bdist_wheel
     fi
     pip_install_whl "$(echo dist/*.whl)"

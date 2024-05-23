@@ -99,8 +99,6 @@ __all__ = [
     "ExportedProgramDeserializer",
 ]
 
-from .upgrade import GraphModuleOpUpgrader
-
 log = logging.getLogger(__name__)
 
 
@@ -284,7 +282,10 @@ def _reconstruct_fake_tensor(
     return fake_tensor
 
 
-def serialize_torch_artifact(artifact: Dict[str, Any]) -> bytes:
+def serialize_torch_artifact(artifact: Optional[Any]) -> bytes:
+    if artifact is None:
+        return b""
+
     assert (
         FakeTensor not in copyreg.dispatch_table
     ), "Refusing to stomp on existing FakeTensor reducer"
@@ -538,21 +539,9 @@ class GraphModuleSerializer(metaclass=Final):
                 path, ty = val
 
                 assert isinstance(path, str)
+                assert isinstance(ty, str)
 
-                # node.meta["nn_module_stack"] could have two forms:
-                # 1. (path: str, module_type: 'type'), e.g.
-                #    ('', <class 'sigmoid.inference.MySimpleModel'>)
-                # 2. (path: str, module_type: str), e.g.
-                #    ('', 'sigmoid.inference.MySimpleModel')
-                # ExportedProgram directly produced by torch.export() has form 1
-                # ExportedProgram deserialized from disk has form 2
-                # TODO: This is not ideal, we should fix this.
-                if isinstance(ty, str):
-                    normalized_ty = ty
-                else:
-                    normalized_ty = ty.__module__ + "." + ty.__qualname__
-
-                return path + "," + normalized_ty
+                return path + "," + ty
 
             # Serialize to "key,orig_path,type_str"
             nn_module_list = [
@@ -1638,14 +1627,6 @@ class GraphModuleDeserializer(metaclass=Final):
             self.deserialize_outputs(serialized_node, fx_node)
             fx_node.meta.update(self.deserialize_metadata(serialized_node.metadata))
 
-            # assign nn_module_stack metadata to submodule/subgraph nodes for higher order ops
-            if serialized_node.target.startswith(('torch.ops.higher_order', 'torch._higher_order_ops')):
-                for node in fx_node._args:
-                    if not isinstance(node, torch.fx.Node):
-                        continue
-                    if node.op not in ["placeholder", "output"] and node.meta.get("nn_module_stack") is None:
-                        node.meta["nn_module_stack"] = copy.copy(fx_node.meta["nn_module_stack"])
-
         elif isinstance(target, torch._ops.OpOverload):
             # For convenience: if this node returns a single tensor, name the
             # newly-created node after it. This ensures that these tensor values
@@ -2221,13 +2202,8 @@ class ExportedProgramDeserializer(metaclass=Final):
             res.names_to_symbols,
         )
         model_opset_version: Optional[Dict[str, int]] = exported_program.opset_version
-        self._validate_model_opset_version(model_opset_version)
 
-        upgrader = GraphModuleOpUpgrader(
-            self.expected_opset_version, model_opset_version
-        )
-
-        exported_program = ep.ExportedProgram(
+        return ep.ExportedProgram(
             root=res.graph_module,
             graph=res.graph_module.graph,
             graph_signature=res.signature,
@@ -2238,52 +2214,6 @@ class ExportedProgramDeserializer(metaclass=Final):
             verifier=load_verifier(exported_program.dialect),
             constants=res.constants,
         )
-        return upgrader.upgrade(exported_program)
-
-    def _validate_model_opset_version(
-        self, model_opset_version: Optional[Dict[str, int]]
-    ):
-        """Compare model_opset_version with expected_opset_version and raise error if we can't resolve the version
-        difference.
-        E.g., model_opset_version = {"aten": 3, "custom": 4}
-        expected_opset_version = {"aten": 4, "custom": 4}
-        This means we can use an upgrader for ATen to reconcile the deserialized model.
-
-        The logic of this method:
-
-        For common op namespaces:
-        1. if model version < expected version, this case can be handled by upgraders.
-        2. if model version > expected version, we need downgraders but not implemented yet.
-        3. if model version == expected version, we don't need extra handling.
-
-        For op namespace only in model_opset_version, we should give a warning because it is missing from
-        expected_opset_version.
-        """
-        if not model_opset_version:
-            raise RuntimeError("Serialized model should have opset version.")
-        common_namespaces = {
-            key for key in model_opset_version if key in self.expected_opset_version
-        }
-        for namespace in common_namespaces:
-            model_version = model_opset_version[namespace]
-            assert isinstance(model_version, int), f"model_opset_version value should be int, got {model_version}"
-
-            compiler_version = self.expected_opset_version[namespace]
-            assert isinstance(compiler_version, int), f"expected_opset_version value should be int, got {compiler_version}"
-
-            # TODO(larryliu0820): Add support for upgrader & downgrader
-            if model_version != compiler_version:
-                raise NotImplementedError(
-                    f"Model opset version {model_opset_version} doesn't match to compiler opset version "
-                    f"{self.expected_opset_version}! Upgrader/downgrader is not implemented yet."
-                )
-        for namespace in model_opset_version:
-            if namespace in common_namespaces:
-                continue
-            log.warning(
-                "Compiler doesn't have a version table for op namespace: {ns}. ",
-                extra={"ns": namespace},
-            )
 
 
 class EnumEncoder(json.JSONEncoder):

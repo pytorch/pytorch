@@ -118,7 +118,7 @@ def _check_input_constraints_for_graph(
                                 sympy.Eq(node_dim.node.expr, arg_dim), symbol
                             )
                             if solution is None:
-                                raise RuntimeError(  # noqa: TRY200
+                                raise RuntimeError(  # noqa: B904
                                     f"Expected input {node.name}.shape[{j}] = {arg_dim} to be "
                                     f"of the form {node_dim.node.expr}, where {symbol} is an integer"
                                 )
@@ -144,6 +144,10 @@ def _check_input_constraints_for_graph(
                                 )
                 else:
                     if arg_dim != node_dim:
+                        if isinstance(
+                            node_dim, torch.SymInt
+                        ):  # this means we deferred a guard from export analysis to runtime, let this pass
+                            continue
                         raise RuntimeError(
                             f"Expected input at {get_keystr(key_path)}.shape[{j}] to be equal to "
                             f"{node_dim}, but got {arg_dim}",

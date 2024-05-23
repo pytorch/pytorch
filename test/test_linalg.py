@@ -18,7 +18,7 @@ from torch.testing._internal.common_utils import \
      TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
      make_fullrank_matrices_with_distinct_singular_values,
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, parametrize, skipIfTorchDynamo,
-     setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally)
+     setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, has_hipsolver,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
@@ -2485,6 +2485,7 @@ class TestLinalg(TestCase):
     @precisionOverride({torch.float: 1e-4, torch.cfloat: 2e-4})
     @setLinalgBackendsToDefaultFinally
     @dtypes(*floating_and_complex_types())
+    @serialTest()
     def test_svd(self, device, dtype):
         # tests linalg.svd, svd, linalg.svdvals
         make_arg = partial(make_tensor, dtype=dtype, device=device)
@@ -6132,6 +6133,30 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
         mean_err = ((res - ref).abs() / ref).mean()
         self.assertTrue(mean_err < 0.05)
+
+    @onlyCPU
+    @parametrize("m", [32, 35, 36, 40, 64])
+    @parametrize("k", [32, 35, 36, 40, 64])
+    # NOTE: This is intended to cover fp16_gemv_trans in
+    # BlasKernel.cpp. Currently, bounds being divisible by 32, 8-but-not-32, and 4-but-not-8
+    # all matter.
+    def test_fp16_mv_transposed_first_argument_arm_cpu(self, device, m, k):
+        torch.manual_seed(1)
+        a = torch.rand((m, k), dtype=torch.half, device=device)
+        b = torch.rand((1, k), dtype=torch.half, device=device)
+
+        prev = torch._C._get_cpu_allow_fp16_reduced_precision_reduction()
+        try:
+            torch._C._set_cpu_allow_fp16_reduced_precision_reduction(False)
+            ref = torch.mm(a, b.t())
+            try:
+                torch._C._set_cpu_allow_fp16_reduced_precision_reduction(True)
+            except RuntimeError as e:
+                raise unittest.SkipTest from e
+            res = torch.mm(a, b.t())
+            torch.testing.assert_close(res, ref, atol=1e-2, rtol=1e-2)
+        finally:
+            torch._C._set_cpu_allow_fp16_reduced_precision_reduction(prev)
 
     @slowTest
     @onlyNativeDeviceTypes
