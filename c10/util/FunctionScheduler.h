@@ -83,10 +83,10 @@ class FunctionScheduler {
   FunctionScheduler();
   ~FunctionScheduler();
 
-  template <class Rep, class Period>
+  template <typename Interval>
   int scheduleJob(
       std::function<void()> function,
-      std::chrono::duration<Rep, Period> const& interval,
+      Interval interval,
       bool immediate = false,
       int run_limit = RUN_FOREVER);
 
@@ -98,5 +98,19 @@ class FunctionScheduler {
   bool isRunning() const;
   int currentId() const;
 };
+
+// Template function must be defined in the header file
+template <typename Interval>
+int FunctionScheduler::scheduleJob(
+    std::function<void()> function,
+    Interval interval,
+    bool immediate,
+    int run_limit) {
+  auto duration =
+      std::chrono::duration_cast<std::chrono::microseconds>(interval);
+  auto job = std::make_unique<Job>(
+      std::move(function), duration, immediate, run_limit);
+  return scheduleJob(std::move(job));
+}
 
 } // namespace c10

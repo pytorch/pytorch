@@ -78,10 +78,13 @@ std::chrono::microseconds FunctionScheduler::getNextWaitTime() {
           job->second->counter() >= job->second->run_limit())) {
     // Only pop runs associated with an invalid job.
     _queue.pop();
-    _next_run = _queue.top();
+    if (_queue.empty())
+      return std::chrono::microseconds(-1);
+
     job = _jobs.find(_next_run->job_id());
   }
 
+  _next_run = _queue.top();
   auto now = std::chrono::steady_clock::now();
   return std::chrono::duration_cast<std::chrono::microseconds>(
       _next_run->time() - now);
@@ -97,6 +100,10 @@ void FunctionScheduler::run() {
     }
 
     std::chrono::microseconds wait_time = getNextWaitTime();
+    // Check again if queue is empty after pops
+    if (_queue.empty())
+      continue;
+
     if (wait_time.count() > 0) {
       // Waiting for the next run to be ready.
       // We need to wake up if a new run is added
@@ -137,7 +144,7 @@ void FunctionScheduler::addRun(int job_id, std::unique_ptr<Job> const& job) {
   if (job->immediate() && job->counter() == 0)
     interval = std::chrono::microseconds(0);
 
-  auto time = std::chrono::steady_clock::now() + job->interval();
+  auto time = std::chrono::steady_clock::now() + interval;
   auto run = std::make_shared<Run>(job_id, time);
   _queue.push(std::move(run));
 
@@ -156,19 +163,6 @@ int FunctionScheduler::scheduleJob(std::unique_ptr<Job> job) {
 
   _jobs.insert(std::make_pair(job_id, std::move(job)));
   return job_id;
-}
-
-template <class Rep, class Period>
-int FunctionScheduler::scheduleJob(
-    std::function<void()> function,
-    std::chrono::duration<Rep, Period> const& interval,
-    bool immediate,
-    int run_limit) {
-  auto duration =
-      std::chrono::duration_cast<std::chrono::microseconds>(interval);
-  auto job = std::make_unique<Job>(
-      std::move(function), duration, immediate, run_limit);
-  return scheduleJob(std::move(job));
 }
 
 int FunctionScheduler::removeJob(int id) {
