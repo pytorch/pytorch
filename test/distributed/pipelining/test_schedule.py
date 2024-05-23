@@ -256,7 +256,8 @@ class ScheduleTest(MultiProcContinousTest):
     @parametrize("ScheduleClass", [ScheduleInterleaved1F1B, ScheduleLoopedBFS])
     def test_grad_with_manual_interleaved(self, ScheduleClass):
         stages_per_rank = 2
-        full_mod = MultiMLP(d_hid, n_layers=stages_per_rank * self.world_size)
+        n_stages = stages_per_rank * self.world_size
+        full_mod = MultiMLP(d_hid, n_layers=n_stages)
         full_mod.to(self.device)
 
         ref_mod = copy.deepcopy(full_mod)
@@ -280,25 +281,23 @@ class ScheduleTest(MultiProcContinousTest):
             self.rank + i * self.world_size for i in range(stages_per_rank)
         ]
         print(f"Rank {self.rank} stages: {stage_indices}")
-        submod_names = [
-            f"layers.{i}" for i in stage_indices
-        ]
+        submod_names = [f"layers.{i}" for i in stage_indices]
         stage_modules = [
-            full_mod.get_submodule(submod_name)
-            for submod_name in submod_names
+            full_mod.get_submodule(submod_name) for submod_name in submod_names
         ]
         # Create a pipeline stage to wrap that submodule
         chunks = 8
-        input_args=x.chunk(chunks)[0]
+        input_args = x.chunk(chunks)[0]
         stages = [
             ManualPipelineStage(
                 stage_module,
-                self.rank,
-                self.world_size,
+                stage_idx,
+                n_stages,
                 self.device,
                 chunks,
                 input_args=input_args,
-            ) for stage_module in stage_modules
+            )
+            for stage_module, stage_idx in zip(stage_modules, stage_indices)
         ]
 
         # Attach to a schedule
@@ -330,9 +329,7 @@ class ScheduleTest(MultiProcContinousTest):
             torch.testing.assert_close(pipe_loss, ref_loss)
 
         # Every rank checks gradients
-        for i in range(stages_per_rank):
-            stage_module = stage_modules[i]
-            submod_name = submod_names[i]
+        for stage_module, submod_name in zip(stage_modules, submod_names):
             # Get corresponding submodule from reference model
             ref_submod = ref_mod.get_submodule(submod_name)
             # Check gradients per parameter
