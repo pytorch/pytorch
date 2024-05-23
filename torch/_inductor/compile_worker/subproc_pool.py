@@ -76,7 +76,15 @@ class SubprocPool:
             cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)},
+            env={
+                **os.environ,
+                # We need to set the PYTHONPATH so the subprocess can find torch.
+                "PYTHONPATH": os.pathsep.join(sys.path),
+                # We don't want to re-warm the pool when the subprocess imports
+                # torch._inductor.codecache since the warming process is what
+                # creates the SubprocPool in the first place.
+                "TORCH_WARM_POOL": "0",
+            },
         )
         self.write_pipe: Pipe = typing.cast(Pipe, self.process.stdin)
         self.write_lock = threading.Lock()
