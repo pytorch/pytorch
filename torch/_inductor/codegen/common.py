@@ -444,7 +444,11 @@ class PythonPrinter(ExprPrinter):
         assert len(expr.args) == 1
         return f"math.floor({self._print(expr.args[0])})"
 
-    def _print_Trunc(self, expr):
+    def _print_IntTrueDiv(self, expr):
+        lhs, rhs = expr.args
+        return f"{self._print(lhs)} / {self._print(rhs)}"
+
+    def _print_TruncToInt(self, expr):
         assert len(expr.args) == 1
         return f"math.trunc({self._print(expr.args[0])})"
 

@@ -793,9 +793,11 @@ def _sympy_abs(a):
 
 
 def _sympy_round(number, ndigits=None):
-    from torch.utils._sympy.functions import Round, RoundDecimal
+    from torch.utils._sympy.functions import Round, RoundDecimal, TruncToInt
 
     if ndigits is None:
+        return TruncToInt(Round(number))
+    elif ndigits == 0:
         return Round(number)
     else:
         return RoundDecimal(number, ndigits)
@@ -1144,9 +1146,13 @@ def _make_node_magic(method, func):
             except Exception:
                 log.warning("failed to eval %s(%s, ndigits=%s)", method, expr, ndigits)
                 raise
+
             out = safe_expand(out)
 
-            pytype = int if ndigits is None else self.pytype
+            if ndigits is None:
+                pytype = int
+            else:
+                pytype = self.pytype
 
             out_hint = None
             if self.hint is not None:
@@ -1158,6 +1164,7 @@ def _make_node_magic(method, func):
             # hack down below works, because all round function down the line all take ndigits=None as default in their
             # signature.
             # TODO: Remove the args construction below if a different sentinel is used by FX.
+            # ezyang(May 2024): LOL
             args = [self.fx_node]
             if ndigits is not None:
                 args.append(ndigits)

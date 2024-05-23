@@ -407,9 +407,12 @@ class OpsHandler(Protocol[T]):
     def isnan(self, x0: T) -> T:
         ...
 
+    # NB: this returns a float, like the torch operation
+    # This rounds half to even to break ties
     def round(self, x0: T) -> T:
         ...
 
+    # NB: this returns a float, like the torch operation
     def floor(self, x0: T) -> T:
         ...
 

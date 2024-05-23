@@ -153,14 +153,14 @@ class ValueRanges(Generic[_T]):
         # Unlike bool/int in Python, we don't report bools are ints
         object.__setattr__(self, "is_bool", isinstance(lower, SympyBoolean))
         if self.is_bool:
-            assert isinstance(upper, SympyBoolean), upper
+            assert isinstance(upper, SympyBoolean), (lower, upper)
         object.__setattr__(
             self, "is_int", not self.is_bool and isinstance(lower, sympy.Integer)
         )
         if self.is_int:
-            assert isinstance(upper, sympy.Integer), upper
+            assert isinstance(upper, sympy.Integer), (lower, upper)
         object.__setattr__(self, "is_float", not self.is_bool and not self.is_int)
-        assert self.is_bool or self.is_int or self.is_float, lower
+        assert self.is_bool or self.is_int or self.is_float, (lower, upper)
 
     def boolify(self) -> ValueRanges[SympyBoolean]:
         if vr_is_bool(self):
@@ -807,9 +807,10 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         return ValueRanges.unknown()
 
-    def index_expr(self, index, dtype):
+    @classmethod
+    def index_expr(cls, index, dtype):
         assert isinstance(index, ValueRanges)
-        return index
+        return cls.to_dtype(index, dtype)
 
     @staticmethod
     def to_dtype(x, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None):

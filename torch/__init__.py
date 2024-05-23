@@ -546,8 +546,8 @@ def sym_max(a, b):
         # max(1, 1.0) === max(1.0, 1) === 1.0
         return b.__sym_max__(a)
     # TODO: Probably can make bool work too, just lazy
-    assert isinstance(a, (builtins.int, builtins.float))
-    assert isinstance(b, (builtins.int, builtins.float))
+    assert isinstance(a, (builtins.int, builtins.float)), type(a)
+    assert isinstance(b, (builtins.int, builtins.float)), type(b)
     if isinstance(a, builtins.float) or isinstance(b, builtins.float):
         return builtins.float(builtins.max(a, b))
     else:
@@ -563,8 +563,8 @@ def sym_min(a, b):
         return a.__sym_min__(b)
     elif isinstance(b, (SymInt, SymFloat)):
         return b.__sym_min__(a)
-    assert isinstance(a, (builtins.int, builtins.float))
-    assert isinstance(b, (builtins.int, builtins.float))
+    assert isinstance(a, (builtins.int, builtins.float)), type(a)
+    assert isinstance(b, (builtins.int, builtins.float)), type(b)
     if isinstance(a, builtins.float) or isinstance(b, builtins.float):
         return builtins.float(builtins.min(a, b))
     else:

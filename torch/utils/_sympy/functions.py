@@ -68,7 +68,7 @@ class FloorDiv(sympy.Function):
     @classmethod
     def eval(cls, base, divisor):
         # python test/test_dynamic_shapes.py -k TestDimConstraints.test_dim_constraints_solve_full
-        # Assert riggered by inequality solver
+        # Assert triggered by inequality solver
         # assert base.is_integer, base
         # assert divisor.is_integer, divisor
 
@@ -419,8 +419,25 @@ class TruncToInt(sympy.Function):
 
 # This is float -> float.  This is inconsistent with Python builtin round,
 # which returns an integer when there are no digits, but consistent with
-# torch.round, which always returns a float.  To simulate Python style
-# semantics, do a float round and then cast the result to an integer, c.f.,
+# torch.round, which always returns a float.
+#
+# TODO: As currently written, this is redundant with RoundDecimal, but we
+# leave this open because we have codegen for Round but not
+# RoundDecimal (we do have lowering for RoundDecimal, need to use that...)
+class Round(sympy.Function):
+    is_integer = False
+
+    @classmethod
+    def eval(cls, number):
+        # assert number.is_integer is not True, number
+
+        if isinstance(number, sympy.Float):
+            # TODO: Verify that this Python call actually matches PyTorch
+            # semantics
+            return sympy.Float(round(float(number), 0))
+
+
+# To get float -> int, Python style round semantics.
 #
 #   x = PyFloat_AsDouble(self);
 #   if (o_ndigits == Py_None) {
@@ -432,21 +449,9 @@ class TruncToInt(sympy.Function):
 #           rounded = 2.0*round(x/2.0);
 #       return PyLong_FromDouble(rounded);
 #   }
-#
-# NB: this is illegal to put on integer inputs, just don't apply this function
-# in that case
-class Round(sympy.Function):
-    is_integer = False
-
-    @classmethod
-    def eval(cls, number):
-        # assert number.is_integer is not True, number
-
-        if isinstance(number, sympy.Float):
-            return sympy.Float(round(float(number)))
 
 
-# NB: Like Round, this only ever returns floats
+# NB: Like Round, this only ever returns floats.  ndigits cannot be None
 class RoundDecimal(sympy.Function):
     is_integer = False
 

@@ -1352,6 +1352,8 @@ SYMPY_INTERP = {
     'cast_symbool_to_symint_guardless': cast_symbool_to_symint_guardless,
     'Round': builtins.round,
     'RoundDecimal': builtins.round,
+    'TruncToInt': math.trunc,
+    'IntTrueDiv': operator.truediv,
 }
 
 
@@ -4419,7 +4421,10 @@ class ShapeEnv:
             int_range = ValueRanges(-sys.maxsize - 1, sys.maxsize - 1)
 
             def issubset(x, y):
-                return (x & int_range).issubset(y & int_range)
+                if x.is_int and y.is_int:
+                    return (x & int_range).issubset(y & int_range)
+                else:
+                    return x.issubset(y)
 
             # First, refine the value range of a based on the computed value range
             # of tgt.  This is always OK to do, even if we decide not to do the
