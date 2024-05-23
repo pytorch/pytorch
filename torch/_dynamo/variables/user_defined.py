@@ -834,6 +834,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             return tx.output.side_effects.load_attr(self, name)
 
+        if name == "__dict__":
+            options = {"source": source}
+            return variables.GetAttrVariable(self, name, **options)
+
         try:
             subobj = self._getattr_static(name)
         except AttributeError:
