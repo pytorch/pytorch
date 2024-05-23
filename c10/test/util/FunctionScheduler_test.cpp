@@ -278,7 +278,7 @@ TEST(FunctionScheduler, ConcurrentJobScheduling) {
   for (int i = 0; i < num_threads; ++i) {
     threads.emplace_back([&fs, &function]() {
       for (int j = 0; j < 10; ++j) {
-        fs.scheduleJob(function, std::chrono::milliseconds(10));
+        fs.scheduleJob(function, std::chrono::milliseconds(10), false, 10);
       }
     });
   }
