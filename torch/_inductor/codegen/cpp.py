@@ -2694,7 +2694,6 @@ class CppVecKernelChecker(CppVecKernel):
         self.supported_dtypes_for_masked_vec: List[torch.dtype] = [
             torch.float,
             torch.bfloat16,
-            torch.float16,
         ]
 
     def disable_vec(self, msg=None):
@@ -2738,14 +2737,17 @@ class CppVecKernelChecker(CppVecKernel):
 
     def store(self, name, index, value, mode=None):
         with RecordOptimizationContext(__name__) as node_ctx:
+            store_dtype = V.graph.get_dtype(name)
+
+            if store_dtype not in self.supported_dtypes_for_masked_vec:
+                self.disable_masked_vec(f"{store_dtype} not supported by masked vectorization")
+
             if has_free_symbols(self.ranges):
                 self.disable_masked_vec(f"Symbolic ranges not supported by masked store")
 
             if len(self.itervars) == 0:
                 self.disable_vec("not a loop")
                 return self.simd_vec
-
-            store_dtype = V.graph.get_dtype(name)
 
             opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
             assert opt_ctx
@@ -2858,6 +2860,9 @@ class CppVecKernelChecker(CppVecKernel):
                         ):
                             opt_ctx.dtype = torch.float32
 
+                    if opt_ctx.dtype not in self.supported_dtypes_for_masked_vec:
+                        self.disable_masked_vec(f"{opt_ctx.dtype} not supported by masked vectorization")
+
                     if opt_ctx.dtype not in self.supported_dtypes:
                         self.disable_vec(f"constant dtype: {opt_ctx.dtype}")
                     return val
@@ -2931,6 +2936,9 @@ class CppVecKernelChecker(CppVecKernel):
 
             @staticmethod
             def to_dtype(x, dtype, src_dtype=None):
+                if dtype not in self.supported_dtypes_for_masked_vec:
+                        self.disable_masked_vec(f"{dtype} not supported by masked vectorization")
+
                 if dtype not in self.supported_dtypes:
                     self.disable_vec(f"to_dtype: {dtype}")
                 return x
