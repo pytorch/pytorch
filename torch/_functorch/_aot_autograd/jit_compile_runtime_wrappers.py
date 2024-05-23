@@ -23,6 +23,12 @@ from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals
 from .. import config
+from .autograd_cache import (
+    AOTAutogradCache,
+    AOTAutogradCacheEntry,
+    CompiledBackward,
+    CompiledForward,
+)
 from .dispatch_and_compile_graph import (
     aot_dispatch_autograd_graph,
     aot_dispatch_base_graph,
@@ -179,11 +185,25 @@ def aot_dispatch_base(
     compiled_fw = functionalized_rng_wrapper.post_compile(
         compiled_fw, aot_config, runtime_metadata=fw_metadata
     )
+    if config.enable_autograd_cache and aot_config.cache_key:
+        if fw_key := getattr(compiled_fw, "_fx_graph_cache_key", None):
+            entry = AOTAutogradCacheEntry(
+                compiled_fw=CompiledForward(fw_key),
+                compiled_bw=None,
+                runtime_metadata=fw_metadata,
+                dispatch_wrappers=wrappers,
+                maybe_subclass_meta=maybe_subclass_meta,
+                num_fw_outs_saved_for_bw=None,
+                indices_of_inps_to_detach=[],
+            )
+            AOTAutogradCache.save(aot_config.cache_key, entry)
+
     compiled_fw = fakified_out_wrapper.post_compile(
         compiled_fw,
         aot_config,
         runtime_metadata=fw_metadata,
     )
+
     # Why do we need to pass in num_fw_outs_saved_for_bw?
     # See Note: [Partitioner handling for Subclasses, Part 2]
     compiled_fw_func = AOTDispatchSubclassWrapper(
@@ -514,7 +534,9 @@ def aot_dispatch_autograd(
                     placeholder_list[i] = ph_arg.as_strided(ph_arg.size(), real_stride)
 
             compiled_bw_func = None
-            if num_symints_saved_for_bw > 0:
+            if num_symints_saved_for_bw > 0 or (
+                config.enable_autograd_cache and aot_config.cache_key
+            ):
                 context = torch._C._DisableAutocast if disable_amp else nullcontext
                 with context():
                     try:
@@ -559,6 +581,22 @@ def aot_dispatch_autograd(
         saved_context,
         saved_compile_context,
     )
+    if config.enable_autograd_cache and aot_config.cache_key:
+        fw_key = getattr(compiled_fw_func, "_fx_graph_cache_key", None)
+        bw_key = getattr(compiled_bw_func, "_fx_graph_cache_key", None)
+        if fw_key and bw_key:
+            entry = AOTAutogradCacheEntry(
+                CompiledForward(fw_key),
+                CompiledBackward(
+                    bw_key, backward_state_indices, num_symints_saved_for_bw
+                ),
+                fw_metadata,
+                wrappers,
+                maybe_subclass_meta,
+                num_fw_outs_saved_for_bw,
+                _indices_of_inps_to_detach,
+            )
+            AOTAutogradCache.save(aot_config.cache_key, entry)
 
     compiled_fn = AOTDispatchAutograd.post_compile(
         compiled_fw_func,
