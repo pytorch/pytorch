@@ -93,7 +93,7 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         r3 = opt_fn(a, (b, c), d)
 
         self.assertIsNotNone(r1)
-        self.assertTrue(same(r1, r2))
+        self.assertEqual(r1, r2)
         self.assertTrue(same(r1, r3))
 
     def _check_backend_works(self, backend):
