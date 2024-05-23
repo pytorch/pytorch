@@ -18,7 +18,6 @@ on:
         description: Hardware to run this "build"job on, linux.12xlarge or linux.arm64.2xlarge.
       timeout-minutes:
         required: false
-        default: 210
         type: string
         description: timeout for the job
       ALPINE_IMAGE:
