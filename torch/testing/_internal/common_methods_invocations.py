@@ -13022,11 +13022,11 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_diagonal_scatter),
     OpInfo('alias_copy',
-           # dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
            # TODO: why can't alias_copy, which looks like the identity function
            # not do forward or backward differntiation on complex numbers but
            # work on everything else?
-           dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
+           # dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
            sample_inputs_func=sample_inputs_alias_copy,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True),
@@ -23261,8 +23261,8 @@ python_ref_db = [
         validate_view_consistency=False,
     ),
     PythonRefInfo(
-        "_refs.diag_embed",
-        torch_opinfo_name="diag_embed",
+        "_refs.alias_copy",
+        torch_opinfo_name="alias_copy",
         supports_out=True,
     ),
     PythonRefInfo(
