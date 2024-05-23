@@ -157,7 +157,7 @@ def aot_dispatch_base(
             )
 
         with TracingContext.report_output_strides() as fwd_output_strides:
-            compiled_fw = compiler(fw_module, updated_flat_args)
+            compiled_fw = compiler(fw_module, updated_flat_args, num_params_buffers=aot_config.num_params_buffers)
 
         if fakified_out_wrapper.needs_post_compile:
             fakified_out_wrapper.set_fwd_output_strides(fwd_output_strides)
