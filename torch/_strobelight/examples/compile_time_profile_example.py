@@ -1,8 +1,6 @@
 import torch
 
-from torch.utils._strobelight.compile_time_profiler import (
-    StrobelightCompileTimeProfiler,
-)
+from torch._strobelight.compile_time_profiler import StrobelightCompileTimeProfiler
 
 if __name__ == "__main__":
     # You can pass TORCH_COMPILE_STROBELIGHT=True instead.

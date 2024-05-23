@@ -7,6 +7,7 @@ import tempfile
 from typing import Any, Dict, Optional
 
 import torch
+from torch._strobelight.compile_time_profiler import StrobelightCompileTimeProfiler
 
 log = logging.getLogger(__name__)
 
@@ -17,10 +18,6 @@ if os.environ.get("TORCH_COMPILE_STROBELIGHT", False):
         )
     else:
         log.info("Strobelight profiler is enabled via environment variable")
-        from torch.utils._strobelight.compile_time_profiler import (
-            StrobelightCompileTimeProfiler,
-        )
-
         StrobelightCompileTimeProfiler.enable()
 
 # this arbitrary-looking assortment of functionality is provided here
@@ -77,10 +74,6 @@ def throw_abstract_impl_not_imported_error(opname, module, context):
 
 # NB!  This treats "skip" kwarg specially!!
 def compile_time_strobelight_meta(phase_name):
-    from torch.utils._strobelight.compile_time_profiler import (
-        StrobelightCompileTimeProfiler,
-    )
-
     def compile_time_strobelight_meta_inner(function):
         @functools.wraps(function)
         def wrapper_function(*args, **kwargs):

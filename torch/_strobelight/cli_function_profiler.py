@@ -7,6 +7,7 @@ import re
 import subprocess
 import time
 from threading import Lock
+from timeit import default_timer as timer
 from typing import Any, List, Optional, Sequence
 
 
@@ -274,7 +275,11 @@ class StrobelightCLIFunctionProfiler:
 
             try:
                 logger.debug("collection started")
+                start = timer()
                 result = work_function(*args, **kwargs)
+                end = timer()
+                total_time = (end - start) # Time in seconds, e.g. 5.38091952400282
+                logger.info("work function took %s seconds", total_time)
                 self._stop_strobelight_no_throw(collect_results=True)
                 StrobelightCLIFunctionProfiler._lock.release()
                 return result
