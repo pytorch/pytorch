@@ -16,6 +16,7 @@ from torch._C._functorch import (
 from torch._dispatch.python import suspend_functionalization
 from torch._functorch.utils import exposed_in
 from torch._guards import detect_fake_mode
+from torch._higher_order_ops.cudagraph_conditional_nodes import if_else_node
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
@@ -329,10 +330,13 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
 def cond_op_dense(pred, true_fn, false_fn, operands):
     mode = _get_current_dispatch_mode()
     assert mode is None, "Mode should never be enabled for CPU/CUDA key"
-    if pred:
-        return true_fn(*operands)
+    if not torch.cuda.is_available() or not torch.cuda.is_current_stream_capturing():
+        if pred:
+            return true_fn(*operands)
+        else:
+            return false_fn(*operands)
     else:
-        return false_fn(*operands)
+        return if_else_node(pred, true_fn, false_fn, operands)
 
 
 class CondAutogradOp(torch.autograd.Function):

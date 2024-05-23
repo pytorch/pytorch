@@ -15,7 +15,7 @@ from torch._higher_order_ops.utils import (
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
-
+from torch._higher_order_ops.cudagraph_conditional_nodes import while_loop_node
 
 class WhileLoopOp(HigherOrderOperator):
     def __init__(self):
@@ -158,20 +158,23 @@ def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
             f"carried_inputs must be a tuple but got {type(carried_inputs)}"
         )
 
-    while pred := cond_fn(*carried_vals, *additional_inputs):
-        if not _is_boolean_scalar_tensor(pred):
-            raise RuntimeError(
-                f"cond_fn must return a boolean scalar tensor but got {pred}"
-            )
-        out = body_fn(*carried_vals, *additional_inputs)
-        assert isinstance(
-            out, tuple
-        ), f"body_fn should return a tuple but got {type(out)}"
-        assert len(out) == len(
-            carried_inputs
-        ), "body_fn should return the same number of elements as carried_inputs"
-        carried_vals = out
-    return carried_vals
+    if not torch.cuda.is_available() or not torch.cuda.is_current_stream_capturing():
+        while pred := cond_fn(*carried_vals, *additional_inputs):
+            if not _is_boolean_scalar_tensor(pred):
+                raise RuntimeError(
+                    f"cond_fn must return a boolean scalar tensor but got {pred}"
+                )
+            out = body_fn(*carried_vals, *additional_inputs)
+            assert isinstance(
+                out, tuple
+            ), f"body_fn should return a tuple but got {type(out)}"
+            assert len(out) == len(
+                carried_inputs
+            ), "body_fn should return the same number of elements as carried_inputs"
+            carried_vals = out
+        return carried_vals
+    else:
+        return while_loop_node(cond_fn, body_fn, carried_inputs, additional_inputs)
 
 
 while_loop_op.py_impl(DispatchKey.Autograd)(
