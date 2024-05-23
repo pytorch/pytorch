@@ -91,7 +91,7 @@ CPUCapability get_cpu_capability() {
   return capability;
 }
 
-void* DispatchStubImpl::get_call_ptr(
+DispatchResult DispatchStubImpl::try_get_call_ptr(
   const DeviceType device_type
   , void *DEFAULT
 #ifdef HAVE_AVX512_CPU_DEFINITION
@@ -107,6 +107,17 @@ void* DispatchStubImpl::get_call_ptr(
   , void *ZVECTOR
 #endif
 ) {
+  constexpr auto supported_devices = c10::array_of<c10::DeviceType>(
+        c10::DeviceType::CPU,
+        c10::DeviceType::CUDA,
+        c10::DeviceType::HIP,
+        c10::DeviceType::MPS,
+        c10::DeviceType::PrivateUse1
+    );
+    // Check if the device type is supported.
+    if (std::find(supported_devices.begin(), supported_devices.end(), device_type) == supported_devices.end()) {
+        return ErrorType::DeviceNotSupported;
+    }
   switch (device_type) {
     case DeviceType::CPU: {
       // Use memory_order_relaxed here since even if two threads race,
@@ -134,26 +145,76 @@ void* DispatchStubImpl::get_call_ptr(
     }
 
     case DeviceType::CUDA:
-      TORCH_INTERNAL_ASSERT(cuda_dispatch_ptr, "DispatchStub: missing CUDA kernel");
-      return cuda_dispatch_ptr;
+      return cuda_dispatch_ptr != nullptr ? DispatchResult(cuda_dispatch_ptr) : ErrorType::MissingDeviceKernel;
 
     case DeviceType::HIP:
-      TORCH_INTERNAL_ASSERT(hip_dispatch_ptr, "DispatchStub: missing HIP kernel");
-      return hip_dispatch_ptr;
+      return hip_dispatch_ptr != nullptr ? DispatchResult(hip_dispatch_ptr) : ErrorType::MissingDeviceKernel;
 
 #if defined(USE_MPS)
     case DeviceType::MPS:
-      TORCH_INTERNAL_ASSERT(mps_dispatch_ptr, "DispatchStub: missing MPS kernel");
-      return mps_dispatch_ptr;
+      return mps_dispatch_ptr != nullptr ? DispatchResult(mps_dispatch_ptr) : ErrorType::MissingDeviceKernel;
 #endif
 
     case DeviceType::PrivateUse1:
-      TORCH_INTERNAL_ASSERT(privateuse1_dispatch_ptr, "DispatchStub: missing PrivateUse1 kernel");
-      return privateuse1_dispatch_ptr;
+      return privateuse1_dispatch_ptr != nullptr ? DispatchResult(privateuse1_dispatch_ptr) : ErrorType::MissingDeviceKernel;
 
     default:
-      AT_ERROR("DispatchStub: unsupported device type", device_type);
+      TORCH_INTERNAL_ASSERT(false, "An unexpected device type was provided ", device_type);
+      return ErrorType::DeviceNotSupported;
   }
+}
+
+void* DispatchStubImpl::get_call_ptr(
+  const DeviceType device_type
+  , void *DEFAULT
+#ifdef HAVE_AVX512_CPU_DEFINITION
+  , void *AVX512
+#endif
+#ifdef HAVE_AVX2_CPU_DEFINITION
+  , void *AVX2
+#endif
+#ifdef HAVE_VSX_CPU_DEFINITION
+  , void *VSX
+#endif
+#ifdef HAVE_ZVECTOR_CPU_DEFINITION
+  , void *ZVECTOR
+#endif
+) {
+
+  auto result = try_get_call_ptr(
+      device_type,
+      DEFAULT
+#ifdef HAVE_AVX512_CPU_DEFINITION
+      ,
+      AVX512
+#endif
+#ifdef HAVE_AVX2_CPU_DEFINITION
+      ,
+      AVX2
+#endif
+#ifdef HAVE_VSX_CPU_DEFINITION
+      ,
+      VSX
+#endif
+#ifdef HAVE_ZVECTOR_CPU_DEFINITION
+      ,
+      ZVECTOR
+#endif
+  );
+  if (std::holds_alternative<ErrorType>(result)) {
+    auto error = std::get<ErrorType>(result);
+    switch (error) {
+      case ErrorType::MissingDeviceKernel:
+        TORCH_INTERNAL_ASSERT(
+            false, "DispatchStub: missing kernel for ", device_type);
+        return nullptr;
+      case ErrorType::DeviceNotSupported:
+        AT_ERROR("DispatchStub: unsupported device type", device_type);
+    }
+  }
+
+  void* fptr = std::get<void*>(result);
+  return fptr;
 }
 
 void* DispatchStubImpl::choose_cpu_impl(

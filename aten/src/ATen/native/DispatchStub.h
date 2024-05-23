@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <utility>
+#include <variant>
 
 // Implements instruction set specific function dispatch.
 //
@@ -68,6 +69,15 @@ enum class CPUCapability {
   NUM_OPTIONS
 };
 
+// Enum for error types
+enum class ErrorType {
+  MissingDeviceKernel,
+  DeviceNotSupported
+};
+
+// Alias for the return type using std::variant
+using DispatchResult = std::variant<void*, ErrorType>;
+
 CPUCapability get_cpu_capability();
 
 template <typename FnPtr, typename T>
@@ -80,6 +90,23 @@ struct DispatchStub;
  * number of specialization of the DispatchStub<> class.
  */
 struct TORCH_API DispatchStubImpl {
+  DispatchResult try_get_call_ptr(
+    c10::DeviceType device_type
+    , void *DEFAULT
+#ifdef HAVE_AVX512_CPU_DEFINITION
+      , void *AVX512
+#endif
+#ifdef HAVE_AVX2_CPU_DEFINITION
+      , void *AVX2
+#endif
+#ifdef HAVE_VSX_CPU_DEFINITION
+      , void *VSX
+#endif
+#ifdef HAVE_ZVECTOR_CPU_DEFINITION
+      , void *ZVECTOR
+#endif
+  );
+
   void* get_call_ptr(
     c10::DeviceType device_type
     , void *DEFAULT
@@ -190,20 +217,25 @@ public:
   // Returns true if the dispatcher has a kernel registered for this device
   // type.
   bool is_device_supported(const c10::DeviceType device_type) {
-    constexpr auto supported_devices = c10::array_of<c10::DeviceType>(
-        c10::DeviceType::CPU,
-        c10::DeviceType::CUDA,
-        c10::DeviceType::HIP,
-        c10::DeviceType::MPS,
-        c10::DeviceType::PrivateUse1
-    );
-    // Check if the device type is supported.
-    if (std::find(supported_devices.begin(), supported_devices.end(), device_type) == supported_devices.end()) {
-        return false;
+    auto result = impl.try_get_call_ptr(device_type
+      , reinterpret_cast<void*>(DEFAULT)
+#ifdef HAVE_AVX512_CPU_DEFINITION
+      , reinterpret_cast<void*>(AVX512)
+#endif
+#ifdef HAVE_AVX2_CPU_DEFINITION
+      , reinterpret_cast<void*>(AVX2)
+#endif
+#ifdef HAVE_VSX_CPU_DEFINITION
+      , reinterpret_cast<void*>(VSX)
+#endif
+#ifdef HAVE_ZVECTOR_CPU_DEFINITION
+      , reinterpret_cast<void*>(ZVECTOR)
+#endif
+      );
+    if (std::holds_alternative<ErrorType>(result)){
+      return false;
     }
-    // Check if there is a kernel registered for this device type.
-    FnPtr call_ptr = get_call_ptr(device_type);
-    return call_ptr != nullptr;
+    return true;
   };
 
   static TORCH_API FnPtr DEFAULT;
