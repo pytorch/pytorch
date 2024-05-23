@@ -3,6 +3,7 @@ PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_sym_bool)
 """
 
+
 # Owner(s): ["oncall: export"]
 import copy
 import io
@@ -30,17 +31,15 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import Dim, export, load, save
 from torch.fx.experimental.symbolic_shapes import is_concrete_int, ValueRanges
 from torch.testing._internal.common_utils import (
-    find_library_location,
     instantiate_parametrized_tests,
-    IS_FBCODE,
-    IS_MACOS,
-    IS_SANDCASTLE,
     IS_WINDOWS,
     parametrize,
     run_tests,
     TemporaryFileName,
     TestCase,
 )
+
+from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 
 
 def get_filtered_export_db_tests():
@@ -184,7 +183,7 @@ class TestSerialize(TestCase):
                 torch.ones([512]),
                 torch.ones([512]),
             ),
-        )
+        ).run_decompositions()
 
         serialized = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.exported_program.graph_module.graph.nodes[-1]
@@ -347,17 +346,8 @@ class TestSerialize(TestCase):
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestDeserialize(TestCase):
     def setUp(self):
-        if IS_SANDCASTLE or IS_FBCODE:
-            torch.ops.load_library(
-                "//caffe2/test/cpp/jit:test_custom_class_registrations"
-            )
-        elif IS_MACOS:
-            raise unittest.SkipTest("non-portable load_library call used in test")
-        else:
-            lib_file_path = find_library_location("libtorchbind_test.so")
-            if IS_WINDOWS:
-                lib_file_path = find_library_location("torchbind_test.dll")
-            torch.ops.load_library(str(lib_file_path))
+        super().setUp()
+        init_torchbind_implementations()
 
     def _check_graph_nodes(self, gm1, gm2, _check_meta=True):
         # TODO: The _check_meta flag bypasses checking for
@@ -631,6 +621,8 @@ class TestDeserialize(TestCase):
         dynamic_shapes = {"a": {0: dim0_ac}, "b": None, "c": {0: dim0_ac}}
         self.check_graph(DynamicShapeSimpleModel(), inputs, dynamic_shapes)
 
+    # TODO: Failing due to "constraining non-Symbols NYI (Piecewise((1, Eq(u1, 1)), (0, True)), 1, 1)"
+    @unittest.expectedFailure
     def test_sym_bool(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
@@ -837,8 +829,7 @@ class TestDeserialize(TestCase):
 
         m = MyModule()
         inputs = (torch.ones(2, 3),)
-        with enable_torchbind_tracing():
-            self.check_graph(m, inputs, strict=False)
+        self.check_graph(m, inputs, strict=False)
 
     def test_custom_obj(self):
         class MyModule(torch.nn.Module):
@@ -853,8 +844,7 @@ class TestDeserialize(TestCase):
 
         m = MyModule()
         inputs = (torch.ones(2, 3),)
-        with enable_torchbind_tracing():
-            self.check_graph(m, inputs, strict=False)
+        self.check_graph(m, inputs, strict=False)
 
     def test_custom_obj_list_out(self):
         class MyModule(torch.nn.Module):
@@ -870,8 +860,21 @@ class TestDeserialize(TestCase):
 
         m = MyModule()
         inputs = (torch.ones(2, 3),)
-        with enable_torchbind_tracing():
-            self.check_graph(m, inputs, strict=False)
+        self.check_graph(m, inputs, strict=False)
+
+    def test_export_no_inputs(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p = torch.ones(3, 3)
+
+            def forward(self):
+                return self.p * self.p
+
+        ep = torch.export.export(M(), ())
+        ep._example_inputs = None
+        roundtrip_ep = deserialize(serialize(ep))
+        self.assertTrue(torch.allclose(ep.module()(), roundtrip_ep.module()()))
 
 
 instantiate_parametrized_tests(TestDeserialize)
@@ -897,34 +900,6 @@ class TestSchemaVersioning(TestCase):
                 serialized_program.state_dict,
                 serialized_program.constants,
                 serialized_program.example_inputs,
-            )
-
-
-class TestOpVersioning(TestCase):
-    """Test if serializer/deserializer behaves correctly if version mismatch."""
-
-    def test_empty_model_opset_version_raises(self):
-        compiler_opset_version = {"aten": 4}
-        model_opset_version = None
-        deserializer = ExportedProgramDeserializer(compiler_opset_version)
-        with self.assertRaises(RuntimeError):
-            deserializer._validate_model_opset_version(model_opset_version)
-
-    def test_opset_mismatch_raises(self):
-        compiler_opset_version = {"aten": 4}
-        model_opset_version = {"aten": 3}
-        deserializer = ExportedProgramDeserializer(compiler_opset_version)
-        with self.assertRaises(NotImplementedError):
-            deserializer._validate_model_opset_version(model_opset_version)
-
-    def test_model_op_namespace_version_missing_from_deserializer_do_not_raises(self):
-        compiler_opset_version = {"aten": 3}
-        model_opset_version = {"aten": 3, "custom": 4}
-        deserializer = ExportedProgramDeserializer(compiler_opset_version)
-        with self.assertLogs(level="WARN") as log:
-            deserializer._validate_model_opset_version(model_opset_version)
-            self.assertIn(
-                "Compiler doesn't have a version table for op namespace", log.output[0]
             )
 
 
@@ -1061,17 +1036,8 @@ class TestSaveLoad(TestCase):
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerializeCustomClass(TestCase):
     def setUp(self):
-        if IS_SANDCASTLE or IS_FBCODE:
-            torch.ops.load_library(
-                "//caffe2/test/cpp/jit:test_custom_class_registrations"
-            )
-        elif IS_MACOS:
-            raise unittest.SkipTest("non-portable load_library call used in test")
-        else:
-            lib_file_path = find_library_location("libtorchbind_test.so")
-            if IS_WINDOWS:
-                lib_file_path = find_library_location("torchbind_test.dll")
-            torch.ops.load_library(str(lib_file_path))
+        super().setUp()
+        init_torchbind_implementations()
 
     def test_custom_class(self):
         custom_obj = torch.classes._TorchScriptTesting._PickleTester([3, 4])

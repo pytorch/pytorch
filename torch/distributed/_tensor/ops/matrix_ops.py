@@ -157,7 +157,7 @@ def baddmm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
 
 
 @register_op_strategy(aten._scaled_dot_product_flash_attention.default)
-def scaled_dot_product_attention_strategy(
+def scaled_dot_product_flash_attention_strategy(
     mesh: DeviceMesh, op_schema: OpSchema
 ) -> OpStrategy:
     # NOTE: currently we only support some simple strategies to support tensor parallelism
@@ -252,7 +252,7 @@ def scaled_dot_product_attention_strategy(
 
 
 @register_op_strategy(aten._scaled_dot_product_flash_attention_backward.default)
-def scaled_dot_product_attention_backward_strategy(
+def scaled_dot_product_flash_attention_backward_strategy(
     mesh: DeviceMesh, op_schema: OpSchema
 ) -> OpStrategy:
     q_input_strategy = op_schema.args_schema[1]
@@ -281,7 +281,7 @@ def scaled_dot_product_attention_backward_strategy(
 
         # second we can accept the sharding pattern of tensor parallelism, which
         # shard on the num of head dim
-        grad_output_sharding = Shard(1)
+        grad_output_sharding = Shard(1)  # num head dim
         qkv_sharding = Shard(1)  # num head dim
         output_sharding = Shard(1)  # num head dim
         logsumexp_sharding = Shard(1)  # num head dim
@@ -374,3 +374,183 @@ def constant_pad_nd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrateg
             )
         ]
     )
+
+
+@register_op_strategy(aten._scaled_dot_product_efficient_attention.default)
+def scaled_dot_product_efficient_attention_strategy(
+    mesh: DeviceMesh, op_schema: OpSchema
+) -> OpStrategy:
+    # NOTE: currently we only support some simple strategies to support tensor parallelism
+    q_input_strategy = op_schema.args_schema[0]
+    assert isinstance(q_input_strategy, OpStrategy)
+    # assuming q/k/v have the same shape
+    qkv_shape = q_input_strategy.output_shape
+    has_attn_bias = op_schema.args_schema[3] is not None
+    compute_log_sumexp = op_schema.args_schema[4]
+
+    all_mesh_dim_strategies = []
+
+    for mesh_dim in range(mesh.ndim):
+        single_mesh_dim_strategies = []
+
+        # placement list stores placements of [outputs, inputs]
+        # in the spda case, we have 2 valid tensor outputs and 3 or 4 tensor inputs
+        # first we can always accept full replication for both inputs and outputs
+        all_replicate: List[Placement] = [Replicate()] * (5 + has_attn_bias)
+        single_mesh_dim_strategies.append(all_replicate)
+
+        # second we can accept the sharding pattern of tensor parallelism, which
+        # shard on the heads dimension
+        qkv_sharding = Shard(1)
+        output_sharding = Shard(1)
+        if compute_log_sumexp:
+            logsumexp_sharding: Placement = Shard(1)
+        else:
+            # empty logsumexp, replicated
+            logsumexp_sharding = Replicate()
+
+        num_heads_dim_sharding = [
+            output_sharding,
+            logsumexp_sharding,
+            qkv_sharding,
+            qkv_sharding,
+            qkv_sharding,
+        ]
+        if has_attn_bias:
+            num_heads_dim_sharding.append(Shard(1))
+        single_mesh_dim_strategies.append(num_heads_dim_sharding)
+
+        all_mesh_dim_strategies.append(single_mesh_dim_strategies)
+
+    strategy_combs = itertools.product(*all_mesh_dim_strategies)
+
+    all_strategies = []
+    for strategy_comb in strategy_combs:
+        spec_list = []
+        for specs in zip(*strategy_comb):
+            spec_list.append(DTensorSpec(mesh, tuple(specs)))
+
+        assert len(spec_list) == (5 + has_attn_bias)
+        input_expected_specs = spec_list[2:]
+        output_specs: List[Optional[DTensorSpec]] = list(spec_list[:2])
+        # fill in None for the scalar tensor return values
+        # namely philox_seed and philox_offset
+        output_specs.extend([None, None])
+        if all(is_tensor_shardable(qkv_shape, spec) for spec in input_expected_specs):
+            # only add to the strategy list when all inputs are shardable
+            redistribute_cost = []
+            for input_idx, spec in enumerate(input_expected_specs):
+                qkv_strategy = op_schema.args_schema[input_idx]
+                assert isinstance(qkv_strategy, OpStrategy)
+                qkv_tensor_meta = qkv_strategy.strategies[0].output_spec.tensor_meta
+                spec.tensor_meta = qkv_tensor_meta
+                redistribute_cost.append(
+                    generate_redistribute_costs(qkv_strategy, spec)
+                )
+
+            strat = PlacementStrategy(
+                output_specs=tuple(output_specs),
+                input_specs=tuple(input_expected_specs),
+                redistribute_cost=redistribute_cost,
+            )
+            all_strategies.append(strat)
+
+    return OpStrategy(all_strategies)
+
+
+@register_op_strategy(aten._scaled_dot_product_efficient_attention_backward.default)
+def scaled_dot_product_efficient_attention_backward_strategy(
+    mesh: DeviceMesh, op_schema: OpSchema
+) -> OpStrategy:
+    q_input_strategy = op_schema.args_schema[1]
+    assert isinstance(q_input_strategy, OpStrategy)
+    # assuming q/k/v have the same shape
+    qkv_shape = q_input_strategy.output_shape
+    has_attn_bias = op_schema.args_schema[4] is not None
+
+    tensor_input_indices = [
+        i
+        for i, arg_spec in enumerate(op_schema.args_schema)
+        if isinstance(arg_spec, OpStrategy)
+    ]
+
+    all_mesh_dim_strategies = []
+
+    for mesh_dim in range(mesh.ndim):
+        single_mesh_dim_strategies = []
+
+        # placement list stores placements of [outputs, inputs]
+        # in the spda backward case, we have 4 tensor outputs and 8 or 9 tensor inputs
+        # NOTE: Output sharding of grad_bias on heads dim if attn_bias is present;
+        #       otherwise grad_bias will be empty and its DTensorSpec will be removed.
+        # first we can always accept full replication for both inputs and outputs
+        all_replicate: List[Placement] = [Replicate()] * (12 + has_attn_bias)
+
+        single_mesh_dim_strategies.append(all_replicate)
+
+        # second we can accept the sharding pattern of tensor parallelism, which
+        # shard on the heads dimension
+        grad_output_sharding = Shard(1)
+        qkv_sharding = Shard(1)
+        output_sharding = Shard(1)
+        logsumexp_sharding = Shard(1)
+        grad_qkv_sharding = Shard(1)
+        grad_bias_sharding = Shard(1)
+
+        num_heads_dim_sharding: List[Placement] = [
+            grad_qkv_sharding,
+            grad_qkv_sharding,
+            grad_qkv_sharding,
+            grad_bias_sharding,
+            grad_output_sharding,
+            qkv_sharding,
+            qkv_sharding,
+            qkv_sharding,
+            # the place for optional input attn_bias,
+            output_sharding,
+            logsumexp_sharding,
+        ]
+        # input sharding of attn_bias on heads dim if present
+        if has_attn_bias:
+            num_heads_dim_sharding.insert(8, Shard(1))
+        # accept replicate on the rest scalar tensor inputs
+        # namely philox_seed and philox_offset
+        num_heads_dim_sharding.extend([Replicate(), Replicate()])
+        single_mesh_dim_strategies.append(num_heads_dim_sharding)
+
+        all_mesh_dim_strategies.append(single_mesh_dim_strategies)
+
+    strategy_combs = itertools.product(*all_mesh_dim_strategies)
+
+    all_strategies = []
+    for strategy_comb in strategy_combs:
+        spec_list = []
+        for specs in zip(*strategy_comb):
+            spec_list.append(DTensorSpec(mesh, tuple(specs)))
+
+        assert len(spec_list) == (12 + has_attn_bias)
+        input_expected_specs = spec_list[4:]
+        output_specs: List[Optional[DTensorSpec]] = list(spec_list[:4])
+        # remove the DTensorSpec of output grad_bias if it's empty
+        if not has_attn_bias:
+            output_specs[-1] = None
+        if all(is_tensor_shardable(qkv_shape, spec) for spec in input_expected_specs):
+            # only add to the strategy list when all inputs are shardable
+            redistribute_cost = []
+            for input_idx, spec in enumerate(input_expected_specs):
+                qkv_strategy = op_schema.args_schema[tensor_input_indices[input_idx]]
+                assert isinstance(qkv_strategy, OpStrategy)
+                qkv_tensor_meta = qkv_strategy.strategies[0].output_spec.tensor_meta
+                spec.tensor_meta = qkv_tensor_meta
+                redistribute_cost.append(
+                    generate_redistribute_costs(qkv_strategy, spec)
+                )
+
+            strat = PlacementStrategy(
+                output_specs=tuple(output_specs),
+                input_specs=tuple(input_expected_specs),
+                redistribute_cost=redistribute_cost,
+            )
+            all_strategies.append(strat)
+
+    return OpStrategy(all_strategies)

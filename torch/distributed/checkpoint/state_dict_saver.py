@@ -1,3 +1,4 @@
+import inspect
 import os
 import warnings
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -6,7 +7,6 @@ from typing import cast, Optional, Union
 import torch
 import torch.distributed as dist
 from torch.distributed._state_dict_utils import _offload_state_dict_to_cpu
-from torch.distributed.checkpoint import FileSystemWriter
 
 from torch.distributed.checkpoint._storage_utils import _storage_setup
 from torch.distributed.checkpoint.default_planner import DefaultSavePlanner
@@ -221,10 +221,6 @@ def async_save(
     storage_writer = cast(
         StorageWriter, _storage_setup(storage_writer, checkpoint_id, reader=False)
     )
-    if isinstance(storage_writer, FileSystemWriter):
-        # in the async case, the state dict is already on CPU, so maintaining this
-        # buffer makes no sense
-        storage_writer.per_thread_copy_ahead = 0
 
     state_dict = _stateful_to_state_dict(state_dict)
     if isinstance(storage_writer, AsyncStager):
@@ -286,8 +282,22 @@ def _save_state_dict(
     @_dcp_method_logger(**ckpt_kwargs)
     def local_step():
         assert planner is not None
-        planner.set_up_planner(state_dict, distW.is_coordinator)
+        storage_meta = storage_writer.storage_meta()
+        if "storage_meta" not in inspect.signature(planner.set_up_planner).parameters:
+            warnings.warn(
+                "The function definition for SavePlanner.set_up_planner has been updated"
+                " to include the storage_meta argument. Please update your implementation"
+                " to include this parameter."
+            )
+            planner.set_up_planner(state_dict, distW.is_coordinator)  # type: ignore[call-arg, arg-type]
+        else:
+            planner.set_up_planner(
+                state_dict=state_dict,
+                storage_meta=storage_meta,
+                is_coordinator=distW.is_coordinator,
+            )
         storage_writer.set_up_storage_writer(distW.is_coordinator)
+
         local_plan = planner.create_local_plan()
         local_plan = storage_writer.prepare_local_plan(local_plan)
         return local_plan

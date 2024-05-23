@@ -15,7 +15,7 @@ from ...utils import sympy_product
 from ...virtualized import V
 from ..common import IndentedBuffer, Kernel, OpOverrides
 
-from ..cpp import CppPrinter, DTYPE_TO_CPP
+from ..cpp_utils import CppPrinter, DTYPE_TO_CPP
 
 if TYPE_CHECKING:
     from torch._inductor.codegen.cuda.cuda_template import CUDATemplate
@@ -169,7 +169,10 @@ class CUDATemplateKernel(CUDAKernel):
         call_args.append("None")
 
         if node.get_workspace_size() > 0:
-            call_args.append(f"c_void_p({node.get_name()}_workspace.data_ptr())")
+            wrapper.generate_workspace_allocation(
+                node.get_workspace_size(), V.graph.scheduler.current_device, False
+            )
+            call_args.append("c_void_p(workspace.data_ptr())")
         else:
             call_args.append("None")
 
@@ -180,6 +183,8 @@ class CUDATemplateKernel(CUDAKernel):
             cuda=True,
             triton=False,
         )
+        if node.get_workspace_size() > 0:
+            wrapper.writeline(wrapper.make_free_by_names(["workspace"]))
 
     def dtype(self, node: IRNode) -> Optional[str]:
         """
@@ -379,6 +384,7 @@ class CUDATemplateCaller(ChoiceCaller):
             return {"backend": "CUDA", "op_type": "unknown"}
 
     def output_node(self) -> TensorBox:
+        self.bmreq.update_workspace_size()
         return TensorBox.create(
             CUDATemplateBuffer(
                 layout=self.layout,
