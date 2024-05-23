@@ -1,7 +1,9 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import copy
+import itertools
 import logging
 import operator
+from collections import defaultdict
 from dataclasses import dataclass
 from enum import Enum
 from inspect import Parameter, signature, Signature
@@ -11,7 +13,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import torch
 import torch.fx as fx
 from torch.export import ExportedProgram
-from torch.export.unflatten import _assign_attr, _AttrKind, _sink_params
+from torch.export.unflatten import _assign_attr, _AttrKind, _sink_params, InterpreterModule
 from torch.fx.node import map_aggregate
 from torch.fx.passes.split_module import split_module
 
@@ -776,6 +778,17 @@ class Pipe(QualnameMapMixin, torch.nn.Module):
         # To be accumulated in `move_param_to_callee`.
         to_delete = list()
 
+        def _recursive_getattr_with_parent(mod, fqn):
+            # Returns getattr given a fqn, along with the last parent
+            atoms = fqn.split(".")
+            for atom in atoms[:-1]:
+                if not hasattr(mod, atom):
+                    return None, None
+                mod = getattr(mod, atom)
+            if not hasattr(mod, atoms[-1]):
+                return None, None
+            return mod, getattr(mod, atoms[-1])
+
         def move_param_to_callee(
             root,
             callee_name,
@@ -788,15 +801,11 @@ class Pipe(QualnameMapMixin, torch.nn.Module):
                 callee_name: The name of the submodule to move the parameter to.
                 param_fqn: The fully qualified name of the parameter to move.
             """
+
             # `atoms` is a list of strings representing the path to the
             # parameter in the original model
             atoms = param_fqn.split(".")
-            # Recursively find the parent of the parameter
-            mod_itr = split
-            for atom in atoms[:-1]:
-                mod_itr = getattr(mod_itr, atom)
-            # Get the parameter (it is still under the root module)
-            param_val = getattr(mod_itr, atoms[-1])
+            mod_itr, param_val = _recursive_getattr_with_parent(split, param_fqn)
             # Check whether the parameter is a buffer or a parameter
             is_buffer = atoms[-1] in mod_itr._buffers
 
@@ -875,6 +884,38 @@ class Pipe(QualnameMapMixin, torch.nn.Module):
                     node.target,
                 )
 
+        # handle aliasing params, by storing id -> list of fqns
+        id_to_fqns: Dict[torch.Parameter, List[str]] = defaultdict(list)
+        for fqn, tensor in mod.state_dict(keep_vars=True).items():
+            id_to_fqns[id(tensor)].append(fqn)
+
+        # After moving the params to their corresponding hierarchies, we also
+        # need to move the `get_attr` nodes from the root of the graph to those
+        # hierarchies.
+        inputs_to_state: Dict[str, List[str]] = {}
+        for attr in attr_nodes:
+            _, tensor = _recursive_getattr_with_parent(mod, attr.target)
+            inputs_to_state[attr.name] = [fqn for fqn in id_to_fqns[id(tensor)]]
+
+        # maybe inefficient
+        added_attributes: Dict[str, List[str]] = defaultdict(list)
+        for fqn, tensor in mod.state_dict(keep_vars=True).items():
+            for name, submod in split.named_children():
+                if isinstance(submod, fx.GraphModule):
+                    if _recursive_getattr_with_parent(submod, fqn)[0] is None:
+                        atoms = fqn.split(".")
+
+                        success = True
+                        mod_itr = submod
+                        for atom in atoms[:-1]:
+                            if not hasattr(mod_itr, atom):
+                                success = False
+                                break
+                            mod_itr = getattr(mod_itr, atom)
+                        if success:
+                            added_attributes[name].append(fqn)
+                            setattr(mod_itr, atoms[-1], tensor)
+
         # Deferral deletion: Remove the original attributes (to params) from the
         # root GraphModule
         for mod_itr, last_atom in to_delete:
@@ -884,18 +925,35 @@ class Pipe(QualnameMapMixin, torch.nn.Module):
                 # This is expected if the parameter is used in multiple stages
                 pass
 
-        # After moving the params to their corresponding hierarchies, we also
-        # need to move the `get_attr` nodes from the root of the graph to those
-        # hierarchies.
-        inputs_to_state: Dict[str, List[str]] = {
-            attr.name: [attr.target] for attr in attr_nodes
-        }
         # This is done by (1) `_sink_params` at each submodule;
         for name, submod in split.named_children():
             if isinstance(submod, fx.GraphModule):
                 _sink_params(submod, inputs_to_state, [])
                 submod.graph.lint()
                 submod.recompile()
+
+        # clean up graph attributes
+        for name, attributes in added_attributes.items():
+            submod = getattr(split, name)
+            unused_attributes = set(attributes)
+            # track used attributes in the submodule
+            stack = [('', submod)]
+            while stack:
+                scope, _mod = stack.pop()
+                if isinstance(_mod, (fx.GraphModule, InterpreterModule)):
+                    for node in _mod.graph.nodes:
+                        if node.op == "get_attr":
+                            fqn = scope + "." + node.target if scope else node.target
+                            if fqn in unused_attributes:
+                                unused_attributes.remove(fqn)
+                for _name, _submod in _mod.named_children():
+                    stack.append((scope + "." + _name if scope else _name, _submod))
+            # delete unused attributes
+            for attr in unused_attributes:
+                mod_itr, atoms = submod, attr.split(".")
+                for atom in atoms[:-1]:
+                    mod_itr = getattr(mod_itr, atom)
+                delattr(mod_itr, atoms[-1])
 
         for node in attr_nodes:
             # And (2): remove `get_attr` node from submod's arg list
