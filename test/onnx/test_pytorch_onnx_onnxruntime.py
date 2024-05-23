@@ -3721,6 +3721,20 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         input = torch.arange(24, dtype=torch.int64).reshape(3, 4, 2)
         self.run_test(BitshiftModel(), input)
 
+    @skipIfUnsupportedMinOpsetVersion(18)
+    def test_bitwise_and(self):
+        class BitwiseAndModel(torch.nn.Module):
+            def forward(self, input, other):
+                return (
+                    input & 20,
+                    torch.bitwise_and(input, other),
+                    other & torch.tensor([1, 2], dtype=torch.int32),
+                )
+
+        input = torch.randint(0, 255, (3, 4, 2), dtype=torch.uint8)
+        other = torch.randint(-128, 127, (3, 4, 2), dtype=torch.int8)
+        self.run_test(BitwiseAndModel(), (input, other))
+
     # uint8 not implemented in ORT for Mul used in
     # exporting bitshift for opset_version < 10
     @skipIfUnsupportedMinOpsetVersion(11)

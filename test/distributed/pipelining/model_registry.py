@@ -17,15 +17,37 @@ class ExampleCode(torch.nn.Module):
         self.lin0 = torch.nn.Linear(d_hid, d_hid)
         self.lin1 = torch.nn.Linear(d_hid, d_hid)
 
-    def forward(self, x, y=torch.zeros(default_batch_size, default_dhid)):
+    def forward(self, x):
         x = torch.mm(x, self.mm_param0)
-        x = x + y
         x = torch.relu(x)
         # try passing a value that doesn't require_grad across skip boundaries
         a_constant = self.cval.clone()
         x = self.lin0(x)
         pipe_split()
         x = torch.relu(x) + a_constant
+        x = torch.mm(x, self.mm_param1)
+        x = self.lin1(x)
+        x = torch.relu(x)
+        return x
+
+
+class ModelWithKwargs(torch.nn.Module):
+    default_dhid = 512
+    default_batch_size = 256
+
+    def __init__(self, d_hid: int = default_dhid):
+        super().__init__()
+        self.mm_param0 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
+        self.mm_param1 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
+        self.lin0 = torch.nn.Linear(d_hid, d_hid)
+        self.lin1 = torch.nn.Linear(d_hid, d_hid)
+
+    def forward(self, x, y=torch.zeros(default_batch_size, default_dhid)):
+        x = torch.mm(x, self.mm_param0)
+        x = x + y
+        x = self.lin0(x)
+        x = torch.relu(x)
+        pipe_split()
         x = torch.mm(x, self.mm_param1)
         x = self.lin1(x)
         x = torch.relu(x)
