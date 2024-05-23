@@ -2498,7 +2498,7 @@ class ShapeEnv:
 
         def maybe_transform_fake(fake: TrackedFake):
             inner_fake = fake.fake \
-                if isinstance(fake.fake, torch.SymInt) \
+                if isinstance(fake.fake, (torch.SymInt, torch.SymFloat)) \
                 else FakeTensorMeta.from_fake(fake.fake)
             # Even though TrackedFake accepts either a Union[SymInt, FakeTensor], here we give it a
             # FakeTensorMeta for two reasons:
@@ -3166,7 +3166,7 @@ class ShapeEnv:
     @record_shapeenv_event()
     def create_unspecified_symbol(
         self,
-        val: Union[int, SymInt],
+        val: Union[int, SymInt, float, SymFloat],
         source: Source,
         dynamic_dim: DimDynamic = DimDynamic.DUCK,
         constraint_dim: DimConstraint = None,  # NB: includes None
@@ -4372,7 +4372,7 @@ class ShapeEnv:
             )
         fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(True)
         if expr.is_integer:
-            msg = "Could extract specialized integer from data-dependent expression"
+            msg = "Could not extract specialized integer from data-dependent expression"
         else:
             msg = "Could not guard on data-dependent expression"
         return GuardOnDataDependentSymNode(
@@ -4939,17 +4939,17 @@ class ShapeEnv:
                 )
                 return concrete_val
 
-            if isinstance(g, sympy.Rel):
-                # TODO: If we successfully eliminate a symbol via equality, it
-                # is not actually necessary to save a guard for the equality,
-                # as we will implicitly generate a guard when we match that
-                # input against the symbol.  Probably the easiest way to
-                # implement this is to have maybe_guard_rel return a bool
-                # saying if it "subsumed" the guard (and therefore the guard
-                # is no longer necessary)
-                self._maybe_guard_rel(g)
-
             if not self._suppress_guards_tls():
+                if isinstance(g, sympy.Rel):
+                    # TODO: If we successfully eliminate a symbol via equality, it
+                    # is not actually necessary to save a guard for the equality,
+                    # as we will implicitly generate a guard when we match that
+                    # input against the symbol.  Probably the easiest way to
+                    # implement this is to have maybe_guard_rel return a bool
+                    # saying if it "subsumed" the guard (and therefore the guard
+                    # is no longer necessary)
+                    self._maybe_guard_rel(g)
+
                 stack = CapturedTraceback.extract(skip=1)
                 guard = ShapeGuard(g, stack)
                 self.guards.append(guard)
@@ -4979,7 +4979,7 @@ class ShapeEnv:
                         )
                         self.evaluate_expr(s, forcing_spec=True)
             else:
-                self.log.debug("eval %s [guard suppressed]", g)
+                self._log_guard("eval [guard suppressed]", g, forcing_spec=forcing_spec)
 
         return concrete_val
 
@@ -5043,11 +5043,11 @@ class ShapeEnv:
 
         self._check_frozen(expr, sympy.true)
 
-        # eliminate symbols on equality tests / refine ranges
-        if isinstance(expr, sympy.Rel):
-            self._maybe_guard_rel(expr)
-
         if not self._suppress_guards_tls():
+            # eliminate symbols on equality tests / refine ranges
+            if isinstance(expr, sympy.Rel):
+                self._maybe_guard_rel(expr)
+
             # canonicalise to remove equations that are trivially equal
             orig_expr = expr
             expr = canonicalize_bool_expr(expr)
@@ -5063,7 +5063,7 @@ class ShapeEnv:
             self._update_version_counter()
             self._log_guard("runtime_assert", orig_expr, forcing_spec=False)
         else:
-            self.log.debug("runtime_assert %s [guard suppressed]", expr)
+            self._log_guard("runtime_assert [guard suppressed]", orig_expr, forcing_spec=False)
 
         return True
 
