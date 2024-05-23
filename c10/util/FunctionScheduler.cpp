@@ -1,5 +1,4 @@
 #include <c10/util/FunctionScheduler.h>
-#include <chrono>
 
 namespace c10 {
 
@@ -75,7 +74,8 @@ std::chrono::microseconds FunctionScheduler::getNextWaitTime() {
   // Finding the first run associated with an active job.
   auto job = _jobs.find(_next_run->job_id());
   while (job == _jobs.end() ||
-         job->second->counter() >= job->second->run_limit()) {
+         (job->second->run_limit() != FunctionScheduler::RUN_FOREVER &&
+          job->second->counter() >= job->second->run_limit())) {
     // Only pop runs associated with an invalid job.
     _queue.pop();
     _next_run = _queue.top();
