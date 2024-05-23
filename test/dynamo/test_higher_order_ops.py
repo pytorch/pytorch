@@ -5870,7 +5870,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(actual, expected)
         self.assertEqual(some_list, [1, 1])
 
-    @unittest.expectedFailure
     def test_vmap_side_effects_append_input(self):
         counters.clear()
         x = torch.ones(2, 3)
