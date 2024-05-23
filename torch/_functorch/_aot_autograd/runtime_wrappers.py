@@ -1180,6 +1180,10 @@ def merge_view_inputs(
         return True
 
     assert len(fwd_inputs) == len(mutated_input_info)
+    if not [info for info in mutated_input_info if info.mutates_data]:
+        # Return early when there are no mutations.
+        return fwd_inputs, None
+
     storage_ref_to_idx: Dict[StorageWeakRef, List[int]] = collections.defaultdict(list)
     base_args = []
     other_args = []
