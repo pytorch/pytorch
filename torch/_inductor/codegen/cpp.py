@@ -16,11 +16,11 @@ import torch
 import torch.fx
 from torch._inductor import dependencies
 from torch._prims_common import is_float_dtype
+from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
-from torch.fx.experimental.symbolic_shapes import has_free_symbols
 
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
@@ -2189,7 +2189,9 @@ class CppVecKernel(CppKernel):
                     f"#pragma unroll {self.tail_size if self.tail_size else self.tiling_factor}"
                 )
             code.writeline(
-                f"for (long {itervar_inner} = 0; {itervar_inner} < {self.tail_size if self.tail_size else self.tiling_factor}; {itervar_inner}++)"
+                f"for (long {itervar_inner} = 0; "
+                + f"{itervar_inner} < {self.tail_size if self.tail_size else self.tiling_factor}; "
+                + f"{itervar_inner}++)"
             )
             with code.indent(), contextlib.ExitStack() as stack:
                 index_c = cexpr_index(index)
@@ -2717,10 +2719,12 @@ class CppVecKernelChecker(CppVecKernel):
             var = self.cse.newvar()
 
             if load_dtype not in self.supported_dtypes_for_masked_vec:
-                self.disable_masked_vec(f"{load_dtype} not supported by masked vectorization")
+                self.disable_masked_vec(
+                    f"{load_dtype} not supported by masked vectorization"
+                )
 
             if has_free_symbols(self.ranges):
-                self.disable_masked_vec(f"Symbolic ranges not supported by masked load")
+                self.disable_masked_vec("Symbolic ranges not supported by masked load")
 
             if len(self.itervars) == 0:
                 self.disable_vec("not a loop")
@@ -2740,10 +2744,12 @@ class CppVecKernelChecker(CppVecKernel):
             store_dtype = V.graph.get_dtype(name)
 
             if store_dtype not in self.supported_dtypes_for_masked_vec:
-                self.disable_masked_vec(f"{store_dtype} not supported by masked vectorization")
+                self.disable_masked_vec(
+                    f"{store_dtype} not supported by masked vectorization"
+                )
 
             if has_free_symbols(self.ranges):
-                self.disable_masked_vec(f"Symbolic ranges not supported by masked store")
+                self.disable_masked_vec("Symbolic ranges not supported by masked store")
 
             if len(self.itervars) == 0:
                 self.disable_vec("not a loop")
@@ -2768,7 +2774,7 @@ class CppVecKernelChecker(CppVecKernel):
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
         if has_free_symbols(self.ranges):
-                self.disable_masked_vec(f"Symbolic ranges not supported by masked reduction")
+            self.disable_masked_vec("Symbolic ranges not supported by masked reduction")
 
         if not (
             (dtype == torch.float and src_dtype == torch.float)
@@ -2861,7 +2867,9 @@ class CppVecKernelChecker(CppVecKernel):
                             opt_ctx.dtype = torch.float32
 
                     if opt_ctx.dtype not in self.supported_dtypes_for_masked_vec:
-                        self.disable_masked_vec(f"{opt_ctx.dtype} not supported by masked vectorization")
+                        self.disable_masked_vec(
+                            f"{opt_ctx.dtype} not supported by masked vectorization"
+                        )
 
                     if opt_ctx.dtype not in self.supported_dtypes:
                         self.disable_vec(f"constant dtype: {opt_ctx.dtype}")
@@ -2937,7 +2945,9 @@ class CppVecKernelChecker(CppVecKernel):
             @staticmethod
             def to_dtype(x, dtype, src_dtype=None):
                 if dtype not in self.supported_dtypes_for_masked_vec:
-                        self.disable_masked_vec(f"{dtype} not supported by masked vectorization")
+                    self.disable_masked_vec(
+                        f"{dtype} not supported by masked vectorization"
+                    )
 
                 if dtype not in self.supported_dtypes:
                     self.disable_vec(f"to_dtype: {dtype}")
@@ -3312,14 +3322,20 @@ class CppKernelProxy(CppKernel):
                     ) as vec_checker:
                         run(vec_checker)
                         could_vec = could_vec and vec_checker.simd_vec
-                        could_masked_vec = could_masked_vec and vec_checker.simd_masked_vec
+                        could_masked_vec = (
+                            could_masked_vec and vec_checker.simd_masked_vec
+                        )
                         if not could_vec:
                             break
                 if could_vec:
                     if len(tiling_indices) == 1:
                         return [tiling_factor], tiling_indices, could_masked_vec
                     if len(tiling_indices) == 2:
-                        return [tiling_factor, tiling_factor], tiling_indices, could_masked_vec
+                        return (
+                            [tiling_factor, tiling_factor],
+                            tiling_indices,
+                            could_masked_vec,
+                        )
             return [], [], False
 
         # Kernels share the same global contexts like V.graph.wrapper_code, V.kernel.args.
