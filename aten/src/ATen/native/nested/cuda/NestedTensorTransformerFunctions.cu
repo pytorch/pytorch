@@ -464,6 +464,10 @@ template void add_padding_kernelLauncher<c10::Half>(
     const int batch_size,
     const int output_batch_size);
 
+// NB: The following code covers jagged <-> padded dense conversions and was lifted
+// from fbgemm_gpu. For more details, see
+// https://github.com/pytorch/FBGEMM/tree/main/fbgemm_gpu/src/jagged_tensor_ops
+
 // Passing lambda exp argument by value instead of by reference to avoid
 // "internal compiler error: in maybe_undo_parenthesized_ref" error for specific
 // compiler version.
