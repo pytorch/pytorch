@@ -115,9 +115,10 @@ def build_subgraph_buffer(
             # already created TensorBoxes as args
             from torch.utils._pytree import tree_map
 
-            env[node] = lowerings[node.target](
-                *tree_map(lambda x: env[x] if x in env else x, node.args)
+            args, kwargs = tree_map(
+                lambda x: env[x] if x in env else x, (node.args, node.kwargs)
             )
+            env[node] = lowerings[node.target](*args, **kwargs)
         elif node.op == "output":
             # For the output node we need to create a ComputedBuffer
             # which represents the actual score modification
@@ -360,7 +361,7 @@ def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
     elif head_dim <= 256 and torch.cuda.get_device_capability() >= (8, 0):  # A100
         return (32, 32, 4, 1)
     else:  # modest hardware or extremely large head_dim
-        return (32, 32, 4, 1)
+        return (16, 16, 4, 1)
 
 
 # TODO: We probably also need a layout constraint?
