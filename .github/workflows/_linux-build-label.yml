@@ -32,7 +32,7 @@ on:
         required: false
         type: string
         default: "5.2"
-        description: Runner label to select worker type
+        description: Runner label to select worker  type
       runner:
         required: false
         type: string
