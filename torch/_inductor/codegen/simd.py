@@ -17,6 +17,7 @@ from typing import (
     Iterable,
     List,
     Optional,
+    Sequence,
     Set,
     Tuple,
     TYPE_CHECKING,
@@ -557,7 +558,7 @@ class SIMDKernel(Kernel):
 
     @staticmethod
     def _split_iteration_ranges(
-        groups: Iterable[sympy.Expr], lengths: List[List[sympy.Expr]]
+        groups: Iterable[sympy.Expr], lengths: Sequence[Sequence[sympy.Expr]]
     ):
         sv = V.graph.sizevars
         new_ranges: List[List[sympy.Expr]] = [[] for _ in groups]
@@ -625,7 +626,7 @@ class SIMDKernel(Kernel):
 
     @classmethod
     def is_compatible(
-        cls, groups: Iterable[sympy.Expr], lengths: List[List[sympy.Expr]]
+        cls, groups: Iterable[sympy.Expr], lengths: Sequence[Sequence[sympy.Expr]]
     ):
         try:
             cls._split_iteration_ranges(groups, lengths)
@@ -970,7 +971,7 @@ class SIMDKernel(Kernel):
         """
         nbytes = []
         ninplace_args = len(unique(self.args.inplace_buffers.values()))
-        _, call_args, _ = self.args.python_argdefs()
+        _, call_args, _, _ = self.args.python_argdefs()
 
         # For pointwise and reduction kernels, this is the upper-bound numels
         # for the output buffer.
@@ -1031,7 +1032,7 @@ class SIMDKernel(Kernel):
             # the mix layouts.
             return
 
-        argdefs, call_args, signature = self.args.python_argdefs()
+        argdefs, call_args, signature, _ = self.args.python_argdefs()
         uniform_stride_order = None
         for arg_name in call_args:
             buf = V.graph.get_buffer(arg_name)
@@ -1544,6 +1545,7 @@ class SIMDScheduling(BaseScheduling):
                 name = node.get_name()
                 if name not in live_outs:
                     continue
+                assert node.node is not None
                 origin_node = node.node.get_origin_node()
                 if origin_node is not None:
                     counters["inductor"]["intermediate_hooks"] += 1
