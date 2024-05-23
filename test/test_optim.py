@@ -604,8 +604,16 @@ class TestOptimRenewed(TestCase):
             for input, model, optimizer in zip(inputs, models, optimizers):
                 optimizer.zero_grad()
 
+                if i == 3:
+                    # Freeze a layer to test if the step of this layer in 'fused' or 'foreach'
+                    # is same as the step in 'forloop'.
+                    model[2].requires_grad_(False)
+                if i == 5:
+                    # Unfreeze the layer after 2 iters.
+                    model[2].requires_grad_(True)
+
                 # Test that step behaves as expected (a no-op) when grads are set to None
-                if i != 3:
+                if i != 2:
                     output = model(input)
                     loss = output.sum()
                     loss.backward()
@@ -699,8 +707,8 @@ class TestOptimRenewed(TestCase):
         assert impl in ("foreach", "fused")
         if impl == "foreach" and "foreach" not in optim_info.supported_impls:
             return unittest.skip(f"foreach not supported for {optim_info.optim_cls.__name__}")
-        elif impl == "fused" and "fused" not in optim_info.supported_impls:
-            return unittest.skip(f"fused not supported for {optim_info.optim_cls.__name__}")
+        elif impl == "fused" and "cuda" not in optim_info.supports_fused_on:
+            return unittest.skip(f"fused not supported for {optim_info.optim_cls.__name__} on cuda")
 
         params = [
             torch.rand(2, 3, dtype=torch.float64, device='cuda:0', requires_grad=True),

@@ -394,6 +394,33 @@ class DistMathOpsTest(DTensorTestBase):
 
             self.assertEqual(x_local.grad, x_dist.grad.full_tensor())
 
+    @with_comms
+    def test_topk(self):
+        device_mesh = self.build_device_mesh()
+        placement_combs = [Shard(0), Shard(1), Shard(2), Replicate()]
+
+        comm_mode = CommDebugMode()
+
+        tensor = torch.randn(12, 8, 8, requires_grad=True)
+        global_topk = tensor.topk(3, dim=0)
+
+        for placement in placement_combs:
+            dtensor = distribute_tensor(tensor, device_mesh, (placement,))
+            with comm_mode:
+                out_dt = dtensor.topk(3, dim=0)
+            if placement.is_shard(0):
+                self.assertEqual(comm_mode.get_total_counts(), 1)
+                self.assertEqual(
+                    comm_mode.get_comm_counts()[funcol.all_gather_into_tensor],
+                    1,
+                )
+            out_full_values = out_dt.values.full_tensor()
+            self.assertEqual(global_topk.values, out_full_values)
+
+            # TODO: support backward scatter
+            # global_topk.values.sum().backward()
+            # out_full_values.sum().backward()
+
 
 if __name__ == "__main__":
     run_tests()
