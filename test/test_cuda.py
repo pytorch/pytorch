@@ -1800,7 +1800,6 @@ torch.cuda.synchronize()
 
     def test_autocast_custom_deprecated_warning(self):
         with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always", category=DeprecationWarning)
 
             class MyMM(torch.autograd.Function):
                 @staticmethod

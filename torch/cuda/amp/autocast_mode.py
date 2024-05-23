@@ -55,8 +55,7 @@ def custom_fwd(fwd=None, *, cast_inputs=None):
     ``torch.amp.custom_fwd(args..., device_type='cuda')`` instead.
     """
     warnings.warn(
-        "torch.cuda.amp.custom_fwd(args...) is deprecated. Please use torch.amp.custom_fwd(args..., device_type='cuda') instead.",
-        DeprecationWarning,
+        "torch.cuda.amp.custom_fwd(args...) is deprecated. Please use torch.amp.custom_fwd(args..., device_type='cuda') instead."
     )
     return functools.partial(torch.amp.custom_fwd, device_type="cuda")(
         fwd=fwd, cast_inputs=cast_inputs
@@ -69,7 +68,6 @@ def custom_bwd(bwd):
     ``torch.amp.custom_bwd(args..., device_type='cuda')`` instead.
     """
     warnings.warn(
-        "torch.cuda.amp.custom_bwd(args...) is deprecated. Please use torch.amp.custom_bwd(args..., device_type='cuda') instead.",
-        DeprecationWarning,
+        "torch.cuda.amp.custom_bwd(args...) is deprecated. Please use torch.amp.custom_bwd(args..., device_type='cuda') instead."
     )
     return functools.partial(torch.amp.custom_bwd, device_type="cuda")(bwd)
