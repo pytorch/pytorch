@@ -11,6 +11,7 @@ import torch.nn.functional as F
 
 from torch._dynamo.comptime import comptime
 from torch._dynamo.testing import CompileCounter, same
+from torch.testing._internal.logging_utils import logs_to_string
 
 
 # The intention of this test file is you should put test cases specifically
@@ -393,6 +394,36 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(f3(r), optimize(f3)(r))
         self.assertEqual(f4(r), optimize(f4)(r))
 
+    def test_to_tensor(self):
+        def f1():
+            a = np.random.uniform(low=-1, high=1, size=(20, 1))
+            return torch.tensor([a, a, a, a], dtype=torch.float64, device="cpu")
+
+        def f2():
+            a = torch.tensor([[[123]]])
+            return torch.tensor([a, a])
+
+        def f3():
+            a = torch.tensor(123)
+            return torch.tensor([a, a])
+
+        def f4():
+            a = torch.tensor(123)
+            b = torch.tensor([[[456]]])
+            return torch.tensor([a, b])
+
+        def f5():
+            a = np.array([1, 2])
+            return torch.tensor([a, a])
+
+        optimize = torch.compile(backend="aot_eager", fullgraph=True)
+
+        self.assertEqual(f1().shape, optimize(f1)().shape)
+        self.assertEqual(f2(), optimize(f2)())
+        self.assertEqual(f3(), optimize(f3)())
+        self.assertEqual(f4(), optimize(f4)())
+        self.assertEqual(f5(), optimize(f5)())
+
     def test_sym_int_conversion(self):
         def f(x):
             y = x.size(0)
@@ -485,6 +516,41 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         compl_fn = torch.compile(fn, dynamic=True, backend="eager")
         self.assertEqual(compl_fn(inputs), fn(inputs))
 
+    @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=True)
+    def test_unspec_float_input(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def f(x, y):
+            if y == 5.0:
+                return x + 2
+            else:
+                return x + y
+
+        cf = torch.compile(backend=cnts, fullgraph=True)(f)
+
+        x = torch.randn(3)
+        self.assertEqual(f(x, 3.0), cf(x, 3.0))
+        self.assertEqual(f(x, 4.0), cf(x, 4.0))
+        self.assertExpectedInline(cnts.frame_count, """1""")  # no recompile
+        self.assertEqual(f(x, 5.0), cf(x, 5.0))
+        self.assertExpectedInline(cnts.frame_count, """2""")  # guard worked
+        self.assertEqual(f(x, math.nan), cf(x, math.nan))
+        self.assertExpectedInline(cnts.frame_count, """3""")  # nan always recompiles
+
+    @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=True)
+    def test_unspec_float_output(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def f(x, y):
+            return x + 1, y * 2
+
+        cf = torch.compile(backend=cnts, fullgraph=True)(f)
+        x = torch.randn(3)
+
+        self.assertEqual(f(x, 3.0), cf(x, 3.0))
+        self.assertEqual(f(x, 4.0), cf(x, 4.0))
+        self.assertEqual(f(x, 5.0), cf(x, 5.0))
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_data_dependent_evaluate_expr_graph_break(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -511,7 +577,26 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         fn(x)
 
         self.assertExpectedInline(cnts.frame_count, """2""")
-        self.assertExpectedInline(cnts.op_count, """3""")
+        self.assertExpectedInline(cnts.op_count, """4""")
+
+    def test_prune_torch_check(self):
+        log_stream, ctx = logs_to_string("torch._dynamo.output_graph", "graph_code")
+
+        @torch.compile(fullgraph=True, dynamic=True, backend="eager")
+        def f(x, y):
+            torch._check(y + 5 == 85)
+            torch._check(x.size(0) == 80)
+
+        with ctx():
+            f(torch.randn(80, 100), 80)
+
+        out = "\n".join(log_stream.getvalue().strip().split("\n")[3:]).strip()
+        self.assertExpectedInline(
+            out,
+            """\
+def forward(self):
+        return ()""",
+        )
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_split_aot_autograd(self):
