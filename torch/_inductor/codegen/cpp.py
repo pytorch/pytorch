@@ -16,7 +16,6 @@ import torch
 import torch.fx
 from torch._inductor import dependencies
 from torch._prims_common import is_float_dtype
-from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
@@ -37,6 +36,7 @@ from ..utils import (
     cache_on_self,
     get_bounds_index_expr,
     get_fused_kernel_name,
+    has_free_symbols,
     is_welford_reduction,
     parallel_num_threads,
     Placeholder,
