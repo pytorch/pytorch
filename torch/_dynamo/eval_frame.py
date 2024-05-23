@@ -411,9 +411,8 @@ class _TorchDynamoContext:
             # something onto the DynamicLayerStack then we pop it off (the
             # constructed graph code isn't guarded with try/finally).
             #
-            # This is an inlined `with _PreserveDynamicLayerStack()`
-            # but putting a `with` here has a noticible perf regression
-            # (#126293)
+            # This used to be a context but putting a `with` here is a noticible
+            # perf regression (#126293)
             saved_dynamic_layer_stack_depth = (
                 torch._C._functorch.get_dynamic_layer_stack_depth()
             )
@@ -421,7 +420,7 @@ class _TorchDynamoContext:
             try:
                 return fn(*args, **kwargs)
             finally:
-                # Restore the dynamic layer stack depth, if necessary.
+                # Restore the dynamic layer stack depth if necessary.
                 torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
                     saved_dynamic_layer_stack_depth
                 )
