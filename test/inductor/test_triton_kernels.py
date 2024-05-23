@@ -1319,6 +1319,23 @@ def forward(self, x_1, output_1):
     @requires_cuda
     @skipIfRocm
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_triton_kernel_num_ctas(self, backend):
+        @triton.jit
+        def kernel(X):
+            return
+
+        @torch.compile(backend=backend)
+        def f(x):
+            kernel[(1,)](x, num_ctas=1)
+            kernel.run(x, num_ctas=1, grid=(1,), warmup=False)
+            return x
+
+        x = torch.randn(4, device="cuda")
+        f(x)
+
+    @requires_cuda
+    @skipIfRocm
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_special_kwargs_without_autotune(self, backend):
         @triton.jit
         def add_kernel(
