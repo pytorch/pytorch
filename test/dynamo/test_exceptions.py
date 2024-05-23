@@ -14,7 +14,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             x = torch.cos(x)
             try:
                 x = torch.sin(x)
-                raise NotImplementedError
+                raise NotImplementedError()
             except Exception:
                 x = torch.sigmoid(x)
 
@@ -31,7 +31,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             x = torch.cos(x)
             try:
                 x = torch.sin(x)
-                raise NotImplementedError
+                raise NotImplementedError()
             except AssertionError:
                 x = torch.sigmoid(x)
             except NotImplementedError:
@@ -47,7 +47,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
     def test_exception_raised_from_child(self):
         def gn():
-            raise NotImplementedError
+            raise NotImplementedError()
 
         def fn(x):
             x = torch.cos(x)
