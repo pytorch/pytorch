@@ -966,6 +966,8 @@ class TestFullyShard2DTraining(FSDPTest):
             reshard_after_forward=True,
             offload_policy=CPUOffloadPolicy(),
         )
+        for param in model.parameters():
+            self.assertEqual(param.device.type, "cpu")
         num_mlps = sum(isinstance(module, MLP) for module in model.modules())
         optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=False)
 
