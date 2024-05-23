@@ -420,6 +420,7 @@ def linalg_svd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     # back to replicate
     args_schema = op_schema.args_schema
     input_strategy = args_schema[0]
+    assert isinstance(input_strategy, OpStrategy), f"{input_strategy}"
     output_strategies: List[PlacementStrategy] = []
     for placement_strategy in input_strategy.strategies:
         replicate_placements = tuple(Replicate() for _ in range(mesh.ndim))
