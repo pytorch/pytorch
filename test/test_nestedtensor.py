@@ -4349,8 +4349,7 @@ class TestNestedTensorSubclass(TestCase):
         self.assertTrue(torch.allclose(value_grad, value.grad))
 
     @dtypes(torch.float64, torch.float32, torch.half)
-    @onlyCUDA
-    def test_fbgemm_jagged_to_padded_dense_kernels(self, device, dtype):
+    def test_jagged_padded_dense_conversion_kernels(self, device, dtype):
         values = torch.randn(10, 5, device=device, dtype=dtype)
         offsets = torch.tensor([0, 1, 3, 8, 10], device=device, dtype=torch.int64)
         max_length = offsets.diff().max().item()
