@@ -84,7 +84,11 @@ install_ubuntu() {
     if [[ $(ver $ROCM_VERSION) -ge $(ver 6.0) ]]; then
         for kdb in /opt/rocm/share/miopen/db/*.kdb
         do
-            sqlite3 $kdb "PRAGMA journal_mode=off; PRAGMA VACUUM;"
+	  # journal_mode=delete seems to work on some kdbs that have "wal" as initial journal_mode
+	  sqlite3 $kdb "PRAGMA journal_mode=delete; PRAGMA VACUUM;"
+	  JOURNAL_MODE=$(sqlite3 $kdb "PRAGMA journal_mode;")
+	  # Both "delete and "off" work in cases where user doesn't have write permissions to directory where kdbs are installed
+	  if [[ $JOURNAL_MODE != "delete" ]] && [[ $JOURNAL_MODE != "off" ]]; then echo "kdb journal_mode change failed" && exit 1; fi
         done
     fi
 
@@ -163,7 +167,11 @@ install_centos() {
   if [[ $(ver $ROCM_VERSION) -ge $(ver 6.0) ]]; then
       for kdb in /opt/rocm/share/miopen/db/*.kdb
       do
-          sqlite3 $kdb "PRAGMA journal_mode=off; PRAGMA VACUUM;"
+	# journal_mode=delete seems to work on some kdbs that have "wal" as initial journal_mode
+	sqlite3 $kdb "PRAGMA journal_mode=delete; PRAGMA VACUUM;"
+	JOURNAL_MODE=$(sqlite3 $kdb "PRAGMA journal_mode;")
+	# Both "delete" and "off" work in cases where user doesn't have write permissions to directory where kdbs are installed
+	if [[ $JOURNAL_MODE != "delete" ]] && [[ $JOURNAL_MODE != "off" ]]; then echo "kdb journal_mode change failed" && exit 1; fi
       done
   fi
 
