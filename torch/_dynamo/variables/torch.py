@@ -250,7 +250,6 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         ):
             return AutocastModeVariable.create(self.value, args, kwargs)
         elif self.value in (
-            torch.profiler.profile,
             torch.profiler.record_function,
             torch.autograd.profiler.profile,
             torch.autograd.profiler.record_function,
