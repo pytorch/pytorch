@@ -71,8 +71,6 @@ def load_aoti_eager_cache(ns: str, op_func_name_with_overload: str, device_type:
             with open(op_conf) as f:
                 json_data = json.load(f)
                 for item in json_data:
-                    shape_env = ShapeEnv()
-
                     # Get absolution path for kernel library
                     kernel_lib_abs_path = device_kernel_cache / item["kernel_path"]
                     item["kernel_path"] = kernel_lib_abs_path.as_posix()
@@ -80,6 +78,9 @@ def load_aoti_eager_cache(ns: str, op_func_name_with_overload: str, device_type:
                     # Check if the kernel library exists
                     if not kernel_lib_abs_path.exists():
                         return []
+
+                    # Create shape environment per kernel
+                    shape_env = ShapeEnv()
 
                     for metadata in item["meta_info"]:
                         if "is_dynamic" in metadata and metadata["is_dynamic"]:
@@ -107,20 +108,24 @@ def load_aoti_eager_cache(ns: str, op_func_name_with_overload: str, device_type:
                                 )
                                 for idx in range(len(sizes_hint))
                             ]
+
                         if (
                             "device_type" in metadata
                             and metadata["device_type"] == "cpu"
                         ):
                             metadata["device_index"] = -1
+
                         for dtype_key in ["dtype", "dtype_value"]:
                             if dtype_key in metadata:
                                 metadata[dtype_key] = getattr(
                                     torch, metadata[dtype_key].split(".")[-1]
                                 )
+
                         if "layout_value" in metadata:
                             metadata["layout_value"] = getattr(
                                 torch, metadata["layout_value"].split(".")[-1]
                             )
+
                         if "memory_format_value" in metadata:
                             metadata["memory_format_value"] = getattr(
                                 torch, metadata["memory_format_value"].split(".")[-1]
@@ -349,13 +354,14 @@ def aoti_compile_with_persistent_cache(
                 assume_static_by_default=torch._dynamo.config.assume_static_by_default,
             )
 
-            # Remove unused nodes
+            # Remove unused nodes. Should the signature of the graph be updated?
             gm.graph.lint()
             for node in reversed(gm.graph.nodes):
                 if len(node.users) == 0 and node.op != "output":
                     gm.graph.erase_node(node)
             gm.recompile()
 
+            # Compile the graph to produce kernel library
             with torch.no_grad():
                 kernel_lib_path = torch._inductor.aot_compile(gm, args, kwargs, options=options)  # type: ignore[arg-type]
 
@@ -372,20 +378,19 @@ def aoti_compile_with_persistent_cache(
 
             kernel_metadata_items = []
 
-            shape_env = ShapeEnv() if dynamic else None
-            tensor_offset = 0
+            tensor_arg_offset = 0
             for idx, input in enumerate(flattened_inputs):
                 if isinstance(input, torch.Tensor):
                     metadata = extract_tensor_metadata(
-                        dynamic, input, fake_inputs[tensor_offset]
+                        dynamic, input, fake_inputs[tensor_arg_offset]
                     )
-                    tensor_offset = tensor_offset + 1
+                    tensor_arg_offset = tensor_arg_offset + 1
                 elif isinstance(input, list):
                     assert all(isinstance(item, torch.Tensor) for item in input)
                     metadata = extract_tensor_list_metadata(
-                        dynamic, input, fake_inputs[tensor_offset:]
+                        dynamic, input, fake_inputs[tensor_arg_offset:]
                     )
-                    tensor_offset = tensor_offset + len(input)
+                    tensor_arg_offset = tensor_arg_offset + len(input)
                 elif isinstance(input, supported_scalar_types()):
                     metadata = extract_scalar_metadata(device_type, input)
                 elif isinstance(input, str):

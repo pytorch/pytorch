@@ -65,6 +65,7 @@ struct TensorMetadata {
       c10::DispatchKeySet dispatch_key_set,
       std::vector<int64_t> sizes,
       std::vector<int64_t> strides,
+      std::vector<int64_t> dim_order,
       bool requires_grad = false);
   TensorMetadata(
       bool is_symbolic,

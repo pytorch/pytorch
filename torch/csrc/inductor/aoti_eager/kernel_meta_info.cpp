@@ -30,11 +30,13 @@ TensorMetadata::TensorMetadata(
     c10::DispatchKeySet dispatch_key_set,
     std::vector<int64_t> sizes,
     std::vector<int64_t> strides,
+    std::vector<int64_t> dim_order,
     bool requires_grad)
     : is_symbolic_(is_symbolic),
       dtype_(dtype),
       device_(device),
       dispatch_key_set_(dispatch_key_set),
+      dim_order_(dim_order),
       requires_grad_(requires_grad) {
   std::transform(
       sizes.begin(), sizes.end(), std::back_inserter(sizes_), [](int64_t size) {
@@ -119,17 +121,19 @@ bool TensorMetadata::operator==(const TensorMetadata& other) const {
       return res;
     }
 
-    auto dim_idx = dim_order[0];
-    if (other.strides_[dim_idx].value().expect_int() != 1) {
+    auto cur_dim_idx = dim_order[0];
+    if (other.strides_[cur_dim_idx].value().expect_int() != 1) {
       return false;
     }
 
-    for (auto dim_order_idx = 1; dim_order_idx < dim_order.size();
+    // Check tensor layout
+    for (size_t dim_order_idx = 1; dim_order_idx < dim_order.size();
          dim_order_idx++) {
-      dim_idx = dim_order[dim_order_idx];
-      auto dim_cont_size = other.sizes_[dim_idx - 1].value().expect_int();
-      auto dim_cont_stride = other.strides_[dim_idx - 1].value().expect_int();
-      auto dim_cur_stride = other.strides_[dim_idx].value().expect_int();
+      cur_dim_idx = dim_order[dim_order_idx];
+      auto cont_dim_idx = dim_order[dim_order_idx - 1];
+      auto dim_cont_size = other.sizes_[cont_dim_idx].value().expect_int();
+      auto dim_cont_stride = other.strides_[cont_dim_idx].value().expect_int();
+      auto dim_cur_stride = other.strides_[cur_dim_idx].value().expect_int();
       if (dim_cur_stride != dim_cont_size * dim_cont_stride)
         return false;
     }
