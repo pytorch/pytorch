@@ -685,9 +685,8 @@ class WrapperCodeGen(CodeGen):
         for line in code.split("\n"):
             self.writeline(line)
 
-        stream_name = self.write_get_raw_stream(
-            V.graph.scheduler.current_device.index, V.graph
-        )
+        current_device = V.graph.scheduler.get_current_device_or_throw()
+        stream_name = self.write_get_raw_stream(current_device.index, V.graph)
         self.writeline(
             f"{kernel_name}.run({', '.join(args)}, grid={grid}, stream={stream_name})"
         )
@@ -1149,7 +1148,9 @@ class WrapperCodeGen(CodeGen):
                 size_dtype=index_dtype,
                 indices=non_constant_indices,
             ),
-            "device": DeviceProperties.create(V.graph.scheduler.current_device),
+            "device": DeviceProperties.create(
+                V.graph.scheduler.get_current_device_or_throw()
+            ),
             # Triton compiler includes equal_to_1 args into constants even
             # when they are not constexpr. otherwise there may be a segfault
             # during launching the Inductor-compiled Triton kernel.
@@ -1270,9 +1271,8 @@ class WrapperCodeGen(CodeGen):
 
         traverse(kernel)
 
-        compile_wrapper.writeline(
-            f"''', device_str='{V.graph.scheduler.current_device.type}')"
-        )
+        current_device = V.graph.scheduler.get_current_device_or_throw()
+        compile_wrapper.writeline(f"''', device_str='{current_device.type}')")
         _, lineno = inspect.getsourcelines(kernel.fn)
         srcfile = inspect.getsourcefile(kernel.fn)
         metadata = f"# Original path: {srcfile}:{lineno}"
@@ -1387,9 +1387,8 @@ class WrapperCodeGen(CodeGen):
         """
         if cuda:
             call_args_str = ", ".join(pexpr(item) for item in call_args)
-            stream_name = self.write_get_raw_stream(
-                V.graph.scheduler.current_device.index, V.graph
-            )
+            current_device = V.graph.scheduler.get_current_device_or_throw()
+            stream_name = self.write_get_raw_stream(current_device.index, V.graph)
             if triton:
                 grid_str = ", ".join(pexpr(item) for item in grid)
                 grid_str = f"{grid_fn}({grid_str})"
@@ -1686,6 +1685,10 @@ class WrapperCodeGen(CodeGen):
     @staticmethod
     def statically_known_int_or_none(x):
         try:
+            if getattr(x, "free_symbols", None):
+                # _maybe_evaluate_static will return (s0 // (2 // s0)) as 2, but
+                # the actual codegen will still generate the full expression here.
+                return None
             val = V.graph._shape_env._maybe_evaluate_static(x)
             return int(val)
         except Exception:
