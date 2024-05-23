@@ -15,7 +15,7 @@
 #include <torch/csrc/utils/cpp_stacktraces.h>
 #include <torch/csrc/utils/pybind.h>
 
-#if defined(USE_DISTRIBUTED) && defined(USE_C10D)
+#if defined(USE_DISTRIBUTED)
 #include <torch/csrc/distributed/c10d/exception.h>
 #endif
 

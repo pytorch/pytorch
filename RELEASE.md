@@ -262,7 +262,7 @@ requires `pytorchbot`, so it's only available in PyTorch atm.
 
 ### Cherry Picking Reverts
 
-If PR that has been cherry-picked into release branch has been reverted, it's cherry-pick must be reverted as well.
+If PR that has been cherry-picked into release branch has been reverted, its cherry-pick must be reverted as well.
 
 Reverts for changes that was committed into the main branch prior to the branch cut, must be propagated into release branch as well.
 

@@ -1978,6 +1978,14 @@ torch.cuda.synchronize()
         self.assertTrue(output.dtype is torch.float16)
         output.sum().backward()
 
+    def test_cuda_autocast_deprecated_warning(self):
+        with self.assertWarnsRegex(
+            DeprecationWarning,
+            r"torch.cuda.amp.autocast\(args...\) is deprecated. Please use torch.amp.autocast\('cuda', args...\) instead.",
+        ):
+            with torch.cuda.amp.autocast():
+                _ = torch.ones(10)
+
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     @serialTest()
@@ -4243,7 +4251,10 @@ class TestCudaMallocAsync(TestCase):
 
     @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
     def test_nvml_get_handler(self):
-        self.assertTrue(torch.cuda._get_pynvml_handler() is not None)
+        if not torch.version.hip:
+            self.assertTrue(torch.cuda._get_pynvml_handler() is not None)
+        else:
+            self.assertTrue(torch.cuda._get_amdsmi_handler() is not None)
 
     @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
     def test_temperature(self):
