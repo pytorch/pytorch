@@ -319,6 +319,11 @@ class CachingAutotuner(KernelInterface):
                     if new_config in seen_configs:
                         continue
                     seen_configs.add(new_config)
+                    log.debug(
+                        "Dynamically scale down RBLOCK from TritonConfig(%s) and get a new TritonConfig(%s)",
+                        triton_config,
+                        new_config,
+                    )
                     self.launchers.append(
                         self._precompile_config(new_config, warm_cache_only)[1]
                     )
@@ -1086,17 +1091,18 @@ def cached_autotune(
                 )
 
         best_config = None
-        if cache_filename is not None and os.path.exists(cache_filename):
-            with open(cache_filename) as fd:
-                best_config = json.loads(fd.read())
-        elif remote_cache is not None and remote_cache_key is not None:
-            best_config = remote_cache.get(remote_cache_key)
+        if not inductor_meta.get("force_disable_caches", False):
+            if cache_filename is not None and os.path.exists(cache_filename):
+                with open(cache_filename) as fd:
+                    best_config = json.loads(fd.read())
+            elif remote_cache is not None and remote_cache_key is not None:
+                best_config = remote_cache.get(remote_cache_key)
 
-        best_config = load_cached_autotuning(
-            best_config, configs_hash, configs, inductor_meta
-        )
-        if best_config:
-            configs = [best_config]
+            best_config = load_cached_autotuning(
+                best_config, configs_hash, configs, inductor_meta
+            )
+            if best_config:
+                configs = [best_config]
 
         def save_cache_hook(cfg, time_taken_ns, found_by_coordesc=False):
             data = {
@@ -1479,12 +1485,32 @@ def _reduction_configs(
     assert len(size_hints) == 2
     rnumel = size_hints[-1]
 
+    MAX_RBLOCK = 2048
+    if (
+        size_hints[0] >= 1024
+        and inductor_meta.get("num_load", 0) + inductor_meta.get("num_reduction", 0)
+        >= 10
+    ):
+        # A heuristics to reduce RBLOCK if a kernel potentially need many registers.
+        # Consider load and reduction since load need move data into registers and
+        # reduction needs an accumulator.
+        #
+        # The magic numbers are a bit arbitrary.
+        #
+        # We cannot rely on dynamically scaling down RBLOCK later, since sometimes
+        # triton makes it to use less registers with worse perf. Check:
+        # https://github.com/pytorch/pytorch/issues/126463
+        #
+        # The heuristic is a very simple one since registers can be reused. But
+        # hopefully it can be a good enough indicator.
+        MAX_RBLOCK = 1024
+
     contiguous_config = triton_config_reduction(
-        size_hints, 1, (rnumel if 256 <= rnumel < 2048 else 2048)
+        size_hints, 1, (rnumel if 256 <= rnumel < MAX_RBLOCK else MAX_RBLOCK)
     )
     outer_config = triton_config_reduction(size_hints, 64, 8)
     tiny_config = triton_config_reduction(
-        size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, min(rnumel, 2048)
+        size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, min(rnumel, MAX_RBLOCK)
     )
     if inductor_meta.get("max_autotune") or inductor_meta.get("max_autotune_pointwise"):
         pass  # skip all these cases

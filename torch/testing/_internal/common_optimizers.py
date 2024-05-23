@@ -590,6 +590,7 @@ def optim_inputs_func_asgd(device, dtype=None):
     ]
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
+        OptimizerInput(params=None, kwargs={"lambd": 0.1}, desc="non-default lambd"),
         OptimizerInput(params=None, kwargs={"lr": 0.02}, desc="non-default lr"),
         OptimizerInput(params=None, kwargs={"t0": 100}, desc="t0"),
         OptimizerInput(params=None, kwargs={"maximize": True}, desc="maximize"),
@@ -1450,6 +1451,13 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_defaults_changed_to_foreach",
             ),
+            DecorateInfo(
+                unittest.skip(
+                    "ASGD internally changes the weights even with zero grad"
+                ),
+                "TestOptimRenewed",
+                "test_step_is_noop_for_zero_grads",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1464,6 +1472,18 @@ optim_db: List[OptimizerInfo] = [
             # Fails on MacOS 13.2.1 in CI https://github.com/pytorch/pytorch/issues/117094
             DecorateInfo(
                 skipIfMps, "TestOptimRenewed", "test_can_load_older_state_dict"
+            ),
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.complex64: tol(
+                            rtol=4.5e-5,
+                            atol=5e-5,
+                        )
+                    }
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
             ),
             DecorateInfo(
                 unittest.skip("Does not support param groups"),
