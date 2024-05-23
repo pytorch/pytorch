@@ -737,7 +737,6 @@ def fx_codegen_and_compile(
                 const_gm,
                 example_inputs=[],
                 shape_env=shape_env,
-                num_static_inputs=num_fixed,
                 graph_id=graph_id,
                 cpp_wrapper=cpp_wrapper,
                 aot_mode=aot_mode,
@@ -759,7 +758,6 @@ def fx_codegen_and_compile(
             # we currently use fake tensors and defake them later.
             example_inputs=example_inputs,
             shape_env=shape_env,
-            num_static_inputs=num_fixed,
             graph_id=graph_id,
             cpp_wrapper=cpp_wrapper,
             aot_mode=aot_mode,
