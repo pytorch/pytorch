@@ -260,20 +260,24 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(32, 64, device=self.device),)
         self.check_model(Model(), example_inputs)
 
-    def test_large(self):
+    def test_large_weight(self):
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.linear = torch.nn.Linear(512, 250112)
+                self.linear = torch.nn.Linear(2048, 262144)
 
             def forward(self, x, y):
                 return x + self.linear(y)
 
         example_inputs = (
-            torch.randn(1, 250112, device=self.device),
-            torch.randn(1, 512, device=self.device),
+            torch.randn(1, 262144, device=self.device),
+            torch.randn(1, 2048, device=self.device),
         )
-        self.check_model(Model(), example_inputs)
+
+        # We only test compilation since we often get OOM running in CI.
+        model = Model()
+        model = model.to(self.device)
+        AOTIRunnerUtil.compile(model, example_inputs)
 
     def test_large_mmaped_weights(self):
         class Model(torch.nn.Module):
@@ -2961,8 +2965,10 @@ CPU_TEST_FAILURES = {
     "test_duplicate_constant_folding": fail_with_and_without_stack_allocation(
         is_skip=True
     ),
-    "test_dup_unbacked_sym_decl": fail_with_and_without_stack_allocation(),
-    "test_dup_unbacked_sym_decl_with_refinement": fail_with_and_without_stack_allocation(),
+    "test_dup_unbacked_sym_decl": fail_minimal_arrayref_interface(is_skip=True),
+    "test_dup_unbacked_sym_decl_with_refinement": fail_minimal_arrayref_interface(
+        is_skip=True
+    ),
     "test_dynamic_cat": fail_minimal_arrayref_interface(),
     # https://github.com/pytorch/pytorch/issues/122978
     "test_dynamic_scalar": fail_stack_allocation(is_skip=True),
@@ -2979,7 +2985,6 @@ CPU_TEST_FAILURES = {
     # minimal arrayref interface only works with CPU; test crashes.
     # https://github.com/pytorch/pytorch/issues/122983
     "test_multi_device": fail_minimal_arrayref_interface(is_skip=True),
-    "test_normal_functional": fail_with_and_without_stack_allocation(),
     # undefined symbol: _Z16aoti_torch_dtypeIN3c104HalfEEiv
     "test_non_contiguous_output_alias": fail_with_and_without_stack_allocation(
         is_skip=True
@@ -3042,13 +3047,7 @@ CPU_TEST_FAILURES = {
 
 CUDA_TEST_FAILURES = {
     # test_failures, xfail by default, set is_skip=True to skip
-    "test_dup_unbacked_sym_decl": fail_abi_compatible_cuda(),
-    "test_dup_unbacked_sym_decl_with_refinement": fail_abi_compatible_cuda(),
     "test_large_grid": fail_cuda(),
-    "test_normal_functional": fail_abi_compatible_cuda(),
-    # There is a double-free issue which will be fixed in another PR
-    # no ABI shim fn for torch.sort; remove this when adding one
-    "test_triton_kernel_multi_output_arg": fail_abi_compatible_cuda(is_skip=True),
     # no runtime checks for non_abi_compatible mode
     "test_runtime_checks": fail_non_abi_compatible_cuda(is_skip=True),
     "test_runtime_checks_complex": fail_non_abi_compatible_cuda(is_skip=True),
@@ -3062,12 +3061,10 @@ CUDA_TEST_FAILURES = {
 if TEST_WITH_ROCM:
     CUDA_TEST_FAILURES.update(
         {
-            "test_dup_unbacked_sym_decl": fail_cuda(is_skip=True),
-            "test_dup_unbacked_sym_decl_with_refinement": fail_cuda(is_skip=True),
             "test_addmm_multiple_dynamic": fail_cuda(is_skip=True),
             "test_bmm_multiple_dynamic": fail_cuda(is_skip=True),
             "test_convolution": fail_cuda(is_skip=True),
-            "test_large": fail_cuda(is_skip=True),
+            "test_large_weight": fail_cuda(is_skip=True),
             "test_large_mmaped_weights": fail_cuda(is_skip=True),
             "test_missing_cubin": fail_cuda(is_skip=True),
             "test_multi_device": fail_cuda(is_skip=True),
@@ -3112,8 +3109,9 @@ if not IS_FBCODE:
             "test_constant_folding": fail_minimal_arrayref_interface(is_skip=True),
             "test_convolution": fail_minimal_arrayref_interface(is_skip=True),
             "test_empty_graph": fail_minimal_arrayref_interface(is_skip=True),
-            "test_large": fail_minimal_arrayref_interface(is_skip=True),
+            "test_large_weight": fail_minimal_arrayref_interface(is_skip=True),
             "test_large_mmaped_weights": fail_minimal_arrayref_interface(is_skip=True),
+            "test_normal_functional": fail_minimal_arrayref_interface(is_skip=True),
             "test_misc_1": fail_minimal_arrayref_interface(is_skip=True),
             "test_missing_output": fail_minimal_arrayref_interface(is_skip=True),
             "test_model_modified_weights": fail_minimal_arrayref_interface(
