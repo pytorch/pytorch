@@ -1273,12 +1273,13 @@ class CppWrapperCpu(WrapperCodeGen):
                     break
             assert grid_decision is not None
 
+        current_device = V.graph.scheduler.get_current_device_or_throw()
         self.generate_kernel_call(
             kernel_name,
             args,
             arg_types=arg_types,
             grid=grid_decision,
-            device_index=V.graph.scheduler.current_device.index,
+            device_index=current_device.index,
             cuda=True,
             triton=True,
             triton_meta=triton_meta,
@@ -2264,12 +2265,15 @@ if (py_{buf_name}.get() == NULL) {{
             return f"{self.c_type_for_prim_type(type_.getElementType())}*"
         elif isinstance(type_, torch.TensorType):
             return "AtenTensorHandle"
-        elif isinstance(type_, torch.IntType):
+        elif isinstance(type_, (torch.IntType, torch.SymIntType)):
             return "int64_t"
+        elif (
+            isinstance(type_, (torch.BoolType, torch.SymBoolType, torch.EnumType))
+            or repr(type_) == "ScalarType"
+        ):
+            return "int32_t"
         elif isinstance(type_, torch.FloatType):
             return "float"
-        elif isinstance(type_, torch.BoolType):
-            return "int32_t"
         else:
             raise AssertionError(f"Unexpected type in c_type_for_prim_type: {type_=}")
 
@@ -2297,7 +2301,9 @@ if (py_{buf_name}.get() == NULL) {{
                 return "std::numeric_limits<float>::infinity()"
             else:
                 return "-std::numeric_limits<float>::infinity()"
-
+        elif isinstance(val, (list, tuple)):
+            # FIXME: This happens because type_ is not always properly set to torch.ListType
+            return f"{{{', '.join(self.val_to_arg_str(x, None) for x in val)}}}"
         else:
             return repr(val)
 
@@ -2306,16 +2312,17 @@ if (py_{buf_name}.get() == NULL) {{
             # None needs special care. It either represent nullopt or an empty tensor
             if config.abi_compatible:
                 if type_ is None or isinstance(type_, torch.OptionalType):
-                    if type_ is None or isinstance(
-                        type_.getElementType(), torch.TensorType
+                    if type_ is not None and isinstance(
+                        type_.getElementType(),
+                        (
+                            torch.ListType,
+                            torch.TupleType,
+                            torch.DeviceObjType,
+                        ),
                     ):
-                        return "0"  # nullptr is not available in C
-                    else:
-                        assert isinstance(
-                            type_.getElementType(),
-                            (torch.ListType, torch.TupleType, torch.DeviceObjType),
-                        ), f"Unexpected arg type: {type_=}"
                         return "0, 0"
+                    else:
+                        return "0"  # nullptr is not available in C
                 elif isinstance(type_, torch.TensorType):
                     # create an empty tensor, the equivalent of at::Tensor()
                     var_name = f"var_{next(self.arg_var_id)}"
@@ -2355,7 +2362,7 @@ if (py_{buf_name}.get() == NULL) {{
                         return f"&{var_name}, {aux}"
                     else:
                         self.writeline(
-                            f"auto {var_name} = {self.val_to_arg_str(val, element_type)};"
+                            f"{self.c_type_for_prim_type(element_type)} {var_name} = {self.val_to_arg_str(val, element_type)};"
                         )
                         return f"&{var_name}"
                 elif config.c_shim_version == "2":
@@ -2375,6 +2382,8 @@ if (py_{buf_name}.get() == NULL) {{
                         f"AtenTensorHandle {var_name} = {base_handle}.get();"
                     )
                     return f"&{var_name}"
+            else:
+                return self.val_to_arg_str(val, element_type)
 
         elif isinstance(type_, torch.ListType):
             assert isinstance(
