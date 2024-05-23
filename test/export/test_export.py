@@ -1499,6 +1499,50 @@ class TestExport(TestCase):
         self.assertTrue(torch.allclose(orig_res[1], ep_res[1]))
         self.assertTrue(torch.allclose(orig_res[2], ep_res[2]))
 
+    def test_unflatten_asserts(self):
+        # TODO: strict-export fails
+        class M1(torch.nn.Module):
+            def forward(self, x, y):
+                b = x.item()
+
+                torch._check_is_size(b)
+                torch._check(b < y.size(0))
+                return y[:b]
+
+        class M3(torch.nn.Module):
+            def forward(self, x, y):
+                b = x.item()
+
+                torch._check_is_size(b)
+                torch._check(b < y.size(0) * 2)
+                return y[:b]
+
+        class M2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m1 = M1()
+                self.m3 = M3()
+
+            def forward(self, x, y):
+                return self.m1(x, y) + self.m3(x, y)
+
+        inputs = (torch.tensor(3), torch.randn(10))
+
+        ep = torch.export.export(
+            M2(), inputs, dynamic_shapes={"x": None, "y": (Dim("moo"),)}, strict=False
+        )
+        orig_res = M2()(*inputs)
+        ep_res = ep.module()(*inputs)
+        self.assertTrue(torch.allclose(orig_res[0], ep_res[0]))
+        self.assertTrue(torch.allclose(orig_res[1], ep_res[1]))
+        self.assertTrue(torch.allclose(orig_res[2], ep_res[2]))
+
+        unflattened = torch.export.unflatten(ep)
+        ep_res = unflattened(*inputs)
+        self.assertTrue(torch.allclose(orig_res[0], ep_res[0]))
+        self.assertTrue(torch.allclose(orig_res[1], ep_res[1]))
+        self.assertTrue(torch.allclose(orig_res[2], ep_res[2]))
+
     def test_export_func_with_var_keyword_pytree_args(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, *args, kw1, kw2, **kwargs):
