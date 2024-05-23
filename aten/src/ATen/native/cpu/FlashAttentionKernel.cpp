@@ -807,19 +807,20 @@ void flash_attention_backward_kernel_impl(
   auto q_seq_len = query.size(1);
 
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, query.scalar_type(), "flash_attention_backward", [&] {
-    if (!attn_mask.has_value()) {
+    if (!attn_mask.has_value() || !attn_mask.value().defined()) {
+      using accum_t = at::opmath_type<scalar_t>;
       if (q_seq_len >= 768) {
-        cpu_flash_attention_backward<scalar_t, scalar_t, 256, 512>(
+        cpu_flash_attention_backward<scalar_t, accum_t, 256, 512>(
           grad_q, grad_k, grad_v, grad_out_contig,
           query, key, value, out, logsumexp,
           dropout_p, is_causal, attn_mask, scale);
       } else if (q_seq_len >= 192) {
-        cpu_flash_attention_backward<scalar_t, scalar_t, 64, 512>(
+        cpu_flash_attention_backward<scalar_t, accum_t, 64, 512>(
           grad_q, grad_k, grad_v, grad_out_contig,
           query, key, value, out, logsumexp,
           dropout_p, is_causal, attn_mask, scale);
       } else {
-        cpu_flash_attention_backward<scalar_t, scalar_t, 32, 512>(
+        cpu_flash_attention_backward<scalar_t, accum_t, 32, 512>(
           grad_q, grad_k, grad_v, grad_out_contig,
           query, key, value, out, logsumexp,
           dropout_p, is_causal, attn_mask, scale);
