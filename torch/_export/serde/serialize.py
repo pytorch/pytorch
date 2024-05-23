@@ -2822,7 +2822,7 @@ class CustomOpHandler:
         raise NotImplementedError(f"{cls.__class__} op_type() must be implemented")
 
     def op_schema(self, op_type):
-        pass
+        raise NotImplementedError(f"{cls.__class__} op_schema() must be implemented")
 
 
 def register_custom_op_handler(
