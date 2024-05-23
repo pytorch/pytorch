@@ -4,6 +4,9 @@ set -eoux pipefail
 
 SYNC_BRANCH=fbcode/pytorch-stable-prototype
 
+git config user.email "fake@example.com"
+git config user.name  "PyTorch Stable Bot"
+
 git fetch origin main
 git fetch origin "$SYNC_BRANCH"
 git checkout "$SYNC_BRANCH"
