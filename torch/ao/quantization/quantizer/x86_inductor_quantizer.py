@@ -360,11 +360,8 @@ def _get_supported_config_and_operators() -> List[OperatorConfig]:
     return _get_supported_x86_inductor_config_and_operators()
 
 
-from functools import wraps
-
-
 def config_checker(method: Callable) -> Callable:
-    @wraps(method)
+    @functools.wraps(method)
     def wrapper(
         self: "X86InductorQuantizer",
         name: Any,
@@ -629,6 +626,8 @@ class X86InductorQuantizer(Quantizer):
             conv_gemm_node_idx = 1
             extra_input_node_idx = 0
         extra_input_node = binary_node.args[extra_input_node_idx]  # type: ignore[index]
+        assert isinstance(extra_input_node, Node)
+        return conv_gemm_node_idx, extra_input_node_idx
 
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
         """Annotate the model with quantization configurations.
@@ -685,8 +684,6 @@ class X86InductorQuantizer(Quantizer):
         such as maxpool2d, which only supports output with int8 data type when the input is with int8 data type,
         we need to annotate the output of this pattern.
         """
-        if config is None:
-            return
 
         # Step1: Recipe of fusion patterns like conv/linear.
         self._annotate_conv2d_fusion_pattern(model, config, filter_fn)
@@ -937,7 +934,7 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_conv2d_fusion_pattern(
         self, model: torch.fx.GraphModule, config, filter_fn
     ):
-        if config.is_qat:
+        if self._is_qat:
             # Annotate QAT specific pattern: mainly due to BN not folded in prepare_qat
             self._annotate_qat_conv2d_fusion_pattern(model, config, filter_fn)
         self._annotate_conv2d_binary_unary(model, config, filter_fn)
@@ -948,7 +945,7 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_linear_fusion_pattern(
         self, model: torch.fx.GraphModule, config, filter_fn
     ):
-        if config.input_activation and not config.input_activation.is_dynamic:
+        if not self._is_dynamic:
             # <TODO> Weiwen: Dynamic Quant of linear unary will be supported in next step
             self._annotate_linear_binary_unary(model, config, filter_fn)
             self._annotate_linear_unary(model, config, filter_fn)
@@ -957,7 +954,7 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_matmul(
         self,
         model: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
+        quantization_config: Optional[QuantizationConfig],
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ):
         for node in model.graph.nodes:
