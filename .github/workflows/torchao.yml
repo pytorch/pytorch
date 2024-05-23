@@ -74,7 +74,6 @@ jobs:
     name: cuda12.1-py3.10-gcc9-sm80
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-focal-cuda12_1-py3_10-gcc9-torchao-build
-    if: github.event.schedule == '0 7 * * 1-6'
     with:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
       dashboard-tag: noquant-${{ inputs.noquant }}-int8dynamic-${{ inputs.int8dynamic }}-int8weightonly-${{ inputs.int8weightonly }}-int4weightonly-${{ inputs.int4weightonly }}-autoquant-${{ inputs.autoquant }}
