@@ -8,11 +8,11 @@ from datetime import datetime
 from socket import gethostname
 from typing import Any, Optional
 
-from tools.strobelight.cli_function_profiler import StrobelightCLIFunctionProfiler
+from torch.utils._strobelight.cli_function_profiler import (
+    StrobelightCLIFunctionProfiler,
+)
 
-__can_extern__ = True
-
-__all__ = ["StrobelightCompileTimeProfiler"]
+# __can_extern__ = True
 
 logger = logging.getLogger("strobelight_compile_time_profiler")
 

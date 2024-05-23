@@ -17,7 +17,11 @@ if os.environ.get("TORCH_COMPILE_STROBELIGHT", False):
         )
     else:
         log.info("Strobelight profiler is enabled via environment variable")
-        torch.utils.strobelight.StrobelightCompileTimeProfiler.enable()
+        from torch.utils._strobelight.compile_time_profiler import (
+            StrobelightCompileTimeProfiler,
+        )
+
+        StrobelightCompileTimeProfiler.enable()
 
 # this arbitrary-looking assortment of functionality is provided here
 # to have a central place for overrideable behavior. The motivating
@@ -73,12 +77,16 @@ def throw_abstract_impl_not_imported_error(opname, module, context):
 
 # NB!  This treats "skip" kwarg specially!!
 def compile_time_strobelight_meta(phase_name):
+    from torch.utils._strobelight.compile_time_profiler import (
+        StrobelightCompileTimeProfiler,
+    )
+
     def compile_time_strobelight_meta_inner(function):
         @functools.wraps(function)
         def wrapper_function(*args, **kwargs):
             if "skip" in kwargs:
                 kwargs["skip"] = kwargs["skip"] + 1
-            return torch.utils.strobelight.StrobelightCompileTimeProfiler.profile_compile_time(
+            return StrobelightCompileTimeProfiler.profile_compile_time(
                 function, phase_name, *args, **kwargs
             )
 

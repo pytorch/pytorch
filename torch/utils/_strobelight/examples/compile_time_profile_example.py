@@ -1,6 +1,8 @@
 import torch
 
-from tools.strobelight.compile_time_profiler import StrobelightCompileTimeProfiler
+from torch.utils._strobelight.compile_time_profiler import (
+    StrobelightCompileTimeProfiler,
+)
 
 if __name__ == "__main__":
     # You can pass TORCH_COMPILE_STROBELIGHT=True instead.
@@ -11,11 +13,12 @@ if __name__ == "__main__":
 
     @torch.compile()
     def work(n):
-        for i in range(100):
+        for i in range(3):
             for j in range(5):
                 fn(torch.rand(n, n), torch.rand(n, n), torch.rand(n, n))
 
     # Strobelight will be called only 3 times because dynamo will be disabled after
     # 3rd iteration.
-    for i in range(1, 20):
+    for i in range(3):
+        torch._dynamo.reset()
         work(i)
