@@ -53,38 +53,46 @@ def get_filtered_export_db_tests():
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerialize(TestCase):
     def test_export_with_custom_op_serialization(self):
-        class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
+        class TestModule(torch.nn.Module):
             def forward(self, x):
                 return x + 1
 
-        class FooCustomOp(torch._export.serde.serialize.CustomOpHandler):
+        class FooCustomOp(torch.nn.Module):
+            pass
+
+        class FooCustomOpHandler(torch._export.serde.serialize.CustomOpHandler):
             def namespace(self):
-                return "foo"
+                return "Foo"
 
             def op_name(self, op_type):
-                return "target"
+                if op_type == FooCustomOp:
+                    return "FooCustomOp"
+                return None
 
-            def serialize_target(self, target):
-                pass
+            def op_type(self, op_name):
+                if op_name == "FooCustomOp":
+                    return FooCustomOp
+                return None
 
-            def __call__(self, *arg, **kwargs):
-                pass
+            def op_schema(self, op_type):
+                if op_type == FooCustomOp:
+                    return self.attached_schema
+                return None
 
         inp = (torch.ones(10),)
-        ep = export(Foo(), inp)
+        ep = export(TestModule(), inp)
 
         # Register the custom op handler.
         foo_custom_op = FooCustomOp()
-        torch._export.serde.serialize.register_custom_op_serialization(
-            foo_custom_op, type(foo_custom_op)
+        foo_custom_op_handler = FooCustomOpHandler()
+        torch._export.serde.serialize.register_custom_op_handler(
+            foo_custom_op_handler, type(foo_custom_op)
         )
 
         # Inject the custom operator.
         for node in ep.graph.nodes:
             if node.name == "add":
+                foo_custom_op_handler.attached_schema = node.target._schema
                 node.target = foo_custom_op
 
         # Serialization.
