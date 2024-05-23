@@ -145,18 +145,6 @@ class VecMask {
     return result;
   }
 
-  static VecMask<T, N> minimum(
-    const VecMask<T, N>& a,
-    const VecMask<T, N>& b) {
-    return VecMask<T, N>::blendv(b, a, a < b);
-  }
-
-  static VecMask<T, N> maximum(
-    const VecMask<T, N>& a,
-    const VecMask<T, N>& b) {
-    return VecMask<T, N>::blendv(b, a, a > b);
-  }
-
   void store(bool* b, int count = size()) {
     constexpr int L = (VectorizedN<T, N>::size() + Vectorized<bool>::size() - 1)/ Vectorized<bool>::size();
     auto res = this->to<bool, L>();

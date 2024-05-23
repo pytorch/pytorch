@@ -1318,7 +1318,7 @@ class CppVecOverrides(CppOverrides):
         if a.dtype == torch.bool:
             assert b.dtype == torch.bool
             a_cast, b_cast = unify_mask_base_type(V.kernel.compute, (a, b))
-            return f"decltype({a_cast})::minimum({a_cast}, {b_cast})"
+            return f"{a_cast} & {b_cast}"
         else:
             return f"at::vec::minimum({a}, {b})"
 
@@ -1327,7 +1327,7 @@ class CppVecOverrides(CppOverrides):
         if a.dtype == torch.bool:
             assert b.dtype == torch.bool
             a_cast, b_cast = unify_mask_base_type(V.kernel.compute, (a, b))
-            return f"decltype({a_cast})::maximum({a_cast}, {b_cast})"
+            return f"{a_cast} | {b_cast}"
         else:
             return f"at::vec::maximum({a}, {b})"
 
