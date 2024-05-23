@@ -292,7 +292,7 @@ class FSDPParamGroup:
             if torch._dynamo.compiled_autograd.compiled_autograd_enabled:
                 for fsdp_param in self.fsdp_params:
                     fsdp_param.realloc_all_gather_outputs()
-                    fsdp_param.init_unsharded_param(mutate_existing=True)
+                    fsdp_param.init_unsharded_param()
             self._training_state = TrainingState.PRE_BACKWARD
             self.unshard()  # no-op if prefetched
             self.wait_for_unshard()
@@ -352,11 +352,7 @@ class FSDPParamGroup:
             if fsdp_param.grad_offload_event is not None:
                 fsdp_param.grad_offload_event.synchronize()
                 fsdp_param.grad_offload_event = None
-            # NOTE(yf225): Setting _unsharded_param to None at the end of backward, so that we always
-            # redo AGO buffer allocation and _unsharded_param nn.Parameter creation in the next forward for this FSDPParamGroup.
-            # We do this so that those allocation ops are always part of FWD graph.
-            if torch.distributed._composable.fsdp._fsdp_state.no_storage_resize():
-                fsdp_param._unsharded_param = None
+            fsdp_param._unsharded_param = None
         self._post_forward_indices.clear()
 
     def _prefetch_unshard(self):

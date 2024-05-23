@@ -62,43 +62,22 @@ def all_gather_copy_in(all_gather_input_numel, world_size, rank, dtype, device, 
     return all_gather_copy_in_impl(all_gather_input_numel, world_size, rank, dtype, device, inp_split_sizes, param_all_gather_inputs)
 
 
-lib.define("split_contiguous_view_as_strided(Tensor all_gather_output, SymInt[] all_gather_input_numels, SymInt[][] orig_sizes, SymInt[][] contiguous_orig_strides) -> Tensor[]")
+lib.define("split_with_sizes_copy(Tensor all_gather_output, SymInt[] all_gather_input_split_sizes, int dim=0, *, Tensor(a!)[] out) -> ()")
 
-@torch.library.impl(lib, "split_contiguous_view_as_strided", "Meta")
-def split_contiguous_view_as_strided(all_gather_output, all_gather_input_numels, orig_sizes, contiguous_orig_strides):
-    splits = torch.split(all_gather_output, all_gather_input_numels, dim=1)
-    out = []
-    for i in range(len(orig_sizes)):
-        split = splits[i]
-        orig_size = orig_sizes[i]
-        contiguous_orig_stride = contiguous_orig_strides[i]
-        split_flattened = split.contiguous().view(split.numel())
-        split_unpadded = torch.as_strided(
-            split_flattened,
-            orig_size,
-            contiguous_orig_stride,
-            storage_offset=0,
-        )
-        out.append(split_unpadded)
-    return out
+@torch.library.impl(lib, "split_with_sizes_copy", "Meta")
+def split_with_sizes_copy(all_gather_output, all_gather_input_split_sizes, dim, out):
+    return torch.split_with_sizes_copy(
+        all_gather_output, all_gather_input_split_sizes, dim=1, out=out
+    )
 
-@torch.library.impl(lib, "split_contiguous_view_as_strided", "CUDA")
-def split_contiguous_view_as_strided(all_gather_output, all_gather_input_numels, orig_sizes, contiguous_orig_strides):
-    splits = torch.split(all_gather_output, all_gather_input_numels, dim=1)
-    out = []
-    for i in range(len(orig_sizes)):
-        split = splits[i]
-        orig_size = orig_sizes[i]
-        contiguous_orig_stride = contiguous_orig_strides[i]
-        split_flattened = split.contiguous().view(split.numel())
-        split_unpadded = torch.as_strided(
-            split_flattened,
-            orig_size,
-            contiguous_orig_stride,
-            storage_offset=0,
-        )
-        out.append(split_unpadded)
-    return out
+def split_with_sizes_copy_impl(all_gather_output, all_gather_input_split_sizes, dim, out):
+    return torch.split_with_sizes_copy(
+        all_gather_output, all_gather_input_split_sizes, dim=1, out=out
+    )
+
+@torch.library.impl(lib, "split_with_sizes_copy", "CUDA")
+def split_with_sizes_copy(all_gather_output, all_gather_input_split_sizes, dim, out):
+    return split_with_sizes_copy_impl(all_gather_output, all_gather_input_split_sizes, dim, out)
 
 
 lib.define("chunk_cat(Tensor[] tensors, int dim, int num_chunks) -> Tensor")
@@ -206,42 +185,19 @@ def foreach_all_gather_copy_out(
         fsdp_param.init_all_gather_outputs(
             all_gather_input_numels, all_gather_input_dtypes, world_size, device
         )
-        fsdp_param.init_unsharded_param()  # needed for compile
         fsdp_param.alloc_all_gather_outputs()
     all_gather_output = all_gather_output.view(world_size, -1)
-    # NOTE: This is the biggest difference between eager and compile code path.
-    # In eager, we directly copy from `all_gather_output` into `fsdp_param.all_gather_output` (`fsdp_param._unsharded_param` will be updated because of shared storage),
-    # but in compile path we copy from `as_strided(all_gather_output)` into `fsdp_param._unsharded_param` to avoid having `fsdp_param.all_gather_output` as graph input.
-    # They are equivalent and must produce the same result.
-    if not torch._dynamo.compiled_autograd.compiled_autograd_enabled:
-        gen = (t for fsdp_param in fsdp_params for t in fsdp_param.all_gather_outputs)
-        if all_gather_output.dtype == torch.uint8:
-            out = [t.view(world_size, -1).view(torch.uint8) for t in gen]
-        else:
-            out = [t.view(world_size, -1) for t in gen]
-        torch.split_with_sizes_copy(
-            all_gather_output, all_gather_input_split_sizes, dim=1, out=out
-        )
+    gen = (t for fsdp_param in fsdp_params for t in fsdp_param.all_gather_outputs)
+    if all_gather_output.dtype == torch.uint8:
+        out = [t.view(world_size, -1).view(torch.uint8) for t in gen]
     else:
-        # TODO(yf225): support uint8 similar to the eager case (i.e. support fsdp_pre_all_gather)
-        assert all(len(fsdp_param.all_gather_outputs) == 1 for fsdp_param in fsdp_params)
-        unsharded_params = []
-        orig_sizes = []
-        contiguous_orig_strides = []
-        for i, fsdp_param in enumerate(fsdp_params):
-            unsharded_param = fsdp_param._unsharded_param
-            if fsdp_param.is_dtensor:
-                unsharded_param = unsharded_param.to_local()
-            unsharded_params.append(unsharded_param)
-            orig_sizes.append(fsdp_param._orig_size)
-            contiguous_orig_strides.append(fsdp_param._contiguous_orig_stride)
-        out = torch.ops.fsdp.split_contiguous_view_as_strided(all_gather_output, all_gather_input_split_sizes, orig_sizes, contiguous_orig_strides)
-        for i, unsharded_param in enumerate(unsharded_params):
-            ctx = contextlib.nullcontext()
-            if not torch._dynamo.compiled_autograd.compiled_autograd_enabled:
-                ctx = torch.autograd._unsafe_preserve_version_counter(unsharded_param)
-            with torch.no_grad(), ctx:
-                unsharded_param.copy_(out[i])
+        out = [t.view(world_size, -1) for t in gen]
+    torch.split_with_sizes_copy(
+        all_gather_output, all_gather_input_split_sizes, dim=1, out=out
+    )
+    # torch.ops.fsdp.split_with_sizes_copy(
+    #     all_gather_output, all_gather_input_split_sizes, dim=1, out=out
+    # )
 
 
 @torch.no_grad()

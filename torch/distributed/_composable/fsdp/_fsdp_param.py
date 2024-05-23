@@ -333,13 +333,14 @@ class FSDPParam:
             for numel, dtype in zip(all_gather_input_numels, all_gather_input_dtypes)
         ]
 
-    def init_unsharded_param(self, mutate_existing=False):
-        if not mutate_existing and getattr(self, "_unsharded_param", None) is not None:  # after the 1st all-gather
+    def init_unsharded_param(self):
+        if (
+            # NOTE(yf225): under compile, we always skip this branch and re-init unsharded param using the slow path
+            not torch._dynamo.compiled_autograd.compiled_autograd_enabled
+            and getattr(self, "_unsharded_param", None) is not None  # after the 1st all-gather
+        ):
             inner_tensor = self._sharded_local_tensor
-            if (
-                torch._dynamo.compiled_autograd.compiled_autograd_enabled
-                or not hasattr(inner_tensor, "fsdp_post_all_gather")
-            ):
+            if not hasattr(inner_tensor, "fsdp_post_all_gather"):
                 return  # already initialized
             for tensor in self._unsharded_inner_tensors:
                 alloc_storage(tensor)
@@ -354,6 +355,7 @@ class FSDPParam:
             return
         inner_tensor = self._sharded_local_tensor
         if (
+            # TODO(yf225): compile doesn't support `hasattr(inner_tensor, "fsdp_post_all_gather")` yet
             not torch._dynamo.compiled_autograd.compiled_autograd_enabled
             and hasattr(inner_tensor, "fsdp_post_all_gather")
         ):
@@ -387,7 +389,7 @@ class FSDPParam:
                 self._global_size,
                 self._global_stride,
             )
-        if mutate_existing:
+        if self._unsharded_param is not None:
             maybe_preserve_version_counter = contextlib.nullcontext()
             if not torch._dynamo.compiled_autograd.compiled_autograd_enabled:
                 maybe_preserve_version_counter = torch.autograd._unsafe_preserve_version_counter(self._unsharded_param)
@@ -425,8 +427,6 @@ class FSDPParam:
             )
         shard_rank = self.post_forward_mesh_info.shard_mesh_rank
         sharded_numel = numel // shard_world_size
-        if torch._dynamo.compiled_autograd.compiled_autograd_enabled:
-            raise Exception("NYI(yf225): need to use ._unsharded_param instead of .all_gather_output for compile, to avoid having .all_gather_output as graph input")
         self._sharded_post_forward_param_data = (
             self.all_gather_outputs[0].narrow(
                 0, sharded_numel * shard_rank, sharded_numel
@@ -522,26 +522,14 @@ class FSDPParam:
             self.unsharded_param.grad = None
 
     def alloc_all_gather_outputs(self) -> None:
-        # for tensor in self.all_gather_outputs:
-        # TODO(yf225): support the len(self.all_gather_outputs) > 1 case (i.e. support custom fsdp_pre_all_gather)
-        assert len(self.all_gather_outputs) == 1
-        assert len(self.all_gather_output_storage_sizes) == 1
-        if not torch.distributed._composable.fsdp._fsdp_state.no_storage_resize():
-            alloc_storage(self.all_gather_outputs[0], self.all_gather_output_storage_sizes[0])
+        for tensor, size in zip(self.all_gather_outputs, self.all_gather_output_storage_sizes):
+            alloc_storage(tensor, size)
 
     def free_unsharded_param(self) -> None:
-        # for tensor in itertools.chain(
-        #     self.all_gather_outputs, self._unsharded_inner_tensors
-        # ):
-        #     free_storage(tensor)
-        # TODO(yf225): support the len(self.all_gather_outputs) > 1 case (i.e. support custom fsdp_pre_all_gather)
-
-        # These two branches do the exact same thing underneath,
-        # because .all_gather_output and ._unsharded_param share the same storage.
-        # We use ._unsharded_param under compile just to avoid having .all_gather_output as graph input.
-        assert len(self.all_gather_outputs) == 1
-        if not torch.distributed._composable.fsdp._fsdp_state.no_storage_resize():
-            free_storage(self.all_gather_outputs[0])
+        for tensor in itertools.chain(
+            self.all_gather_outputs, self._unsharded_inner_tensors
+        ):
+            free_storage(tensor)
 
     @property
     def all_gather_inputs(self) -> List[torch.Tensor]:  # 1D
