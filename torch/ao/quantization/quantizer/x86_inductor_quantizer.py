@@ -647,20 +647,20 @@ class X86InductorQuantizer(Quantizer):
 
         module_name_list = list(self.module_name_qconfig.keys())
         for module_name, qconfig in self.module_name_qconfig.items():
-            self._annotate_by_config(
+            self._annotate_with_config(
                 model, qconfig, _get_module_name_filter(module_name)
             )
 
         tp_list = list(self.operator_type_qconfig.keys())
         for operator_type, qconfig in self.operator_type_qconfig.items():
-            self._annotate_by_config(
+            self._annotate_with_config(
                 model,
                 qconfig,
                 _get_operator_type_filter(operator_type, module_name_list),
             )
 
         if self.global_config:
-            self._annotate_by_config(
+            self._annotate_with_config(
                 model,
                 self.global_config,
                 _get_not_operator_type_or_name_filter(tp_list, module_name_list),
@@ -668,7 +668,7 @@ class X86InductorQuantizer(Quantizer):
 
         return model
 
-    def _annotate_by_config(
+    def _annotate_with_config(
         self,
         model: torch.fx.GraphModule,
         config: Optional[QuantizationConfig],
