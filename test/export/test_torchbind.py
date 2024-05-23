@@ -255,15 +255,8 @@ def forward(self, token, obj_attr, x):
         )
 
     @parametrize("pre_dispatch", [True, False])
-    @parametrize("fakify_script_obj", [True, False])
-    def test_input(self, pre_dispatch, fakify_script_obj):
+    def test_input(self, pre_dispatch):
         cc = torch.classes._TorchScriptTesting._Foo(10, 20)
-        if not fakify_script_obj:
-            qual_name = cc._type().qualified_name()  # type: ignore[att-defined]
-            if torch._library.fake_class_registry.has_fake_class(qual_name):
-                torch._library.fake_class_registry.deregister_fake_class(
-                    "_TorchScriptTesting::_Foo"
-                )
 
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -295,20 +288,11 @@ def forward(self, x, cc):
         # aot_export_function runs the program twice
         # in run_functionalized_fw_and_collect_metadata and create_aot_dispatcher_function
         # We also have a re-tracing test, which doubles the count.
-        if fakify_script_obj:
-            self.assertEqual(self.foo_add_tensor_counter, 4)
+        self.assertEqual(self.foo_add_tensor_counter, 4)
 
     @parametrize("pre_dispatch", [True, False])
-    @parametrize("fakify_script_obj", [True, False])
-    def test_input_as_custom_op_argument(self, pre_dispatch, fakify_script_obj):
+    def test_input_as_custom_op_argument(self, pre_dispatch):
         cc = torch.classes._TorchScriptTesting._Foo(10, 20)
-        if not fakify_script_obj:
-            qual_name = cc._type().qualified_name()  # type: ignore[att-defined]
-            if torch._library.fake_class_registry.has_fake_class(qual_name):
-                torch._library.fake_class_registry.deregister_fake_class(
-                    "_TorchScriptTesting::_Foo"
-                )
-
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -322,16 +306,15 @@ def forward(self, x, cc):
         torch.ops._TorchScriptTesting.takes_foo.default._dispatch_cache.clear()
         # Even though a C++ implementation for takes_foo.default is registered,
         # we still need the python implementation for takes_foo.default to trace with FakeFoo.
-        if fakify_script_obj:
-            with self.assertRaisesRegex(
-                RuntimeError, "no python implementation is found"
-            ):
-                self._test_export_same_as_eager(
-                    MyModule(),
-                    (torch.ones(2, 3), cc),
-                    strict=False,
-                    pre_dispatch=pre_dispatch,
-                )
+        with self.assertRaisesRegex(
+            RuntimeError, "no python implementation is found"
+        ):
+            self._test_export_same_as_eager(
+                MyModule(),
+                (torch.ones(2, 3), cc),
+                strict=False,
+                pre_dispatch=pre_dispatch,
+            )
 
         torch.ops._TorchScriptTesting.takes_foo.default.py_impl(
             torch._C.DispatchKey.Meta
@@ -364,8 +347,7 @@ def forward(self, token, x, cc):
         )
 
     @parametrize("pre_dispatch", [True, False])
-    @parametrize("fakify_script_obj", [True, False])
-    def test_torchbind_alias(self, pre_dispatch, fakify_script_obj):
+    def test_torchbind_alias(self, pre_dispatch):
         class F2(torch.nn.Module):
             def __init__(self, foo):
                 super().__init__()
@@ -378,12 +360,6 @@ def forward(self, token, x, cc):
             def __init__(self):
                 super().__init__()
                 self.alpha = torch.classes._TorchScriptTesting._Foo(10, 20)
-                if not fakify_script_obj:
-                    qual_name = self.alpha._type().qualified_name()
-                    if torch._library.fake_class_registry.has_fake_class(qual_name):
-                        torch._library.fake_class_registry.deregister_fake_class(
-                            "_TorchScriptTesting::_Foo"
-                        )
                 self.beta = self.alpha
                 self.gamma = self.alpha
                 self.foo = F2(self.gamma)
@@ -402,8 +378,7 @@ def forward(self, token, x, cc):
     # TODO(pianpwk): look into this
     @unittest.expectedFailure
     @parametrize("pre_dispatch", [True, False])
-    @parametrize("fakify_script_obj", [True, False])
-    def test_torchbind_input_and_alias(self, pre_dispatch, fakify_script_obj):
+    def test_torchbind_input_and_alias(self, pre_dispatch):
         # alias as model attribute
         class F3(torch.nn.Module):
             def forward(self, x, foo):
@@ -411,12 +386,6 @@ def forward(self, token, x, cc):
                 return x + self.foo.add_tensor(x)
 
         foo = torch.classes._TorchScriptTesting._Foo(10, 20)
-        if not fakify_script_obj:
-            qual_name = foo._type().qualified_name()  # type: ignore[att-defined]
-            if torch._library.fake_class_registry.has_fake_class(qual_name):
-                torch._library.fake_class_registry.deregister_fake_class(
-                    "_TorchScriptTesting::_Foo"
-                )
         self._test_export_same_as_eager(
             F3(), (torch.ones(2, 3), foo), strict=False, pre_dispatch=pre_dispatch
         )
