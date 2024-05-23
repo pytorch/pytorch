@@ -136,7 +136,10 @@ def save(
     """
     torch._C._log_api_usage_once("torch.distributed.checkpoint.save")
 
-    no_dist = (not (dist.is_available() and dist.is_initialized())) or process_group is None
+    no_dist = (
+        not (dist.is_available() and dist.is_initialized())
+    ) or process_group is None
+
     if no_dist:
         warnings.warn(
             "torch.distributed is unavailable or uninitialized, assuming the intent is to save in a single process."
