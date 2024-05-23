@@ -1470,6 +1470,7 @@ def dump_node_schedule(node_schedule):
             is_red = node.is_reduction()
             print(f"{'red' if is_red else 'pw'} scheduler node")
             if is_red:
+                assert node.node is not None
                 print(f"original reduction hint {node.node.data.reduction_hint}")  # type: ignore[attr-defined]
             print("ReadDep:")
             for dep in node.read_writes.reads:
