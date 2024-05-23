@@ -18,8 +18,9 @@
 
 namespace c10 {
 
-// Represents a function that runs
-// periodically.
+/**
+ * Represents a function that runs periodically.
+ */
 class Job {
   std::function<void()> _function;
   std::chrono::microseconds _interval;
@@ -42,9 +43,10 @@ class Job {
   void run();
 };
 
-// Represents a concrete run, i.e,
-// a job that will be executed at
-// a specific time.
+/**
+ * Represents a concrete run, i.e, a job that
+ * will be executed at a specific time.
+ */
 class Run {
   int _job_id;
   std::chrono::time_point<std::chrono::steady_clock> _time;
@@ -60,28 +62,73 @@ class Run {
   void set_time(std::chrono::time_point<std::chrono::steady_clock> time);
 };
 
+/**
+ * Schedule a function to run periodically.
+ * Example:
+ * bool ran = false;
+ * std::function<void()> function = [&ran]() { ran = true; };
+ * std::chrono::milliseconds interval(10);
+ *
+ * c10::FunctionScheduler fs;
+ * fs.scheduleJob(function, interval);
+ * fs.start();
+ * std::this_thread::sleep_for(std::chrono::milliseconds(2));
+ * // ran == false
+ *
+ * std::this_thread::sleep_for(std::chrono::milliseconds(12));
+ * fs.stop();
+ * // ran == true
+ *
+ */
 class FunctionScheduler {
+  // The id to be attributed to a new job.
   int _current_id = 0;
+
+  // FunctionScheduler state.
   std::atomic_bool _running = false;
   std::atomic_bool _paused = false;
   std::chrono::time_point<std::chrono::steady_clock> _paused_time;
+
+  // Runs, sorted by wait time until execution.
   std::priority_queue<
       std::shared_ptr<Run>,
       std::vector<std::shared_ptr<Run>>,
       decltype(&Run::gt)>
       _queue;
+
+  // Current active jobs.
   std::unordered_map<int, std::unique_ptr<Job>> _jobs;
+
+  // Run selected to be executed next
   std::shared_ptr<Run> _next_run;
+
+  // The thread running the run execution loop
   std::thread _thread;
+
+  // Synchronization variables.
   std::mutex _mutex;
   std::condition_variable _cond;
 
+  // Returns a new job id, updating _current_id.
   int id();
+
+  // Main run execution loop function.
   void run();
+
+  // Executes _next_run
   void runNextJob(const std::unique_lock<std::mutex>& lock);
+
+  // Selects the next run to be executed and returns
+  // the wait time until execution.
   std::chrono::microseconds getNextWaitTime();
+
+  // Registers a new run.
   void addRun(const std::unique_lock<std::mutex>& lock, int job_id, std::unique_ptr<Job> const& job);
+
+  // Registers a new job.
   int scheduleJob(std::unique_ptr<Job> job);
+
+  // Checks if a job is still valid.
   bool validEntry(const std::unordered_map<int, std::unique_ptr<Job>>::iterator& entry);
 
  public:
@@ -95,11 +142,21 @@ class FunctionScheduler {
       bool immediate = false,
       int run_limit = RUN_FOREVER);
 
+  // Removes the job registered with `id` and returns it.
+  // Returns -1 if a job registered with `id` doesn't exist.
   int removeJob(int id);
 
+  // Starts the FunctionScheduler.
   void start();
+
+  // Stops the FunctionScheduler
+  // and resets all jobs (_run_count = 0).
   void stop();
+
+  // Pauses FunctionScheduler execution.
   void pause();
+
+  // Resumes FunctionScheduler execution.
   void resume();
 
   bool isRunning() const;
