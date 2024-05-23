@@ -20,8 +20,7 @@ class GradScaler(torch.amp.GradScaler):
         enabled: bool = True,
     ) -> None:
         warnings.warn(
-            "torch.cuda.amp.GradScaler(args...) is deprecated. Please use torch.amp.GradScaler('cuda', args...) instead.",
-            DeprecationWarning,
+            "torch.cuda.amp.GradScaler(args...) is deprecated. Please use torch.amp.GradScaler('cuda', args...) instead."
         )
         super().__init__(
             "cuda",

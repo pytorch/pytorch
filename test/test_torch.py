@@ -6152,7 +6152,7 @@ else:
     @onlyNativeDeviceTypes
     def test_grad_scaler_pass_itself(self, device):
         device = torch.device(device)
-        GradScaler = partial(torch.amp.GradScaler, device=device)
+        GradScaler = partial(torch.amp.GradScaler, device=device.type)
 
         class _PlaceHolderOptimizer(torch.optim.Optimizer):
             tester = self
@@ -6195,7 +6195,7 @@ else:
         GradScaler = torch.cuda.amp.GradScaler if "cuda" == device.type else torch.cpu.amp.GradScaler
 
         with self.assertWarnsRegex(
-            DeprecationWarning,
+            UserWarning,
             rf"torch.{device.type}.amp.GradScaler\(args...\) is deprecated.",
         ):
             _ = GradScaler(init_scale=2.0)
