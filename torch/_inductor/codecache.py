@@ -43,6 +43,7 @@ from typing import (
     Generator,
     List,
     Optional,
+    Sequence,
     Set,
     Tuple,
     TYPE_CHECKING,
@@ -61,6 +62,7 @@ from torch._inductor.runtime.compile_tasks import (
     _set_triton_ptxas_path,
     _worker_compile_triton,
 )
+from torch._inductor.runtime.hints import HalideMeta
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import clear_on_fresh_inductor_cache, is_linux
 
@@ -108,6 +110,7 @@ else:
 
 
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
+kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
 
 LOCK_TIMEOUT = 600
 
@@ -773,11 +776,23 @@ class FxGraphCache:
                 subdir = FxGraphCache._get_tmp_dir_for_key(key)
                 if os.path.exists(subdir):
                     for path in sorted(os.listdir(subdir)):
-                        with open(os.path.join(subdir, path), "rb") as f:
-                            yield pickle.load(f)
+                        try:
+                            with open(os.path.join(subdir, path), "rb") as f:
+                                yield pickle.load(f)
+                        except Exception:
+                            log.warning(
+                                "fx graph cache unable to load compiled graph",
+                                exc_info=True,
+                            )
+
             if remote_cache:
-                if (data := remote_cache.get(key)) is not None:
-                    yield pickle.loads(data)
+                try:
+                    if (data := remote_cache.get(key)) is not None:
+                        yield pickle.loads(data)
+                except Exception:
+                    log.warning(
+                        "fx graph cache unable to load compiled graph", exc_info=True
+                    )
 
         # Iterate over any entries in the subdir for this key and evaluate
         # their guards to determine whether there's a hit.
@@ -890,32 +905,39 @@ class FxGraphCache:
 
         try:
             content = pickle.dumps(disk_compiled_graph)
-        except Exception as e:
-            log.debug("fx graph cache unable to serialize compiled graph: %s", e)
+        except Exception:
+            log.warning(
+                "fx graph cache unable to serialize compiled graph", exc_info=True
+            )
             counters["inductor"]["fxgraph_cache_pickle_error"] += 1
             return
 
-        if local:
-            subdir = FxGraphCache._get_tmp_dir_for_key(key)
-            if not os.path.exists(subdir):
-                os.makedirs(subdir, exist_ok=True)
+        try:
+            if local:
+                subdir = FxGraphCache._get_tmp_dir_for_key(key)
+                if not os.path.exists(subdir):
+                    os.makedirs(subdir, exist_ok=True)
 
-            # Use a hash of the serialized CompiledFxGraph to get a unique file
-            # name. The specific name doesn't matter since a lookup involves
-            # iterating over all entries in the parent subdir.
-            path = os.path.join(subdir, sha256_hash(content))
-            write_atomic(path, content, make_dirs=True)
+                # Use a hash of the serialized CompiledFxGraph to get a unique file
+                # name. The specific name doesn't matter since a lookup involves
+                # iterating over all entries in the parent subdir.
+                path = os.path.join(subdir, sha256_hash(content))
+                write_atomic(path, content, make_dirs=True)
 
-        if remote_cache:
-            cache_data = (
-                {
-                    "data": content,
-                    "time_taken_ms": time_taken_ns // 1000000,  # Convert from NS to MS
-                }
-                if config.is_fbcode()
-                else content
-            )
-            remote_cache.put(key, cache_data)
+            if remote_cache:
+                cache_data = (
+                    {
+                        "data": content,
+                        "time_taken_ms": time_taken_ns
+                        // 1000000,  # Convert from NS to MS
+                    }
+                    if config.is_fbcode()
+                    else content
+                )
+                remote_cache.put(key, cache_data)
+        except Exception:
+            log.warning("fx graph unable to write to cache", exc_info=True)
+            counters["inductor"]["fxgraph_cache_write_error"] += 1
 
     @staticmethod
     def _check_can_cache(gm: torch.fx.GraphModule):
@@ -1752,6 +1774,7 @@ def cpp_compile_command(
     compile_only: bool = False,
     use_absolute_path: bool = False,
     use_mmap_weights: bool = False,
+    extra_flags: Sequence[str] = (),
 ) -> str:
     ipaths, lpaths, libs, macros, build_arch_flags = get_include_and_linking_paths(
         include_pytorch, vec_isa, cuda, aot_mode
@@ -1801,6 +1824,7 @@ def cpp_compile_command(
             {use_fb_internal_macros()}
             {use_standard_sys_dir_headers()}
             {get_compile_only(compile_only)}
+            {' '.join(extra_flags)}
             -o {out_name}
         """,
     ).strip()
@@ -1924,12 +1948,23 @@ class AotCodeCompiler:
                 run_command_and_check(cmd)
             log.debug("aot constant binary command: %s", cmd)
 
-            # .data section is between .text and .bss. When the size of .data is large,
-            # during the linking, the relocation of .text against .bss may overflow.
-            # Rename it to .ldata so that it won't be in between the .text and .bss section
+            if graph.buffer_mutation:
+                # .data section is between .text and .bss. When the size of .data is large,
+                # during the linking, the relocation of .text against .bss may overflow.
+                # Rename it to .ldata so that it won't be in between the .text and .bss section
+                if len(consts) > 2_000_000_000:
+                    raise ValueError(
+                        "Models with buffer mutation included doesn't support constants greater than 2GB!"
+                    )
+                rename_data = " .data=.ldata"
+            else:
+                # if no buffer mutation is needed, we could instead set the data region
+                # as read-only (i.e. .lrodata) which could accomodate larger size of data
+                # to be linked.
+                rename_data = " .data=.lrodata,alloc,load,readonly,data,contents"
             cmd = (
                 f"{objcopy_command} --rename-section"
-                " .data=.ldata"
+                f"{rename_data}"
                 " --set-section-alignment .data=64"  # following the gAlignment of CPU in c10/core/alignment.h
                 f" {consts_o} {consts_o}"
             )
@@ -2273,11 +2308,12 @@ class CppCodeCache:
             raise
 
     @classmethod
-    def load_async(cls, source_code: str, cuda=False, submit_fn=None):
+    def load_async(cls, source_code: str, cuda=False, submit_fn=None, extra_flags=()):
         compile_command = {
             **cls.cpp_compile_command_flags,
             "cuda": cuda,
             "vec_isa": pick_vec_isa(),
+            "extra_flags": extra_flags,
         }
         cpp_command = repr(cpp_compile_command("i", "o", **compile_command))
         key, input_path = write(source_code, "cpp", extra=cpp_command)
@@ -2442,6 +2478,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         cuda: bool = False,
         num_outputs: int = -1,
         submit_fn=None,
+        extra_flags=(),
     ) -> Any:
         """
         Wrap a C++ function in fast Python bindings.
@@ -2469,7 +2506,9 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             cls.entry_function,
             cls.entry_function,
         )
-        get_result = cls.load_async(source_code + suffix, cuda, submit_fn=submit_fn)
+        get_result = cls.load_async(
+            source_code + suffix, cuda, submit_fn=submit_fn, extra_flags=extra_flags
+        )
         result = None
 
         def future():
@@ -2547,6 +2586,213 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
         }
         """
     )
+
+
+@clear_on_fresh_inductor_cache
+class HalideCodeCache(CppPythonBindingsCodeCache):
+    cache: Dict[str, Callable[[], Union[ModuleType, CDLL]]] = {}
+    cache_clear = staticmethod(cache.clear)
+    glue_template = textwrap.dedent(
+        """
+        #include "{halidebuffer_h}"
+        #include "{headerfile}"
+        #include <stdexcept>
+        #include <cmath>
+        void kernel({argdefs}) {{
+            {buffers}
+            int err = halide_kernel({buffer_names});
+            if(err != 0) {{
+                throw std::runtime_error("halide_kernel failed");
+            }}
+        }}
+        """
+    )
+
+    @classmethod
+    def _codegen_glue(cls, argtypes, headerfile):
+        buffers = []
+        buffer_names = []
+        for i, arg in enumerate(argtypes):
+            if arg.numel:
+                buffer_names.append(f"hl_buf_{i}")
+                buffers.append(
+                    f"    Halide::Runtime::Buffer {buffer_names[-1]}({arg.halide_type()}, {arg.name}, {arg.numel});"
+                )
+            else:
+                assert "*" not in arg.ctype
+                buffer_names.append(arg.name)
+        glue_code = cls.glue_template.format(
+            halidebuffer_h=cls.find_header("HalideBuffer.h"),
+            headerfile=headerfile,
+            argdefs=", ".join(f"{a.bindings_type()} {a.name}" for a in argtypes),
+            buffers="\n".join(buffers).lstrip(),
+            buffer_names=", ".join(buffer_names),
+        )
+        return glue_code
+
+    @classmethod
+    @functools.lru_cache(None)
+    def config_hash(cls):
+        return sha256_hash(
+            "\n".join(
+                [
+                    cls.glue_template,
+                    f"{cls.cpu_cache_size()}",
+                    cpp_compile_command("I", "O"),
+                ]
+            ).encode("utf-8")
+        )
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def cpu_cache_size():
+        try:
+            cpuinfo = open("/proc/cpuinfo").read()
+        except OSError:
+            return 16777216
+        m = re.search(r"cache size\s*: (\d+) KB", cpuinfo)
+        if m:
+            return int(m.group(1)) * 1024
+        m = re.search(r"cache size\s*: (\d+) MB", cpuinfo)
+        if m:
+            return int(m.group(1)) * 1024 * 1024
+        raise RuntimeError("failed to find 'cache size: ... KB' in /proc/cpuinfo")
+
+    @staticmethod
+    def _search_for_file(suffix, errmsg):
+        try:
+            search, *_ = importlib.machinery.PathFinder.find_spec(  # type: ignore[union-attr,misc]
+                "halide"
+            ).submodule_search_locations
+            for file in os.listdir(search):
+                if file.endswith(".so"):
+                    try:
+                        out = subprocess.check_output(
+                            ["ldd", os.path.join(search, file)]
+                        )
+                    except subprocess.SubprocessError:
+                        continue
+                    m = re.search(r"(/.*)/libHalide.so", out.decode("utf-8"))
+                    if m:
+                        path = os.path.join(os.path.abspath(m.group(1)), suffix)
+                        if os.path.exists(path):
+                            return os.path.abspath(path)
+        except Exception as e:
+            raise RuntimeError(errmsg) from e
+        raise RuntimeError(errmsg)
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def find_libautoschedule(name):
+        sofile = f"libautoschedule_{name.lower()}.so"
+        if "HALIDE_LIB" in os.environ:
+            path = os.path.join(os.environ["HALIDE_LIB"], sofile)
+            if os.path.exists(path):
+                return path
+        errmsg = (
+            f"Can't find {sofile}, set env HALIDE_LIB to the directory containing it"
+        )
+        return HalideCodeCache._search_for_file(sofile, errmsg)
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def find_header(name):
+        if "HALIDE_INCLUDE" in os.environ:
+            path = os.path.join(os.environ["HALIDE_INCLUDE"], name)
+            if os.path.exists(path):
+                return path
+        if "HALIDE_LIB" in os.environ:
+            path = os.path.abspath(
+                os.path.join(os.environ["HALIDE_LIB"], f"../include/{name}")
+            )
+            if os.path.exists(path):
+                return path
+        errmsg = (
+            f"Can't find {name}, set env HALIDE_INCLUDE to the directory containing it"
+        )
+        return HalideCodeCache._search_for_file(f"../include/{name}", errmsg)
+
+    @classmethod
+    def generate_halide_async(cls, meta: HalideMeta, source_code: str, submit_fn=None):
+        dirpath = Path(
+            get_path(
+                code_hash(
+                    source_code,
+                    extra=repr((cls.config_hash(), meta)),
+                ),
+                "halide",
+            )[2]
+        )
+        os.makedirs(dirpath, exist_ok=True)
+        wait_for_compile = None
+        genfile = str(dirpath / "generate_kernel.py")
+        libfile = str(dirpath / "halide_kernel.a")
+        headerfile = str(dirpath / "halide_kernel.h")
+        donefile = str(dirpath / "done")
+        lockfile = str(dirpath / "lock")
+        need_compile = not os.path.exists(donefile)
+        jobs = []
+
+        if need_compile:
+            write_atomic(genfile, source_code)
+            jobs.append(
+                functools.partial(
+                    subprocess.check_call,
+                    [
+                        sys.executable,
+                        genfile,
+                        "-g",
+                        "kernel",
+                        "-o",
+                        f"{dirpath}",
+                        "-f",
+                        "halide_kernel",
+                        "-e",
+                        "static_library,h,schedule,pytorch_wrapper",
+                        "-p",
+                        cls.find_libautoschedule(meta.scheduler),
+                        *meta.args(),
+                    ],
+                )
+            )
+
+        bindings_future = cls.load_pybinding_async(
+            [arg.bindings_type() for arg in meta.argtypes],
+            cls._codegen_glue(meta.argtypes, headerfile),
+            extra_flags=(libfile,),
+            submit_fn=jobs.append if need_compile else None,
+        )
+
+        if need_compile:
+            jobs.append(functools.partial(touch, donefile))
+            task = functools.partial(_worker_task_halide, lockfile, jobs)
+            if submit_fn:
+                wait_for_compile = submit_fn(task).result
+            else:
+                task()
+
+        def load():
+            if wait_for_compile:
+                wait_for_compile()
+            return bindings_future()
+
+        return load
+
+    @classmethod
+    def generate_halide(cls, *args, **kwargs):
+        return cls.generate_halide_async(*args, **kwargs)()
+
+
+def _worker_task_halide(lockfile, jobs):
+    from filelock import FileLock
+
+    with FileLock(lockfile, LOCK_TIMEOUT):
+        for job in jobs:
+            job()
+
+
+def touch(filename):
+    open(filename, "a").close()
 
 
 @clear_on_fresh_inductor_cache
@@ -3079,6 +3325,7 @@ class AsyncCompile:
         return cls.pool().submit(task)
 
     def triton(self, kernel_name: str, source_code: str, device_str: str = "cuda"):
+        kernel_code_log.info("Triton Kernel:\n%s", source_code)
         _compile_start()
         _set_triton_ptxas_path()
 
@@ -3102,6 +3349,7 @@ class AsyncCompile:
         return MultiKernelCall(*args, **kwargs)
 
     def cpp(self, source_code: str):
+        kernel_code_log.info("CPP Kernel:\n%s", source_code)
         if config.compile_threads <= 1:
             return CppCodeCache.load(source_code).kernel
         else:
@@ -3109,6 +3357,7 @@ class AsyncCompile:
             return LambdaFuture(lambda: get_result().kernel)
 
     def cpp_pybinding(self, argtypes: List[str], source_code: str):
+        kernel_code_log.info("CPP+Bindings Kernel:\n%s", source_code)
         if config.compile_threads <= 1:
             return CppPythonBindingsCodeCache.load_pybinding(argtypes, source_code)
         else:
@@ -3118,10 +3367,22 @@ class AsyncCompile:
             return LambdaFuture(get_result)
 
     def cuda(self, source_code, dst_file_ext):
+        kernel_code_log.info("CUDA Kernel:\n%s", source_code)
+
         def task():
             return CUDACodeCache.load(source_code, dst_file_ext)[0]
 
         return self.submit(task)
+
+    def halide(self, meta: HalideMeta, source_code: str):
+        kernel_code_log.info("Halide Kernel:\n%r\n%s", meta, source_code)
+        if config.compile_threads <= 1:
+            return HalideCodeCache.generate_halide(meta, source_code)
+        else:
+            get_result = HalideCodeCache.generate_halide_async(
+                meta, source_code, submit_fn=self.submit
+            )
+            return LambdaFuture(get_result)
 
     def wait(self, scope: Dict[str, Any]) -> None:
         num_kernels = len(
@@ -3153,7 +3414,5 @@ if (
     or os.environ.get("TORCH_WARM_POOL", "1") != "1"
 ):
     pass
-elif sys.version_info >= (3, 12):
-    log.info("AsyncCompile.warm_pool() is broken on 3.12+.")
 else:
     AsyncCompile.warm_pool()
