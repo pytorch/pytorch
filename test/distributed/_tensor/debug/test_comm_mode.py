@@ -90,14 +90,21 @@ class TestCommMode(TestCase):
         comm_mode = CommDebugMode()
         with comm_mode:
             model(torch.randn(20, 10, device=self.device_type))
+
+        comm_counts = comm_mode.get_comm_counts()
+        self.assertEqual(comm_mode.get_total_counts(), 3)
+        self.assertEqual(comm_counts[c10d_functional.all_reduce_coalesced], 1)
+        self.assertEqual(comm_counts[c10d_functional.all_gather_into_tensor], 1)
+        self.assertEqual(comm_counts[c10d_functional.reduce_scatter_tensor], 1)
+
+        with comm_mode:
             model2(torch.randn(20, 10, device=self.device_type))
 
         comm_counts = comm_mode.get_comm_counts()
-        self.assertEqual(comm_mode.get_total_counts(), 6)
-        self.assertEqual(comm_counts[c10d_functional.all_reduce_coalesced], 1)
+        self.assertEqual(comm_mode.get_total_counts(), 3)
         self.assertEqual(comm_counts[c10d_functional.all_reduce], 1)
-        self.assertEqual(comm_counts[c10d_functional.all_gather_into_tensor], 2)
-        self.assertEqual(comm_counts[c10d_functional.reduce_scatter_tensor], 2)
+        self.assertEqual(comm_counts[c10d_functional.all_gather_into_tensor], 1)
+        self.assertEqual(comm_counts[c10d_functional.reduce_scatter_tensor], 1)
 
     def test_comm_mode_with_dtensor(self):
         world_pg = self.world_pg
