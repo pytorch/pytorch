@@ -294,7 +294,6 @@ TEST(FunctionScheduler, ConcurrentJobScheduling) {
 }
 
 TEST(FunctionScheduler, ConcurrentJobRemoval) {
-  GTEST_SKIP_("CRASHES");
   std::atomic<int> counter = 0;
   std::function<void()> function = [&counter]() { counter++; };
 
@@ -319,7 +318,7 @@ TEST(FunctionScheduler, ConcurrentJobRemoval) {
     thread.join();
   }
 
-  std::this_thread::sleep_for(std::chrono::seconds(2)); // TODO crashes here
+  std::this_thread::sleep_for(std::chrono::seconds(2));
   fs.stop();
 
   ASSERT_EQ(counter, 0);
