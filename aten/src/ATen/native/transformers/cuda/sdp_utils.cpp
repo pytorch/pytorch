@@ -523,6 +523,7 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
   // Replace with std::to_array when we migrate to c++20
   constexpr auto general_constraints =
       array_of<bool (*)(sdp_params const&, bool)>(
+          check_for_nested_inputs,
           check_runtime_enabled_cudnn,
           check_runtime_disabled_cudnn,
           check_cudnn_hardware_support,
@@ -534,7 +535,6 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
 	  check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim>*/>,
           // check_cudnn_layout,
           // check_is_causal,
-          check_for_nested_inputs,
           check_dtypes_low_precision);
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
