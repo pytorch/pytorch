@@ -172,8 +172,14 @@ class TensorVariable(VariableTracker):
             "is_quantized": value.is_quantized,
             "is_sparse": value.is_sparse,
             "class_type": type(value),
-            "has_grad_fn": value.grad_fn is not None,
         }
+        try:
+            props["has_grad_fn"] = value.grad_fn is not None
+        except Exception:
+            # Workaround for issues with create_parameter_op in Dynamo. Reading
+            # grad_fn should never cause an issue.
+            props["has_grad_fn"] = False
+
         if is_sparse_any(value) and not has_free_symbols(value):
             props["size"] = tuple(
                 [int(s) if is_symbolic(s) else s for s in value.size()]
