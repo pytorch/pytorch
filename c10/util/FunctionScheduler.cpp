@@ -114,25 +114,26 @@ void FunctionScheduler::run() {
       if (_cond.wait_for(lock, wait_time) == std::cv_status::timeout) {
         // Lock timed out, i.e., no new run was added while we waited.
         // The run selected as next is still the correct one.
-        runNextJob();
+        runNextJob(lock);
       }
     } else {
-      runNextJob();
+      runNextJob(lock);
     }
   }
 }
 
-void FunctionScheduler::runNextJob() {
+void FunctionScheduler::runNextJob(const std::unique_lock<std::mutex>& lock) {
   // This function is always called with the mutex previously acquired.
+  TORCH_INTERNAL_ASSERT(lock.owns_lock(), "Mutex not acquired");
+  TORCH_INTERNAL_ASSERT(_next_run == _queue.top(), "Next run does not match queue top.");
   _queue.pop(); // Remove this run from the queue
-  // TODO: check that the queue top is actually the _next_run (?)
 
   // Check if the job was canceled in the meantime.
   auto entry = _jobs.find(_next_run->job_id());
   if (validEntry(entry)) {
     entry->second->run();
     // Add a new run associated with this job to the queue
-    addRun(entry->first, entry->second);
+    addRun(lock, entry->first, entry->second);
   }
 }
 
@@ -144,8 +145,10 @@ int FunctionScheduler::id() {
   return _current_id++;
 }
 
-void FunctionScheduler::addRun(int job_id, std::unique_ptr<Job> const& job) {
+void FunctionScheduler::addRun(const std::unique_lock<std::mutex>& lock,int job_id, std::unique_ptr<Job> const& job) {
   // This function is always called with the mutex previously acquired.
+  TORCH_INTERNAL_ASSERT(lock.owns_lock(), "Mutex not acquired");
+
   auto interval = job->interval();
   if (job->immediate() && job->counter() == 0)
     interval = std::chrono::microseconds(0);
@@ -160,11 +163,11 @@ void FunctionScheduler::addRun(int job_id, std::unique_ptr<Job> const& job) {
 }
 
 int FunctionScheduler::scheduleJob(std::unique_ptr<Job> job) {
-  std::lock_guard<std::mutex> lock(_mutex);
+  std::unique_lock<std::mutex> lock(_mutex);
   int job_id = id();
 
   if (_running) {
-    addRun(job_id, job);
+    addRun(lock, job_id, job);
   }
 
   _jobs.insert(std::make_pair(job_id, std::move(job)));
@@ -184,10 +187,10 @@ void FunctionScheduler::start() {
   if (_running || _paused)
     return;
 
-  std::lock_guard<std::mutex> lock(_mutex);
+  std::unique_lock<std::mutex> lock(_mutex);
   auto now = std::chrono::steady_clock::now();
   for (const auto& entry : _jobs) {
-    addRun(entry.first, entry.second);
+    addRun(lock, entry.first, entry.second);
   }
 
   _running = true;

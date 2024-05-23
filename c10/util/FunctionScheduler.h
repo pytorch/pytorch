@@ -1,5 +1,7 @@
 #pragma once
 
+#include <c10/macros/Macros.h>
+
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -10,6 +12,7 @@
 #include <thread>
 #include <unordered_map>
 #include <vector>
+#include <string>
 
 #define RUN_FOREVER -1
 
@@ -75,9 +78,9 @@ class FunctionScheduler {
 
   int id();
   void run();
-  void runNextJob();
+  void runNextJob(const std::unique_lock<std::mutex>& lock);
   std::chrono::microseconds getNextWaitTime();
-  void addRun(int job_id, std::unique_ptr<Job> const& job);
+  void addRun(const std::unique_lock<std::mutex>& lock, int job_id, std::unique_ptr<Job> const& job);
   int scheduleJob(std::unique_ptr<Job> job);
   bool validEntry(const std::unordered_map<int, std::unique_ptr<Job>>::iterator& entry);
 
@@ -85,10 +88,10 @@ class FunctionScheduler {
   FunctionScheduler();
   ~FunctionScheduler();
 
-  template <typename Interval>
+  template <typename Rep, typename Period>
   int scheduleJob(
       std::function<void()> function,
-      Interval interval,
+      std::chrono::duration<Rep, Period> interval,
       bool immediate = false,
       int run_limit = RUN_FOREVER);
 
@@ -104,12 +107,16 @@ class FunctionScheduler {
 };
 
 // Template function must be defined in the header file
-template <typename Interval>
+template <typename Rep, typename Period>
 int FunctionScheduler::scheduleJob(
     std::function<void()> function,
-    Interval interval,
+    std::chrono::duration<Rep, Period> interval,
     bool immediate,
     int run_limit) {
+  TORCH_CHECK(function != nullptr, "Job function can't be null.");
+  TORCH_CHECK(interval > 0, "Job interval must be greater than 0.");
+  TORCH_CHECK(run_limit > 0 || run_limit == RUN_FOREVER, "Job run limit must be greater than 0 or " + std::to_string(RUN_FOREVER) + ".");
+
   auto duration =
       std::chrono::duration_cast<std::chrono::microseconds>(interval);
   auto job = std::make_unique<Job>(
