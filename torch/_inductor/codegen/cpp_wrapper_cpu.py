@@ -2032,7 +2032,7 @@ class CppWrapperCpu(WrapperCodeGen):
 
         def extract_output_name(out):
             assert out is not None, "None, i.e. optional output is not supported"
-            if isinstance(out, ir.MultiOutput):
+            if isinstance(out, (ir.MultiOutput, ir._CollectiveKernel)):
                 return out.get_name()
             elif isinstance(out, (list, tuple)):
                 return type(out)(extract_output_name(o) for o in out)
@@ -2113,17 +2113,19 @@ if (custom_op_wrapper.get() == NULL) {
                 return f"PyCapsule_New(reinterpret_cast<void*>({raw_arg.codegen_reference()}.get()), NULL, NULL)"
             elif isinstance(arg_type, torch.IntType):
                 # int
-                return f"PyInt_FromLong({raw_arg})"
+                return f"PyLong_FromLong({raw_arg})"
             elif isinstance(arg_type, torch.SymIntType):
                 # SymInt
                 expr = (
                     raw_arg.node.expr if isinstance(raw_arg, torch.SymInt) else raw_arg
                 )
-                return f"PyInt_FromLong({self.expr_printer(expr)})"
+                return f"PyLong_FromLong({self.expr_printer(expr)})"
             elif isinstance(arg_type, torch.FloatType):
                 return f"PyFloat_FromDouble({raw_arg})"
             elif isinstance(arg_type, torch.BoolType):
-                return f"PyBool_FromBool({raw_arg})"
+                return f"PyBool_FromLong({raw_arg})"
+            elif isinstance(arg_type, torch.StringType):
+                return f'PyUnicode_FromString("{raw_arg}")'
             else:
                 raise NotImplementedError(
                     f"arg type {arg_type} is not yet supported by custom_op_wrapper"
