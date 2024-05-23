@@ -26,6 +26,7 @@ import torch
 from torch._prims_common import dtype_to_type
 from .functions import (
     FloatTrueDiv,
+    FloorDiv,
     IntTrueDiv,
     OpaqueUnaryFn_acos,
     OpaqueUnaryFn_asinh,
@@ -39,6 +40,7 @@ from .functions import (
     Round,
     RoundDecimal,
     ToFloat,
+    TruncToFloat,
     TruncToInt,
 )
 from .interp import sympy_interp
@@ -505,7 +507,7 @@ class SymPyValueRangeAnalysis:
         ):
             return ValueRanges.unknown()
         else:
-            return ValueRanges.coordinatewise_monotone_map(a, b, operator.floordiv)
+            return ValueRanges.coordinatewise_monotone_map(a, b, FloorDiv)
 
     @classmethod
     def mod(cls, x, y):
@@ -554,7 +556,7 @@ class SymPyValueRangeAnalysis:
 
     @classmethod
     def is_non_overlapping_and_dense_indicator(cls, *args):
-        return ValueRanges.unknown()
+        return ValueRanges.unknown()  # TODO: type here is wrong
 
     @classmethod
     def pow(cls, a, b):
@@ -646,21 +648,7 @@ class SymPyValueRangeAnalysis:
     def min_or_max(a, b, fn):
         a = ValueRanges.wrap(a)
         b = ValueRanges.wrap(b)
-
-        # Performs upcasting first
-        def fn_(x: sympy.Expr, y: sympy.Expr) -> sympy.Expr:
-            # Poorman's version of upcasting in Sympy
-            # Inf is not a float...
-            if x.is_Integer and y.is_Integer:
-                result_type = sympy.Integer
-            elif x.is_rational and y.is_rational:
-                result_type = sympy.Rational
-            else:
-                assert x.is_real or not x.is_finite or y.is_real or not y.is_finite
-                result_type = sympy.Float
-            return fn(result_type(x), result_type(y))
-
-        return ValueRanges.coordinatewise_increasing_map(a, b, fn_)
+        return ValueRanges.coordinatewise_increasing_map(a, b, fn)
 
     @classmethod
     def floor(cls, x):
@@ -784,10 +772,7 @@ class SymPyValueRangeAnalysis:
 
     @staticmethod
     def trunc(x):
-        def trunc(x):
-            return sympy.Integer(x) if x.is_finite else x
-
-        return ValueRanges.increasing_map(x, trunc)
+        return ValueRanges.increasing_map(x, TruncToFloat)
 
 
 class ValueRangeAnalysis(SymPyValueRangeAnalysis):
@@ -867,6 +852,7 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
     def neg(x):
         return ValueRanges.decreasing_map(x, operator.neg)
 
+    # TODO: this is wrong, do something better
     @classmethod
     def truncdiv(cls, a, b):
         x = cls.truediv(a, b)
@@ -887,6 +873,7 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
 def bound_sympy(
     expr: sympy.Expr, ranges: Optional[Dict[sympy.Symbol, ValueRanges]] = None
 ) -> ValueRanges:
+    log.debug("bound_sympy(%s, %s)", expr, ranges)
     if isinstance(expr, sympy.Number):
         return ValueRanges.wrap(expr)
 

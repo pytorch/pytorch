@@ -515,6 +515,7 @@ METHOD_TO_OPERATOR = {
 unary_magic_methods = {
     "abs",
     "sym_float",
+    "sym_int",
     "ceil",
     "floor",
     "neg",
@@ -570,7 +571,7 @@ also_bool_magic_methods = {"eq"}
 bool_magic_methods = only_bool_magic_methods | also_bool_magic_methods
 
 # Methods that are only for float
-only_float_magic_methods = {"is_integer", "round"}
+only_float_magic_methods = {"is_integer", "round", "sym_int"}
 
 
 magic_methods_on_operator_with_trailing_underscore = {"and", "or"}
@@ -1361,6 +1362,8 @@ def _make_user_magic(method, user_type):
         return wrap_node(getattr(self.node, method_attr)())
 
     def binary_magic_impl(self, other):
+        if isinstance(other, torch.Tensor):
+            return NotImplemented
         sym_node_log.debug("MAGIC %s %s %s", method, self, other)
         self = promote(self)
         other = promote(other)

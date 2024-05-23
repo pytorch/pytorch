@@ -113,11 +113,11 @@ def sympy_interp(
         return analysis.sqrt(sympy_interp(analysis, env, expr.args[0]))
 
     # Recursive case
-    args = [sympy_interp(analysis, env, arg) for arg in expr.args]  # type: ignore[arg-type]
     if hasattr(expr.func, "_torch_handler_name"):
         handler_name = expr.func._torch_handler_name
     else:
         handler_name = handlers()[expr.func]
+    args = [sympy_interp(analysis, env, arg) for arg in expr.args]  # type: ignore[arg-type]
     handler = getattr(analysis, handler_name)
     if handler_name in ASSOCIATIVE_OPS:
         assert len(args) > 1

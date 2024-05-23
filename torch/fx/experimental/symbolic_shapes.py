@@ -959,16 +959,6 @@ def eval_guards(gm, *args, ignore_static=True):
 def bind_symbols(gm, *args):
     return gm.shape_env.bind_symbols(fx_placeholder_vals(gm), args)
 
-def _assert_bound_is_rational(expr: sympy.Expr, bound: ValueRanges):
-    """
-    We assert that the bounds are either Boolean, or not finite, or can be computed
-    in exact prevision via rational arithmetic.
-    The only exception to this is the rare case when the user calls `sqrt(s0)`
-    sqrt is turned into sympy.Pow so we just match for that (it matches more things, but still)
-    """
-    assert bound.lower.is_rational or bound.lower.is_Boolean or not bound.lower.is_finite or expr.has(sympy.Pow), (bound, expr)
-    assert bound.upper.is_rational or bound.upper.is_Boolean or not bound.upper.is_finite or expr.has(sympy.Pow), (bound, expr)
-
 class DimDynamic(Enum):
     """
     Controls how to perform symbol allocation for a dimension.  It is always
@@ -4218,6 +4208,10 @@ class ShapeEnv:
             self.counter["sympy_recursion_error"] += 1
             return None
 
+        # This is bad to do, the replacement with division leaves us with
+        # rationals when atom.args[0] is addition, e.g., sympy will happily
+        # turn (s0 + s1) // 2 into s0 / 2 + s1 / 2.  Needless complication!
+        """
         floor_div_replace = {}
         for atom in new_expr.atoms(FloorDiv):
             floor_div_replace[atom] = sympy.floor(atom.args[0] / atom.args[1])
@@ -4226,11 +4220,11 @@ class ShapeEnv:
         # are still free symbols
         if new_expr.is_number:
             return new_expr
+        """
 
         # Check if the range can solve it statically
         out = bound_sympy(new_expr, new_range_env)
         if expect_rational:
-            _assert_bound_is_rational(new_expr, out)
             if out.is_singleton():
                 return out.lower
 
@@ -5087,7 +5081,6 @@ class ShapeEnv:
             lower, upper = vr.lower, vr.upper
 
             rhs_vr = bound_sympy(rhs, self.var_to_range)
-            _assert_bound_is_rational(rhs, rhs_vr)
 
             # Let's suppose that we have a preexisting range for x [0, 100].
             # Now, we issue a guard x > y, where the range for y is [50, 150].
