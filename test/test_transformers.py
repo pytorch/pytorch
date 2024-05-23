@@ -43,7 +43,8 @@ from torch.testing._internal.common_cuda import (
     IS_JETSON, SM80OrLater, PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
-    PLATFORM_SUPPORTS_CUDNN_ATTENTION
+    PLATFORM_SUPPORTS_CUDNN_ATTENTION,
+    tf32_on_and_off
 )
 
 if TEST_FAIRSEQ:
@@ -315,6 +316,7 @@ class TestTransformers(NNTestCase):
         with torch.no_grad():
             model(src, src_mask=src_mask)
 
+    @tf32_on_and_off(0.001)
     @parametrize("use_torchscript", [False])
     @parametrize("enable_nested_tensor", [True, False])
     @parametrize("use_autocast", [True, False])
@@ -405,8 +407,9 @@ class TestTransformers(NNTestCase):
                 # no garauntees on output corresponding to masked tokens, so they may vary between slow/fast path. set all to 0.
                 fastpath_output_expanded = fastpath_output_expanded.masked_fill(src_key_padding_mask.unsqueeze(-1), 0)
                 slowpath_output = slowpath_output.masked_fill(src_key_padding_mask.unsqueeze(-1), 0)
-                torch.testing.assert_close(fastpath_output_expanded, slowpath_output, rtol=2e-4, atol=5e-4)
+                self.assertEqual(fastpath_output_expanded, slowpath_output)
 
+    @tf32_on_and_off(0.001)
     @parametrize("with_no_grad", [True, False])
     @parametrize("training", [True, False])
     @parametrize("enable_nested_tensor", [False])
@@ -450,7 +453,7 @@ class TestTransformers(NNTestCase):
                                     [2.419836044311523, 0.017548924311996, -0.608187675476074, -0.085347734391689]]]
                                   ).to(device)
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
+        self.assertEqual(result, ref_output)
 
     @parametrize("batch_first", [True, False])
     @parametrize("training", [True, False])
