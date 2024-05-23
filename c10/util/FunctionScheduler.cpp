@@ -1,18 +1,37 @@
 #include <c10/util/FunctionScheduler.h>
+#include <chrono>
 
 namespace c10 {
 
 /* Job */
 
-Job::Job(std::function<void()> function, std::chrono::microseconds interval)
-    : _function(std::move(function)), _interval(interval) {}
+Job::Job(
+    std::function<void()> function,
+    std::chrono::microseconds interval,
+    bool immediate)
+    : _function(std::move(function)),
+      _interval(interval),
+      _immediate(immediate) {}
 
 std::chrono::microseconds Job::interval() const {
   return _interval;
 }
 
-void Job::run() const {
+int Job::counter() const {
+  return _counter;
+}
+
+void Job::reset_counter() {
+  _counter = 0;
+}
+
+bool Job::immediate() const {
+  return _immediate;
+}
+
+void Job::run() {
   _function();
+  _counter++;
 }
 
 /* Run */
@@ -36,7 +55,7 @@ std::chrono::time_point<std::chrono::steady_clock> Run::time() const {
 
 /* FunctionScheduler */
 
-FunctionScheduler::FunctionScheduler() : _queue(&Run::gt) {};
+FunctionScheduler::FunctionScheduler() : _queue(&Run::gt){};
 
 FunctionScheduler::~FunctionScheduler() {
   stop();
@@ -105,6 +124,10 @@ int FunctionScheduler::id() {
 
 void FunctionScheduler::addRun(int job_id, std::unique_ptr<Job> const& job) {
   // This function is always called with the mutex previously acquired.
+  auto interval = job->interval();
+  if (job->immediate() && job->counter() == 0)
+    interval = std::chrono::microseconds(0);
+
   auto time = std::chrono::steady_clock::now() + job->interval();
   auto run = std::make_shared<Run>(job_id, time);
   _queue.push(std::move(run));
@@ -126,13 +149,14 @@ int FunctionScheduler::scheduleJob(std::unique_ptr<Job> job) {
   return job_id;
 }
 
-
-template<class Rep, class Period>
+template <class Rep, class Period>
 int FunctionScheduler::scheduleJob(
     std::function<void()> function,
-    std::chrono::duration<Rep, Period> const &duration) {
-  auto interval = std::chrono::duration_cast<std::chrono::microseconds>(duration);
-  auto job = std::make_unique<Job>(std::move(function), interval);
+    std::chrono::duration<Rep, Period> const& interval,
+    bool immediate) {
+  auto duration =
+      std::chrono::duration_cast<std::chrono::microseconds>(interval);
+  auto job = std::make_unique<Job>(std::move(function), duration, immediate);
   return scheduleJob(std::move(job));
 }
 
@@ -169,6 +193,11 @@ void FunctionScheduler::stop() {
   // clear queue
   while (!_queue.empty())
     _queue.pop();
+
+  // reset counters
+  for (const auto& entry : _jobs) {
+    entry.second->reset_counter();
+  }
 }
 
 bool FunctionScheduler::isRunning() const {

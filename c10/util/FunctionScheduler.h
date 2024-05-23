@@ -18,17 +18,23 @@ namespace c10 {
 class Job {
   std::function<void()> _function;
   std::chrono::microseconds _interval;
+  int _counter = 0;
+  bool _immediate;
 
  public:
-  Job(std::function<void()> function, std::chrono::microseconds interval);
+  Job(std::function<void()> function,
+      std::chrono::microseconds interval,
+      bool immediate = false);
 
-  std::chrono::time_point<std::chrono::steady_clock> next_run() const;
   std::chrono::microseconds interval() const;
+  int counter() const;
+  void reset_counter();
+  bool immediate() const;
 
   void set_next_run(
       std::chrono::time_point<std::chrono::steady_clock> next_run);
 
-  void run() const;
+  void run();
 };
 
 // Represents a concrete run, i.e,
@@ -72,10 +78,11 @@ class FunctionScheduler {
   FunctionScheduler();
   ~FunctionScheduler();
 
-  template<class Rep, class Period>
+  template <class Rep, class Period>
   int scheduleJob(
       std::function<void()> function,
-      std::chrono::duration<Rep, Period> const &duration);
+      std::chrono::duration<Rep, Period> const& interval,
+      bool immediate = false);
 
   int removeJob(int id);
 
