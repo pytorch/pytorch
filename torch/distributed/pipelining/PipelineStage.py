@@ -125,7 +125,7 @@ class _PipelineStageBase(ABC):
             )
 
         # Run time states
-        self._outputs_meta: Optional[Tuple[torch.Tensor]] = None
+        self._outputs_meta: Optional[Tuple[torch.Tensor, ...]] = None
         # map microbatch ID to list of forward tensor args
         self.fwd_cache: Dict[int, Tuple[Any, List[torch.Tensor]]] = {}
         # Current forward chunk id
@@ -184,9 +184,7 @@ class _PipelineStageBase(ABC):
         """
         return self.stage_index == self.num_stages - 1
 
-    def _configure_outputs_meta(
-        self, outputs_meta: Union[List[torch.Tensor], Tuple[torch.Tensor]]
-    ):
+    def _configure_outputs_meta(self, outputs_meta: Tuple[torch.Tensor, ...]):
         """
         Track the output shapes/dtype of this stage since they determine the send operation(s) which must match
         recv operations of the next stage.  The next stage _will_ be freezing its recv buffers based on its initial
@@ -198,7 +196,7 @@ class _PipelineStageBase(ABC):
         ), "Attempting to reconfigure output_meta, which is not supported"
         self._outputs_meta = tuple(outputs_meta)  # type: ignore[assignment]
 
-    def get_outputs_meta(self) -> Tuple[torch.Tensor]:
+    def get_outputs_meta(self) -> Tuple[torch.Tensor, ...]:
         """Get the output metadata (meta tensors) reprensenting the outputs of this stage"""
         assert (
             self._outputs_meta is not None
@@ -588,9 +586,6 @@ class _PipelineStageBase(ABC):
         if len(kwargs):
             # TODO- need a mapping of kwarg to position in self.args_recv_info
             # without it, we just validate shapes for args and ignore kwargs
-            logger.warning(
-                "Unable to validate input info for traced modules with kwargs."
-            )
             expected_args = expected_args[: len(expected_args) - len(kwargs)]
 
         # TODO- need a mapping of kwarg to position in self.args_recv_info
@@ -603,7 +598,7 @@ class _PipelineStageBase(ABC):
         ]
         validate_tensors_metadata("forward input args", expected_tensors_meta, args)
 
-    def _validate_fwd_outputs(self, outputs: Tuple[torch.Tensor]):
+    def _validate_fwd_outputs(self, outputs: Tuple[torch.Tensor, ...]):
         """Raises a RuntimeError if this stage produces an output of unexpected shape/dtype.
         Most likely, this could be cause either by incorrect user specification of output shapes, or becuase
         shape inference was done on the original model but then at runtime the model is wrapped with something like
@@ -1108,7 +1103,7 @@ class ManualPipelineStage(_PipelineStageBase):
         else:
             self.outputs = _create_empty_tensors(output_args, device)
 
-        self._configure_outputs_meta(self.outputs)
+        self._configure_outputs_meta(tuple(self.outputs))
 
         # these are the buffers used in backwards send/recv, they are allocated later
         self.outputs_grad: List[torch.Tensor] = []
