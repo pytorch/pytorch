@@ -58,10 +58,10 @@ struct ListElementConstReferenceTraits {
   using const_reference = typename c10::detail::ivalue_to_const_ref_overload_return<T>::type;
 };
 
-// There is no to() overload for c10::optional<std::string>.
+// There is no to() overload for std::optional<std::string>.
 template<>
-struct ListElementConstReferenceTraits<c10::optional<std::string>> {
-  using const_reference = c10::optional<std::reference_wrapper<const std::string>>;
+struct ListElementConstReferenceTraits<std::optional<std::string>> {
+  using const_reference = std::optional<std::reference_wrapper<const std::string>>;
 };
 
 template<class T, class Iterator>

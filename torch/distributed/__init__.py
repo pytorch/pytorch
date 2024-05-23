@@ -54,6 +54,8 @@ if is_available():
         set_debug_level,
         set_debug_level_from_env,
         _make_nccl_premul_sum,
+        _ControlCollectives,
+        _StoreCollectives,
     )
 
     class _DistributedPdb(pdb.Pdb):
@@ -127,6 +129,7 @@ if is_available():
     )
 
     from .remote_device import _remote_device
+    from .device_mesh import init_device_mesh, DeviceMesh
 
     set_debug_level_from_env()
 
