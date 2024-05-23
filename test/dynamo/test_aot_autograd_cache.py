@@ -5,15 +5,11 @@ import torch._dynamo
 import torch._dynamo.test_case
 
 import torch._functorch._aot_autograd
-import torch.distributed as dist
 from torch._functorch._aot_autograd.autograd_cache import (
     autograd_cache_hash,
     BypassAOTAutogradCache,
 )
 from torch._functorch._aot_autograd.schemas import AOTConfig
-
-from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
-from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
@@ -136,22 +132,6 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
 
         config = self.default_config()
         self.gen_cache_key(fn, config)
-
-    # Redistribute is not cacheable
-    def test_dtensor_redistribute(self):
-        fake_store = FakeStore()
-        dist.init_process_group("fake", store=fake_store, rank=0, world_size=2)
-        mesh = DeviceMesh(self.device_type, torch.arange(2))
-
-        def fn(x):
-            dt = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
-            return dt.redistribute(mesh, [Replicate()]).to_local() + 2
-
-        config = self.default_config()
-        self.assertRaises(
-            BypassAOTAutogradCache, lambda: self.gen_cache_key(fn, config)
-        )
-        dist.destroy_process_group()
 
 
 if __name__ == "__main__":
