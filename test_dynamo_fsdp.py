@@ -44,9 +44,9 @@ from torch.distributed._composable.fsdp._fsdp_init import (
 )
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.distributed._tensor import init_device_mesh
-# from llama_model_toy import ToyTransformer, ModelArgs
+from llama_model_toy import ToyTransformer, ModelArgs
 # from llama_model_toy_graph_break import ToyTransformerWithGraphBreak, ModelArgs
-from llama_model import Transformer, ModelArgs
+# from llama_model import Transformer, ModelArgs
 # from llama_model_graph_break import TransformerWithGraphBreak, ModelArgs
 
 # from torchviz import make_dot
@@ -275,7 +275,7 @@ def checkpoint_wrapper(module, config):
         )
 
 
-test_case = "nested_fully_shard"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard" / "toy_transformer"
+test_case = "toy_transformer"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard" / "toy_transformer"
 balanced = True
 mixed_precision = False  # TODO(yf225): when True, fails accuracy test, needs debugging
 apply_fsdp = True
@@ -310,6 +310,19 @@ def init(activation_checkpoint):
     if activation_checkpoint:
         ac_config = ACConfigClass()  # use default in this class
         torch._dynamo.config._experimental_support_context_fn_in_torch_utils_checkpoint = True
+    if apply_fsdp:
+        torch._dynamo.config.trace_distributed = True
+        torch._functorch.config.move_view_chain_to_bwd_graph = True
+        torch._functorch.config.aggressive_recomputation = False
+        torch._inductor.config.reorder_for_compute_comm_overlap = True
+        torch._inductor.config.reorder_for_compute_comm_overlap_passes = [
+            "sink_waits",
+            "raise_comms",
+        ]
+        torch._inductor.config.allow_buffer_reuse = True
+        torch._inductor.config.inplace_buffers = True
+        torch._inductor.config.raise_last_usage = True
+        torch._dynamo.config.error_on_recompile = True
     mesh = init_device_mesh("cuda", (world_size,))
 
     torch.manual_seed(0)
@@ -349,7 +362,6 @@ def init(activation_checkpoint):
 
             def forward(self, x):
                 ret = torch.matmul(x, self.param)
-                print(ret)
                 ret = torch.matmul(ret, self.param)
                 return ret
 
@@ -379,24 +391,15 @@ def init(activation_checkpoint):
         #         fully_shard(mod, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
         #     fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
     elif test_case == "toy_transformer":
-        torch._functorch.config.aggressive_recomputation = False
-        torch._inductor.config.allow_buffer_reuse = False
-        torch._inductor.config.inplace_buffers = False
-        torch._inductor.config.reorder_for_compute_comm_overlap = True
-        torch._inductor.config.reorder_for_compute_comm_overlap_passes = [
-            "sink_waits",
-            "raise_comms",
-        ]
-        torch._inductor.config.raise_last_usage = True
         model_args = ModelArgs(
             dim=hidden_dim,
             n_layers=1,
             n_heads=1,
             vocab_size=1024,
         )
-        # transformer_class = ToyTransformer  # makes comm-induced peak memory issue more prominent
+        transformer_class = ToyTransformer  # makes comm-induced peak memory issue more prominent
         # transformer_class = ToyTransformerWithGraphBreak
-        transformer_class = Transformer
+        # transformer_class = Transformer
         # transformer_class = TransformerWithGraphBreak
         model = transformer_class(model_args)
         for layer_id, mod in enumerate(model.layers):
@@ -492,13 +495,13 @@ def run(model, optim, n_iter, hidden_dim, use_compiled_autograd=False):
         #     backend = "eager"
         #     fullgraph = False
         # else:
-        #     backend = "inductor"
+        #     backend = "aot_eager"
         #     fullgraph = True
         torch_log.warning(f"Starting iteration: {i}")
         optim.zero_grad(set_to_none=True)
         inp = create_input(hidden_dim)
         if use_compiled_autograd:
-            compiled_autograd_ctx = compiled_autograd.enable(compiler_fn("inductor", True))
+            compiled_autograd_ctx = compiled_autograd.enable(compiler_fn("aot_eager", True))
         else:
             compiled_autograd_ctx = contextlib.nullcontext()
         with compiled_autograd_ctx:
@@ -527,20 +530,6 @@ def main_compiled(n_iter, activation_checkpoint, backend):
         # per-param FSDP does lazy init using 1st run, so run it once to init using eager mode
         run(model, optim, 1, hidden_dim)
         print("done eager 1st run for compiled!")
-
-    if apply_fsdp:
-        torch._dynamo.config.trace_distributed = True
-        torch._functorch.config.move_view_chain_to_bwd_graph = True
-        torch._functorch.config.aggressive_recomputation = False
-        torch._inductor.config.reorder_for_compute_comm_overlap = True
-        torch._inductor.config.reorder_for_compute_comm_overlap_passes = [
-            "sink_waits",
-            "raise_comms",
-        ]
-        torch._inductor.config.allow_buffer_reuse = True
-        torch._inductor.config.inplace_buffers = True
-        torch._inductor.config.raise_last_usage = True
-        torch._dynamo.config.error_on_recompile = True
 
     # if dist.get_rank() == 0:
     #     # HACK: delay rank 0 by X seconds, so that rank 1 will always fail first.
@@ -627,7 +616,7 @@ if __name__ == "__main__":
     if dist.get_rank() == 0:
         start_record_memory_history()
     ac_test_order = [False]
-    backends = ["inductor"]
+    backends = ["aot_eager"]
 
     def test_eager(activation_checkpoint):
         losses_eager = execute_and_profile(
