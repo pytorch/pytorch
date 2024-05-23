@@ -20,8 +20,7 @@ class GradScaler(torch.amp.GradScaler):
         enabled: bool = True,
     ) -> None:
         warnings.warn(
-            "torch.cpu.amp.GradScaler(args...) is deprecated. Please use torch.amp.GradScaler('cpu', args...) instead.",
-            DeprecationWarning,
+            "torch.cpu.amp.GradScaler(args...) is deprecated. Please use torch.amp.GradScaler('cpu', args...) instead."
         )
         super().__init__(
             "cpu",
