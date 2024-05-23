@@ -2,10 +2,6 @@
 # flake8: noqa
 import unittest
 
-from collections import namedtuple
-
-from dataclasses import dataclass
-
 from typing import Dict, List, Tuple
 
 import torch
