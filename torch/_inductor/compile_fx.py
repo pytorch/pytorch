@@ -338,31 +338,6 @@ def maybe_disable_comprehensive_padding(example_inputs: List[torch.Tensor]):
         return contextlib.nullcontext()
 
 
-@DebugContext.wrap
-def count_bytes_inner(
-    gm: torch.fx.GraphModule,
-    example_inputs: List[torch.Tensor],
-    num_fixed: int = 0,
-    **kwargs,
-):
-    shape_env = _shape_env_from_inputs(example_inputs)
-    fake_mode = fake_tensor_prop(gm, example_inputs)
-
-    with V.set_fake_mode(fake_mode):
-        _recursive_post_grad_passes(gm, False)
-
-    graph = GraphLowering(gm, shape_env=shape_env, num_static_inputs=num_fixed)
-    with V.set_graph_handler(graph), V.set_real_inputs(
-        example_inputs
-    ), maybe_disable_comprehensive_padding(example_inputs):
-        graph.run(*example_inputs)
-        num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
-        metrics.num_bytes_accessed += num_bytes
-        metrics.nodes_num_elem += nodes_num_elem
-        metrics.node_runtimes += node_runtimes
-    return make_boxed_func(gm.forward)
-
-
 def fake_tensor_prop(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
@@ -795,6 +770,7 @@ def fx_codegen_and_compile(
             const_code=const_code,
             const_module=const_graph,
         )
+        metrics_helper = metrics.CachedMetricsHelper()
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)
             output_strides: List[Optional[Tuple[int, ...]]] = []
@@ -814,8 +790,11 @@ def fx_codegen_and_compile(
                     else:
                         output_strides.append(None)
 
-            metrics_helper = metrics.CachedMetricsHelper()
             compiled_fn = graph.compile_to_fn()
+            num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
+            metrics.num_bytes_accessed += num_bytes
+            metrics.node_runtimes += node_runtimes
+            metrics.nodes_num_elem += nodes_num_elem
 
             if (
                 cudagraphs

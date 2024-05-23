@@ -354,6 +354,24 @@ def patch_torch_manual_seed():
     torch.manual_seed = deterministic_torch_manual_seed
 
 
+def empty_gpu_cache(device):
+    """
+    Explicitly empty gpu cache to avoid OOM in subsequent run.
+    """
+
+    if device not in ["cuda", "xpu"]:
+        log.warning(
+            "Trying to call the empty_gpu_cache for device: %s, which is not in list [cuda, xpu]",
+            device,
+        )
+        return
+
+    if device == "cuda":
+        torch.cuda.empty_cache()
+    elif device == "xpu":
+        torch.xpu.empty_cache()
+
+
 def synchronize():
     pass
 
@@ -1234,7 +1252,7 @@ def download_retry_decorator(download_fn):
                     )
                     time.sleep(wait)
                 else:
-                    raise RuntimeError(  # noqa: TRY200
+                    raise RuntimeError(  # noqa: B904
                         f"Failed to load model '{args}' with following error(s): {str(e)}."
                     )
 
@@ -2278,7 +2296,7 @@ class BenchmarkRunner:
     def batch_size_finder(self, device, model_name, initial_batch_size=1024):
         batch_size = initial_batch_size
         while batch_size >= 1:
-            torch.cuda.empty_cache()
+            empty_gpu_cache(current_device)
             try:
                 device, name, model, example_inputs, _ = self.load_model(
                     device,
@@ -2468,7 +2486,7 @@ class BenchmarkRunner:
                 fp64_outputs = None
             finally:
                 del model_fp64, inputs_fp64
-                torch.cuda.empty_cache()
+                empty_gpu_cache(current_device)
 
             tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
                 self.args.training, current_device, name
@@ -2497,7 +2515,7 @@ class BenchmarkRunner:
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
-                torch.cuda.empty_cache()
+                empty_gpu_cache(current_device)
 
             # Rerun native pytorch
             reset_rng_state()
@@ -2518,7 +2536,7 @@ class BenchmarkRunner:
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
-                torch.cuda.empty_cache()
+                empty_gpu_cache(current_device)
 
             # Two eager runs should have exactly same result
             is_same = True
@@ -2719,7 +2737,7 @@ class BenchmarkRunner:
             try:
                 if current_device == "cuda":
                     torch.cuda.reset_peak_memory_stats()
-                    torch.cuda.empty_cache()
+                    empty_gpu_cache(current_device)
                 t0 = time.perf_counter()
                 for _ in range(niters):
                     fn(model, example_inputs)
@@ -2949,7 +2967,7 @@ class BenchmarkRunner:
                 name, model, example_inputs, optimize_ctx, experiment, tag
             )
             print(status)
-        torch.cuda.empty_cache()
+        empty_gpu_cache(current_device)
 
         self.maybe_preserve_compile_debug(name, status)
 
@@ -3468,6 +3486,18 @@ def parse_args(args=None):
         help="Measure speedup with TorchInductor",
     )
     group.add_argument(
+        "--quantization",
+        choices=[
+            "int8dynamic",
+            "int8weightonly",
+            "int4weightonly",
+            "autoquant",
+            "noquant",
+        ],
+        default=None,
+        help="Measure speedup of torchao quantization with TorchInductor baseline",
+    )
+    group.add_argument(
         "--export",
         action="store_true",
         help="Measure pass rate with export",
@@ -3661,6 +3691,9 @@ def run(runner, args, original_dir=None):
     if args.inductor:
         assert args.backend is None
         args.backend = "inductor"
+    if args.quantization:
+        assert args.backend is None
+        args.backend = "torchao"
     if args.dynamic_batch_only:
         args.dynamic_shapes = True
         torch._dynamo.config.assume_static_by_default = True
@@ -3939,6 +3972,23 @@ def run(runner, args, original_dir=None):
 
             # AOTInductor doesn't support control flow yet
             runner.skip_models.update(runner.skip_models_due_to_control_flow)
+        elif args.backend == "torchao":
+            assert "cuda" in args.devices, "Quantization requires CUDA device."
+            assert args.bfloat16, "Quantization requires dtype bfloat16."
+            try:
+                from .torchao_backend import setup_baseline, torchao_optimize_ctx
+            except ImportError:
+                from torchao_backend import setup_baseline, torchao_optimize_ctx
+
+            setup_baseline()
+            baseline_ctx = functools.partial(
+                torch.compile,
+                backend="inductor",
+                fullgraph=args.nopython,
+                mode=args.inductor_compile_mode,
+            )
+            runner.model_iter_fn = baseline_ctx(runner.model_iter_fn)
+            optimize_ctx = torchao_optimize_ctx(args.quantization)
         else:
             optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
         experiment = speedup_experiment

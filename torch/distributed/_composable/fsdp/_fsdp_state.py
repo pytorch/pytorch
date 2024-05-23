@@ -245,7 +245,7 @@ class FSDPState(_State):
         )
         if tensors:
             for tensor in tensors:
-                handle = tensor.register_hook(self._pre_backward)
+                tensor.register_hook(self._pre_backward)
         return output
 
     def _register_root_post_backward_final_callback(self):
