@@ -311,7 +311,7 @@ realize_opcount_threshold = 30
 realize_acc_reads_threshold = 8
 
 # fallback to eager for random/dropout, this is slow but useful for debugging
-fallback_random = False
+fallback_random = True  # TODO(jansel): halide+random
 
 # automatically create fallbacks when encountering an unhandled op
 implicit_fallbacks = True
@@ -508,7 +508,7 @@ freezing_discard_parameters: bool = False
 # Kill switch for allowing temporary tensors to be allocated as stack arrays. Tests
 # should be run with this flag both on and off to make sure we have coverage.
 allow_stack_allocation: bool = (
-    os.environ.get("TORCHINDUCTOR_STACK_ALLOCATION", "1") == "1"
+    os.environ.get("TORCHINDUCTOR_STACK_ALLOCATION", "1" if is_fbcode() else "0") == "1"
 )
 
 # Enables an alternate DSO interface (the "minimal ArrayRef interface") intended

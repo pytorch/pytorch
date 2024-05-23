@@ -246,7 +246,7 @@ class HalideOverrides(OpOverrides):
 
     @staticmethod
     def expm1(x):
-        return f"hl.expm1({x})"
+        return f"hl.exp({x}) - hl.f32(1.0)"
 
     @staticmethod
     def sqrt(x):
@@ -478,12 +478,10 @@ class HalideOverrides(OpOverrides):
 
     @staticmethod
     def floordiv(a, b):
-        # See the comment in lowering.div_mode. a and b are integer type.
-        # Similar to div_floor_kernel_cuda in pytorch core.
-        # Notice that // in triton behaves as truncdiv instead of floordiv
-        quot = f"{a} // {b}"
-        rem = f"{a} % {b}"
-        return f"hl.select(({a} < 0) != ({b} < 0), hl.select({rem} != 0, {quot} - 1, {quot}), {quot})"
+        # TODO(jansel): find a better ways to do this, the select-based trick from triton.py didn't work
+        return (
+            f"hl.floor(hl.cast(hl.Float(max(32, {a.name}.type().bits())), {a}) / {b})"
+        )
 
     @classmethod
     def sign(cls, x):
@@ -498,9 +496,7 @@ class HalideOverrides(OpOverrides):
 
     @staticmethod
     def truncdiv(a, b):
-        # See the comment in lowering.div_mode. a and b are integer type.
-        # Notice that // in triton behaves as truncdiv instead of floordiv
-        return f"{a} // {b}"
+        return f"hl.div_round_to_zero({a}, {b})"
 
     @staticmethod
     def ceil(x):
@@ -833,21 +829,11 @@ class HalideKernel(SIMDKernel):
         value_str = value.reduction_str()
 
         if reduction_type in ("argmax", "argmin"):
-
-            def cast_tuple(a, b):
-                return f"hl.Tuple([hl.cast({halide_type(src_dtype)}, {a}), hl.cast({halide_type(dtype)}, {b})])"
-
-            tuple_var = self.newfunc(result_var.used_dims)
             self.body.writeline(
-                f"{tuple_var} = {cast_tuple(halide_constant(default), 0)}"
+                f"{result_var} = hl.{reduction_type}(rdom, {value_str})[0]"
             )
-            cmp = ">" if reduction_type == "argmax" else "<"
-            better = f"{value_str} {cmp} {tuple_var}[0]"
-            self.body.writeline(
-                f"{tuple_var} = hl.select({better}, {cast_tuple(value_str, 'rdom')}, {tuple_var})"
-            )
-            self.body.writeline(f"{result_var} = {tuple_var}[1]")
         elif reduction_type == "welford_reduce":
+            # TODO(jansel): implement welford_reduce without fallback
             result_var = self.welford_reduce_fallback(dtype, value)
         elif reduction_type == "welford_combine":
             raise Unsupported(reduction_type)
@@ -908,11 +894,27 @@ class HalideKernel(SIMDKernel):
         """
         return V.graph.get_buffer(name).get_layout().storage_size()
 
+    def halide_argdefs(self):
+        """
+        Halide requires scalar inputs before outputs, so need to reorder args.
+        """
+
+        def arg_order(arg_tuple):
+            call_str, arg = arg_tuple
+            if isinstance(arg, SizeArg):
+                return 1  # this would normally be at the end, move it to middle
+            elif "out_ptr" in arg.name:
+                return 2
+            else:
+                assert "in_ptr" in arg.name
+                return 0
+
+        return sorted(zip(*self.args.python_argdefs()[1:]), key=arg_order)
+
     def halide_kernel_meta(self) -> HalideMeta:
         """Compute metadata required by codecache.py"""
-        _, _, signature = self.args.python_argdefs()
         argtypes = []
-        for arg in signature:
+        for _, arg in self.halide_argdefs():
             if isinstance(arg, SizeArg):
                 numel = None
                 dtype = "long"
@@ -928,18 +930,17 @@ class HalideKernel(SIMDKernel):
                     numel,
                 )
             )
-        target = "host"
-        # cuda_capability_86
-        # for cuda: target="host-cuda-cuda_capability_86-user_context"
+        target = ["host", "strict_float"]
+        # TODO(jansel): for cuda want target="host-cuda-cuda_capability_86-user_context"
         if config.halide.no_asserts:
-            target += "-no_asserts"
-
+            target.append("no_asserts")
         if "64" in self.index_dtype:
-            target += "-large_buffers"
+            # TODO(jansel): it is unclear if this does anything, since input sizes are still int32
+            target.append("large_buffers")
 
         return HalideMeta(
             argtypes,
-            target=target,
+            target="-".join(target),
             scheduler="Mullapudi2016",
             scheduler_flags={
                 "parallelism": parallel_num_threads(),
@@ -963,9 +964,7 @@ class HalideKernel(SIMDKernel):
             strip=True,
         )
         code.do_indent()
-
-        _, _, signature = self.args.python_argdefs()
-        for arg in signature:
+        for _, arg in self.halide_argdefs():
             if isinstance(arg, SizeArg):
                 code.writeline(f"{arg.name} = hl.InputScalar({self.index_dtype})")
             else:
@@ -973,14 +972,13 @@ class HalideKernel(SIMDKernel):
                 argcls = "hl.OutputBuffer" if "out" in arg.name else "hl.InputBuffer"
                 argtype = halide_type(arg.dtype)
                 code.writeline(f"{arg.name} = {argcls}({argtype}, 1)")
-
         code.splice(
             """
             def generate(g):
         """
         )
         code.do_indent()
-        for arg in signature:
+        for _, arg in self.halide_argdefs():
             code.writeline(f"{arg.name} = g.{arg.name}")
         for old, new in self.args.aliases():
             code.writeline(f"{old} = {new}")
@@ -1025,7 +1023,7 @@ class HalideKernel(SIMDKernel):
             code.writeline(line)
         code.writeline("")
         code.writeline("assert g.using_autoscheduler()")
-        for arg in signature:
+        for _, arg in self.halide_argdefs():
             if isinstance(arg, SizeArg):
                 numel = V.graph.sizevars.symbolic_hint(arg.expr)
             else:
@@ -1051,7 +1049,7 @@ class HalideKernel(SIMDKernel):
     def call_kernel(self, name: str, node=None):
         """Codegen a call to this kernel"""
         wrapper = V.graph.wrapper_code
-        call_args = [*map(str, self.args.python_argdefs()[1])]
+        call_args = [f"{n}" for n, _ in self.halide_argdefs()]
         current_device = V.graph.scheduler.current_device
         assert current_device.type == "cpu"
         wrapper.generate_kernel_call(
