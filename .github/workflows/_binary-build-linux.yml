@@ -19,7 +19,7 @@ on:
       timeout-minutes:
         required: false
         default: 210
-        type: string
+        type: number
         description: timeout for the job
       ALPINE_IMAGE:
         required: false
