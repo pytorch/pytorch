@@ -776,11 +776,23 @@ class FxGraphCache:
                 subdir = FxGraphCache._get_tmp_dir_for_key(key)
                 if os.path.exists(subdir):
                     for path in sorted(os.listdir(subdir)):
-                        with open(os.path.join(subdir, path), "rb") as f:
-                            yield pickle.load(f)
+                        try:
+                            with open(os.path.join(subdir, path), "rb") as f:
+                                yield pickle.load(f)
+                        except Exception:
+                            log.warning(
+                                "fx graph cache unable to load compiled graph",
+                                exc_info=True,
+                            )
+
             if remote_cache:
-                if (data := remote_cache.get(key)) is not None:
-                    yield pickle.loads(data)
+                try:
+                    if (data := remote_cache.get(key)) is not None:
+                        yield pickle.loads(data)
+                except Exception:
+                    log.warning(
+                        "fx graph cache unable to load compiled graph", exc_info=True
+                    )
 
         # Iterate over any entries in the subdir for this key and evaluate
         # their guards to determine whether there's a hit.
@@ -893,32 +905,39 @@ class FxGraphCache:
 
         try:
             content = pickle.dumps(disk_compiled_graph)
-        except Exception as e:
-            log.debug("fx graph cache unable to serialize compiled graph: %s", e)
+        except Exception:
+            log.warning(
+                "fx graph cache unable to serialize compiled graph", exc_info=True
+            )
             counters["inductor"]["fxgraph_cache_pickle_error"] += 1
             return
 
-        if local:
-            subdir = FxGraphCache._get_tmp_dir_for_key(key)
-            if not os.path.exists(subdir):
-                os.makedirs(subdir, exist_ok=True)
+        try:
+            if local:
+                subdir = FxGraphCache._get_tmp_dir_for_key(key)
+                if not os.path.exists(subdir):
+                    os.makedirs(subdir, exist_ok=True)
 
-            # Use a hash of the serialized CompiledFxGraph to get a unique file
-            # name. The specific name doesn't matter since a lookup involves
-            # iterating over all entries in the parent subdir.
-            path = os.path.join(subdir, sha256_hash(content))
-            write_atomic(path, content, make_dirs=True)
+                # Use a hash of the serialized CompiledFxGraph to get a unique file
+                # name. The specific name doesn't matter since a lookup involves
+                # iterating over all entries in the parent subdir.
+                path = os.path.join(subdir, sha256_hash(content))
+                write_atomic(path, content, make_dirs=True)
 
-        if remote_cache:
-            cache_data = (
-                {
-                    "data": content,
-                    "time_taken_ms": time_taken_ns // 1000000,  # Convert from NS to MS
-                }
-                if config.is_fbcode()
-                else content
-            )
-            remote_cache.put(key, cache_data)
+            if remote_cache:
+                cache_data = (
+                    {
+                        "data": content,
+                        "time_taken_ms": time_taken_ns
+                        // 1000000,  # Convert from NS to MS
+                    }
+                    if config.is_fbcode()
+                    else content
+                )
+                remote_cache.put(key, cache_data)
+        except Exception:
+            log.warning("fx graph unable to write to cache", exc_info=True)
+            counters["inductor"]["fxgraph_cache_write_error"] += 1
 
     @staticmethod
     def _check_can_cache(gm: torch.fx.GraphModule):
@@ -1553,7 +1572,7 @@ def _set_gpu_runtime_env() -> None:
         and "CUDA_HOME" not in os.environ
         and "CUDA_PATH" not in os.environ
     ):
-        os.environ["CUDA_HOME"] = os.path.dirname(build_paths.cuda())
+        os.environ["CUDA_HOME"] = build_paths.cuda()
 
 
 def _get_python_include_dirs():
@@ -1567,6 +1586,23 @@ def _get_python_include_dirs():
     if not (include_dir / "Python.h").exists():
         warnings.warn(f"Can't find Python.h in {str(include_dir)}")
     return [str(include_dir)]
+
+
+def _transform_cuda_paths(lpaths):
+    # This handles two cases:
+    # 1. Meta internal cuda-12 where libs are in lib/cuda-12 and lib/cuda-12/stubs
+    # 2. Linux machines may have CUDA installed under either lib64/ or lib/
+    for i, path in enumerate(lpaths):
+        if (
+            "CUDA_HOME" in os.environ
+            and path.startswith(os.environ["CUDA_HOME"])
+            and not os.path.exists(f"{path}/libcudart_static.a")
+        ):
+            for root, dirs, files in os.walk(path):
+                if "libcudart_static.a" in files:
+                    lpaths[i] = os.path.join(path, root)
+                    lpaths.append(os.path.join(lpaths[i], "stubs"))
+                    break
 
 
 def get_include_and_linking_paths(
@@ -1608,17 +1644,7 @@ def get_include_and_linking_paths(
             if aot_mode:
                 ipaths += [os.path.dirname(cpp_prefix_path())]
                 if cuda and torch.version.hip is None:
-                    # This is a special treatment for Meta internal cuda-12 where all libs
-                    # are in lib/cuda-12 and lib/cuda-12/stubs
-                    for i, path in enumerate(lpaths):
-                        if path.startswith(
-                            os.environ["CUDA_HOME"]
-                        ) and not os.path.exists(f"{path}/libcudart_static.a"):
-                            for root, dirs, files in os.walk(path):
-                                if "libcudart_static.a" in files:
-                                    lpaths[i] = os.path.join(path, root)
-                                    lpaths.append(os.path.join(lpaths[i], "stubs"))
-                                    break
+                    _transform_cuda_paths(lpaths)
         if macros:
             if config.is_fbcode() and vec_isa != invalid_vec_isa:
                 cap = str(vec_isa).upper()
@@ -1727,7 +1753,7 @@ def get_include_and_linking_paths(
         if torch.version.hip is not None:
             ipaths.append(build_paths.rocm())
         else:
-            ipaths.append(build_paths.cuda())
+            ipaths.append(os.path.join(build_paths.cuda(), "include"))
         # We also need to bundle includes with absolute paths into a remote directory
         # (later on, we copy the include paths from cpp_extensions into our remote dir)
         ipaths.append("include")
@@ -1929,12 +1955,23 @@ class AotCodeCompiler:
                 run_command_and_check(cmd)
             log.debug("aot constant binary command: %s", cmd)
 
-            # .data section is between .text and .bss. When the size of .data is large,
-            # during the linking, the relocation of .text against .bss may overflow.
-            # Rename it to .ldata so that it won't be in between the .text and .bss section
+            if graph.buffer_mutation:
+                # .data section is between .text and .bss. When the size of .data is large,
+                # during the linking, the relocation of .text against .bss may overflow.
+                # Rename it to .ldata so that it won't be in between the .text and .bss section
+                if len(consts) > 2_000_000_000:
+                    raise ValueError(
+                        "Models with buffer mutation included doesn't support constants greater than 2GB!"
+                    )
+                rename_data = " .data=.ldata"
+            else:
+                # if no buffer mutation is needed, we could instead set the data region
+                # as read-only (i.e. .lrodata) which could accomodate larger size of data
+                # to be linked.
+                rename_data = " .data=.lrodata,alloc,load,readonly,data,contents"
             cmd = (
                 f"{objcopy_command} --rename-section"
-                " .data=.ldata"
+                f"{rename_data}"
                 " --set-section-alignment .data=64"  # following the gAlignment of CPU in c10/core/alignment.h
                 f" {consts_o} {consts_o}"
             )
@@ -2853,6 +2890,8 @@ class TritonCodeCache:
 def _cuda_compiler() -> Optional[str]:
     if cuda_env.nvcc_exist(config.cuda.cuda_cxx):
         return config.cuda.cuda_cxx
+    if config.is_fbcode():
+        return os.path.join(build_paths.cuda(), "bin", "nvcc")
     if cuda_env.nvcc_exist(os.getenv("CUDACXX")):
         return os.getenv("CUDACXX", "")
     if cuda_env.nvcc_exist(os.getenv("CUDA_HOME")):
@@ -2877,21 +2916,19 @@ def _cutlass_include_paths() -> List[str]:
 
 
 def _cuda_lib_options() -> List[str]:
+    _set_gpu_runtime_env()  # cpp_extension consults the env
     from torch.utils import cpp_extension
 
+    lpaths = cpp_extension.library_paths(cuda=True) + [
+        sysconfig.get_config_var("LIBDIR")
+    ]
     extra_ldflags: List[str] = []
     if is_linux():
-        extra_lib_dir = "lib64"
-        if not os.path.exists(
-            cpp_extension._join_cuda_home(extra_lib_dir)
-        ) and os.path.exists(cpp_extension._join_cuda_home("lib")):
-            # 64-bit CUDA may be installed in "lib"
-            # Note that it's also possible both don't exist (see _find_cuda_home) - in that case we stay with "lib64"
-            extra_lib_dir = "lib"
-        extra_ldflags.append(f"-L{cpp_extension._join_cuda_home(extra_lib_dir)}")
-        extra_ldflags.append(
-            f'-L{cpp_extension._join_cuda_home(extra_lib_dir, "stubs")}'
-        )
+        _transform_cuda_paths(lpaths)
+        for path in lpaths:
+            # -rpath ensures the DLL can find its dependencies when loaded, even
+            # if the library path is non-standard.
+            extra_ldflags.extend([f"-L{path}", "-Xlinker", f"-rpath={path}"])
         extra_ldflags.append("-lcuda")
         extra_ldflags.append("-lcudart")
     else:
@@ -2928,6 +2965,8 @@ def _nvcc_compiler_options() -> List[str]:
         "--expt-relaxed-constexpr",
         "-DNDEBUG",
     ]
+    if config.is_fbcode():
+        options.extend(["-ccbin", os.path.dirname(build_paths.gcc())])
     if config.cuda.enable_debug_info:
         options.extend(["-lineinfo", "-g", "-DCUTLASS_DEBUG_TRACE_LEVEL=1"])
     if config.cuda.enable_ptxas_info:
@@ -3384,7 +3423,5 @@ if (
     or os.environ.get("TORCH_WARM_POOL", "1") != "1"
 ):
     pass
-elif sys.version_info >= (3, 12):
-    log.info("AsyncCompile.warm_pool() is broken on 3.12+.")
 else:
     AsyncCompile.warm_pool()

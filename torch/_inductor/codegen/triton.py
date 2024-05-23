@@ -25,7 +25,7 @@ from ..codecache import code_hash, get_path, PyCodeCache
 from ..ir import IRNode
 from ..metrics import is_metric_table_enabled, log_kernel_metadata
 from ..runtime.hints import ReductionHint, TRITON_MAX_BLOCK
-from ..runtime.runtime_utils import do_bench_gpu, next_power_of_2
+from ..runtime.runtime_utils import do_bench_gpu, get_max_y_grid, next_power_of_2
 from ..utils import (
     cache_on_self,
     get_bounds_index_expr,
@@ -47,12 +47,12 @@ from .common import (
     TensorArg,
 )
 from .simd import (
+    constant_repr,
     IndexingOptions,
     IterationRangesEntry,
     pexpr,
     SIMDKernel,
     SIMDScheduling,
-    triton_constant,
 )
 from .triton_utils import config_of, signature_of, signature_to_meta
 
@@ -492,7 +492,7 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def _shaped_constant(value, dtype, shape):
         type_ = torch._prims_common.dtype_to_type(dtype)
-        triton_val = triton_constant(type_(value))
+        triton_val = constant_repr(type_(value))
         triton_type = triton_compute_type(dtype)
 
         if triton_type == "tl.float32":
@@ -866,7 +866,7 @@ class TritonKernelOverrides(TritonOverrides):
         # Take dtype from result to prevent accidental promotion
         other = V.kernel.cse.generate(
             V.kernel.compute,
-            f"tl.full({result}.shape, {triton_constant(other)}, {result}.dtype)",
+            f"tl.full({result}.shape, {constant_repr(other)}, {result}.dtype)",
             bounds=ValueRanges.wrap(other),
         )
         return ops.where(new_mask, result, other)
@@ -1342,7 +1342,7 @@ class TritonKernel(SIMDKernel):
 
         if self.persistent_reduction:
             default = ir.Reduction.default_value(reduction_type, src_dtype)
-            default = self._map_tuple_or_scalar(triton_constant, default)
+            default = self._map_tuple_or_scalar(constant_repr, default)
 
             def _mask_value(value, default):
                 return self.cse.generate(self.compute, where_cond(value, default))
@@ -1367,16 +1367,7 @@ class TritonKernel(SIMDKernel):
                 # For persistent reductions, don't bother with
                 # welford's algorithm since it uses more registers, and
                 # taking two reductions doesn't increase memory usage.
-                sum_ = ops.reduction(dtype, dtype, "sum", value)
-                self.inside_reduction = False
-                rnumel = ops.index_expr(self.numels[-1], dtype)
-                mean = ops.truediv(sum_, rnumel)
-
-                self.inside_reduction = True
-                dx = ops.sub(value, mean)
-                dx2 = ops.mul(dx, dx)
-                m2 = ops.reduction(dtype, dtype, "sum", dx2)
-                result_var = (mean, m2, rnumel)
+                result_var = self.welford_reduce_fallback(dtype, value)
             elif reduction_type == "welford_combine":
                 mean, m2, weight = masked_value
                 welford = f"triton_helpers.welford({mean}, {m2}, {weight}, {dim})"
@@ -1394,7 +1385,7 @@ class TritonKernel(SIMDKernel):
         else:
             accumulator = f"_{result_var}"
             default = ir.Reduction.default_accumulator(reduction_type, src_dtype)
-            default = self._map_tuple_or_scalar(triton_constant, default)
+            default = self._map_tuple_or_scalar(constant_repr, default)
             if not isinstance(default, tuple):
                 self.body.writeline(
                     f"{accumulator} = tl.full({self.dense_size_str()}, {default}, {acc_type})"
@@ -1501,8 +1492,10 @@ class TritonKernel(SIMDKernel):
         self.cse.reduction_cache[cache_key] = result_var
 
         if isinstance(result_var, tuple):
+            assert all(isinstance(x, TritonCSEVariable) for x in result_var)
             self.outside_loop_vars |= set(result_var)
         else:
+            assert isinstance(result_var, TritonCSEVariable)
             self.outside_loop_vars.add(result_var)
 
         return result_var
@@ -1732,7 +1725,7 @@ class TritonKernel(SIMDKernel):
 
     def codegen_kernel_benchmark(self, num_gb, grid=None):
         result = IndentedBuffer()
-        argdefs, call_args, signature = self.args.python_argdefs()
+        argdefs, call_args, signature, _ = self.args.python_argdefs()
 
         result.writelines(["", "", "def get_args():"])
         with result.indent():
@@ -1917,7 +1910,7 @@ class TritonKernel(SIMDKernel):
             if config.benchmark_kernel:
                 code.splice(self.imports_for_benchmark_kernel())
 
-        argdefs, _, signature = self.args.python_argdefs()
+        argdefs, _, signature, _ = self.args.python_argdefs()
         # maps actual expression to SizeArg if it is in sizevars replacements
         for i, arg in enumerate(signature):
             if isinstance(arg, SizeArg):
@@ -2086,7 +2079,7 @@ class TritonKernel(SIMDKernel):
     def _get_grid_fn(self):
         return "grid"
 
-    def add_numel_to_call_args_and_grid(self, name, call_args, grid):
+    def add_numel_to_call_args_and_grid(self, name, call_args, arg_types, grid):
         # TODO(jansel): if there are constants, we shouldn't bother passing them as args
         for tree in self.range_trees:
             if isinstance(tree.numel, (sympy.Integer, sympy.Symbol)):
@@ -2096,23 +2089,25 @@ class TritonKernel(SIMDKernel):
 
             if tree.prefix != "r" or self.inside_reduction:
                 call_args.append(expr)
+                arg_types.append(type(expr))
             if tree.grid_dim is not None:
                 grid.append(expr)
 
     def get_call_args(self):
-        _, call_args, _ = self.args.python_argdefs()
+        # arg_types is needed for cpp wrapper codegen
+        _, call_args, _, arg_types = self.args.python_argdefs()
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
                 call_args[i] = call_args[i] + ".item()"
 
-        return call_args
+        return call_args, arg_types
 
     def call_kernel(self, name: str, node: Optional[IRNode] = None):
         wrapper = V.graph.wrapper_code
-        call_args = self.get_call_args()
+        call_args, arg_types = self.get_call_args()
         grid: List[Any] = []
-        self.add_numel_to_call_args_and_grid(name, call_args, grid)
+        self.add_numel_to_call_args_and_grid(name, call_args, arg_types, grid)
         current_device = V.graph.scheduler.current_device
 
         if self.args.workspace_arg is not None:
@@ -2129,6 +2124,7 @@ class TritonKernel(SIMDKernel):
             current_device.index,
             cuda=True,
             triton=True,
+            arg_types=arg_types,
             grid_fn=self._get_grid_fn(),
             triton_meta=self.triton_meta,
         )
@@ -2138,7 +2134,7 @@ class TritonKernel(SIMDKernel):
 
     def codegen_nan_check(self):
         wrapper = V.graph.wrapper_code
-        _, call_args, arg_types = self.args.python_argdefs()
+        _, call_args, arg_types, _ = self.args.python_argdefs()
         for arg, arg_type in zip(call_args, arg_types):
             if isinstance(arg_type, TensorArg):
                 line = f"assert not {arg}.isnan().any().item()"
@@ -2156,6 +2152,56 @@ class TritonKernel(SIMDKernel):
         else:
             # lift non-reduction stores outside loop
             self.body.writeline(line)
+
+    def iteration_ranges_ranges_code(self, entry):
+        assert entry.tensor_dim is not None
+        size = self.indexing_size_str(entry.tensor_dim)
+        index_dtype = self.index_dtype
+        convert = f".to({index_dtype})" if index_dtype != "tl.int32" else ""
+        return f"tl.arange(0, {entry.prefix.upper()}BLOCK){size}{convert}"
+
+    def iteration_ranges_scalar_code(self, entry, value):
+        index_dtype = self.index_dtype
+        ndim = self.triton_tensor_ndim()
+        size = [1] * ndim
+        return f"tl.full({size}, {value}, {index_dtype})"
+
+    def iteration_ranges_get_pid(self, entry):
+        assert entry.grid_dim is not None
+        key = f"tl.program_id({entry.grid_dim})"
+        # y_grid has a limit, so express it in terms of y and z in case of overflow.
+        # z grid is only exercised when max_tiles == 3 (off by default).
+        if (
+            entry.grid_dim == 1
+            and not entry.has_zdim
+            and not (isinstance(entry.numel, int) and entry.numel <= get_max_y_grid())
+        ):
+            key = f"{key} * (tl.program_id({entry.grid_dim + 1}) + 1)"
+        pid = entry.pid_cache.get(key, key)
+        if self.index_dtype != "tl.int32":
+            return f"{pid}.to({self.index_dtype})"
+        return pid
+
+    def iteration_ranges_codegen_header(self, entry, code):
+        x = entry.prefix
+        if entry.is_loop:
+            code.writeline(f"{entry.name} = {x}offset + {x}base")
+        elif entry.grid_dim is None:
+            # no need to "{x}offset = "
+            code.writeline(f"{entry.name} = {entry.ranges_code()}")
+            code.writeline(f"{x}offset = 0")
+        else:
+            if entry.tensor_dim is not None:
+                line = f"{x}offset + {entry.ranges_code()}"
+            else:
+                line = entry.scalar_code(f"{x}offset")
+            code.writelines(
+                [
+                    f"{x}offset = {entry.get_pid()} * {x.upper()}BLOCK",
+                    f"{entry.name} = {line}",
+                ]
+            )
+        code.writeline(f"{x}mask = {entry.name} < {x}numel")
 
 
 class TritonScheduling(SIMDScheduling):

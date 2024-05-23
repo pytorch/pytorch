@@ -38,7 +38,7 @@ from ..dependencies import Dep, MemoryDep, StarDep, WeakDep
 from ..ir import TritonTemplateBuffer
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..runtime.hints import ReductionHint, TRITON_MAX_BLOCK
-from ..runtime.runtime_utils import get_max_y_grid, green_text, yellow_text
+from ..runtime.runtime_utils import green_text, yellow_text
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..utils import (
     get_dtype_size,
@@ -50,9 +50,10 @@ from ..utils import (
     sympy_subs,
     unique,
 )
-from ..virtualized import V
+from ..virtualized import ops, OpsValue, V
 from .common import CSEVariable, index_prevent_reordering, Kernel, PythonPrinter
 from .multi_kernel import MultiKernel
+
 
 if TYPE_CHECKING:
     pass
@@ -247,54 +248,16 @@ class IterationRangesRoot(IterationRanges):
         return list(reversed(index_vars)), list(reversed(sizes))
 
     def ranges_code(self):
-        assert self.tensor_dim is not None
-        size = self.kernel.indexing_size_str(self.tensor_dim)
-        index_dtype = self.kernel.index_dtype
-        convert = f".to({index_dtype})" if index_dtype != "tl.int32" else ""
-        return f"tl.arange(0, {self.prefix.upper()}BLOCK){size}{convert}"
+        return self.kernel.iteration_ranges_ranges_code(self)
 
     def scalar_code(self, value):
-        index_dtype = self.kernel.index_dtype
-        ndim = self.kernel.triton_tensor_ndim()
-        size = [1] * ndim
-        return f"tl.full({size}, {value}, {index_dtype})"
+        return self.kernel.iteration_ranges_scalar_code(self, value)
 
     def get_pid(self):
-        assert self.grid_dim is not None
-        key = f"tl.program_id({self.grid_dim})"
-        # y_grid has a limit, so express it in terms of y and z in case of overflow.
-        # z grid is only exercised when max_tiles == 3 (off by default).
-        if (
-            self.grid_dim == 1
-            and not self.has_zdim
-            and not (isinstance(self.numel, int) and self.numel <= get_max_y_grid())
-        ):
-            key = f"{key} * (tl.program_id({self.grid_dim + 1}) + 1)"
-        pid = self.pid_cache.get(key, key)
-        if self.kernel.index_dtype != "tl.int32":
-            return f"{pid}.to({self.kernel.index_dtype})"
-        return pid
+        return self.kernel.iteration_ranges_get_pid(self)
 
     def codegen_header(self, code):
-        x = self.prefix
-        if self.is_loop:
-            code.writeline(f"{self.name} = {x}offset + {x}base")
-        elif self.grid_dim is None:
-            # no need to "{x}offset = "
-            code.writeline(f"{self.name} = {self.ranges_code()}")
-            code.writeline(f"{x}offset = 0")
-        else:
-            if self.tensor_dim is not None:
-                line = f"{x}offset + {self.ranges_code()}"
-            else:
-                line = self.scalar_code(f"{x}offset")
-            code.writelines(
-                [
-                    f"{x}offset = {self.get_pid()} * {x.upper()}BLOCK",
-                    f"{self.name} = {line}",
-                ]
-            )
-        code.writeline(f"{x}mask = {self.name} < {x}numel")
+        return self.kernel.iteration_ranges_codegen_header(self, code)
 
 
 class IterationRangesEntry(IterationRanges):
@@ -358,7 +321,7 @@ class IterationRangesEntry(IterationRanges):
         return self.name == other.name
 
 
-def triton_constant(value):
+def constant_repr(value):
     if value == float("inf"):
         return 'float("inf")'
     elif value == float("-inf"):
@@ -900,8 +863,9 @@ class SIMDKernel(Kernel):
         """Context manager to add an additional mask to tl.load/store"""
         prior = self._load_mask
         if prior:
-            mask = self.cse.generate(self.compute, f"{mask} & {prior}")
+            mask = ops.logical_and(mask, prior)
 
+        mask = OpsValue.unwrap(mask)
         self._load_mask = mask
         try:
             # TODO(jansel): do we need a reshape here?
@@ -970,7 +934,7 @@ class SIMDKernel(Kernel):
         """
         nbytes = []
         ninplace_args = len(unique(self.args.inplace_buffers.values()))
-        _, call_args, _ = self.args.python_argdefs()
+        _, call_args, _, _ = self.args.python_argdefs()
 
         # For pointwise and reduction kernels, this is the upper-bound numels
         # for the output buffer.
@@ -1031,7 +995,7 @@ class SIMDKernel(Kernel):
             # the mix layouts.
             return
 
-        argdefs, call_args, signature = self.args.python_argdefs()
+        argdefs, call_args, signature, _ = self.args.python_argdefs()
         uniform_stride_order = None
         for arg_name in call_args:
             buf = V.graph.get_buffer(arg_name)
@@ -1081,6 +1045,18 @@ class SIMDKernel(Kernel):
         )
         log.warning(msg)
 
+    def welford_reduce_fallback(self, dtype, value):
+        sum_ = ops.reduction(dtype, dtype, "sum", value)
+        self.inside_reduction = False
+        rnumel = ops.index_expr(self.numels[-1], dtype)
+        mean = ops.truediv(sum_, rnumel)
+
+        self.inside_reduction = True
+        dx = ops.sub(value, mean)
+        dx2 = ops.mul(dx, dx)
+        m2 = ops.reduction(dtype, dtype, "sum", dx2)
+        return OpsValue.unwrap((mean, m2, rnumel))
+
     def codegen_kernel(self):
         raise NotImplementedError
 
@@ -1088,6 +1064,18 @@ class SIMDKernel(Kernel):
         pass
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry):
+        raise NotImplementedError
+
+    def iteration_ranges_ranges_code(self, entry):
+        raise NotImplementedError
+
+    def iteration_ranges_scalar_code(self, entry, value):
+        raise NotImplementedError
+
+    def iteration_ranges_get_pid(self, entry):
+        raise NotImplementedError
+
+    def iteration_ranges_codegen_header(self, entry, code):
         raise NotImplementedError
 
 
