@@ -8,10 +8,12 @@ namespace c10 {
 Job::Job(
     std::function<void()> function,
     std::chrono::microseconds interval,
-    bool immediate)
+    bool immediate,
+    int run_limit)
     : _function(std::move(function)),
       _interval(interval),
-      _immediate(immediate) {}
+      _immediate(immediate),
+      _run_limit(run_limit) {}
 
 std::chrono::microseconds Job::interval() const {
   return _interval;
@@ -27,6 +29,10 @@ void Job::reset_counter() {
 
 bool Job::immediate() const {
   return _immediate;
+}
+
+int Job::run_limit() const {
+  return _run_limit;
 }
 
 void Job::run() {
@@ -67,10 +73,13 @@ std::chrono::microseconds FunctionScheduler::getNextWaitTime() {
   _next_run = _queue.top();
 
   // Finding the first run associated with an active job.
-  while (_jobs.find(_next_run->job_id()) == _jobs.end()) {
+  auto job = _jobs.find(_next_run->job_id());
+  while (job == _jobs.end() ||
+         job->second->counter() >= job->second->run_limit()) {
     // Only pop runs associated with an invalid job.
     _queue.pop();
     _next_run = _queue.top();
+    job = _jobs.find(_next_run->job_id());
   }
 
   auto now = std::chrono::steady_clock::now();
@@ -153,10 +162,12 @@ template <class Rep, class Period>
 int FunctionScheduler::scheduleJob(
     std::function<void()> function,
     std::chrono::duration<Rep, Period> const& interval,
-    bool immediate) {
+    bool immediate,
+    int run_limit) {
   auto duration =
       std::chrono::duration_cast<std::chrono::microseconds>(interval);
-  auto job = std::make_unique<Job>(std::move(function), duration, immediate);
+  auto job = std::make_unique<Job>(
+      std::move(function), duration, immediate, run_limit);
   return scheduleJob(std::move(job));
 }
 

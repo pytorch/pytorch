@@ -19,17 +19,20 @@ class Job {
   std::function<void()> _function;
   std::chrono::microseconds _interval;
   int _counter = 0;
+  int _run_limit;
   bool _immediate;
 
  public:
   Job(std::function<void()> function,
       std::chrono::microseconds interval,
-      bool immediate = false);
+      bool immediate = false,
+      int run_limit = -1);
 
   std::chrono::microseconds interval() const;
   int counter() const;
   void reset_counter();
   bool immediate() const;
+  int run_limit() const;
 
   void set_next_run(
       std::chrono::time_point<std::chrono::steady_clock> next_run);
@@ -75,6 +78,8 @@ class FunctionScheduler {
   int scheduleJob(std::unique_ptr<Job> job);
 
  public:
+  static constexpr int RUN_FOREVER = -1;
+
   FunctionScheduler();
   ~FunctionScheduler();
 
@@ -82,7 +87,8 @@ class FunctionScheduler {
   int scheduleJob(
       std::function<void()> function,
       std::chrono::duration<Rep, Period> const& interval,
-      bool immediate = false);
+      bool immediate = false,
+      int run_limit = RUN_FOREVER);
 
   int removeJob(int id);
 
