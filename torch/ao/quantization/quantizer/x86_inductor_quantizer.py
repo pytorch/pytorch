@@ -360,6 +360,26 @@ def _get_supported_config_and_operators() -> List[OperatorConfig]:
     return _get_supported_x86_inductor_config_and_operators()
 
 
+from functools import wraps
+
+
+def config_checker(method: Callable) -> Callable:
+    @wraps(method)
+    def wrapper(
+        self: "X86InductorQuantizer",
+        name: Any,
+        quantization_config: Optional["QuantizationConfig"],
+    ) -> "X86InductorQuantizer":
+        if self._need_skip_config(quantization_config):
+            warnings.warn(
+                f"Skip the quantization config for {name} by X86InductorQuantizer.",
+            )
+            return self
+        return method(self, name, quantization_config)
+
+    return wrapper
+
+
 class X86InductorQuantizer(Quantizer):
     supported_config_and_operators = _get_supported_config_and_operators()
     module_function_to_aten_operator_type = _map_module_function_to_aten_operator_type()
@@ -371,6 +391,8 @@ class X86InductorQuantizer(Quantizer):
             torch._ops.OpOverloadPacket, Optional[QuantizationConfig]
         ] = {}
         self.module_name_qconfig: Dict[str, Optional[QuantizationConfig]] = {}
+        self._is_dynamic = None
+        self._is_qat = None
 
     @classmethod
     def get_supported_quantization_configs(cls) -> List[QuantizationConfig]:
@@ -394,7 +416,41 @@ class X86InductorQuantizer(Quantizer):
                 return ops
         return []
 
+    def _need_skip_config(
+        self, quantization_config: Optional[QuantizationConfig]
+    ) -> bool:
+        """Check if the given quantization config is valid for this quantizer.
+
+        Note: Mixed static/dynamic configurations or mixed QAT/non-QAT configurations are not supported.
+        If such a mix is detected, the configuration will be skipped.
+        """
+        if quantization_config is None:
+            return False
+
+        if self._is_qat is None:
+            self._is_qat = quantization_config.is_qat
+        else:
+            if self._is_qat != quantization_config.is_qat:
+                warnings.warn(
+                    "Mixed QAT and Non-QAT quantization config is not supported."
+                )
+                return True
+        input_activation_spec = quantization_config.input_activation
+        if input_activation_spec is not None:
+            if self._is_dynamic is None:
+                self._is_dynamic = input_activation_spec.is_dynamic
+            else:
+                if self._is_dynamic != input_activation_spec.is_dynamic:
+                    warnings.warn(
+                        "Mixed dynamic and static quantization config is not supported."
+                    )
+                    return True
+        return False
+
     def set_global(self, quantization_config: QuantizationConfig):
+        if self._need_skip_config(quantization_config):
+            warnings.warn("Skip the global quantization config.")
+            return self
         self.global_config = quantization_config
         return self
 
@@ -406,6 +462,7 @@ class X86InductorQuantizer(Quantizer):
             )
         return self.global_config
 
+    @config_checker
     def set_function_type_qconfig(
         self,
         function_type: Callable,
@@ -424,6 +481,7 @@ class X86InductorQuantizer(Quantizer):
             )
         return self
 
+    @config_checker
     def set_module_type_qconfig(
         self,
         module_type: torch.nn.Module,
@@ -440,6 +498,7 @@ class X86InductorQuantizer(Quantizer):
             )
         return self
 
+    @config_checker
     def set_module_name_qconfig(
         self, module_name: str, quantization_config: Optional[QuantizationConfig]
     ):
@@ -570,67 +629,9 @@ class X86InductorQuantizer(Quantizer):
             conv_gemm_node_idx = 1
             extra_input_node_idx = 0
         extra_input_node = binary_node.args[extra_input_node_idx]  # type: ignore[index]
-        assert isinstance(extra_input_node, Node)
-        return conv_gemm_node_idx, extra_input_node_idx
-
-    def _check_qconfig(self) -> None:
-        """Check if the qconfig is valid.
-
-        Currently, not support mixed static and dynamic quantization config.
-        If the mixture is detected, the subsequent configuration will be skipped.
-        """
-
-        def _need_skip_cur_config(
-            qconfig: Optional[QuantizationConfig], _pre_mode: Optional[bool], msg: str
-        ) -> Tuple[Optional[bool], bool]:
-            input_act_config = getattr(qconfig, "input_activation", None)
-            need_skip = False
-            if input_act_config:
-                qconfig_is_dynamic = input_act_config.is_dynamic
-                if _pre_mode is not None and _pre_mode != qconfig_is_dynamic:
-                    warnings.warn(
-                        "Mixed dynamic and static quantization config is not supported."
-                        f"The configuration for {msg} will be skipped."
-                    )
-                    need_skip = True
-                else:
-                    if _pre_mode is None:
-                        _pre_mode = qconfig_is_dynamic
-            return _pre_mode, need_skip
-
-        _pre_mode = None
-
-        tmp_module_name_qconfig: Dict[str, Optional[QuantizationConfig]] = {}
-        for module_name, qconfig in self.module_name_qconfig.items():
-            _pre_mode, need_skip = _need_skip_cur_config(
-                qconfig, _pre_mode, module_name
-            )
-            if not need_skip:
-                tmp_module_name_qconfig[module_name] = qconfig
-        self.module_name_qconfig = tmp_module_name_qconfig
-
-        tmp_operator_type_qconfig: Dict[
-            torch._ops.OpOverloadPacket, Optional[QuantizationConfig]
-        ] = {}
-        for operator_type, qconfig in self.operator_type_qconfig.items():
-            _pre_mode, need_skip = _need_skip_cur_config(
-                qconfig, _pre_mode, str(operator_type)
-            )
-            if not need_skip:
-                tmp_operator_type_qconfig[operator_type] = qconfig
-        self.operator_type_qconfig = tmp_operator_type_qconfig
-
-        if self.global_config:
-            _pre_mode, need_skip = _need_skip_cur_config(
-                self.global_config, _pre_mode, "global"
-            )
-            if not need_skip:
-                self.global_config = self.global_config
-            else:
-                self.global_config = None
 
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
-        """Annotate the model with quantization configuration.
+        """Annotate the model with quantization configurations.
 
         Note:
         1. Annotate each node according to the users's qconfig in the following order:
@@ -644,24 +645,22 @@ class X86InductorQuantizer(Quantizer):
         This filter function checks if the node is marked by current stage and not marked by previous stage.
         """
 
-        self._check_qconfig()
-
         module_name_list = list(self.module_name_qconfig.keys())
         for module_name, qconfig in self.module_name_qconfig.items():
-            self._annotate_by_single_config(
+            self._annotate_by_config(
                 model, qconfig, _get_module_name_filter(module_name)
             )
 
         tp_list = list(self.operator_type_qconfig.keys())
         for operator_type, qconfig in self.operator_type_qconfig.items():
-            self._annotate_by_single_config(
+            self._annotate_by_config(
                 model,
                 qconfig,
                 _get_operator_type_filter(operator_type, module_name_list),
             )
 
         if self.global_config:
-            self._annotate_by_single_config(
+            self._annotate_by_config(
                 model,
                 self.global_config,
                 _get_not_operator_type_or_name_filter(tp_list, module_name_list),
@@ -669,7 +668,7 @@ class X86InductorQuantizer(Quantizer):
 
         return model
 
-    def _annotate_by_single_config(
+    def _annotate_by_config(
         self,
         model: torch.fx.GraphModule,
         config: Optional[QuantizationConfig],
@@ -690,8 +689,8 @@ class X86InductorQuantizer(Quantizer):
             return
 
         # Step1: Recipe of fusion patterns like conv/linear.
-        self._annotate_all_conv2d_fusion_pattern(model, config, filter_fn)
-        self._annotate_all_linear_fusion_pattern(model, config, filter_fn)
+        self._annotate_conv2d_fusion_pattern(model, config, filter_fn)
+        self._annotate_linear_fusion_pattern(model, config, filter_fn)
         self._annotate_matmul(model, config, filter_fn)
 
         # Step2: Recipe to propagate annotation for patterns beside conv/linear.
@@ -699,7 +698,7 @@ class X86InductorQuantizer(Quantizer):
         # Recipe refer to https://github.com/intel/intel-extension-for-pytorch/blob/
         # 90d19323d96afc53fcc22ba5a7bb3fb07fdd6c1c/intel_extension_for_pytorch/quantization/_recipe.py#L538
 
-        self._annotate_all_propagation_quantizable_pattern(model, config, filter_fn)
+        self._annotate_propagation_quantizable_pattern_entry(model, config, filter_fn)
 
         # Step3: For quantizable ops, such as maxpool2d, we need to quantize its output if it is quantized
         # in inputs. So, we can fuse dq-operator-q into a quantized op.
@@ -708,7 +707,7 @@ class X86InductorQuantizer(Quantizer):
 
         self._annotate_output_for_int8_in_int8_out_pattern_entry(model)
 
-    def _annotate_all_qat_conv2d_fusion_pattern(
+    def _annotate_qat_conv2d_fusion_pattern(
         self, model: torch.fx.GraphModule, config: QuantizationConfig, filter_fn
     ):
         # Annotate QAT Specific patterns
@@ -935,18 +934,18 @@ class X86InductorQuantizer(Quantizer):
             nodes_to_mark_annotated.extend(list(bn_partition.nodes))
             _mark_nodes_as_annotated(nodes_to_mark_annotated)
 
-    def _annotate_all_conv2d_fusion_pattern(
+    def _annotate_conv2d_fusion_pattern(
         self, model: torch.fx.GraphModule, config, filter_fn
     ):
         if config.is_qat:
             # Annotate QAT specific pattern: mainly due to BN not folded in prepare_qat
-            self._annotate_all_qat_conv2d_fusion_pattern(model, config, filter_fn)
+            self._annotate_qat_conv2d_fusion_pattern(model, config, filter_fn)
         self._annotate_conv2d_binary_unary(model, config, filter_fn)
         self._annotate_conv2d_binary(model, config, filter_fn)
         self._annotate_conv2d_unary(model, config, filter_fn)
         self._annotate_conv2d(model, config, filter_fn)
 
-    def _annotate_all_linear_fusion_pattern(
+    def _annotate_linear_fusion_pattern(
         self, model: torch.fx.GraphModule, config, filter_fn
     ):
         if config.input_activation and not config.input_activation.is_dynamic:
@@ -1184,7 +1183,7 @@ class X86InductorQuantizer(Quantizer):
             _is_output_of_quantized_pattern=True,
         )
 
-    def _annotate_all_propagation_quantizable_pattern(
+    def _annotate_propagation_quantizable_pattern_entry(
         self, model, quantization_config, filter_fn
     ):
         for node in model.graph.nodes:
