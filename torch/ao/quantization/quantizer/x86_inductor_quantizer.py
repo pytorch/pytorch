@@ -146,7 +146,7 @@ def _get_module_name_filter(module_name: str):
 
         names = [_normalize_path(n) for n, _ in nn_module_stack.values()]
         return module_name in names
-
+    # TODO:
     def check_all_node(nodes: List[Node]) -> bool:
         return all(module_name_filter(n) for n in nodes)
 
@@ -180,18 +180,20 @@ def _get_operator_type_filter(operator_type: Callable, module_name_list):
 
 
 def _get_operator_type_qconfig_filter(operator_type: Callable):
+    # TODO:
     def operator_type_qconfig_filter(nodes: List[Node]):
         # Return True, if the first node has the certain operator type
-        has_certain_operator_type = nodes[0].target == operator_type
+        has_certain_operator_type = nodes[-1].target == operator_type
         return has_certain_operator_type
 
     return operator_type_qconfig_filter
 
 
 def _get_global_config_filter():
+    # TODO: 
     def global_config_filter(nodes: List[Node]):
         # Return True, if the first node has not been annotated
-        return nodes[0].target in default_quantizable_ops
+        return any (node.target in default_quantizable_ops for node in nodes)
 
     return global_config_filter
 
