@@ -77,7 +77,7 @@ std::chrono::microseconds FunctionScheduler::getNextWaitTime() {
 
   // Finding the first run associated with an active job.
   auto entry = _jobs.find(_next_run->job_id());
-  while (validEntry(entry)) {
+  while (!validEntry(entry)) {
     // Only pop runs associated with an invalid job.
     _queue.pop();
     if (_queue.empty())
