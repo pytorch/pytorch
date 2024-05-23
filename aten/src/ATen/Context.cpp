@@ -171,7 +171,7 @@ bool Context::allowTF32CuDNN(const std::string& op) const {
     bool allow_tf32_rnn = float32Precision("cuda", "rnn") == "tf32";
     bool allow_tf32_conv = float32Precision("cuda", "conv") == "tf32";
     TORCH_CHECK(
-        allow_tf32_rnn == allow_tf32_conv || allow_tf32_rnn == allow_tf32_cudnn,
+        allow_tf32_rnn == allow_tf32_conv && allow_tf32_rnn == allow_tf32_cudnn,
         "You are checking whether allow_tf32 is enabled for cudnn backend without a specific operator name. ",
         "But the current status indicate that cudnn conv and cudnn rnn have different TF32 status with cudnn",
         "This indicate you have used mix of legacy API and new API to set the TF32 status. ",
@@ -299,11 +299,20 @@ void Context::setAllowTF32CuBLAS(bool b) {
 }
 
 Float32MatmulPrecision Context::float32MatmulPrecision() const {
-  if (float32Precision("cuda", "matmul") == "tf32") {
-    TORCH_CHECK(at::Float32MatmulPrecision::HIGHEST != float32_matmul_precision, "Invalid status");
-  } else if (float32Precision("mkldnn", "matmul") == "bf16") {
-    TORCH_CHECK(at::Float32MatmulPrecision::MEDIUM == float32_matmul_precision, "Invalid status");
-  }
+  bool invalid = float32Precision("cuda", "matmul") == "tf32" &&
+      float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST;
+  invalid = invalid ||
+      (float32Precision("mkldnn", "matmul") == "bf16" &&
+       float32_matmul_precision != at::Float32MatmulPrecision::MEDIUM);
+  TORCH_CHECK(
+      !invalid,
+      "From Pytorch 2.4 we introduced an new set of API to set the TF32 status "
+      "for fp32 matmul precision in a more fine-grained way. ",
+      "Current status indicate that you have used mix of legacy API and new API",
+      "You have used the new API to turn the status into an un-represented state for old API. ",
+      "And now you are using old API to query the status."
+      "We suggest to only use the new API, you can check the usage at ",
+      "https://github.com/pytorch/pytorch/blob/main/docs/source/notes/cuda.rst#tensorfloat-32-tf32-on-ampere-and-later-devices");
   return float32_matmul_precision;
 }
 
