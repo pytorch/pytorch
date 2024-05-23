@@ -76,16 +76,14 @@ std::chrono::microseconds FunctionScheduler::getNextWaitTime() {
   _next_run = _queue.top();
 
   // Finding the first run associated with an active job.
-  auto job = _jobs.find(_next_run->job_id());
-  while (job == _jobs.end() ||
-         (job->second->run_limit() != FunctionScheduler::RUN_FOREVER &&
-          job->second->counter() >= job->second->run_limit())) {
+  auto entry = _jobs.find(_next_run->job_id());
+  while (validEntry(entry)) {
     // Only pop runs associated with an invalid job.
     _queue.pop();
     if (_queue.empty())
       return std::chrono::microseconds(-1);
 
-    job = _jobs.find(_next_run->job_id());
+    entry = _jobs.find(_next_run->job_id());
   }
 
   _next_run = _queue.top();
@@ -131,11 +129,15 @@ void FunctionScheduler::runNextJob() {
 
   // Check if the job was canceled in the meantime.
   auto entry = _jobs.find(_next_run->job_id());
-  if (entry != _jobs.end()) {
+  if (validEntry(entry)) {
     entry->second->run();
     // Add a new run associated with this job to the queue
     addRun(entry->first, entry->second);
   }
+}
+
+bool FunctionScheduler::validEntry(const std::unordered_map<int, std::unique_ptr<Job>>::iterator& entry) {
+  return entry != _jobs.end() && entry->second->counter() != entry->second->run_limit();
 }
 
 int FunctionScheduler::id() {

@@ -11,6 +11,8 @@
 #include <unordered_map>
 #include <vector>
 
+#define RUN_FOREVER -1
+
 namespace c10 {
 
 // Represents a function that runs
@@ -26,7 +28,7 @@ class Job {
   Job(std::function<void()> function,
       std::chrono::microseconds interval,
       bool immediate = false,
-      int run_limit = -1);
+      int run_limit = RUN_FOREVER);
 
   std::chrono::microseconds interval() const;
   int counter() const;
@@ -77,10 +79,9 @@ class FunctionScheduler {
   std::chrono::microseconds getNextWaitTime();
   void addRun(int job_id, std::unique_ptr<Job> const& job);
   int scheduleJob(std::unique_ptr<Job> job);
+  bool validEntry(const std::unordered_map<int, std::unique_ptr<Job>>::iterator& entry);
 
  public:
-  static constexpr int RUN_FOREVER = -1;
-
   FunctionScheduler();
   ~FunctionScheduler();
 
