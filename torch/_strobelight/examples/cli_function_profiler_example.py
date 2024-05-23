@@ -1,5 +1,4 @@
 import torch
-from timeit import default_timer as timer
 
 from torch._strobelight.cli_function_profiler import (
     strobelight,
