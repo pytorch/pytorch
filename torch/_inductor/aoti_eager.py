@@ -252,11 +252,11 @@ def extract_layout_metadata(input: torch.layout):
     return metadata
 
 
-def mark_tensor_dim_as_dynamic(flattened_inputs: list[Any]):
+def mark_tensor_dim_as_dynamic(inputs):
     def _mark_tensor_dim_as_dynamic(input_item):
         torch._dynamo.mark_dynamic(input_item, list(range(input_item.ndim)))
 
-    for input_item in flattened_inputs:
+    for input_item in inputs:
         if isinstance(input_item, torch.Tensor):
             _mark_tensor_dim_as_dynamic(input_item)
         elif isinstance(input_item, list):
