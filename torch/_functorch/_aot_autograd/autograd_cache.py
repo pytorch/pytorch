@@ -4,11 +4,14 @@ Utils for caching the outputs of AOTAutograd
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
-import torch
 from torch._inductor.codecache import _ident, FxGraphCachePickler
 
 from .schemas import AOTConfig  # noqa: F401
+
+if TYPE_CHECKING:
+    import torch
 
 log = logging.getLogger(__name__)
 

@@ -60,7 +60,7 @@ class SimpleModel(nn.Module):
 
 
 def extract_graph(fx_g, _, graph_cell):
-    graph_cell[0] = fx_g
+    graph_cell[0] = fx_g.code
     return fx_g
 
 
@@ -480,6 +480,32 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x_dt)
         self.assertEqual(ref, res)
+
+    def test_graph_input_is_async(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fn(x):
+            return x.sin().sin()
+
+        opt_fn = torch.compile(fn, backend=aot_eager_graph, fullgraph=True)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        x_dt = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
+        x2 = x_dt.redistribute(mesh, [Replicate()], async_op=True)
+        x2 = x2.to_local()
+        out = opt_fn(x2)
+        # The important part: we get a wait_tensor() in the graph.
+        # At runtime, the input to the graph is an AsyncCollectiveTensor,
+        # and inside the graph we need to issue a wait() to synchronize.
+        self.assertExpectedInline(
+            str(fw_graph_cell[0]).strip(),
+            """\
+def forward(self, primals_1):
+    wait_tensor = torch.ops._c10d_functional.wait_tensor.default(primals_1)
+    sin = torch.ops.aten.sin.default(wait_tensor)
+    sin_1 = torch.ops.aten.sin.default(sin);  sin = None
+    return [sin_1, primals_1, wait_tensor]""",
+        )
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_dtensor_partial_placement_graph_output(self):

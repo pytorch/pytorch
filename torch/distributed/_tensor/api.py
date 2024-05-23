@@ -573,7 +573,7 @@ def distribute_tensor(
     # OffsetBasedRNGTracker to perform random operators.
     # TODO: the value assignment to global variable is not the ideal solution
     # we can replace it in future.
-    if is_rng_supported_mesh(device_mesh) and not random._rng_tracker:
+    if not random._rng_tracker and is_rng_supported_mesh(device_mesh):
         random._rng_tracker = OffsetBasedRNGTracker(device_type)
 
     if not tensor.is_leaf:
@@ -612,7 +612,7 @@ def distribute_tensor(
             )
         return tensor
 
-    local_tensor = tensor
+    local_tensor = tensor.detach()
 
     # distribute the tensor according to the placements.
     placements = list(placements)
@@ -637,7 +637,7 @@ def distribute_tensor(
     # detach the local tensor passed to DTensor since after the construction
     # of DTensor, autograd would work on top of DTensor instead of local tensor
     return DTensor(
-        local_tensor.detach().requires_grad_(tensor.requires_grad),
+        local_tensor.requires_grad_(tensor.requires_grad),
         device_mesh,
         placements,
         shape=tensor.size(),

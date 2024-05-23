@@ -30,6 +30,7 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     NoTest,
     run_tests,
+    serialTest,
     skipCUDANonDefaultStreamIf,
     skipIfRocm,
     TEST_CUDA,
@@ -280,6 +281,7 @@ class TestCudaMultiGPU(TestCase):
         assert_change(0, reset_peak=True)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled")
+    @serialTest()
     def test_memory_stats(self):
         gc.collect()
         torch.cuda.empty_cache()

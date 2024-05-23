@@ -19,16 +19,9 @@ class LazyCache:
         assert self.vt is None
         from ..symbolic_convert import InstructionTranslator
         from .builder import VariableBuilder
-        from .ctx_manager import ContextWrappingVariable, NullContextVariable
-        from .misc import NullVariable
 
         tx = InstructionTranslator.current_tx()
         self.vt = VariableBuilder(tx, self.source)(self.value)
-
-        # we do not expect wrapping these variables in lazy VTs
-        assert not isinstance(
-            self.vt, (NullVariable, ContextWrappingVariable)
-        ) or isinstance(self.vt, NullContextVariable)
 
         del self.value
         del self.source

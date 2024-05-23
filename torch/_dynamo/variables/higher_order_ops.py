@@ -2,10 +2,11 @@
 
 import contextlib
 import functools
+import itertools
 import logging
 import types
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, TYPE_CHECKING
 
 import torch._C
 import torch.fx
@@ -30,6 +31,9 @@ from .dicts import ConstDictVariable
 from .lazy import LazyVariableTracker
 from .lists import ListVariable, TupleVariable
 from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 log = logging.getLogger(__name__)
@@ -545,6 +549,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return StrictModeHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "associative_scan":
             return AssociativeScanHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "call_torchbind":
+            return CallTorchbindHigherOrderVariable(value, source, **kwargs)
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
@@ -765,6 +771,34 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
+class CallTorchbindHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    def __init__(self, hop, source, script_obj_var, method_name):
+        super().__init__(hop, source)
+        self.script_obj_var = script_obj_var
+        self.method_name = method_name
+
+    def call_function(
+        self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
+    ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
+        args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
+
+        args_proxy = [arg.as_proxy() for arg in args]
+        kwargs_proxy = {k: v.as_proxy() for k, v in kwargs.items()}
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                self.value,
+                args=tuple(
+                    [self.script_obj_var.as_proxy(), self.method_name] + args_proxy
+                ),
+                kwargs=kwargs_proxy,
+            ),
+        )
+
+
 class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
     @raise_hard_error_if_graph_break(
         reason="while_loop doesn't work unless it is captured completely with torch.compile."
@@ -937,7 +971,6 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
-        from . import NestedUserFunctionVariable, UserFunctionVariable
         from .builder import SourcelessBuilder, wrap_fx_proxy
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
@@ -947,25 +980,18 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         combine_fn, input, dim = arg_extractor(*args, **kwargs)
 
-        assert isinstance(
-            combine_fn,
-            (
-                UserFunctionVariable,
-                NestedUserFunctionVariable,
-            ),
-        )
-
-        if input.python_type() != torch.Tensor:
+        if input.python_type() != list:
             unimplemented(
-                f"Expected input to be a tensor but got {input.python_type()}",
+                f"Expected input to be a list of tensors but got {input.python_type()}",
             )
+        assert isinstance(input, torch._dynamo.variables.lists.BaseListVariable)
 
         # Trace the subgraph
         # TODO: Fix these pointless new_empty calls appearing in the dynamo output graph.
         null_shape = SourcelessBuilder.create(tx, ())
         sub_args = [
-            input.call_method(tx, "new_empty", args=(null_shape,), kwargs={})
-            for _ in range(2)
+            leaf.call_method(tx, "new_empty", args=(null_shape,), kwargs={})
+            for leaf in itertools.chain(input.items, input.items)
         ]
         (
             (combine_result, combine_treespec),
@@ -986,41 +1012,46 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"Combine fn had unexpected freevars: {combine_lifted_freevars}"
             )
 
-        if combine_result.python_type() != torch.Tensor:
+        if combine_result.python_type() != list:
             unimplemented(
-                f"Expected combine_fn to return a tensor but got {combine_result.python_type()}",
+                f"Expected combine_fn to return a list if tensor but got {combine_result.python_type()}",
             )
 
-        input_meta = input.as_proxy().node.meta["example_value"]
-        combine_result_meta = combine_result.as_proxy().node.meta["example_value"]
+        input_proxy = input.as_proxy()
+        combine_result_proxy = combine_result.as_proxy()
+        for result, inp_proxy in zip(combine_result_proxy, input_proxy):
+            inp_meta = inp_proxy.node.meta["example_value"]
+            combine_result_meta = result.node.meta["example_value"]
+            if combine_result_meta.device != inp_meta.device:
+                unimplemented(
+                    f"Expected combine_fn to return a tensor on device {inp_meta.device} but "
+                    + f"got {combine_result_meta.device}"
+                )
+            if combine_result_meta.dtype != inp_meta.dtype:
+                unimplemented(
+                    f"Expected combine_fn to return a tensor of {inp_meta.dtype} but "
+                    + f"got {combine_result_meta.dtype}"
+                )
 
-        if combine_result_meta.device != input_meta.device:
-            unimplemented(
-                f"Expected combine_fn to return a tensor on device {input_meta.device} but "
-                + f"got {combine_result_meta.device}"
-            )
-        if combine_result_meta.dtype != input_meta.dtype:
-            unimplemented(
-                f"Expected combine_fn to return a tensor of {input_meta.dtype} but "
-                + f"got {combine_result_meta.dtype}"
-            )
-
-        if combine_result_meta.shape != ():
-            unimplemented(
-                f"Expected combine_fn to return a tensor with shape () but got {combine_result_meta.shape}"
-            )
+            if combine_result_meta.shape != ():
+                unimplemented(
+                    f"Expected combine_fn to return a tensor with shape () but got {combine_result_meta.shape}"
+                )
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
         combine_fn_name = add_subgraph(tx, "scan_combine", combine_gm)
 
         p_args = (
             make_attr(tx, combine_fn_name),
-            input.as_proxy(),
+            input_proxy,
             dim.as_proxy(),
         )
 
         with tx.fake_mode:
-            out_meta = input_meta.clone()
+            out_meta = tuple(
+                inp_proxy.node.meta["example_value"].clone()
+                for inp_proxy in input_proxy
+            )
         return wrap_fx_proxy(
             tx=tx,
             proxy=tx.output.create_proxy(
@@ -1474,7 +1505,6 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def create_wrapped_node(
         self, tx, query: "VariableTracker", score_function: "VariableTracker"
     ):
-        from torch._dynamo.symbolic_convert import InstructionTranslator
         from torch._higher_order_ops.flex_attention import TransformGetItemToIndex
         from .builder import SourcelessBuilder
 

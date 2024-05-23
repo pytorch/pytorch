@@ -705,6 +705,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             example_value = self.value(*args, **kwargs)
             source = RandomValueSource(random_call_index)
             tx.output.random_calls.append((self.value, args, kwargs))
+            # TODO: arguably, this should route to wrap_symint/wrap_symfloat
+            # (currently hypothetical), but I'm not going to poke my hand in
+            # this nest for now
             return VariableBuilder(tx, source).wrap_unspecialized_primitive(
                 example_value
             )
@@ -830,8 +833,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             subobj = NO_SUCH_SUBOBJ
             getattr_fn = self._check_for_getattr()
             if isinstance(getattr_fn, types.FunctionType):
+                # Dynamo is going to trace the __getattr__ function with
+                # args=name. Set the source accordingly.
+                new_source = None
+                if self.source:
+                    new_source = AttrSource(self.source, "__getattr__")
                 return variables.UserMethodVariable(
-                    getattr_fn, self, source=source
+                    getattr_fn, self, source=new_source
                 ).call_function(tx, [ConstantVariable.create(name)], {})
             elif getattr_fn is not None:
                 unimplemented("UserDefined with non-function __getattr__")
