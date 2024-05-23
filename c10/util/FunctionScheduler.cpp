@@ -1,5 +1,7 @@
 #include <c10/util/FunctionScheduler.h>
 
+#include <iostream>
+
 namespace c10 {
 
 /* Job */
@@ -35,8 +37,12 @@ int Job::run_limit() const {
 }
 
 void Job::run() {
-  _function();
   _counter++;
+  try {
+    _function();
+  } catch (const std::exception& e) {
+    std::cerr << "Job failed: " << e.what() << std::endl;
+  }
 }
 
 /* Run */

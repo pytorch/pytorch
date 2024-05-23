@@ -326,11 +326,10 @@ TEST(FunctionScheduler, ConcurrentJobRemoval) {
 }
 
 TEST(FunctionScheduler, JobExceptions) {
-  GTEST_SKIP_("CRASHES");
   std::atomic<int> counter = 0;
   std::function<void()> function = [&counter]() {
     counter++;
-    throw std::runtime_error("Test exception"); // TODO crashes
+    throw std::runtime_error("Test exception");
   };
 
   c10::FunctionScheduler fs;
