@@ -456,7 +456,7 @@ def _get_torch_jit_trace_forward_signature(mod: torch.nn.Module):
     return inspect.Signature(parameters=param_list)
 
 
-def _get_placeholder_combined_args(mod, fake_args, fake_kwargs):
+def _bind_signature_to_inputs(mod, fake_args, fake_kwargs):
     if isinstance(mod, (torch.jit.ScriptModule, torch.jit.TracedModule)):
         sig = _get_torch_jit_trace_forward_signature(mod)
 
@@ -518,7 +518,7 @@ def placeholder_naming_pass(
     name_map: Dict[str, str] = {}
 
     # map user input names with mod.forward() signature
-    combined_args = _get_placeholder_combined_args(mod, fake_args, fake_kwargs)
+    combined_args = _bind_signature_to_inputs(mod, fake_args, fake_kwargs)
 
     flat_args_with_path, _ = tree_flatten_with_path(combined_args)
     user_input_names = [
