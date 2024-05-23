@@ -1474,6 +1474,18 @@ optim_db: List[OptimizerInfo] = [
                 skipIfMps, "TestOptimRenewed", "test_can_load_older_state_dict"
             ),
             DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.complex64: tol(
+                            rtol=4.5e-5,
+                            atol=5e-5,
+                        )
+                    }
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
+            ),
+            DecorateInfo(
                 unittest.skip("Does not support param groups"),
                 "TestOptimRenewed",
                 "test_param_groups_lr",
