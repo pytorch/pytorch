@@ -765,6 +765,110 @@ class CommonTemplate:
         )
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    def test_aoti_eager_dynamic_shapes(self):
+        ns = "aten"
+        op_name = "clamp"
+        op_overload_name = "out"
+        dispatch_key = "CPU"
+        device = "cpu"
+        if self.device.lower() == "cuda":
+            dispatch_key = "CUDA"
+            device = "cuda"
+
+        tensor_size = [10, 20, 30]
+        min_tensor = 0.05
+        max_tensor = 0.05
+
+        with torch._dynamo.config.patch(assume_static_by_default=False):
+            inp_tensor = torch.randn(
+                tensor_size, dtype=torch.float, device=device
+            ).fill_(1.0)
+            out_ref_tensor = torch.randn(
+                tensor_size, dtype=torch.float, device=device
+            ).fill_(-2.0)
+            aoti_compile_with_persistent_cache(
+                ns,
+                f"{op_name}.{op_overload_name}",
+                device,
+                True,
+                getattr(torch.ops.aten, op_name),
+                (inp_tensor, min_tensor, max_tensor),
+                {"out": out_ref_tensor},
+            )
+            json_data = load_aoti_eager_cache(
+                ns, f"{op_name}.{op_overload_name}", device
+            )
+            self.assertTrue(len(json_data) == 1)
+
+            with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
+                inp_tensor = torch.randn(
+                    tensor_size, dtype=torch.float, device=device
+                ).fill_(1.0)
+                out_ref_tensor = torch.randn(
+                    tensor_size, dtype=torch.float, device=device
+                ).fill_(-2.0)
+                out_res_tensor = torch.randn(
+                    tensor_size, dtype=torch.float, device=device
+                ).fill_(-2.0)
+
+                torch.clamp(
+                    input=inp_tensor, min=min_tensor, max=max_tensor, out=out_ref_tensor
+                )
+                register_ops_with_aoti_compile(
+                    ns, [op_name], dispatch_key, torch_compile_op_lib_impl
+                )
+                torch.clamp(
+                    input=inp_tensor, min=min_tensor, max=max_tensor, out=out_res_tensor
+                )
+                self.assertEqual(out_ref_tensor, out_res_tensor)
+                json_data = load_aoti_eager_cache(
+                    ns, f"{op_name}.{op_overload_name}", device
+                )
+                self.assertTrue(len(json_data) == 1)
+
+                # Update dim value
+                new_tensor_size = [item + 1 for item in tensor_size]
+                inp_tensor = torch.randn(
+                    new_tensor_size, dtype=torch.float, device=device
+                ).fill_(1.0)
+                out_ref_tensor = torch.randn(
+                    new_tensor_size, dtype=torch.float, device=device
+                ).fill_(0.05)
+                out_res_tensor = torch.randn(
+                    new_tensor_size, dtype=torch.float, device=device
+                ).fill_(-2.0)
+
+                torch.clamp(
+                    input=inp_tensor, min=min_tensor, max=max_tensor, out=out_res_tensor
+                )
+                json_data = load_aoti_eager_cache(
+                    ns, f"{op_name}.{op_overload_name}", device
+                )
+                self.assertTrue(len(json_data) == 1)
+                self.assertEqual(out_ref_tensor, out_res_tensor)
+
+                # Update dim rank
+                new_tensor_size = tensor_size + [2]
+                inp_tensor = torch.randn(
+                    new_tensor_size, dtype=torch.float, device=device
+                ).fill_(1.0)
+                out_ref_tensor = torch.randn(
+                    new_tensor_size, dtype=torch.float, device=device
+                ).fill_(0.05)
+                out_res_tensor = torch.randn(
+                    new_tensor_size, dtype=torch.float, device=device
+                ).fill_(-2.0)
+
+                torch.clamp(
+                    input=inp_tensor, min=min_tensor, max=max_tensor, out=out_res_tensor
+                )
+                json_data = load_aoti_eager_cache(
+                    ns, f"{op_name}.{op_overload_name}", device
+                )
+                self.assertTrue(len(json_data) == 2)
+                self.assertEqual(out_ref_tensor, out_res_tensor)
+
+    @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_aoti_eager_dtype_device_layout(self):
         ns = "aten"
         op_name = "tril_indices"

@@ -84,6 +84,11 @@ bool TensorMetadata::operator==(const TensorMetadata& other) const {
   torch::dynamo::LocalState local_state;
   local_state.overrideDispatchKeySet(dispatch_key_set_);
 
+  if (sizes_.size() != other.sizes_.size() ||
+      strides_.size() != other.strides_.size()) {
+    return false;
+  }
+
   auto _sym_sizes = std::vector<c10::SymInt>();
   auto _sym_strides = std::vector<c10::SymInt>();
   for (auto sym_size_val : other.sizes_) {
