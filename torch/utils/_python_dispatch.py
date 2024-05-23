@@ -212,6 +212,7 @@ def _disable_current_modes():
         _pop_mode_from_pre_dispatch() for _ in range(mode_len_pre_dispatch)
     ]
 
+    functional_modes = []
     has_proxy_mode_in_pre_dispatch = False
     has_functional_mode_in_pre_dispatch = False
     has_schema_check_mode_in_pre_dispatch = False
@@ -221,6 +222,7 @@ def _disable_current_modes():
             has_proxy_mode_in_pre_dispatch = True
         if isinstance(i, FunctionalTensorMode):
             has_functional_mode_in_pre_dispatch = True
+            functional_modes.append(i)
         if isinstance(i, SchemaCheckMode):
             has_schema_check_mode_in_pre_dispatch = True
 
@@ -230,11 +232,12 @@ def _disable_current_modes():
     for old in old_modes:
         if (
             isinstance(old, FunctionalTensorMode)
-            and has_functional_mode_in_pre_dispatch
         ):
-            raise AssertionError(
-                "Can't have FunctionalMode available both in PreDispatch and Python Key"
-            )
+            functional_modes.append(old)
+            if has_functional_mode_in_pre_dispatch:
+                raise AssertionError(
+                    "Can't have FunctionalMode available both in PreDispatch and Python Key"
+                )
         if isinstance(old, ProxyTorchDispatchMode) and has_proxy_mode_in_pre_dispatch:
             raise AssertionError(
                 "Can't have ProxyTorchDispatchMode available both in PreDispatch and Python Key"
@@ -249,8 +252,12 @@ def _disable_current_modes():
 
     # Manually disable proxy and fake modes, if any are active
     try:
+        for mode in reversed(functional_modes):
+            _push_mode(mode)
         yield old_pre_dispatch_modes + old_modes
     finally:
+        for i in range(len(functional_modes)):
+            _pop_mode()
         for mode in reversed(old_modes):
             _push_mode(mode)
         for mode in reversed(old_pre_dispatch_modes):

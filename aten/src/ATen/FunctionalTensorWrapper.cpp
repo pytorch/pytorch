@@ -65,6 +65,10 @@ void FunctionalTensorWrapper::freeze_storage() const {
   functional_storage_impl()->freeze();
 }
 
+bool FunctionalTensorWrapper::is_storage_frozen() const {
+  return functional_storage_impl()->is_frozen();
+}
+
 // Note [Functionalization: Alias Removal]
 // When someone calls a view() op during the functionalization pass, e.g. 'b = a.view(...)',
 // we link `b` and `a` to a shared Alias object to preserve the aliasing relationship.
@@ -733,6 +737,12 @@ void freeze_functional_tensor(const Tensor& tensor) {
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(tensor));
   auto functional_base_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(tensor);
   functional_base_impl->freeze_storage();
+}
+
+bool is_functional_tensor_frozen(const Tensor &tensor) {
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(tensor));
+  auto functional_base_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(tensor);
+  return functional_base_impl->is_storage_frozen();
 }
 
 Tensor create_functional_tensor_with_view_meta(const at::Tensor& view_to_wrap, const at::Tensor& base, functionalization::ViewMeta meta, int64_t out_idx) {

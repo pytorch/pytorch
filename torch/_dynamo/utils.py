@@ -1812,6 +1812,7 @@ def run_node(tracer, node, args, kwargs, nnmodule):
         def make_error_message(e):
             return f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n" + str(e)
 
+        # breakpoint()
         try:
             if op == "call_function":
                 return node.target(*args, **kwargs)
@@ -1826,7 +1827,7 @@ def run_node(tracer, node, args, kwargs, nnmodule):
                 assert "example_value" in node.meta
                 return node.meta["example_value"]
 
-        except (NotImplementedError, UnsupportedFakeTensorException) as e:
+        except (NotImplementedError, UnsupportedFakeTensorException, RuntimeError) as e:
             # NB: mimic how wrap_fake_exception does it
             from .exc import unimplemented
 

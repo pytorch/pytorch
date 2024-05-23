@@ -109,6 +109,9 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
   void freeze() {
     frozen_ = true;
   }
+  bool is_frozen() const {
+    return frozen_;
+  }
 
   c10::SymInt get_storage_size(bool before) {
     if (before) {

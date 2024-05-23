@@ -136,6 +136,8 @@ def unset_fake_temporarily():
 def is_fake(x):
     if isinstance(x, FakeTensor):
         return True
+    if isinstance(x, torch._subclasses.functional_tensor.FunctionalTensor):
+        x = x.elem
     if is_traceable_wrapper_subclass(x):
         attrs, _ = type(x).__tensor_flatten__(x)
         flattened_tensors = [getattr(x, attr) for attr in attrs]
@@ -157,6 +159,8 @@ def is_fake(x):
 def maybe_get_fake_mode(t):
     if isinstance(t, FakeTensor):
         return t.fake_mode
+    if isinstance(t, torch._subclasses.functional_tensor.FunctionalTensor):
+        t = t.elem
     if is_traceable_wrapper_subclass(t):
         inner_tensor_names, _ = t.__tensor_flatten__()
         modes = [
@@ -276,6 +280,7 @@ class FakeTensorConverter:
         source=None,
         symbolic_context=None,
     ):
+        # breakpoint()
         # see note [Tensor Fakification and Symbol Caching]
         if not symbolic_context and not source and shape_env:
             if tracing_context := torch._guards.TracingContext.try_get():
@@ -302,7 +307,8 @@ class FakeTensorConverter:
             # for which it is not strictly necessary to use the
             # invocation manager (I think!)
             with no_dispatch():
-                return FakeTensor(
+                # print("meta output", make_meta_t())
+                r = FakeTensor(
                     fake_mode,
                     make_meta_t(),
                     existing_device,
@@ -310,6 +316,7 @@ class FakeTensorConverter:
                     # which case using t is wrong!  BUG!
                     constant=t if make_constant else None,
                 )
+                return r
 
         out = self.meta_converter(
             t,
@@ -320,9 +327,14 @@ class FakeTensorConverter:
         )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
+        if isinstance(t, torch._subclasses.functional_tensor.FunctionalTensor):
+            # breakpoint()
+            out = torch._subclasses.functional_tensor.FunctionalTensor(torch._to_functional_tensor(out))
+            torch._copy_freeze_functional_tensor(t.elem, out.elem)
         if make_constant:
             self.add_constant_storage_mapping(out)
         # NB: meta_converter set the memo
+        # print("result", out)
         return out
 
     # If you specify the device, it MUST be a meta tensor.

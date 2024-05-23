@@ -1788,6 +1788,9 @@ def wrap_fx_proxy_cls(
     def _clone_input(value):
         if isinstance(value, torch.Tensor):
             # tensor subclasses will not be converted to FakeTensors and need to be cloned
+            print(value)
+            print(torch._is_functional_tensor(value))
+            # breakpoint()
             if not (
                 isinstance(value, FakeTensor)
                 or (
@@ -1796,6 +1799,7 @@ def wrap_fx_proxy_cls(
                     and maybe_get_fake_mode(value) is tx.fake_mode
                 )
                 or value.is_nested
+                or isinstance(value, torch._subclasses.functional_tensor.FunctionalTensor)
             ):
                 # NB: ensure strides are preserved
                 value = clone_input(value)
@@ -1813,6 +1817,9 @@ def wrap_fx_proxy_cls(
         pass
 
     elif isinstance(example_value, torch.Tensor):
+        # if isinstance(example_value, torch._subclasses.functional_tensor.FunctionalTensor):
+        #     example_value = example_value.elem
+
         if tx.export:
             # The legacy behavior for real value cache with subclasses was
             # to perform a clone WITHOUT preserving the subclass.  It's
@@ -2284,6 +2291,7 @@ def wrap_to_fake_tensor_and_record(
             symbolic_context,
             type(e),
         )
+        # breakpoint()
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
                 e,

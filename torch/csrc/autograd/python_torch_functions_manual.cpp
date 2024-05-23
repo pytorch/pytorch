@@ -462,6 +462,25 @@ static PyObject* THPVariable__is_functional_tensor(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPVariable__copy_freeze_functional_tensor(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser(
+      {"_copy_freeze_functional_tensor(Tensor self, Tensor copy)"}, /*traceable=*/true);
+
+  ParsedArgs<2> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto self_ = r.tensor(0);
+  auto copy_ = r.tensor(1);
+  if (at::functionalization::impl::is_functional_tensor_frozen(self_)) {
+    at::functionalization::impl::freeze_functional_tensor(copy_);
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPVariable__functionalize_was_storage_changed(
     PyObject* self,
     PyObject* args,
@@ -833,6 +852,10 @@ static PyMethodDef torch_functions_manual[] = {
      nullptr},
     {"_is_functional_tensor",
      castPyCFunctionWithKeywords(THPVariable__is_functional_tensor),
+     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
+     nullptr},
+    {"_copy_freeze_functional_tensor",
+     castPyCFunctionWithKeywords(THPVariable__copy_freeze_functional_tensor),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"_to_functional_tensor",
