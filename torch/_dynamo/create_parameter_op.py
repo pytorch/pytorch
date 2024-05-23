@@ -14,7 +14,7 @@ class TracableCreateParameter(torch.autograd.Function):
     @staticmethod
     def forward(ctx, tensor, placeholder):
         assert not tensor.requires_grad
-        return placeholder.set_(tensor)
+        return placeholder.set_(tensor).clone()
 
     @staticmethod
     def backward(ctx, grad):
