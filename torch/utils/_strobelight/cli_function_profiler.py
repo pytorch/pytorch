@@ -9,6 +9,7 @@ import time
 from threading import Lock
 from typing import Any, List, Optional, Sequence
 
+
 logger = logging.getLogger("strobelight_function_profiler")
 
 console_handler = logging.StreamHandler()
