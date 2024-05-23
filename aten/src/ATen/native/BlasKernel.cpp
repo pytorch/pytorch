@@ -335,11 +335,15 @@ static inline float32x4_t f32_fma(float32x4_t a, float32x4_t b, float32x4_t c) {
 // fp16_gemv_trans_fp32_arith_by_dot_products are adapted from
 // llama.cpp's ggml_vec_dot_f32 and surrounding utility functions. See
 // NOTE [ GGML Copyright Notice ] above for the required notice.
-#define F32_ELEMENTS_PER_ITERATION 16
+#define F32_ELEMENTS_PER_ITERATION 32
 #define F32_ELEMENTS_PER_REGISTER 4
 #define F32_REGISTERS_PER_ITERATION (F32_ELEMENTS_PER_ITERATION / F32_ELEMENTS_PER_REGISTER)
 static inline double reduce(float32x4_t x[F32_REGISTERS_PER_ITERATION]) {
   int offset = F32_REGISTERS_PER_ITERATION / 2;
+  for (int i = 0; i < offset; ++i) {
+    x[i] = vaddq_f32(x[i], x[offset + i]);
+  }
+  offset /= 2;
   for (int i = 0; i < offset; ++i) {
     x[i] = vaddq_f32(x[i], x[offset + i]);
   }
