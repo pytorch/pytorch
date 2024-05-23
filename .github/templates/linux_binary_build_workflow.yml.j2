@@ -73,8 +73,6 @@ jobs:
       {%- endif %}
       {%- if config["gpu_arch_type"] == "cuda-aarch64" %}
       timeout-minutes: 360
-      {%- else %}
-      timeout-minutes: 210
       {%- endif %}
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}

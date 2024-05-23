@@ -52,7 +52,6 @@ jobs:
       DESIRED_PYTHON: "3.8"
       build_name: conda-py3_8-cpu
       build_environment: linux-binary-conda
-      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_8-cpu-test:  # Testing
@@ -114,7 +113,6 @@ jobs:
       runs_on: linux.24xlarge
       build_name: conda-py3_8-cuda11_8
       build_environment: linux-binary-conda
-      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_8-cuda11_8-test:  # Testing
@@ -178,7 +176,6 @@ jobs:
       runs_on: linux.24xlarge
       build_name: conda-py3_8-cuda12_1
       build_environment: linux-binary-conda
-      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_8-cuda12_1-test:  # Testing
@@ -242,7 +239,6 @@ jobs:
       runs_on: linux.24xlarge
       build_name: conda-py3_8-cuda12_4
       build_environment: linux-binary-conda
-      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_8-cuda12_4-test:  # Testing
@@ -304,7 +300,6 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cpu
       build_environment: linux-binary-conda
-      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_9-cpu-test:  # Testing
@@ -366,7 +361,6 @@ jobs:
       runs_on: linux.24xlarge
       build_name: conda-py3_9-cuda11_8
       build_environment: linux-binary-conda
-      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_9-cuda11_8-test:  # Testing
@@ -430,7 +424,6 @@ jobs:
       runs_on: linux.24xlarge
       build_name: conda-py3_9-cuda12_1
       build_environment: linux-binary-conda
-      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_9-cuda12_1-test:  # Testing
@@ -494,7 +487,6 @@ jobs:
       runs_on: linux.24xlarge
       build_name: conda-py3_9-cuda12_4
       build_environment: linux-binary-conda
-      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_9-cuda12_4-test:  # Testing
@@ -556,7 +548,6 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cpu
       build_environment: linux-binary-conda
-      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_10-cpu-test:  # Testing
@@ -618,7 +609,6 @@ jobs:
       runs_on: linux.24xlarge
       build_name: conda-py3_10-cuda11_8
       build_environment: linux-binary-conda
-      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_10-cuda11_8-test:  # Testing
@@ -682,7 +672,6 @@ jobs:
       runs_on: linux.24xlarge
       build_name: conda-py3_10-cuda12_1
       build_environment: linux-binary-conda
-      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_10-cuda12_1-test:  # Testing
@@ -746,7 +735,6 @@ jobs:
       runs_on: linux.24xlarge
       build_name: conda-py3_10-cuda12_4
       build_environment: linux-binary-conda
-      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_10-cuda12_4-test:  # Testing
@@ -808,7 +796,6 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cpu
       build_environment: linux-binary-conda
-      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_11-cpu-test:  # Testing
@@ -870,7 +857,6 @@ jobs:
       runs_on: linux.24xlarge
       build_name: conda-py3_11-cuda11_8
       build_environment: linux-binary-conda
-      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_11-cuda11_8-test:  # Testing
@@ -934,7 +920,6 @@ jobs:
       runs_on: linux.24xlarge
       build_name: conda-py3_11-cuda12_1
       build_environment: linux-binary-conda
-      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_11-cuda12_1-test:  # Testing
@@ -998,7 +983,6 @@ jobs:
       runs_on: linux.24xlarge
       build_name: conda-py3_11-cuda12_4
       build_environment: linux-binary-conda
-      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_11-cuda12_4-test:  # Testing
@@ -1060,7 +1044,6 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: conda-py3_12-cpu
       build_environment: linux-binary-conda
-      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_12-cpu-test:  # Testing
@@ -1122,7 +1105,6 @@ jobs:
       runs_on: linux.24xlarge
       build_name: conda-py3_12-cuda11_8
       build_environment: linux-binary-conda
-      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_12-cuda11_8-test:  # Testing
@@ -1186,7 +1168,6 @@ jobs:
       runs_on: linux.24xlarge
       build_name: conda-py3_12-cuda12_1
       build_environment: linux-binary-conda
-      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_12-cuda12_1-test:  # Testing
@@ -1250,7 +1231,6 @@ jobs:
       runs_on: linux.24xlarge
       build_name: conda-py3_12-cuda12_4
       build_environment: linux-binary-conda
-      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_12-cuda12_4-test:  # Testing

@@ -53,7 +53,6 @@ jobs:
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cpu-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
-      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cpu-shared-with-deps-pre-cxx11-test:  # Testing
@@ -117,7 +116,6 @@ jobs:
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cuda11_8-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
-      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cuda11_8-shared-with-deps-pre-cxx11-test:  # Testing
@@ -183,7 +181,6 @@ jobs:
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cuda12_1-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
-      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cuda12_1-shared-with-deps-pre-cxx11-test:  # Testing
@@ -249,7 +246,6 @@ jobs:
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cuda12_4-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
-      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cuda12_4-shared-with-deps-pre-cxx11-test:  # Testing
@@ -315,7 +311,6 @@ jobs:
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-rocm6_0-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
-      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-rocm6_0-shared-with-deps-pre-cxx11-test:  # Testing
@@ -422,7 +417,6 @@ jobs:
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-rocm6_1-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
-      timeout-minutes: 210
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-rocm6_1-shared-with-deps-pre-cxx11-test:  # Testing
