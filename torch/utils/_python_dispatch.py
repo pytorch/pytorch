@@ -369,10 +369,6 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
         if is_traceable_wrapper_subclass(arg) or is_traceable_wrapper_subclass(ret):
             ret_list = ret if isinstance(ret, list) else [ret]
             for r in ret_list:
-                # NJTs have known dense -> subclass and subclass -> dense views, so
-                # skip the type check asserts for those
-                if arg.is_nested or r.is_nested:
-                    continue
                 assert type(arg) == type(
                     r
                 ), f"""Called {str(func)} with input of type {type(arg)}
@@ -395,19 +391,24 @@ and output of type {type(ret)}. But expected types to match."""
                 #     This requires swapping the storage of out to be the same as inp,
                 #     but we do *not* want it to change the sizes/strides that were compute for out.
 
-                def _alias_storage(source, dst):
-                    # NB: There are problems with this approach for mixed dense -> subclass
-                    # and subclass -> dense views, so don't do this for those yet.
-                    # TODO: Support mixed views here as well
-                    if is_traceable_wrapper_subclass(source) == is_traceable_wrapper_subclass(dst):
-                        torch.ops.aten._unsafe_set_storage_(dst, source.untyped_storage())
-
                 if isinstance(ret, list):
                     for r in ret:
-                        _alias_storage(arg, r)
+                        torch.ops.aten.set_.source_Storage_storage_offset(
+                            r,
+                            arg.untyped_storage(),
+                            r.storage_offset(),
+                            r.shape,
+                            r.stride(),
+                        )
                 else:
                     assert isinstance(ret, torch.Tensor), f"type: {type(ret)}"
-                    _alias_storage(arg, ret)
+                    torch.ops.aten.set_.source_Storage_storage_offset(
+                        ret,
+                        arg.untyped_storage(),
+                        ret.storage_offset(),
+                        ret.shape,
+                        ret.stride(),
+                    )
             finally:
                 torch._C._set_meta_in_tls_dispatch_include(meta_in_tls)
 

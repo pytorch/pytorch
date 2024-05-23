@@ -7895,15 +7895,6 @@
   autogen: set, set.out
   tags: inplace_view
 
-- func: _unsafe_set_storage_(Tensor(a!) self, Storage source) -> Tensor(a!)
-  variants: method
-  device_check: NoCheck
-  device_guard: False
-  tags: inplace_view
-  dispatch:
-    CPU, CUDA, Meta, MPS, NestedTensorCPU, NestedTensorCUDA, NestedTensorMeta: _unsafe_set_storage_
-  autogen: _unsafe_set_storage, _unsafe_set_storage.out
-
 # Not making it CompositeImplicitAutograd because lift
 # should be a primitive w.r.t. functorch
 
@@ -14649,11 +14640,13 @@
   variants: function
   dispatch:
     CUDA: _fbgemm_jagged_to_padded_dense_forward
+    CPU: _jagged_to_padded_dense_forward_cpu
 
 - func: _padded_dense_to_jagged_forward(Tensor dense, Tensor[] offsets, SymInt? total_L=None) -> Tensor
   variants: function
   dispatch:
     CUDA: _fbgemm_dense_to_jagged_forward_symint
+    CPU: _padded_dense_to_jagged_forward_cpu
 
 - func: _nested_tensor_softmax_with_shape(Tensor self, Tensor query) -> Tensor
   dispatch:
