@@ -576,9 +576,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(1, 1, 1, 32, device=torch.device("cuda"))
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (x,))
 
-    # NOTE:The test was meant to test the empty bounding box case, but it is not
-    # supported. When we have vision model examples, we will have a better test case
-    # to demonstrate in FX and FX exporter.
     def test_view_dynamic_zero_dim(self):
         class ViewModel(torch.nn.Module):
             def forward(self, input):
@@ -586,12 +583,11 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 return input.view(1, -1)
 
         x = torch.ones(2)
-        # y = torch.empty(0)
+        y = torch.empty(0)
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             ViewModel(),
             (x,),
-            # additional_test_inputs=[((y,),)],  # TODO: Without `additional_test_inputs` arg, dynamic shape cannot be verified
-            skip_dynamic_shapes_check=True,  # Has static shape for dynamic_shapes=True due to 0/1 specialization
+            additional_test_inputs=[((y,),)],
         )
 
     def test_flatten_dynamic_axes(self):

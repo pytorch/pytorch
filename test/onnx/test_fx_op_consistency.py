@@ -146,6 +146,11 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         reason=onnx_test_common.reason_onnx_script_does_not_support("Add", "bool"),
     ),
     xfail(
+        "__rmatmul__",
+        dtypes=(torch.float16,),
+        reason="fixme: Assertion error: result mismatch",
+    ),
+    xfail(
         "__rpow__",
         dtypes=onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Pow", "int"),
@@ -516,6 +521,11 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         reason=onnx_test_common.reason_dynamo_does_not_support("full_like", "complex64")
     ),
     xfail(
+        "gather",
+        reason="HandleNegativeAxis(int64_t, int64_t) IsAxisInRange(axis, tensor_rank) was \
+            false. axis 0 is not in valid range [-0,-1]"
+    ),
+    xfail(
         "geometric",
         reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
     ),
@@ -536,13 +546,18 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
     ),
     xfail(
         "index_put",
-        dtypes=onnx_test_common.BOOL_TYPES,
+        dtypes=onnx_test_common.BOOL_TYPES + (torch.float16,),
         reason=onnx_test_common.reason_onnx_script_does_not_support("index_put", "bool"),
     ),
     xfail(
         "index_put",
         dtypes=(torch.uint8, torch.int8, torch.int16,),
         reason=onnx_test_common.reason_onnx_script_does_not_support("Add", "int8, int16"),
+    ),
+    xfail(
+        "index_put",
+        dtypes=(torch.float16,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("ScatterND", "float16"),
     ),
     xfail(
         "isnan",
@@ -847,6 +862,11 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         "nn.functional.conv3d",
         dtypes=onnx_test_common.COMPLEX_TYPES,
         reason="fixme: Assertion error: result mismatch",
+    ),
+    xfail(
+        "nn.functional.cosine_embedding_loss",
+        dtypes=onnx_test_common.BOOL_TYPES,
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("CosineEmbeddingLoss", "bool"),
     ),
     xfail(
         "nn.functional.ctc_loss",
@@ -1965,6 +1985,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         "nn.functional.poisson_nll_loss": [3e-2, 1e-3],
         "nn.functional.nll_loss": [3e-2, 1e-3],
         "native_batch_norm": [3e-2, 1e-3],
+        "norm": [1e-2, 1e-2],
         "dot": [3e-2, 1e-3],
         "logit": [3e-2, 1e-3],
         "rsub": [3e-2, 1e-3],
