@@ -5,6 +5,7 @@ import unittest
 
 import torch
 import torch._inductor
+import torch._inductor.fx_passes.group_batch_fusion
 from torch._dynamo.utils import counters, optimus_scuba_log
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
