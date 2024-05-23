@@ -320,6 +320,27 @@ static inline float32x4_t f32_fma(float32x4_t a, float32x4_t b, float32x4_t c) {
 #endif
 }
 
+static inline float32x4_t f32_fma_low_f16(float32x4_t a, float16x8_t b, float16x8_t c) {
+#ifdef __ARM_FEATURE_FP16_FML
+  // NOTE: this instruction is an optional instruction in ARM v8.2 and
+  // v8.3, but mandatory in v8.4 per
+  // https://developer.arm.com/documentation/ddi0596/2021-03/SIMD-FP-Instructions/FMLAL--FMLAL2--vector---Floating-point-fused-Multiply-Add-Long-to-accumulator--vector--?lang=en
+  // I'm not certain that I have the right feature test macro.
+  return vfmlalq_low_f16(a, b, c);
+#else
+  return f32_fma(a, vcvt_f32_f16(vget_low_f16(b)), vcvt_f32_f16(vget_low_f16(c)));
+#endif
+}
+
+static inline float32x4_t f32_fma_high_f16(float32x4_t a, float16x8_t b, float16x8_t c) {
+#ifdef __ARM_FEATURE_FP16_FML
+  // See above note about this instruction.
+  return vfmlalq_high_f16(a, b, c);
+#else
+  return f32_fma(a, vcvt_f32_f16(vget_high_f16(b)), vcvt_f32_f16(vget_high_f16(c)));
+#endif
+}
+
 // The below reduce overload and
 // fp16_gemv_trans_fp32_arith_by_dot_products are adapted from
 // llama.cpp's ggml_vec_dot_f32 and surrounding utility functions. See
@@ -334,9 +355,11 @@ static constexpr auto kF32ElementsPerRegisterShift = 2;
 static constexpr auto kF32ElementsPerRegister = 1 << kF32ElementsPerRegisterShift;
 static_assert(kF32ElementsPerRegister == 4);
 
-static constexpr auto kF32RegistersPerIterationShift = kF32ElementsPerIterationShift - kF32ElementsPerRegisterShift;
-static constexpr auto kF32RegistersPerIteration = 1 << kF32RegistersPerIterationShift;
+static constexpr auto kF32RegisterPairsPerIteration = 4;
+static constexpr auto kF32RegistersPerIteration = kF32RegisterPairsPerIteration * 2;
+static constexpr auto kF32RegistersPerIterationShift = 3;
 static_assert(kF32RegistersPerIteration == kF32ElementsPerIteration / kF32ElementsPerRegister);
+static_assert(kF32RegistersPerIteration == 1 << kF32RegistersPerIterationShift);
 
 static inline double reduce(float32x4_t x[kF32RegistersPerIteration]) {
   int offset = kF32RegistersPerIteration;
@@ -349,6 +372,9 @@ static inline double reduce(float32x4_t x[kF32RegistersPerIteration]) {
   return vaddvq_f32(x[0]);
 }
 
+// On my Apple M1 Macbook (which is ARM v8.5 and thus has the
+// instructions f32_fma_{low,high}_f16 is targeting), this kernel has
+// equivalent performance to the fp16-native kernel.
 static void fp16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n, const float16_t* a, const int lda, const float16_t *x, float16_t* y, int incy) {
   parallel_for(0, n, 1, [&](int begin, int end) {
   for (int i = begin; i < end; ++i) {
@@ -356,11 +382,14 @@ static void fp16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n,
 
       const auto m_aligned = m & ~(kF32ElementsPerIteration - 1);
       for (int j = 0; j < m_aligned ; j += kF32ElementsPerIteration) {
-        for (int k = 0; k < kF32RegistersPerIteration; ++k) {
-          const auto temp_x = vcvt_f32_f16(vld1_f16(x + j + k * kF32ElementsPerRegister));
-          const auto temp_a = vcvt_f32_f16(vld1_f16(a + lda * i + j + k * kF32ElementsPerRegister));
-          sum[k] = f32_fma(sum[k], temp_x, temp_a);
-        }
+        c10::ForcedUnroll<kF32RegisterPairsPerIteration>{}([x, a, lda, i, j, &sum](auto k) {
+          // Load a pair of f32 registers at a time.
+          const auto temp_x = vld1q_f16(x + j + k * 2 * kF32ElementsPerRegister);
+          const auto temp_a = vld1q_f16(a + lda * i + j + k * 2 * kF32ElementsPerRegister);
+
+          sum[2 * k] = f32_fma_low_f16(sum[2 * k], temp_x, temp_a);
+          sum[2 * k + 1] = f32_fma_high_f16(sum[2 * k + 1], temp_x, temp_a);
+        });
       }
       auto reducedSum = reduce(sum);
 
