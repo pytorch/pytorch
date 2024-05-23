@@ -23,6 +23,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: 'fbcode/pytorch-stable-prototype'
       - run: .github/scripts/sync_distributed_folder_prototype.sh
