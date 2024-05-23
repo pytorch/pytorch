@@ -2643,12 +2643,6 @@ class DeviceCachingAllocator {
       std::function<bool(cudaStream_t)> filter) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     create_or_incref_pool(mempool_id);
-    for (auto it = captures_underway.begin(); it != captures_underway.end();
-         ++it) {
-      TORCH_CHECK(
-          it->first != mempool_id,
-          "beginAllocateToPool: already recording to mempool_id");
-    }
     captures_underway.emplace_back(mempool_id, std::move(filter));
   }
 
