@@ -1,5 +1,4 @@
 import os
-from functools import lru_cache
 from typing import List, Optional
 
 from torch._inductor import config
@@ -15,7 +14,7 @@ def _rocm_include_paths() -> List[str]:
         else f"{cpp_extension._join_rocm_home('include')}"
     )
     ck_include = os.path.join(config.rocm.ck_dir, "include")
-    return [rocm_include, ck_include]
+    return [os.path.realpath(rocm_include), os.path.realpath(ck_include)]
 
 
 def _rocm_lib_options() -> List[str]:
@@ -33,8 +32,8 @@ def _rocm_lib_options() -> List[str]:
     )
 
     return [
-        f"-L{rocm_lib_dir}",
-        f"-L{hip_lib_dir}",
+        f"-L{os.path.realpath(rocm_lib_dir)}",
+        f"-L{os.path.realpath(hip_lib_dir)}",
         "-lamdhip64",
     ]
 
@@ -71,11 +70,11 @@ def _rocm_compiler_options() -> List[str]:
 def rocm_compiler() -> Optional[str]:
     if is_linux():
         if config.rocm.rocm_home:
-            return os.path.join(config.rocm.rocm_home, "llvm", "bin", "clang")
+            return os.path.realpath(os.path.join(config.rocm.rocm_home, "llvm", "bin", "clang"))
         try:
             from torch.utils import cpp_extension
 
-            return cpp_extension._join_rocm_home("llvm", "bin", "clang")
+            return os.path.realpath(cpp_extension._join_rocm_home("llvm", "bin", "clang"))
         except OSError:
             # neither config.rocm.rocm_home nor env variable ROCM_HOME are set
             return "clang"

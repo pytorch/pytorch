@@ -40,6 +40,15 @@ class TestCKBackend(TestCase):
         old_disable_fresh_cache_envvar = os.environ.get(
             "INDUCTOR_TEST_DISABLE_FRESH_CACHE", ""
         )
+
+        torch.random.manual_seed(1234)
+        try:
+            import ck4inductor
+            self.ck_dir = os.path.dirname(ck4inductor.__file__)
+            os.environ["TORCHINDUCTOR_CK_DIR"] = self.ck_dir
+        except ImportError as e:
+            raise unittest.SkipTest("Composable Kernel library not installed") from e
+
         try:
             os.environ["INDUCTOR_TEST_DISABLE_FRESH_CACHE"] = "1"
             super().setUp()
@@ -47,7 +56,6 @@ class TestCKBackend(TestCase):
             os.environ[
                 "INDUCTOR_TEST_DISABLE_FRESH_CACHE"
             ] = old_disable_fresh_cache_envvar
-        torch.random.manual_seed(1234)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CK path setup")
@@ -77,6 +85,7 @@ class TestCKBackend(TestCase):
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "compile_threads": 2,
                 "rocm.n_max_profiling_configs": 2,
+                "rocm.ck_dir": self.ck_dir,
             }
         ):
             Y_compiled = torch.compile(mm, dynamic=False)(a, b)
@@ -110,6 +119,7 @@ class TestCKBackend(TestCase):
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "compile_threads": 12,
+                "rocm.ck_dir": self.ck_dir,
                 "rocm.use_preselected_instances": True,
             }
         ):
@@ -141,6 +151,7 @@ class TestCKBackend(TestCase):
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "compile_threads": 2,
+                "rocm.ck_dir": self.ck_dir,
                 "rocm.n_max_profiling_configs": 2,
             }
         ):

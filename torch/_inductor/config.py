@@ -850,15 +850,8 @@ class rocm:
     rocm_home: Optional[str] = None
 
     # Path to Composable Kernel library.
-    # The default path only works under PyTorch local development environment.
-    ck_dir = os.environ.get(
-        "TORCHINDUCTOR_CK_DIR",
-        os.path.abspath(
-            os.path.join(
-                os.path.dirname(torch.__file__), "../third_party/composable_kernel/"
-            )
-        ),
-    )
+    # Install with `pip install git+https://github.com/rocm/composable_kernel@develop`.
+    ck_dir = os.environ.get("TORCHINDUCTOR_CK_DIR")
 
     # Number of op instance choices to trade off between runtime perf and compilation time
     n_max_profiling_configs: Optional[int] = None
