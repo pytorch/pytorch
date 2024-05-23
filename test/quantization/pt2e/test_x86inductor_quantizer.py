@@ -1486,10 +1486,10 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
                 }
                 node_list = [
+                    torch.ops.quantized_decomposed.dequantize_per_channel.default,
                     quantize_per_tensor_op,
                     dequantize_per_tensor_op,
                     torch.ops.aten.linear.default,
-                    torch.ops.quantized_decomposed.dequantize_per_channel.default,
                     torch.ops.aten.add_.Tensor
                     if inplace_add
                     else torch.ops.aten.add.Tensor,
@@ -1659,10 +1659,10 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.dequantize_per_channel.default: 4,
                 }
                 node_list = [
+                    torch.ops.quantized_decomposed.dequantize_per_channel.default,
                     quantize_per_tensor_op,
                     dequantize_per_tensor_op,
                     torch.ops.aten.linear.default,
-                    torch.ops.quantized_decomposed.dequantize_per_channel.default,
                     torch.ops.aten.linear.default,
                     torch.ops.aten.linear.default,
                     torch.ops.aten.add.Tensor,
