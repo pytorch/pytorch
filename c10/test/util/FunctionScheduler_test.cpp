@@ -409,3 +409,22 @@ TEST(FunctionScheduler, ImmediateJobWithRunLimit) {
 
   ASSERT_EQ(counter, 3);
 }
+
+TEST(FunctionScheduler, PauseWhileRunning) {
+  std::atomic<int> counter = 0;
+  std::function<void()> function = [&counter]() { counter++; };
+  std::chrono::milliseconds interval(100);
+
+  c10::FunctionScheduler fs;
+  fs.scheduleJob(function, interval);
+
+  fs.start();
+  std::this_thread::sleep_for(std::chrono::milliseconds(350));
+  fs.pause();
+  std::this_thread::sleep_for(std::chrono::seconds(1));
+  fs.resume();
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  fs.stop();
+
+  ASSERT_EQ(counter, 4);
+}

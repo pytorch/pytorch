@@ -34,9 +34,6 @@ class Job {
   bool immediate() const;
   int run_limit() const;
 
-  void set_next_run(
-      std::chrono::time_point<std::chrono::steady_clock> next_run);
-
   void run();
 };
 
@@ -54,11 +51,15 @@ class Run {
 
   int job_id() const;
   std::chrono::time_point<std::chrono::steady_clock> time() const;
+
+  void set_time(std::chrono::time_point<std::chrono::steady_clock> time);
 };
 
 class FunctionScheduler {
   int _current_id = 0;
   std::atomic_bool _running = false;
+  std::atomic_bool _paused = false;
+  std::chrono::time_point<std::chrono::steady_clock> _paused_time;
   std::priority_queue<
       std::shared_ptr<Run>,
       std::vector<std::shared_ptr<Run>>,
@@ -94,6 +95,8 @@ class FunctionScheduler {
 
   void start();
   void stop();
+  void pause();
+  void resume();
 
   bool isRunning() const;
   int currentId() const;

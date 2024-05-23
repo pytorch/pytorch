@@ -58,6 +58,10 @@ std::chrono::time_point<std::chrono::steady_clock> Run::time() const {
   return _time;
 }
 
+void Run::set_time(std::chrono::time_point<std::chrono::steady_clock> time) {
+  _time = time;
+}
+
 /* FunctionScheduler */
 
 FunctionScheduler::FunctionScheduler() : _queue(&Run::gt){};
@@ -175,6 +179,9 @@ int FunctionScheduler::removeJob(int id) {
 }
 
 void FunctionScheduler::start() {
+  if (_running || _paused)
+    return;
+
   std::lock_guard<std::mutex> lock(_mutex);
   auto now = std::chrono::steady_clock::now();
   for (const auto& entry : _jobs) {
@@ -182,11 +189,16 @@ void FunctionScheduler::start() {
   }
 
   _running = true;
+  _paused = false;
   _thread = std::thread(&FunctionScheduler::run, this);
 }
 
 void FunctionScheduler::stop() {
+  if (!_running)
+    return;
+
   _running = false;
+  _paused = false;
   // Unblock the thread executing
   // `FunctionScheduler::run` so it
   // exits the loop.
@@ -203,6 +215,40 @@ void FunctionScheduler::stop() {
   for (const auto& entry : _jobs) {
     entry.second->reset_counter();
   }
+}
+
+void FunctionScheduler::pause() {
+  if (_paused || !_running)
+    return;
+
+  _running = false;
+  // Unblock the thread executing
+  // `FunctionScheduler::run` so it
+  // exits the loop.
+  _cond.notify_one();
+  if (_thread.joinable()) {
+    _thread.join();
+  }
+
+  _paused_time = std::chrono::steady_clock::now();
+  _paused = true;
+}
+
+void FunctionScheduler::resume() {
+  if (!_paused)
+    return;
+
+  auto diff = std::chrono::steady_clock::now() - _paused_time;
+  auto _queue_copy = _queue;
+  while (!_queue_copy.empty()) {
+    auto entry = _queue_copy.top();
+    _queue_copy.pop();
+    entry->set_time(entry->time() + diff);
+  }
+
+  _running = true;
+  _paused = false;
+  _thread = std::thread(&FunctionScheduler::run, this);
 }
 
 bool FunctionScheduler::isRunning() const {
