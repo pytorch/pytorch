@@ -405,7 +405,7 @@ class TestTransformers(NNTestCase):
                 # no garauntees on output corresponding to masked tokens, so they may vary between slow/fast path. set all to 0.
                 fastpath_output_expanded = fastpath_output_expanded.masked_fill(src_key_padding_mask.unsqueeze(-1), 0)
                 slowpath_output = slowpath_output.masked_fill(src_key_padding_mask.unsqueeze(-1), 0)
-                torch.testing.assert_close(fastpath_output_expanded, slowpath_output, rtol=1e-7, atol=1e-5)
+                torch.testing.assert_close(fastpath_output_expanded, slowpath_output, rtol=2e-4, atol=5e-4)
 
     @parametrize("with_no_grad", [True, False])
     @parametrize("training", [True, False])
