@@ -14,7 +14,7 @@ import socket
 import time
 import traceback
 import warnings
-from contextlib import closing, contextmanager
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -22,7 +22,6 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import torch.distributed.elastic.rendezvous as rdzv
 import torch.distributed.elastic.utils.store as store_util
 from torch.distributed.elastic.rendezvous import RendezvousGracefulExitError
-from torch.distributed import Store
 from torch.distributed.elastic.events import Event, EventSource, record
 from torch.distributed.elastic.metrics import prof, put_metric
 from torch.distributed.elastic.multiprocessing import (
@@ -251,7 +250,7 @@ class WorkerGroup:
     group contains cross instance workers or not depends on the implementation of the agent.
     """
 
-    __slots__ = ["spec", "workers", "store", "group_rank", "group_world_size", "state"]
+    __slots__ = ["spec", "workers", "store", "group_rank", "group_world_size", "state", "master_addr", "master_port"]
 
     def __init__(self, spec: WorkerSpec):
         self.spec = spec
@@ -261,6 +260,8 @@ class WorkerGroup:
         self.store = None
         self.group_rank = None
         self.group_world_size = None
+        self.master_addr = None
+        self.master_port = None
 
         self.state = WorkerState.INIT
 
@@ -354,37 +355,6 @@ class RunResult:
 
     def is_failed(self) -> bool:
         return self.state == WorkerState.FAILED
-
-
-def _get_socket_with_port() -> socket.socket:
-    """Return a free port on localhost.
-
-    The free port is "reserved" by binding a temporary socket on it.
-    Close the socket before passing the port to the entity that
-    requires it. Usage example::
-
-    sock = _get_socket_with_port()
-    with closing(sock):
-        port = sock.getsockname()[1]
-        sock.close()
-        # there is still a race-condition that some other process
-        # may grab this port before func() runs
-        func(port)
-    """
-    addrs = socket.getaddrinfo(
-        host="localhost", port=None, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM
-    )
-    for addr in addrs:
-        family, type, proto, _, _ = addr
-        s = socket.socket(family, type, proto)
-        try:
-            s.bind(("localhost", 0))
-            s.listen(0)
-            return s
-        except OSError as e:
-            s.close()
-            logger.info("Socket creation attempt failed.", exc_info=e)
-    raise RuntimeError("Failed to create a socket")
 
 
 def _get_fq_hostname() -> str:
@@ -506,36 +476,6 @@ class SimpleElasticAgent(ElasticAgent):
         """
         raise NotImplementedError
 
-    @staticmethod
-    def _set_master_addr_port(
-        store: Store,
-        master_addr: Optional[str],
-        master_port: Optional[int],
-        local_addr: Optional[str],
-    ):
-        if master_port is None:
-            sock = _get_socket_with_port()
-            with closing(sock):
-                master_port = sock.getsockname()[1]
-
-        if master_addr is None:
-            # If user specified the address for the local node, use it as the master addr if not exist
-            if local_addr:
-                master_addr = local_addr
-            else:
-                master_addr = _get_fq_hostname()
-
-        store.set("MASTER_ADDR", master_addr.encode(encoding="UTF-8"))
-        store.set("MASTER_PORT", str(master_port).encode(encoding="UTF-8"))
-
-    @staticmethod
-    def _get_master_addr_port(store: Store) -> Tuple[str, int]:
-        master_addr = store.get("MASTER_ADDR").decode(encoding="UTF-8")
-        master_port = int(store.get("MASTER_PORT").decode(encoding="UTF-8"))
-        return (master_addr, master_port)
-
-    # pyre-fixme[56]: Pyre was not able to infer the type of the decorator
-    #  `torch.distributed.elastic.metrics.prof`.
     @prof
     def _rendezvous(self, worker_group: WorkerGroup) -> None:
         r"""Run rendezvous for the workers specified by the worker spec.
@@ -546,7 +486,16 @@ class SimpleElasticAgent(ElasticAgent):
         spec = worker_group.spec
 
         with self.record_duration("RENDEZVOUS"):
-            store, group_rank, group_world_size = spec.rdzv_handler.next_rendezvous()
+            rdzv_info = spec.rdzv_handler.next_rendezvous()
+        store = rdzv_info.store
+        group_rank = rdzv_info.rank
+        group_world_size = rdzv_info.world_size
+
+        # master_addr/master_port could be explicitly overriden
+        # TODO: BC - specific to static rdzv and can be simplifed further
+        master_addr = spec.master_addr or rdzv_info.bootstrap_store_info.master_addr
+        master_port = spec.master_port or rdzv_info.bootstrap_store_info.master_port
+
         self._store = store
 
         with self.record_duration("ASSIGN_WORKER_RANKS"):
@@ -555,17 +504,9 @@ class SimpleElasticAgent(ElasticAgent):
         worker_group.store = store
         worker_group.group_rank = group_rank
         worker_group.group_world_size = group_world_size
+        worker_group.master_addr = master_addr
+        worker_group.master_port = master_port
 
-        if group_rank == 0:
-            self._set_master_addr_port(
-                store,
-                spec.master_addr,
-                spec.master_port,
-                spec.local_addr,
-            )
-
-        with self.record_duration("GET_MASTER_ADDR_PORT"):
-            master_addr, master_port = self._get_master_addr_port(store)
         restart_count = spec.max_restarts - self._remaining_restarts
 
         logger.info(
