@@ -1269,7 +1269,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
               globalStore_->check({std::string(EXCEPTION_DUMP)});
         } catch (const std::exception& e) {
           LOG(ERROR)
-              << logPrefix() << "Failed to get exception dump flag from the global store."
+              << logPrefix()
+              << "Failed to get exception dump flag from the global store."
               << e.what();
           break;
         }
@@ -1290,7 +1291,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
                 "Invalid size for the timeout rank ID");
             std::memcpy(&timeOutRank, vec.data(), vec.size());
           } catch (const std::exception& e) {
-            LOG(ERROR) << logPrefix() << "Failed to get timeout rank ID from the global store."
+            LOG(ERROR) << logPrefix()
+                       << "Failed to get timeout rank ID from the global store."
                        << e.what();
           }
           errorMsg = c10::str(
