@@ -1873,6 +1873,16 @@ class CPUReproTests(TestCase):
         # For forward and backward kernel
         check_metrics_vec_kernel_count(2)
 
+    @requires_vectorization
+    def test_ops_masked_with_bool_input(self):
+        x = torch.zeros(129, dtype=torch.bool)
+        size = [2, 3]
+        res_aten_eager = torch.constant_pad_nd(x, size)
+        cfn = torch.compile(torch.constant_pad_nd)
+        res = cfn(x, size)
+        self.assertEqual(res_aten_eager, res)
+        check_metrics_vec_kernel_count(1)
+
     @patch("torch.cuda.is_available", lambda: False)
     def test_scatter_using_atomic_add(self):
         def fn(a, dim, index, b):
@@ -3636,6 +3646,16 @@ class CPUReproTests(TestCase):
             return torch.nn.functional.pad(x, (0, 13))
 
         x = torch.randint(0, 100, (819,), dtype=torch.int64)
+        metrics.reset()
+        self.common(fn, (x,))
+        assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_reduction_float_to_int64(self):
+        # https://github.com/pytorch/pytorch/issues/124821
+        def fn(x):
+            return x.max(0).values
+
+        x = torch.randint(0, 100, (22, 51), dtype=torch.int64)
         metrics.reset()
         self.common(fn, (x,))
         assert metrics.generated_cpp_vec_kernel_count == 1

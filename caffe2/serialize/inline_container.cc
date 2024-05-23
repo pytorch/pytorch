@@ -610,7 +610,8 @@ size_t ostream_write_func(
 
   // Get the CRC32 of uncompressed data from the data descriptor, if the written
   // data is identified as the data descriptor block.
-  if (n >= 8 && MZ_READ_LE32(pBuf) == MZ_ZIP_DATA_DESCRIPTOR_ID) {
+  // See [Note: write_record_metadata] for why we check for non-null pBuf here
+  if (pBuf && n >= 8 && MZ_READ_LE32(pBuf) == MZ_ZIP_DATA_DESCRIPTOR_ID) {
     const int8_t* pInt8Buf = (const int8_t*)pBuf;
     const uint32_t uncomp_crc32 = MZ_READ_LE32(pInt8Buf + 4);
     self->combined_uncomp_crc32_ =
@@ -620,35 +621,15 @@ size_t ostream_write_func(
   return ret;
 }
 
-// This func will not update combined_uncomp_crc32_ with the uncomp_crc32
-// since there is no way to get the uncomp_crc32 when no buffer is provided.
-size_t ostream_seek_func(
-  void* pOpaque,
-  mz_uint64 file_ofs,
-  size_t n) {
-  auto self = static_cast<PyTorchStreamWriter*>(pOpaque);
-  if (self->current_pos_ != file_ofs) {
-    CAFFE_THROW("unexpected pos ", self->current_pos_, " vs ", file_ofs);
-  }
-  size_t ret = self->seek_func_(n);
-  if (self->current_pos_ + n != ret) {
-    self->err_seen_ = true;
-  }
-  self->current_pos_ += n;
-  return n;
-}
-
 PyTorchStreamWriter::PyTorchStreamWriter(const std::string& file_name)
     : archive_name_(basename(file_name)) {
   setup(file_name);
 }
 
 PyTorchStreamWriter::PyTorchStreamWriter(
-    const std::function<size_t(const void*, size_t)> writer_func,
-    const std::function<size_t(size_t)> seek_func)
+    const std::function<size_t(const void*, size_t)> writer_func)
     : archive_name_("archive"),
-      writer_func_(writer_func),
-      seek_func_(seek_func) {
+      writer_func_(writer_func) {
   setup(archive_name_);
 }
 
@@ -674,18 +655,18 @@ void PyTorchStreamWriter::setup(const string& file_name) {
     }
     TORCH_CHECK(file_stream_, "File ", file_name, " cannot be opened.");
     writer_func_ = [this](const void* buf, size_t nbytes) -> size_t {
-      file_stream_.write(static_cast<const char*>(buf), nbytes);
+      if (!buf) {
+        // See [Note: write_record_metadata]
+        file_stream_.seekp(nbytes, std::ios_base::cur);
+      } else {
+        file_stream_.write(static_cast<const char*>(buf), nbytes);
+      }
       return !file_stream_ ? 0 : nbytes;
-    };
-    seek_func_ = [this](size_t nbytes) -> size_t {
-      file_stream_.seekp(nbytes, std::ios_base::cur);
-      return file_stream_.tellp();
     };
   }
 
   ar_->m_pIO_opaque = this;
   ar_->m_pWrite = ostream_write_func;
-  ar_->m_pSeek = ostream_seek_func;
 
   mz_zip_writer_init_v2(ar_.get(), 0, MZ_ZIP_FLAG_WRITE_ZIP64);
   valid("initializing archive ", file_name.c_str());

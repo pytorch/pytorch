@@ -15,7 +15,7 @@ from ...utils import sympy_product
 from ...virtualized import V
 from ..common import IndentedBuffer, Kernel, OpOverrides
 
-from ..cpp import CppPrinter, DTYPE_TO_CPP
+from ..cpp_utils import CppPrinter, DTYPE_TO_CPP
 
 if TYPE_CHECKING:
     from torch._inductor.codegen.cuda.cuda_template import CUDATemplate
@@ -156,7 +156,7 @@ class CUDATemplateKernel(CUDAKernel):
         as well as all required inputs and outputs.
         """
         wrapper = V.graph.wrapper_code
-        _, call_args, _ = self.args.python_argdefs()
+        _, call_args, _, arg_types = self.args.python_argdefs()
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
@@ -169,17 +169,24 @@ class CUDATemplateKernel(CUDAKernel):
         call_args.append("None")
 
         if node.get_workspace_size() > 0:
-            call_args.append(f"c_void_p({node.get_name()}_workspace.data_ptr())")
+            wrapper.generate_workspace_allocation(
+                node.get_workspace_size(), V.graph.scheduler.current_device, False
+            )
+            call_args.append("c_void_p(workspace.data_ptr())")
         else:
             call_args.append("None")
 
+        current_device = V.graph.scheduler.get_current_device_or_throw()
         wrapper.generate_kernel_call(
             name,
             call_args,
-            device_index=V.graph.scheduler.current_device.index,
+            device_index=current_device.index,
             cuda=True,
             triton=False,
+            arg_types=arg_types,
         )
+        if node.get_workspace_size() > 0:
+            wrapper.writeline(wrapper.make_free_by_names(["workspace"]))
 
     def dtype(self, node: IRNode) -> Optional[str]:
         """
@@ -379,6 +386,7 @@ class CUDATemplateCaller(ChoiceCaller):
             return {"backend": "CUDA", "op_type": "unknown"}
 
     def output_node(self) -> TensorBox:
+        self.bmreq.update_workspace_size()
         return TensorBox.create(
             CUDATemplateBuffer(
                 layout=self.layout,

@@ -39,18 +39,18 @@ def traverse_state_dict(
 ) -> None:
     """
     Invoke ``visitor`` for each value recursively in ``state_dict``.
-
-    Traversal is short-circuited when if finds a collection for which ``keep_visiting_tensors`` evaluates
-    to false for all elements.
-    By default, all collections with at least one ``torch.Tensor`` element are traversed.
-    Visitor takes a path argument that is a tuple of the keys used to reach it.
+    Mapping, list, and tuple will be flattened and other value types are treated
+    as the terminal values and will invoke ``visitor``.
+    Mapping is treated as non terminal node and will be flattened.
+    List and tuple, on the other hand, will not be flattened unless containing other
+    mapping containers or tensors.
     """
 
     # a value is terminal if it has no other containers values inside it
     def _is_terminal(value: STATE_DICT_ITEM) -> bool:
         values: Collection[STATE_DICT_ITEM]
         if isinstance(value, Mapping):
-            values = value.values()
+            return False
         elif isinstance(value, list):
             values = value
         else:
@@ -64,12 +64,12 @@ def traverse_state_dict(
         return True
 
     def _traverse_obj(path: OBJ_PATH, value: STATE_DICT_ITEM) -> None:
-        if _is_terminal(value):
-            visitor(path, value)
-        elif isinstance(value, Mapping):
+        if isinstance(value, Mapping):
             for k, v in value.items():
                 _traverse_obj(path + (str(k),), v)
-        elif isinstance(value, list):
+        elif _is_terminal(value):
+            visitor(path, value)
+        elif isinstance(value, (list, tuple)):
             for i, v in enumerate(value):
                 _traverse_obj(path + (i,), v)
 

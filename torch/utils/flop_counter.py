@@ -1,13 +1,13 @@
 import torch
-import torch.nn as nn
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
-from typing import List, Any, Dict, Optional, Union, NamedTuple
+from .module_tracker import ModuleTracker
+from typing import List, Any, Dict, Optional, Union, Tuple, Iterator
 from collections import defaultdict
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils.hooks import RemovableHandle
 from torch._decomp import register_decomposition
 from math import prod
 from functools import wraps
+import warnings
 
 
 
@@ -249,6 +249,164 @@ def sdpa_flop(query_shape, key_shape, value_shape, *args, out_shape=None, **kwar
     return sdpa_flop_count(query_shape, key_shape, value_shape)
 
 
+def _unpack_flash_attention_nested_shapes(
+    *,
+    query,
+    key,
+    value,
+    grad_out=None,
+    cum_seq_q,
+    cum_seq_k,
+    max_q,
+    max_k,
+) -> Iterator[Tuple[Tuple[int, ...], Tuple[int, ...], Tuple[int, ...], Optional[Tuple[int, ...]]]]:
+    """
+    Given inputs to a flash_attention_(forward|backward) kernel, this will handle behavior for
+    NestedTensor inputs by effectively unbinding the NestedTensor and yielding the shapes for
+    each batch element.
+
+    In the case that this isn't a NestedTensor kernel, then it just yields the original shapes.
+    """
+    if cum_seq_q is not None:
+        # This means we should be dealing with a Nested Jagged Tensor query.
+        # The inputs will have shape                  (sum(sequence len), heads, dimension)
+        # In comparison, non-Nested inputs have shape (batch, heads, sequence len, dimension)
+        # To deal with this, we convert to a shape of (batch, heads, max_seq_len, dimension)
+        # So the flops calculation in this case is an overestimate of the actual flops.
+        assert len(key.shape) == 3
+        assert len(value.shape) == 3
+        assert grad_out is None or grad_out.shape == query.shape
+        _, h_q, d_q = query.shape
+        _, h_k, d_k = key.shape
+        _, h_v, d_v = value.shape
+        assert cum_seq_q is not None
+        assert cum_seq_k is not None
+        assert cum_seq_q.shape == cum_seq_k.shape
+        seq_q_lengths = (cum_seq_q[1:] - cum_seq_q[:-1]).tolist()
+        seq_k_lengths = (cum_seq_k[1:] - cum_seq_k[:-1]).tolist()
+        for (seq_q_len, seq_k_len) in zip(seq_q_lengths, seq_k_lengths):
+            new_query_shape = (1, h_q, seq_q_len, d_q)
+            new_key_shape = (1, h_k, seq_k_len, d_k)
+            new_value_shape = (1, h_v, seq_k_len, d_v)
+            new_grad_out_shape = new_query_shape if grad_out is not None else None
+            yield new_query_shape, new_key_shape, new_value_shape, new_grad_out_shape
+        return
+
+    yield query.shape, key.shape, value.shape, grad_out.shape if grad_out is not None else None
+
+
+def _unpack_efficient_attention_nested_shapes(
+    *,
+    query,
+    key,
+    value,
+    grad_out=None,
+    cu_seqlens_q,
+    cu_seqlens_k,
+    max_seqlen_q,
+    max_seqlen_k,
+) -> Iterator[Tuple[Tuple[int, ...], Tuple[int, ...], Tuple[int, ...], Optional[Tuple[int, ...]]]]:
+    """
+    Given inputs to a efficient_attention_(forward|backward) kernel, this will handle behavior for
+    NestedTensor inputs by effectively unbinding the NestedTensor and yielding the shapes for
+    each batch element.
+
+    In the case that this isn't a NestedTensor kernel, then it just yields the original shapes.
+    """
+    if cu_seqlens_q is not None:
+        # Unlike flash_attention_forward, we get a 4D tensor instead of a 3D tensor for efficient attention.
+        #
+        # This means we should be dealing with a Nested Jagged Tensor query.
+        # The inputs will have shape                  (sum(sequence len), heads, dimension)
+        # In comparison, non-Nested inputs have shape (batch, heads, sequence len, dimension)
+        # To deal with this, we convert to a shape of (batch, heads, max_seq_len, dimension)
+        # So the flops calculation in this case is an overestimate of the actual flops.
+        assert len(key.shape) == 4
+        assert len(value.shape) == 4
+        assert grad_out is None or grad_out.shape == query.shape
+        _, _, h_q, d_q = query.shape
+        _, _, h_k, d_k = key.shape
+        _, _, h_v, d_v = value.shape
+        assert cu_seqlens_q is not None
+        assert cu_seqlens_k is not None
+        assert cu_seqlens_q.shape == cu_seqlens_k.shape
+        seqlens_q = (cu_seqlens_q[1:] - cu_seqlens_q[:-1]).tolist()
+        seqlens_k = (cu_seqlens_k[1:] - cu_seqlens_k[:-1]).tolist()
+        for len_q, len_k in zip(seqlens_q, seqlens_k):
+            new_query_shape = (1, h_q, len_q, d_q)
+            new_key_shape = (1, h_k, len_k, d_k)
+            new_value_shape = (1, h_v, len_k, d_v)
+            new_grad_out_shape = new_query_shape if grad_out is not None else None
+            yield new_query_shape, new_key_shape, new_value_shape, new_grad_out_shape
+        return
+
+    yield query.shape, key.shape, value.shape, grad_out.shape if grad_out is not None else None
+
+
+@register_flop_formula(aten._flash_attention_forward, get_raw=True)
+def _flash_attention_forward_flop(
+    query,
+    key,
+    value,
+    cum_seq_q,
+    cum_seq_k,
+    max_q,
+    max_k,
+    *args,
+    out_shape=None,
+    **kwargs
+) -> int:
+    """Count flops for self-attention."""
+    # NB: We aren't accounting for causal attention here
+    # in case this is a nested tensor, we unpack the individual batch elements
+    # and then sum the flops per batch element
+    sizes = _unpack_flash_attention_nested_shapes(
+        query=query,
+        key=key,
+        value=value,
+        cum_seq_q=cum_seq_q,
+        cum_seq_k=cum_seq_k,
+        max_q=max_q,
+        max_k=max_k,
+    )
+    return sum(
+        sdpa_flop_count(query_shape, key_shape, value_shape)
+        for query_shape, key_shape, value_shape, _ in sizes
+    )
+
+
+@register_flop_formula(aten._efficient_attention_forward, get_raw=True)
+def _efficient_attention_forward_flop(
+    query,
+    key,
+    value,
+    bias,
+    cu_seqlens_q,
+    cu_seqlens_k,
+    max_seqlen_q,
+    max_seqlen_k,
+    *args,
+    **kwargs
+) -> int:
+    """Count flops for self-attention."""
+    # NB: We aren't accounting for causal attention here
+    # in case this is a nested tensor, we unpack the individual batch elements
+    # and then sum the flops per batch element
+    sizes = _unpack_efficient_attention_nested_shapes(
+        query=query,
+        key=key,
+        value=value,
+        cu_seqlens_q=cu_seqlens_q,
+        cu_seqlens_k=cu_seqlens_k,
+        max_seqlen_q=max_seqlen_q,
+        max_seqlen_k=max_seqlen_k,
+    )
+    return sum(
+        sdpa_flop_count(query_shape, key_shape, value_shape)
+        for query_shape, key_shape, value_shape, _ in sizes
+    )
+
+
 def sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape):
     total_flops = 0
     b, h, s_q, d_q = query_shape
@@ -281,6 +439,72 @@ def sdpa_backward_flop(grad_out_shape, query_shape, key_shape, value_shape, *arg
     """Count flops for self-attention backward."""
     return sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape)
 
+@register_flop_formula(aten._flash_attention_backward, get_raw=True)
+def _flash_attention_backward_flop(
+    grad_out,
+    query,
+    key,
+    value,
+    out,  # named _out_shape to avoid kwarg collision with out_shape created in wrapper
+    logsumexp,
+    cum_seq_q,
+    cum_seq_k,
+    max_q,
+    max_k,
+    *args,
+    **kwargs,
+) -> int:
+    # in case this is a nested tensor, we unpack the individual batch elements
+    # and then sum the flops per batch element
+    shapes = _unpack_flash_attention_nested_shapes(
+        query=query,
+        key=key,
+        value=value,
+        grad_out=grad_out,
+        cum_seq_q=cum_seq_q,
+        cum_seq_k=cum_seq_k,
+        max_q=max_q,
+        max_k=max_k,
+    )
+    return sum(
+        sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape)
+        for query_shape, key_shape, value_shape, grad_out_shape in shapes
+    )
+
+
+@register_flop_formula(aten._efficient_attention_backward, get_raw=True)
+def _efficient_attention_backward_flop(
+    grad_out,
+    query,
+    key,
+    value,
+    bias,
+    out,  # named _out to avoid kwarg collision with out created in wrapper
+    cu_seqlens_q,
+    cu_seqlens_k,
+    max_seqlen_q,
+    max_seqlen_k,
+    *args,
+    **kwargs,
+) -> int:
+    # in case this is a nested tensor, we unpack the individual batch elements
+    # and then sum the flops per batch element
+    shapes = _unpack_efficient_attention_nested_shapes(
+        query=query,
+        key=key,
+        value=value,
+        grad_out=grad_out,
+        cu_seqlens_q=cu_seqlens_q,
+        cu_seqlens_k=cu_seqlens_k,
+        max_seqlen_q=max_seqlen_q,
+        max_seqlen_k=max_seqlen_k,
+    )
+    return sum(
+        sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape)
+        for query_shape, key_shape, value_shape, grad_out_shape in shapes
+    )
+
+
 flop_registry = {
     aten.mm: mm_flop,
     aten.addmm: addmm_flop,
@@ -293,6 +517,10 @@ flop_registry = {
     aten._scaled_dot_product_flash_attention: sdpa_flop,
     aten._scaled_dot_product_efficient_attention_backward: sdpa_backward_flop,
     aten._scaled_dot_product_flash_attention_backward: sdpa_backward_flop,
+    aten._flash_attention_forward: _flash_attention_forward_flop,
+    aten._efficient_attention_forward: _efficient_attention_forward_flop,
+    aten._flash_attention_backward: _flash_attention_backward_flop,
+    aten._efficient_attention_backward: _efficient_attention_backward_flop,
 }
 
 def normalize_tuple(x):
@@ -348,8 +576,7 @@ class FlopCounterMode(TorchDispatchMode):
     .. code-block:: python
 
         mod = ...
-        flop_counter = FlopCounterMode(mod)
-        with flop_counter:
+        with FlopCounterMode(mod) as flop_counter:
             mod.sum().backward()
 
     """
@@ -362,100 +589,16 @@ class FlopCounterMode(TorchDispatchMode):
             custom_mapping: Optional[Dict[Any, Any]] = None):
         self.flop_counts: Dict[str, Dict[Any, int]] = defaultdict(lambda: defaultdict(int))
         self.depth = depth
-        self.parents = ["Global"]
-        self.in_backward = False
         self.display = display
         if custom_mapping is None:
             custom_mapping = {}
-        if isinstance(mods, torch.nn.Module):
-            mods = [mods]
-        self.mods = mods
-        # Keys will include the modules in `mods` and their submodules
-        self._module_to_forward_hook_handles: Dict[nn.Module, _ForwardHookHandles] = {}
+        if mods is not None:
+            warnings.warn("mods argument is not needed anymore, you can stop passing it", stacklevel=2)
         self.flop_registry = {
             **flop_registry,
             **{k: v if getattr(v, "_get_raw", False) else shape_wrapper(v) for k, v in custom_mapping.items()}
         }
-
-    def _register_forward_hooks(self):
-        if self.mods is None:
-            return
-        for mod in self.mods:
-            prefix = type(mod).__name__
-            for name, module in dict(mod.named_modules()).items():
-                if name == "":
-                    name = prefix
-                else:
-                    name = ".".join([prefix, name])
-
-                forward_pre_hook_handle, forward_hook_handle = (None, None)
-
-                try:
-                    forward_pre_hook_handle = module.register_forward_pre_hook(self._enter_module(name))
-                    forward_hook_handle = module.register_forward_hook(self._exit_module(name))
-                except RuntimeError:
-                    # ignore any module that doesn't support forward hook, e.g. script.
-                    if forward_pre_hook_handle is not None:
-                        forward_pre_hook_handle.remove()
-                else:
-                    self._module_to_forward_hook_handles[module] = _ForwardHookHandles(
-                        forward_pre_hook_handle, forward_hook_handle
-                    )
-
-    def _deregister_forward_hooks(self):
-        for forward_hook_handles in self._module_to_forward_hook_handles.values():
-            forward_hook_handles[0].remove()
-            forward_hook_handles[1].remove()
-        self._module_to_forward_hook_handles.clear()
-
-    def _enter_module(self, name):
-        def f(module, inputs):
-            out = _pytreeify_preserve_structure(self._create_pre_module(name))(inputs)
-            return out
-
-        return f
-
-    def _exit_module(self, name):
-        def f(module, inputs, outputs):
-            outputs = _pytreeify_preserve_structure(self._create_post_module(name))(outputs)
-            return outputs
-        return f
-
-    def _create_post_module(self, name):
-        class PushState(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, *args):
-                assert self.parents[-1] == name, f"{self.parents[-1]} is not {name}"
-                self.parents.pop()
-                args = tree_map(lambda x: x.clone() if isinstance(x, torch.Tensor) else x, args)
-                return args
-
-            @staticmethod
-            def backward(ctx, *grad_outs):
-                self.in_backward = True
-                self.parents.append(name)
-                return grad_outs
-
-        return PushState.apply
-
-    def _create_pre_module(self, name):
-        class PopState(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, *args):
-                if self.in_backward:
-                    self.parents = ["Global"]
-                    self.in_backward = True
-                self.parents.append(name)
-                args = tree_map(lambda x: x.clone() if isinstance(x, torch.Tensor) else x, args)
-                return args
-
-            @staticmethod
-            def backward(ctx, *grad_outs):
-                assert self.parents[-1] == name
-                self.parents.pop()
-                return grad_outs
-
-        return PopState.apply
+        self.mod_tracker = ModuleTracker()
 
     def get_total_flops(self) -> int:
         return sum(self.flop_counts['Global'].values())
@@ -508,7 +651,7 @@ class FlopCounterMode(TorchDispatchMode):
                 ])
             return values
 
-        for mod in self.flop_counts.keys():
+        for mod in sorted(self.flop_counts.keys()):
             if mod == 'Global':
                 continue
             mod_depth = mod.count(".") + 1
@@ -534,15 +677,15 @@ class FlopCounterMode(TorchDispatchMode):
 
     def __enter__(self):
         self.flop_counts.clear()
-        self._register_forward_hooks()
+        self.mod_tracker.__enter__()
         super().__enter__()
         return self
 
     def __exit__(self, *args):
+        super().__exit__(*args)
+        self.mod_tracker.__exit__()
         if self.display:
             print(self.get_table(self.depth))
-        self._deregister_forward_hooks()
-        super().__exit__(*args)
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
@@ -553,17 +696,7 @@ class FlopCounterMode(TorchDispatchMode):
         if func_packet in self.flop_registry:
             flop_count_func = self.flop_registry[func_packet]
             flop_count = flop_count_func(*args, **kwargs, out_val=out)  # type: ignore[operator]
-            if len(set(self.parents)) != len(self.parents):
-                print(
-                    "The module hierarchy tracking seems to be messed up."
-                    "Please file a bug or just run the flop counter without"
-                    "tracking the module hierarchy (i.e. `with FlopCounterMode():`)"
-                )
-            for par in set(self.parents):
+            for par in set(self.mod_tracker.parents):
                 self.flop_counts[par][func_packet] += flop_count
 
         return out
-
-class _ForwardHookHandles(NamedTuple):
-    forward_pre_hook_handle: RemovableHandle
-    forward_hook_handle: RemovableHandle

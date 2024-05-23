@@ -11,7 +11,8 @@ else:
 import torch
 import torch.utils._pytree as pytree
 from torch import fx
-from torch.fx._utils import get_node_context, lazy_format_graph_code
+from torch.fx._compatibility import compatibility
+from torch.fx._utils import lazy_format_graph_code
 from torch.fx.experimental.sym_node import SymNode
 from torch.fx.graph_module import GraphModule
 
@@ -19,7 +20,7 @@ log = logging.getLogger(__name__)
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 
 
-def get_example_value(node: fx.Node) -> Optional[str]:
+def _get_example_value(node: fx.Node) -> Optional[str]:
     """
     Get the example value key for a node, since dynamo uses "example_value"
     while non-strict export uses "val.
@@ -32,6 +33,7 @@ def get_example_value(node: fx.Node) -> Optional[str]:
         return None
 
 
+@compatibility(is_backward_compatible=True)
 def insert_deferred_runtime_asserts(
     gm: GraphModule,
     shape_env: ShapeEnv,
@@ -55,6 +57,7 @@ def insert_deferred_runtime_asserts(
         ConvertIntKey,
         DivideByKey,
         free_symbols,
+        InnerTensorKey,
     )
     from torch.utils._sympy.interp import sympy_interp
     from torch.utils._sympy.reference import PythonReferenceAnalysis
@@ -114,16 +117,17 @@ def insert_deferred_runtime_asserts(
                     # useless right now
                     (
                         res,
-                        f"Runtime assertion failed for expression {ra.expr} on node '{res}'\nMore context: {get_node_context(res)}",
+                        f"Runtime assertion failed for expression {ra.expr} on node '{res}'",
                     ),
                 )
 
-    for node in graph.nodes:
+    nodes = list(graph.nodes)
+    for i, node in enumerate(nodes[:-1]):
         # Placeholders can match symbols, but when we destructure them
         # with size we have to make sure we insert the nodes after all
         # the placeholders
         with graph.inserting_before(
-            node.next if node not in placeholders else last_placeholder.next
+            nodes[i + 1] if node not in placeholders else last_placeholder.next
         ):
             # Unfortunately, this logic still must remain because manual
             # make_fx calls may not explicitly bind all symbolic ints as
@@ -131,7 +135,7 @@ def insert_deferred_runtime_asserts(
             # arguments
             if (
                 node in placeholders
-                and (example_value := get_example_value(node)) is not None
+                and (example_value := _get_example_value(node)) is not None
             ):
 
                 def match_symbol(symint, cb):
@@ -148,12 +152,24 @@ def insert_deferred_runtime_asserts(
                 match_symbol(example_value, lambda: node)
                 if isinstance(t := example_value, torch.Tensor):
                     for i, s in enumerate(t.size()):
-                        match_symbol(s, lambda: graph.call_method("size", (node, i)))
+                        match_symbol(
+                            s,
+                            lambda: graph.call_function(
+                                torch.ops.aten.sym_size.int, (node, i)
+                            ),
+                        )
                     for i, s in enumerate(t.stride()):
-                        match_symbol(s, lambda: graph.call_method("stride", (node, i)))
+                        match_symbol(
+                            s,
+                            lambda: graph.call_function(
+                                torch.ops.aten.sym_stride.int, (node, i)
+                            ),
+                        )
                     match_symbol(
                         t.storage_offset(),
-                        lambda: graph.call_method("storage_offset", (node,)),
+                        lambda: graph.call_function(
+                            torch.ops.aten.sym_storage_offset.default, (node,)
+                        ),
                     )
 
             # Handle asserts that aren't associated with any symbol.  This
@@ -210,6 +226,13 @@ def insert_deferred_runtime_asserts(
                                 ),
                                 keypath[1:],
                             )
+                        elif isinstance(keypath[0], InnerTensorKey):
+                            return go(
+                                graph.call_function(
+                                    getattr, (node, keypath[0].inner_name)
+                                ),
+                                keypath[1:],
+                            )
                         else:
                             raise AssertionError(f"unrecognized keypath {keypath}")
 
@@ -261,7 +284,7 @@ def insert_deferred_runtime_asserts(
                 if i0 in shape_env.size_like:
                     if export:
                         graph.call_function(
-                            torch.ops.aten.sym_constrain_range_for_size,
+                            torch.ops.aten.sym_constrain_range_for_size.default,
                             (symbol_to_proxy[i0].node,),
                         )
                     else:
@@ -281,33 +304,23 @@ def insert_deferred_runtime_asserts(
                         except TypeError:
                             return None
 
-                    ge_check = graph.call_function(
-                        operator.ge,
-                        (
-                            symbol_to_proxy[i0].node,
-                            convert(vr.lower),
-                        ),
-                    )
-                    le_check = graph.call_function(
-                        operator.le,
-                        (
-                            symbol_to_proxy[i0].node,
-                            convert(vr.upper),
-                        ),
-                    )
-                    graph.call_function(
-                        torch.ops.aten._assert_scalar.default,
-                        (
-                            ge_check,
-                            f"Runtime assertion failed for {symbol_to_proxy[i0].node} >= {vr.lower}",
-                        ),
-                    )
-                    graph.call_function(
-                        torch.ops.aten._assert_scalar.default,
-                        (
-                            le_check,
-                            f"Runtime assertion failed for {symbol_to_proxy[i0].node} <= {vr.upper}",
-                        ),
-                    )
+                    if export:
+                        graph.call_function(
+                            torch.ops.aten.sym_constrain_range.default,
+                            (symbol_to_proxy[i0].node,),
+                            {
+                                "min": convert(vr.lower),
+                                "max": convert(vr.upper),
+                            },
+                        )
+                    else:
+                        graph.call_function(
+                            torch._constrain_as_value,
+                            (
+                                symbol_to_proxy[i0].node,
+                                convert(vr.lower),
+                                convert(vr.upper),
+                            ),
+                        )
 
                 add_runtime_asserts(ras)
