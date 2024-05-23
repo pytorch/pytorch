@@ -103,7 +103,9 @@ try:
     has_pytest = True
 except ImportError:
     has_pytest = False
-from tools.setup_helpers.env import LIBTORCH_PKG_NAME
+
+# @todo: consolidate definitions of LIBTORCH_PKG_NAME into a single file [bootcamp]
+LIBTORCH_PKG_NAME = "libtorchsplit"
 
 # Class to keep track of test flags configurable by environment variables.
 # Flags set here are intended to be read-only and should not be modified after
@@ -2904,11 +2906,6 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
 
         if self._default_dtype_check_enabled:
             assert torch.get_default_dtype() == torch.float
-
-        # reset dynamo cache to avoid issues like
-        # https://github.com/pytorch/pytorch/issues/125967#issuecomment-2118483919
-        # which depends on test order.
-        torch._dynamo.reset()
 
     def tearDown(self):
         # There exists test cases that override TestCase.setUp
