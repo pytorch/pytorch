@@ -433,21 +433,16 @@ def node_inline_(call_mod_node: torch.fx.Node) -> None:
 
 def _get_torch_jit_trace_forward_signature(mod: torch.nn.Module):
     """
-    Get source code and parse argument names using AST.
+    Get source code and parse argument names using AST. The function returns
+    a signature of the forward() function.
+
+    # TODO: Directly provide inspect.signature compatible TS-d module.
     """
     ast_mod = ast.parse(mod.code)
-    ast_func_def: ast.FunctionDef = ast_mod.body[0]
+    ast_func_def: ast.FunctionDef = ast_mod.body[0]  # type: ignore[assignment]
 
-    # Arguments type mappings. Used to map from AST to Python signature.
-    # FIXME: Based on my understanding, TorchScript only supports explicit arguments
-    # and it cannot take variable length arguments.
-    arg_type_map = {
-        # "posonlyargs": Parameter.POSITIONAL_ONLY,
-        "args": Parameter.POSITIONAL_OR_KEYWORD,
-        # "vararg": Parameter.VAR_POSITIONAL,
-        # "kwonlyargs": Parameter.KEYWORD_ONLY,
-        # "kwarg": Parameter.VAR_KEYWORD,
-    }
+    # FIXME(jiashenc): TorchScript should only allow positional or keywords arguments.
+    arg_type_map = {"args": Parameter.POSITIONAL_OR_KEYWORD}
 
     # Traverse all argument types in AST tree and create associated parameters.
     param_list = []
@@ -461,6 +456,21 @@ def _get_torch_jit_trace_forward_signature(mod: torch.nn.Module):
     return inspect.Signature(parameters=param_list)
 
 
+def _get_placeholder_combined_args(mod, fake_args, fake_kwargs):
+    if isinstance(mod, (torch.jit.ScriptModule, torch.jit.TracedModule)):
+        sig = _get_torch_jit_trace_forward_signature(mod)
+
+        # Sanity check for placeholder names coming from TorchScript.
+        assert len(sig.parameters) == len(fake_args) + len(fake_kwargs), (
+            "Arguments other than POSITIONAL_OR_KEYWORD kinds in forward() "
+            "are not supported in _get_torch_jit_trace_forward_signature"
+        )
+    else:
+        sig = inspect.signature(mod.forward)
+
+    return sig.bind(*fake_args, **fake_kwargs).arguments
+
+
 def placeholder_naming_pass(
     gm: torch.fx.GraphModule,
     export_graph_signature: torch.export.ExportGraphSignature,
@@ -469,7 +479,6 @@ def placeholder_naming_pass(
     fake_kwargs,
     fake_params_buffers,
     constants: Dict[str, Any],
-    _is_torch_jit_trace: bool,
 ) -> None:
     """
     This pass is run at the end of _export_non_strict() to assign better placeholder node names:
@@ -509,20 +518,7 @@ def placeholder_naming_pass(
     name_map: Dict[str, str] = {}
 
     # map user input names with mod.forward() signature
-    sig = (
-        inspect.signature(mod.forward)
-        if not _is_torch_jit_trace
-        else _get_torch_jit_trace_forward_signature(mod)
-    )
-
-    # Sanity check for placeholder names coming from TorchScript.
-    if _is_torch_jit_trace:
-        assert len(sig.parameters) == len(fake_args) + len(fake_kwargs), (
-            "Arguments other than POSITIONAL_OR_KEYWORD kinds in forward() "
-            "are not supported in _get_torch_jit_trace_forward_signature"
-        )
-
-    combined_args = sig.bind(*fake_args, **fake_kwargs).arguments
+    combined_args = _get_placeholder_combined_args(mod, fake_args, fake_kwargs)
 
     flat_args_with_path, _ = tree_flatten_with_path(combined_args)
     user_input_names = [

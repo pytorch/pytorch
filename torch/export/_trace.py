@@ -707,7 +707,6 @@ def _export_to_aten_ir(
         fake_kwargs,
         fake_params_buffers,
         constants,
-        _is_torch_jit_trace,
     )
 
     return ExportedArtifact(
