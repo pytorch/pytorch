@@ -47,12 +47,12 @@ from .common import (
     TensorArg,
 )
 from .simd import (
+    constant_repr,
     IndexingOptions,
     IterationRangesEntry,
     pexpr,
     SIMDKernel,
     SIMDScheduling,
-    triton_constant,
 )
 from .triton_utils import config_of, signature_of, signature_to_meta
 
@@ -492,7 +492,7 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def _shaped_constant(value, dtype, shape):
         type_ = torch._prims_common.dtype_to_type(dtype)
-        triton_val = triton_constant(type_(value))
+        triton_val = constant_repr(type_(value))
         triton_type = triton_compute_type(dtype)
 
         if triton_type == "tl.float32":
@@ -866,7 +866,7 @@ class TritonKernelOverrides(TritonOverrides):
         # Take dtype from result to prevent accidental promotion
         other = V.kernel.cse.generate(
             V.kernel.compute,
-            f"tl.full({result}.shape, {triton_constant(other)}, {result}.dtype)",
+            f"tl.full({result}.shape, {constant_repr(other)}, {result}.dtype)",
             bounds=ValueRanges.wrap(other),
         )
         return ops.where(new_mask, result, other)
@@ -1342,7 +1342,7 @@ class TritonKernel(SIMDKernel):
 
         if self.persistent_reduction:
             default = ir.Reduction.default_value(reduction_type, src_dtype)
-            default = self._map_tuple_or_scalar(triton_constant, default)
+            default = self._map_tuple_or_scalar(constant_repr, default)
 
             def _mask_value(value, default):
                 return self.cse.generate(self.compute, where_cond(value, default))
@@ -1367,16 +1367,7 @@ class TritonKernel(SIMDKernel):
                 # For persistent reductions, don't bother with
                 # welford's algorithm since it uses more registers, and
                 # taking two reductions doesn't increase memory usage.
-                sum_ = ops.reduction(dtype, dtype, "sum", value)
-                self.inside_reduction = False
-                rnumel = ops.index_expr(self.numels[-1], dtype)
-                mean = ops.truediv(sum_, rnumel)
-
-                self.inside_reduction = True
-                dx = ops.sub(value, mean)
-                dx2 = ops.mul(dx, dx)
-                m2 = ops.reduction(dtype, dtype, "sum", dx2)
-                result_var = (mean, m2, rnumel)
+                result_var = self.welford_reduce_fallback(dtype, value)
             elif reduction_type == "welford_combine":
                 mean, m2, weight = masked_value
                 welford = f"triton_helpers.welford({mean}, {m2}, {weight}, {dim})"
@@ -1394,7 +1385,7 @@ class TritonKernel(SIMDKernel):
         else:
             accumulator = f"_{result_var}"
             default = ir.Reduction.default_accumulator(reduction_type, src_dtype)
-            default = self._map_tuple_or_scalar(triton_constant, default)
+            default = self._map_tuple_or_scalar(constant_repr, default)
             if not isinstance(default, tuple):
                 self.body.writeline(
                     f"{accumulator} = tl.full({self.dense_size_str()}, {default}, {acc_type})"
@@ -1501,8 +1492,10 @@ class TritonKernel(SIMDKernel):
         self.cse.reduction_cache[cache_key] = result_var
 
         if isinstance(result_var, tuple):
+            assert all(isinstance(x, TritonCSEVariable) for x in result_var)
             self.outside_loop_vars |= set(result_var)
         else:
+            assert isinstance(result_var, TritonCSEVariable)
             self.outside_loop_vars.add(result_var)
 
         return result_var
