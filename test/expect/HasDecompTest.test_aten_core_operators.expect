@@ -48,6 +48,8 @@ aten::addmv
 aten::addmv.out
 aten::addmv_
 aten::alias
+aten::alias_copy
+aten::alias_copy.out
 aten::amax
 aten::amax.out
 aten::amin
