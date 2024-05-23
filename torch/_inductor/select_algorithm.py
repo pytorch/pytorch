@@ -470,6 +470,8 @@ class TritonTemplateKernel(TritonKernel):
             if isinstance(call_args[i], sympy.Symbol):
                 call_args[i] = texpr(call_args[i])
 
+        current_device = V.graph.scheduler.get_current_device_or_throw()
+
         if V.graph.cpp_wrapper:
             # In the cpp_wrapper case, we have to compute CUDA launch grid at runtime
             # if any dynamic dimension is involved. We rely on the Python version
@@ -484,15 +486,13 @@ class TritonTemplateKernel(TritonKernel):
             wrapper.generate_kernel_call(
                 name,
                 call_args,
-                device_index=V.graph.scheduler.current_device.index,
+                device_index=current_device.index,
                 arg_types=arg_types,
                 grid=grid,
                 triton_meta=self.triton_meta,
             )
         else:
-            stream_name = wrapper.write_get_raw_stream(
-                V.graph.scheduler.current_device.index
-            )
+            stream_name = wrapper.write_get_raw_stream(current_device.index)
 
             wrapper.add_import_once(f"import {self.grid_fn.__module__}")
             meta = wrapper.add_meta_once(self.meta)
