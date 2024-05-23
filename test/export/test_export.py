@@ -1256,6 +1256,105 @@ class TestExport(TestCase):
         ):
             _ = export(M(), (torch.tensor([2, 3, 5]),))
 
+    def test_data_dependent_errors_basic(self):
+        class N(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m = M()
+
+            def forward(self, t):
+                return self.m(t) + 1
+
+        t = torch.tensor([1, 4, 4], dtype=torch.int32)
+        error_type = (
+            torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
+            if is_non_strict_test(self._testMethodName)
+            else torch._dynamo.exc.UserError
+        )
+
+        class M1(torch.nn.Module):
+            def forward(self, t):
+                i0 = t[0].item()
+                i1 = t[1].item()
+                i2 = t[2].item()
+                t = torch.randn([i0, i1])
+                # Could not guard on data-dependent expression Eq(u2, -1)
+                return t.view(i0, i2)
+
+        M = M1
+        with self.assertRaisesRegex(
+            error_type,
+            "User Stack(.*\n)+"
+            ".*return t.view\\(i0, i2\\)(.*\n)+"
+            "Suggested fixes.*:\n"
+            ".*torch._check\\(i2 == \\(-1\\)\\).*\n"
+            ".*torch._check\\(i2 != \\(-1\\)\\)",
+        ):
+            export(N(), (t,))
+
+        class M2(torch.nn.Module):
+            def forward(self, t):
+                i0 = t[0].item()
+                i1 = t[1].item()
+                i2 = t[2].item()
+                t = torch.randn([i0, i1])
+                # Could not guard on data-dependent expression Eq(u2, -1)
+                torch._check(i2 != -1)
+                # Could not guard on data-dependent expression u2 >= 0
+                return t.view(i0, i2)
+
+        M = M2
+        with self.assertRaisesRegex(
+            error_type,
+            "User Stack(.*\n)+"
+            ".*return t.view\\(i0, i2\\)(.*\n)+"
+            "Suggested fixes.*:\n"
+            ".*torch._check\\(i2 >= 0\\).*\n"
+            ".*torch._check\\(i2 < 0\\)",
+        ):
+            export(N(), (t,))
+
+        class M3(torch.nn.Module):
+            def forward(self, t):
+                i0 = t[0].item()
+                i1 = t[1].item()
+                i2 = t[2].item()
+                t = torch.randn([i0, i1])
+                # Could not guard on data-dependent expression Eq(u2, -1)
+                torch._check(i2 != -1)
+                # Could not guard on data-dependent expression u2 >= 0
+                torch._check(i2 >= 0)
+                # Could not guard on data-dependent expression Eq(u1, u2)
+                return t.view(i0, i2)
+
+        M = M3
+        with self.assertRaisesRegex(
+            error_type,
+            "User Stack(.*\n)+"
+            ".*return t.view\\(i0, i2\\)(.*\n)+"
+            "Suggested fixes.*:\n"
+            ".*torch._check\\(i2 == i1\\).*\n"
+            ".*torch._check\\(i2 != i1\\)",
+        ):
+            export(N(), (t,))
+
+        class M4(torch.nn.Module):
+            def forward(self, t):
+                i0 = t[0].item()
+                i1 = t[1].item()
+                i2 = t[2].item()
+                t = torch.randn([i0, i1])
+                # Could not guard on data-dependent expression Eq(u2, -1)
+                torch._check(i2 != -1)
+                # Could not guard on data-dependent expression u2 >= 0
+                torch._check(i2 >= 0)
+                # Could not guard on data-dependent expression Eq(u1, u2)
+                torch._check(i2 == i1)
+                return t.view(i0, i2)
+
+        M = M4
+        export(N(), (t,))
+
     def test_if_functional(self):
         class Module(torch.nn.Module):
             def forward(self, x):

@@ -1105,7 +1105,7 @@ def _export(
             fake_mode, _get_params_buffers(mod)
         )
 
-        with fake_mode:
+        with fake_mode, torch.fx.experimental.symbolic_shapes._DataDependentErrorHandlerNonStrict():
             with _fakify_script_objects(mod, fake_args, fake_kwargs, fake_mode) as (
                 patched_mod,
                 new_fake_args,

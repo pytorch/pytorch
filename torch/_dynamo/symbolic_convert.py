@@ -888,6 +888,8 @@ class InstructionTranslatorBase(
             except BackendCompilerFailed:
                 raise
             except Exception as e:
+                if isinstance(e, exc.UserError) and "data-dependent expression" in e.args[0] and "Suggested fixes" not in e.args[0]:
+                    torch.fx.experimental.symbolic_shapes._suggest_fixes_for_data_dependent_error_strict(e, self)
                 if self.exec_recorder:
                     e.exec_record = self.exec_recorder.get_record()  # type: ignore[attr-defined]
                 raise
