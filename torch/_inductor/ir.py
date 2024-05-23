@@ -1097,6 +1097,7 @@ class Reduction(Loops):
             "any": 0,
             "welford_reduce": (0, 0, 0),
             "welford_combine": (0, 0, 0),
+            "online_softmax_reduce": (float("-inf"), 0),
         }[reduction_type]
 
     @staticmethod
@@ -1326,9 +1327,79 @@ class Reduction(Loops):
         )
 
 
-def num_reduction_outputs(reduction_type):
-    return 3 if "welford" in reduction_type else 1
+class MultiOutputReduction(Reduction):
+    output_index: int
 
+    def __init__(
+        self,
+        device,
+        dst_dtype,
+        inner_fn,
+        ranges,
+        reduction_ranges,
+        reduction_type,
+        src_dtype,
+        reduction_hint,
+        output_index,
+    ):
+        super().__init__(
+            device,
+            dst_dtype,
+            inner_fn,
+            ranges,
+            reduction_ranges,
+            reduction_type,
+            src_dtype,
+            reduction_hint,
+        )
+        self.output_index = output_index
+
+    def store_reduction(self, output_name, indexer, vars, reduction_vars):
+        values = ops.reduction(
+            self.dtype,
+            self.src_dtype,
+            self.reduction_type,
+            self.inner_fn(vars, reduction_vars),
+        )
+        if isinstance(values, (tuple, list)):
+            value = values[self.output_index]
+        else:
+            value = values
+        return ops.store_reduction(output_name, indexer(vars), value)
+
+    @classmethod
+    def create(
+        cls,
+        device: torch.device,
+        dst_dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        inner_fn: Callable[..., Any],
+        ranges: List[Expr],
+        reduction_ranges: List[Expr],
+        reduction_type: str,
+        num_output: int,
+        reduction_hint: ReductionHint = ReductionHint.DEFAULT,
+        input_node: Optional[IRNode] = None,
+    ):
+        results = tuple(
+            TensorBox.create(
+                MultiOutputReduction(
+                    device,
+                    dst_dtype,
+                    inner_fn,
+                    ranges,
+                    reduction_ranges,
+                    reduction_type,
+                    src_dtype,
+                    reduction_hint,
+                    output_idx,
+                )
+            )
+            for output_idx in range(num_output)
+        )
+        for t in results:
+            t.realize()
+        return results
 
 class WelfordReduction(Reduction):
     output_index: int
@@ -8053,6 +8124,8 @@ class LoopBodyBlock:
                 result = self._inner.reduction(dtype, src_dtype, reduction_type, value)
                 if "welford" in reduction_type:
                     return tuple(result[i] for i in range(3))
+                if reduction_type == "online_softmax_reduce":
+                    return tuple(result[i] for i in range(2))
                 return result
 
             def index_expr(self, index, dtype):

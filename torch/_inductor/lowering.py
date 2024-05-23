@@ -47,6 +47,7 @@ from .ir import (
     PermuteView,
     Pointwise,
     Reduction,
+    MultiOutputReduction,
     SqueezeView,
     TensorBox,
     validate_ir,
@@ -5949,6 +5950,25 @@ def with_effects(token, op, *args, **kwargs):
     else:
         return (effectful_kernel, *result)
 
+# @register_lowering(inductor_prims.online_softmax, type_promotion_kind=None)
+# def online_softmax(x, dim):
+#     amax = reduce_amax(x, dim, keepdims=True)
+#     exp = lowerings[aten.exp](sub(x, amax))
+#     xsum = sum_(exp, dim, keepdims=True)
+#     return amax, xsum
+
+@register_lowering(inductor_prims.online_softmax, type_promotion_kind=None)
+def online_softmax(x, dim):
+    kwargs = _make_reduction_inner(
+        x, axis=dim, keepdims=True, dtype=None, override_return_dtype=None
+    )
+    max_tensor, sum_tensor = MultiOutputReduction.create(
+        reduction_type="online_softmax_reduce",
+        input_node=x,
+        num_output=2,
+        **kwargs
+    )
+    return max_tensor, sum_tensor
 
 try:
     import torch.distributed._functional_collectives
