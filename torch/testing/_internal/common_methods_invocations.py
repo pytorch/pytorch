@@ -23141,6 +23141,10 @@ python_ref_db = [
     # View & Shape OpInfos
     #
     PythonRefInfo(
+        "_refs.alias_copy",
+        torch_opinfo_name="alias_copy",
+    ),
+    PythonRefInfo(
         "_refs.atleast_1d",
         torch_opinfo_name="atleast_1d",
         validate_view_consistency=False,
@@ -23261,8 +23265,8 @@ python_ref_db = [
         validate_view_consistency=False,
     ),
     PythonRefInfo(
-        "_refs.alias_copy",
-        torch_opinfo_name="alias_copy",
+        "_refs.diag_embed",
+        torch_opinfo_name="diag_embed",
         supports_out=True,
     ),
     PythonRefInfo(
