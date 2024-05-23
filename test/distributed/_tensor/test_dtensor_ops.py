@@ -378,7 +378,6 @@ dtensor_fails = {
     xfail("nn.functional.upsample_bilinear"),
     xfail("nn.functional.upsample_nearest"),
     xfail("nonzero"),
-    xfail("norm", "nuc"),
     xfail("normal"),
     xfail("normal", "number_mean"),
     xfail("normal", "in_place"),
