@@ -1122,6 +1122,7 @@ def print_box(msg):
         print("|{}{}|".format(l, " " * (size - len(l))))
     print("-" * (size + 2))
 
+
 def main():
     if BUILD_LIBTORCH_WHL and BUILD_PYTHON_ONLY:
         raise RuntimeError(
