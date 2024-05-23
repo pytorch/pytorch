@@ -1,5 +1,5 @@
 import functools
-from typing import Any, cast, Optional, Union
+from typing import Any, cast, List, Optional, Union
 
 import typing_extensions
 
@@ -344,3 +344,29 @@ def register_fsdp_forward_method(module: nn.Module, method_name: str) -> None:
 
     # Use `__get__` to make `wrapped_method` an instance method
     setattr(module, method_name, wrapped_method.__get__(module, type(module)))
+
+
+def share_comm_ctx(modules: List[FSDPModule]) -> None:
+    """
+    Shares the communication context across multiple FSDP modules. For example,
+    for pipeline parallelism, if we have a module list whose children each are
+    FSDP root modules, then we can use this function to share the communication
+    context across all of the FSDP root modules, including FSDP streams.
+    Sharing streams can avoid memory fragmentation across streams.
+
+    Args:
+        modules (List[FSDPModule]): List of :class:`FSDPModule`s across which
+            to share communication context. Passing only the root FSDP modules
+            is sufficient if this function is called before lazy init.
+    """
+    if len(modules) == 0:
+        return
+    for module in modules:
+        if not isinstance(module, FSDPModule):
+            raise ValueError(f"Expects list of FSDPModules but got {module}")
+    fsdp_states = [module._get_fsdp_state() for module in modules]
+    comm_ctx = fsdp_states[0]._comm_ctx
+    for fsdp_state in fsdp_states[1:]:
+        fsdp_state._comm_ctx = comm_ctx
+        if fsdp_param_group := fsdp_state._fsdp_param_group:
+            fsdp_param_group.comm_ctx = comm_ctx

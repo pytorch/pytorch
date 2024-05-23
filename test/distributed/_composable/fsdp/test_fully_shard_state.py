@@ -3,8 +3,9 @@
 import copy
 import unittest
 
+import torch
 import torch.nn as nn
-from torch.distributed._composable.fsdp import FSDPModule, fully_shard
+from torch.distributed._composable.fsdp import FSDPModule, fully_shard, share_comm_ctx
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_fsdp import FSDPTestMultiThread, MLP
 from torch.testing._internal.common_utils import run_tests
@@ -82,6 +83,24 @@ class TestFullyShardState(FSDPTestMultiThread):
         fully_shard(model)
         with self.assertRaisesRegex(AssertionError, "FSDP does not support deepcopy"):
             copy.deepcopy(model)
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_share_comm_ctx(self):
+        model = nn.ModuleList([MLP(8) for _ in range(3)])
+        for mlp in model:
+            fully_shard(mlp)
+        share_comm_ctx(list(model.children()))
+        x = torch.randn((1, 8), device="cuda")
+        for mlp in model:
+            x = mlp(x)
+        fsdp_states = [mlp._get_fsdp_state() for mlp in model]
+        comm_ctx = fsdp_states[0]._fsdp_param_group.comm_ctx
+        for fsdp_state in fsdp_states[1:]:
+            self.assertEqual(comm_ctx, fsdp_state._fsdp_param_group.comm_ctx)
+
+        model = nn.ModuleList([MLP(8) for _ in range(3)])
+        with self.assertRaisesRegex(ValueError, "Expects list of FSDPModules but got"):
+            share_comm_ctx([model])
 
 
 if __name__ == "__main__":
