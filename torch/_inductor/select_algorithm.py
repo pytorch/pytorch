@@ -274,7 +274,9 @@ class TritonTemplateKernel(TritonKernel):
             val = self.named_input_nodes[name].get_stride()[index]
         return texpr(self.rename_indexing(val))
 
-    def modification(self, subgraph_number: int, **fixed_inputs) -> str:
+    def modification(
+        self, subgraph_number: int, output_name: str, **fixed_inputs
+    ) -> str:
         """This creates a modification function for a subgraph.
         To use this inside a template, the first argument should specify which subgraph to codegen for
 
@@ -319,7 +321,7 @@ class TritonTemplateKernel(TritonKernel):
                 out = subgraph.data.inner_fn((1,))
 
         self.codegen_body()
-        self.body.writeline(f"{fixed_inputs['out']} = {out.value}")
+        self.body.writeline(f"{output_name} = {out.value}")
 
         body_val = self.body.getvalue()
         self.body.clear()
