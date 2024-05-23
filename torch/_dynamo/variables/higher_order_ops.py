@@ -130,25 +130,11 @@ def _assert_tensors_nonaliasing(inputs, outputs):
     ), "inputs to function body cannot alias outputs"
 
 
-def _check_supported_callable_arg(func_var: VariableTracker, arg_name):
-    from . import (
-        NestedUserFunctionVariable,
-        NNModuleVariable,
-        TorchInGraphFunctionVariable,
-        UnspecializedNNModuleVariable,
-        UserFunctionVariable,
+def _check_supported_callable_arg(tx, func_var: VariableTracker, arg_name):
+    is_callable = (
+        BuiltinVariable(callable).call_function(tx, [func_var], {}).as_python_constant()
     )
-
-    if not isinstance(
-        func_var,
-        (
-            UserFunctionVariable,
-            NestedUserFunctionVariable,
-            NNModuleVariable,
-            UnspecializedNNModuleVariable,
-            TorchInGraphFunctionVariable,
-        ),
-    ):
+    if not is_callable:
         unimplemented(f"{arg_name} is of unsupported callable type {str(func_var)}.")
 
 
@@ -629,8 +615,8 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
 
         # branches
-        _check_supported_callable_arg(args[1], "true_fn")
-        _check_supported_callable_arg(args[2], "false_fn")
+        _check_supported_callable_arg(tx, args[1], "true_fn")
+        _check_supported_callable_arg(tx, args[2], "false_fn")
 
         # Our strategy for tracing the true/false branches of cond
         # are to checkpoint our graphstate, run the true branch,
@@ -823,8 +809,8 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"Usage: while_loop(cond_fn, body_fn, operands)",
             )
 
-        _check_supported_callable_arg(args[0], "cond_fn")
-        _check_supported_callable_arg(args[1], "body_fn")
+        _check_supported_callable_arg(tx, args[0], "cond_fn")
+        _check_supported_callable_arg(tx, args[1], "body_fn")
 
         # operands
         if not isinstance(args[2], (ListVariable, TupleVariable)):
@@ -1066,7 +1052,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 "torch.ops.higher_order.map: kwargs are not supported in the map operator."
             )
 
-        _check_supported_callable_arg(args[0].realize(), "map_fn")
+        _check_supported_callable_arg(tx, args[0].realize(), "map_fn")
 
         assert type(args[1].realize()) is TensorVariable
 
