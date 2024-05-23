@@ -114,7 +114,7 @@ int FunctionScheduler::scheduleJob(
     bool immediate,
     int run_limit) {
   TORCH_CHECK(function != nullptr, "Job function can't be null.");
-  TORCH_CHECK(interval > 0, "Job interval must be greater than 0.");
+  TORCH_CHECK(interval >= 0, "Job interval must be positive.");
   TORCH_CHECK(run_limit > 0 || run_limit == RUN_FOREVER, "Job run limit must be greater than 0 or " + std::to_string(RUN_FOREVER) + ".");
 
   auto duration =
