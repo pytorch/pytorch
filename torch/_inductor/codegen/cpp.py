@@ -62,7 +62,14 @@ from .common import (
     OptimizationContext,
 )
 
-from .cpp_utils import cexpr, cexpr_index, DTYPE_TO_CPP, INDEX_TYPE, value_to_cpp
+from .cpp_utils import (
+    cexpr,
+    cexpr_index,
+    DTYPE_TO_CPP,
+    INDEX_TYPE,
+    LocalBuffer,
+    value_to_cpp,
+)
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
@@ -1830,7 +1837,10 @@ class CppKernel(Kernel):
         threads = parallel_num_threads()
         assert self.call_ranges is not None
         kernels = loop_nest.get_kernels()
-        if any(isinstance(kernel, OuterLoopFusedKernel) for kernel in kernels):
+        has_outer_loop_kernel = any(
+            isinstance(kernel, OuterLoopFusedKernel) for kernel in kernels
+        )
+        if has_outer_loop_kernel:
             assert len(kernels) == 1
             assert isinstance(kernels[0], OuterLoopFusedKernel)
             par_depth = kernels[0].decide_parallel_depth(
@@ -1960,6 +1970,27 @@ class CppKernel(Kernel):
 
             stack.enter_context(code.indent())
             if loop_nest.root:
+                if (
+                    has_outer_loop_kernel
+                    and V.graph.scheduler.get_local_buffer() is not None
+                    and len(V.graph.scheduler.get_local_buffer().items()) == 1
+                ):
+                    # Codegen the Local Buffer
+                    local_buffers = V.graph.scheduler.get_local_buffer()
+                    assert len(local_buffers.items()) == 1
+                    local_buffer = next(iter(local_buffers.items()))[1]
+
+                    # For dynamic size, rename s to ks
+                    # Hardcode to use the last dim, since we have check in try_outer_loop_fusion_with_local_buf
+                    local_buf_size = self.rename_indexing(
+                        local_buffer.get_layout().size[-1]
+                    )
+                    dtype = DTYPE_TO_CPP[local_buffer.get_layout().dtype]
+                    allocate = f"std::make_unique<{dtype} []>({local_buf_size})"
+                    code.splice(
+                        f"std::unique_ptr<{dtype} []> local_buffer = {allocate};"
+                    )
+                    code.splice(f"{dtype}* local_buffer_data = local_buffer.get();")
                 gen_loops(loop_nest.root)
             else:
                 gen_kernel(loop_nest.kernel)
@@ -3376,7 +3407,7 @@ class CppKernelProxy(CppKernel):
             DataTypePropagation.propagate_loopbody(body)
         self.codegen_functions(loop_bodies, var_sizes_list)
 
-    def codegen_nodes(self, nodes: List[SchedulerNode]):
+    def codegen_nodes(self, nodes: List[SchedulerNode], local_buffers=None):
         # Legalize BF16 node by adding to_dtype explicitly
         self.legalize_lowp_fp_dtype(nodes)
         self.data_type_propagation(nodes)
@@ -3393,17 +3424,46 @@ class CppKernelProxy(CppKernel):
             else torch.float
         )
 
-        def fn(node, *index_vars):
-            node.decide_inplace_update()
-            node.mark_run()
-            if isinstance(V.kernel, NullKernelHandler):
-                return node._body(*index_vars)
-            else:
-                return node.codegen(index_vars)
+        from .cpp_utils import LocalBufferScope, LocalizeBufferHandler
 
-        fn_list = [functools.partial(fn, node) for node in nodes]
-        var_sizes_list = [node.group[1] for node in nodes]
-        self.codegen_functions(fn_list, var_sizes_list, vec_dtype)
+        can_use_local_buf = True
+        with LocalBufferScope(self) as scope:
+            if local_buffers:
+                assert len(local_buffers) == 1
+                scope.add_local_buffer(
+                    local_buffers[0].local_buf, local_buffers[0].global_node
+                )
+
+            def fn(node, *index_vars):
+                op_handle = None
+                ctx = contextlib.nullcontext()
+                if local_buffers and len(local_buffers) == 1:
+                    op_handle = LocalizeBufferHandler(
+                        V.get_ops_handler(),
+                        global_buf=local_buffers[0].global_node.node,
+                        local_buf=local_buffers[0].local_buf,
+                        outer_loop_local_buf=True,
+                        local_buf_index=local_buffers[0].local_buf_index,
+                    )
+                    ctx = V.set_ops_handler(op_handle)
+                with ctx:
+                    node.decide_inplace_update()
+                    node.mark_run()
+                    if isinstance(V.kernel, NullKernelHandler):
+                        res = node._body(*index_vars)
+                    else:
+                        res = node.codegen(index_vars)
+                    if op_handle:
+                        nonlocal can_use_local_buf
+                        can_use_local_buf = (
+                            can_use_local_buf and op_handle.can_use_local_buf
+                        )
+                    return res
+
+            fn_list = [functools.partial(fn, node) for node in nodes]
+            var_sizes_list = [node.group[1] for node in nodes]
+            self.codegen_functions(fn_list, var_sizes_list, vec_dtype)
+            return can_use_local_buf
 
     def codegen_loops(self, code, worksharing):
         self.codegen_loops_impl(self.loop_nest, code, worksharing)
@@ -3697,6 +3757,148 @@ class CppScheduling(BaseScheduling):
             self._can_fuse_horizontal_impl(node1, node2) and not node1.is_reduction()
         ) or self.can_fuse_vertical_outer_loop(node1, node2)
 
+    def codegen_outer_loop_node(
+        self,
+        node: OuterLoopFusedSchedulerNode,
+    ):
+        """
+        Generate the code for the outer loop fused node.
+        1. Codegen code with fused outer loop and local Buffer.
+        2. If failed, codegen code with fused outer loop and without local Buffer.
+        3. If failed, fallback to standard codegen.
+        """
+        kernel_group = self.kernel_group
+        generated_cpp_vec_kernel_count = metrics.generated_cpp_vec_kernel_count
+        cpp_kernel_proxy_list: List[CppKernelProxy] = []
+        nodes_list: List[List[SchedulerNode]] = []
+        assert isinstance(node, OuterLoopFusedSchedulerNode)
+
+        def try_outer_loop_fusion_with_local_buf(node: OuterLoopFusedSchedulerNode):
+            """
+            Codegen code with fused outer loop and local Buffer.
+            """
+            assert isinstance(node, OuterLoopFusedSchedulerNode)
+            cpp_kernel_proxy_list.clear()
+            nodes_list.clear()
+
+            def get_call_ranges(node: BaseSchedulerNode):
+                assert isinstance(node, (SchedulerNode, FusedSchedulerNode))
+                nodes: List[SchedulerNode] = node.get_nodes()  # type: ignore[assignment]
+                _, (group, reduction_group) = max(
+                    nodes, key=lambda x: int(x.is_reduction())
+                ).group
+                call_ranges = tuple(group) + tuple(reduction_group)
+                return call_ranges
+
+            if not all(
+                len(get_call_ranges(_node)) == node.outer_loop_fusion_depth + 1
+                for _node in node.get_outer_nodes()
+            ):
+                # Ref to the typical case of local buffer
+                # in https://github.com/pytorch/pytorch/blob/
+                # 1115a25c36340554442f28f9570abd42f0aface2/aten/src/ATen/native/cpu/SoftMaxKernel.cpp#L159
+                # where the buffer is with size of last dim and contiguous.
+                # Only support this typical case at first.
+                return False
+
+            local_buffers = []
+            for fused_scheduler_node in node.get_outer_nodes():
+                call_ranges = get_call_ranges(fused_scheduler_node)
+                keep_idx_id = len(call_ranges) - 1
+                scheduler_nodes = fused_scheduler_node.get_nodes()
+                for scheduler_node in scheduler_nodes:
+                    # all users inside same OuterLoopFusedSchedulerNode
+                    if not scheduler_node.is_reduction() and all(
+                        user.node in node.get_nodes() for user in scheduler_node.users
+                    ):
+                        local_buffer = LocalBuffer(
+                            scheduler_node,
+                            keep_idx_id,
+                            call_ranges[keep_idx_id],
+                            scheduler_node.node.layout.get_dtype(),
+                            ir.Buffer(
+                                "local_buffer_data", scheduler_node.node.get_layout()
+                            ),
+                        )
+                        local_buffers.append(local_buffer)
+                        # At most 1 node with local buf for each OuterLoopFusedSchedulerNode
+                        break
+                if len(local_buffers) > 0:
+                    break
+            if len(local_buffers) == 0:
+                # No local buffer found
+                return False
+            assert len(local_buffers) == 1
+
+            for _node in node.get_outer_nodes():
+                assert isinstance(_node, (FusedSchedulerNode, SchedulerNode))
+                cpp_kernel_proxy = CppKernelProxy(kernel_group)
+                if not cpp_kernel_proxy.codegen_nodes(_node.get_nodes(), local_buffers):  # type: ignore[arg-type]
+                    # Failed to use local buf by checking the kernel codegn
+                    return False
+                cpp_kernel_proxy_list.append(cpp_kernel_proxy)
+                nodes_list.append(_node.get_nodes())  # type: ignore[arg-type]
+
+            if not node.check_outer_fusion_loop_level_attr(
+                cpp_kernel_proxy_list, node.outer_loop_fusion_depth
+            ):
+                return False
+            outer_fusion_cpp_kernel_proxy = node.merge_outer_fusion_kernels(
+                cpp_kernel_proxy_list,
+            )
+            from .cpp_utils import LocalBufferScope
+
+            with LocalBufferScope(outer_fusion_cpp_kernel_proxy) as scope:
+                if local_buffers:
+                    assert len(local_buffers) == 1
+                    scope.add_local_buffer(
+                        local_buffers[0].local_buf, local_buffers[0].global_node
+                    )
+                kernel_group.finalize_kernel(
+                    outer_fusion_cpp_kernel_proxy,
+                    [_node for _nodes in nodes_list for _node in _nodes],
+                )
+
+            return True
+
+        if not try_outer_loop_fusion_with_local_buf(node):
+            # Reset generated_cpp_vec_kernel_count to codegen again
+            metrics.generated_cpp_vec_kernel_count = generated_cpp_vec_kernel_count
+            cpp_kernel_proxy_list.clear()
+            nodes_list.clear()
+            # Similar as comment in
+            # https://github.com/pytorch/pytorch/blob/469383755fe416eb1c41fa724762ad3eaecdff07/torch/_inductor/codegen/cpp.py#L3269-L3272
+            # Kernels share the same global contexts like V.graph.wrapper_code, V.kernel.args.
+            with torch._inductor.config.patch(inplace_buffers=False):
+                for _node in node.get_outer_nodes():
+                    assert isinstance(_node, (FusedSchedulerNode, SchedulerNode))
+                    _nodes: List[SchedulerNode] = _node.get_nodes()  # type: ignore[assignment]
+                    cpp_kernel_proxy = CppKernelProxy(kernel_group)
+                    cpp_kernel_proxy.codegen_nodes(_nodes)
+
+                    cpp_kernel_proxy_list.append(cpp_kernel_proxy)
+                    nodes_list.append(_nodes)
+
+                # Note that, in the future, when every kernel can be vectorized,
+                # the function select_tiling will be much easier, and we'll be able to lift
+                # check_outer_fusion_loop_level_attr to the fusion phase,
+                # avoiding grouping kernels at fusion time that "look like we'll be able to fuse them"
+                # but then we actually won't.
+                if node.check_outer_fusion_loop_level_attr(
+                    cpp_kernel_proxy_list, node.outer_loop_fusion_depth
+                ):
+                    outer_fusion_cpp_kernel_proxy = node.merge_outer_fusion_kernels(
+                        cpp_kernel_proxy_list,
+                    )
+                    kernel_group.finalize_kernel(
+                        outer_fusion_cpp_kernel_proxy,
+                        [_node for _nodes in nodes_list for _node in _nodes],
+                    )
+                else:
+                    # Fall back to standard loop codegen
+                    for _kernel_proxy, _nodes in zip(cpp_kernel_proxy_list, nodes_list):
+                        kernel_group.finalize_kernel(_kernel_proxy, _nodes)
+
     def codegen_node(
         self,
         node: Union[OuterLoopFusedSchedulerNode, FusedSchedulerNode, SchedulerNode],
@@ -3707,38 +3909,7 @@ class CppScheduling(BaseScheduling):
         kernel_group = self.kernel_group
 
         if isinstance(node, OuterLoopFusedSchedulerNode):
-            cpp_kernel_proxy_list: List[CppKernelProxy] = []
-            nodes_list: List[List[SchedulerNode]] = []
-
-            for _node in node.get_outer_nodes():
-                assert isinstance(_node, (FusedSchedulerNode, SchedulerNode))
-                _nodes: List[SchedulerNode] = _node.get_nodes()  # type: ignore[assignment]
-                cpp_kernel_proxy = CppKernelProxy(kernel_group)
-                cpp_kernel_proxy.codegen_nodes(_nodes)
-
-                cpp_kernel_proxy_list.append(cpp_kernel_proxy)
-                nodes_list.append(_nodes)
-
-            # Note that, in the future, when every kernel can be vectorized,
-            # the function select_tiling will be much easier, and we'll be able to lift
-            # check_outer_fusion_loop_level_attr to the fusion phase,
-            # avoiding grouping kernels at fusion time that "look like we'll be able to fuse them"
-            # but then we actually won't.
-            if node.check_outer_fusion_loop_level_attr(
-                cpp_kernel_proxy_list, node.outer_loop_fusion_depth
-            ):
-                # Merge the cpp_kernel_proxy_list into cpp_kernel_proxy
-                outer_fusion_cpp_kernel_proxy = node.merge_outer_fusion_kernels(
-                    cpp_kernel_proxy_list,
-                )
-                kernel_group.finalize_kernel(
-                    outer_fusion_cpp_kernel_proxy,
-                    [_node for _nodes in nodes_list for _node in _nodes],
-                )
-            else:
-                # Fall back to standard loop codegen
-                for _kernel_proxy, _nodes in zip(cpp_kernel_proxy_list, nodes_list):
-                    kernel_group.finalize_kernel(_kernel_proxy, _nodes)
+            self.codegen_outer_loop_node(node)
         else:
             nodes: List[SchedulerNode] = node.get_nodes()  # type: ignore[assignment]
             cpp_kernel_proxy = CppKernelProxy(kernel_group)
