@@ -158,6 +158,7 @@ def make_fake_inputs(
         fake_mode = FakeTensorMode(
             shape_env=ShapeEnv(tracked_fakes=[], co_fields=co_fields),
             allow_non_fake_inputs=True,
+            export=True,
         )
     else:
         fake_mode = FakeTensorMode(

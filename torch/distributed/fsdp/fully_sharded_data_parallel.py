@@ -425,6 +425,12 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
+        if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
+            warnings.warn(
+                "FSDP will not all-gather parameters for containers that do "
+                f"not implement forward: {module}",
+                stacklevel=2,
+            )
         _init_ignored_module_states(self, module, ignored_modules, ignored_states)
         _init_device_handle(self, module, self._ignored_params, device_id)
 

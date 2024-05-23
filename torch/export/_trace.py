@@ -127,7 +127,7 @@ def _convert_input_to_fake(gm, args, kwargs):
     if detected_fake_mode := detect_fake_mode(fake_inps):
         fake_mode = detected_fake_mode
     else:
-        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv(), export=True)
 
     if len(args) == 0 and len(kwargs) == 0:
         return (), {}, params_buffers, fake_mode
