@@ -12,5 +12,7 @@ do
     echo "Copying $SHA"
     git cherry-pick -x "$SHA"
 done
-git push
+if [[ "${WITH_PUSH}" == true ]]; then
+  git push
+fi
 git checkout "$ORIG_BRANCH"
