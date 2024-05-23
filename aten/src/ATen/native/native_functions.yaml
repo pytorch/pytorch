@@ -14659,11 +14659,13 @@
   variants: function
   dispatch:
     CUDA: _fbgemm_jagged_to_padded_dense_forward
+    CPU: _jagged_to_padded_dense_forward_cpu
 
 - func: _padded_dense_to_jagged_forward(Tensor dense, Tensor[] offsets, SymInt? total_L=None) -> Tensor
   variants: function
   dispatch:
     CUDA: _fbgemm_dense_to_jagged_forward_symint
+    CPU: _padded_dense_to_jagged_forward_cpu
 
 - func: _nested_from_padded_tensor(Tensor padded, Tensor offsets, Tensor dummy, int dim=1, SymInt? sum_S=None) -> Tensor
   variants: function
