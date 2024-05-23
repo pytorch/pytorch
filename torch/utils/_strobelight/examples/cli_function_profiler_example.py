@@ -1,9 +1,10 @@
 import torch
 
-from torch.utils.strobelight.cli_function_profiler import (
+from torch.utils._strobelight.cli_function_profiler import (
     strobelight,
     StrobelightCLIFunctionProfiler,
 )
+
 
 if __name__ == "__main__":
 
