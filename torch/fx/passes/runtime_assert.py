@@ -57,6 +57,7 @@ def insert_deferred_runtime_asserts(
         ConvertIntKey,
         DivideByKey,
         free_symbols,
+        InnerTensorKey,
     )
     from torch.utils._sympy.interp import sympy_interp
     from torch.utils._sympy.reference import PythonReferenceAnalysis
@@ -120,12 +121,13 @@ def insert_deferred_runtime_asserts(
                     ),
                 )
 
-    for node in graph.nodes:
+    nodes = list(graph.nodes)
+    for i, node in enumerate(nodes[:-1]):
         # Placeholders can match symbols, but when we destructure them
         # with size we have to make sure we insert the nodes after all
         # the placeholders
         with graph.inserting_before(
-            node.next if node not in placeholders else last_placeholder.next
+            nodes[i + 1] if node not in placeholders else last_placeholder.next
         ):
             # Unfortunately, this logic still must remain because manual
             # make_fx calls may not explicitly bind all symbolic ints as
@@ -150,12 +152,24 @@ def insert_deferred_runtime_asserts(
                 match_symbol(example_value, lambda: node)
                 if isinstance(t := example_value, torch.Tensor):
                     for i, s in enumerate(t.size()):
-                        match_symbol(s, lambda: graph.call_method("size", (node, i)))
+                        match_symbol(
+                            s,
+                            lambda: graph.call_function(
+                                torch.ops.aten.sym_size.int, (node, i)
+                            ),
+                        )
                     for i, s in enumerate(t.stride()):
-                        match_symbol(s, lambda: graph.call_method("stride", (node, i)))
+                        match_symbol(
+                            s,
+                            lambda: graph.call_function(
+                                torch.ops.aten.sym_stride.int, (node, i)
+                            ),
+                        )
                     match_symbol(
                         t.storage_offset(),
-                        lambda: graph.call_method("storage_offset", (node,)),
+                        lambda: graph.call_function(
+                            torch.ops.aten.sym_storage_offset.default, (node,)
+                        ),
                     )
 
             # Handle asserts that aren't associated with any symbol.  This
@@ -209,6 +223,13 @@ def insert_deferred_runtime_asserts(
                             return go(
                                 graph.call_function(
                                     operator.floordiv, (node, keypath[0].divisor)
+                                ),
+                                keypath[1:],
+                            )
+                        elif isinstance(keypath[0], InnerTensorKey):
+                            return go(
+                                graph.call_function(
+                                    getattr, (node, keypath[0].inner_name)
                                 ),
                                 keypath[1:],
                             )

@@ -65,8 +65,8 @@ static C10_UNUSED void checkIndexTensorTypes(IOptTensorListRef indices, bool all
   }
 }
 
-inline torch::List<c10::optional<Tensor>> toListOfOptionalTensors(ArrayRef<Tensor> list) {
-  torch::List<c10::optional<Tensor>> result;
+inline torch::List<std::optional<Tensor>> toListOfOptionalTensors(ArrayRef<Tensor> list) {
+  torch::List<std::optional<Tensor>> result;
   result.reserve(list.size());
   for (const Tensor& a : list) {
     result.push_back(a);
@@ -74,11 +74,11 @@ inline torch::List<c10::optional<Tensor>> toListOfOptionalTensors(ArrayRef<Tenso
   return result;
 }
 
-inline torch::List<c10::optional<Tensor>> toListOfOptionalTensors(ArrayRef<IValue> list) {
-  torch::List<c10::optional<Tensor>> result;
+inline torch::List<std::optional<Tensor>> toListOfOptionalTensors(ArrayRef<IValue> list) {
+  torch::List<std::optional<Tensor>> result;
   result.reserve(list.size());
   for (const IValue& a : list) {
-    result.push_back(a.isTensor() ? c10::optional<Tensor>(a.toTensor()) : c10::optional<Tensor>());
+    result.push_back(a.isTensor() ? std::optional<Tensor>(a.toTensor()) : c10::optional<Tensor>());
   }
   return result;
 }

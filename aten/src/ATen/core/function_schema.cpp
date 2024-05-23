@@ -30,7 +30,7 @@ FunctionSchema FunctionSchema::cloneWithRealTypes(bool with_symint) const {
     // NB: keep this in sync with unpackSymInt in KernelFunction_impl.h
     if (
       *a.real_type() == *getTypePtr<c10::SymInt>() ||
-      *a.real_type() == *getTypePtr<c10::optional<c10::SymInt>>() ||
+      *a.real_type() == *getTypePtr<std::optional<c10::SymInt>>() ||
       *a.real_type() == *getTypePtr<c10::SymIntArrayRef>() ||
       *a.real_type() == *getTypePtr<at::OptionalSymIntArrayRef>()
     ) {
@@ -53,7 +53,7 @@ FunctionSchema FunctionSchema::cloneWithRealTypes(bool with_symint) const {
     is_varret());
 }
 
-bool FunctionSchema::canAliasTypeSetsAlias(const c10::optional<AliasTypeSet> &lhs, const c10::optional<AliasTypeSet> &rhs) const {
+bool FunctionSchema::canAliasTypeSetsAlias(const std::optional<AliasTypeSet> &lhs, const c10::optional<AliasTypeSet> &rhs) const {
   if (!lhs || !rhs) {
     return false;
   }
@@ -67,7 +67,7 @@ bool FunctionSchema::canAliasTypeSetsAlias(const c10::optional<AliasTypeSet> &lh
   return false;
 }
 
-c10::optional<AliasTypeSet> FunctionSchema::getAliasTypeSetContainedTypes(const c10::optional<AliasTypeSet> &aliasTypeSet) const {
+std::optional<AliasTypeSet> FunctionSchema::getAliasTypeSetContainedTypes(const c10::optional<AliasTypeSet> &aliasTypeSet) const {
   if (!aliasTypeSet) {
     return c10::nullopt;
   }
@@ -95,7 +95,7 @@ c10::optional<AliasTypeSet> FunctionSchema::getAliasTypeSetContainedTypes(const 
   return AliasTypeSet(containedTypes.begin(), containedTypes.end());
 }
 
-c10::optional<AliasTypeSet> FunctionSchema::mapTypeToAliasTypeSet(const TypePtr& type) const {
+std::optional<AliasTypeSet> FunctionSchema::mapTypeToAliasTypeSet(const TypePtr& type) const {
   switch(type->kind()) {
     case TypeKind::ListType:
     case TypeKind::DictType:
@@ -155,8 +155,8 @@ bool FunctionSchema::may_alias(const SchemaArgument& lhs, const SchemaArgument& 
   const Argument lhsArg = getCorrectList(lhs.type)[lhs.index];
   const Argument rhsArg = getCorrectList(rhs.type)[rhs.index];
 
-  c10::optional<AliasTypeSet> lhsTypes = mapTypeToAliasTypeSet(lhsArg.type());
-  c10::optional<AliasTypeSet> rhsTypes = mapTypeToAliasTypeSet(rhsArg.type());
+  std::optional<AliasTypeSet> lhsTypes = mapTypeToAliasTypeSet(lhsArg.type());
+  std::optional<AliasTypeSet> rhsTypes = mapTypeToAliasTypeSet(rhsArg.type());
 
   // Check to see if lhs and rhs have the same alias set
   if (canAliasTypeSetsAlias(lhsTypes, rhsTypes)) {
@@ -182,10 +182,10 @@ bool FunctionSchema::may_contain_alias(const SchemaArgument& lhs, const SchemaAr
 
   const c10::Argument lhsArg = getCorrectList(lhs.type)[lhs.index];
   const c10::Argument rhsArg = getCorrectList(rhs.type)[rhs.index];
-  c10::optional<AliasTypeSet> lhsTypes = mapTypeToAliasTypeSet(lhsArg.type());
-  c10::optional<AliasTypeSet> rhsTypes = mapTypeToAliasTypeSet(rhsArg.type());
-  c10::optional<AliasTypeSet> lhsContainedTypes = getAliasTypeSetContainedTypes(lhsTypes);
-  c10::optional<AliasTypeSet> rhsContainedTypes = getAliasTypeSetContainedTypes(rhsTypes);
+  std::optional<AliasTypeSet> lhsTypes = mapTypeToAliasTypeSet(lhsArg.type());
+  std::optional<AliasTypeSet> rhsTypes = mapTypeToAliasTypeSet(rhsArg.type());
+  std::optional<AliasTypeSet> lhsContainedTypes = getAliasTypeSetContainedTypes(lhsTypes);
+  std::optional<AliasTypeSet> rhsContainedTypes = getAliasTypeSetContainedTypes(rhsTypes);
 
   // Checks if one side is wildcard and the other side is a container of the same type
   bool lhsWildcard = lhsArg.alias_info() && lhsArg.alias_info()->isWildcardAfter() && canAliasTypeSetsAlias(lhsTypes, rhsContainedTypes);
