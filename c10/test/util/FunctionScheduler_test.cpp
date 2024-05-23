@@ -337,7 +337,7 @@ TEST(FunctionScheduler, JobExceptions) {
   std::this_thread::sleep_for(std::chrono::milliseconds(3));
   fs.stop();
 
-  ASSERT_GE(counter.load(), 1);
+  ASSERT_GE(counter, 1);
 }
 
 TEST(FunctionScheduler, RunImmediately) {

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/macros/Macros.h>
+#include <c10/util/Exception.h>
 
 #include <atomic>
 #include <chrono>
@@ -9,10 +9,10 @@
 #include <memory>
 #include <mutex>
 #include <queue>
+#include <string>
 #include <thread>
 #include <unordered_map>
 #include <vector>
-#include <string>
 
 #define RUN_FOREVER -1
 
@@ -21,12 +21,12 @@ namespace c10 {
 /**
  * Represents a function that runs periodically.
  */
-class Job {
+class C10_API Job {
   std::function<void()> _function;
   std::chrono::microseconds _interval;
   int _counter = 0;
-  int _run_limit;
   bool _immediate;
+  int _run_limit;
 
  public:
   Job(std::function<void()> function,
@@ -47,7 +47,7 @@ class Job {
  * Represents a concrete run, i.e, a job that
  * will be executed at a specific time.
  */
-class Run {
+class C10_API Run {
   int _job_id;
   std::chrono::time_point<std::chrono::steady_clock> _time;
 
@@ -80,7 +80,7 @@ class Run {
  * // ran == true
  *
  */
-class FunctionScheduler {
+class C10_API FunctionScheduler {
   // The id to be attributed to a new job.
   int _current_id = 0;
 
@@ -123,13 +123,17 @@ class FunctionScheduler {
   std::chrono::microseconds getNextWaitTime();
 
   // Registers a new run.
-  void addRun(const std::unique_lock<std::mutex>& lock, int job_id, std::unique_ptr<Job> const& job);
+  void addRun(
+      const std::unique_lock<std::mutex>& lock,
+      int job_id,
+      std::unique_ptr<Job> const& job);
 
   // Registers a new job.
   int scheduleJob(std::unique_ptr<Job> job);
 
   // Checks if a job is still valid.
-  bool validEntry(const std::unordered_map<int, std::unique_ptr<Job>>::iterator& entry);
+  bool validEntry(
+      const std::unordered_map<int, std::unique_ptr<Job>>::iterator& entry);
 
  public:
   FunctionScheduler();
@@ -171,8 +175,11 @@ int FunctionScheduler::scheduleJob(
     bool immediate,
     int run_limit) {
   TORCH_CHECK(function != nullptr, "Job function can't be null.");
-  TORCH_CHECK(interval >= 0, "Job interval must be positive.");
-  TORCH_CHECK(run_limit > 0 || run_limit == RUN_FOREVER, "Job run limit must be greater than 0 or " + std::to_string(RUN_FOREVER) + ".");
+  TORCH_CHECK(interval.count() >= 0, "Job interval must be positive.");
+  TORCH_CHECK(
+      run_limit > 0 || run_limit == RUN_FOREVER,
+      "Job run limit must be greater than 0 or " + std::to_string(RUN_FOREVER) +
+          ".");
 
   auto duration =
       std::chrono::duration_cast<std::chrono::microseconds>(interval);

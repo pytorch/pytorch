@@ -131,7 +131,8 @@ void FunctionScheduler::run() {
 void FunctionScheduler::runNextJob(const std::unique_lock<std::mutex>& lock) {
   // This function is always called with the mutex previously acquired.
   TORCH_INTERNAL_ASSERT(lock.owns_lock(), "Mutex not acquired");
-  TORCH_INTERNAL_ASSERT(_next_run == _queue.top(), "Next run does not match queue top.");
+  TORCH_INTERNAL_ASSERT(
+      _next_run == _queue.top(), "Next run does not match queue top.");
   _queue.pop(); // Remove this run from the queue
 
   // Check if the job was canceled in the meantime.
@@ -143,15 +144,20 @@ void FunctionScheduler::runNextJob(const std::unique_lock<std::mutex>& lock) {
   }
 }
 
-bool FunctionScheduler::validEntry(const std::unordered_map<int, std::unique_ptr<Job>>::iterator& entry) {
-  return entry != _jobs.end() && entry->second->counter() != entry->second->run_limit();
+bool FunctionScheduler::validEntry(
+    const std::unordered_map<int, std::unique_ptr<Job>>::iterator& entry) {
+  return entry != _jobs.end() &&
+      entry->second->counter() != entry->second->run_limit();
 }
 
 int FunctionScheduler::id() {
   return _current_id++;
 }
 
-void FunctionScheduler::addRun(const std::unique_lock<std::mutex>& lock,int job_id, std::unique_ptr<Job> const& job) {
+void FunctionScheduler::addRun(
+    const std::unique_lock<std::mutex>& lock,
+    int job_id,
+    std::unique_ptr<Job> const& job) {
   // This function is always called with the mutex previously acquired.
   TORCH_INTERNAL_ASSERT(lock.owns_lock(), "Mutex not acquired");
 
