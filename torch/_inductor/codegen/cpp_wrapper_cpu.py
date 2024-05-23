@@ -1273,12 +1273,13 @@ class CppWrapperCpu(WrapperCodeGen):
                     break
             assert grid_decision is not None
 
+        current_device = V.graph.scheduler.get_current_device_or_throw()
         self.generate_kernel_call(
             kernel_name,
             args,
             arg_types=arg_types,
             grid=grid_decision,
-            device_index=V.graph.scheduler.current_device.index,
+            device_index=current_device.index,
             cuda=True,
             triton=True,
             triton_meta=triton_meta,
@@ -1760,6 +1761,10 @@ class CppWrapperCpu(WrapperCodeGen):
 
     def codegen_device_copy(self, src, dst):
         if config.abi_compatible:
+            # aoti_torch_tensor_copy_ takes AtenTensorHandle as input,
+            # while stack-allocation results in ArrayRefTensor
+            # so disable stack allocation here
+            self.allow_stack_allocation = False
             self.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_tensor_copy_(expensive_copy_to_tensor_if_needed({src}), {dst}));"
             )
