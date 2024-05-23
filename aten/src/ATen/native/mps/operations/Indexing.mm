@@ -608,17 +608,20 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
       newCachedGraph->outputTensor_ = outputTensor;
     });
 
+    // MPS TODO: MPS Gather is failing with MPS strided API. Fallback to old gather.
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_,
                                               self,
                                               /*mpsShape=*/nullptr,
                                               /*gatherTensorData=*/true,
-                                              /*dataType=*/inputType);
-    Placeholder indexPlaceholder = Placeholder(cachedGraph->indexTensor_, index);
+                                              /*dataType=*/inputType,
+                                              /*useStridedAPI=*/false);
+    Placeholder indexPlaceholder = Placeholder(cachedGraph->indexTensor_, index, nil, true, MPSDataTypeInvalid, false);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_,
                                                 output,
                                                 /*mpsShape=*/nullptr,
                                                 /*gatherTensorData=*/false,
-                                                /*dataType=*/outputType);
+                                                /*dataType=*/outputType,
+                                                /*useStridedAPI=*/false);
 
     auto feeds = dictionaryFromPlaceholders(selfPlaceholder, indexPlaceholder);
     runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);

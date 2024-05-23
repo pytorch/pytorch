@@ -56,7 +56,7 @@ static void upsample_out_template(const Tensor& input,
     native::upsample_2d_common_check(input.sizes(), output_size);
   }
   Tensor out;
-  if (!output.is_contiguous()) {
+  if (needsGather(output)) {
     out = at::empty_like(output, MemoryFormat::Contiguous);
   }
 

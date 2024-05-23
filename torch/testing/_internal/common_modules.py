@@ -4195,11 +4195,7 @@ module_db: List[ModuleInfo] = [
                    # Fails on backward check on MPS
                    # See https://github.com/pytorch/pytorch/issues/107214
                    DecorateInfo(
-                       unittest.expectedFailure,
-                       'TestModule',
-                       'test_memory_format',
-                       active_if=operator.itemgetter('training'),
-                       device_type='mps',
+                       skipMPS
                    ),)
                ),
     ModuleInfo(torch.nn.LeakyReLU,
