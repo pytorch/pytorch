@@ -433,7 +433,7 @@ def free_symbols(val: Union[SymInt, sympy.Expr, torch.Tensor]) -> Set[sympy.Symb
 
     return first_expr.free_symbols.union(*(e.free_symbols for e in itr))
 
-def has_free_symbols(val: Union[SymInt, torch.Tensor]) -> bool:
+def has_free_symbols(val: Union[SymInt, sympy.Expr, torch.Tensor]) -> bool:
     """Faster version of bool(free_symbols(val))"""
     return not all(e.is_number for e in _iterate_exprs(val))
 
