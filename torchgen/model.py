@@ -260,7 +260,7 @@ for fk in FUNCTIONALITY_KEYS:
             )
 
 
-STRUCTURED_DISPATCH_KEYS = {DispatchKey.MPS, DispatchKey.CUDA, DispatchKey.CPU}
+STRUCTURED_DISPATCH_KEYS = {DispatchKey.MPS, DispatchKey.CUDA, DispatchKey.CPU, DispatchKey.XPU}
 UFUNC_DISPATCH_KEYS = {DispatchKey.CUDA, DispatchKey.CPU}
 
 # Set of supported dispatch keys
@@ -271,6 +271,7 @@ dispatch_keys = [
     DispatchKey.MkldnnCPU,
     DispatchKey.CUDA,
     DispatchKey.MPS,
+    DispatchKey.XPU,
     DispatchKey.SparseCUDA,
     DispatchKey.SparseCsrCUDA,
     DispatchKey.QuantizedCPU,
@@ -562,6 +563,9 @@ class NativeFunction:
     # That aren't easily inferrable directly from the operator's schema.
     tags: Set[str]
 
+    # The number of dispachkeys declared
+    num_dispatch_keys: int
+
     # NB: The benefit of defining a dataclass is that we automatically get
     # a constructor defined for all the fields we specify.  No need
     # to explicitly write it out.
@@ -573,6 +577,7 @@ class NativeFunction:
         loc: "Location",
         valid_tags: Set[str],
         ignore_keys: Optional[Set[DispatchKey]] = None,
+        whitelist_keys: Optional[Set[DispatchKey]] = None
     ) -> Tuple[
         "NativeFunction", Dict[DispatchKey, Dict["OperatorName", "BackendMetadata"]]
     ]:
@@ -712,6 +717,8 @@ class NativeFunction:
                     num_dispatch_keys += 1
 
                     if ignore_keys and dispatch_key in ignore_keys:
+                        continue
+                    if whitelist_keys and (dispatch_key not in whitelist_keys):
                         continue
                     assert dispatch_key in dispatch_keys, (
                         f"Dispatch key {dispatch_key} of kernel {v} "
@@ -921,6 +928,7 @@ class NativeFunction:
                 has_composite_explicit_autograd_kernel=has_composite_explicit_autograd_kernel,
                 has_composite_explicit_autograd_non_functional_kernel=has_composite_explicit_autograd_non_functional_kernel,
                 tags=tags,
+                num_dispatch_keys=num_dispatch_keys,
                 namespace=namespace,
             ),
             backend_metadata,
@@ -1076,6 +1084,7 @@ class NativeFunctionsGroup:
     inplace: Optional[NativeFunction]
     mutable: Optional[NativeFunction]
     out: NativeFunction
+    num_dispatch_keys: int
 
     @property
     def structured(self) -> bool:
@@ -1174,6 +1183,7 @@ class NativeFunctionsGroup:
         inplace = d.pop(SchemaKind.inplace, None)
         mutable = d.pop(SchemaKind.mutable, None)
         out = d.pop(SchemaKind.out, None)
+        num_dispatcy_keys = functional.num_dispatch_keys
         assert not d
         assert functional is not None
         # There are a few operators which only have functional/inplace variants;
@@ -1186,6 +1196,7 @@ class NativeFunctionsGroup:
             inplace=inplace,
             mutable=mutable,
             out=out,
+            num_dispatch_keys=num_dispatcy_keys
         )
 
 

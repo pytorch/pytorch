@@ -360,6 +360,7 @@ def generate_function(
             # Every generated NativeFunction gets a "generated" tag, so it's easy to tell
             # which NativeFunction objects did not come directly from native_functions.yaml.
             tags=tags,
+            num_dispatch_keys=f.num_dispatch_keys,
             namespace=f.namespace,
         ),
         backend_metadata,
@@ -381,6 +382,7 @@ def add_generated_native_functions(
     # The main code for generating new NativeFunctions
     # First we group of NativeFunctions by schema kind,
     # then we detect which ones are missing and generate them.
+    # breakpoint()
     pre_grouped_native_functions = pre_group_native_functions(rs)
     for d in pre_grouped_native_functions.values():
         has_functional = SchemaKind.functional in d

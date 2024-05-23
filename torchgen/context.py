@@ -106,12 +106,12 @@ def method_with_nested_native_function(
 # Convenience decorator for functions that explicitly take in a BackendIndex,
 # instead of indirectly taking one in as a closure
 def with_native_function_and_index(
-    func: Callable[[F, BackendIndex], T]
-) -> Callable[[F, BackendIndex], T]:
+    func: Callable[[F, BackendIndex, bool], T]
+) -> Callable[[F, BackendIndex, bool], T]:
     @functools.wraps(func)
-    def wrapper(f: F, backend_index: BackendIndex) -> T:
+    def wrapper(f: F, backend_index: BackendIndex, strip_default: bool = False) -> T:
         with native_function_manager(f):
-            return func(f, backend_index)
+            return func(f, backend_index, strip_default)
 
     return wrapper
 

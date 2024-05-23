@@ -10,18 +10,7 @@
 #include <cstdlib>
 #include <cstring>
 
-#ifdef HAVE_ZVECTOR_CPU_DEFINITION
-#include <sys/auxv.h>
-#endif
-
 namespace at::native {
-
-#ifdef HAVE_ZVECTOR_CPU_DEFINITION
-static inline bool cpu_has_vxe()
-{
-  return (getauxval(AT_HWCAP) & HWCAP_S390_VXE);
-}
-#endif
 
 static CPUCapability compute_cpu_capability() {
   auto envar = std::getenv("ATEN_CPU_CAPABILITY");
@@ -71,16 +60,10 @@ static CPUCapability compute_cpu_capability() {
 #endif
   }
 #endif
-
-#ifdef HAVE_ZVECTOR_CPU_DEFINITION
-  // vxe is needed for fp32 vector instructions
-  if (cpu_has_vxe()) {
-    return CPUCapability::ZVECTOR;
-  }
-#endif
-
 #ifdef HAVE_VSX_CPU_DEFINITION
   return CPUCapability::VSX;
+#elif HAVE_ZVECTOR_CPU_DEFINITION
+  return CPUCapability::ZVECTOR;
 #else
   return CPUCapability::DEFAULT;
 #endif
@@ -146,6 +129,12 @@ void* DispatchStubImpl::get_call_ptr(
       TORCH_INTERNAL_ASSERT(mps_dispatch_ptr, "DispatchStub: missing MPS kernel");
       return mps_dispatch_ptr;
 #endif
+
+// #if defined(USE_XPU)
+    case DeviceType::XPU:
+      TORCH_INTERNAL_ASSERT(xpu_dispatch_ptr, "DispatchStub: missing XPU kernel");
+      return xpu_dispatch_ptr;
+// #endif
 
     case DeviceType::PrivateUse1:
       TORCH_INTERNAL_ASSERT(privateuse1_dispatch_ptr, "DispatchStub: missing PrivateUse1 kernel");

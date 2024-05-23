@@ -204,7 +204,7 @@ class DispatcherSignature:
     def name(self) -> str:
         return self.prefix + dispatcher.name(self.func)
 
-    def decl(self, name: Optional[str] = None) -> str:
+    def decl(self, name: Optional[str] = None, strip_default: bool = False) -> str:
         args_str = ", ".join(a.decl() for a in self.arguments())
         if name is None:
             name = self.name()
@@ -255,8 +255,8 @@ class NativeSignature:
     def name(self) -> str:
         return self.prefix + native.name(self.func)
 
-    def decl(self, name: Optional[str] = None) -> str:
-        args_str = ", ".join(a.decl() for a in self.arguments())
+    def decl(self, name: Optional[str] = None, strip_default: bool = False) -> str:
+        args_str = ", ".join(a.decl(strip_default=strip_default) for a in self.arguments())
         if name is None:
             name = self.name()
         return f"{native.returns_type(self.func.returns, symint=self.symint).cpp_type()} {name}({args_str})"

@@ -36,6 +36,7 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     ops,
     skipMeta,
+    _serialize_sample,
 )
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
@@ -296,6 +297,7 @@ class TestCommon(TestCase):
         samples = op.reference_inputs(device, dtype)
 
         for sample in samples:
+            print("Sample:", _serialize_sample(sample))
             cpu_sample = sample.transform(to_cpu)
             cuda_results = op(sample.input, *sample.args, **sample.kwargs)
             cpu_results = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
@@ -811,10 +813,13 @@ class TestCommon(TestCase):
                 out = _apply_out_transform(transform, expected)
                 original_strides = _extract_strides(out)
                 original_ptrs = _extract_data_ptrs(out)
+                print("original_strides", original_strides, "out.sizes():", out.size(), "out:", out)
+
 
                 op_out(out=out)
                 final_strides = _extract_strides(out)
                 final_ptrs = _extract_data_ptrs(out)
+                print("final_strides:", final_strides)
 
                 self.assertEqual(expected, out)
 
@@ -855,6 +860,7 @@ class TestCommon(TestCase):
                 with self.assertWarnsRegex(
                     UserWarning, "An output with one or more elements", msg=msg_fail
                 ):
+                    print("before case zero running")
                     op_out(out=out)
 
     # Validates ops implement the correct out= behavior
@@ -949,6 +955,8 @@ class TestCommon(TestCase):
                         "Strides are not the same! "
                         f"Original strides were {original_strides} and strides are now {final_strides}"
                     )
+                    print("original_strides:", original_strides)
+                    print("final_strides:", final_strides)
                     self.assertEqual(original_strides, final_strides, msg=stride_msg)
                     self.assertEqual(original_ptrs, final_ptrs)
 

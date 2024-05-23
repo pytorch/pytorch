@@ -48,7 +48,7 @@ add_library(unbox_lib STATIC
         ${TEST_ROOT}/custom_ops.cpp
         )
 target_include_directories(unbox_lib PUBLIC ${TEST_ROOT} ${ATen_CPU_INCLUDE})
-target_link_libraries(unbox_lib PUBLIC torch_cpu)
+target_link_libraries(unbox_lib PUBLIC torch_cpu torch_xpu)
 target_compile_definitions(unbox_lib PUBLIC USE_ATEN_LIB)
 
 add_executable(test_edge_op_registration
