@@ -34,7 +34,7 @@ TEST(Run, Initialization) {
   ASSERT_EQ(r.time(), time);
 }
 
-TEST(Run, lt) {
+TEST(Run, gt) {
   int job_id1 = 1;
   int job_id2 = 2;
   auto time1 = std::chrono::steady_clock::now();
