@@ -3,8 +3,14 @@ import contextlib
 from typing import Callable, Union
 
 import torch
+from torch.cuda.graphs import _graph_no_gc
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
+from torch._higher_order_ops.cudagraph_conditional_nodes import (
+    ControlFlowOpWarmupDispatchMode,
+    CUDAGraphCaptureControlFlowOpDispatchMode,
+    while_loop_node,
+)
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
@@ -214,6 +220,31 @@ def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
         ), "body_fn should return the same number of elements as carried_inputs"
         carried_vals = out
     return carried_vals
+
+
+# WAR for https://github.com/pytorch/pytorch/issues/140322
+@while_loop_op.py_impl(CUDAGraphCaptureControlFlowOpDispatchMode)
+def cond_op_cudagraph(mode, cond_fn, body_fn, carried_inputs, additional_inputs):
+    assert torch.cuda.is_available() and torch.cuda.is_current_stream_capturing()
+    # Re-enter this mode because addition torch.cond() and
+    # torch.while_loop() calls may be nested inside cond_fn or body_fn
+    with mode:
+        return while_loop_node(
+            cond_fn, body_fn, carried_inputs, additional_inputs
+        )
+
+
+# WAR for https://github.com/pytorch/pytorch/issues/140322
+@while_loop_op.py_impl(ControlFlowOpWarmupDispatchMode)
+def while_loop_warmup(mode, cond_fn, body_fn, carried_inputs, additional_inputs):
+    with _graph_no_gc(torch.cuda.CUDAGraph(),
+                      pool=None,
+                      stream=mode.capture_stream,
+                      capture_error_mode="relaxed"):
+        while_loop_node(cond_fn, body_fn, carried_inputs, additional_inputs)
+    # Since ControlFlowOpWarmupDispatchMode has been popped, this call
+    # will fall back to while_loop_dense
+    return while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs)
 
 
 while_loop_op.py_impl(DispatchKey.Autograd)(
