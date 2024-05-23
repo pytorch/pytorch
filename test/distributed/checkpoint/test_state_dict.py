@@ -548,13 +548,32 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
     @with_comms
     @skip_if_lt_x_gpu(1)
-    def test_activation_ckpt_fqns(self) -> None:
+    def test_activation_ckpt_fqns_ddp(self) -> None:
         """Tests that activation checkpointing prefixes are removed from module names"""
         model = CompositeParamModel(device=torch.device("cuda"))
         original_keys = get_model_state_dict(model).keys()
 
         apply_activation_checkpointing(model)
         model = DDP(model)
+        new_keys = get_model_state_dict(model).keys()
+
+        self.assertEqual(original_keys, new_keys)
+
+    @with_comms
+    @skip_if_lt_x_gpu(1)
+    def test_activation_ckpt_fqns_fsdp1(self) -> None:
+        self.run_subtests(
+            {"use_orig_params": [True, False]},
+            self._test_activation_ckpt_fqns_fsdp1,
+        )
+
+    def _test_activation_ckpt_fqns_fsdp1(self, use_orig_params: bool) -> None:
+        """Tests that activation checkpointing prefixes are removed from module names"""
+        model = CompositeParamModel(device=torch.device("cuda"))
+        original_keys = get_model_state_dict(model).keys()
+
+        apply_activation_checkpointing(model)
+        model = FSDP(model, use_orig_params=use_orig_params)
         new_keys = get_model_state_dict(model).keys()
 
         self.assertEqual(original_keys, new_keys)
