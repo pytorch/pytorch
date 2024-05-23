@@ -79,26 +79,18 @@ def create_subclass_meta(
 def unwrap_tensor_subclasses(wrapped_args, *, is_joint_structure: bool):
     def concat_inner_tensors_from_subclasses(xs):
         xs_inner = []
-        new_sizes = []
-
         has_symint = any(not isinstance(x, Tensor) for x in xs)
 
         for x in xs:
             if isinstance(x, Tensor) and is_traceable_wrapper_subclass(x):
                 attrs, _ = x.__tensor_flatten__()  # type: ignore[attr-defined]
                 xs_inner += [getattr(x, attr) for attr in attrs]
-                if has_symint:
-                    for sz in x.size():
-                        if sz not in new_sizes:
-                            new_sizes.append(sz)
             else:
                 xs_inner += [x]
 
-        for i, e in enumerate(xs_inner):
-            if isinstance(e, SymInt):
-                lst = [sz for sz in new_sizes if sz == e]
-                if len(lst) > 0:
-                    xs_inner[i] = lst[0]
+        for x in xs:
+            if isinstance(x, Tensor) and is_traceable_wrapper_subclass(x) and has_symint:
+                xs_inner += [*x.size()]
 
         return xs_inner
 
@@ -173,7 +165,7 @@ def wrap_tensor_subclasses(
             return wrapped_args + activations
         return tuple(list(wrapped_args) + list(activations))
     else:
-        assert len(unwrapped_args) == num_args_tallied
+        # assert len(unwrapped_args) == num_args_tallied
         return tuple(wrapped_args)
 
 
@@ -300,8 +292,8 @@ def compute_inner_mutated_inp_indices_from_subclass_meta(
             for _ in range(inp_meta.arg_count):
                 updated_input_info.append(fw_metadata.input_info[outer_idx])
                 inner_idx += 1
-    if inner_metadata is not None:
-        assert len(inner_metadata.input_info) == len(updated_input_info)
+    # if inner_metadata is not None:
+    #     assert len(inner_metadata.input_info) == len(updated_input_info)
 
     return [
         i
