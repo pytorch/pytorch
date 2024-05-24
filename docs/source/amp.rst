@@ -19,7 +19,7 @@ are much faster in ``lower_precision_fp``. Other ops, like reductions, often req
 range of ``float32``.  Mixed precision tries to match each op to its appropriate datatype.
 
 Ordinarily, "automatic mixed precision training" with datatype of ``torch.float16`` uses :class:`torch.autocast` and
-:class:`torch.cpu.amp.GradScaler` or :class:`torch.cuda.amp.GradScaler` together, as shown in the :ref:`CUDA Automatic Mixed Precision examples<amp-examples>`
+:class:`torch.amp.GradScaler` together, as shown in the :ref:`CUDA Automatic Mixed Precision examples<amp-examples>`
 and `CUDA Automatic Mixed Precision recipe <https://pytorch.org/tutorials/recipes/recipes/amp_recipe.html>`_.
 However, :class:`torch.autocast` and :class:`torch.GradScaler` are modular, and may be used separately if desired.
 As shown in the CPU example section of :class:`torch.autocast`, "automatic mixed precision training/inference" on CPU with
