@@ -905,12 +905,17 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
   // If our backend doesn't support splitting, this is a no-op for
   // ranks not in the new subgroup (and ranks that would be in it will
   // just use a new communicator rather than split).
+
+  // ncclCommCreateFromRanks() does not do anything for ranks that are
+  // not assigned to the new communicator - so don't do anything
+#ifndef NCCL_HAS_COMM_CREATE_FROM_RANKS
 #ifdef NCCL_HAS_COMM_SPLIT
   const auto key = getKeyFromDevice(device);
   LOG(INFO) << logPrefix() << "Performing nocolor split on backend device "
             << device << ", key " << key << ", i am " << this;
   auto comm = getNCCLComm(key, device, OpType::ALLREDUCE);
   NCCLComm::split(comm.get(), NCCL_SPLIT_NOCOLOR, rank_, options_->config);
+#endif
 #endif
 }
 
@@ -2033,7 +2038,25 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   // Get the device index
   auto deviceIndex = device.index();
   gpuGuard.set_index(deviceIndex);
-#ifdef NCCL_HAS_COMM_SPLIT
+#if defined(NCCL_HAS_COMM_CREATE_FROM_RANKS)
+  if (options_->split_from) {
+    std::vector<uint64_t>& v = options_->global_ranks_in_group;
+    TORCH_CHECK(
+        std::find(v.begin(), v.end(), rank) != v.end(),
+        "Current rank must be in list of ranks when splitting");
+    // Find a valid, healthy communicator to split from if possible.
+    std::lock_guard<std::mutex> lock(options_->split_from->mutex_);
+    auto& other_comms = options_->split_from->devNCCLCommMap_;
+    auto dit = other_comms.find(deviceKey);
+    if (dit != other_comms.end()) {
+      auto& parentComm = dit->second;
+      if (parentComm != nullptr && !parentComm->isAborted()) {
+        ncclComm = NCCLComm::split(
+            parentComm.get(), options_->global_ranks_in_group, options_->config);
+      }
+    }
+  }
+#elif defined(NCCL_HAS_COMM_SPLIT)
   if (options_->split_from) {
     TORCH_CHECK(
         options_->split_color != 0,
@@ -2052,7 +2075,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   }
 #endif
 
-  // To simplify conditioonal nesting, just create the ncclComms[i]
+  // To simplify conditional nesting, just create the ncclComms[i]
   // entry if it hasn't been yet rather than untangling the
   // conditions that might have resulted in a split above.
   if (!ncclComm) {

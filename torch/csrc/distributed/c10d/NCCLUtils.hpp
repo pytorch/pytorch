@@ -24,6 +24,11 @@
 #define NCCL_HAS_COMM_SPLIT
 #endif
 
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
+    (NCCL_MINOR >= 21) && defined (IS_NCCLX)
+#define NCCL_HAS_COMM_CREATE_FROM_RANKS
+#endif
+
 // ncclGetLastError() is enabled only for NCCL versions 2.13+
 // ncclRemoteError only exists in NCCL versions 2.13+
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
@@ -286,7 +291,30 @@ class NCCLComm {
   }
 #endif
 
-#ifdef NCCL_HAS_COMM_SPLIT
+
+
+#if defined(NCCL_HAS_COMM_CREATE_FROM_RANKS)
+  static std::shared_ptr<NCCLComm> split(
+      NCCLComm* source,
+      std::vector<uint64_t> &ranks_ull,
+      ncclConfig_t& config) {
+    std::vector<int> ranks(ranks_ull.begin(), ranks_ull.end());
+    auto comm = std::make_shared<NCCLComm>();
+    C10D_NCCL_CHECK(
+        ncclCommCreateFromRanks(
+            source->ncclComm_,
+            ranks_ull.size(),
+            &ranks[0],
+            &(comm->ncclComm_),
+            &config),
+        c10::nullopt);
+    // We are using ncclCommSplitCounter_ for either ncclCommCreateFromRanks() or
+    // ncclCommSplit()
+    ++source->ncclCommSplitCounter_;
+    ncclCommUserRank(comm->ncclComm_, &comm->rank_);
+    return comm;
+  }
+#elif defined(NCCL_HAS_COMM_SPLIT)
   static std::shared_ptr<NCCLComm> split(
       NCCLComm* source,
       int color_id,
@@ -298,7 +326,7 @@ class NCCLComm {
             source->ncclComm_, color_id, rank, &(comm->ncclComm_), &config),
         c10::nullopt);
     ++source->ncclCommSplitCounter_;
-    comm->rank_ = rank;
+    ncclCommUserRank(comm->ncclComm_, &comm->rank_);
     return comm;
   }
 #endif
