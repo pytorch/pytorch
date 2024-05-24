@@ -159,7 +159,11 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             # TODO: this currently causes more cache misses than necessary
             # with dynamic shapes, because this is before we add
             # symints to tensor metadata. Improve this later.
-            self.example_input_metadata = [extract_tensor_metadata(t) for t in example_inputs if isinstance(t, torch.Tensor)]
+            self.example_input_metadata = [
+                extract_tensor_metadata(t)
+                for t in example_inputs
+                if isinstance(t, torch.Tensor)
+            ]
             super().__init__(gm, [], {})
         except BypassFxGraphCache as e:
             # Sometimes inductor configs are unpickleable and can fail
@@ -211,17 +215,20 @@ def autograd_cache_key(
 
 
 @dataclass
-class CompiledForward:
-    """
-    Cacheable entry for a forward function
-    """
-
-    fw_key: str  # FXGraphCache hash key
+class FXGraphCacheLoadable:
+    fx_graph_cache_key: str
 
     def load(self, example_inputs) -> CompiledFxGraph:
-        # TODO: do we save the entire CompiledFXGraph or just the key to FXGraphCache?
-        result = FxGraphCache._lookup_graph(self.fw_key, example_inputs, True, False)
-
+        # [Note: AOTAutogradCache and FXGraphCache Guard interactions]
+        # FXGraphCache serializes guards that are needed in the shape_env based on the symint inputs to the graph.
+        # he invariant that AOTAutograd uses here is that the sources for symints given to it by dynamo are exactly
+        # the same as the ones it passes to inductor, for both the forward and backward passes.
+        # (This does not mean that the tensor values passed in are the same: only that their symints are).
+        # That is, AOTAutograd and Inductor never create new guards based on symints with different sources
+        # than those passed to it by inductor.
+        result = FxGraphCache._lookup_graph(
+            self.fx_graph_cache_key, example_inputs, True, False
+        )
         if result is None:
             raise BypassAOTAutogradCache("Failed to load from FXGraphCache")
         result._boxed_call = True
@@ -229,24 +236,23 @@ class CompiledForward:
 
 
 @dataclass
-class CompiledBackward:
+class CompiledForward(FXGraphCacheLoadable):
     """
     Cacheable entry for a forward function
     """
 
-    bw_key: str  # FXGraphCache hash key
+    pass
+
+
+@dataclass
+class CompiledBackward(FXGraphCacheLoadable):
+    """
+    Cacheable entry for a forward function
+    """
 
     # Used by AOTDispatchAutograd.post_compile
     backward_state_indices: List[int]
     num_symints_saved_for_bw_: int
-
-    def load(self, example_inputs: List[torch.Tensor]):
-        # TODO: do we save the entire CompiledFXGraph or just the key to FXGraphCache?
-        result = FxGraphCache._lookup_graph(self.bw_key, example_inputs, True, False)
-        if result is None:
-            raise BypassAOTAutogradCache("Failed to load from FXGraphCache")
-        result._boxed_call = True
-        return result
 
 
 @dataclass

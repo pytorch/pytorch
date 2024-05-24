@@ -162,7 +162,6 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         return (result, fx_graph, example_inputs)
 
     def gen_cache_key(self, f, config, inputs=None):
-
         if inputs is None:
             inputs = [torch.ones(3)]
         _, fx_g, example_inputs = self._get_dynamo_output(f, *inputs)
