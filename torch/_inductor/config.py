@@ -864,9 +864,6 @@ class trace:
     # to workaround the above failure.
     dot_graph_shape = os.environ.get("INDUCTOR_DOT_GRAPH_SHAPE_SVG", None)
 
-    # Store cProfile (see snakeviz to view)
-    compile_profile = False
-
     # Upload the .tar.gz file
     # Needs to be overriden based on specific environment needs
     upload_tar: Optional[Callable[[str], None]] = None
