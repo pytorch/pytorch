@@ -158,7 +158,9 @@ class ForeachKernel(Kernel):
         _, _, signature, _ = self.args.python_argdefs()
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=size_dtype),
-            "device": DeviceProperties.create(V.graph.scheduler.current_device),
+            "device": DeviceProperties.create(
+                V.graph.scheduler.get_current_device_or_throw()
+            ),
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
@@ -230,20 +232,19 @@ class ForeachKernel(Kernel):
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
                 call_args[i] = call_args[i] + ".item()"
+        current_device = V.graph.scheduler.get_current_device_or_throw()
         if V.graph.cpp_wrapper:
             V.graph.wrapper_code.generate_kernel_call(
                 name,
                 call_args,
-                device_index=V.graph.scheduler.current_device.index,
+                device_index=current_device.index,
                 grid=self.grid(),
                 arg_types=arg_types,
             )
         else:
             # TODO: refactor generate_kernel_call
             call_args_str = ", ".join(call_args)
-            stream_name = code.write_get_raw_stream(
-                V.graph.scheduler.current_device.index
-            )
+            stream_name = code.write_get_raw_stream(current_device.index)
             code.writeline(
                 f"{name}.run({call_args_str}, grid=({self.grid()}), stream={stream_name})"
             )
