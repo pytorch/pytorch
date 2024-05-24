@@ -184,8 +184,7 @@ int FunctionScheduler::scheduleJob(
   TORCH_CHECK(interval.count() >= 0, "Job interval must be positive.");
   TORCH_CHECK(
       run_limit > 0 || run_limit == RUN_FOREVER,
-      "Job run limit must be greater than 0 or " + std::to_string(RUN_FOREVER) +
-          ".");
+      "Job run limit must be greater than 0 or ", RUN_FOREVER, ".");
 
   auto duration =
       std::chrono::duration_cast<std::chrono::microseconds>(interval);
