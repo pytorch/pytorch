@@ -253,9 +253,10 @@ class BaseSchedulerNode:
         self.read_writes = rw
         self.unmet_dependencies = self.read_writes.reads
         self.prune_deps()
+
         # read_and_write_deps_with_hint are a summary of read_writes used by
         # score_fusion_memory()
-        def dep_size_hint(dep):
+        def dep_size_hint(dep: Dep) -> int:
             try:
                 if dep.has_unbacked_symbols():
                     return 0
@@ -265,6 +266,7 @@ class BaseSchedulerNode:
                 # create a StarDep that doesn't exist in the graph and calling
                 # `has_unbacked_symbols()` throws an error.
                 return 0
+
         self.read_and_write_deps_with_hint = {
             (dep, hint)
             for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes)
