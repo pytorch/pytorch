@@ -22,47 +22,201 @@ static at::native::mps::MetalShaderLibrary lib(R"METAL_QUANTIZED(
 #include <metal_stdlib>
 using namespace metal;
 
-// A is sizes.x x sizes.y
-// B.T is sizes.z x sizes.y
-// C is sizes.x x sizes.z
+template <typename T> struct Vec4Type {};
+
+template <> struct Vec4Type<float> {
+  using type = float4;
+};
+
+template <> struct Vec4Type<half> {
+  using type = half4;
+};
+
+#if __METAL_VERSION__ >= 310
+template <> struct Vec4Type<bfloat> {
+  using type = bfloat4;
+};
+#endif
+
+template <typename T> struct Vec2Type {};
+
+template <> struct Vec2Type<float> {
+  using type = float2;
+};
+
+template <> struct Vec2Type<half> {
+  using type = half2;
+};
+
+#if __METAL_VERSION__ >= 310
+template <> struct Vec2Type<bfloat> {
+  using type = bfloat2;
+};
+#endif
+
 
 template<typename T, unsigned groupSize>
-kernel void int4pack_mm(
+kernel void int4pack_mm_vec(
     constant T                 * A              [[buffer(0)]],
     constant uchar             * B              [[buffer(1)]],
     constant T                 * scalesAndZeros [[buffer(2)]],
     device   T                 * outputData     [[buffer(3)]],
-    constant uint3             & sizes          [[buffer(4)]],
-    uint2                        thread_index   [[thread_position_in_grid]]) {
-    const uint lda = sizes.y;
-    const uint ldc = sizes.z;
-    const uint m = thread_index.y; // 0..sizes.x-1
-    const uint n = thread_index.x; // 0..sizes.z-1
-    const uint nb = n / 32;
-    const uint ldb = min(32U,  sizes.z - nb * 32);
-    const uint32_t k_block = (sizes.y + groupSize - 1) / groupSize;
-    constant T *A_ptr = A + m * lda;
-    constant uchar *B_ptr = B + (nb * 16 * sizes.y);
+    constant uint3             & sizes          [[buffer(4)]], // M, K, N
+    uint2 group_index [[threadgroup_position_in_grid]],
+    uint2 threadgroup_index [[thread_position_in_threadgroup]]) {
 
-    float rc = 0.0;
-    uint k = 0;
+    const uint K = sizes.y;
+    const uint N = sizes.z;
+    const uint nb = group_index.x; // 0..N/32-1
+    const uint n2 = 16 * nb + threadgroup_index.x; // 0..N/2-1
+    const uint ldb = min(32U,  N - nb * 32);
+    const uint32_t k_block = (K + groupSize - 1) / groupSize;
+
+    using vec2T = typename Vec2Type<T>::type;
+    using vec4T = typename Vec4Type<T>::type;
+
+    constant vec4T *A_ptr = reinterpret_cast<constant vec4T *>(A);
+    constant uchar *B_ptr = B + (nb * 16 * K);
+
+    float2 rc = 0.0;
+    uint k = threadgroup_index.y * 4;
     for (uint32_t kb = 0; kb < k_block ; kb ++) {
-      const T scale = scalesAndZeros[(kb * ldc + n) * 2 + 0];
-      const T zero = scalesAndZeros[(kb * ldc + n) * 2 + 1] - scale * T(8);
-      for(uint idx = 0; idx < groupSize && k < sizes.y; idx++, k++) {
-        const auto a_val = float(A_ptr[k]);
-        uchar b_val = B_ptr[(k * ldb + (n % 32))/2];
-        b_val = (n & 1) == 0 ? b_val & 0x0f : (b_val >> 4);
-        rc += a_val * float(scale * T(b_val) + zero);
+      float2 scales, zeros;
+      for (int i = 0; i < 2; ++i) {
+        scales[i] = scalesAndZeros[(kb * N + 2*n2 + i) * 2 + 0];
+        zeros[i] = scalesAndZeros[(kb * N + 2*n2 + i) * 2 + 1] - scales[i] * T(8);
+      }
+
+      for(uint idx = k % groupSize; idx < groupSize && k < K; idx += 16, k += 16) {
+        threadgroup_barrier(mem_flags::mem_none);
+
+        const auto a_vec = float4(A_ptr[k/4]);
+        uchar4 b_byte;
+        for (int i = 0; i < 4; i++) {
+          b_byte[i] = B_ptr[((k + i) * ldb + (2*n2 % 32))/2];
+        }
+
+        float4x2 b_mat;
+
+        for (int i = 0; i < 4; i++) {
+          b_mat[i] = scales * float2(
+            float(b_byte[i] & 0x0f),
+            float(b_byte[i] >> 4)) + zeros;
+        }
+
+        rc += b_mat * a_vec;
       }
     }
-    outputData[m * sizes.z + n] = T(rc);
+
+    threadgroup float2 tgp_memory[16][4];
+    tgp_memory[threadgroup_index.x][threadgroup_index.y] = rc;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (threadgroup_index.y == 0) {
+      for (unsigned i = 1; i < 4; i++) {
+        rc += tgp_memory[threadgroup_index.x][i];
+      }
+      reinterpret_cast<device vec2T*>(outputData)[n2] = vec2T(rc);
+    }
 }
 
 #define INSTANTIATE_INT4MM(DTYPE, GSIZE)                                 \
 template                                                                 \
-[[host_name("int4pack_mm_" #GSIZE "_" #DTYPE)]]                          \
-kernel void int4pack_mm<DTYPE, GSIZE>(                                   \
+[[host_name("int4pack_mm_vec_" #GSIZE "_" #DTYPE)]]                      \
+kernel void int4pack_mm_vec<DTYPE, GSIZE>(                              \
+    constant DTYPE             * A              [[buffer(0)]],           \
+    constant uchar             * B              [[buffer(1)]],           \
+    constant DTYPE             * scalesAndZeros [[buffer(2)]],           \
+    device   DTYPE             * outputData     [[buffer(3)]],           \
+    constant uint3             & sizes          [[buffer(4)]],           \
+    uint2 group_index [[threadgroup_position_in_grid]],                  \
+    uint2 threadgroup_index [[thread_position_in_threadgroup]])
+
+INSTANTIATE_INT4MM(float, 32);
+INSTANTIATE_INT4MM(half, 32);
+INSTANTIATE_INT4MM(float, 64);
+INSTANTIATE_INT4MM(half, 64);
+INSTANTIATE_INT4MM(float, 128);
+INSTANTIATE_INT4MM(half, 128);
+INSTANTIATE_INT4MM(float, 256);
+INSTANTIATE_INT4MM(half, 256);
+#if __METAL_VERSION__ >= 310
+INSTANTIATE_INT4MM(bfloat, 32);
+INSTANTIATE_INT4MM(bfloat, 64);
+INSTANTIATE_INT4MM(bfloat, 128);
+INSTANTIATE_INT4MM(bfloat, 256);
+#endif
+
+
+template<typename T, unsigned groupSize>
+kernel void int4pack_mm_mat(
+    constant T                 * A              [[buffer(0)]],
+    constant uchar             * B              [[buffer(1)]],
+    constant T                 * scalesAndZeros [[buffer(2)]],
+    device   T                 * outputData     [[buffer(3)]],
+    constant uint3             & sizes          [[buffer(4)]], // M, K, N
+    uint2                        thread_index   [[thread_position_in_grid]]) {
+
+    const uint M = sizes.x;
+    const uint K = sizes.y;
+    const uint N = sizes.z;
+    const uint m = thread_index.y; // 0..M/4-1
+    const uint n = thread_index.x; // 0..N/4-1
+    const uint nb = n / 8;
+    const uint ldb = min(32U,  N - nb * 32);
+    const uint32_t k_block = (K + groupSize - 1) / groupSize;
+
+    using vecT = typename Vec4Type<T>::type;
+    constant vecT *A_ptr = reinterpret_cast<constant vecT *>(A + m * 4 * K);
+    constant uchar *B_ptr = B + (nb * 16 * K);
+
+    float4x4 rc;
+    for(int j = 0; j < 4; ++j) {
+      rc[j] = float4(0.0);
+    }
+    uint k = 0;
+    for (uint32_t kb = 0; kb < k_block ; kb ++) {
+      float4 scales, zeros;
+      for (int i = 0; i < 4; ++i) {
+        scales[i] = scalesAndZeros[(kb * N + 4 * n + i) * 2 + 0];
+        zeros[i] = scalesAndZeros[(kb * N + 4 * n + i) * 2 + 1] - scales[i] * T(8);
+      }
+
+      for(uint idx = 0; idx < groupSize && k < K; idx += 4, k += 4) {
+        float4x4 a_mat;
+        if (M % 4 == 0) {
+          for(int j = 0; j < 4; ++j) {
+            a_mat[j] = float4(A_ptr[k/4 + j * K / 4]);
+          }
+        } else {
+          for(int j = 0; j < 4; ++j) {
+            a_mat[j] = j < M - m ? float4(A_ptr[k/4 + j * K / 4]) : float4(0.0);
+          }
+        }
+
+        float4x4 t_b_mat;
+        for(int j = 0; j < 4; ++j) {
+          uchar b_val0 = B_ptr[((k + j) * ldb + ((4 * n) % 32))/2];
+          uchar b_val1 = B_ptr[((k + j) * ldb + ((4 * n) % 32))/2 + 1];
+
+          t_b_mat[j] = scales * float4(
+            float(b_val0 & 0x0f),
+            float(b_val0 >> 4),
+            float(b_val1 & 0x0f),
+            float(b_val1 >> 4)) + zeros;
+        }
+
+        rc += t_b_mat * a_mat;
+      }
+    }
+    for (int i = 0; i < 4; ++i) {
+      reinterpret_cast<device vecT*>(outputData + (4 * m + i) * N)[n] = vecT(rc[i]);
+    }
+}
+
+#define INSTANTIATE_INT4MM(DTYPE, GSIZE)                                 \
+template                                                                 \
+[[host_name("int4pack_mm_mat_" #GSIZE "_" #DTYPE)]]                       \
+kernel void int4pack_mm_mat<DTYPE, GSIZE>(                              \
     constant DTYPE             * A              [[buffer(0)]],           \
     constant uchar             * B              [[buffer(1)]],           \
     constant DTYPE             * scalesAndZeros [[buffer(2)]],           \
@@ -85,25 +239,6 @@ INSTANTIATE_INT4MM(bfloat, 128);
 INSTANTIATE_INT4MM(bfloat, 256);
 #endif
 
-template<typename T>
-struct Vec4Type {};
-
-template<>
-struct Vec4Type<float> {
-  using type = float4;
-};
-
-template<>
-struct Vec4Type<half> {
-  using type = half4;
-};
-
-#if __METAL_VERSION__ >= 310
-template<>
-struct Vec4Type<bfloat> {
-  using type = bfloat4;
-};
-#endif
 
 template <typename T, unsigned blockSize=8>
 kernel void
@@ -204,7 +339,8 @@ Tensor _weight_int4pack_mm_mps(const Tensor& A, const Tensor& B, int64_t qGroupS
       }
 #endif
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      const std::string kernel = fmt::format("int4pack_mm_{}_{}", qGroupSize, scalarToMetalTypeString(A));
+      const std::string kernel = fmt::format(
+          (M == 1) ? "int4pack_mm_vec_{}_{}" : "int4pack_mm_mat_{}_{}", qGroupSize, scalarToMetalTypeString(A));
       id<MTLComputePipelineState> quantizedPSO = lib.getPipelineStateForFunc(kernel);
       const auto maxThreadsPerGroup = static_cast<decltype(M)>([quantizedPSO maxTotalThreadsPerThreadgroup]);
       [computeEncoder setComputePipelineState:quantizedPSO];
@@ -213,8 +349,13 @@ Tensor _weight_int4pack_mm_mps(const Tensor& A, const Tensor& B, int64_t qGroupS
       mtl_setBuffer(computeEncoder, qScaleAndZeros, 2);
       mtl_setBuffer(computeEncoder, C, 3);
       [computeEncoder setBytes:sizes.data() length:sizeof(uint32_t) * sizes.size() atIndex:4];
-      [computeEncoder dispatchThreads:MTLSizeMake(N, M, 1)
-                threadsPerThreadgroup:MTLSizeMake(std::min(maxThreadsPerGroup, M), 1, 1)];
+      if (M == 1) {
+        [computeEncoder dispatchThreads:MTLSizeMake(N / 2, 4, 1) threadsPerThreadgroup:MTLSizeMake(16, 4, 1)];
+      } else {
+        [computeEncoder dispatchThreads:MTLSizeMake(N / 4, (M + 3) / 4, 1)
+                  threadsPerThreadgroup:MTLSizeMake(std::min(maxThreadsPerGroup, M), 1, 1)];
+      }
+
 #if _CAPTURE_KERNEL
       if (getMPSProfiler().isCapturing()) {
         getMPSProfiler().stopCapture(mpsStream);
