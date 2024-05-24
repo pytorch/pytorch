@@ -17,6 +17,7 @@ from typing import (
     Iterable,
     List,
     Optional,
+    Sequence,
     Set,
     Tuple,
     TYPE_CHECKING,
@@ -245,18 +246,6 @@ class IterationRangesRoot(IterationRanges):
             add(self.lookup(divisor, FloorDiv(self.numel, divisor)))
 
         return list(reversed(index_vars)), list(reversed(sizes))
-
-    def ranges_code(self):
-        return self.kernel.iteration_ranges_ranges_code(self)
-
-    def scalar_code(self, value):
-        return self.kernel.iteration_ranges_scalar_code(self, value)
-
-    def get_pid(self):
-        return self.kernel.iteration_ranges_get_pid(self)
-
-    def codegen_header(self, code):
-        return self.kernel.iteration_ranges_codegen_header(self, code)
 
 
 class IterationRangesEntry(IterationRanges):
@@ -519,7 +508,7 @@ class SIMDKernel(Kernel):
 
     @staticmethod
     def _split_iteration_ranges(
-        groups: Iterable[sympy.Expr], lengths: List[List[sympy.Expr]]
+        groups: Iterable[sympy.Expr], lengths: Sequence[Sequence[sympy.Expr]]
     ):
         sv = V.graph.sizevars
         new_ranges: List[List[sympy.Expr]] = [[] for _ in groups]
@@ -587,7 +576,7 @@ class SIMDKernel(Kernel):
 
     @classmethod
     def is_compatible(
-        cls, groups: Iterable[sympy.Expr], lengths: List[List[sympy.Expr]]
+        cls, groups: Iterable[sympy.Expr], lengths: Sequence[Sequence[sympy.Expr]]
     ):
         try:
             cls._split_iteration_ranges(groups, lengths)
@@ -1052,18 +1041,6 @@ class SIMDKernel(Kernel):
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry):
         raise NotImplementedError
 
-    def iteration_ranges_ranges_code(self, entry):
-        raise NotImplementedError
-
-    def iteration_ranges_scalar_code(self, entry, value):
-        raise NotImplementedError
-
-    def iteration_ranges_get_pid(self, entry):
-        raise NotImplementedError
-
-    def iteration_ranges_codegen_header(self, entry, code):
-        raise NotImplementedError
-
 
 class SIMDScheduling(BaseScheduling):
     kernel_type = SIMDKernel  # override in subclass
@@ -1518,6 +1495,7 @@ class SIMDScheduling(BaseScheduling):
                 name = node.get_name()
                 if name not in live_outs:
                     continue
+                assert node.node is not None
                 origin_node = node.node.get_origin_node()
                 if origin_node is not None:
                     counters["inductor"]["intermediate_hooks"] += 1
