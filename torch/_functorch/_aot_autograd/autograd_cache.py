@@ -129,6 +129,12 @@ def check_cacheable(gm: torch.fx.GraphModule):
         raise BypassAOTAutogradCache(
             "Cannot cache a graph with compiled autograd enabled"
         )
+
+    tracing_context = torch._guards.TracingContext.try_get()
+    if tracing_context and tracing_context.fakify_first_call:
+        raise BypassAOTAutogradCache(
+            "Won't cache a graph with fakify_first_call enabled"
+        )
     for node in nodes:
         check_node_safe(node)
 
