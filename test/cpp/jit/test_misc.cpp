@@ -3134,7 +3134,7 @@ TEST_F(Composed, ComposedOp) {
 }
 
 TEST(ConstantPropagation, CustomClassesCanBePropagated) {
-#ifdef USE_PYTORCH_QNNPACK
+#ifdef USE_QNNPACK
   const auto src = R"IR(
     graph():
         %none: NoneType = prim::Constant()
