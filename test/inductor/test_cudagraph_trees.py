@@ -1413,23 +1413,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             node = self.get_manager().current_node
             self.assertEqual(len(list(node.path_live_weakrefs())), 1)
 
-        def test_unstable_ptr(self):
-            import torch
-
-            @torch.compile(mode="reduce-overhead")
-            def foo(m, inp):
-                return m(inp)
-
-            def f():
-                l = []
-                m = torch.nn.Linear(20, 20).cuda()
-                for _ in range(4):
-                    inp = torch.rand([20, 20], device="cuda")
-                    foo(m, inp)
-                    m.weight.data = torch.rand([20, 20], device="cuda")
-
-            self.assertRaises(RuntimeError, f)
-
         @requires_multigpu()
         def test_manager_per_device(self):
             def test():
@@ -1706,28 +1689,143 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             with self.assertRaisesRegex(Exception, "custom error msg"):
                 device = x.untyped_storage()
 
-        @torch._inductor.config.patch("triton.cudagraphs", True)
-        def test_multiple_dispatch_single_graph(self):
-            # Verify that we can record multiple cudagraphs for a single
-            # compiled function
-            torch.set_default_device("cuda")
+        def run_static_input_param_test(self, fn_eager, num_graphs):
+            with torch.device("cuda"):
+                fn_compiled = torch.compile(fn_eager, mode="reduce-overhead")
 
-            @torch.compile(mode="reduce-overhead")
+                def run_iter(param, fn):
+                    fwd_output = fn(torch.ones(2, 2), param)
+                    fwd_output.sum().backward()
+                    grad_output = param.grad.clone().detach()
+                    param.grad = None
+                    return fwd_output, grad_output
+
+                def loop(param):
+                    exp_output, exp_grad = run_iter(param, fn_eager)
+                    for _ in range(5):
+                        compiled_output, compiled_grad = run_iter(param, fn_compiled)
+                        self.assertEqual(exp_output, compiled_output)
+                        self.assertEqual(exp_grad, compiled_grad)
+
+                p1 = torch.nn.Parameter(torch.rand([2, 2]))
+                loop(p1)
+
+                p2 = torch.nn.Parameter(torch.rand([2, 2]))
+                loop(p2)
+
+                # Run p1 again to ensure we reuse the previous recording
+                loop(p1)
+
+                self.assertEqual(self.get_manager().new_graph_id().id, num_graphs)
+
+        def _module_test(self, mod):
+            with torch.device("cuda"):
+
+                def fn(x, mod):
+                    return mod(x)
+
+                fn_compiled = torch.compile(fn, mode="reduce-overhead", fullgraph=True)
+
+                def run_test_iter(mod, fn):
+                    fwd_output = fn(torch.ones(2, 2), mod)
+                    fwd_output.sum().backward()
+                    grad_output = mod.weight.grad.clone().detach()
+                    mod.zero_grad()
+                    return fwd_output, grad_output
+
+                def run_test():
+                    exp_output, exp_grad = run_test_iter(mod, fn)
+                    for _ in range(5):
+                        compiled_output, compiled_grad = run_test_iter(mod, fn_compiled)
+                        self.assertEqual(exp_output, compiled_output)
+                        self.assertEqual(exp_grad, compiled_grad)
+
+                run_test()
+                old = mod.weight.data
+                mod.weight.data = torch.rand_like(mod.weight.data)
+                run_test()
+                # Run original version to verify we reuse the other recording
+                mod.weight.data = old
+                run_test()
+
+                # Fwd + bwd graphs for each version of the function => 4 graphs
+                self.assertEqual(self.get_manager().new_graph_id().id, 4)
+
+        @torch._inductor.config.patch("triton.cudagraphs", True)
+        @torch._dynamo.config.patch("error_on_recompile", True)
+        def test_multi_dispatch_single_compile_param_inputs(self):
+            # Verify that we can record multiple cudagraphs for a single
+            # compiled function with param inputs
             def fn(x, y):
                 return x * y
 
-            p1 = torch.nn.Parameter(torch.ones([2, 2]))
-            p2 = torch.nn.Parameter(torch.zeros([2, 2]))
-            for _ in range(5):
-                res1 = fn(torch.ones(2, 2), p1)
-                res1.sum().backward()
-
-            for _ in range(5):
-                res2 = fn(torch.ones(2, 2), p2)
-                res2.sum().backward()
-
             # Fwd + bwd graphs for each version of the function => 4 graphs
-            self.assertEqual(self.get_manager().new_graph_id().id, 4)
+            self.run_static_input_param_test(fn, 4)
+
+        @torch._inductor.config.patch("triton.cudagraphs", True)
+        @torch._dynamo.config.patch("error_on_recompile", True)
+        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
+        def test_multi_dispatch_single_compile_builtin_module(self):
+            # Verify that we don't recompile when changing the param of a builtin module
+            # and that we record another cudagraph
+            # Note: Linear is a builtin module so we enable that config setting above
+            self._module_test(torch.nn.Linear(2, 3, device="cuda"))
+
+        @torch._inductor.config.patch("triton.cudagraphs", True)
+        @torch._dynamo.config.patch("error_on_recompile", True)
+        def test_multi_dispatch_custom_module(self):
+            # Test that we can correclty dispatch multiple graphs
+            # if params of a custom module change
+            class TestModule(torch.nn.Module):
+                def __init__(self, param) -> None:
+                    super().__init__()
+                    self.weight = param
+
+                def forward(self, x):
+                    return self.weight * x
+
+            self._module_test(
+                TestModule(torch.nn.Parameter(torch.rand([2, 2], device="cuda")))
+            )
+
+        @torch._inductor.config.patch("triton.cudagraphs", True)
+        @torch._dynamo.config.patch("error_on_recompile", True)
+        def test_multi_dispatch_child_node(self):
+            # Test that we can correctly dispatch multiple graphs if a child node
+            # in the tree has stable input pointers change
+            def fn(x, p):
+                # Graph 1
+                y = x * x
+                torch._dynamo.graph_break()
+                # Graph 2
+                return y * p
+
+            # We have 5 graphs here
+            #            Graph 1
+            #       /                \
+            # Graph 2 w/ p1     Graph 2 w/ p2
+            # and then two backward graphs
+            self.run_static_input_param_test(fn, 5)
+
+        @torch._inductor.config.patch("triton.cudagraphs", True)
+        @torch._dynamo.config.patch("error_on_recompile", True)
+        def test_multi_dispatch_parent_node(self):
+            def fn(x, p):
+                # Graph 1
+                y = x * p
+                torch._dynamo.graph_break()
+                # Graph 2
+                return y + x
+
+            # We have 5 graphs here
+            #    Graph 1 w/ p1    Graph 1 w/ pw
+            #          |                |
+            #     Graph 2 (v1)     Graph 2 (v2)
+            # There are two versions of graph 2 because
+            # we re-record due to different memory state after running the
+            # two versions of Graph 1
+            # and then two backward graphs
+            self.run_static_input_param_test(fn, 6)
 
     instantiate_parametrized_tests(CudaGraphTreeTests)
 

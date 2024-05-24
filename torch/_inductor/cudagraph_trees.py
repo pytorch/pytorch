@@ -1538,8 +1538,8 @@ class CUDAGraphNode:
 
     def check_invariants(self, inputs: List[Tensor]) -> bool:
         """
-        Checks if this node can be run. The same pattern of tensor liveness and tensors
-        managed in the cudagraph private pool must remain stable.
+        Checks if this node can be run. The same pattern of tensor liveness, static inputs,
+        and tensors managed in the cudagraph private pool must remain stable.
         """
 
         # previously managed data pointers remain stable
