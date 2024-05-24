@@ -209,7 +209,6 @@ int FunctionScheduler::start() {
     return -1;
 
   std::unique_lock<std::mutex> lock(_mutex);
-  auto now = std::chrono::steady_clock::now();
   for (const auto& entry : _jobs) {
     addRun(lock, entry.first, entry.second);
   }
