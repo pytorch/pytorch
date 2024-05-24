@@ -4384,6 +4384,41 @@ class TestNestedTensorSubclass(TestCase):
         # should be equivalent to the original values
         self.assertEqual(values, output_jagged)
 
+        # success case: truncate to max length as needed
+        trunc_max_length = max_length - 1
+        trunc_padded = torch.ops.aten._jagged_to_padded_dense_forward(
+            values, [offsets], [trunc_max_length], padding_value
+        )
+        self.assertEqual(padded[:, :trunc_max_length, :], trunc_padded)
+
+        # specific to CPU impls
+        if device == "cpu":
+            # error case: multiple offsets on cpu since CPU kernels don't support more now
+            with self.assertRaisesRegex(RuntimeError, "only a single jagged dim is supported"):
+                torch.ops.aten._jagged_to_padded_dense_forward(
+                    values, [offsets, offsets], [max_length, max_length], padding_value)
+
+            with self.assertRaisesRegex(RuntimeError, "only a single jagged dim is supported"):
+                torch.ops.aten._padded_dense_to_jagged_forward(
+                    padded, [offsets, offsets], total_L)
+
+            # error case: > 1D offsets
+            offsets2d = offsets.unsqueeze(-1)
+            with self.assertRaisesRegex(RuntimeError, "expected 1D offsets"):
+                torch.ops.aten._jagged_to_padded_dense_forward(
+                    values, [offsets2d], [max_length], padding_value)
+
+            with self.assertRaisesRegex(RuntimeError, "expected 1D offsets"):
+                torch.ops.aten._padded_dense_to_jagged_forward(
+                    values, [offsets2d], total_L)
+
+            # error case: final offset != total_L
+            offsets_wrong = offsets.clone().detach()
+            offsets_wrong[-1] = total_L + 1
+            with self.assertRaisesRegex(RuntimeError, "final offset should match total_L value"):
+                torch.ops.aten._padded_dense_to_jagged_forward(
+                    values, [offsets_wrong], total_L)
+
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
     @unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
