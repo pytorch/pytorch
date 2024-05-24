@@ -86,21 +86,45 @@ class TestFullyShardState(FSDPTestMultiThread):
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_share_comm_ctx(self):
+        # Check that passing in a non-FSDP-module raises an error
+        model = nn.ModuleList([MLP(8) for _ in range(3)])
+        with self.assertRaisesRegex(ValueError, "Expects list of FSDPModules but got"):
+            share_comm_ctx([model])
+
+        # Check that passing in a list of root FSDP modules works, where the
+        # root FSDP modules have not yet been lazily initialized
         model = nn.ModuleList([MLP(8) for _ in range(3)])
         for mlp in model:
             fully_shard(mlp)
         share_comm_ctx(list(model.children()))
         x = torch.randn((1, 8), device="cuda")
         for mlp in model:
-            x = mlp(x)
+            x = mlp(x)  # run forward to lazy init the comm. context
         fsdp_states = [mlp._get_fsdp_state() for mlp in model]
         comm_ctx = fsdp_states[0]._fsdp_param_group.comm_ctx
         for fsdp_state in fsdp_states[1:]:
             self.assertEqual(comm_ctx, fsdp_state._fsdp_param_group.comm_ctx)
 
+        # Check that passing in a list of all FSDP modules works
         model = nn.ModuleList([MLP(8) for _ in range(3)])
-        with self.assertRaisesRegex(ValueError, "Expects list of FSDPModules but got"):
-            share_comm_ctx([model])
+        for mlp in model:
+            fully_shard(mlp.out_proj)
+            fully_shard(mlp)
+        fsdp_modules = [
+            module for module in model.modules() if isinstance(module, FSDPModule)
+        ]
+        share_comm_ctx(fsdp_modules)
+        x = torch.randn((1, 8), device="cuda")
+        for mlp in model:
+            x = mlp(x)  # run forward to lazy init the comm. context
+        fsdp_states = [
+            module._get_fsdp_state()
+            for module in model.modules()
+            if isinstance(module, FSDPModule)
+        ]
+        comm_ctx = fsdp_states[0]._fsdp_param_group.comm_ctx
+        for fsdp_state in fsdp_states[1:]:
+            self.assertEqual(comm_ctx, fsdp_state._fsdp_param_group.comm_ctx)
 
 
 if __name__ == "__main__":
