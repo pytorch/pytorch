@@ -566,6 +566,19 @@ class FxGraphCachePickler(pickle.Pickler):
         return "\n".join(lines)
 
 
+def get_code_hash(roots):
+    contents: Dict[str, bytes] = {torch.__version__: b""}
+    for lib in pkgutil.iter_modules(roots):
+        spec = lib.module_finder.find_spec(lib.name, None)
+        assert spec is not None
+        module = spec.origin
+        assert module is not None
+        with open(module, "rb") as f:
+            contents[module] = f.read()
+
+    return hashlib.sha256(pickle.dumps(contents)).digest()
+
+
 @functools.lru_cache(None)
 def torch_key():
     """
@@ -573,21 +586,15 @@ def torch_key():
     """
     if not config.is_fbcode():
         inductor_root = os.path.dirname(__file__)
-
-        contents: Dict[str, bytes] = {torch.__version__: b""}
-        for lib in pkgutil.iter_modules([inductor_root]):
-            spec = lib.module_finder.find_spec(lib.name, None)
-            assert spec is not None
-            module = spec.origin
-            assert module is not None
-            with open(module, "rb") as f:
-                contents[module] = f.read()
-
-        return hashlib.sha256(pickle.dumps(contents)).digest()
+        return get_code_hash([inductor_root])
 
     from libfb.py import parutil
 
     return parutil.get_file_contents("torch/src_hash.txt").rstrip()
+
+
+def get_inductor_root():
+    return os.path.dirname(__file__)
 
 
 @dataclasses.dataclass

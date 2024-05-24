@@ -39,7 +39,7 @@ TORCH_API at::Tensor mkldnn_tensor_from_data_ptr(
     int64_t opaque_metadata_size);
 
 // Construct aten MKL-DNN tensor given an ideep tensor
-TORCH_API Tensor new_with_itensor_mkldnn(ideep::tensor&& it, std::optional<ScalarType> dtype, c10::optional<Device> device);
+TORCH_API Tensor new_with_itensor_mkldnn(ideep::tensor&& it, std::optional<ScalarType> dtype, std::optional<Device> device);
 
 // Retrieve `ideep::tensor` from MKL-DNN tensor
 TORCH_API ideep::tensor& itensor_from_mkldnn(const Tensor& mkldnn_tensor);
