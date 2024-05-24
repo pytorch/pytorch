@@ -110,7 +110,9 @@ def make_fake_params_buffers(
     return faked_params_buffers  # type: ignore[return-value]
 
 
-def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes):
+def make_fake_inputs(
+    nn_module, args, kwargs, dynamic_shapes, _is_torch_jit_trace=False
+):
     """
     Given an nn module, example inputs, and constraints, return a new fake mode,
     fake inputs created in that mode whose dynamic shape dimensions are constrained
@@ -127,7 +129,7 @@ def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes):
     #   - [post-tracing] guards.py processes input shape equalities.
 
     constraints = torch.export.dynamic_shapes._process_dynamic_shapes(
-        nn_module, args, kwargs, dynamic_shapes
+        nn_module, args, kwargs, dynamic_shapes, _is_torch_jit_trace=_is_torch_jit_trace
     )
     constraints = constraints or []
     t_constraints: Dict[int, Dict[int, Constraint]] = defaultdict(dict)
@@ -136,17 +138,33 @@ def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes):
         if constraint.shared is not None:
             t_constraints[constraint.shared.t_id][constraint.shared.dim] = constraint
 
-    code = nn_module.forward.__code__
-    co_fields = {
-        "co_name": code.co_name,
-        "co_filename": code.co_filename,
-        "co_firstlineno": code.co_firstlineno,
-    }
-
-    fake_mode = FakeTensorMode(
-        shape_env=ShapeEnv(tracked_fakes=[], co_fields=co_fields),
-        allow_non_fake_inputs=True,
-    )
+    context = torch._guards.TracingContext.try_get()
+    if context is not None:
+        # This occurs when we are exporting within dynamo. There already exists
+        # a toplevel TracingContext with a fake mode, so we do not want to
+        # create another fake mode. In this scenario, we also shouldn't have any
+        # constraints since the toplevel tracing context should handle it.
+        assert (
+            len(constraints) == 0
+        ), "Found constraints when tracing with a toplevel tracing context."
+        fake_mode = context.fake_mode
+    elif not _is_torch_jit_trace:
+        code = nn_module.forward.__code__
+        co_fields = {
+            "co_name": code.co_name,
+            "co_filename": code.co_filename,
+            "co_firstlineno": code.co_firstlineno,
+        }
+        fake_mode = FakeTensorMode(
+            shape_env=ShapeEnv(tracked_fakes=[], co_fields=co_fields),
+            allow_non_fake_inputs=True,
+            export=True,
+        )
+    else:
+        fake_mode = FakeTensorMode(
+            shape_env=ShapeEnv(tracked_fakes=[]),
+            allow_non_fake_inputs=True,
+        )
     if fake_mode.shape_env is None or fake_mode.shape_env.tracked_fakes is None:
         raise ValueError(
             "Detected fake_mode does not have a shape_env with tracked fakes. "
@@ -155,7 +173,11 @@ def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes):
         )
 
     with fake_mode:
-        original_signature = inspect.signature(nn_module.forward)
+        # FIXME(ycao) ScriptMethod doesn't have signature, I am using an empty one to unblock
+        if not _is_torch_jit_trace:
+            original_signature = inspect.signature(nn_module.forward)
+        else:
+            original_signature = None
         sources: Dict[Tuple[int, int], List[Source]] = defaultdict(list)
         fake_args, fake_kwargs = tree_map_with_path(
             lambda kp, val: fakify(fake_mode, kp, val, t_constraints, sources),
@@ -204,6 +226,7 @@ def produce_guards_and_solve_constraints(
     equalities_inputs: EqualityConstraint,
     original_signature: inspect.Signature,
     _disable_forced_specializations: Optional[bool] = False,
+    _is_torch_jit_trace=False,
 ):
     """
     Given a fake mode, sources pairs corresponding to equal dynamic shape dimensions,
@@ -248,9 +271,13 @@ def produce_guards_and_solve_constraints(
     )
     dim_constraints.remove_redundant_dynamic_results()
     forced_specializations = dim_constraints.forced_specializations()
-    msg = dim_constraints.prettify_results(
-        original_signature, constraint_violation_error, forced_specializations
-    )
+    if not _is_torch_jit_trace:
+        msg = dim_constraints.prettify_results(
+            original_signature, constraint_violation_error, forced_specializations
+        )
+    else:
+        # FIXME(ycao): This is a hack to get around missing signature from ScriptMethod
+        msg = "dummy constraint violation message"
     if constraint_violation_error:
         constraint_violation_error.args = (constraint_violation_error.args[0] + msg,)
     elif forced_specializations:
@@ -358,12 +385,7 @@ def _gather_constant_attrs(m: torch.nn.Module) -> ConstantAttrMap:
                     continue
 
                 fqn = ".".join(prefix_atoms + [k])
-                if v in constants:
-                    raise ValueError(
-                        f"Duplicate reference to constant attribute found: '{constants[v]}' and '{fqn}'."
-                    )
-
-                constants[v] = fqn
+                constants.add(v, fqn)
         for k, v in m.named_children():
             inner(v, prefix_atoms + [k], constants)
 
@@ -420,16 +442,18 @@ def _fakify_script_objects(
         return cur_mod, last_attr
 
     try:
-        for obj, fqn in constant_attrs.items():
+        for obj, fqns in constant_attrs.items():
             if isinstance(obj, torch.ScriptObject):
-                cur_mod, attr = _leaf_mod_and_attr(mod, fqn)
-                assert obj is getattr(cur_mod, attr)
                 fake_script_obj = _maybe_fakify_obj(obj)
-                setattr(cur_mod, attr, fake_script_obj)
-                fake_constant_attrs[fake_script_obj] = fqn
-                patched_attr[fqn] = obj
+                for fqn in fqns:
+                    cur_mod, attr = _leaf_mod_and_attr(mod, fqn)
+                    assert obj is getattr(cur_mod, attr)
+                    setattr(cur_mod, attr, fake_script_obj)
+                    fake_constant_attrs.add(fake_script_obj, fqn)
+                    patched_attr[fqn] = obj
             else:
-                fake_constant_attrs[obj] = fqn
+                for fqn in fqns:
+                    fake_constant_attrs.add(obj, fqn)
 
         fake_args, fake_kwargs = pytree.tree_map_only(
             torch.ScriptObject, _maybe_fakify_obj, (args, kwargs)

@@ -1,5 +1,7 @@
 import math
 
+from collections import namedtuple
+
 import torch
 
 from .common import ExprPrinter
@@ -55,6 +57,8 @@ DEVICE_TO_ATEN = {
 
 INDEX_TYPE = "long"
 
+GemmBlocking = namedtuple("GemmBlocking", ["block_m", "block_n", "block_k"])
+
 
 class CppPrinter(ExprPrinter):
     def _print_Integer(self, expr):
@@ -103,16 +107,19 @@ class CppPrinter(ExprPrinter):
 
         if exp == 0.5 or exp == -0.5:
             return f"std::sqrt({base})" if exp == 0.5 else f"1.0/std::sqrt({base})"
-        assert exp.is_integer
-        exp = int(exp)
-        if exp > 0:
-            r = "*".join([self.paren(base)] * exp)
-        elif exp < 0:
-            r = "1.0/" + self.paren("*".join([self.paren(base)] * abs(exp)))
-        else:  # exp == 0
-            r = "1.0"
+        if exp.is_integer:
+            exp = int(exp)
+            if exp > 0:
+                r = "*".join([self.paren(base)] * exp)
+            elif exp < 0:
+                r = "1.0/" + self.paren("*".join([self.paren(base)] * abs(exp)))
+            else:  # exp == 0
+                r = "1.0"
 
-        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+            return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+        else:
+            # TODO: float vs double
+            return f"std::pow({base}, {float(exp)})"
 
     def _print_Rational(self, expr):
         # Uses float constants to perform FP div

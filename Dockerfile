@@ -65,8 +65,9 @@ ARG CUDA_VERSION=12.1
 ARG CUDA_CHANNEL=nvidia
 ARG INSTALL_CHANNEL=pytorch-nightly
 # Automatically set by buildx
-# Note conda needs to be pinned to 23.5.2 see: https://github.com/pytorch/pytorch/issues/106470
-RUN /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -y python=${PYTHON_VERSION} conda=23.5.2
+RUN /opt/conda/bin/conda update -y -n base -c defaults conda
+RUN /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -y python=${PYTHON_VERSION}
+
 ARG TARGETPLATFORM
 
 # On arm64 we can only install wheel packages.

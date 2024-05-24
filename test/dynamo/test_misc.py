@@ -32,6 +32,7 @@ import torch._inductor.test_case
 import torch.onnx.operators
 
 import torch.utils._pytree as pytree
+from torch import Tensor
 from torch._C import FileCheck
 from torch._dynamo import allow_in_graph, bytecode_analysis, bytecode_transformation
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
@@ -146,9 +147,13 @@ class UserDefineSetAttr:
         assert torch.compiler.is_dynamo_compiling() or UserDefineSetAttr.setup
         super().__setattr__(f"pfx_{key}", value)
 
-    def __getattr__(self, key):
+    def __getattr__(self, key, c=1):
         assert torch.compiler.is_dynamo_compiling() or UserDefineSetAttr.setup
-        return self.__dict__[f"pfx_{key}"]
+        # c is added to force a guard on __defaults__ and checks the source for __getattr__
+        if c:
+            return self.__dict__[f"pfx_{key}"]
+        else:
+            return None
 
 
 class MiscTests(torch._inductor.test_case.TestCase):
@@ -860,7 +865,7 @@ def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: 
             return x + y
 
         torch._dynamo.testing.standard_test(
-            self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(1, 10)
+            self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(1, 4)
         )
 
     def test_int_int_comparisons(self):
@@ -903,10 +908,8 @@ def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: 
                 out = 1
             return x + out
 
-        # expect for dynamic: size, index, 6 comparison ops, add
-        torch._dynamo.testing.standard_test(
-            self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(1, 9)
-        )
+        # TODO: Test the guards maybe?
+        torch._dynamo.testing.standard_test(self, fn, 1, expected_ops=1)
 
     def test_int_shape_comparisons(self):
         def fn(x):
@@ -928,10 +931,8 @@ def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: 
                 out = 1
             return x + out
 
-        # expect for dynamic: size, index, 6 comparison ops, add
-        torch._dynamo.testing.standard_test(
-            self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(1, 9)
-        )
+        # TODO: Test the guards maybe?
+        torch._dynamo.testing.standard_test(self, fn, 1, expected_ops=1)
 
     def test_param_shape_binops(self):
         class MyModule(torch.nn.Module):
@@ -1258,13 +1259,11 @@ utils_device.CURRENT_DEVICE == None""".split(
                 y.add_(1.0)
             return y
 
-        # expect extra size node for dynamic
         torch._dynamo.testing.standard_test(
             self,
             fn,
             1,
             expected_ops=20,
-            expected_ops_dynamic=ifdynstaticdefault(20, 21),
         )
 
     def test_empty_list(self):
@@ -1358,6 +1357,21 @@ utils_device.CURRENT_DEVICE == None""".split(
                 return torch.arange(0, y)
 
         self.assertRaises(torch._dynamo.exc.UserError, lambda: f(torch.tensor([3])))
+
+    def test_assert(self):
+        @torch.compile
+        def fn1(x):
+            assert x.shape != x.shape
+
+        with self.assertRaises(AssertionError):
+            a = torch.randn(10)
+            fn1(a)
+
+        def fn2(x):
+            assert x.shape == x.shape
+            return x.abs()
+
+        torch._dynamo.testing.standard_test(self, fn=fn2, nargs=1, expected_ops=1)
 
     def test_config_obj(self):
         class Cfg:
@@ -1654,7 +1668,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         self.assertEqual(opt_fn(v1, v2), correct)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 3)
+        self.assertEqual(cnts.op_count, 4)
 
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", False)
     def test_tensor_item_no_capture(self):
@@ -1734,13 +1748,11 @@ utils_device.CURRENT_DEVICE == None""".split(
                 a += 1
             return a
 
-        # expect 1 more op (size call) for dynamic
         return torch._dynamo.testing.standard_test(
             self,
             fn=fn,
             nargs=1,
             expected_ops=9,
-            expected_ops_dynamic=ifdynstaticdefault(9, 10),
         )
 
     def test_build_tuple_unpack(self):
@@ -4333,7 +4345,7 @@ def fn():
         if torch._dynamo.config.assume_static_by_default:
             self.assertExpectedInline(cnts.op_count, """2""")
         else:
-            self.assertExpectedInline(cnts.op_count, """3""")
+            self.assertExpectedInline(cnts.op_count, """2""")
 
         torch._dynamo.reset()
         cnts = torch._dynamo.testing.CompileCounter()
@@ -4343,7 +4355,7 @@ def fn():
         if torch._dynamo.config.assume_static_by_default:
             self.assertExpectedInline(cnts.op_count, """1""")
         else:
-            self.assertExpectedInline(cnts.op_count, """2""")
+            self.assertExpectedInline(cnts.op_count, """1""")
 
     def test_inline_func_jump_on_tensor_condition(self):
         def f1(input):
@@ -5384,9 +5396,14 @@ def fn():
                 return map(body, xs)
 
         mod = Module()
-        with self.assertRaisesRegex(
-            Unsupported, "Can't inplace modify module params/buffers"
-        ):
+
+        error_message = ""
+        if torch._dynamo.config.inline_inbuilt_nn_modules:
+            error_message = r"HigherOrderOperator: Mutating a variable not in the current scope \(SideEffects\)"
+        else:
+            error_message = "Can't inplace modify module params/buffers"
+
+        with self.assertRaisesRegex(Unsupported, error_message):
             opt_fn = torch._dynamo.optimize("eager", nopython=True)(mod)
             opt_fn(torch.randn(3, 2))
 
@@ -8514,6 +8531,28 @@ def ___make_guard_fn():
 
         f(torch.tensor([2, 3, 4]), torch.randn(9))
 
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_unbacked_auto_functionalize_op(self):
+        @torch.library.custom_op(
+            "mylib::mk_image", mutates_args=("decoder",), device_types=["cpu"]
+        )
+        def mk_image(decoder: Tensor) -> Tensor:
+            return torch.randn(2, 3, 4, 5)
+
+        @torch.library.register_fake("mylib::mk_image")
+        def _(decoder: Tensor) -> Tensor:
+            image_size = [torch.library.get_ctx().new_dynamic_size() for _ in range(4)]
+            return torch.empty(image_size)
+
+        @torch.compile(fullgraph=True)
+        def f(x):
+            return torch.ops.mylib.mk_image.default(x)
+
+        x = torch.zeros(100, dtype=torch.int64)
+        f(x)
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_runtime_assert_replacement(self):
         @torch.compile(backend="aot_eager")
@@ -9610,7 +9649,7 @@ ShapeEnv not equal: field values don't match:
 ShapeEnv not equal: field values don't match:
 
 ==> name_to_node: values don't match.
-  >  Left: {f0, u0, u1}
+  >  Left: {u0, u1, zuf0}
   > Right: {}
 ==> unbacked_symfloat_counter: values don't match.
   >  Left: 1
@@ -9619,7 +9658,7 @@ ShapeEnv not equal: field values don't match:
   >  Left: 2
   > Right: 0
 ==> var_to_range: values don't match.
-  >  Left: {f0: ValueRanges(lower=-oo, upper=oo, is_bool=False), u0: ValueRanges(lower=-9223372036854775808, upper=9223372036854775807, is_bool=False), u1: ValueRanges(lower=0, upper=1, is_bool=False)}
+  >  Left: {u0: ValueRanges(lower=-9223372036854775808, upper=9223372036854775807, is_bool=False), u1: ValueRanges(lower=0, upper=1, is_bool=False), zuf0: ValueRanges(lower=-oo, upper=oo, is_bool=False)}
   > Right: {}
 """,
         )
@@ -10352,6 +10391,7 @@ fn
         c2 = _debug_get_cache_entry_list(fn.__code__)
         self.assertIs(c1[1], c2[0])
 
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
     def test_dynamo_cache_invalidate(self):
         class Mod(torch.nn.Module):
             def __init__(self):
@@ -10654,6 +10694,33 @@ fn
         # Check recompilation
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(res, fn(x, d))
+
+    def test_contains_dunder_dict(self):
+        class UserDefined:
+            def __init__(self):
+                self.a = 3
+                self.b = 5
+
+            def run(self, x):
+                if "a" in self.__dict__:
+                    x = x * self.a
+                if "b" in self.__dict__:
+                    x = x * self.b
+                self.c = 7
+                if "c" in self.__dict__:
+                    x = x * self.c
+                return x * self.__dict__.get("a") * self.__dict__.get("z", 2)
+
+        obj = UserDefined()
+
+        def fn(x):
+            return obj.run(x)
+
+        x = torch.randn(4)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
 
 
 class TestTracer(JitTestCase):

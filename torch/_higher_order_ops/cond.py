@@ -7,7 +7,6 @@ import torch.utils._pytree as pytree
 
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
-from torch._functorch.aot_autograd import AOTConfig, create_joint, from_fun
 from torch._C._functorch import (
     _add_batch_dim,
     get_unwrapped,
@@ -35,6 +34,7 @@ from torch._subclasses.functional_tensor import (
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     make_fx,
+    _temp_remove_pre_dispatch_torch_function_mode,
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
@@ -153,18 +153,18 @@ In order to do this, we need implementations for each of the dispatch keys.
 """
 cond_op = HigherOrderOperator("cond")
 
-dummy_aot_config = AOTConfig(
-    fw_compiler=None,  # type: ignore[arg-type]
-    bw_compiler=None,  # type: ignore[arg-type]
-    partition_fn=None,  # type: ignore[arg-type]
-    decompositions={},
-    num_params_buffers=0,
-    aot_id=0,
-    keep_inference_input_mutations=False,
-)
-
-
 def create_fw_bw_graph(true_fn, false_fn, operands):
+    
+    from torch._functorch.aot_autograd import AOTConfig, create_joint, from_fun
+    dummy_aot_config = AOTConfig(
+        fw_compiler=None,  # type: ignore[arg-type]
+        bw_compiler=None,  # type: ignore[arg-type]
+        partition_fn=None,  # type: ignore[arg-type]
+        decompositions={},
+        num_params_buffers=0,
+        aot_id=0,
+        keep_inference_input_mutations=False,
+    )
 
     # Note:[HOP create fw_bw graph] We create "clean" environments for make_fx by suspending all dispatch keys
     # between Autograd and Python key. Currently, we only suspend functionalization but more can be
@@ -336,11 +336,8 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
         isinstance(o, torch.Tensor) for o in operands
     ), "Cond operands must be a list of tensors"
 
-    pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
-
-    with disable_proxy_modes_tracing():
-        true_graph = reenter_make_fx(true_fn, pre_dispatch)(*operands)
-        false_graph = reenter_make_fx(false_fn, pre_dispatch)(*operands)
+    true_graph = reenter_make_fx(true_fn)(*operands)
+    false_graph = reenter_make_fx(false_fn)(*operands)
 
     true_outs = []
     false_outs = []

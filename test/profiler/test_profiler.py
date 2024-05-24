@@ -16,9 +16,12 @@ except ImportError:
 import collections
 import gc
 import json
+import mmap
 import os
 import pickle
+import random
 import re
+import struct
 import subprocess
 import sys
 import threading
@@ -64,7 +67,9 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_ARM64,
     IS_JETSON,
+    IS_LINUX,
     IS_WINDOWS,
     parametrize,
     run_tests,
@@ -699,48 +704,6 @@ class TestProfiler(TestCase):
         if torch.cuda.is_available():
             check_metrics(stats, "device_memory_usage", deallocs=["[memory]"])
 
-    @unittest.skipIf(not kineto_available(), "Kineto is required")
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
-    def test_kineto_cupti_range_profiler(self):
-        """CUPTI provides a newer Profiling API from CUDA 10.0 that enables measuring
-        performance events for the GPU. This is supported as an experimental pytorch profiler feature.
-        Read more here https://docs.nvidia.com/cupti/r_main.html#r_profiler.
-        """
-        exp_config = _ExperimentalConfig(
-            profiler_metrics=[
-                # Metrics list at https://docs.nvidia.com/cupti/r_main.html#r_profiler
-                # or use kineto__tensor_core_insts, kineto__cuda_core_flops
-                "kineto__tensor_core_insts",
-                "dram__bytes_read.sum",
-                "dram__bytes_write.sum",
-            ],
-            profiler_measure_per_kernel=True,
-        )
-        with _profile(
-            use_cuda=True, use_kineto=True, experimental_config=exp_config
-        ) as p:
-            self.payload(use_cuda=True)
-
-        def check_trace(fname):
-            with open(fname) as f:
-                trace = json.load(f)
-                self.assertTrue("traceEvents" in trace)
-                events = trace["traceEvents"]
-                found_cupti_profiler_events = False
-                for evt in events:
-                    self.assertTrue("name" in evt)
-                    if "__cupti_profiler__" in evt["name"]:
-                        found_cupti_profiler_events = True
-                # PyTorch OSS CI runs in docker containers where the Range Profiler
-                # does not have sufficient privilege level (CUPTI_ERROR_INSUFFICIENT_PRIVILEGES).
-                # We can check that the profiler does not crash the job and the trace is not
-                # malformed, however do not check the actual presence of data.
-                self.assertTrue(1 or found_cupti_profiler_events)
-
-        with TemporaryFileName(mode="w+") as fname:
-            p.export_chrome_trace(fname)
-            check_trace(fname)
-
     @unittest.skipIf(
         IS_JETSON, "Jetson has a guard against OOM since host and gpu memory are shared"
     )
@@ -1257,6 +1220,26 @@ class TestProfiler(TestCase):
                         0,
                         f"Failed finding record funciont for op = {e}",
                     )
+
+    def test_profiler_strides(self):
+        torch._C._profiler._set_record_concrete_inputs_enabled_val(True)
+        base_tensor = torch.randn(1024, dtype=torch.float32)
+        a = base_tensor.as_strided((16, 16), (17, 1), 0)
+        b = base_tensor.as_strided((16, 16), (25, 2), 272)
+        with _profile(record_shapes=True) as prof:
+            c = torch.add(a, b)
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                j = json.load(f)
+                op_events = [
+                    e for e in j["traceEvents"] if e.get("cat", "") == "cpu_op"
+                ]
+                for e in op_events:
+                    args = e["args"]
+                    if e["name"] == "aten::add":
+                        self.assertEqual(args["Input Strides"], [[17, 1], [25, 2], []])
 
     def test_profiler_fwd_bwd_link(self):
         with _profile(use_kineto=True) as prof:
@@ -2457,6 +2440,70 @@ aten::mm""",
                 self.assertEqual(expected_fields, actual_fields)
         finally:
             os.remove("torchtidy_report.json")
+
+    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "x86 linux only cpp unwinding")
+    def test_fuzz_symbolize(self):
+        # generate some random addresses in the text section and make sure the
+        # symbolizers do not throw exceptions/crash
+        def get_text_sections():
+            text_sections = []
+            seen = set()
+            for filename in os.listdir("/proc/self/map_files"):
+                library = os.readlink("/proc/self/map_files/" + filename)
+                if ".so" not in library or library in seen:
+                    continue
+                seen.add(library)
+                with open(os.path.join("/proc/self/map_files", library), "rb") as f:
+                    mm = mmap.mmap(f.fileno(), 0, prot=mmap.PROT_READ)
+
+                    def unpack(fmt, offset):
+                        return struct.unpack(
+                            fmt, mm[offset : offset + struct.calcsize(fmt)]
+                        )
+
+                    if mm[:4] != b"\x7fELF":
+                        continue
+                    (section_headers_start,) = unpack("Q", 40)
+                    (section_header_size,) = unpack("H", 58)
+                    (num_section_headers,) = unpack("H", 60)
+                    (shstrndx,) = unpack("H", 62)
+                    (shstrtab_offset,) = unpack(
+                        "Q", section_headers_start + shstrndx * section_header_size + 24
+                    )
+                    for i in range(num_section_headers):
+                        (section_name_offset,) = unpack(
+                            "I", section_headers_start + i * section_header_size
+                        )
+                        name_start = shstrtab_offset + section_name_offset
+                        section_name = mm[name_start : name_start + 6]
+                        if section_name != b".text\0":
+                            continue
+                        (section_offset,) = unpack(
+                            "Q", section_headers_start + i * section_header_size + 24
+                        )
+                        (section_size,) = unpack(
+                            "Q", section_headers_start + i * section_header_size + 32
+                        )
+                        start = int(filename.split("-")[0], 16) + section_offset
+                        text_sections.append((start, section_size))
+                        break
+                    mm.close()
+            return text_sections
+
+        r = random.Random()
+        r.seed(1)
+        text_sections = get_text_sections()
+        addrs = []
+        for i in range(200):
+            s = r.randrange(0, len(text_sections))
+            start, size = text_sections[s]
+            addr = r.randrange(start, start + size)
+            addrs.append(addr)
+        fast = torch._C._profiler.symbolize_addresses(addrs, "fast")
+        dladdr = torch._C._profiler.symbolize_addresses(addrs, "dladdr")
+        addr2line = torch._C._profiler.symbolize_addresses(addrs, "addr2line")
+        self.assertEqual(len(fast), len(addrs))
+        self.assertEqual(len(addr2line), len(fast))
 
 
 if __name__ == "__main__":

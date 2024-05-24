@@ -601,6 +601,8 @@ class OverridesData:
     )
 
 
+# NB: if you add a new special function, don't forget to update
+# torch._inductor.ops_handler too
 pointwise_overrides_data: Dict[str, OverridesData] = dict(
     airy_ai=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
@@ -1031,12 +1033,14 @@ class KernelArgs:
     def python_argdefs(self):
         arg_defs = []
         call_args = []
+        arg_types = []
         precompile_args: List[Union[TensorArg, SizeArg, WorkspaceArg]] = []
         for inplaced in unique(self.inplace_buffers.values()):
             if self._buffer_is_marked_removed(inplaced):
                 continue
             arg_defs.append(inplaced.inner_name)
             call_args.append(inplaced.other_names[-1])
+            arg_types.append(V.graph.get_dtype(inplaced.other_names[-1]))
             precompile_args.append(
                 TensorArg(
                     name=inplaced.inner_name,
@@ -1051,6 +1055,7 @@ class KernelArgs:
                 continue
             arg_defs.append(inner)
             call_args.append(outer)
+            arg_types.append(V.graph.get_dtype(outer))
             precompile_args.append(
                 TensorArg(
                     name=inner,
@@ -1061,6 +1066,7 @@ class KernelArgs:
         for outer, inner in self.sizevars.items():
             arg_defs.append(inner)
             call_args.append(outer)
+            arg_types.append(type(outer))
             precompile_args.append(SizeArg(inner, outer))
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
@@ -1069,7 +1075,7 @@ class KernelArgs:
             call_args.append("workspace")
             precompile_args.append(self.workspace_arg)
 
-        return arg_defs, call_args, precompile_args
+        return arg_defs, call_args, precompile_args, arg_types
 
     def aliases(self):
         for inplaced in unique(self.inplace_buffers.values()):
@@ -1121,6 +1127,7 @@ class CSEVariable:
         assert isinstance(bounds, ValueRanges)
         self.name = name
         self.bounds = bounds
+        self.use_count = 1  # track how many tims this expression is used
 
     def __str__(self):
         return self.name
@@ -1210,6 +1217,7 @@ class CSE:
             # assert expr.bounds == bounds, but sometimes the expression is created
             # with the loose ValueRanges.unknown(), so we need to tighten the bounds
             expr.bounds = expr.bounds.tighten(bounds)
+            expr.use_count += 1
             return expr
         cache_key = expr.getvalue() if isinstance(expr, IndentedBuffer) else expr
         var = self.cache.get(cache_key, None)
@@ -1234,6 +1242,7 @@ class CSE:
                     buffer.writeline(line)
         else:
             var.bounds = var.bounds.tighten(bounds)
+            var.use_count += 1
 
         return var
 
@@ -1333,6 +1342,10 @@ class Kernel(CodeGen):
         self.loads = IndentedBuffer()
         self.compute = IndentedBuffer()
         self.stores = IndentedBuffer()
+
+        self.num_load = 0
+        self.num_reduction = 0
+
         self.cse: CSE = CSE(self.newvar_prefix, self.suffix)
         self.must_keep_buffers = set()
         self.store_buffer_names = set()
@@ -1606,7 +1619,12 @@ class Kernel(CodeGen):
                 store_cache = self.cse.store_cache
                 if name in store_cache:
                     return store_cache[name]
-                return self.load(name, index)
+                out = self.load(name, index)
+                # count load that is not in the store_cache, and also not in the
+                # cse cache.
+                if out.use_count == 1:
+                    self.num_load += 1
+                return out
 
             @staticmethod
             def store(
@@ -1641,6 +1659,7 @@ class Kernel(CodeGen):
                 reduction_type: ReductionType,
                 value: Union[CSEVariable, Tuple[CSEVariable, ...]],
             ) -> Union[CSEVariable, Tuple[CSEVariable, ...]]:
+                self.num_reduction += 1
                 return self.reduction(dtype, src_dtype, reduction_type, value)
 
             @staticmethod
@@ -1717,7 +1736,14 @@ class Kernel(CodeGen):
         replacements = {
             x: self.args.size(x)
             for x in sorted_symbols
-            if symbol_is_type(x, (SymT.UNBACKED_INT, SymT.SIZE, SymT.PRECOMPUTED_SIZE))
+            if symbol_is_type(
+                x,
+                (
+                    SymT.UNBACKED_INT,
+                    SymT.SIZE,
+                    SymT.PRECOMPUTED_SIZE,
+                ),
+            )
         }
         return sympy_subs(index, replacements)
 

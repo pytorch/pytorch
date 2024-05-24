@@ -448,7 +448,7 @@ class ExportedProgram:
                 res = pytree.tree_unflatten(res, self.call_spec.out_spec)
             except Exception:
                 _, received_spec = pytree.tree_flatten(res)
-                raise error.InternalError(  # noqa: TRY200
+                raise error.InternalError(  # noqa: B904
                     "Trying to flatten user outputs with exported output tree spec: \n"
                     f"{self.call_spec.out_spec}\n"
                     "but actually got outputs with tree spec of: \n"
@@ -530,10 +530,6 @@ class ExportedProgram:
         For now, we do not decompose joint graphs.
         """
         from torch._decomp import core_aten_decompositions
-        from torch._export.passes._node_metadata_hook import _node_metadata_hook
-        from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
-            _AddRuntimeAssertionsForInlineConstraintsPass,
-        )
         from torch._export.passes.lift_constants_pass import (
             ConstantAttrMap,
             lift_constants_pass,
@@ -551,7 +547,8 @@ class ExportedProgram:
                 placeholders.append(node)
             return placeholders
 
-        decomp_table = decomp_table or core_aten_decompositions()
+        if decomp_table is None:
+            decomp_table = core_aten_decompositions()
 
         old_placeholders = _get_placeholders(self.graph_module)
         fake_args = [node.meta["val"] for node in old_placeholders]
@@ -662,20 +659,6 @@ class ExportedProgram:
             self.constants[k] = v
 
         _replace_sym_size_ops_pass(gm)
-
-        if len(new_range_constraints) > 0:
-            stack_trace = (
-                'File "torch/_export/passes/add_runtime_assertions_for_constraints_pass.py", line 46, '
-                "in _AddRuntimeAssertionsForInlineConstraintsPass"
-            )
-            with gm._set_create_node_hook(
-                functools.partial(_node_metadata_hook, stack_trace=stack_trace)
-            ):
-                res = _AddRuntimeAssertionsForInlineConstraintsPass(
-                    new_range_constraints
-                )(gm)
-            assert res is not None
-            gm = res.graph_module
 
         exported_program = ExportedProgram(
             root=gm,

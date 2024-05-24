@@ -1295,8 +1295,9 @@ TEST_CUDA_GRAPH = TEST_CUDA and (not TEST_SKIP_CUDAGRAPH) and (  # noqa: F821
 
 if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
     num_procs = int(os.getenv("NUM_PARALLEL_PROCS", "2"))
-    # other libraries take up about 11% of space per process
-    torch.cuda.set_per_process_memory_fraction(round(1 / num_procs - .11, 2))
+    gb_available = torch.cuda.mem_get_info()[1] / 2 ** 30
+    # other libraries take up about a little under 1 GB of space per process
+    torch.cuda.set_per_process_memory_fraction(round((gb_available - num_procs * .85) / gb_available / num_procs, 2))
 
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "Requires CUDA")
 
@@ -1847,15 +1848,7 @@ def skipIfNotRegistered(op_name, message):
         @skipIfNotRegistered('MyOp', 'MyOp is not linked!')
             This will check if 'MyOp' is in the caffe2.python.core
     """
-    if not BUILD_WITH_CAFFE2:
-        return unittest.skip("Pytorch is compiled without Caffe2")
-    try:
-        from caffe2.python import core
-        skipper = unittest.skipIf(op_name not in core._REGISTERED_OPERATORS,
-                                  message)
-    except ImportError:
-        skipper = unittest.skip("Cannot import `caffe2.python.core`")
-    return skipper
+    return unittest.skip("Pytorch is compiled without Caffe2")
 
 def _decide_skip_caffe2(expect_caffe2, reason):
     def skip_dec(func):
@@ -2910,6 +2903,9 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         if self._default_dtype_check_enabled:
             assert torch.get_default_dtype() == torch.float
 
+        # attempt to reset some global state at the end of the test
+        self._prev_grad_state = torch.is_grad_enabled()
+
     def tearDown(self):
         # There exists test cases that override TestCase.setUp
         # definition, so we cannot assume that _check_invariants
@@ -2923,6 +2919,10 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
 
         if self._default_dtype_check_enabled:
             assert torch.get_default_dtype() == torch.float
+
+        # attribute may not be defined, per above
+        if hasattr(self, '_prev_grad_state'):
+            torch.set_grad_enabled(self._prev_grad_state)
 
     @staticmethod
     def _make_crow_indices(n_rows, n_cols, nnz,

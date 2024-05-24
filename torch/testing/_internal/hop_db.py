@@ -82,7 +82,7 @@ def foo_impl_cuda(x, z):
     return x, z, x + z
 
 
-@torch.library.impl_abstract("testlib::mutating_custom_op")
+@torch.library.register_fake("testlib::mutating_custom_op")
 def foo_impl_abstract(x, z):
     return x, z, x + z
 
@@ -118,9 +118,9 @@ def sample_inputs_flex_attention(opinfo, device, dtype, requires_grad, **kwargs)
         return score + h
 
     yield SampleInput(
-        make_arg(2, 2, 64, 8, low=0.1, high=2),
-        make_arg(2, 2, 64, 8, low=0.1, high=2),
-        make_arg(2, 2, 64, 8, low=0.1, high=2),
+        make_arg(2, 2, 128, 8, low=0.1, high=2),
+        make_arg(2, 2, 128, 8, low=0.1, high=2),
+        make_arg(2, 2, 128, 8, low=0.1, high=2),
         score_mod,
     )
 
