@@ -2101,7 +2101,7 @@ class BenchmarkRunner:
             #  which is bad as Gradscaler has state and can adjust the scaling
             #  factor between eager and dynamo run, making accuracy check
             #  harder.
-            # self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
+            # self.grad_scaler = torch.amp.GradScaler(device="cuda", init_scale=2.0)
             self.autocast = functools.partial(
                 torch.amp.autocast, device_type=devices[0]
             )
