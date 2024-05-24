@@ -112,6 +112,7 @@ graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 graph_sizes_log = torch._logging.getArtifactLogger(__name__, "graph_sizes")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 
+torch_log = logging.getLogger("torch")
 
 @dataclass(frozen=True)
 class VariableTrackerCacheKey:
@@ -483,16 +484,33 @@ class OutputGraph:
         call fn(*args) before the graph runs and turn the result into a fake input.
         """
         example_value = fn(*args)
+        torch_log.warning(f"type(example_value): {type(example_value)}")
+        # torch_log.warning(f"example_value: {example_value}")
         varname = self.new_var()
         cg = PyCodegen(self.root_tx)
         cg.load_import_from(
             fn.__module__,
             fn.__name__,
         )
-        cg.foreach(map(variables.ConstantVariable.create, args))
+
+        def create_var(value):
+            from .variables.distributed import DeviceMeshVariable, PlacementVariable
+            # if PlacementVariable.is_placement(value):
+            #     return PlacementVariable(value)
+            # elif DeviceMeshVariable.is_device_mesh(value):
+            #     return DeviceMeshVariable(value)
+            # if isinstance(value, torch.Tensor):
+            #     return variables.TensorVariable(value)
+            # else:
+            return variables.ConstantVariable.create(value)
+
+        cg.foreach(map(create_var, args))
         cg.call_function(len(args), True)
         cg.store(varname)
-        self.pregraph_bytecode.extend(cg.get_instructions())
+        insts = cg.get_instructions()
+        for inst in insts:
+            torch_log.warning(f"inst: {inst}")
+        self.pregraph_bytecode.extend(insts)
         source = SyntheticLocalSource(varname)
         result = VariableBuilder(self.root_tx, source)(example_value)
         TracingContext.get().guards_context.dynamo_guards.remove_guards_with_source(
