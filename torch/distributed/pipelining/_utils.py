@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Tuple, Union
 
 import torch
 from torch import fx
@@ -132,3 +132,35 @@ class QualnameMapMixin:
             return self.tracer_qualname_map[name_before_split]
         else:
             return name_before_split
+
+
+class PipeliningShapeError(RuntimeError):
+    """Shape mismatch between configured and runtime values."""
+
+
+def validate_tensor_metadata(desc, expected, given):
+    if not expected.shape == given.shape:
+        raise PipeliningShapeError(
+            f"{desc} has a shape mismatch: expected {expected.shape} actual {given.shape}"
+        )
+    if not expected.dtype == given.dtype:
+        raise PipeliningShapeError(
+            f"{desc} has a dtype mismatch: expected {expected.dtype} actual {given.dtype}"
+        )
+    if not expected.stride() == given.stride():
+        raise PipeliningShapeError(
+            f"{desc} has a stride mismatch: expected {expected.stride()} actual {given.stride()}"
+        )
+
+
+def validate_tensors_metadata(
+    desc,
+    expected_tensors: Union[List[torch.Tensor], Tuple[torch.Tensor, ...]],
+    actual_tensors: Union[List[torch.Tensor], Tuple[torch.Tensor, ...]],
+):
+    if len(expected_tensors) != len(actual_tensors):
+        raise PipeliningShapeError(
+            f"Number of {desc} ({len(actual_tensors)}) does not match expected number ({len(expected_tensors)})"
+        )
+    for i in range(len(expected_tensors)):
+        validate_tensor_metadata(f"{desc}[{i}]", expected_tensors[i], actual_tensors[i])

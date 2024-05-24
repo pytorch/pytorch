@@ -427,14 +427,12 @@ class Loops(IRNode):
 
     @cache_on_self
     def inner_fn_opcount(self):
-        from .ir import FlexibleLayout
-
         opcounter = OpCounterCSE(V.MockHandler())
 
         with V.set_ops_handler(opcounter), patch.object(
             FlexibleLayout, "allow_indexing", True
         ):
-            result = self.inner_fn(*self.inner_fn_args())
+            self.inner_fn(*self.inner_fn_args())
             return opcounter.op_count
 
     def inner_fn_args(self):
@@ -3720,6 +3718,13 @@ class CUDATemplateBuffer(TemplateBuffer):
         return self.workspace_size if self.workspace_size is not None else 0
 
 
+class CppTemplateBuffer(TemplateBuffer):
+    def __init__(self, layout, inputs, make_kernel_render, template, choice):
+        super().__init__(layout, inputs, make_kernel_render)
+        self.template = template
+        self.choice = choice
+
+
 @dataclasses.dataclass
 class InputsKernel(Buffer):
     inputs: List[Buffer]
@@ -4404,7 +4409,7 @@ class ExternKernel(InputsKernel):
                     type_ = self.arg_properties[i].get("type")
                     args.append(
                         V.graph.wrapper_code.val_to_cpp_arg_str(  # type: ignore[arg-type]
-                            type_, x
+                            x, type_
                         )
                     )
                 else:
@@ -4439,7 +4444,7 @@ class ExternKernel(InputsKernel):
                     )
                     kwargs.append(
                         V.graph.wrapper_code.val_to_cpp_arg_str(  # type: ignore[arg-type]
-                            type_, v
+                            v, type_
                         )
                     )
         else:
@@ -4651,20 +4656,26 @@ class UserDefinedTritonKernel(ExternKernel):
         )
 
         args = self.codegen_kwargs()
+        arg_types = []
         if V.graph.cpp_wrapper:
             # in C++ wrapper, we don't pass constexpr args, as they don't
             # get added as parameters to the PTX code compiled from the
             # user-defined Triton kernel (only non-constexpr args do)
             args = [arg for i, arg in enumerate(args) if i not in kernel.constexprs]
+            # cpp wrapper needs arg type info for codegen
+            for arg_name in self.ordered_kwargs_for_cpp_kernel:
+                val = self.get_kwargs_value(arg_name)
+                arg_types.append(
+                    val.get_dtype() if hasattr(val, "get_dtype") else type(val)
+                )
+            arg_types = [
+                t for i, t in enumerate(arg_types) if i not in kernel.constexprs
+            ]
 
         # Call to kernel
         self.codegen_comment(wrapper)
         wrapper.generate_user_defined_triton_kernel(
-            new_name,
-            self.grid,
-            configs,
-            args,
-            triton_meta,
+            new_name, self.grid, configs, args, triton_meta, arg_types
         )
 
     def should_allocate(self):
@@ -5407,7 +5418,7 @@ class FallbackKernel(ExternKernelAlloc):
         if V.graph.cpp_wrapper and isinstance(self.op_overload, torch._ops.OpOverload):
             args = self.fill_non_provided_args(args, kwargs)
             args = [
-                V.graph.wrapper_code.val_to_cpp_arg_str(param.real_type, x)
+                V.graph.wrapper_code.val_to_cpp_arg_str(x, param.real_type)
                 for param, x in zip(self.op_overload._schema.arguments, args)
             ]
         else:
