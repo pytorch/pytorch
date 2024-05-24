@@ -367,7 +367,7 @@ def _get_schema_from_target(target):
         return target._schema
     elif type(target) in _serialization_registry:
         return _serialization_registry[type(target)].op_schema(type(target))
-    raise Exception(f"Cannot find schema for {type(target)}")
+    raise RuntimeError(f"Cannot find schema for {type(target)}")
 
 
 def _is_single_tensor_return(target: torch._ops.OpOverload) -> bool:
@@ -376,7 +376,7 @@ def _is_single_tensor_return(target: torch._ops.OpOverload) -> bool:
     return len(returns) == 1 and isinstance(returns[0].real_type, torch.TensorType)
 
 
-def _is_single_tensor_list_return(target: torch._ops.OpOverload) -> bool:
+def _is_single_tensor_list_return(target: Any) -> bool:
     schema = _get_schema_from_target(target)
     returns = schema.returns
 
@@ -609,7 +609,7 @@ class GraphModuleSerializer(metaclass=Final):
         args,
         kwargs=None
     ) -> List[NamedArgument]:
-        assert isinstance(target, torch._ops.OpOverload) or isinstance(target, allowed_registered_op_types())
+        assert isinstance(target, (torch._ops.OpOverload, *allowed_registered_op_types()))
         kwargs = kwargs or {}
         serialized_args = []
 
@@ -1106,8 +1106,7 @@ class GraphModuleSerializer(metaclass=Final):
         mostly reuse the names coming from FX. This function computes a mapping from
         the FX representation to our representation, preserving the names.
         """
-        assert node.op == "call_function"
-        assert isinstance(node.target, torch._ops.OpOverload) or isinstance(node.target, allowed_registered_op_types())
+        assert node.op == "call_function" and isinstance(node.target, (torch._ops.OpOverload, *allowed_registered_op_types()))
 
         schema = _get_schema_from_target(node.target)
         returns = schema.returns
