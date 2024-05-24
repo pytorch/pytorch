@@ -3,11 +3,12 @@
 from copy import copy
 
 import torch
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase, xfailIfTorchDynamo
 from torch.utils.module_tracker import ModuleTracker
 
 
 class TestModuleTracker(TestCase):
+    @xfailIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127112")
     def test_module_hierarchy(self):
         seen_fw = []
         seen_bw = []

@@ -79,6 +79,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
+    xfailIfTorchDynamo,
 )
 
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
@@ -2342,6 +2343,7 @@ class TestJac(VmapTearDownMixin, TestCase):
         )(x)
         self.assertEqual(actual, expected)
 
+    @xfailIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127036")
     @parametrize("_preallocate_and_copy", (True, False))
     def test_chunk_jacrev_chunksize_one(self, device, _preallocate_and_copy):
         # With chunk_size=1, we shouldn't `vmap` and hence not be limited
