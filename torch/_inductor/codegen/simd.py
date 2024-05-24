@@ -45,7 +45,6 @@ from ..utils import (
     get_dtype_size,
     IndentedBuffer,
     Placeholder,
-    sympy_dot,
     sympy_index_symbol,
     sympy_product,
     sympy_subs,
@@ -65,28 +64,6 @@ fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 
 
 pexpr = PythonPrinter().doprint
-
-
-@dataclasses.dataclass
-class IndexingOptions:
-    index_str: str
-    mask_vars: Set[sympy.Symbol]
-    mask_str: str
-    expand_str: Optional[str]
-    _has_rindex: bool
-    index: sympy.Expr
-
-    def has_mask(self):
-        return bool(self.mask_vars)
-
-    def has_rindex(self):
-        return self._has_rindex
-
-    def has_tmpmask(self):
-        return "tmp" in self.mask_str
-
-    def has_rmask(self):
-        return "rmask" in self.mask_str
 
 
 @dataclasses.dataclass
@@ -641,8 +618,8 @@ class SIMDKernel(Kernel):
 
     def index_to_str(self, index: sympy.Expr) -> str:
         """
-        Convert an index expr to a string that can be used in triton code.
-        e.g. a sympy expression "s2" may actually appear as "ks1" in the triton kernel.
+        Convert an index expr to a string that can be used in output code.
+        e.g. a sympy expression "s2" may actually appear as "ks1" in the generated kernel.
 
         Index expressions often need to be passed in as arguments to the triton kernel.
         Rename_indexing and codegen_indexing keep track of the needed indices and add
@@ -650,22 +627,12 @@ class SIMDKernel(Kernel):
         """
         if isinstance(index, list):
             return f"[{', '.join(map(self.index_to_str, index))}]"
-        return self.kexpr(  # type: ignore[call-arg]
-            self.rename_indexing(self.codegen_indexing(index))
-        )
+        return self.kexpr(self.rename_indexing(index))  # type: ignore[call-arg]
 
-    def indexing(
+    def prepare_indexing(
         self,
         index: sympy.Expr,
-        *,
-        copy_shape=None,
-        dense_indexing=False,
-        override_mask=None,
-        block_ptr=False,
     ):
-        """
-        Compute the index and mask to pass to tl.load() or tl.store()
-        """
         index = self.simplify_indexing(index)
         index = sympy_subs(index, V.graph.sizevars.precomputed_replacements)
         # if simple replacements didn't get rid of floor/ceil, try full subs
@@ -689,116 +656,7 @@ class SIMDKernel(Kernel):
                     replacements = {a: V.graph.sizevars.lookup_precomputed_size(a)}
                     index = sympy_subs(index, replacements)
 
-        index = self.simplify_indexing(index)
-        index_vars = index.free_symbols
-        has_rindex = False
-
-        mask_vars: Set[str] = set()
-        for var in index_vars:
-            assert isinstance(var, sympy.Symbol)
-            has_rindex = has_rindex or symbol_is_type(var, SymT.RINDEX)
-            if override_mask:
-                pass
-            elif symbol_is_type(var, SymT.TMP):
-                # indirect indexing
-                cse_var = self.cse.varname_map[var.name]
-                mask_vars.update(cse_var.mask_vars)
-            elif symbol_is_type(
-                var,
-                (
-                    SymT.UNBACKED_INT,
-                    SymT.SIZE,
-                    SymT.PRECOMPUTED_SIZE,
-                    SymT.INDEX,
-                    SymT.FLOAT,
-                    SymT.UNBACKED_FLOAT,
-                ),
-            ):
-                pass
-            else:
-                # var is one of xN, yN or rN
-                assert symbol_is_type(
-                    var, (SymT.RINDEX, SymT.XBLOCK, SymT.YBLOCK)
-                ), var.name
-                mask_vars.add(f"{var.name[0]}mask")
-
-        need_dense = (
-            config.triton.dense_indexing
-            or dense_indexing
-            or self._load_mask is not None
-        ) and index != 0
-
-        have_dense = True
-        have_loop_vars = False
-        dense_mask_vars = set()
-
-        for tree in self.active_range_trees():
-            if index_vars.intersection(tree.var_list):
-                have_loop_vars = True
-            else:
-                have_dense = False
-            dense_mask_vars.add(f"{tree.prefix}mask")
-
-        if (
-            block_ptr
-            and self.allow_block_ptr
-            and config.triton.use_block_ptr
-            and not override_mask
-            and not self._load_mask
-            and len(mask_vars - dense_mask_vars) == 0
-            and not self.is_indirect_indexing(index)
-            and have_loop_vars
-            # workaround https://github.com/openai/triton/issues/2821
-            and self.index_dtype == "tl.int32"
-        ):
-            index_relative_to_xyr_index = sympy_subs(
-                index, {v: t.expr for v, t in self.range_tree_nodes.items()}
-            )
-            range_trees = self.active_range_trees(reorder=True)
-            symbols = [t.symbol() for t in range_trees]
-            strides = [sympy.Wild(f"stride_{s}", exclude=symbols) for s in symbols]
-            offset = sympy.Wild("_offset", exclude=symbols)
-            m = index_relative_to_xyr_index.match(sympy_dot(symbols, strides) + offset)
-            # TODO(jansel): it is sometimes possible to do higher dimensional block_ptrs with
-            #               a tl.reshape the correct block.  We will miss these cases today.
-            if m:
-                self.filter_masks(mask_vars)
-                from .triton import BlockPtrOptions
-
-                return BlockPtrOptions.create(
-                    [m[s] for s in strides],
-                    m[offset],
-                    range_trees,
-                    mask_vars,  # type: ignore[arg-type]
-                )
-
-        expand_str = None
-        index_str = self.index_to_str(index)
-        if isinstance(index, sympy.Integer):
-            expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
-            index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
-            return IndexingOptions(
-                index_str, set(), "None", expand_str, has_rindex, index
-            )
-
-        if need_dense and not have_dense:
-            expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
-            index_str = f"tl.broadcast_to({index_str}, {expand_str})"
-            mask_vars = dense_mask_vars
-        elif not have_loop_vars and copy_shape:
-            index_str = f"tl.broadcast_to({index_str}, {copy_shape}.shape)"
-            mask_vars = dense_mask_vars
-
-        if override_mask:
-            mask_vars = {override_mask}
-
-        if self._load_mask:
-            mask_vars.add(self._load_mask)
-
-        self.filter_masks(mask_vars)
-
-        mask_str = " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
-        return IndexingOptions(index_str, mask_vars, mask_str, expand_str, has_rindex, index)  # type: ignore[arg-type]
+        return self.codegen_indexing(self.simplify_indexing(index))
 
     def active_range_trees(self, reorder=False):
         trees = [
