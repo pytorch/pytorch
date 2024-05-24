@@ -583,7 +583,7 @@ class MyWrapperLoadTensor(MyLoadTensor):
         return f"MyWrapperLoadTensor({self._data.__repr__()})"
 
     def __tensor_flatten__(self):
-        return self._data
+        return ["_data"], None
 
     @staticmethod
     def __tensor_unflatten__(data):
