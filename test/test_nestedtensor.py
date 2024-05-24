@@ -4275,6 +4275,24 @@ class TestNestedTensorSubclass(TestCase):
         output.sum().backward()
         self.assertEqual(values.grad, torch.ones_like(values))
 
+    @skipIfTorchDynamo("compiles internally")
+    def test_no_mark_dynamic(self, device):
+        values = torch.randn((18, 16), device=device)
+        offsets = torch.tensor([0, 2, 3, 6, 15, 18], device=device)
+        like_values = torch.randn_like(values)
+
+        # this marks values as dynamic
+        nt = torch.nested._internal.nested_tensor.ViewNestedFromBuffer(
+            values,
+            offsets,
+            {"mark_dynamic": False},
+        )
+
+        def fn(values, same_size):
+            return values + same_size
+
+        self.assertEqual(fn(values, like_values), torch.compile(fn)(values, like_values))
+
     # Internally-defined NT use cases are lifted to here for maximum test realism.
     # TODO: Remove these when ViewNestedFromBuffer, etc. are deprecated.
     @skipCUDAIfRocm  # not needed

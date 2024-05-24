@@ -3,7 +3,8 @@ from typing import Tuple
 import torch
 from torch._C import DispatchKey, DispatchKeySet
 from torch._prims_common import is_expandable_to
-from torch.fx.experimental.symbolic_shapes import has_free_symbols
+from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.utils.weak import WeakTensorKeyDictionary
 from typing import *  # noqa: F403
 
@@ -118,7 +119,11 @@ class NestedTensor(torch.Tensor):
         self._metadata_cache = kwargs.get("_metadata_cache") or {}
 
         # collapsed ragged dim must always be dynamic
-        mark_dynamic = md if (md := kwargs.get("_mark_dynamic")) is not None else True
+        mark_dynamic = (
+            md
+            if (md := self._metadata_cache.get("_mark_dynamic")) is not None
+            else True
+        )
         if mark_dynamic:
             torch._dynamo.mark_dynamic(self, self._ragged_idx)
             torch._dynamo.mark_dynamic(self._values, self._ragged_idx - 1)
@@ -199,8 +204,11 @@ class NestedTensor(torch.Tensor):
         # Note that we cannot simply check if is_fake(values) because
         # during aot autograd, FunctionalTensors are not fake but hold
         # symbolic sizes.
+        def is_tracing_tensor(t):
+            return isinstance(t, (FakeTensor, FunctionalTensor))
+
         ragged_source = offsets if lengths is None else lengths
-        if has_free_symbols(ragged_source) or has_free_symbols(values):
+        if is_tracing_tensor(ragged_source) or is_tracing_tensor(values):
             # Associate offsets or lengths (possibly fake, possibly functionalized)
             # with the ragged_size.
             ragged_size = outer_size[ragged_idx]
