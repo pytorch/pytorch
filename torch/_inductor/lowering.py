@@ -1491,6 +1491,11 @@ def diagonal_scatter(input, src, offset: int = 0, dim1: int = 0, dim2: int = 1):
     return output
 
 
+@register_lowering(aten.alias_copy, type_promotion_kind=None)
+def alias_copy(input, offset: int = 0, dim1: int = 0, dim2: int = 1):
+    return clone(input)
+
+
 @register_lowering(aten.select, type_promotion_kind=None)
 def select(x, dim, idx):
     idx = View.handle_negative_index(idx, x.get_size()[dim])
