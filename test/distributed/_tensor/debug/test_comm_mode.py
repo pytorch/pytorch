@@ -127,6 +127,7 @@ class TestCommMode(TestCase):
         self.assertEqual(comm_counts[c10d_ops._reduce_scatter_base_], 1)
         self.assertEqual(comm_counts[c10d_ops.broadcast_], 1)
 
+    @requires_nccl()
     def test_comm_mode_with_c10d_allreduce_coalesced(self):
         world_pg = self.world_pg
 
