@@ -158,7 +158,7 @@ kernel_name_to_op = {
 
 
 class BaseSchedulerNode:
-    group: Tuple[torch.device, Sequence[Sequence[sympy.Expr]]]
+    group: Tuple[torch.device, Tuple[Tuple[sympy.Expr, ...], ...]]
 
     def __init__(self, scheduler: "Scheduler", node: ir.Buffer) -> None:
         self.scheduler: Scheduler = scheduler
@@ -1235,7 +1235,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             for name in other_node.get_names():
                 self.name_to_node[name] = other_node
 
-        self.group = (nodes[0].get_device(), [[sympy.Expr("foreach")]])
+        self.group = (nodes[0].get_device(), ((sympy.Expr("foreach"),),))
 
         self.origins: Set[torch.fx.Node] = set()
 
@@ -2788,7 +2788,7 @@ class BaseScheduling:
 
     def group_fn(
         self, sizes: Sequence[Sequence[sympy.Expr]]
-    ) -> Sequence[Sequence[sympy.Expr]]:
+    ) -> Tuple[Tuple[sympy.Expr, ...], ...]:
         """
         Process the iteration sizes in case a transformation needs to be applied.
         """
