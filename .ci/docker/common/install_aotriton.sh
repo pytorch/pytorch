@@ -16,7 +16,7 @@ git submodule sync --recursive
 git submodule update --init --recursive --force --depth 1
 mkdir build
 cd build
-cmake .. -DCMAKE_INSTALL_PREFIX=./install_dir -DCMAKE_BUILD_TYPE=Release -G Ninja
+cmake .. -G Ninja -DCMAKE_INSTALL_PREFIX=./install_dir -DCMAKE_BUILD_TYPE=Release -DAOTRITON_COMPRESS_KERNEL=OFF -DAOTRITON_NO_PYTHON=ON -DAOTRITON_NO_SHARED=ON
 ninja install
 SUDO mkdir -p "${AOTRITON_INSTALL_PREFIX}"
 SUDO cp -r install_dir/* "${AOTRITON_INSTALL_PREFIX}"
