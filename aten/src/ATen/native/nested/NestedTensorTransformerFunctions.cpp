@@ -258,6 +258,11 @@ Tensor _jagged_to_padded_dense_forward_cpu(
 
   // allocate appropriately-sized padded tensor
   auto offsets = offsets_list[0];
+  TORCH_CHECK(
+      offsets.dim() == 1,
+      "_jagged_to_padded_dense_forward(): expected 1D offsets, but got offsets.dim() == ",
+      offsets.dim());
+
   auto batch_size = offsets.size(0) - 1;
   auto max_length = max_lengths[0];
   auto values_shape = values.sizes().vec();
@@ -273,7 +278,9 @@ Tensor _jagged_to_padded_dense_forward_cpu(
     auto start_offset = offsets[i].item<int64_t>();
     auto end_offset = offsets[i + 1].item<int64_t>();
     auto length = end_offset - start_offset;
-    auto source = values.slice(0, start_offset, end_offset);
+    // NB: truncate to max length to match CUDA kernel behavior.
+    length = std::min(length, max_length);
+    auto source = values.slice(0, start_offset, start_offset + length);
     auto dst = padded.select(0, i).slice(0, 0, length);
     dst.copy_(source);
   }
@@ -288,11 +295,24 @@ Tensor _padded_dense_to_jagged_forward_cpu(
   // TODO: Make this kernel more efficient using TensorIterator or something.
   TORCH_INTERNAL_ASSERT(
       offsets_list.size() == 1,
-      "_jagged_to_padded_dense_forward(): only a single jagged dim is supported for now");
+      "_padded_dense_to_jagged_forward(): only a single jagged dim is supported for now");
 
   // allocate appropriately-sized values tensor
   auto offsets = offsets_list[0];
-  int64_t total_L_val = total_L.has_value() ? (*total_L) : offsets[-1].item<int64_t>();
+  TORCH_CHECK(
+      offsets.dim() == 1,
+      "_padded_dense_to_jagged_forward(): expected 1D offsets, but got offsets.dim() == ",
+      offsets.dim());
+
+  auto final_offset = offsets[-1].item<int64_t>();
+  int64_t total_L_val = total_L.has_value() ? (*total_L) : final_offset;
+  if (total_L.has_value()) {
+    // error if the offsets try to index past the end of the packed dimension
+    TORCH_CHECK(
+        final_offset == total_L_val,
+        "_padded_dense_to_jagged_forward(): final offset should match total_L value")
+  }
+
   std::vector<int64_t> values_shape;
   values_shape.reserve(padded.dim() - 1);
   values_shape.push_back(total_L_val);
