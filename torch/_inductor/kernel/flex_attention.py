@@ -690,6 +690,8 @@ flex_attention_backward_template = TritonTemplate(
             kT = tl.load(kT_ptrs)
             vT = tl.load(vT_ptrs)
             qk = tl.dot(q, kT)
+            if not SCORE_MOD_IS_LINEAR:
+                qk *= 1.44269504
             p = tl.math.exp2(qk - m_)
             # Autoregressive masking.
             # if MASK:
