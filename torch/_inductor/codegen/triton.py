@@ -977,11 +977,13 @@ class TritonKernel(SIMDKernel):
         for tree in self.range_trees:
             # reduction indexing goes inside a loop
             if not tree.is_loop:
-                tree.codegen_header(self.body)
+                self.iteration_ranges_codegen_header(tree, self.body)
         if self.inside_reduction and self.range_trees[-1].is_loop:
             # workaround for this issue:
             # https://gist.github.com/jansel/6527126f781559095c5531f98a4235a7
-            self.body.writeline(f"rbase = {self.range_trees[-1].ranges_code()}")
+            self.body.writeline(
+                f"rbase = {self.iteration_ranges_ranges_code(self.range_trees[-1])}"
+            )
 
     def need_numel_args(self):
         r"""
@@ -1078,6 +1080,21 @@ class TritonKernel(SIMDKernel):
         # workaround https://github.com/openai/triton/issues/2814
         value = f"{value}.to({triton_store_type(V.graph.get_dtype(name))})"
         return f"tl.store({block_ptr}, {value}{other})"
+
+    def load_mask(self, var):
+        mask = ""
+        mask_vars = set(var.mask_vars)
+        if self._load_mask:
+            mask_vars.add(self._load_mask)
+
+        if mask_vars:
+            mask = (
+                f"{next(iter(mask_vars))}"
+                if len(mask_vars) == 1
+                # sorted for deterministic order
+                else f"({' & '.join(sorted(map(str, mask_vars)))})"
+            )
+        return mask
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
@@ -1702,7 +1719,7 @@ class TritonKernel(SIMDKernel):
             self.body.writeline("for roffset in range(0, rnumel, RBLOCK):")
             with self.body.indent():
                 # last range tree is always reduction
-                self.range_trees[-1].codegen_header(self.body)
+                self.iteration_ranges_codegen_header(self.range_trees[-1], self.body)
                 self.body.splice(self.indexing_code)
                 self.body.splice(self.loads)
                 self.body.splice(self.compute)
@@ -1777,7 +1794,8 @@ class TritonKernel(SIMDKernel):
             grid_arg = f"{extra_args_str}grid=grid({', '.join(grid)})"
         else:
             grid_arg = f"grid={grid}"
-        index = V.graph.scheduler.current_device.index
+        current_device = V.graph.scheduler.get_current_device_or_throw()
+        index = current_device.index
         with result.indent():
             result.writeline(f"with {V.graph.device_ops.device_guard(index)}:")
             with result.indent():
@@ -1941,7 +1959,9 @@ class TritonKernel(SIMDKernel):
         )
         triton_meta = {
             "signature": triton_meta_signature,
-            "device": DeviceProperties.create(V.graph.scheduler.current_device),
+            "device": DeviceProperties.create(
+                V.graph.scheduler.get_current_device_or_throw()
+            ),
             "constants": {},
         }
 
@@ -1950,6 +1970,8 @@ class TritonKernel(SIMDKernel):
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
             "no_x_dim": self.no_x_dim,
+            "num_load": self.num_load,
+            "num_reduction": self.num_reduction,
             **self.inductor_meta_common(),
         }
 
@@ -2108,7 +2130,7 @@ class TritonKernel(SIMDKernel):
         call_args, arg_types = self.get_call_args()
         grid: List[Any] = []
         self.add_numel_to_call_args_and_grid(name, call_args, arg_types, grid)
-        current_device = V.graph.scheduler.current_device
+        current_device = V.graph.scheduler.get_current_device_or_throw()
 
         if self.args.workspace_arg is not None:
             ws = self.args.workspace_arg
@@ -2188,16 +2210,16 @@ class TritonKernel(SIMDKernel):
             code.writeline(f"{entry.name} = {x}offset + {x}base")
         elif entry.grid_dim is None:
             # no need to "{x}offset = "
-            code.writeline(f"{entry.name} = {entry.ranges_code()}")
+            code.writeline(f"{entry.name} = {self.iteration_ranges_ranges_code(entry)}")
             code.writeline(f"{x}offset = 0")
         else:
             if entry.tensor_dim is not None:
-                line = f"{x}offset + {entry.ranges_code()}"
+                line = f"{x}offset + {self.iteration_ranges_ranges_code(entry)}"
             else:
-                line = entry.scalar_code(f"{x}offset")
+                line = self.iteration_ranges_scalar_code(entry, f"{x}offset")
             code.writelines(
                 [
-                    f"{x}offset = {entry.get_pid()} * {x.upper()}BLOCK",
+                    f"{x}offset = {self.iteration_ranges_get_pid(entry)} * {x.upper()}BLOCK",
                     f"{entry.name} = {line}",
                 ]
             )
@@ -2268,9 +2290,8 @@ class TritonScheduling(SIMDScheduling):
             compile_wrapper = IndentedBuffer()
             compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
             compile_wrapper.splice(src_code, strip=True)
-            compile_wrapper.writeline(
-                f"''', device_str='{V.graph.scheduler.current_device.type}')"
-            )
+            current_device = V.graph.scheduler.get_current_device_or_throw()
+            compile_wrapper.writeline(f"''', device_str='{current_device.type}')")
 
             metadata_comment = f"# kernel path: {kernel_path}"
             origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
