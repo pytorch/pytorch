@@ -1462,7 +1462,9 @@ class DeviceCachingAllocator {
   /* Checkpoint the state of a private pool necessary to return it to its
    * current state */
   std::unique_ptr<PrivatePoolState> getCheckpointState(MempoolId_t id) {
+    auto context = maybeGatherContext(RecordContext::ALL);
     std::lock_guard<std::recursive_mutex> lock(mutex);
+    insert_events_deferred_until_no_capture(context);
 
     auto pool = graph_pools.find(id);
     if (pool != graph_pools.end()) {
@@ -1901,12 +1903,6 @@ class DeviceCachingAllocator {
 
   bool hasAllocatedExpandableSegments() const {
     return !expandable_segments_.empty();
-  }
-
-  void remove_cudagraph_stream_uses_and_free_blocks() {
-    auto context = maybeGatherContext(RecordContext::ALL);
-    std::lock_guard<std::recursive_mutex> lock(mutex);
-    insert_events_deferred_until_no_capture(context);
   }
 
  private:
@@ -2740,15 +2736,17 @@ class DeviceCachingAllocator {
   void remove_cudagraph_stream_uses(Block* block) {
     // remove stream uses added during cudagraph capture
     // (i.e., block->stream_uses - block->cudagraph_stream_uses)
-    stream_set streams(std::move(block->stream_uses));
-    AT_ASSERT(block->stream_uses.empty());
-    for (auto& stream : streams) {
-      if (block_to_cudagraph_stream_uses[block].find(stream) ==
-          block_to_cudagraph_stream_uses[block].end()) {
-        block->stream_uses.insert(stream);
+    if (C10_UNLIKELY(block_to_cudagraph_stream_uses.find(block) != block_to_cudagraph_stream_uses.end())) {
+      stream_set streams(std::move(block->stream_uses));
+      AT_ASSERT(block->stream_uses.empty());
+      for (auto& stream : streams) {
+        if (block_to_cudagraph_stream_uses[block].find(stream) ==
+            block_to_cudagraph_stream_uses[block].end()) {
+          block->stream_uses.insert(stream);
+        }
       }
+      block_to_cudagraph_stream_uses.erase(block);
     }
-    block_to_cudagraph_stream_uses.erase(block);
   }
 
   void insert_events(Block* block) {
@@ -3121,7 +3119,6 @@ class NativeCachingAllocator : public CUDAAllocator {
   std::shared_ptr<AllocatorState> getCheckpointState(
       c10::DeviceIndex device,
       MempoolId_t id) override {
-    device_allocator[device]->remove_cudagraph_stream_uses_and_free_blocks();
     return device_allocator[device]->getCheckpointState(id);
   }
 
