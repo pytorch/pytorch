@@ -186,296 +186,402 @@ class Unpickler:
         self.append = self.stack.append
         read = self.read
         readline = self.readline
+        dispatch = self.dispatch
+
         while True:
             key = read(1)
             if not key:
                 raise EOFError
             assert isinstance(key, bytes_types)
-            # Risky operators
-            if key[0] == GLOBAL[0]:
-                module = readline()[:-1].decode("utf-8")
-                name = readline()[:-1].decode("utf-8")
-                full_path = f"{module}.{name}"
-                if full_path in _get_allowed_globals():
-                    self.append(_get_allowed_globals()[full_path])
-                elif full_path in _get_user_allowed_globals():
-                    self.append(_get_user_allowed_globals()[full_path])
+            if key[0] in dispatch:
+                if key[0] == STOP[0]:
+                    return dispatch[key[0]](self)
                 else:
-                    # The logic in this branch handles user-defined tensor subclasses.
-                    # We can automatically allow and raise and error for anything that is not provably safe.
-                    # [Note: Criteria for allowing out-of-core tensor subclasses]
-                    # GLOBAL '<module>.<tensor subclass>' instructions will get the class and
-                    # push the string (not the actual type) while adding the type to the dictionary keyed
-                    # by the string onto the unpickler's stack if they satisfy the following conditions:
-                    # (1) The <module> that defines them is in `sys.modules`
-                    #     (we will use getattr_static to access it to ensure no code execution)
-                    # (2) They inherit from `torch.Tensor`
-                    # (2) The class is not overriding any of the `torch.Tensor` methods listed here:
-                    #     `__getattr__`, `__get__`, `__getattribute__`, `__setstate__`, `__set__`,
-                    #     and `tp_alloc`
-                    #     The methods that we ban overriding were selected in a test-driven manner
-                    #     by overriding every callable method on a tensor subclass and determinining
-                    #     which might get called during unpickling.
-                    # When executing REDUCE, the string will be appropriately converted back to the type only
-                    # for `torch._tensor._rebuild_from_type_v2` as other use of the class could use methods
-                    # we didn't audit.
-                    if module == "__builtin__":
-                        raise RuntimeError(
-                            f"Unsupported global: GLOBAL {full_path} was not an allowed global by default. "
-                            "Please use `torch.serialization.add_safe_globals` to allowlist this global "
-                            "if you trust this class/function."
-                        )
-                    elif module not in modules:
-                        # TODO: add a link here to a doc that explains to users what we mean by trust
-                        raise RuntimeError(
-                            f"Found GLOBAL `{full_path}` instruction in the pickle file but `{full_path}` was "
-                            f"not in the pre-defined list of allowed globals that are considered safe by the "
-                            "weights_only unpickler for rebuilding state_dicts. This is the expected behavior if "
-                            f"`{full_path}` is a class or function that is not in the list of allowed globals "
-                            f"If `{full_path}` is NOT a tensor subclass, you might consider"
-                            "`torch.serialization.add_safe_globals` if it is appropriate. However, if it is a "
-                            "user-defined tensor subclass not defined in the `torch` package, this error might arise "
-                            f"as we expect `{module}` to be present in `sys.modules` (i.e. it "
-                            "must be imported in the current environment), but this was not the case. "
-                            f"If you intend to unpickle a tensor subclass `{full_path}` please import `{name}` from "
-                            f"`{module}`. Note that having this imported will *only* allow the type `{full_path}` to "
-                            "be passed as the second argument to `torch._tensor._rebuild_from_type_v2`, which should "
-                            "enable the tensor subclass to be unpickled without any arbitrary code execution as long "
-                            # If the user imports and these are overridden the next error will prompt them to use
-                            # torch.serialization.add_safe_globals.
-                            "a sa pre-defined list of methods called when unpickling are not overridden. In "
-                            "particular, the methods are `__getattr__`, `__get__`, `__getattribute__`, `__setstate__`, "
-                            "`__set__`, as well as the implementation of `tp_alloc`."
-                        )
-                    else:
-                        try:
-                            class_type = getattr_static(modules[module], name)
-                        except AttributeError as e:
-                            raise AttributeError(
-                                "For safety during weights_only loading, we use inspect.getattr_state to "
-                                f"get {name} from {module}, if {module} implements the descriptor protocol, "
-                                "__getattr__ or __getattribute__ these will not be called."
-                            ) from e
-                        # None of the objects here contain any data from the pickle so this is safe
-                        if isinstance(class_type, type) and issubclass(
-                            class_type, torch.Tensor
-                        ):
-                            # getattr is called by the getattr call in `_rebuild_from_type_v2`
-                            custom_get_attribute = (
-                                class_type.__getattribute__
-                                is not torch.Tensor.__getattribute__
-                            )
-                            custom_get = (
-                                getattr_static(class_type, "__get__", None) is not None
-                            )
-                            custom_get_attr = (
-                                getattr_static(class_type, "__getattr__", None)
-                                is not None
-                            )
-                            # Tensor.__setstate__ might be called in `_rebuild_from_type_v2`
-                            custom_set_state = (
-                                class_type.__setstate__ is not torch.Tensor.__setstate__
-                            )
-                            # setattr is called in `torch._utils._set_obj_state`
-                            custom_set_attr = (
-                                class_type.__setattr__ is not object.__setattr__
-                            )
-                            custom_set = (
-                                getattr_static(class_type, "__set__", None) is not None
-                            )
-                            # tp_alloc is called by `Tensor._rebuild_wrapper_subclass` and `Tensor.as_subclass`
-                            has_custom_tp_alloc = (
-                                not torch._C._check_tp_alloc_is_default(class_type)
-                            )
-                            custom_methods = {
-                                "__getattribute__": custom_get_attribute,
-                                "__getattr__": custom_get_attr,
-                                "__get__": custom_get,
-                                "__setattr__": custom_set_attr,
-                                "__set__": custom_set,
-                                "__setstate__": custom_set_state,
-                                "tp_alloc": has_custom_tp_alloc,
-                            }
-                            if any(custom_methods.values()):
-                                error = ""
-                                for k, v in custom_methods.items():
-                                    error += f" {k}={v}"
-                                raise RuntimeError(
-                                    f"Trying to unpickle tensor subclass `{full_path}` that has defined a custom "
-                                    f"version for one of these methods:{error}. Please check whether you trust these "
-                                    "methods and allowlist the subclass with `torch.serialization.add_safe_globals` if so."
-                                )
-                            # push the string full_path onto the stack (in REBUILD, there is special logic to
-                            # access this from tensor_subclasses_found for rebuild_from_type_v2)
-                            self.tensor_subclasses_found[full_path] = class_type
-                            self.append(full_path)
-                        else:
-                            raise RuntimeError(
-                                f"Unsupported global: GLOBAL {full_path} was not an allowed global by default. "
-                                "Please use `torch.serialization.add_safe_globals` to allowlist this global "
-                                "if you trust this class/function."
-                            )
-
-            elif key[0] == NEWOBJ[0]:
-                args = self.stack.pop()
-                cls = self.stack.pop()
-                if cls is not torch.nn.Parameter:
-                    raise RuntimeError(f"Trying to instantiate unsupported class {cls}")
-                self.append(torch.nn.Parameter(*args))
-            elif key[0] == REDUCE[0]:
-                args = self.stack.pop()
-                func = self.stack[-1]
-                if (
-                    func not in _get_allowed_globals().values()
-                    and func not in _get_user_allowed_globals().values()
-                ):
-                    raise RuntimeError(
-                        f"Trying to call reduce for unrecognized function {func}"
-                    )
-                # Special handling for tensor subclass type found in GLOBAL that is pushed
-                # onto stack as str to prevent it from being used anywhere except the
-                # second arg of _rebuild_from_type_v2 and within argument tuple for _rebuild_wrapper_subclass
-                # _rebuild_from_type_v2 is called with args (func, type, func_args, state)
-                # where both type and, when func is rebuild_wrapper_subclass, func_args[0] could be the subclass type
-                # Since we pushed these subclass types onto the stack as strings, convert them to the actual
-                # type here.
-                if func is torch._tensor._rebuild_from_type_v2 and type(args[1]) is str:
-                    args_after = args[2:]
-                    if (
-                        args[0] is torch._utils._rebuild_wrapper_subclass
-                        and type(args[2][0]) is str
-                    ):
-                        new_arg_tuple = (
-                            self.tensor_subclasses_found[args[2][0]],
-                        ) + args[2][1:]
-                        args_after = (new_arg_tuple,) + args[3:]
-                    args = (
-                        args[:1] + (self.tensor_subclasses_found[args[1]],) + args_after
-                    )
-                self.stack[-1] = func(*args)
-            elif key[0] == BUILD[0]:
-                state = self.stack.pop()
-                inst = self.stack[-1]
-                if type(inst) is torch.Tensor:
-                    # Legacy unpickling
-                    inst.set_(*state)
-                elif type(inst) is torch.nn.Parameter:
-                    inst.__setstate__(state)
-                elif type(inst) is OrderedDict:
-                    inst.__dict__.update(state)
-                else:
-                    raise RuntimeError(
-                        f"Can only build Tensor, parameter or dict objects, but got {type(inst)}"
-                    )
-            # Stack manipulation
-            elif key[0] == APPEND[0]:
-                item = self.stack.pop()
-                list_obj = self.stack[-1]
-                if type(list_obj) is not list:
-                    raise RuntimeError(
-                        f"Can only append to lists, but got {type(list_obj)}"
-                    )
-                list_obj.append(item)
-            elif key[0] == APPENDS[0]:
-                items = self.pop_mark()
-                list_obj = self.stack[-1]
-                if type(list_obj) is not list:
-                    raise RuntimeError(
-                        f"Can only extend lists, but got {type(list_obj)}"
-                    )
-                list_obj.extend(items)
-            elif key[0] == SETITEM[0]:
-                (v, k) = (self.stack.pop(), self.stack.pop())
-                self.stack[-1][k] = v
-            elif key[0] == SETITEMS[0]:
-                items = self.pop_mark()
-                for i in range(0, len(items), 2):
-                    self.stack[-1][items[i]] = items[i + 1]
-            elif key[0] == MARK[0]:
-                self.metastack.append(self.stack)
-                self.stack = []
-                self.append = self.stack.append
-            elif key[0] == TUPLE[0]:
-                items = self.pop_mark()
-                self.append(tuple(items))
-            elif key[0] == TUPLE1[0]:
-                self.stack[-1] = (self.stack[-1],)
-            elif key[0] == TUPLE2[0]:
-                self.stack[-2:] = [(self.stack[-2], self.stack[-1])]
-            elif key[0] == TUPLE3[0]:
-                self.stack[-3:] = [(self.stack[-3], self.stack[-2], self.stack[-1])]
-            # Basic types construction
-            elif key[0] == NONE[0]:
-                self.append(None)
-            elif key[0] == NEWFALSE[0]:
-                self.append(False)
-            elif key[0] == NEWTRUE[0]:
-                self.append(True)
-            elif key[0] == EMPTY_TUPLE[0]:
-                self.append(())
-            elif key[0] == EMPTY_LIST[0]:
-                self.append([])
-            elif key[0] == EMPTY_DICT[0]:
-                self.append({})
-            elif key[0] == EMPTY_SET[0]:
-                self.append(set())
-            elif key[0] == BININT[0]:
-                self.append(unpack("<i", read(4))[0])
-            elif key[0] == BININT1[0]:
-                self.append(self.read(1)[0])
-            elif key[0] == BININT2[0]:
-                self.append(unpack("<H", read(2))[0])
-            elif key[0] == BINFLOAT[0]:
-                self.append(unpack(">d", self.read(8))[0])
-            elif key[0] == BINUNICODE[0]:
-                strlen = unpack("<I", read(4))[0]
-                if strlen > maxsize:
-                    raise RuntimeError("String is too long")
-                strval = str(read(strlen), "utf-8", "surrogatepass")
-                self.append(strval)
-            elif key[0] == SHORT_BINSTRING[0]:
-                strlen = read(1)[0]
-                strdata = read(strlen)
-                if self.encoding != "bytes":
-                    strdata = strdata.decode(self.encoding, "strict")
-                self.append(strdata)
-            elif key[0] == BINPERSID[0]:
-                pid = self.stack.pop()
-                # Only allow persistent load of storage
-                if type(pid) is not tuple and not type(pid) is not int:
-                    raise RuntimeError(
-                        f"persistent_load id must be tuple or int, but got {type(pid)}"
-                    )
-                if (
-                    type(pid) is tuple
-                    and len(pid) > 0
-                    and torch.serialization._maybe_decode_ascii(pid[0]) != "storage"
-                ):
-                    raise RuntimeError(
-                        f"Only persistent_load of storage is allowed, but got {pid[0]}"
-                    )
-                self.append(self.persistent_load(pid))
-            elif key[0] in [BINGET[0], LONG_BINGET[0]]:
-                idx = (read(1) if key[0] == BINGET[0] else unpack("<I", read(4)))[0]
-                self.append(self.memo[idx])
-            elif key[0] in [BINPUT[0], LONG_BINPUT[0]]:
-                i = (read(1) if key[0] == BINPUT[0] else unpack("<I", read(4)))[0]
-                if i < 0:
-                    raise ValueError("negative argument")
-                self.memo[i] = self.stack[-1]
-            elif key[0] == LONG1[0]:
-                n = read(1)[0]
-                data = read(n)
-                self.append(decode_long(data))
-            # First and last deserializer ops
-            elif key[0] == PROTO[0]:
-                # Read and ignore proto version
-                read(1)[0]
-            elif key[0] == STOP[0]:
-                rc = self.stack.pop()
-                return rc
+                    dispatch[key[0]](self)
             else:
                 raise RuntimeError(f"Unsupported operand {key[0]}")
+
+    dispatch = {}
+
+    # === Risky bytecode =======================================================
+
+    def load_global(self):
+        module = self.readline()[:-1].decode("utf-8")
+        name = self.readline()[:-1].decode("utf-8")
+        full_path = f"{module}.{name}"
+        if full_path in _get_allowed_globals():
+            self.append(_get_allowed_globals()[full_path])
+        elif full_path in _get_user_allowed_globals():
+            self.append(_get_user_allowed_globals()[full_path])
+        else:
+            # The logic in this branch handles user-defined tensor subclasses.
+            # We can automatically allow and raise and error for anything that is not provably safe.
+            # [Note: Criteria for allowing out-of-core tensor subclasses]
+            # GLOBAL '<module>.<tensor subclass>' instructions will get the class and
+            # push the string (not the actual type) while adding the type to the dictionary keyed
+            # by the string onto the unpickler's stack if they satisfy the following conditions:
+            # (1) The <module> that defines them is in `sys.modules`
+            #     (we will use getattr_static to access it to ensure no code execution)
+            # (2) They inherit from `torch.Tensor`
+            # (2) The class is not overriding any of the `torch.Tensor` methods listed here:
+            #     `__getattr__`, `__get__`, `__getattribute__`, `__setstate__`, `__set__`,
+            #     and `tp_alloc`
+            #     The methods that we ban overriding were selected in a test-driven manner
+            #     by overriding every callable method on a tensor subclass and determinining
+            #     which might get called during unpickling.
+            # When executing REDUCE, the string will be appropriately converted back to the type only
+            # for `torch._tensor._rebuild_from_type_v2` as other use of the class could use methods
+            # we didn't audit.
+            if module == "__builtin__":
+                raise RuntimeError(
+                    f"Unsupported global: GLOBAL {full_path} was not an allowed global by default. "
+                    "Please use `torch.serialization.add_safe_globals` to allowlist this global "
+                    "if you trust this class/function."
+                )
+            elif module not in modules:
+                # TODO: add a link here to a doc that explains to users what we mean by trust
+                raise RuntimeError(
+                    f"Found GLOBAL `{full_path}` instruction in the pickle file but `{full_path}` was "
+                    f"not in the pre-defined list of allowed globals that are considered safe by the "
+                    "weights_only unpickler for rebuilding state_dicts. This is the expected behavior if "
+                    f"`{full_path}` is a class or function that is not in the list of allowed globals "
+                    f"If `{full_path}` is NOT a tensor subclass, you might consider"
+                    "`torch.serialization.add_safe_globals` if it is appropriate. However, if it is a "
+                    "user-defined tensor subclass not defined in the `torch` package, this error might arise "
+                    f"as we expect `{module}` to be present in `sys.modules` (i.e. it "
+                    "must be imported in the current environment), but this was not the case. "
+                    f"If you intend to unpickle a tensor subclass `{full_path}` please import `{name}` from "
+                    f"`{module}`. Note that having this imported will *only* allow the type `{full_path}` to "
+                    "be passed as the second argument to `torch._tensor._rebuild_from_type_v2`, which should "
+                    "enable the tensor subclass to be unpickled without any arbitrary code execution as long "
+                    # If the user imports and these are overridden the next error will prompt them to use
+                    # torch.serialization.add_safe_globals.
+                    "a sa pre-defined list of methods called when unpickling are not overridden. In "
+                    "particular, the methods are `__getattr__`, `__get__`, `__getattribute__`, `__setstate__`, "
+                    "`__set__`, as well as the implementation of `tp_alloc`."
+                )
+            else:
+                try:
+                    class_type = getattr_static(modules[module], name)
+                except AttributeError as e:
+                    raise AttributeError(
+                        "For safety during weights_only loading, we use inspect.getattr_state to "
+                        f"get {name} from {module}, if {module} implements the descriptor protocol, "
+                        "__getattr__ or __getattribute__ these will not be called."
+                    ) from e
+                # None of the objects here contain any data from the pickle so this is safe
+                if isinstance(class_type, type) and issubclass(
+                    class_type, torch.Tensor
+                ):
+                    # getattr is called by the getattr call in `_rebuild_from_type_v2`
+                    custom_get_attribute = (
+                        class_type.__getattribute__ is not torch.Tensor.__getattribute__
+                    )
+                    custom_get = getattr_static(class_type, "__get__", None) is not None
+                    custom_get_attr = (
+                        getattr_static(class_type, "__getattr__", None) is not None
+                    )
+                    # Tensor.__setstate__ might be called in `_rebuild_from_type_v2`
+                    custom_set_state = (
+                        class_type.__setstate__ is not torch.Tensor.__setstate__
+                    )
+                    # setattr is called in `torch._utils._set_obj_state`
+                    custom_set_attr = class_type.__setattr__ is not object.__setattr__
+                    custom_set = getattr_static(class_type, "__set__", None) is not None
+                    # tp_alloc is called by `Tensor._rebuild_wrapper_subclass` and `Tensor.as_subclass`
+                    has_custom_tp_alloc = not torch._C._check_tp_alloc_is_default(
+                        class_type
+                    )
+                    custom_methods = {
+                        "__getattribute__": custom_get_attribute,
+                        "__getattr__": custom_get_attr,
+                        "__get__": custom_get,
+                        "__setattr__": custom_set_attr,
+                        "__set__": custom_set,
+                        "__setstate__": custom_set_state,
+                        "tp_alloc": has_custom_tp_alloc,
+                    }
+                    if any(custom_methods.values()):
+                        error = ""
+                        for k, v in custom_methods.items():
+                            error += f" {k}={v}"
+                        raise RuntimeError(
+                            f"Trying to unpickle tensor subclass `{full_path}` that has defined a custom "
+                            f"version for one of these methods:{error}. Please check whether you trust these "
+                            "methods and allowlist the subclass with `torch.serialization.add_safe_globals` if so."
+                        )
+                    # push the string full_path onto the stack (in REBUILD, there is special logic to
+                    # access this from tensor_subclasses_found for rebuild_from_type_v2)
+                    self.tensor_subclasses_found[full_path] = class_type
+                    self.append(full_path)
+                else:
+                    raise RuntimeError(
+                        f"Unsupported global: GLOBAL {full_path} was not an allowed global by default. "
+                        "Please use `torch.serialization.add_safe_globals` to allowlist this global "
+                        "if you trust this class/function."
+                    )
+
+    dispatch[GLOBAL[0]] = load_global
+
+    def load_new_obj(self):
+        args = self.stack.pop()
+        cls = self.stack.pop()
+        if cls is not torch.nn.Parameter:
+            raise RuntimeError(f"Trying to instantiate unsupported class {cls}")
+        self.append(torch.nn.Parameter(*args))
+
+    dispatch[NEWOBJ[0]] = load_new_obj
+
+    def load_reduce(self):
+        args = self.stack.pop()
+        func = self.stack[-1]
+        if (
+            func not in _get_allowed_globals().values()
+            and func not in _get_user_allowed_globals().values()
+        ):
+            raise RuntimeError(
+                f"Trying to call reduce for unrecognized function {func}"
+            )
+        # Special handling for tensor subclass type found in GLOBAL that is pushed
+        # onto stack as str to prevent it from being used anywhere except the
+        # second arg of _rebuild_from_type_v2 and within argument tuple for _rebuild_wrapper_subclass
+        # _rebuild_from_type_v2 is called with args (func, type, func_args, state)
+        # where both type and, when func is rebuild_wrapper_subclass, func_args[0] could be the subclass type
+        # Since we pushed these subclass types onto the stack as strings, convert them to the actual
+        # type here.
+        if func is torch._tensor._rebuild_from_type_v2 and type(args[1]) is str:
+            args_after = args[2:]
+            if (
+                args[0] is torch._utils._rebuild_wrapper_subclass
+                and type(args[2][0]) is str
+            ):
+                new_arg_tuple = (self.tensor_subclasses_found[args[2][0]],) + args[2][
+                    1:
+                ]
+                args_after = (new_arg_tuple,) + args[3:]
+            args = args[:1] + (self.tensor_subclasses_found[args[1]],) + args_after
+        self.stack[-1] = func(*args)
+
+    dispatch[REDUCE[0]] = load_reduce
+
+    def load_build(self):
+        state = self.stack.pop()
+        inst = self.stack[-1]
+        if type(inst) is torch.Tensor:
+            # Legacy unpickling
+            inst.set_(*state)
+        elif type(inst) is torch.nn.Parameter:
+            inst.__setstate__(state)
+        elif type(inst) is OrderedDict:
+            inst.__dict__.update(state)
+        else:
+            raise RuntimeError(
+                f"Can only build Tensor, parameter or dict objects, but got {type(inst)}"
+            )
+
+    dispatch[BUILD[0]] = load_build
+
+    # == Stack manipulation bytecode =======================================
+
+    def load_append(self):
+        item = self.stack.pop()
+        list_obj = self.stack[-1]
+        if type(list_obj) is not list:
+            raise RuntimeError(f"Can only append to lists, but got {type(list_obj)}")
+        list_obj.append(item)
+
+    dispatch[APPEND[0]] = load_append
+
+    def load_appends(self):
+        items = self.pop_mark()
+        list_obj = self.stack[-1]
+        if type(list_obj) is not list:
+            raise RuntimeError(f"Can only extend lists, but got {type(list_obj)}")
+        list_obj.extend(items)
+
+    dispatch[APPENDS[0]] = load_appends
+
+    def load_setitem(self):
+        (v, k) = (self.stack.pop(), self.stack.pop())
+        self.stack[-1][k] = v
+
+    dispatch[SETITEM[0]] = load_setitem
+
+    def load_setitems(self):
+        items = self.pop_mark()
+        for i in range(0, len(items), 2):
+            self.stack[-1][items[i]] = items[i + 1]
+
+    dispatch[SETITEMS[0]] = load_setitems
+
+    def load_mark(self):
+        self.metastack.append(self.stack)
+        self.stack = []
+        self.append = self.stack.append
+
+    dispatch[MARK[0]] = load_mark
+
+    def load_tuple(self):
+        items = self.pop_mark()
+        self.append(tuple(items))
+
+    dispatch[TUPLE[0]] = load_tuple
+
+    def load_tuple1(self):
+        self.stack[-1] = (self.stack[-1],)
+
+    dispatch[TUPLE1[0]] = load_tuple1
+
+    def load_tuple2(self):
+        self.stack[-2:] = [(self.stack[-2], self.stack[-1])]
+
+    dispatch[TUPLE2[0]] = load_tuple2
+
+    def load_tuple3(self):
+        self.stack[-3:] = [(self.stack[-3], self.stack[-2], self.stack[-1])]
+
+    dispatch[TUPLE3[0]] = load_tuple3
+
+    # == Basic type construction bytecode ==================================
+
+    def load_none(self):
+        self.append(None)
+
+    dispatch[NONE[0]] = load_none
+
+    def load_newfalse(self):
+        self.append(False)
+
+    dispatch[NEWFALSE[0]] = load_newfalse
+
+    def load_newtrue(self):
+        self.append(True)
+
+    dispatch[NEWTRUE[0]] = load_newtrue
+
+    def load_empty_tuple(self):
+        self.append(())
+
+    dispatch[EMPTY_TUPLE[0]] = load_empty_tuple
+
+    def load_empty_list(self):
+        self.append([])
+
+    dispatch[EMPTY_LIST[0]] = load_empty_list
+
+    def load_empty_dict(self):
+        self.append({})
+
+    dispatch[EMPTY_DICT[0]] = load_empty_dict
+
+    def load_empty_set(self):
+        self.append(set())
+
+    dispatch[EMPTY_SET[0]] = load_empty_set
+
+    def load_binint(self):
+        self.append(unpack("<i", self.read(4))[0])
+
+    dispatch[BININT[0]] = load_binint
+
+    def load_binint1(self):
+        self.append(self.read(1)[0])
+
+    dispatch[BININT1[0]] = load_binint1
+
+    def load_binint2(self):
+        self.append(unpack("<H", self.read(2))[0])
+
+    dispatch[BININT2[0]] = load_binint2
+
+    def load_binfloat(self):
+        self.append(unpack(">d", self.read(8))[0])
+
+    dispatch[BINFLOAT[0]] = load_binfloat
+
+    def load_binunicode(self):
+        strlen = unpack("<I", self.read(4))[0]
+        if strlen > maxsize:
+            raise RuntimeError("String is too long")
+        strval = str(self.read(strlen), "utf-8", "surrogatepass")
+        self.append(strval)
+
+    dispatch[BINUNICODE[0]] = load_binunicode
+
+    def load_short_binstring(self):
+        strlen = self.read(1)[0]
+        strdata = self.read(strlen)
+        if self.encoding != "bytes":
+            strdata = strdata.decode(self.encoding, "strict")
+        self.append(strdata)
+
+    dispatch[SHORT_BINSTRING[0]] = load_short_binstring
+
+    def load_binpersid(self):
+        pid = self.stack.pop()
+        # Only allow persistent load of storage
+        if type(pid) is not tuple and not type(pid) is not int:
+            raise RuntimeError(
+                f"persistent_load id must be tuple or int, but got {type(pid)}"
+            )
+        if (
+            type(pid) is tuple
+            and len(pid) > 0
+            and torch.serialization._maybe_decode_ascii(pid[0]) != "storage"
+        ):
+            raise RuntimeError(
+                f"Only persistent_load of storage is allowed, but got {pid[0]}"
+            )
+        self.append(self.persistent_load(pid))
+
+    dispatch[BINPERSID[0]] = load_binpersid
+
+    def load_binget(self):
+        idx = self.read(1)[0]
+        self.append(self.memo[idx])
+
+    dispatch[BINGET[0]] = load_binget
+
+    def load_long_binget(self):
+        idx = unpack("<I", self.read(4))[0]
+        self.append(self.memo[idx])
+
+    dispatch[LONG_BINGET[0]] = load_long_binget
+
+    def load_binput(self):
+        i = self.read(1)[0]
+        if i < 0:
+            raise ValueError("negative argument")
+        self.memo[i] = self.stack[-1]
+
+    dispatch[BINPUT[0]] = load_binput
+
+    def load_long_binput(self):
+        i = unpack("<I", self.read(4))[0]
+        if i < 0:
+            raise ValueError("negative argument")
+        self.memo[i] = self.stack[-1]
+
+    dispatch[LONG_BINPUT[0]] = load_long_binput
+
+    def load_long1(self):
+        n = self.read(1)[0]
+        data = self.read(n)
+        self.append(decode_long(data))
+
+    dispatch[LONG1[0]] = load_long1
+
+    def load_proto(self):
+        # Read and ignore proto version
+        self.read(1)[0]
+
+    dispatch[PROTO[0]] = load_proto
+
+    def load_stop(self):
+        rc = self.stack.pop()
+        return rc
+
+    dispatch[STOP[0]] = load_stop
 
     # Return a list of items pushed in the stack after last MARK instruction.
     def pop_mark(self):
