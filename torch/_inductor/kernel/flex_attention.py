@@ -549,113 +549,49 @@ flex_attention_backward_template = TritonTemplate(
         offs_m = start_m + tl.arange(0, BLOCK_M1)
         offs_n = start_n + tl.arange(0, BLOCK_N1)
         offs_k = tl.arange(0, BLOCK_DMODEL)
-
-        # initialize pointers to value-like data
-        q_ptrs = Q + (offs_m[:, None] * stride_qm + offs_k[None, :] * stride_qk)
-        k_ptrs = K + (offs_n[:, None] * stride_kn + offs_k[None, :] * stride_kk)
-        v_ptrs = V + (offs_n[:, None] * stride_vn + offs_k[None, :] * stride_vk)
-        do_ptrs = DO + (offs_m[:, None] * stride_qm + offs_k[None, :] * stride_qk)
-        dq_ptrs = DQ + (offs_m[:, None] * stride_qm + offs_k[None, :] * stride_qk)
-
-        # pointer to row-wise quantities in value-like data
-        D_ptrs = DELTA + off_hz * N_CTX
-        l_ptrs = LSE + off_hz * N_CTX
-
-        # initialize dv and dk
-        dv = tl.zeros([BLOCK_N, BLOCK_DMODEL], dtype=tl.float32)
-        dk = tl.zeros([BLOCK_N, BLOCK_DMODEL], dtype=tl.float32)
-
-        # Key and Value stay in SRAM throughout
-        k = tl.load(k_ptrs)
-        v = tl.load(v_ptrs)
-
-        for start_m in range(0, NUM_Q_BLOCKS * BLOCK_M, BLOCK_M):
-            offs_m_curr = start_m + offs_m
-
-            # load q, k, v, do on-chip
-            q = tl.load(q_ptrs)
-
-            if SCORE_MOD_IS_LINEAR:
-                qk_scale *= 1.44269504
-            q = (q * qk_scale).to(MATMUL_PRECISION)
-
-            # -- compute qk ---
-            qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
-            qk = tl.dot(q, tl.trans(k.to(MATMUL_PRECISION)), acc=qk)
-            pre_mod_scores = qk
-            # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
-            m = offs_m_curr[:, None]
-            n = offs_n[None, :]
-            {{ modification(
-                subgraph_number=0,
-                output_name="post_mod_scores",
-                score="qk",
-                b="off_z",
-                h="off_h",
-                m="m",
-                n="n",
-                out="qk"
-            ) | indent_except_first(3) }}
-            # TODO: In the case that score_mod is linear, this can be LICMed
-            if not SCORE_MOD_IS_LINEAR:
-                post_mod_scores *= 1.44269504
-            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-            l_i = tl.load(l_ptrs + offs_m_curr)
-            p = tl.math.exp2(post_mod_scores - l_i[:, None])
-
-            # compute dv
+        qT_ptrs = Q + offs_m[None, :] * stride_tok + offs_k[:, None] * stride_d
+        do_ptrs = DO + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d
+        # BLOCK_N1 must be a multiple of BLOCK_M1, otherwise the code wouldn't work.
+        tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
+        curr_m = start_m
+        step_m = BLOCK_M1
+        for blk_idx in range(num_steps):
+            qT = tl.load(qT_ptrs)
+            # Load m before computing qk to reduce pipeline stall.
+            offs_m = curr_m + tl.arange(0, BLOCK_M1)
+            m = tl.load(M + offs_m)
+            qkT = tl.dot(k, qT)
+            pT = tl.math.exp2(qkT - m[None, :])
+            # Autoregressive masking.
+            # if MASK:
+            #     mask = (offs_m[None, :] >= offs_n[:, None])
+            #     pT = tl.where(mask, pT, 0.0)
             do = tl.load(do_ptrs)
-            dv += tl.dot(tl.trans(p.to(MATMUL_PRECISION)), do)
+            # Compute dV.
+            ppT = pT
+            ppT = ppT.to(tl.float16)
+            dv += tl.dot(ppT, do)
+            # D (= delta) is pre-divided by ds_scale.
+            Di = tl.load(D + offs_m)
+            # Compute dP and dS.
+            dpT = tl.dot(v, tl.trans(do)).to(tl.float32)
+            dsT = pT * (dpT - Di[None, :])
+            dsT = dsT.to(tl.float16)
+            dk += tl.dot(dsT, tl.trans(qT))
+            # Increment pointers.
+            curr_m += step_m
+            qT_ptrs += step_m * stride_tok
+            do_ptrs += step_m * stride_tok
+        # return dk, dv
+        # end bwd dkdv
 
-            # compute dp = dot(v, do)
-            Di = tl.load(D_ptrs + offs_m_curr) # [BLOCKM, 1]
-
-            # compute ds = p * (dp - delta[:, None])
-            dp = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32) - Di[:, None]
-            dp += tl.dot(do, tl.trans(v))
-            ds = p * dp
-
-            # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
-            {{ modification(
-                subgraph_number=1,
-                output_name = "grad_scores",
-                score="pre_mod_scores",
-                b="off_z",
-                h="off_h",
-                m="m",
-                n="n",
-                grad_score_mod="ds"
-            ) | indent_except_first(3) }}
-            ds = grad_scores
-            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-            # compute dk = dot(ds.T, q)
-            dk += tl.dot(tl.trans(ds.to(MATMUL_PRECISION)), q)
-            # compute dq
-            dq = tl.load(dq_ptrs)
-            dq += tl.dot(ds.to(MATMUL_PRECISION), k)
-
-            # Store grad_query
-            tl.store(dq_ptrs, dq)
-
-            # increment pointers
-            dq_ptrs += BLOCK_M * stride_qm
-            q_ptrs += BLOCK_M * stride_qm
-            do_ptrs += BLOCK_M * stride_qm
-
-        # write-back
-        index_n = offs_n[:, None]
-        index_k = offs_k[None, :]
-
-        dv_ptrs = DV + index_n * stride_tok + index_k * stride_d
+        dv_ptrs = DV + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
         tl.store(dv_ptrs, dv)
 
         # Write back dK.
         dk *= sm_scale
-        # dk_ptrs = DK + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
-        # tl.store(dk_ptrs, dk)
-        # TODO generalize and add proper mask support
-        mask = (index_n != -1) & (index_k != -1)
-        {{store_output(("off_z", "off_h", "index_n", "index_k"), "dk", "mask", indent_width=8)}}
+        dk_ptrs = DK + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
+        tl.store(dk_ptrs, dk)
     else:
         pid = pid - NUM_KV_BLOCKS
         # THIS BLOCK DOES DQ:
