@@ -671,7 +671,7 @@ class ONNXProgram:
         fake_context: Optional[ONNXFakeContext] = None,
         export_exception: Optional[Exception] = None,
         model_signature: Optional[torch.export.ExportGraphSignature] = None,
-        exported_program: torch_export.ExportedProgram | None = None,
+        exported_program: Optional[torch_export.ExportedProgram] = None,
     ):
         self._model_proto = model_proto
         self._model_signature = model_signature
