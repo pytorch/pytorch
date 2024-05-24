@@ -1273,12 +1273,13 @@ class CppWrapperCpu(WrapperCodeGen):
                     break
             assert grid_decision is not None
 
+        current_device = V.graph.scheduler.get_current_device_or_throw()
         self.generate_kernel_call(
             kernel_name,
             args,
             arg_types=arg_types,
             grid=grid_decision,
-            device_index=V.graph.scheduler.current_device.index,
+            device_index=current_device.index,
             cuda=True,
             triton=True,
             triton_meta=triton_meta,
