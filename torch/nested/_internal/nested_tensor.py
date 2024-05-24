@@ -118,8 +118,10 @@ class NestedTensor(torch.Tensor):
         self._metadata_cache = kwargs.get("_metadata_cache") or {}
 
         # collapsed ragged dim must always be dynamic
-        torch._dynamo.mark_dynamic(self, self._ragged_idx)
-        torch._dynamo.mark_dynamic(self._values, self._ragged_idx - 1)
+        mark_dynamic = md if (md := kwargs.get("_mark_dynamic")) is not None else True
+        if mark_dynamic:
+            torch._dynamo.mark_dynamic(self, self._ragged_idx)
+            torch._dynamo.mark_dynamic(self._values, self._ragged_idx - 1)
 
     def values(self):
         # dispatch to get proper view relationship
