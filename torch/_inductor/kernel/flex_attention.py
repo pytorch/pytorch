@@ -115,9 +115,10 @@ def build_subgraph_buffer(
             # already created TensorBoxes as args
             from torch.utils._pytree import tree_map
 
-            env[node] = lowerings[node.target](
-                *tree_map(lambda x: env[x] if x in env else x, node.args)
+            args, kwargs = tree_map(
+                lambda x: env[x] if x in env else x, (node.args, node.kwargs)
             )
+            env[node] = lowerings[node.target](*args, **kwargs)
         elif node.op == "output":
             # For the output node we need to create a ComputedBuffer
             # which represents the actual score modification
@@ -249,6 +250,7 @@ flex_attention_template = TritonTemplate(
         n = start_n + offs_n[None, :]
         {{ modification(
             subgraph_number=0,
+            output_name="post_mod_scores",
             score="qk",
             b="off_hz // H",
             h="off_hz % H",
@@ -258,15 +260,15 @@ flex_attention_template = TritonTemplate(
         ) | indent_except_first(2) }}
         # TODO: In the case that score_mod is linear, this can be LICMed
         if not SCORE_MOD_IS_LINEAR:
-            qk *= 1.44269504
+            post_mod_scores *= 1.44269504
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
         # -- compute scaling constant ---
-        row_max = tl.max(qk, 1)
+        row_max = tl.max(post_mod_scores, 1)
         m_i_new = tl.maximum(m_i, row_max)
 
         alpha = tl.math.exp2(m_i - m_i_new)
-        p = tl.math.exp2(qk - m_i_new[:, None])
+        p = tl.math.exp2(post_mod_scores - m_i_new[:, None])
         if not ROWS_GUARANTEED_SAFE:
             masked_out_rows = (m_i_new == float("-inf"))
             alpha = tl.where(masked_out_rows, 0, alpha)
@@ -360,7 +362,7 @@ def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
     elif head_dim <= 256 and torch.cuda.get_device_capability() >= (8, 0):  # A100
         return (32, 32, 4, 1)
     else:  # modest hardware or extremely large head_dim
-        return (32, 32, 4, 1)
+        return (16, 16, 4, 1)
 
 
 # TODO: We probably also need a layout constraint?
@@ -559,6 +561,7 @@ flex_attention_backward_template = TritonTemplate(
             n = offs_n[None, :]
             {{ modification(
                 subgraph_number=0,
+                output_name="post_mod_scores",
                 score="qk",
                 b="off_z",
                 h="off_h",
@@ -568,10 +571,10 @@ flex_attention_backward_template = TritonTemplate(
             ) | indent_except_first(3) }}
             # TODO: In the case that score_mod is linear, this can be LICMed
             if not SCORE_MOD_IS_LINEAR:
-                qk *= 1.44269504
+                post_mod_scores *= 1.44269504
             # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             l_i = tl.load(l_ptrs + offs_m_curr)
-            p = tl.math.exp2(qk - l_i[:, None])
+            p = tl.math.exp2(post_mod_scores - l_i[:, None])
 
             # compute dv
             do = tl.load(do_ptrs)
@@ -588,13 +591,15 @@ flex_attention_backward_template = TritonTemplate(
             # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
             {{ modification(
                 subgraph_number=1,
+                output_name = "grad_scores",
                 score="pre_mod_scores",
                 b="off_z",
                 h="off_h",
                 m="m",
                 n="n",
-                out="ds"
+                grad_score_mod="ds"
             ) | indent_except_first(3) }}
+            ds = grad_scores
             # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             # compute dk = dot(ds.T, q)
             dk += tl.dot(tl.trans(ds.to(MATMUL_PRECISION)), q)
@@ -663,7 +668,7 @@ def flex_attention_backward(*args, **kwargs):
     )
 
     joint_placeholder_inps = fwd_placeholder_inps + [
-        create_placeholder("out", dtype, device)
+        create_placeholder("grad_score_mod", dtype, device)
     ]
     joint_subgraph_buffer = build_subgraph_buffer(
         args, joint_placeholder_inps, joint_graph, graph_type=SubgraphType.JOINT_BWD
