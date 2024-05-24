@@ -44,7 +44,7 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
             os.remove(m.__file__)
         torch._inductor.codecache.PyCodeCache.cache_clear()
 
-    @torch._inductor.config.patch("fx_graph_cache", True)
+    @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
     def test_basic(self):
         """
@@ -74,8 +74,8 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
-    @torch._inductor.config.patch({"fx_graph_cache": True})
-    @config.patch({"enable_autograd_cache": True})
+    @inductor_config.patch({"fx_graph_cache": True})
+    @functorch_config.patch({"enable_autograd_cache": True})
     def test_autograd_lazy_backward(self):
         """
         Lazily compile the backward, and lazily save to cache
@@ -122,7 +122,7 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(a.grad, a2.grad)
         self.assertEqual(b.grad, b2.grad)
 
-    @torch._inductor.config.patch({"fx_graph_cache": True})
+    @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
     def test_autograd_function(self):
         """
