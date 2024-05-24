@@ -312,7 +312,6 @@ def init(activation_checkpoint):
         torch._dynamo.config._experimental_support_context_fn_in_torch_utils_checkpoint = True
     if apply_fsdp:
         torch._dynamo.config.trace_distributed = True
-        torch._functorch.config.move_view_chain_to_bwd_graph = True
         torch._functorch.config.aggressive_recomputation = False
         torch._inductor.config.reorder_for_compute_comm_overlap = True
         torch._inductor.config.reorder_for_compute_comm_overlap_passes = [
