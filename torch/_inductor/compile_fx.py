@@ -193,11 +193,9 @@ def _unlift_graph(mod, gm, graph_signature):
             mutated_outputs.append(None)
 
     mutated_out_inputs = {}
-    # Single output case where output is an alias of input.
-    #
     # Take clamp.out as an example:
     #   aten::clamp.out(Tensor self, Scalar? min=None, Scalar? max=None, *, Tensor(a!) out) -> Tensor(a!)
-    # The input graph is as follows, while arg0_1 is self and arg1_1 is out:
+    # The produced graph will be as follows w/ current implementation, while arg0_1 is self and arg1_1 is out:
     #   opcode         name       target                  args                       kwargs
     #   -------------  ---------  ----------------------  -------------------------  --------
     #   placeholder    arg0_1     arg0_1                  ()                         {}
@@ -205,7 +203,8 @@ def _unlift_graph(mod, gm, graph_signature):
     #   call_function  clamp_min  aten.clamp_min.default  (arg0_1, 0.05)             {}
     #   call_function  clamp_max  aten.clamp_max.default  (clamp_min, 0.05)          {}
     #   output         output     output                  ((clamp_max, clamp_max),)  {}
-    # But the graph above does not align with the semantics of aten::clamp.out, which is an inplace operation.
+    #
+    # But the graph above does not align with the semantics of aten::clamp.out as it is an inplace operation.
     # The correct graph should be:
     #   opcode         name       target                  args                       kwargs
     #   -------------  ---------  ----------------------  -------------------------  --------
@@ -215,22 +214,24 @@ def _unlift_graph(mod, gm, graph_signature):
     #   call_function  clamp_max  aten.clamp_max.default  (clamp_min, 0.05)          {}
     #   call_function  copy_      aten.copy_.default      (arg1_1, clamp_max)        {}
     #   output         output     output                  (copy_,)                   {}
+    #
     # To get the expected graph, we need to find the output node and the corresponding input node,
     # and replace the output node with a copy_ node. By now, the check is only for single output case.
     # The multiple output case is not supported yet.
-    is_output_alias_of_input = len(graph_signature.user_outputs) == 1
-    is_output_alias_of_input = is_output_alias_of_input and all(
-        mutated_output is None for mutated_output in mutated_outputs
-    )
-    is_output_alias_of_input = is_output_alias_of_input and all(
-        output.name in graph_signature.user_inputs_to_mutate for output in outputs
-    )
-    if is_output_alias_of_input:
-        for out_node in outputs:
-            if out_node.name in graph_signature.user_inputs_to_mutate:
-                input_node = graph_signature.user_inputs_to_mutate[out_node.name]
-                assert input_node in placeholder_node_list
-                mutated_out_inputs[out_node] = placeholder_node_list[input_node]
+    inputs_to_mutate = {
+        key: val
+        for key, val in graph_signature.user_inputs_to_mutate.items()
+        if val not in graph_signature.inputs_to_parameters
+    }
+    if len(inputs_to_mutate) > 0:
+        assert all(
+            key in graph_signature.user_outputs for key, _ in inputs_to_mutate.items()
+        )
+    for out_node in outputs:
+        if out_node.name in graph_signature.user_inputs_to_mutate:
+            input_node = graph_signature.user_inputs_to_mutate[out_node.name]
+            assert input_node in placeholder_node_list
+            mutated_out_inputs[out_node] = placeholder_node_list[input_node]
 
     unlifted_gm = _unlift(
         gm,
@@ -380,31 +381,6 @@ def maybe_disable_comprehensive_padding(example_inputs: List[torch.Tensor]):
         return config.patch(comprehensive_padding=False)
     else:
         return contextlib.nullcontext()
-
-
-@DebugContext.wrap
-def count_bytes_inner(
-    gm: torch.fx.GraphModule,
-    example_inputs: List[torch.Tensor],
-    num_fixed: int = 0,
-    **kwargs,
-):
-    shape_env = _shape_env_from_inputs(example_inputs)
-    fake_mode = fake_tensor_prop(gm, example_inputs)
-
-    with V.set_fake_mode(fake_mode):
-        _recursive_post_grad_passes(gm, False)
-
-    graph = GraphLowering(gm, shape_env=shape_env, num_static_inputs=num_fixed)
-    with V.set_graph_handler(graph), V.set_real_inputs(
-        example_inputs
-    ), maybe_disable_comprehensive_padding(example_inputs):
-        graph.run(*example_inputs)
-        num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
-        metrics.num_bytes_accessed += num_bytes
-        metrics.nodes_num_elem += nodes_num_elem
-        metrics.node_runtimes += node_runtimes
-    return make_boxed_func(gm.forward)
 
 
 def fake_tensor_prop(
@@ -839,6 +815,7 @@ def fx_codegen_and_compile(
             const_code=const_code,
             const_module=const_graph,
         )
+        metrics_helper = metrics.CachedMetricsHelper()
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)
             output_strides: List[Optional[Tuple[int, ...]]] = []
@@ -858,8 +835,11 @@ def fx_codegen_and_compile(
                     else:
                         output_strides.append(None)
 
-            metrics_helper = metrics.CachedMetricsHelper()
             compiled_fn = graph.compile_to_fn()
+            num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
+            metrics.num_bytes_accessed += num_bytes
+            metrics.node_runtimes += node_runtimes
+            metrics.nodes_num_elem += nodes_num_elem
 
             if (
                 cudagraphs
@@ -1512,7 +1492,6 @@ def compile_fx(
                 example_inputs_,
                 trace_joint=False,
                 decompositions=decompositions,
-                keep_inference_input_mutations=False,
             )
         unlifted_gm = _unlift_graph(model_, gm, graph_signature)
         if "dynamo_flat_name_to_original_fqn" in model_.meta:
