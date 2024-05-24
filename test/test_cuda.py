@@ -1721,7 +1721,7 @@ torch.cuda.synchronize()
     def test_autocast_custom_enabled(self):
         class MyMM(torch.autograd.Function):
             @staticmethod
-            @torch.cuda.amp.custom_fwd
+            @torch.amp.custom_fwd(device_type="cuda")
             def forward(ctx, a, b):
                 self.assertTrue(a.dtype is torch.float32)
                 self.assertTrue(b.dtype is torch.float32)
@@ -1730,7 +1730,7 @@ torch.cuda.synchronize()
                 return a.mm(b)
 
             @staticmethod
-            @torch.cuda.amp.custom_bwd
+            @torch.amp.custom_bwd(device_type="cuda")
             def backward(ctx, grad):
                 self.assertTrue(torch.is_autocast_enabled())
                 a, b = ctx.saved_tensors
@@ -1754,7 +1754,7 @@ torch.cuda.synchronize()
     def test_autocast_custom_cast_inputs(self):
         class MyMM(torch.autograd.Function):
             @staticmethod
-            @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
+            @torch.amp.custom_fwd(device_type="cuda", cast_inputs=torch.float32)
             def forward(ctx, a, container, expect_type):
                 b = container[1][0]
                 self.assertTrue(a.dtype is expect_type)
@@ -1764,7 +1764,7 @@ torch.cuda.synchronize()
                 return a.mm(b)
 
             @staticmethod
-            @torch.cuda.amp.custom_bwd
+            @torch.amp.custom_bwd(device_type="cuda")
             def backward(ctx, grad):
                 self.assertFalse(torch.is_autocast_enabled())
                 a, b = ctx.saved_tensors
@@ -1797,6 +1797,39 @@ torch.cuda.synchronize()
         output = mymm(x, y, torch.float16)
         self.assertTrue(output.dtype is torch.float16)
         loss = output.sum()
+        loss.backward()
+
+    def test_autocast_custom_deprecated_warning(self):
+        with warnings.catch_warnings(record=True) as w:
+
+            class MyMM(torch.autograd.Function):
+                @staticmethod
+                @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
+                def forward(ctx, x, y):
+                    ctx.save_for_backward(x, y)
+                    self.assertFalse(torch.is_autocast_enabled())
+                    return x + y
+
+                @staticmethod
+                @torch.cuda.amp.custom_bwd
+                def backward(ctx, grad):
+                    _, _ = ctx.saved_tensors
+                    self.assertFalse(torch.is_autocast_enabled())
+                    return grad, grad
+
+        self.assertRegex(
+            str(w[0].message), r"torch.cuda.amp.custom_fwd\(args...\) is deprecated."
+        )
+        self.assertRegex(
+            str(w[1].message), r"torch.cuda.amp.custom_bwd\(args...\) is deprecated."
+        )
+
+        mymm = MyMM.apply
+        x = torch.randn(3, 3, requires_grad=True)
+        y = torch.randn(3, 3, requires_grad=True)
+        with torch.amp.autocast("cuda"):
+            output = mymm(x, y)
+            loss = output.sum()
         loss.backward()
 
     def test_autocast_cat_jit(self):
