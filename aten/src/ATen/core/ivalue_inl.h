@@ -1909,7 +1909,7 @@ std::unordered_map<K, V> generic_to(
 }
 
 template <typename T>
-std::optional<T> generic_to(IValue ivalue, _fake_type<c10::optional<T>>) {
+std::optional<T> generic_to(IValue ivalue, _fake_type<std::optional<T>>) {
   if (ivalue.isNone()) {
     return c10::nullopt;
   }

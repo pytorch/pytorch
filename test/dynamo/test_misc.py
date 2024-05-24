@@ -10695,6 +10695,33 @@ fn
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(res, fn(x, d))
 
+    def test_contains_dunder_dict(self):
+        class UserDefined:
+            def __init__(self):
+                self.a = 3
+                self.b = 5
+
+            def run(self, x):
+                if "a" in self.__dict__:
+                    x = x * self.a
+                if "b" in self.__dict__:
+                    x = x * self.b
+                self.c = 7
+                if "c" in self.__dict__:
+                    x = x * self.c
+                return x * self.__dict__.get("a") * self.__dict__.get("z", 2)
+
+        obj = UserDefined()
+
+        def fn(x):
+            return obj.run(x)
+
+        x = torch.randn(4)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
