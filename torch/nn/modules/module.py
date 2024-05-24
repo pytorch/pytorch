@@ -2013,10 +2013,7 @@ class Module:
         local_name_params = itertools.chain(self._parameters.items(), persistent_buffers.items())
         local_state = {k: v for k, v in local_name_params if v is not None}
         assign_to_params_buffers = local_metadata.get("assign_to_params_buffers", False)
-
-        def _use_swap_tensors(p, sd_p):
-            use_swap_tensors = torch.__future__.get_swap_module_params_on_conversion()
-            return use_swap_tensors or is_traceable_wrapper_subclass(p) or is_traceable_wrapper_subclass(sd_p)
+        _use_swap_tensors = torch.__future__.get_swap_module_params_on_conversion()
 
         for name, param in local_state.items():
             key = prefix + name
@@ -2049,8 +2046,9 @@ class Module:
                                   'pass `assign=True` to assign items in the state dictionary to their '
                                   'corresponding key in the module instead of copying them in place?)')
 
-                use_swap_tensors = _use_swap_tensors(param, input_param)
-
+                use_swap_tensors = (_use_swap_tensors
+                                    or is_traceable_wrapper_subclass(param)
+                                    or is_traceable_wrapper_subclass(input_param))
                 try:
                     with torch.no_grad():
                         if use_swap_tensors:
