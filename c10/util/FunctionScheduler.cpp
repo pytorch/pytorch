@@ -25,26 +25,6 @@ Job::Job(
       _immediate(immediate),
       _run_limit(run_limit) {}
 
-std::chrono::microseconds Job::interval() const {
-  return _interval;
-}
-
-int Job::counter() const {
-  return _counter;
-}
-
-void Job::reset_counter() {
-  _counter = 0;
-}
-
-bool Job::immediate() const {
-  return _immediate;
-}
-
-int Job::run_limit() const {
-  return _run_limit;
-}
-
 void Job::run() {
   _counter++;
   try {
@@ -65,21 +45,9 @@ void Job::run() {
 Run::Run(int job_id, std::chrono::time_point<std::chrono::steady_clock> time)
     : _job_id(job_id), _time(time) {}
 
-int Run::job_id() const {
-  return _job_id;
-}
-
-std::chrono::time_point<std::chrono::steady_clock> Run::time() const {
-  return _time;
-}
-
-void Run::set_time(std::chrono::time_point<std::chrono::steady_clock> time) {
-  _time = time;
-}
-
 /* FunctionScheduler */
 
-FunctionScheduler::FunctionScheduler() : _queue(&Run::gt){};
+FunctionScheduler::FunctionScheduler() : _queue(&Run::gt) {}
 
 FunctionScheduler::~FunctionScheduler() {
   stop();
@@ -157,10 +125,6 @@ bool FunctionScheduler::validEntry(
     const std::unordered_map<int, std::unique_ptr<Job>>::iterator& entry) {
   return entry != _jobs.end() &&
       entry->second->counter() != entry->second->run_limit();
-}
-
-int FunctionScheduler::id() {
-  return _current_id++;
 }
 
 void FunctionScheduler::addRun(
@@ -278,14 +242,6 @@ int FunctionScheduler::resume() {
   _paused = false;
   _thread = std::thread(&FunctionScheduler::run, this);
   return 1;
-}
-
-bool FunctionScheduler::isRunning() const {
-  return _running;
-}
-
-int FunctionScheduler::currentId() const {
-  return _current_id;
 }
 
 } // namespace c10

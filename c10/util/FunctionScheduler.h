@@ -31,11 +31,11 @@ class C10_API Job {
       bool immediate = false,
       int run_limit = -1); // -1 = FunctionScheduler::RUN_FOREVER
 
-  std::chrono::microseconds interval() const;
-  int counter() const;
-  void reset_counter();
-  bool immediate() const;
-  int run_limit() const;
+  std::chrono::microseconds interval() const { return _interval; }
+  int counter() const { return _counter; }
+  void reset_counter() { _counter = 0; }
+  bool immediate() const { return _immediate; }
+  int run_limit() const { return _run_limit; }
 
   void run();
 };
@@ -53,10 +53,10 @@ class C10_API Run {
 
   Run(int job_id, std::chrono::time_point<std::chrono::steady_clock> time);
 
-  int job_id() const;
-  std::chrono::time_point<std::chrono::steady_clock> time() const;
+  int job_id() const { return _job_id; }
+  std::chrono::time_point<std::chrono::steady_clock> time() const { return _time; }
 
-  void set_time(std::chrono::time_point<std::chrono::steady_clock> time);
+  void set_time(std::chrono::time_point<std::chrono::steady_clock> time) { _time = time; }
 };
 
 /**
@@ -111,7 +111,7 @@ class C10_API FunctionScheduler {
   std::condition_variable _cond;
 
   // Returns a new job id, updating _current_id.
-  int id();
+  int id() { return _current_id++; }
 
   // Main run execution loop function.
   void run();
@@ -175,8 +175,8 @@ class C10_API FunctionScheduler {
   // unpaused or not running.
   int resume();
 
-  bool isRunning() const;
-  int currentId() const;
+  bool isRunning() const { return _running; }
+  int currentId() const { return _current_id; }
 };
 
 // Template function must be defined in the header file
