@@ -68,6 +68,7 @@ from .cpp_utils import (
     DTYPE_TO_CPP,
     INDEX_TYPE,
     LocalBuffer,
+    LocalBufferCase,
     value_to_cpp,
 )
 
@@ -1970,29 +1971,29 @@ class CppKernel(Kernel):
 
             stack.enter_context(code.indent())
             if loop_nest.root:
-                if (
-                    has_outer_loop_kernel
-                    and V.graph.scheduler.get_local_buffer() is not None
-                    and len(V.graph.scheduler.get_local_buffer().items()) == 1
-                ):
-                    # Codegen the Local Buffer
+                if has_outer_loop_kernel and V.graph.scheduler.get_local_buffer():
+                    # Allocate local buffer
                     local_buffers = V.graph.scheduler.get_local_buffer()
                     assert len(local_buffers.items()) == 1
                     local_buffer = next(iter(local_buffers.items()))[1]
 
-                    # Checked in try_outer_loop_fusion_with_local_buf assuming last dim size and contiguous
+                    # Checked in try_outer_loop_fusion_with_local_buf by assuming last dim size and contiguous
                     assert len(local_buffer.get_layout().size) == 1
                     # For dynamic size, rename s to ks
                     local_buf_size = self.rename_indexing(
                         local_buffer.get_layout().size[-1]
                     )
-                    dtype = DTYPE_TO_CPP[local_buffer.get_layout().dtype]
-                    allocate = f"std::make_unique<{dtype} []>({local_buf_size})"
+                    local_buf_dtype = DTYPE_TO_CPP[local_buffer.get_layout().dtype]
+                    allocate = (
+                        f"std::make_unique<{local_buf_dtype} []>({local_buf_size})"
+                    )
                     code.splice(
-                        f"std::unique_ptr<{dtype} []> local_buffer = {allocate};"
+                        f"std::unique_ptr<{local_buf_dtype} []> local_buffer = {allocate};"
                     )
                     local_buffer_name = local_buffer.get_name()
-                    code.splice(f"{dtype}* {local_buffer_name} = local_buffer.get();")
+                    code.splice(
+                        f"{local_buf_dtype}* {local_buffer_name} = local_buffer.get();"
+                    )
                 gen_loops(loop_nest.root)
             else:
                 gen_kernel(loop_nest.kernel)
@@ -3449,7 +3450,7 @@ class CppKernelProxy(CppKernel):
                         V.get_ops_handler(),
                         global_buf=local_buffers[0].global_snode.node,
                         local_buf=local_buffers[0].local_buf,
-                        outer_loop_local_buf=True,
+                        local_buffer_case=LocalBufferCase.OUTERLOOPFUSION,
                     )
                     ctx = V.set_ops_handler(op_handle)
                 with ctx:
@@ -3808,32 +3809,30 @@ class CppScheduling(BaseScheduling):
                 return False
 
             local_buffers: List[LocalBuffer] = []
-            for fused_scheduler_node in node.get_outer_nodes():
-                scheduler_nodes = fused_scheduler_node.get_nodes()
-                for scheduler_node in scheduler_nodes:
-                    # all users inside same OuterLoopFusedSchedulerNode
-                    if not scheduler_node.is_reduction() and all(
-                        user.node in node.get_nodes() for user in scheduler_node.users
-                    ):
-                        global_buffer_layout = scheduler_node.node.get_layout()
-                        # Previous check ensure that local buffer is with size of last dim and contiguous.
-                        local_buffer_layout = ir.FixedLayout(
-                            global_buffer_layout.device,
-                            global_buffer_layout.dtype,
-                            global_buffer_layout.size[-1:],
-                            global_buffer_layout.stride[-1:],
+            for scheduler_node in node.get_nodes():
+                # all users inside same OuterLoopFusedSchedulerNode
+                if not scheduler_node.is_reduction() and all(
+                    user.node in node.get_nodes() for user in scheduler_node.users
+                ):
+                    global_buffer = scheduler_node.node
+                    assert isinstance(global_buffer, ir.ComputedBuffer)
+                    global_buffer_layout = global_buffer.get_layout()
+                    # Previous check ensure that local buffer is with size of last dim and contiguous.
+                    local_buffer_layout = ir.FixedLayout(
+                        global_buffer_layout.device,
+                        global_buffer_layout.dtype,
+                        global_buffer_layout.size[-1:],
+                        global_buffer_layout.stride[-1:],
+                    )
+                    local_buffers.append(
+                        LocalBuffer(
+                            local_buf=ir.Buffer(
+                                "local_buffer_data", local_buffer_layout
+                            ),
+                            global_snode=scheduler_node,
                         )
-                        local_buffers.append(
-                            LocalBuffer(
-                                local_buf=ir.Buffer(
-                                    "local_buffer_data", local_buffer_layout
-                                ),
-                                global_snode=scheduler_node,
-                            )
-                        )
-                        # At most 1 node with local buf for each OuterLoopFusedSchedulerNode
-                        break
-                if len(local_buffers) > 0:
+                    )
+                    # At most 1 node with local buf for each OuterLoopFusedSchedulerNode
                     break
             if len(local_buffers) == 0:
                 # No local buffer found

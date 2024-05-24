@@ -3,6 +3,7 @@ import copy
 import math
 
 from collections import namedtuple
+from enum import Enum
 from typing import Dict, List, Optional
 from unittest.mock import patch
 
@@ -251,23 +252,28 @@ def value_to_cpp(value, cpp_type):
 LocalBuffer = namedtuple("LocalBuffer", ["local_buf", "global_snode"])
 
 
+class LocalBufferCase(Enum):
+    GEMMEPILOGUE = 0
+    OUTERLOOPFUSION = 1
+
+
 class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
     def __init__(
         self,
         inner,
         global_buf=None,
         local_buf=None,
-        outer_loop_local_buf=False,
+        local_buffer_case=LocalBufferCase.GEMMEPILOGUE,
     ):
         super().__init__(inner)
         self.global_buf = global_buf
         self.local_buf = local_buf
-        self.outer_loop_local_buf = outer_loop_local_buf
+        self.local_buffer_case = local_buffer_case
         self.can_use_local_buf = True
 
     def localize(self, name: str, index: sympy.Expr):
         if self.global_buf and name == self.global_buf.get_name():
-            if self.outer_loop_local_buf:
+            if self.local_buffer_case == LocalBufferCase.OUTERLOOPFUSION:
                 scheduler_nodes = V.graph.scheduler.name_to_node.get(name).get_nodes()  # type: ignore[union-attr]
 
                 # Rename buffer name to Local Buffer
@@ -298,51 +304,55 @@ class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
         return name, index
 
     def load(self, name: str, index: sympy.Expr):
-        if self.outer_loop_local_buf and name == self.global_buf.get_name():
-            from .cpp import CppKernel, CppTile2DKernel, CppVecKernel
+        from .cpp import CppKernel, CppTile2DKernel, CppVecKernel
 
+        if (
+            self.local_buffer_case == LocalBufferCase.OUTERLOOPFUSION
+            and name == self.global_buf.get_name()
+            and isinstance(V.kernel, (CppTile2DKernel, CppVecKernel, CppKernel))
+        ):
             if isinstance(V.kernel, CppTile2DKernel):
                 self.can_use_local_buf = False
-                return self._inner.load(name, index)
             elif isinstance(V.kernel, CppVecKernel):
-                test_index = V.kernel.rename_indexing(index)
+                _index = V.kernel.rename_indexing(index)
                 tiling_var = V.kernel.itervars[V.kernel.tiling_idx]
-                stride = V.kernel._try_get_const_stride(test_index, tiling_var)
+                stride = V.kernel._try_get_const_stride(_index, tiling_var)
                 if stride != 1:
                     self.can_use_local_buf = False
-                    return self._inner.load(name, index)
                 else:
-                    return self._inner.load(*self.localize(name, index))
-            elif isinstance(V.kernel, CppKernel):
-                # Scalar Kernel
-                return self._inner.load(*self.localize(name, index))
+                    name, index = self.localize(name, index)
+            else:
+                assert isinstance(V.kernel, CppKernel)
+                name, index = self.localize(name, index)
+            return self._inner.load(name, index)
         return self._inner.load(*self.localize(name, index))
 
     def store(self, name, index, value, mode=None):
-        if self.outer_loop_local_buf and name == self.global_buf.get_name():
-            from .cpp import CppKernel, CppTile2DKernel, CppVecKernel
+        from .cpp import CppKernel, CppTile2DKernel, CppVecKernel
 
+        if (
+            self.local_buffer_case == LocalBufferCase.OUTERLOOPFUSION
+            and name == self.global_buf.get_name()
+            and isinstance(V.kernel, (CppTile2DKernel, CppVecKernel, CppKernel))
+        ):
             if isinstance(V.kernel, CppTile2DKernel):
                 self.can_use_local_buf = False
-                return self._inner.store(name, index, value, mode)
             elif isinstance(V.kernel, CppVecKernel):
-                test_index = V.kernel.rename_indexing(index)
+                _index = V.kernel.rename_indexing(index)
                 tiling_var = V.kernel.itervars[V.kernel.tiling_idx]
-                stride = V.kernel._try_get_const_stride(test_index, tiling_var)
+                stride = V.kernel._try_get_const_stride(_index, tiling_var)
                 if stride != 1:
                     self.can_use_local_buf = False
-                    return self._inner.store(name, index, value, mode)
                 else:
-                    return self._inner.store(*self.localize(name, index), value, mode)
-            elif isinstance(V.kernel, CppKernel):
-                # Scalar Kernel
+                    name, index = self.localize(name, index)
+            else:
                 assert isinstance(V.kernel, CppKernel)
                 if mode is not None:
                     # Doesn't support atomic_add
                     self.can_use_local_buf = False
-                    return self._inner.store(name, index, value, mode)
                 else:
-                    return self._inner.store(*self.localize(name, index), value, mode)
+                    name, index = self.localize(name, index)
+            return self._inner.store(name, index, value, mode)
         return self._inner.store(*self.localize(name, index), value, mode)
 
     def store_reduction(self, name, index, value):
@@ -363,8 +373,7 @@ class LocalBufferScope:
         self.kernel = kernel
         self.exit_stack = contextlib.ExitStack()
         self.local_buffers: Dict[str, ir.Buffer] = {}
-        # Map between local buffer name and original scheduler node
-        self.local_buffers_nodes: Dict[str, BaseSchedulerNode] = {}
+        self.local_nodes: Dict[str, BaseSchedulerNode] = {}
 
     def __enter__(self):
         self.exit_stack.__enter__()
@@ -398,8 +407,8 @@ class LocalBufferScope:
         original_get_name_to_node = V.graph.scheduler.get_name_to_node
 
         def get_name_to_node(name):
-            if name in self.local_buffers_nodes:
-                return self.local_buffers_nodes[name]
+            if name in self.local_nodes:
+                return self.local_nodes[name]
             return original_get_name_to_node(name)
 
         self.exit_stack.enter_context(
@@ -425,7 +434,7 @@ class LocalBufferScope:
         assert buffer.get_name() not in self.local_buffers
         self.local_buffers[buffer.get_name()] = buffer
         if node:
-            self.local_buffers_nodes[buffer.get_name()] = node
+            self.local_nodes[buffer.get_name()] = node
 
     def localize_buffer(
         self, global_buf: ir.Buffer, local_buf: ir.Buffer, nodes: List[ir.IRNode]
