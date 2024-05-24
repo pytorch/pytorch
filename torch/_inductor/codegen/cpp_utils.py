@@ -66,11 +66,6 @@ DEVICE_TO_ATEN = {
     "cuda": "at::kCUDA",
 }
 
-LAYOUT_TO_ATEN = {
-    torch.strided: "at::kStrided",
-    torch._mkldnn: "at::kMkldnn",  # type: ignore[attr-defined]
-}
-
 INDEX_TYPE = "long"
 
 GemmBlocking = namedtuple("GemmBlocking", ["block_m", "block_n", "block_k"])
@@ -409,23 +404,27 @@ class LocalBufferScope:
 
         self.exit_stack.enter_context(patch.object(self.kernel.args, "output", output))
 
-        original_get_name_to_node = V.graph.scheduler.get_name_to_node
+        from ..scheduler import Scheduler
 
-        def get_name_to_node(name):
-            if name in self.local_nodes:
-                return self.local_nodes[name]
-            return original_get_name_to_node(name)
+        if isinstance(V.graph.scheduler, Scheduler):
 
-        self.exit_stack.enter_context(
-            patch.object(V.graph.scheduler, "get_name_to_node", get_name_to_node)
-        )
+            original_get_name_to_node = V.graph.scheduler.get_name_to_node
 
-        def get_local_buffer():
-            return self.local_buffers
+            def get_name_to_node(name):
+                if name in self.local_nodes:
+                    return self.local_nodes[name]
+                return original_get_name_to_node(name)
 
-        self.exit_stack.enter_context(
-            patch.object(V.graph.scheduler, "get_local_buffer", get_local_buffer)
-        )
+            self.exit_stack.enter_context(
+                patch.object(V.graph.scheduler, "get_name_to_node", get_name_to_node)
+            )
+
+            def get_local_buffer():
+                return self.local_buffers
+
+            self.exit_stack.enter_context(
+                patch.object(V.graph.scheduler, "get_local_buffer", get_local_buffer)
+            )
 
         return self
 
