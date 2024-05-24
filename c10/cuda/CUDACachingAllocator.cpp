@@ -2736,7 +2736,9 @@ class DeviceCachingAllocator {
   void remove_cudagraph_stream_uses(Block* block) {
     // remove stream uses added during cudagraph capture
     // (i.e., block->stream_uses - block->cudagraph_stream_uses)
-    if (C10_UNLIKELY(block_to_cudagraph_stream_uses.find(block) != block_to_cudagraph_stream_uses.end())) {
+    if (C10_UNLIKELY(
+            block_to_cudagraph_stream_uses.find(block) !=
+            block_to_cudagraph_stream_uses.end())) {
       stream_set streams(std::move(block->stream_uses));
       AT_ASSERT(block->stream_uses.empty());
       for (auto& stream : streams) {
