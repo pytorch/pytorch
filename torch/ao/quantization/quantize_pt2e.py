@@ -188,6 +188,13 @@ _QUANT_OPS = [
     torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
     torch.ops.quantized_decomposed.quantize_per_channel.default,
 ]
+
+def _is_inplace_ops(n: Node) -> bool:
+    """
+    Check if the node is an inplace op, e.g. x -> x.add_(y), in this case, the node can't be folded.
+    """
+    return n.op == "call_function" and n.name.endswith("_")
+
 def _quant_node_constraint(n: Node) -> bool:
     """If there is any pure ops between get_attr and quantize op they will be const propagated
     e.g. get_attr(weight) -> transpose -> quantize -> dequantize*
@@ -196,6 +203,8 @@ def _quant_node_constraint(n: Node) -> bool:
     This filter is added because we don't want to constant fold the things that are not
     related to quantization
     """
+    if _is_inplace_ops(n):
+        return False
     return n.op == "call_function" and n.target in _QUANT_OPS
 
 def convert_pt2e(
