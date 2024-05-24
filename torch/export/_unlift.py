@@ -80,17 +80,25 @@ def _insert_copy_for_out_input_mutations(
 
     # Only supports single out parameter now
     assert len(out_inputs) == 1
+
+    # Update output
+    output_args = list(out_inputs.keys())
     for output_node, out_input_node in out_inputs.items():
         # The output node is the alias of the out input node.
         assert output_node in outputs
         with gm.graph.inserting_before(return_node):
             copy_res = gm.graph.call_function(
-                torch.ops.aten.copy_.default, (out_input_node, output_node)
+                torch.ops.aten.copy_.default, args=(out_input_node, output_node)
             )
 
-            new_output = gm.graph.output((copy_res,))
-            return_node.replace_all_uses_with(new_output)
-            gm.graph.erase_node(return_node)
+            # Replace the input nodes of the output node with the copy result
+            output_args = [
+                copy_res if item == output_node else item for item in output_args
+            ]
+
+    new_output_node = gm.graph.output(tuple(output_args))
+    return_node.replace_all_uses_with(new_output_node)
+    gm.graph.erase_node(return_node)
 
 
 def _insert_copy_for_mutations(
