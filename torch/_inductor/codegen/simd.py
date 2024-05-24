@@ -51,7 +51,7 @@ from ..utils import (
     sympy_subs,
     unique,
 )
-from ..virtualized import V
+from ..virtualized import ops, OpsWrapper, V
 from .common import CSEVariable, index_prevent_reordering, Kernel, PythonPrinter
 from .multi_kernel import MultiKernel
 
@@ -309,7 +309,7 @@ class IterationRangesEntry(IterationRanges):
         return self.name == other.name
 
 
-def triton_constant(value):
+def constant_repr(value):
     if value == float("inf"):
         return 'float("inf")'
     elif value == float("-inf"):
@@ -851,8 +851,9 @@ class SIMDKernel(Kernel):
         """Context manager to add an additional mask to tl.load/store"""
         prior = self._load_mask
         if prior:
-            mask = self.cse.generate(self.compute, f"{mask} & {prior}")
+            mask = ops.logical_and(mask, prior)
 
+        mask = OpsWrapper._unwrap(mask)
         self._load_mask = mask
         try:
             # TODO(jansel): do we need a reshape here?
@@ -861,19 +862,7 @@ class SIMDKernel(Kernel):
             self._load_mask = prior
 
     def load_mask(self, var):
-        mask = ""
-        mask_vars = set(var.mask_vars)
-        if self._load_mask:
-            mask_vars.add(self._load_mask)
-
-        if mask_vars:
-            mask = (
-                f"{next(iter(mask_vars))}"
-                if len(mask_vars) == 1
-                # sorted for deterministic order
-                else f"({' & '.join(sorted(map(str, mask_vars)))})"
-            )
-        return mask
+        return self._load_mask
 
     def get_strides_of_load(self, index: sympy.Expr):
         """
@@ -1031,6 +1020,18 @@ class SIMDKernel(Kernel):
             f"All the inputs for the triton kernel {kernel_name} have uniform layout"
         )
         log.warning(msg)
+
+    def welford_reduce_fallback(self, dtype, value):
+        sum_ = ops.reduction(dtype, dtype, "sum", value)
+        self.inside_reduction = False
+        rnumel = ops.index_expr(self.numels[-1], dtype)
+        mean = ops.truediv(sum_, rnumel)
+
+        self.inside_reduction = True
+        dx = ops.sub(value, mean)
+        dx2 = ops.mul(dx, dx)
+        m2 = ops.reduction(dtype, dtype, "sum", dx2)
+        return OpsWrapper._unwrap((mean, m2, rnumel))
 
     def codegen_kernel(self):
         raise NotImplementedError
