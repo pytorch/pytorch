@@ -25,6 +25,7 @@ KNOWN_TYPES = [
     type(None),
     *py_sym_types,
     FakeScriptObject,
+    torch.ScriptObject,
 ]
 
 original_zip = zip
