@@ -107,7 +107,7 @@ def local_map(
         # we assume every DTensor object is placed on the same device mesh
         flat_local_args = []
         nonlocal device_mesh  # access var device_mesh from the outer scope
-        print(f"# of args = {len(args)}")
+        # print(f"# of args = {len(args)}")
         for idx, arg in enumerate(flat_args):
             if isinstance(arg, DTensor):
                 # print(f"func {func} idx {idx}, arg placement={arg.placements}")
