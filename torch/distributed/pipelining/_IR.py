@@ -896,7 +896,7 @@ class Pipe(QualnameMapMixin, torch.nn.Module):
         # [aliasing] use id -> fqn mapping to list out all valid FQNs
         inputs_to_state: Dict[str, List[str]] = {}
         for attr in attr_nodes:
-            _, tensor = _recursive_getattr_with_parent(mod, attr.target)
+            tensor = _recursive_getattr(mod, attr.target)
             inputs_to_state[attr.name] = [fqn for fqn in id_to_fqns[id(tensor)]]
 
         # [aliasing] for each submodule split, assign attributes on FQNs that may be used.
@@ -906,7 +906,7 @@ class Pipe(QualnameMapMixin, torch.nn.Module):
         for fqn, tensor in mod.state_dict(keep_vars=True).items():
             for name, submod in split.named_children():
                 if isinstance(submod, fx.GraphModule):
-                    if _recursive_getattr_with_parent(submod, fqn) is None:
+                    if _recursive_getattr(submod, fqn) is None:
                         # try to reach the last submodule, if it exists.
                         atoms = fqn.split(".")
                         has_parent = True
