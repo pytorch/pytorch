@@ -5,8 +5,8 @@ set -ex
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 
 AOTRITON_DIR="aotriton"
-AOTRITON_TEXT_FILE="aotriton.txt"
-AOTRITON_PINNED_COMMIT=$(get_pinned_commit ${AOTRITON_TEXT_FILE})
+AOTRITON_PINNED_NAME="aotriton" # No .txt extension
+AOTRITON_PINNED_COMMIT=$(get_pinned_commit ${AOTRITON_PINNED_NAME})
 AOTRITON_INSTALL_PREFIX="$1"
 
 git clone https://github.com/ROCm/aotriton.git "${AOTRITON_DIR}"
