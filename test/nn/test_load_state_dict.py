@@ -576,7 +576,6 @@ class MyWrapperLoadTensor(MyLoadTensor):
         return t
 
     def __init__(self, data: torch.Tensor):
-        super().__init__()
         self._data = data
 
     def __repr__(self):
@@ -586,7 +585,9 @@ class MyWrapperLoadTensor(MyLoadTensor):
         return ["_data"], None
 
     @staticmethod
-    def __tensor_unflatten__(data):
+    def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+        assert meta is None
+        data = inner_tensors["_data"]
         return MyWrapperLoadTensor(data)
 
     @classmethod
