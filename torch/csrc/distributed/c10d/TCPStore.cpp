@@ -16,6 +16,7 @@
 #include <io.h>
 #include <winsock2.h>
 #else
+#include <netinet/tcp.h>
 #include <poll.h>
 #include <unistd.h>
 #endif
@@ -154,8 +155,8 @@ class TCPClient {
       const SocketAddress& addr,
       const TCPStoreOptions& opts);
 
-  void sendRaw(uint8_t* data, size_t lenght) {
-    tcputil::sendBytes(socket_.handle(), data, lenght);
+  void sendRaw(uint8_t* data, size_t length) {
+    tcputil::sendBytes(socket_.handle(), data, length);
   }
 
   std::vector<std::uint8_t> receiveBits() {
@@ -175,6 +176,8 @@ class TCPClient {
   }
   void setTimeout(std::chrono::milliseconds value);
 
+  void setNoDelay(bool);
+
   explicit TCPClient(Socket&& socket) : socket_{std::move(socket)} {}
 
  private:
@@ -188,7 +191,9 @@ std::unique_ptr<TCPClient> TCPClient::connect(
   Socket socket = Socket::connect(
       addr.host, addr.port, SocketOptions{}.connect_timeout(timeout));
 
-  return std::make_unique<TCPClient>(std::move(socket));
+  auto client = std::make_unique<TCPClient>(std::move(socket));
+  client.get()->setNoDelay(opts.noDelay);
+  return client;
 }
 
 void TCPClient::setTimeout(std::chrono::milliseconds value) {
@@ -212,6 +217,21 @@ void TCPClient::setTimeout(std::chrono::milliseconds value) {
       SO_RCVTIMEO,
       reinterpret_cast<char*>(&timeoutTV),
       sizeof(timeoutTV)));
+}
+
+void TCPClient::setNoDelay(bool value) {
+#ifdef _WIN32
+  return;
+#else
+  int enable = (value ? 1 : 0);
+
+  SYSCHECK_ERR_RETURN_NEG1(::setsockopt(
+      socket_.handle(),
+      IPPROTO_TCP,
+      TCP_NODELAY,
+      reinterpret_cast<char*>(&enable),
+      sizeof(int)));
+#endif
 }
 
 class SendBuffer {
