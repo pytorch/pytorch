@@ -1990,7 +1990,8 @@ class CppKernel(Kernel):
                     code.splice(
                         f"std::unique_ptr<{dtype} []> local_buffer = {allocate};"
                     )
-                    code.splice(f"{dtype}* local_buffer_data = local_buffer.get();")
+                    local_buffer_name = local_buffer.get_name()
+                    code.splice(f"{dtype}* {local_buffer_name} = local_buffer.get();")
                 gen_loops(loop_nest.root)
             else:
                 gen_kernel(loop_nest.kernel)
@@ -3407,7 +3408,11 @@ class CppKernelProxy(CppKernel):
             DataTypePropagation.propagate_loopbody(body)
         self.codegen_functions(loop_bodies, var_sizes_list)
 
-    def codegen_nodes(self, nodes: List[SchedulerNode], local_buffers=None):
+    def codegen_nodes(
+        self,
+        nodes: List[SchedulerNode],
+        local_buffers: Optional[List[LocalBuffer]] = None,
+    ):
         # Legalize BF16 node by adding to_dtype explicitly
         self.legalize_lowp_fp_dtype(nodes)
         self.data_type_propagation(nodes)
@@ -3431,19 +3436,19 @@ class CppKernelProxy(CppKernel):
             if local_buffers:
                 assert len(local_buffers) == 1
                 scope.add_local_buffer(
-                    local_buffers[0].local_buf, local_buffers[0].global_node
+                    local_buffers[0].local_buf, local_buffers[0].global_snode
                 )
 
             def fn(node, *index_vars):
                 op_handle = None
                 ctx = contextlib.nullcontext()
-                if local_buffers and len(local_buffers) == 1:
+                if local_buffers:
+                    assert len(local_buffers) == 1
                     op_handle = LocalizeBufferHandler(
                         V.get_ops_handler(),
-                        global_buf=local_buffers[0].global_node.node,
+                        global_buf=local_buffers[0].global_snode.node,
                         local_buf=local_buffers[0].local_buf,
                         outer_loop_local_buf=True,
-                        local_buf_index=local_buffers[0].local_buf_index,
                     )
                     ctx = V.set_ops_handler(op_handle)
                 with ctx:
@@ -3801,26 +3806,30 @@ class CppScheduling(BaseScheduling):
                 # Only support this typical case at first.
                 return False
 
-            local_buffers = []
+            local_buffers: List[LocalBuffer] = []
             for fused_scheduler_node in node.get_outer_nodes():
-                call_ranges = get_call_ranges(fused_scheduler_node)
-                keep_idx_id = len(call_ranges) - 1
                 scheduler_nodes = fused_scheduler_node.get_nodes()
                 for scheduler_node in scheduler_nodes:
                     # all users inside same OuterLoopFusedSchedulerNode
                     if not scheduler_node.is_reduction() and all(
                         user.node in node.get_nodes() for user in scheduler_node.users
                     ):
-                        local_buffer = LocalBuffer(
-                            scheduler_node,
-                            keep_idx_id,
-                            call_ranges[keep_idx_id],
-                            scheduler_node.node.layout.get_dtype(),
-                            ir.Buffer(
-                                "local_buffer_data", scheduler_node.node.get_layout()
-                            ),
+                        global_buffer_layout = scheduler_node.node.get_layout()
+                        # Previous check ensure that local buffer is with size of last dim and contiguous.
+                        local_buffer_layout = ir.FixedLayout(
+                            global_buffer_layout.device,
+                            global_buffer_layout.dtype,
+                            global_buffer_layout.size[-1:],
+                            global_buffer_layout.stride[-1:],
                         )
-                        local_buffers.append(local_buffer)
+                        local_buffers.append(
+                            LocalBuffer(
+                                local_buf=ir.Buffer(
+                                    "local_buffer_data", local_buffer_layout
+                                ),
+                                global_snode=scheduler_node,
+                            )
+                        )
                         # At most 1 node with local buf for each OuterLoopFusedSchedulerNode
                         break
                 if len(local_buffers) > 0:
@@ -3852,7 +3861,7 @@ class CppScheduling(BaseScheduling):
                 if local_buffers:
                     assert len(local_buffers) == 1
                     scope.add_local_buffer(
-                        local_buffers[0].local_buf, local_buffers[0].global_node
+                        local_buffers[0].local_buf, local_buffers[0].global_snode
                     )
                 kernel_group.finalize_kernel(
                     outer_fusion_cpp_kernel_proxy,

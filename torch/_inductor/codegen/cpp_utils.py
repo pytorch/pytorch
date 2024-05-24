@@ -11,7 +11,7 @@ import sympy
 import torch
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from .. import ir
-from ..scheduler import SchedulerNode
+from ..scheduler import BaseSchedulerNode
 from ..virtualized import V
 
 from .common import ExprPrinter, Kernel
@@ -248,21 +248,7 @@ def value_to_cpp(value, cpp_type):
         return f"static_cast<{cpp_type}>({repr(value)})"
 
 
-class LocalBuffer:
-    def __init__(
-        self,
-        global_node: SchedulerNode,
-        local_buf_index: int,
-        local_buf_size: int,
-        local_buf_dtype: torch.dtype,
-        local_buf: ir.Buffer,
-    ):
-        self.global_node = global_node
-        self.local_buf_index = local_buf_index
-        self.local_buf_size = local_buf_size
-        self.local_buf_dtype = local_buf_dtype
-        self.local_buf_name = "local_buffer_data"
-        self.local_buf = local_buf
+LocalBuffer = namedtuple("LocalBuffer", ["local_buf", "global_snode"])
 
 
 class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
@@ -272,24 +258,31 @@ class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
         global_buf=None,
         local_buf=None,
         outer_loop_local_buf=False,
-        local_buf_index=None,
     ):
         super().__init__(inner)
         self.global_buf = global_buf
         self.local_buf = local_buf
         self.outer_loop_local_buf = outer_loop_local_buf
-        self.local_buf_index = local_buf_index
         self.can_use_local_buf = True
 
     def localize(self, name: str, index: sympy.Expr):
         if self.global_buf and name == self.global_buf.get_name():
             if self.outer_loop_local_buf:
+                scheduler_nodes = V.graph.scheduler.name_to_node.get(name).get_nodes()  # type: ignore[union-attr]
+
+                # Rename buffer name to Local Buffer
                 name = self.local_buf.get_name()
-                index_id = self.local_buf_index
+
+                # Use the last dim
+                _, (group, reduction_group) = max(
+                    scheduler_nodes, key=lambda x: int(x.is_reduction())
+                ).group
+                call_ranges = tuple(group) + tuple(reduction_group)
+                index_id_to_keep = len(call_ranges) - 1
                 sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)  # type: ignore[attr-defined]
                 replacements = {}
                 for x in sorted_symbols:
-                    if x.name.startswith("x") and x.name != f"x{index_id}":  # type: ignore[attr-defined]
+                    if x.name.startswith("x") and x.name != f"x{index_id_to_keep}":  # type: ignore[attr-defined]
                         # Only keep index used by local buffer
                         replacements[x] = sympy.core.numbers.Zero()
                 from ..utils import sympy_subs
@@ -370,7 +363,7 @@ class LocalBufferScope:
         self.kernel = kernel
         self.exit_stack = contextlib.ExitStack()
         self.local_buffers: Dict[str, ir.Buffer] = {}
-        self.local_buffers_nodes: Dict[str, SchedulerNode] = {}
+        self.local_buffers_nodes: Dict[str, BaseSchedulerNode] = {}
 
     def __enter__(self):
         self.exit_stack.__enter__()
@@ -405,7 +398,6 @@ class LocalBufferScope:
 
         def get_name_to_node(name):
             if name in self.local_buffers_nodes:
-                # TODO: implement it by needed
                 return self.local_buffers_nodes[name]
             return original_get_name_to_node(name)
 
@@ -426,7 +418,9 @@ class LocalBufferScope:
         self.local_buffers.clear()
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
-    def add_local_buffer(self, buffer: ir.Buffer, node: Optional[SchedulerNode] = None):
+    def add_local_buffer(
+        self, buffer: ir.Buffer, node: Optional[BaseSchedulerNode] = None
+    ):
         assert buffer.get_name() not in self.local_buffers
         self.local_buffers[buffer.get_name()] = buffer
         if node:
