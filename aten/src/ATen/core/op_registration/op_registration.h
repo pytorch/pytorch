@@ -399,7 +399,7 @@ public:
     }
 
   private:
-    Options&& kernel(std::optional<DispatchKey> dispatch_key, KernelFunction&& func, c10::optional<impl::CppSignature> cpp_signature, std::unique_ptr<FunctionSchema>&& inferred_function_schema) && {
+    Options&& kernel(std::optional<DispatchKey> dispatch_key, KernelFunction&& func, std::optional<impl::CppSignature> cpp_signature, std::unique_ptr<FunctionSchema>&& inferred_function_schema) && {
       KernelRegistrationConfig config;
       config.dispatch_key = dispatch_key;
       config.func = std::move(func);
