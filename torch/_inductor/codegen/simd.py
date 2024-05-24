@@ -39,7 +39,7 @@ from ..dependencies import Dep, MemoryDep, StarDep, WeakDep
 from ..ir import TritonTemplateBuffer
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..runtime.hints import ReductionHint, TRITON_MAX_BLOCK
-from ..runtime.runtime_utils import get_max_y_grid, green_text, yellow_text
+from ..runtime.runtime_utils import green_text, yellow_text
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..utils import (
     get_dtype_size,
@@ -246,56 +246,6 @@ class IterationRangesRoot(IterationRanges):
             add(self.lookup(divisor, FloorDiv(self.numel, divisor)))
 
         return list(reversed(index_vars)), list(reversed(sizes))
-
-    def ranges_code(self):
-        assert self.tensor_dim is not None
-        size = self.kernel.indexing_size_str(self.tensor_dim)
-        index_dtype = self.kernel.index_dtype
-        convert = f".to({index_dtype})" if index_dtype != "tl.int32" else ""
-        return f"tl.arange(0, {self.prefix.upper()}BLOCK){size}{convert}"
-
-    def scalar_code(self, value):
-        index_dtype = self.kernel.index_dtype
-        ndim = self.kernel.triton_tensor_ndim()
-        size = [1] * ndim
-        return f"tl.full({size}, {value}, {index_dtype})"
-
-    def get_pid(self):
-        assert self.grid_dim is not None
-        key = f"tl.program_id({self.grid_dim})"
-        # y_grid has a limit, so express it in terms of y and z in case of overflow.
-        # z grid is only exercised when max_tiles == 3 (off by default).
-        if (
-            self.grid_dim == 1
-            and not self.has_zdim
-            and not (isinstance(self.numel, int) and self.numel <= get_max_y_grid())
-        ):
-            key = f"{key} * (tl.program_id({self.grid_dim + 1}) + 1)"
-        pid = self.pid_cache.get(key, key)
-        if self.kernel.index_dtype != "tl.int32":
-            return f"{pid}.to({self.kernel.index_dtype})"
-        return pid
-
-    def codegen_header(self, code):
-        x = self.prefix
-        if self.is_loop:
-            code.writeline(f"{self.name} = {x}offset + {x}base")
-        elif self.grid_dim is None:
-            # no need to "{x}offset = "
-            code.writeline(f"{self.name} = {self.ranges_code()}")
-            code.writeline(f"{x}offset = 0")
-        else:
-            if self.tensor_dim is not None:
-                line = f"{x}offset + {self.ranges_code()}"
-            else:
-                line = self.scalar_code(f"{x}offset")
-            code.writelines(
-                [
-                    f"{x}offset = {self.get_pid()} * {x.upper()}BLOCK",
-                    f"{self.name} = {line}",
-                ]
-            )
-        code.writeline(f"{x}mask = {self.name} < {x}numel")
 
 
 class IterationRangesEntry(IterationRanges):
