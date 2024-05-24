@@ -56,7 +56,7 @@ def handlers():
         IntTrueDiv: "int_truediv",
         FloatTrueDiv: "truediv",
         FloorDiv: "floordiv",
-        CleanDiv: "div",
+        CleanDiv: "floordiv",  # TODO: hmm?
         TruncToFloat: "trunc",
         TruncToInt: "to_int",
         ToFloat: "to_float",

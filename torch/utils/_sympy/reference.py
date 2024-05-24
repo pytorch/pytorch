@@ -1,5 +1,6 @@
 import math
 
+import operator
 import sympy
 
 import torch
@@ -111,20 +112,17 @@ class ReferenceAnalysis:
     def truncdiv(a, b):
         raise NotImplementedError("TODO: truncdiv")
 
-    @_keep_float
     @staticmethod
     def add(a, b):
-        return a + b
+        return _keep_float(operator.add)(a, b)
 
-    @_keep_float
     @staticmethod
     def mul(a, b):
-        return a * b
+        return _keep_float(operator.mul)(a, b)
 
-    @_keep_float
     @staticmethod
     def sub(a, b):
-        return a - b
+        return _keep_float(operator.sub)(a, b)
 
     @staticmethod
     def exp(x):

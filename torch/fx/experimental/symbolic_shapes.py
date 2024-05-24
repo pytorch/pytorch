@@ -61,7 +61,7 @@ from torch._logging import trace_structured, structured
 from torch import SymBool, SymFloat, SymInt
 from torch._guards import ShapeGuard, Source, TracingContext
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
-from torch.utils._sympy.functions import FloorDiv, Mod, IsNonOverlappingAndDenseIndicator
+from torch.utils._sympy.functions import FloorDiv, Mod, IsNonOverlappingAndDenseIndicator, CleanDiv
 from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.value_ranges import bound_sympy, SymPyValueRangeAnalysis, ValueRanges, ValueRangeError
 from torch.utils._sympy.singleton_int import SingletonInt
@@ -1592,7 +1592,7 @@ class DimConstraints:
             congruence = (base - mod_reduced) % divisor
             if congruence != 0:
                 self._congruences[s].add(congruence)
-            return (base - mod_reduced) / divisor
+            return CleanDiv(base - mod_reduced, divisor)
 
         if expr.has(Mod):
             expr = expr.replace(Mod, mod_handler)
@@ -4288,7 +4288,7 @@ class ShapeEnv:
             for fd in expr.atoms(FloorDiv):
                 base, divisor = fd.args
                 if self.replace(Mod(base, divisor)) in self.divisible:
-                    div_replacements[fd] = base / divisor
+                    div_replacements[fd] = CleanDiv(base, divisor)
             new_expr = expr.xreplace(div_replacements)
             new_expr = safe_expand(new_expr)
             new_pows = new_expr.atoms(sympy.Pow)
@@ -4661,7 +4661,7 @@ class ShapeEnv:
                         ):
                             # We have Mod(i0, q / c) == 0, which means we can
                             # rewrite i0 as (q / gcd(q, c)) * i1
-                            d = q / sympy.gcd(q, c)
+                            d = q / sympy.gcd(q, c)  # TODO: CleanDiv?
                             i1 = self.create_unbacked_symint().node.expr
                             # Propagate the value ranges.  It doesn't really
                             # matter if we use truediv or floordiv, because we
