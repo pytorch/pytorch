@@ -244,8 +244,7 @@ class Mod(sympy.Function):
         if less.is_Boolean and bool(less) and r.is_positive:
             return p
 
-        gcd = sympy.gcd(p, q)
-        if gcd == q:
+        if sympy.Mod(p, q) == 0:
             return S.Zero
 
     def _eval_is_integer(self):
