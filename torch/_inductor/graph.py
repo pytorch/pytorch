@@ -350,6 +350,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.device_idxs: Set[int] = const_module.device_idxs if const_module else set()
         self.cuda = False
         self.buffers: List[ir.Buffer] = []
+        self.buffer_mutation: bool = False
         self.const_output_index: Dict[str, int] = (
             const_output_index if const_output_index else {}
         )
