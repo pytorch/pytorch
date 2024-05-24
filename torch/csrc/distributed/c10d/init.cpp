@@ -6,6 +6,9 @@
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/control_collectives/ControlCollectives.hpp>
+#include <torch/csrc/distributed/c10d/control_collectives/StoreCollectives.hpp>
+#include <vector>
 #ifndef _WIN32
 #include <torch/csrc/distributed/c10d/HashStore.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupRoundRobin.hpp>
@@ -136,6 +139,34 @@ namespace torch::distributed::c10d {
 
 namespace {
 
+py::bytes toPyBytes(const std::vector<uint8_t>& data) {
+  return py::bytes(reinterpret_cast<const char*>(data.data()), data.size());
+}
+
+std::vector<py::bytes> toPyBytes(
+    const std::vector<std::vector<uint8_t>>& data) {
+  std::vector<py::bytes> out;
+  out.reserve(data.size());
+  for (const std::vector<uint8_t>& data_ : data) {
+    out.emplace_back(reinterpret_cast<const char*>(data_.data()), data_.size());
+  }
+  return out;
+}
+
+std::vector<uint8_t> toVec8(const std::string& data) {
+  std::vector<uint8_t> out{data.begin(), data.end()};
+  return out;
+}
+
+std::vector<std::vector<uint8_t>> toVec8(const std::vector<std::string>& data) {
+  std::vector<std::vector<uint8_t>> out;
+  out.reserve(data.size());
+  for (auto& data_ : data) {
+    out.emplace_back(toVec8(data_));
+  }
+  return out;
+}
+
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
@@ -166,8 +197,7 @@ class PythonStore : public ::c10d::Store {
         pybind11::get_overload(static_cast<const ::c10d::Store*>(this), "set");
     TORCH_INTERNAL_ASSERT(fn, "Not implemented.");
     // Call function with a py::bytes object for the value.
-    fn(key,
-       py::bytes(reinterpret_cast<const char*>(value.data()), value.size()));
+    fn(key, toPyBytes(value));
   }
 
   // Note: this function manually calls the Python-side overload
@@ -184,7 +214,7 @@ class PythonStore : public ::c10d::Store {
     // std::vector<uint8_t>. There is no API for directly accessing
     // the contents of the py::bytes object.
     std::string str = pybind11::cast<py::bytes>(fn(key));
-    return std::vector<uint8_t>(str.begin(), str.end());
+    return toVec8(str);
   }
 
   // Note: this function manually calls the Python-side overload
@@ -204,14 +234,8 @@ class PythonStore : public ::c10d::Store {
     // std::vector<uint8_t>. There is no API for directly accessing
     // the contents of the py::bytes object.
     std::string str = pybind11::cast<py::bytes>(
-        fn(key,
-           py::bytes(
-               reinterpret_cast<const char*>(expectedValue.data()),
-               expectedValue.size()),
-           py::bytes(
-               reinterpret_cast<const char*>(desiredValue.data()),
-               desiredValue.size())));
-    return std::vector<uint8_t>(str.begin(), str.end());
+        fn(key, toPyBytes(expectedValue), toPyBytes(desiredValue)));
+    return toVec8(str);
   }
 
   int64_t add(const std::string& key, int64_t value) override {
@@ -253,8 +277,7 @@ class PythonStore : public ::c10d::Store {
       return Store::append(key, value);
     }
     // Call function with a py::bytes object for the value.
-    fn(key,
-       py::bytes(reinterpret_cast<const char*>(value.data()), value.size()));
+    fn(key, toPyBytes(value));
   }
 
   std::vector<std::vector<uint8_t>> multiGet(
@@ -287,14 +310,7 @@ class PythonStore : public ::c10d::Store {
       return Store::multiSet(keys, values);
     }
 
-    std::vector<py::bytes> bytes;
-    bytes.reserve(values.size());
-    for (auto& value : values) {
-      bytes.emplace_back(
-          reinterpret_cast<const char*>(value.data()), value.size());
-    }
-
-    fn(keys, bytes);
+    fn(keys, toPyBytes(values));
   }
 
   bool hasExtendedApi() const override {
@@ -973,10 +989,7 @@ and :class:`~torch.distributed.HashStore`).
               "set",
               [](::c10d::Store& store,
                  const std::string& key,
-                 const std::string& value) {
-                std::vector<uint8_t> value_(value.begin(), value.end());
-                store.set(key, value_);
-              },
+                 const std::string& value) { store.set(key, toVec8(value)); },
               py::call_guard<py::gil_scoped_release>(),
               R"(
 Inserts the key-value pair into the store based on the supplied ``key`` and
@@ -1001,14 +1014,9 @@ Example::
                  const std::string& key,
                  const std::string& expected_value,
                  const std::string& desired_value) -> py::bytes {
-                std::vector<uint8_t> expectedValue_(
-                    expected_value.begin(), expected_value.end());
-                std::vector<uint8_t> desiredValue_(
-                    desired_value.begin(), desired_value.end());
-                auto value =
-                    store.compareSet(key, expectedValue_, desiredValue_);
-                return py::bytes(
-                    reinterpret_cast<char*>(value.data()), value.size());
+                auto value = store.compareSet(
+                    key, toVec8(expected_value), toVec8(desired_value));
+                return toPyBytes(value);
               },
               py::call_guard<py::gil_scoped_release>(),
               R"(
@@ -1040,8 +1048,7 @@ Example::
                   py::gil_scoped_release guard;
                   return store.get(key);
                 }();
-                return py::bytes(
-                    reinterpret_cast<char*>(value.data()), value.size());
+                return toPyBytes(value);
               },
               R"(
 Retrieves the value associated with the given ``key`` in the store. If ``key`` is not
@@ -1240,8 +1247,7 @@ Example::
               [](::c10d::Store& store,
                  const std::string& key,
                  const std::string& value) {
-                std::vector<uint8_t> value_(value.begin(), value.end());
-                store.append(key, value_);
+                store.append(key, toVec8(value));
               },
               py::call_guard<py::gil_scoped_release>(),
               R"(
@@ -1268,14 +1274,7 @@ Example::
                   py::gil_scoped_release guard;
                   return store.multiGet(keys);
                 }();
-                std::vector<py::bytes> res;
-                for (auto& value : values) {
-                  auto bytes = py::bytes(
-                      reinterpret_cast<const char*>(value.data()),
-                      value.size());
-                  res.push_back(bytes);
-                }
-                return res;
+                return toPyBytes(values);
               },
               R"(
 Retrieve all values in ``keys``. If any key in ``keys`` is not
@@ -1298,12 +1297,7 @@ Example::
               [](::c10d::Store& store,
                  const std::vector<std::string>& keys,
                  const std::vector<std::string>& values) {
-                std::vector<std::vector<uint8_t>> vals;
-                vals.reserve(values.size());
-                for (auto& value : values) {
-                  vals.emplace_back(value.begin(), value.end());
-                }
-                store.multiSet(keys, vals);
+                store.multiSet(keys, toVec8(values));
               },
               py::call_guard<py::gil_scoped_release>(),
               R"(
@@ -1486,6 +1480,212 @@ Arguments:
           "_underlying_non_prefix_store",
           &::c10d::PrefixStore::getUnderlyingNonPrefixStore,
           R"(Recursively to get the store before layers of wrapping with PrefixStore.)");
+
+  using namespace std::chrono_literals;
+
+  auto collectives =
+      py::class_<
+          ::c10d::ControlCollectives,
+          c10::intrusive_ptr<::c10d::ControlCollectives>>(
+          module,
+          "_ControlCollectives",
+          R"(
+Base class for all ControlCollectives implementations.
+)")
+          .def(
+              "barrier",
+              &::c10d::ControlCollectives::barrier,
+              py::arg("key"),
+              py::arg("timeout") = 5min,
+              py::arg("block") = true,
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+Blocks until all workers have entered this function.
+
+Arguments:
+    key (str): The unique key used to identify this operation.
+    timeout (duration): The timeout for this operation.
+    block (bool): whether to block this working waiting on the results of the barrier.
+)")
+          .def(
+              "all_sum",
+              &::c10d::ControlCollectives::allSum,
+              py::arg("key"),
+              py::arg("data"),
+              py::arg("timeout") = 5min,
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+Computes a sum across all workers and returns the final value.
+
+Arguments:
+    key (str): The unique key used to identify this operation.
+    data (int): The data to sum.
+    timeout (duration): The timeout for this operation.
+)")
+          .def(
+              "broadcast_send",
+              [](::c10d::ControlCollectives& collectives,
+                 const std::string& key,
+                 const std::string& data,
+                 std::chrono::milliseconds timeout = 5min) {
+                collectives.broadcastSend(key, toVec8(data), timeout);
+              },
+              py::arg("key"),
+              py::arg("data"),
+              py::arg("timeout") = 5min,
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+Sends data to all other workers. Must be only called from one worker.
+
+Arguments:
+    key (str): The unique key used to identify this operation.
+    data (str): The data to send.
+    timeout (duration): The timeout for this operation.
+)")
+          .def(
+              "broadcast_recv",
+              [](::c10d::ControlCollectives& collectives,
+                 const std::string& key,
+                 std::chrono::milliseconds timeout = 5min) {
+                auto out = [&]() {
+                  py::gil_scoped_release guard;
+                  return collectives.broadcastRecv(key, timeout);
+                }();
+                return toPyBytes(out);
+              },
+              py::arg("key"),
+              py::arg("timeout") = 5min,
+              R"(
+Receives data broadcasted from 1 worker.
+
+Arguments:
+    key (str): The unique key used to identify this operation.
+    timeout (duration): The timeout for this operation.
+)")
+          .def(
+              "gather_send",
+              [](::c10d::ControlCollectives& collectives,
+                 const std::string& key,
+                 const std::string& data,
+                 std::chrono::milliseconds timeout = 5min) {
+                collectives.gatherSend(key, toVec8(data), timeout);
+              },
+              py::arg("key"),
+              py::arg("data"),
+              py::arg("timeout") = 5min,
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+Sends data to one other worker.
+
+Arguments:
+    key (str): The unique key used to identify this operation.
+    data (str): The data to send.
+    timeout (duration): The timeout for this operation.
+)")
+          .def(
+              "gather_recv",
+              [](::c10d::ControlCollectives& collectives,
+                 const std::string& key,
+                 const std::string& data,
+                 std::chrono::milliseconds timeout = 5min) {
+                auto out = [&]() {
+                  py::gil_scoped_release guard;
+                  return collectives.gatherRecv(key, toVec8(data), timeout);
+                }();
+                return toPyBytes(out);
+              },
+              py::arg("key"),
+              py::arg("data"),
+              py::arg("timeout") = 5min,
+              R"(
+Receives data broadcasted from all workers. Must only be called by one worker.
+
+Arguments:
+    key (str): The unique key used to identify this operation.
+    timeout (duration): The timeout for this operation.
+)")
+
+          .def(
+              "scatter_send",
+              [](::c10d::ControlCollectives& collectives,
+                 const std::string& key,
+                 const std::vector<std::string>& data,
+                 std::chrono::milliseconds timeout = 5min) {
+                auto out = [&]() {
+                  py::gil_scoped_release guard;
+                  return collectives.scatterSend(key, toVec8(data), timeout);
+                }();
+                return toPyBytes(out);
+              },
+              py::arg("key"),
+              py::arg("data"),
+              py::arg("timeout") = 5min,
+              R"(
+Sends rank specific data to all other workers.
+
+Arguments:
+    key (str): The unique key used to identify this operation.
+    data (str): The data to send.
+    timeout (duration): The timeout for this operation.
+)")
+          .def(
+              "scatter_recv",
+              [](::c10d::ControlCollectives& collectives,
+                 const std::string& key,
+                 std::chrono::milliseconds timeout = 5min) {
+                auto out = [&]() {
+                  py::gil_scoped_release guard;
+                  return collectives.scatterRecv(key, timeout);
+                }();
+                return toPyBytes(out);
+              },
+              py::arg("key"),
+              py::arg("timeout") = 5min,
+              R"(
+Receives rank specific data from one worker.
+
+Arguments:
+    key (str): The unique key used to identify this operation.
+    timeout (duration): The timeout for this operation.
+)")
+
+          .def(
+              "all_gather",
+              [](::c10d::ControlCollectives& collectives,
+                 const std::string& key,
+                 const std::string& data,
+                 std::chrono::milliseconds timeout = 5min) {
+                auto out = [&]() {
+                  py::gil_scoped_release guard;
+                  return collectives.allGather(key, toVec8(data), timeout);
+                }();
+                return toPyBytes(out);
+              },
+              py::arg("key"),
+              py::arg("data"),
+              py::arg("timeout") = 5min,
+              R"(
+Sends data to all workers and receives data from all other workers.
+
+Arguments:
+    key (str): The unique key used to identify this operation.
+    data (str): The data to send.
+    timeout (duration): The timeout for this operation.
+)");
+
+  intrusive_ptr_class_<::c10d::StoreCollectives>(
+      module,
+      "_StoreCollectives",
+      collectives,
+      R"(
+An implementation of ControlCollectives that uses the provided store as the underlying
+communication mechanism.
+      )")
+      .def(
+          py::init<c10::intrusive_ptr<::c10d::Store>, int, int>(),
+          py::arg("store"),
+          py::arg("rank"),
+          py::arg("world_size"));
 
   auto processGroup =
       py::class_<
