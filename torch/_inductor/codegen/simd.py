@@ -618,8 +618,8 @@ class SIMDKernel(Kernel):
 
     def index_to_str(self, index: sympy.Expr) -> str:
         """
-        Convert an index expr to a string that can be used in triton code.
-        e.g. a sympy expression "s2" may actually appear as "ks1" in the triton kernel.
+        Convert an index expr to a string that can be used in output code.
+        e.g. a sympy expression "s2" may actually appear as "ks1" in the generated kernel.
 
         Index expressions often need to be passed in as arguments to the triton kernel.
         Rename_indexing and codegen_indexing keep track of the needed indices and add
@@ -627,9 +627,7 @@ class SIMDKernel(Kernel):
         """
         if isinstance(index, list):
             return f"[{', '.join(map(self.index_to_str, index))}]"
-        return self.kexpr(  # type: ignore[call-arg]
-            self.rename_indexing(self.codegen_indexing(index))
-        )
+        return self.kexpr(self.rename_indexing(index))  # type: ignore[call-arg]
 
     def prepare_indexing(
         self,
@@ -658,7 +656,7 @@ class SIMDKernel(Kernel):
                     replacements = {a: V.graph.sizevars.lookup_precomputed_size(a)}
                     index = sympy_subs(index, replacements)
 
-        return self.simplify_indexing(index)
+        return self.codegen_indexing(self.simplify_indexing(index))
 
     def active_range_trees(self, reorder=False):
         trees = [
