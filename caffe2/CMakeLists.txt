@@ -457,6 +457,9 @@ if(BUILD_LITE_INTERPRETER)
   append_filelist("libtorch_lite_cmake_sources" LIBTORCH_CMAKE_SRCS)
   list(APPEND LIBTORCH_CMAKE_SRCS ${LITE_EAGER_SYMOBLICATION_SRCS})
   list(APPEND LIBTORCH_CMAKE_SRCS ${LITE_PROFILER_SRCS})
+  if(USE_LITE_AOTI)
+    append_filelist("inductor_core_resources" LIBTORCH_CMAKE_SRCS)
+  endif()
   set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 else()
   append_filelist("libtorch_cmake_sources" LIBTORCH_CMAKE_SRCS)
@@ -575,10 +578,6 @@ if(NOT INTERN_BUILD_MOBILE AND NOT BUILD_LITE_INTERPRETER)
     ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
   )
 
-  set_source_files_properties(
-    ${TORCH_SRC_DIR}/csrc/jit/serialization/import.cpp
-    PROPERTIES COMPILE_FLAGS "-DC10_DISABLE_LEGACY_IMPORT"
-  )
   if(USE_DISTRIBUTED)
     append_filelist("libtorch_distributed_base_sources" TORCH_SRCS)
     if(NOT WIN32)
@@ -1027,6 +1026,14 @@ elseif(USE_CUDA)
   if(USE_PRECOMPILED_HEADERS)
     target_precompile_headers(torch_cuda PRIVATE
         "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")
+  endif()
+
+  # Apply suggestion from comment https://github.com/pytorch/pytorch/issues/113053#issuecomment-2115375714
+  if(LINUX)
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/CUDASparseDescriptors.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/CUDASparseBlas.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/sparse/cuda/SparseCUDABlas.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/sparse/cuda/SparseBlasImpl.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
   endif()
 endif()
 

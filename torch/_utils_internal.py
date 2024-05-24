@@ -1,14 +1,24 @@
+import distutils.spawn
 import functools
 import logging
 import os
 import sys
 import tempfile
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import torch
+from torch._strobelight.compile_time_profiler import StrobelightCompileTimeProfiler
 
 log = logging.getLogger(__name__)
 
+if os.environ.get("TORCH_COMPILE_STROBELIGHT", False):
+    if not distutils.spawn.find_executable("strobeclient"):
+        log.info(
+            "TORCH_COMPILE_STROBELIGHT is true, but seems like you are not on a FB machine."
+        )
+    else:
+        log.info("Strobelight profiler is enabled via environment variable")
+        StrobelightCompileTimeProfiler.enable()
 
 # this arbitrary-looking assortment of functionality is provided here
 # to have a central place for overrideable behavior. The motivating
@@ -62,12 +72,16 @@ def throw_abstract_impl_not_imported_error(opname, module, context):
         )
 
 
-# Meta only, act as nop otherwise.
+# NB!  This treats "skip" kwarg specially!!
 def compile_time_strobelight_meta(phase_name):
     def compile_time_strobelight_meta_inner(function):
         @functools.wraps(function)
         def wrapper_function(*args, **kwargs):
-            return function(*args, **kwargs)
+            if "skip" in kwargs:
+                kwargs["skip"] = kwargs["skip"] + 1
+            return StrobelightCompileTimeProfiler.profile_compile_time(
+                function, phase_name, *args, **kwargs
+            )
 
         return wrapper_function
 
@@ -191,6 +205,6 @@ USE_RTLD_GLOBAL_WITH_LIBTORCH = False
 REQUIRES_SET_PYTHON_MODULE = False
 
 
-def maybe_upload_prof_stats_to_manifold(profile_path: str) -> None:
+def maybe_upload_prof_stats_to_manifold(profile_path: str) -> Optional[str]:
     print("Uploading profile stats (fb-only otherwise no-op)")
-    pass
+    return None

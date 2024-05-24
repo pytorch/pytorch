@@ -373,6 +373,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._add_relu_",
         "torch._add_relu",
         "torch._addmm_activation",
+        "torch._aminmax",
         "torch._amp_foreach_non_finite_check_and_unscale_",
         "torch._amp_update_scale_",
         "torch._assert_async",
@@ -1301,9 +1302,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C.parse_schema",
         "torch._C.parse_type_comment",
         "torch._C.read_vitals",
-        "torch._C.set_flush_denormal",
-        "torch._C.set_num_interop_threads",
-        "torch._C.set_num_threads",
         "torch._C.set_vital",
         "torch._C.unify_type_list",
         "torch._C.vitals_enabled",
@@ -2431,7 +2429,10 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cpu.synchronize",
         "torch.cuda._check_capability",
         "torch.cuda._check_cubins",
+        "torch.cuda._device_count_amdsmi",
         "torch.cuda._device_count_nvml",
+        "torch.cuda._get_amdsmi_handler",
+        "torch.cuda._get_amdsmi_device_index",
         "torch.cuda._get_device",
         "torch.cuda._get_generator",
         "torch.cuda._get_nvml_device_index",
@@ -2462,7 +2463,9 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cuda._memory_viz.trace",
         "torch.cuda._nvml_based_avail",
         "torch.cuda._parse_visible_devices",
+        "torch.cuda._raw_device_count_amdsmi",
         "torch.cuda._raw_device_count_nvml",
+        "torch.cuda._raw_device_uuid_amdsmi",
         "torch.cuda._raw_device_uuid_nvml",
         "torch.cuda._register_triton_kernels",
         "torch.cuda._set_rng_state_offset",
@@ -3266,6 +3269,7 @@ SKIP_DIRS = [
     "<frozen importlib",
     "<__array_function__ internals>",
     _config_module.__file__,
+    "triton/backends",
 ]
 SKIP_DIRS.extend(filter(None, (_module_dir(m) for m in BUILTIN_SKIPLIST)))
 
@@ -3306,7 +3310,7 @@ FORCE_SKIP_FILES = {f"{_module_dir(torch)}optim/lr_scheduler.py"}
 
 def _recompile_re():
     global SKIP_DIRS_RE
-    SKIP_DIRS_RE = re.compile(f"^({'|'.join(map(re.escape, SKIP_DIRS))})")
+    SKIP_DIRS_RE = re.compile(rf"^[^\s<]*({'|'.join(map(re.escape, SKIP_DIRS))})")
 
 
 def add(import_name: str):
@@ -3321,7 +3325,6 @@ def add(import_name: str):
     origin = module_spec.origin
     if origin is None:
         return
-    global SKIP_DIRS_RE
     SKIP_DIRS.append(_strip_init_py(origin))
     _recompile_re()
 

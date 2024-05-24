@@ -1,7 +1,7 @@
 def get_blas_gomp_arch_deps():
     return [
         ("x86_64", [
-            "third-party//IntelComposerXE:{}".format(native.read_config("fbcode", "mkl_lp64", "mkl_lp64_omp")),
+            "fbsource//third-party/mkl:{}".format(native.read_config("fbcode", "mkl_lp64", "mkl_lp64_omp")),
         ]),
         ("aarch64", [
             "third-party//OpenBLAS:OpenBLAS",
@@ -35,7 +35,6 @@ default_compiler_flags = [
     "-DNO_CUDNN_DESTROY_HANDLE",
     "-DUSE_EXPERIMENTAL_CUDNN_V8_API",  # enable cudnn v8 api
     "-DUSE_FBGEMM",
-    "-DUSE_QNNPACK",
     "-DUSE_PYTORCH_QNNPACK",
     # The dynamically loaded NVRTC trick doesn't work in fbcode,
     # and it's not necessary anyway, because we have a stub

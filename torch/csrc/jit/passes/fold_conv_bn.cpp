@@ -105,7 +105,7 @@ void addBiasForConvIfNone(Module& module, const std::string& pattern_name) {
     if (!t->hasAttribute("bias")) {
       auto optional_tensor_type = OptionalType::create(TensorType::get());
       t->addAttribute("bias", std::move(optional_tensor_type), true);
-      auto optional_tensor = c10::optional<at::Tensor>();
+      auto optional_tensor = std::optional<at::Tensor>();
       module.setattr("bias", std::move(optional_tensor));
       replaceConvBiasWithGetAttr(module);
     }
