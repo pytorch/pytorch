@@ -150,6 +150,7 @@ class StateDictOptions:
     keep_submodule_prefixes: bool = True
     strict: bool = True
     broadcast_from_rank0: bool = False
+    flatten_optimizer_state_dict: bool = False
 
 
 @dataclass
@@ -382,7 +383,7 @@ def _verify_state_dict(
 
     if info.handle_optim:
         if (
-            not (optim_state_dict and optim_state_dict[STATE])
+            not optim_state_dict
             and not (info.cpu_offload and info.full_state_dict)
             and (not info.broadcast_from_rank0)
         ):
@@ -563,6 +564,29 @@ def _init_optim_state(optim: torch.optim.Optimizer) -> None:
     optim.zero_grad(set_to_none=True)
 
 
+def _flatten_optim_state_dict(state_dict: OptimizerStateType) -> Dict[str, ValueType]:
+    def _raise_if_type_not_supported(v):
+        if not isinstance(v, (torch.Tensor, int, float)):
+            raise NotImplementedError(
+                "Flattening optimizer state_dict only supports "
+                "tensor, int, float states now. "
+                f"Type is {type(v)}."
+            )
+
+    ret: Dict[str, ValueType] = {}
+    for fqn, state in state_dict[STATE].items():
+        for k, v in state.items():
+            _raise_if_type_not_supported(v)
+            ret[f"{STATE}.{fqn}.{k}"] = v
+
+    for param_group in state_dict[PG]:
+        fqns = param_group.pop(PARAMS)
+        for fqn in fqns:
+            for k, v in param_group.items():
+                ret[f"{PG}.{fqn}.{k}"] = v
+    return ret
+
+
 def _get_optim_state_dict(
     model: nn.Module,
     optimizers: Tuple[torch.optim.Optimizer, ...],
@@ -618,6 +642,9 @@ def _get_optim_state_dict(
         cast(DictValueType, optim_state_dict[STATE]).update(osd[STATE])
         cast(ListDictValueType, optim_state_dict[PG]).extend(osd[PG])
 
+    if info.flatten_optimizer_state_dict:
+        optim_state_dict = _flatten_optim_state_dict(optim_state_dict)
+
     if info.full_state_dict:
         ranks_only = tuple() if not info.cpu_offload else (0,)
         return _gather_state_dict(
@@ -627,6 +654,35 @@ def _get_optim_state_dict(
         return _offload_state_dict_to_cpu(optim_state_dict)
     else:
         return optim_state_dict
+
+
+def _unflatten_optim_state_dict(
+    optim: torch.optim.Optimizer,
+    state_dict: OptimizerStateType,
+    info: _StateDictInfo,
+) -> OptimizerStateType:
+    state: DictValueType = {}
+    pg_state: ListDictValueType = []
+    return_osd: OptimizerStateType = {STATE: state, PG: pg_state}
+
+    for param_group in optim.param_groups:
+        pg_state.append({PARAMS: []})
+        for param in param_group[PARAMS]:
+            for fqn in info.fqn_param_mapping[param]:
+                pg_state[-1][PARAMS].append(fqn)
+                if not param.requires_grad:
+                    continue
+                state[fqn] = {}
+                for state_name in optim.state[param].keys():
+                    state[fqn][state_name] = state_dict[f"{STATE}.{fqn}.{state_name}"]
+
+        first_param_fqn = pg_state[-1][PARAMS][0]
+        for k in param_group.keys():
+            if k == PARAMS:
+                continue
+            pg_state[-1][k] = state_dict[f"{PG}.{first_param_fqn}.{k}"]
+
+    return return_osd
 
 
 def _split_optim_state_dict(
@@ -695,7 +751,12 @@ def _load_optim_state_dict(
     for optim in optimizers:
         _init_optim_state(optim)
         if state_dict:
-            optim_state_dict = _split_optim_state_dict(model, optim, state_dict, info)
+            if STATE in state_dict:
+                optim_state_dict = _split_optim_state_dict(
+                    model, optim, state_dict, info
+                )
+            else:
+                optim_state_dict = _unflatten_optim_state_dict(optim, state_dict, info)
         else:
             optim_state_dict = {}
         if info.fsdp_modules:

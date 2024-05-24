@@ -650,6 +650,33 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         get_model_state_dict(fsdp_model)
         get_optimizer_state_dict(fsdp_model, fsdp_optim)
 
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_flattened_osd(self) -> None:
+        device_mesh = init_device_mesh("cuda", (self.world_size,))
+        model = CompositeParamModel(device=torch.device("cuda"))
+        fsdp_model = FSDP2(copy.deepcopy(model), mesh=device_mesh)
+        fsdp_optim = torch.optim.AdamW(fsdp_model.parameters())
+        batch = torch.rand(8, 100, device="cuda")
+        fsdp_model(batch).sum().backward()
+        fsdp_optim.step()
+        fsdp_optim.zero_grad()
+        osd1 = get_optimizer_state_dict(fsdp_model, fsdp_optim)
+        osd2 = get_optimizer_state_dict(
+            fsdp_model,
+            fsdp_optim,
+            options=StateDictOptions(flatten_optimizer_state_dict=True),
+        )
+        fsdp_optim2 = torch.optim.AdamW(fsdp_model.parameters())
+        set_optimizer_state_dict(
+            fsdp_model, optimizers=fsdp_optim2, optim_state_dict=osd2
+        )
+        self.assertEqual(fsdp_optim.state_dict(), fsdp_optim2.state_dict())
+        set_optimizer_state_dict(
+            fsdp_model, optimizers=fsdp_optim2, optim_state_dict=osd1
+        )
+        self.assertEqual(fsdp_optim.state_dict(), fsdp_optim2.state_dict())
+
 
 if __name__ == "__main__":
     run_tests()
