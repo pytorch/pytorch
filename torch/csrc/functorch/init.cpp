@@ -23,9 +23,7 @@
 
 // This file contains functorch's Python bindings.
 
-namespace torch {
-namespace functorch {
-namespace impl {
+namespace torch::functorch::impl {
 
 using namespace at::functorch;
 
@@ -378,7 +376,7 @@ static int64_t currentLevel() {
 static std::optional<int64_t> maybe_current_level() {
   auto maybe_layer = maybeCurrentDynamicLayer();
   if (maybe_layer.has_value()) {
-    int current_level = maybe_layer->layerId();
+    int64_t current_level = maybe_layer->layerId();
     return current_level;
   }
   return nullopt;
@@ -405,36 +403,29 @@ static void dump_local_tls() {
 
 namespace {
 
-// An RAII to save and restore the DynamicLayer stack.
-struct PreserveDynamicLayerStack {
-  size_t m_oldDepth;
-
-  ~PreserveDynamicLayerStack() {
-    while (at::functorch::getDynamicLayerStack().size() > m_oldDepth) {
-      const auto& top = at::functorch::getDynamicLayerStack().back();
-      switch (top.key()) {
-        case at::functorch::TransformType::Vmap:
-          _vmap_decrement_nesting();
-          break;
-        case at::functorch::TransformType::Grad:
-          _grad_decrement_nesting();
-          break;
-        case at::functorch::TransformType::Jvp:
-          _jvp_decrement_nesting();
-          break;
-        case at::functorch::TransformType::Functionalize:
-          _func_decrement_nesting();
-          break;
-        case at::functorch::TransformType::Torch:
-          popDynamicLayerAndDeleteMetadata();
-          break;
-      }
+// Pop the DynamicLayer stack until it's at the given depth.
+void popDynamicLayerStackToDepth(size_t depth) {
+  while (at::functorch::getDynamicLayerStack().size() > depth) {
+    const auto top = popDynamicLayer();
+    switch (top.key()) {
+      case at::functorch::TransformType::Vmap:
+        _vmap_decrement_nesting();
+        break;
+      case at::functorch::TransformType::Grad:
+        _grad_decrement_nesting();
+        break;
+      case at::functorch::TransformType::Jvp:
+        _jvp_decrement_nesting();
+        break;
+      case at::functorch::TransformType::Functionalize:
+        _func_decrement_nesting();
+        break;
+      case at::functorch::TransformType::Torch:
+        popDynamicLayerAndDeleteMetadata();
+        break;
     }
   }
-
-  PreserveDynamicLayerStack()
-      : m_oldDepth(at::functorch::getDynamicLayerStack().size()) {}
-};
+}
 
 } // anonymous namespace
 
@@ -540,6 +531,7 @@ void initFuncTorchBindings(PyObject* module) {
           return c10::nullopt;
         }
         std::vector<Interpreter> result;
+        result.reserve(stack.size());
         for (auto i : stack) {
           result.push_back(i.interpreter());
         }
@@ -553,6 +545,12 @@ void initFuncTorchBindings(PyObject* module) {
     auto result = stack.back().interpreter();
     return result;
   });
+  m.def("get_dynamic_layer_stack_depth", []() -> size_t {
+    return getDynamicLayerStack().size();
+  });
+  m.def(
+      "pop_dynamic_layer_stack_and_undo_to_depth",
+      &popDynamicLayerStackToDepth);
   m.def("pop_dynamic_layer_stack", &popDynamicLayer);
   m.def("push_dynamic_layer_stack", [](DynamicLayer layer) -> int64_t {
     return pushDynamicLayer(std::move(layer));
@@ -598,11 +596,6 @@ void initFuncTorchBindings(PyObject* module) {
       .def(
           "functionalizeAddBackViews",
           &FunctionalizeInterpreterPtr::functionalizeAddBackViews);
-
-  torch::impl::py_context_manager<PreserveDynamicLayerStack>(
-      m, "_PreserveDynamicLayerStack");
 }
 
-} // namespace impl
-} // namespace functorch
-} // namespace torch
+} // namespace torch::functorch::impl
