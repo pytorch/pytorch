@@ -17,6 +17,7 @@ from typing import (
     Iterable,
     List,
     Optional,
+    Sequence,
     Set,
     Tuple,
     TYPE_CHECKING,
@@ -50,10 +51,9 @@ from ..utils import (
     sympy_subs,
     unique,
 )
-from ..virtualized import ops, OpsValue, V
+from ..virtualized import ops, OpsWrapper, V
 from .common import CSEVariable, index_prevent_reordering, Kernel, PythonPrinter
 from .multi_kernel import MultiKernel
-
 
 if TYPE_CHECKING:
     pass
@@ -246,18 +246,6 @@ class IterationRangesRoot(IterationRanges):
             add(self.lookup(divisor, FloorDiv(self.numel, divisor)))
 
         return list(reversed(index_vars)), list(reversed(sizes))
-
-    def ranges_code(self):
-        return self.kernel.iteration_ranges_ranges_code(self)
-
-    def scalar_code(self, value):
-        return self.kernel.iteration_ranges_scalar_code(self, value)
-
-    def get_pid(self):
-        return self.kernel.iteration_ranges_get_pid(self)
-
-    def codegen_header(self, code):
-        return self.kernel.iteration_ranges_codegen_header(self, code)
 
 
 class IterationRangesEntry(IterationRanges):
@@ -520,7 +508,7 @@ class SIMDKernel(Kernel):
 
     @staticmethod
     def _split_iteration_ranges(
-        groups: Iterable[sympy.Expr], lengths: List[List[sympy.Expr]]
+        groups: Iterable[sympy.Expr], lengths: Sequence[Sequence[sympy.Expr]]
     ):
         sv = V.graph.sizevars
         new_ranges: List[List[sympy.Expr]] = [[] for _ in groups]
@@ -588,7 +576,7 @@ class SIMDKernel(Kernel):
 
     @classmethod
     def is_compatible(
-        cls, groups: Iterable[sympy.Expr], lengths: List[List[sympy.Expr]]
+        cls, groups: Iterable[sympy.Expr], lengths: Sequence[Sequence[sympy.Expr]]
     ):
         try:
             cls._split_iteration_ranges(groups, lengths)
@@ -865,7 +853,7 @@ class SIMDKernel(Kernel):
         if prior:
             mask = ops.logical_and(mask, prior)
 
-        mask = OpsValue.unwrap(mask)
+        mask = OpsWrapper._unwrap(mask)
         self._load_mask = mask
         try:
             # TODO(jansel): do we need a reshape here?
@@ -874,19 +862,7 @@ class SIMDKernel(Kernel):
             self._load_mask = prior
 
     def load_mask(self, var):
-        mask = ""
-        mask_vars = set(var.mask_vars)
-        if self._load_mask:
-            mask_vars.add(self._load_mask)
-
-        if mask_vars:
-            mask = (
-                f"{next(iter(mask_vars))}"
-                if len(mask_vars) == 1
-                # sorted for deterministic order
-                else f"({' & '.join(sorted(map(str, mask_vars)))})"
-            )
-        return mask
+        return self._load_mask
 
     def get_strides_of_load(self, index: sympy.Expr):
         """
@@ -1055,7 +1031,7 @@ class SIMDKernel(Kernel):
         dx = ops.sub(value, mean)
         dx2 = ops.mul(dx, dx)
         m2 = ops.reduction(dtype, dtype, "sum", dx2)
-        return OpsValue.unwrap((mean, m2, rnumel))
+        return OpsWrapper._unwrap((mean, m2, rnumel))
 
     def codegen_kernel(self):
         raise NotImplementedError
@@ -1064,18 +1040,6 @@ class SIMDKernel(Kernel):
         pass
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry):
-        raise NotImplementedError
-
-    def iteration_ranges_ranges_code(self, entry):
-        raise NotImplementedError
-
-    def iteration_ranges_scalar_code(self, entry, value):
-        raise NotImplementedError
-
-    def iteration_ranges_get_pid(self, entry):
-        raise NotImplementedError
-
-    def iteration_ranges_codegen_header(self, entry, code):
         raise NotImplementedError
 
 
@@ -1532,6 +1496,7 @@ class SIMDScheduling(BaseScheduling):
                 name = node.get_name()
                 if name not in live_outs:
                     continue
+                assert node.node is not None
                 origin_node = node.node.get_origin_node()
                 if origin_node is not None:
                     counters["inductor"]["intermediate_hooks"] += 1
