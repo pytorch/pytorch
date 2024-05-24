@@ -2113,13 +2113,13 @@ if (custom_op_wrapper.get() == NULL) {
                 return f"PyCapsule_New(reinterpret_cast<void*>({raw_arg.codegen_reference()}.get()), NULL, NULL)"
             elif isinstance(arg_type, torch.IntType):
                 # int
-                return f"PyLong_FromLong({raw_arg})"
+                return f"PyLong_FromLongLong({raw_arg})"
             elif isinstance(arg_type, torch.SymIntType):
                 # SymInt
                 expr = (
                     raw_arg.node.expr if isinstance(raw_arg, torch.SymInt) else raw_arg
                 )
-                return f"PyLong_FromLong({self.expr_printer(expr)})"
+                return f"PyLong_FromLongLong({self.expr_printer(expr)})"
             elif isinstance(arg_type, torch.FloatType):
                 return f"PyFloat_FromDouble({raw_arg})"
             elif isinstance(arg_type, torch.BoolType):
