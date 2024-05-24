@@ -273,25 +273,29 @@ class SymInt:
     def __truediv__(self, other):
         if isinstance(other, (builtins.float, SymFloat)):
             return sym_float(self).__float_truediv__(other)
-        assert isinstance(other, (builtins.int, SymInt))
+        if not isinstance(other, (builtins.int, SymInt)):
+            return NotImplemented
         return self.__int_truediv__(other)
 
     def __rtruediv__(self, other):
         if isinstance(other, (builtins.float, SymFloat)):
             return sym_float(self).__rfloat_truediv__(other)
-        assert isinstance(other, (builtins.int, SymInt))
+        if not isinstance(other, (builtins.int, SymInt)):
+            return NotImplemented
         return self.__rint_truediv__(other)
 
     def __floordiv__(self, other):
         if isinstance(other, (builtins.float, SymFloat)):
             return math.floor(sym_float(self) / other)
-        assert isinstance(other, (builtins.int, SymInt))
+        if not isinstance(other, (builtins.int, SymInt)):
+            return NotImplemented
         return self.__int_floordiv__(other)
 
     def __rfloordiv__(self, other):
         if isinstance(other, (builtins.float, SymFloat)):
             return math.floor(other / sym_float(self))
-        assert isinstance(other, (builtins.int, SymInt))
+        if not isinstance(other, (builtins.int, SymInt)):
+            return NotImplemented
         return self.__rint_floordiv__(other)
 
     # nb: complex is impossible to handle correctly lol, with
@@ -301,7 +305,8 @@ class SymInt:
     def __pow__(self, other):
         if isinstance(other, (builtins.float, SymFloat)):
             return sym_float(self).__pow__(other)
-        assert isinstance(other, (builtins.int, SymInt))
+        if not isinstance(other, (builtins.int, SymInt)):
+            return NotImplemented
         # Guards!  This guard is necessary because we need to know it to
         # determine the output type of this operation
         if other >= 0:
@@ -324,7 +329,8 @@ class SymInt:
     def __rpow__(self, other):
         if isinstance(other, (builtins.float, SymFloat)):
             return sym_float(self).__rpow__(other)
-        assert isinstance(other, (builtins.int, SymInt))
+        if not isinstance(other, (builtins.int, SymInt)):
+            return NotImplemented
         if self >= 0:  # self is exponent
             return self.__rpow_by_natural__(other)
         else:

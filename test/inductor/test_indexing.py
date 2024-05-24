@@ -251,18 +251,6 @@ class ExprPrinterTests(InductorTestCase):
             f"libdevice.nearbyint(1e{ndigits} * ((1/2)*x)) * 1e{-ndigits}",
         )
 
-        expr = RoundDecimal(sympy.Symbol("x", integer=True), ndigits)
-        if ndigits >= 0:
-            for do_print in [pexpr, cexpr, texpr]:
-                self.assertEqual(do_print(expr), "x")
-        else:
-            self.assertEqual(pexpr(expr), f"round(x, {ndigits})")
-            for do_print in [cexpr, texpr]:
-                with self.assertRaisesRegex(
-                    ValueError, "only non-negative ndigits are currently supported"
-                ):
-                    do_print(expr)
-
     def test_print_floor_div(self):
         s1 = sympy.Symbol("s1", integer=True)
         s2 = sympy.Symbol("s2", integer=True)

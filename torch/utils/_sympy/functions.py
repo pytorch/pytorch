@@ -1,5 +1,6 @@
 import functools
 import math
+import sys
 
 import sympy
 from sympy import S
@@ -552,6 +553,10 @@ class TruncToInt(sympy.Function):
     @classmethod
     def eval(cls, number):
         # assert number.is_integer is not True, number
+        if number == sympy.oo:
+            return sympy.Integer(sys.maxsize - 1)
+        if number == -sympy.oo:
+            return sympy.Integer(-sys.maxsize - 1)
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.trunc(float(number)))
 
