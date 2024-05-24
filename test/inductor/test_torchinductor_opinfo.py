@@ -444,6 +444,7 @@ inductor_all_samples = {
     "constant_pad_nd",
     "clamp_max",
     "clamp_min",
+    "ne",
 }
 
 
