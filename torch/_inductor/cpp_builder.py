@@ -15,7 +15,7 @@ import sys
 import sysconfig
 import warnings
 from pathlib import Path
-from typing import List, Tuple, Union
+from typing import List, Sequence, Tuple, Union
 
 import torch
 from torch._inductor import config, exc
@@ -346,7 +346,12 @@ def _get_shared_cflag(compile_only: bool) -> List[str]:
     return SHARED_FLAG
 
 
-def get_cpp_options(cpp_compiler, compile_only: bool, warning_all: bool = True):
+def get_cpp_options(
+    cpp_compiler,
+    compile_only: bool,
+    warning_all: bool = True,
+    extra_flags: Sequence[str] = (),
+):
     definations: List[str] = []
     include_dirs: List[str] = []
     cflags: List[str] = []
@@ -362,6 +367,8 @@ def get_cpp_options(cpp_compiler, compile_only: bool, warning_all: bool = True):
         + _get_cpp_std_cflag()
         + _get_linux_cpp_cflags(cpp_compiler)
     )
+
+    passthough_args.append(" ".join(extra_flags))
 
     return (
         definations,
@@ -385,7 +392,12 @@ class CppOptions(BuildOptionsBase):
     1. This Options is good for assist modules build, such as x86_isa_help.
     """
 
-    def __init__(self, compile_only: bool, warning_all: bool = True) -> None:
+    def __init__(
+        self,
+        compile_only: bool,
+        warning_all: bool = True,
+        extra_flags: Sequence[str] = (),
+    ) -> None:
         super().__init__()
         self._compiler = _get_cpp_compiler()
 
@@ -397,7 +409,11 @@ class CppOptions(BuildOptionsBase):
             libraries_dirs,
             libraries,
             passthough_args,
-        ) = get_cpp_options(cpp_compiler=self._compiler, compile_only=compile_only)
+        ) = get_cpp_options(
+            cpp_compiler=self._compiler,
+            compile_only=compile_only,
+            extra_flags=extra_flags,
+        )
 
         _append_list(self._definations, definations)
         _append_list(self._include_dirs, include_dirs)
@@ -719,6 +735,7 @@ class CppTorchOptions(CppOptions):
         compile_only: bool = False,
         use_mmap_weights: bool = False,
         shared: bool = True,
+        extra_flags: Sequence[str] = (),
     ) -> None:
         super().__init__(compile_only=compile_only, warning_all=warning_all)
 
@@ -879,6 +896,7 @@ class CppTorchCudaOptions(CppTorchOptions):
         compile_only: bool = False,
         use_mmap_weights: bool = False,
         shared: bool = True,
+        extra_flags: Sequence[str] = (),
     ) -> None:
         # from torch._inductor.codecache import pick_vec_isa
 
@@ -888,6 +906,7 @@ class CppTorchCudaOptions(CppTorchOptions):
             aot_mode=aot_mode,
             compile_only=compile_only,
             use_mmap_weights=use_mmap_weights,
+            extra_flags=extra_flags,
         )
 
         cuda_definations: List[str] = []
