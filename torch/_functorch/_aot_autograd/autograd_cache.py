@@ -156,6 +156,9 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             # We don't use FxGraphHashDetails to hash example_inputs because it expects
             # example_inputs to always be FakeTensors, but at AOTAutograd's entry point,
             # they're still regular. So instead we store their metadata here.
+            # TODO: this currently causes more cache misses than necessary
+            # with dynamic shapes, because this is before we add
+            # symints to tensor metadata. Improve this later.
             self.example_input_metadata = [extract_tensor_metadata(t) for t in example_inputs if isinstance(t, torch.Tensor)]
             super().__init__(gm, [], {})
         except BypassFxGraphCache as e:
@@ -483,3 +486,4 @@ class AOTAutogradCache:
         path = os.path.join(subdir, "entry")
         log.info("Writing AOTAutograd cache entry to %s", path)
         write_atomic(path, content)
+        counters["aot_autograd"]["autograd_cache_saved"] += 1

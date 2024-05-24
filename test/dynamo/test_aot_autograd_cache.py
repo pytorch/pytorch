@@ -63,6 +63,7 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(a, b), compiled_fn(a, b))
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
         # A second call should hit. (First reset so in-memory guards
         # don't prevent compilation).
@@ -71,6 +72,7 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
     @torch._inductor.config.patch({"fx_graph_cache": True})
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -98,6 +100,7 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
         # Reset all tensors
         a = torch.randn(25, requires_grad=True)
@@ -116,6 +119,7 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
 
 class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
