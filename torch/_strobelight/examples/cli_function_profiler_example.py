@@ -1,6 +1,6 @@
 import torch
 
-from torch.utils._strobelight.cli_function_profiler import (
+from torch._strobelight.cli_function_profiler import (
     strobelight,
     StrobelightCLIFunctionProfiler,
 )
