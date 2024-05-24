@@ -38,13 +38,7 @@ from .common import (
 )
 from .cpp import DTYPE_TO_CPP
 from .cpp_utils import cexpr
-from .simd import (
-    constant_repr,
-    IndexingOptions,
-    IterationRangesEntry,
-    SIMDKernel,
-    SIMDScheduling,
-)
+from .simd import constant_repr, IterationRangesEntry, SIMDKernel, SIMDScheduling
 
 log = logging.getLogger(__name__)
 
@@ -487,11 +481,10 @@ class HalideOverrides(OpOverrides):
 
     @classmethod
     def index_expr(cls, expr, dtype):
-        indexing = V.kernel.indexing(expr, block_ptr=False)
-        assert isinstance(indexing, IndexingOptions)
+        index = V.kernel.prepare_indexing(expr)
         var = V.kernel.genfunc(
-            V.kernel.index_to_str(indexing.index),
-            V.kernel.used_dims_from_index(indexing.index),
+            V.kernel.index_to_str(index),
+            V.kernel.used_dims_from_index(index),
             bounds=get_bounds_index_expr(expr),
         )
         if dtype not in {torch.int32, torch.int64}:
@@ -660,20 +653,17 @@ class HalideKernel(SIMDKernel):
     def load(self, name: str, index: sympy.Expr):
         """Codegen a load from an InputBuffer"""
         var = self.args.input(name)
-        indexing = self.indexing(index, block_ptr=False)
-        assert isinstance(indexing, IndexingOptions)
-        index_str = self.index_to_str(indexing.index)
+        index = self.prepare_indexing(index)
+        index_str = self.index_to_str(index)
 
-        if indexing.has_tmpmask() or self.is_indirect_indexing(index):
+        if self.is_indirect_indexing(index):
             # Halide doesn't have a great way to do masked loads
             var = f"hl.BoundaryConditions.constant_exterior({var}, 0)"
             # TODO(jansel): figure out why this didn't work
             # mask, = [m for m in indexing.mask_vars if 'tmp' in str(m)]
             # index_str = f"hl.select({mask}, {index_str}, 0)"
 
-        return self.genfunc(
-            f"{var}[{index_str}]", self.used_dims_from_index(indexing.index)
-        )
+        return self.genfunc(f"{var}[{index_str}]", self.used_dims_from_index(index))
 
     def index_to_dom(self, index: sympy.Expr, suffix: str):
         """Replace xindex => xindex_dom, x0 => x0_dom, etc for update-style indexing"""
@@ -698,7 +688,7 @@ class HalideKernel(SIMDKernel):
         return sympy_subs(index, replacements)
 
     def lookup_cse_var(self, name: str):
-        return super().lookup_cse_var(re.sub(r"\[.*", "", name))
+        return self.cse.varname_map[re.sub(r"\[.*", "", name)]
 
     def determine_store_indexing(
         self, name: str, index: sympy.Expr, value: HalideCSEVariable, var: str
@@ -773,15 +763,9 @@ class HalideKernel(SIMDKernel):
     ) -> None:
         """Codegen a store to an OutputBuffer"""
         var = self.args.output(name)
-        indexing = self.indexing(index, dense_indexing=True, block_ptr=False)
-        assert isinstance(indexing, IndexingOptions)
-        assert not indexing.has_tmpmask()
+        index = self.prepare_indexing(index)
         assert isinstance(value, HalideCSEVariable)
-
-        index_str, value_str = self.determine_store_indexing(
-            name, indexing.index, value, var
-        )
-
+        index_str, value_str = self.determine_store_indexing(name, index, value, var)
         if mode is None:
             line = f"{var}[{index_str}] = hl.cast({var}.type(), {value_str})"
         elif mode == "atomic_add":
@@ -1038,8 +1022,9 @@ class HalideKernel(SIMDKernel):
         """Codegen a call to this kernel"""
         wrapper = V.graph.wrapper_code
         call_args = [f"{n}" for n, _ in self.halide_argdefs()]
+        assert V.graph.scheduler.current_device is not None
         current_device = V.graph.scheduler.current_device
-        assert current_device.type == "cpu"
+        assert current_device.type == "cpu", "TODO"
         wrapper.generate_kernel_call(
             name,
             call_args,
