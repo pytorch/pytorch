@@ -807,7 +807,8 @@ class TestMkldnn(TestCase):
 
                 self.assertEqual(y1, y2.to_dense())
 
-    @xfailIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127111")
+    # https://github.com/pytorch/pytorch/issues/127111
+    @xfailIfTorchDynamo
     def test_max_pool_unsupported(self):
         # OneDNN not support dilation max_pooling, will be avilabled in v2.0.
         N = torch.randint(3, 10, (1,)).item()
@@ -1160,7 +1161,8 @@ class TestMkldnn(TestCase):
         out_mkldnn = mkldnn_utils.to_mkldnn(m)(x)
         self.assertEqual(out_eager, out_mkldnn)
 
-    @xfailIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127111")
+    # https://github.com/pytorch/pytorch/issues/127111
+    @xfailIfTorchDynamo
     def test_view(self):
         x = torch.randn(3, 4, 5, dtype=torch.float32).to_mkldnn()
         self.assertRaisesRegex(RuntimeError,

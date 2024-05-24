@@ -986,7 +986,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
         graph_module = make_fx(torch.func.functionalize(f))(*example_inputs)
         self.assertEqual(graph_module(*example_inputs), f(*example_inputs))
 
-    @xfailIfTorchDynamo("https://github.com/pytorch/pytorch/issues/126988")
+    # https://github.com/pytorch/pytorch/issues/126988
+    @xfailIfTorchDynamo
     def test_cond_functionalized_input_mutation_on_true_branch(self):
         def true_fn(x):
             view_x = x.view(x.shape)
@@ -1012,7 +1013,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
         ):
             make_fx(torch.func.functionalize(f))(*example_inputs)
 
-    @xfailIfTorchDynamo("https://github.com/pytorch/pytorch/issues/126988")
+    # https://github.com/pytorch/pytorch/issues/126988
+    @xfailIfTorchDynamo
     def test_cond_functionalized_input_mutation_on_false_branch(self):
         def true_fn(x):
             return x.sin().sum()
@@ -1038,7 +1040,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
         ):
             make_fx(torch.func.functionalize(f))(*example_inputs)
 
-    @xfailIfTorchDynamo("https://github.com/pytorch/pytorch/issues/126988")
+    # https://github.com/pytorch/pytorch/issues/126988
+    @xfailIfTorchDynamo
     def test_cond_functionalized_output_alias_input(self):
         def true_fn(x):
             return x
@@ -1066,7 +1069,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
         ):
             make_fx(torch.func.functionalize(f))(*example_inputs)
 
-    @xfailIfTorchDynamo("https://github.com/pytorch/pytorch/issues/126988")
+    # https://github.com/pytorch/pytorch/issues/126988
+    @xfailIfTorchDynamo
     def test_cond_functionalized_nested_input_mutation(self):
         def true_true_fn(x):
             x.add_(4)
@@ -1098,7 +1102,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
         ):
             make_fx(torch.func.functionalize(f))(*example_inputs)
 
-    @xfailIfTorchDynamo("https://github.com/pytorch/pytorch/issues/126988")
+    # https://github.com/pytorch/pytorch/issues/126988
+    @xfailIfTorchDynamo
     def test_cond_functionalized_nested_input_mutation_with_aot_func(self):
         def true_true_fn(x):
             x.add_(4)
@@ -1150,7 +1155,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
         ):
             make_fx(f_wrapper(f))(example_input_func)
 
-    @xfailIfTorchDynamo("https://github.com/pytorch/pytorch/issues/126988")
+    # https://github.com/pytorch/pytorch/issues/126988
+    @xfailIfTorchDynamo
     def test_cond_functionalized_input_aliasing_with_aot_func(self):
         def true_fn(x):
             return x
@@ -1781,7 +1787,8 @@ def forward(self, arg0_1):
 
         self.assertEqual(gm(*example_inputs), f(*example_inputs))
 
-    @xfailIfTorchDynamo("https://github.com/pytorch/pytorch/issues/126988")
+    # https://github.com/pytorch/pytorch/issues/126988
+    @xfailIfTorchDynamo
     def test_map_functionalized_arg_mutation(self):
         def map_fn(x, y):
             y.add_(4)
@@ -1797,7 +1804,8 @@ def forward(self, arg0_1):
         ):
             functional_f(*example_inputs)
 
-    @xfailIfTorchDynamo("https://github.com/pytorch/pytorch/issues/126988")
+    # https://github.com/pytorch/pytorch/issues/126988
+    @xfailIfTorchDynamo
     def test_map_functionalized_elem_mutation(self):
         def map_fn(x, y):
             x.add_(4)
@@ -1833,7 +1841,8 @@ def forward(self, arg0_1):
         # Ensure no error is thrown when not running backward
         f(*example_inputs)
 
-    @xfailIfTorchDynamo("https://github.com/pytorch/pytorch/issues/126988")
+    # https://github.com/pytorch/pytorch/issues/126988
+    @xfailIfTorchDynamo
     def test_map_functionalized_elem_alias(self):
         def map_fn(x):
             x.view(x.shape)

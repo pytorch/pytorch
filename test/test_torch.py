@@ -4374,7 +4374,8 @@ else:
                 getattr(x, op)(*args)
 
     # FIXME: move to an elementwise ternary test suite and make this an OpInfo test
-    @xfailIfTorchDynamo("https://github.com/pytorch/pytorch/issues/126474")
+    # https://github.com/pytorch/pytorch/issues/126474
+    @xfailIfTorchDynamo
     @dtypes(torch.double)
     def test_ternary_op_mem_overlap(self, device, dtype):
         if device == "cpu" and TEST_WITH_TORCHINDUCTOR:

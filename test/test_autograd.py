@@ -7040,7 +7040,8 @@ for shape in [(1,), ()]:
         # should only call hook once
         self.assertEqual(count, 1)
 
-    @xfailIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127115")
+    # https://github.com/pytorch/pytorch/issues/127115
+    @xfailIfTorchDynamo
     def test_checkpointing_without_reentrant_arbitrary_input_output(self):
         """
         Ensures checkpointing without reentrant autograd works with functions

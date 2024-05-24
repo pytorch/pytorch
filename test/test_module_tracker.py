@@ -8,7 +8,8 @@ from torch.utils.module_tracker import ModuleTracker
 
 
 class TestModuleTracker(TestCase):
-    @xfailIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127112")
+    # "https://github.com/pytorch/pytorch/issues/127112
+    @xfailIfTorchDynamo
     def test_module_hierarchy(self):
         seen_fw = []
         seen_bw = []

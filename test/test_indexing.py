@@ -1785,7 +1785,8 @@ class NumpyTests(TestCase):
         a[b] = 1.0
         self.assertEqual(a, tensor([[1.0, 1.0, 1.0]], device=device))
 
-    @xfailIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127003")
+    # https://github.com/pytorch/pytorch/issues/127003
+    @xfailIfTorchDynamo
     def test_boolean_assignment_value_mismatch(self, device):
         # A boolean assignment should fail when the shape of the values
         # cannot be broadcast to the subscription. (see also gh-3458)

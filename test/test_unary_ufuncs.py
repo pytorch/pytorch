@@ -789,7 +789,8 @@ class TestUnaryUfuncs(TestCase):
                     _test(op, data[0:sz], data[1 : sz + 1])
 
     # TODO: run on non-native device types
-    @xfailIfTorchDynamo("https://github.com/pytorch/pytorch/issues/126474")
+    # https://github.com/pytorch/pytorch/issues/126474
+    @xfailIfTorchDynamo
     @dtypes(torch.double)
     def test_unary_out_op_mem_overlap(self, device, dtype):
         sz = 3
