@@ -25,7 +25,7 @@ from ..codecache import code_hash, get_path, PyCodeCache
 from ..ir import IRNode
 from ..metrics import is_metric_table_enabled, log_kernel_metadata
 from ..runtime.hints import ReductionHint, TRITON_MAX_BLOCK
-from ..runtime.runtime_utils import do_bench_gpu, next_power_of_2
+from ..runtime.runtime_utils import do_bench_gpu, get_max_y_grid, next_power_of_2
 from ..utils import (
     cache_on_self,
     get_bounds_index_expr,
@@ -977,11 +977,13 @@ class TritonKernel(SIMDKernel):
         for tree in self.range_trees:
             # reduction indexing goes inside a loop
             if not tree.is_loop:
-                tree.codegen_header(self.body)
+                self.iteration_ranges_codegen_header(tree, self.body)
         if self.inside_reduction and self.range_trees[-1].is_loop:
             # workaround for this issue:
             # https://gist.github.com/jansel/6527126f781559095c5531f98a4235a7
-            self.body.writeline(f"rbase = {self.range_trees[-1].ranges_code()}")
+            self.body.writeline(
+                f"rbase = {self.iteration_ranges_ranges_code(self.range_trees[-1])}"
+            )
 
     def need_numel_args(self):
         r"""
@@ -1709,7 +1711,7 @@ class TritonKernel(SIMDKernel):
             self.body.writeline("for roffset in range(0, rnumel, RBLOCK):")
             with self.body.indent():
                 # last range tree is always reduction
-                self.range_trees[-1].codegen_header(self.body)
+                self.iteration_ranges_codegen_header(self.range_trees[-1], self.body)
                 self.body.splice(self.indexing_code)
                 self.body.splice(self.loads)
                 self.body.splice(self.compute)
@@ -2164,6 +2166,56 @@ class TritonKernel(SIMDKernel):
         else:
             # lift non-reduction stores outside loop
             self.body.writeline(line)
+
+    def iteration_ranges_ranges_code(self, entry):
+        assert entry.tensor_dim is not None
+        size = self.indexing_size_str(entry.tensor_dim)
+        index_dtype = self.index_dtype
+        convert = f".to({index_dtype})" if index_dtype != "tl.int32" else ""
+        return f"tl.arange(0, {entry.prefix.upper()}BLOCK){size}{convert}"
+
+    def iteration_ranges_scalar_code(self, entry, value):
+        index_dtype = self.index_dtype
+        ndim = self.triton_tensor_ndim()
+        size = [1] * ndim
+        return f"tl.full({size}, {value}, {index_dtype})"
+
+    def iteration_ranges_get_pid(self, entry):
+        assert entry.grid_dim is not None
+        key = f"tl.program_id({entry.grid_dim})"
+        # y_grid has a limit, so express it in terms of y and z in case of overflow.
+        # z grid is only exercised when max_tiles == 3 (off by default).
+        if (
+            entry.grid_dim == 1
+            and not entry.has_zdim
+            and not (isinstance(entry.numel, int) and entry.numel <= get_max_y_grid())
+        ):
+            key = f"{key} * (tl.program_id({entry.grid_dim + 1}) + 1)"
+        pid = entry.pid_cache.get(key, key)
+        if self.index_dtype != "tl.int32":
+            return f"{pid}.to({self.index_dtype})"
+        return pid
+
+    def iteration_ranges_codegen_header(self, entry, code):
+        x = entry.prefix
+        if entry.is_loop:
+            code.writeline(f"{entry.name} = {x}offset + {x}base")
+        elif entry.grid_dim is None:
+            # no need to "{x}offset = "
+            code.writeline(f"{entry.name} = {self.iteration_ranges_ranges_code(entry)}")
+            code.writeline(f"{x}offset = 0")
+        else:
+            if entry.tensor_dim is not None:
+                line = f"{x}offset + {self.iteration_ranges_ranges_code(entry)}"
+            else:
+                line = self.iteration_ranges_scalar_code(entry, f"{x}offset")
+            code.writelines(
+                [
+                    f"{x}offset = {self.iteration_ranges_get_pid(entry)} * {x.upper()}BLOCK",
+                    f"{entry.name} = {line}",
+                ]
+            )
+        code.writeline(f"{x}mask = {entry.name} < {x}numel")
 
 
 class TritonScheduling(SIMDScheduling):
