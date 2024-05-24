@@ -158,7 +158,7 @@ kernel_name_to_op = {
 
 
 class BaseSchedulerNode:
-    group: Tuple[torch.device, Sequence[Sequence[sympy.Expr]]]
+    group: Tuple[torch.device, Tuple[Tuple[sympy.Expr, ...], ...]]
     read_writes: dependencies.ReadWrites
     unmet_dependencies: Set[Dep]
     # Processed deps used while scoring fusion
@@ -253,8 +253,9 @@ class BaseSchedulerNode:
         self.read_writes = rw
         self.unmet_dependencies = self.read_writes.reads
         self.prune_deps()
-        # common_deps are a summary of read_writes used by score_fusion_memory()
-        self.common_deps = {
+        # read_and_write_deps_with_hint are a summary of read_writes used by
+        # score_fusion_memory()
+        self.read_and_write_deps_with_hint = {
             (dep, hint)
             for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes)
             if not dep.has_unbacked_symbols() and (hint := dep.numbytes_hint()) > 0
@@ -1245,7 +1246,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             for name in other_node.get_names():
                 self.name_to_node[name] = other_node
 
-        self.group = (nodes[0].get_device(), [[sympy.Expr("foreach")]])
+        self.group = (nodes[0].get_device(), ((sympy.Expr("foreach"),),))
 
         self.origins: Set[torch.fx.Node] = set()
 
@@ -2430,8 +2431,8 @@ class Scheduler:
             if read.mode == write.mode and write.mode is not None:
                 return True
             read_name = read.name
-            if read.name in self.mutation_renames:
-                read_name = self.mutation_renames[read.name]
+            if read_name in self.mutation_renames:
+                read_name = self.mutation_renames[read_name]
             return (
                 read_name == write.name
                 and not free_symbol_is_type(read.index, SymT.TMP)
@@ -2482,7 +2483,11 @@ class Scheduler:
         The first term in our fusion score that estimates number of saved
         memory operations.
         """
-        return sum(hint for dep, hint in node1.common_deps & node2.common_deps)
+        return sum(
+            hint
+            for dep, hint in node1.read_and_write_deps_with_hint
+            & node2.read_and_write_deps_with_hint
+        )
 
     def get_possible_fusions_with_highest_priority(
         self, possible_fusions: List[Tuple[BaseSchedulerNode, BaseSchedulerNode]]
@@ -2795,7 +2800,7 @@ class BaseScheduling:
 
     def group_fn(
         self, sizes: Sequence[Sequence[sympy.Expr]]
-    ) -> Sequence[Sequence[sympy.Expr]]:
+    ) -> Tuple[Tuple[sympy.Expr, ...], ...]:
         """
         Process the iteration sizes in case a transformation needs to be applied.
         """
