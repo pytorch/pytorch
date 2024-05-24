@@ -2488,7 +2488,7 @@ class Scheduler:
         if len(possible_fusions) == 0:
             return possible_fusions
         possible_fusions_group_by_priority: Dict[
-            int, List[Tuple["BaseSchedulerNode", "BaseSchedulerNode"]]
+            int, List[Tuple[BaseSchedulerNode, BaseSchedulerNode]]
         ] = {}
 
         for node1, node2 in possible_fusions:
