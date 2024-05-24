@@ -38,8 +38,8 @@ TORCH_API std::vector<at::Tensor> getTensorShapes(
 // Use -2 to represent unset state of env vars
 #define C10D_ENV_NOT_SET -2
 
-#define WARN_ENV_VAR_ONCE(deprecated_env, new_env)\
-  TORCH_WARN_ONCE(\
+#define WARN_ENV_VAR_ONCE(deprecated_env, new_env)                        \
+  TORCH_WARN_ONCE(                                                        \
 "Environment variable " + deprecated_env + " is deprecated; use " + \
 new_env + " instead");
 
