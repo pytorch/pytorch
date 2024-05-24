@@ -21,6 +21,7 @@ from .functions import (
     IntTrueDiv,
     IsNonOverlappingAndDenseIndicator,
     Mod,
+    PythonMod,
     ModularIndexing,
     Pow,
     Round,
@@ -65,6 +66,7 @@ def handlers():
         Pow: "pow",
         sympy.Pow: "pow",
         Mod: "mod",
+        PythonMod: "mod",  # TODO: this is wrong
         sympy.Mod: "mod",
         sympy.Abs: "abs",
         sympy.log: "log",

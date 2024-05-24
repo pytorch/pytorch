@@ -1,3 +1,4 @@
+import functools
 import math
 
 import sympy
@@ -18,6 +19,21 @@ __all__ = [
     "RoundDecimal",
     "ToFloat",
 ]
+
+
+def _keep_float(f):
+    @functools.wraps(f)
+    def inner(a, b):
+        r = f(a, b)
+        if (
+            isinstance(a, sympy.Float)
+            or isinstance(b, sympy.Float)
+            and not isinstance(r, sympy.Float)
+        ):
+            r = sympy.Float(float(r))
+        return r
+
+    return inner
 
 
 def fuzzy_eq(x, y):
@@ -193,24 +209,15 @@ class Where(sympy.Function):
             return q
 
 
-class Mod(sympy.Function):
-    """
-    We maintain this so that we avoid SymPy correctness issues, such as:
-    https://github.com/sympy/sympy/issues/25146
-    """
-
+class PythonMod(sympy.Function):
     nargs = (2,)
 
     is_integer = True
 
     @classmethod
     def eval(cls, p, q):
-        # This was adapted from: sympy/core/mod.py
-
-        # Triggered by
-        # python test/test_dynamic_shapes.py -k TestDimConstraints.test_dim_constraints_solve_full
-        # assert p.is_integer, p
-        # assert q.is_integer, q
+        assert p.is_integer, p
+        assert q.is_integer, q
 
         if q.is_zero:
             raise ZeroDivisionError("Modulo by zero")
@@ -245,11 +252,123 @@ class Mod(sympy.Function):
         if less.is_Boolean and bool(less) and r.is_positive:
             return p
 
+    # NB: args[1] for PythonMod
     def _eval_is_nonnegative(self):
         return True if self.args[1].is_positive else None  # type: ignore[attr-defined]
 
     def _eval_is_nonpositive(self):
         return True if self.args[1].is_negative else None  # type: ignore[attr-defined]
+
+
+class CMod(sympy.Function):
+    nargs = (2,)
+
+    is_integer = True
+
+    @classmethod
+    def eval(cls, p, q):
+        assert p.is_integer, p
+        assert q.is_integer, q
+
+        if q.is_zero:
+            raise ZeroDivisionError("Modulo by zero")
+
+        # Three cases:
+        #   1. p == 0
+        #   2. p is either q or -q
+        #   3. p is integer and q == 1
+        if p is S.Zero or p in (q, -q) or q == 1:
+            return S.Zero
+
+        # Evaluate if they are both literals.
+        if q.is_Number and p.is_Number:
+            r = p % q
+            # C modulus behavior!
+            if p < 0:
+                r *= -1
+            return r
+
+        # If q == 2, it's a matter of whether p is odd or even.
+        if q.is_Number and q == 2:
+            if p.is_even:
+                return S.Zero
+            if p.is_odd:
+                return S.One
+
+        # If p is a multiple of q.
+        r = p / q
+        if r.is_integer:
+            return S.Zero
+
+        # If p < q and its ratio is positive, then:
+        #   - floor(p / q) = 0
+        #   - p % q = p - floor(p / q) * q = p
+        less = p < q
+        if less.is_Boolean and bool(less) and r.is_positive:
+            return p
+
+    # NB: args[0] for cmod
+    def _eval_is_nonnegative(self):
+        return True if self.args[0].is_positive else None  # type: ignore[attr-defined]
+
+    def _eval_is_nonpositive(self):
+        return True if self.args[0].is_negative else None  # type: ignore[attr-defined]
+
+
+class Mod(sympy.Function):
+    """
+    We maintain this so that we avoid SymPy correctness issues, such as:
+    https://github.com/sympy/sympy/issues/25146
+    """
+
+    nargs = (2,)
+
+    is_integer = True
+    is_nonnegative = True
+
+    @classmethod
+    def eval(cls, p, q):
+        # This was adapted from: sympy/core/mod.py
+
+        # Triggered by
+        # python test/test_dynamic_shapes.py -k TestDimConstraints.test_dim_constraints_solve_full
+        # assert p.is_integer, p
+        # assert q.is_integer, q
+
+        if q.is_zero:
+            raise ZeroDivisionError("Modulo by zero")
+
+        # Three cases:
+        #   1. p == 0
+        #   2. p is either q or -q
+        #   3. p is integer and q == 1
+        if p is S.Zero or p in (q, -q) or q == 1:
+            return S.Zero
+
+        # Evaluate if they are both literals.
+        if q.is_Number and p.is_Number:
+            assert p >= 0, p
+            assert q >= 1, q
+            return p % q
+
+        # If q == 2, it's a matter of whether p is odd or even.
+        if q.is_Number and q == 2:
+            if p.is_even:
+                return S.Zero
+            if p.is_odd:
+                return S.One
+
+        # If p is a multiple of q.
+        r = p / q
+        if r.is_integer:
+            return S.Zero
+
+        # If p < q and its ratio is positive, then:
+        #   - floor(p / q) = 0
+        #   - p % q = p - floor(p / q) * q = p
+        less = p < q
+        if less.is_Boolean and bool(less) and r.is_positive:
+            return p
 
 
 class CleanDiv(FloorDiv):

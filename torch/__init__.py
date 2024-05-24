@@ -267,6 +267,9 @@ class SymInt:
 
     # Magic methods installed by torch.fx.experimental.sym_node
 
+    def __round__(self, ndigits=None):
+        return self
+
     def __truediv__(self, other):
         if isinstance(other, (builtins.float, SymFloat)):
             return sym_float(self).__float_truediv__(other)

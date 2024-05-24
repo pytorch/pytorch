@@ -4,6 +4,7 @@ import sympy
 
 import torch
 from torch.utils._sympy.functions import (
+    _keep_float,
     FloatTrueDiv,
     FloorDiv,
     IntTrueDiv,
@@ -110,14 +111,17 @@ class ReferenceAnalysis:
     def truncdiv(a, b):
         raise NotImplementedError("TODO: truncdiv")
 
+    @_keep_float
     @staticmethod
     def add(a, b):
         return a + b
 
+    @_keep_float
     @staticmethod
     def mul(a, b):
         return a * b
 
+    @_keep_float
     @staticmethod
     def sub(a, b):
         return a - b
@@ -209,3 +213,7 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
     @staticmethod
     def ceil(x):
         return math.ceil(x)
+
+    @staticmethod
+    def truediv(a, b):
+        return a / b

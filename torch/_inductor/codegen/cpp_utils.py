@@ -100,6 +100,10 @@ class CppPrinter(ExprPrinter):
         assert len(expr.args) == 1
         return f"std::trunc({self._print(expr.args[0])})"
 
+    def _print_ToFloat(self, expr):
+        assert len(expr.args) == 1
+        return f"static_cast<double>({self._print(expr.args[0])})"
+
     def _print_IntTrueDiv(self, expr):
         lhs, rhs = expr.args
         # TODO: This is only accurate up to 2**53

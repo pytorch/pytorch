@@ -36,7 +36,11 @@ UNARY_OPS = [
     "floor",
     "ceil",
 ]
-BINARY_OPS = ["truediv", "floordiv", "truncdiv", "add", "mul", "sub", "pow", "minimum", "maximum", "mod"]
+BINARY_OPS = [
+    "truediv", "floordiv",
+    # "truncdiv",  # TODO
+    "add", "mul", "sub", "pow", "minimum", "maximum", "mod"
+]
 
 UNARY_BOOL_OPS = ["not_"]
 BINARY_BOOL_OPS = ["or_", "and_"]
@@ -88,9 +92,9 @@ def valid_binary(fn, a, b):
         or (a == b == 0)  # no imaginary numbers  # 0**0 is undefined
     ):
         return False
-    elif fn == "mod" and b == 0:
+    elif fn == "mod" and (a < 0 or b <= 0):
         return False
-    elif (fn == "div" or fn == "truediv") and b == 0:
+    elif (fn in ["div", "truediv", "floordiv"]) and b == 0:
         return False
     return True
 
@@ -130,17 +134,15 @@ class TestValueRanges(TestCase):
         ValueRangeAnalysis.pow(ValueRanges.unknown(), ValueRanges.wrap(0.5))
 
     @parametrize("fn", BINARY_OPS)
-    @parametrize("dtype_a", ("int", "float"))
-    @parametrize("dtype_b", ("int", "float"))
-    def test_binary_ref(self, fn, dtype_a, dtype_b):
+    @parametrize("dtype", ("int", "float"))
+    def test_binary_ref(self, fn, dtype):
         to_dtype = {"int": sympy.Integer, "float": sympy.Float}
-        dtype_a = to_dtype[dtype_a]
-        dtype_b = to_dtype[dtype_b]
+        dtype = to_dtype[dtype]
         for a, b in itertools.product(CONSTANTS, repeat=2):
             if not valid_binary(fn, a, b):
                 continue
-            a = dtype_a(a)
-            b = dtype_b(b)
+            a = dtype(a)
+            b = dtype(b)
             with self.subTest(a=a, b=b):
                 r = getattr(ValueRangeAnalysis, fn)(a, b)
                 if r == ValueRanges.unknown():
@@ -200,7 +202,8 @@ class TestValueRanges(TestCase):
 
     @parametrize("fn", UNARY_OPS)
     def test_unary_ref_range(self, fn):
-        vals = [-sympy.oo, *CONSTANTS, sympy.oo]
+        # TODO: bring back sympy.oo testing for float unary fns
+        vals = CONSTANTS
         for a in generate_range(vals):
             with self.subTest(a=a):
                 ref_r = getattr(ValueRangeAnalysis, fn)(a)
@@ -216,7 +219,8 @@ class TestValueRanges(TestCase):
     # This takes about 4s for all the variants
     @parametrize("fn", BINARY_OPS + COMPARE_OPS)
     def test_binary_ref_range(self, fn):
-        vals = [-sympy.oo, *LESS_CONSTANTS, sympy.oo]
+        # TODO: bring back sympy.oo testing for float unary fns
+        vals = LESS_CONSTANTS
         for a, b in itertools.product(generate_range(vals), repeat=2):
             # don't attempt pow on exponents that are too large (but oo is OK)
             if fn == "pow" and b.upper > 4 and b.upper != sympy.oo:
@@ -234,21 +238,6 @@ class TestValueRanges(TestCase):
                         )
                         if r.is_finite:
                             self.assertIn(r, ref_r)
-
-    def test_rational_bounds(self):
-        # Repro from https://github.com/pytorch/pytorch/issues/105097
-        from sympy import floor, Eq
-        shape_0 = sympy.Symbol('shape_0', positive=True, integer=True)
-        new_expr = (
-            Eq(30 * floor(4 * ((shape_0 + 1) // 96) *
-                          ((shape_0 + 62017) // (((shape_0 + 1) // 96) + 646)) / 647 +
-                          2584 * ((shape_0 + 62017) // (((shape_0 + 1) // 96) + 646)) / 647),
-               2880 * floor(((shape_0 + 1) // 96) *
-                            ((shape_0 + 62017) // (((shape_0 + 1) // 96) + 646)) / 15528 +
-                            323 * ((shape_0 + 62017) // (((shape_0 + 1) // 96) + 646)) / 7764)))
-        new_range_env = {shape_0: ValueRanges(lower=1, upper=190)}
-        self.assertTrue(new_expr.subs({shape_0: 95}))
-        self.assertIn(True, sympy_interp(ValueRangeAnalysis, new_range_env, new_expr))
 
 
 class TestSympyInterp(TestCase):

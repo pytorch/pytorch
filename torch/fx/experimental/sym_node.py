@@ -622,9 +622,12 @@ def _sympy_floordiv(a, b):
 
 
 def _sympy_mod(a, b):
-    from torch.utils._sympy.functions import Mod
+    from torch.utils._sympy.functions import Mod, PythonMod
 
-    return Mod(a, b)
+    if a.is_nonnegative and b.is_nonnegative:
+        return Mod(a, b)
+    else:
+        return PythonMod(a, b)
 
 
 def _sympy_pow(a, b):

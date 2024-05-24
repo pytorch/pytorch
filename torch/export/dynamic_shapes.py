@@ -1,7 +1,6 @@
 import builtins
 import dataclasses
 import inspect
-import math
 import sys
 import weakref
 from collections import defaultdict

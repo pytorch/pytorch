@@ -379,8 +379,21 @@ class ExprPrinter(Printer):
     def _print_Mod(self, expr):
         return " % ".join(map(self.paren, map(self._print, expr.args)))
 
+    def _print_PythonMod(self, expr):
+        return " % ".join(map(self.paren, map(self._print, expr.args)))
+
     def _print_FloorDiv(self, expr):
         raise NotImplementedError(f"_print_FloorDiv not implemented for {type(self)}")
+
+    def _print_IntTrueDiv(self, expr):
+        lhs, rhs = expr.args
+        # WARNING: it's unlikely that Triton is going to codegen this
+        # correctly when lhs > 2**53
+        return f"{self._print(lhs)}   /   {self._print(rhs)}"
+
+    def _print_FloatTrueDiv(self, expr):
+        lhs, rhs = expr.args
+        return f"{self._print(lhs)} / {self._print(rhs)}"
 
     def _print_CleanDiv(self, expr):
         return self._print_FloorDiv(expr)

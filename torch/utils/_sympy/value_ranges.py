@@ -5,6 +5,7 @@ import itertools
 import logging
 import math
 import operator
+import sys
 from typing import (
     Callable,
     Dict,
@@ -25,6 +26,7 @@ import torch
 
 from torch._prims_common import dtype_to_type
 from .functions import (
+    _keep_float,
     FloatTrueDiv,
     FloorDiv,
     IntTrueDiv,
@@ -154,11 +156,21 @@ class ValueRanges(Generic[_T]):
         object.__setattr__(self, "is_bool", isinstance(lower, SympyBoolean))
         if self.is_bool:
             assert isinstance(upper, SympyBoolean), (lower, upper)
+
+        # Warning: is_int/is_float is best effort.  We do pretty well in
+        # Dynamo, but in Inductor these attributes are often wrong because we
+        # are not very rigorous in dtype analysis.  This is also why we need
+        # the flexible analysis for is_int: sometimes a sympy.oo pops in for
+        # an integer bound. I would /like/ for us not to do this, but it's
+        # too hard to push the invariant through right now.
+
         object.__setattr__(
-            self, "is_int", not self.is_bool and isinstance(lower, sympy.Integer)
+            self, "is_int", not self.is_bool and (isinstance(lower, sympy.Integer) or isinstance(upper, sympy.Integer))
         )
         if self.is_int:
-            assert isinstance(upper, sympy.Integer), (lower, upper)
+            assert (isinstance(lower, sympy.Integer) or lower == -sympy.oo), (lower, upper)
+            assert (isinstance(upper, sympy.Integer) or upper == sympy.oo), (lower, upper)
+        # NB: [-oo, oo] always advertises as float!
         object.__setattr__(self, "is_float", not self.is_bool and not self.is_int)
         assert self.is_bool or self.is_int or self.is_float, (lower, upper)
 
@@ -371,7 +383,12 @@ class SymPyValueRangeAnalysis:
         # using nan makes subsequent computation throw, and for the purposes of optimization
         # returning -math.inf - math.inf is equivalent to giving up
         if isinstance(value, SupportsFloat) and math.isnan(value):
-            return ValueRanges.unknown()
+            if dtype == torch.bool:
+                return ValueRanges.unknown_bool()
+            elif dtype.is_floating_point:
+                return ValueRanges.unknown()
+            else:
+                return ValueRanges(-sys.maxsize - 1, sys.maxsize)
 
         if is_python:
             type_ = dtype_to_type(dtype)
@@ -387,7 +404,8 @@ class SymPyValueRangeAnalysis:
                 # dtype is intXX
                 assert value.is_integer
 
-        return ValueRanges.wrap(value)
+        r = ValueRanges.wrap(value)
+        return r
 
     @staticmethod
     def to_int(a):
@@ -454,7 +472,9 @@ class SymPyValueRangeAnalysis:
 
     @staticmethod
     def add(a, b):
-        return ValueRanges.coordinatewise_increasing_map(a, b, operator.add)
+        return ValueRanges.coordinatewise_increasing_map(
+            a, b, _keep_float(operator.add)
+        )
 
     @classmethod
     def mul(cls, a, b):
@@ -474,7 +494,7 @@ class SymPyValueRangeAnalysis:
             else:
                 return a * b
 
-        return ValueRanges.coordinatewise_monotone_map(a, b, safe_mul)
+        return ValueRanges.coordinatewise_monotone_map(a, b, _keep_float(safe_mul))
 
     @staticmethod
     def int_truediv(a, b):
@@ -485,7 +505,9 @@ class SymPyValueRangeAnalysis:
         ):
             return ValueRanges.unknown()
         else:
-            return ValueRanges.coordinatewise_monotone_map(a, b, IntTrueDiv)
+            return ValueRanges.coordinatewise_monotone_map(
+                a, b, _keep_float(IntTrueDiv)
+            )
 
     @staticmethod
     def truediv(a, b):
@@ -496,14 +518,17 @@ class SymPyValueRangeAnalysis:
         ):
             return ValueRanges.unknown()
         else:
-            return ValueRanges.coordinatewise_monotone_map(a, b, FloatTrueDiv)
+            return ValueRanges.coordinatewise_monotone_map(
+                a, b, _keep_float(FloatTrueDiv)
+            )
 
     @staticmethod
     def floordiv(a, b):
         a = ValueRanges.wrap(a)
         b = ValueRanges.wrap(b)
         if 0 in b or (
-            (-sympy.oo in a or sympy.oo in a) and (-sympy.oo in b or sympy.oo in b)
+            # TODO: make this more precise
+            (-sympy.oo in a or sympy.oo in a) or (-sympy.oo in b or sympy.oo in b)
         ):
             return ValueRanges.unknown()
         else:

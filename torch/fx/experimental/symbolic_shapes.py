@@ -849,9 +849,9 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     for N=1.
     """
     if min is None:
-        min = -sympy.oo
+        min = -sys.maxsize - 1
     if max is None:
-        max = sympy.oo
+        max = sys.maxsize - 1
 
     if max < min:
         raise ValueError(
@@ -1344,6 +1344,7 @@ SYMPY_INTERP = {
     'Min': min,
     'Max': max,
     'Mod': operator.mod,
+    'PythonMod': operator.mod,
     'FloorDiv': operator.floordiv,
     'TrueDiv': operator.truediv,
     'IsNonOverlappingAndDenseIndicator': eval_is_non_overlapping_and_dense,
@@ -4168,6 +4169,7 @@ class ShapeEnv:
             vr = self.var_to_range[k]
             if size_oblivious and k in self.size_like:
                 lower = max(2, vr.lower)
+                vr = ValueRanges(lower, vr.upper)
             else:
                 lower = vr.lower
             # Don't do anything if we don't have a nontrivial lower bound
@@ -4175,10 +4177,17 @@ class ShapeEnv:
             # SymInt
             if (
                 lower < (-sys.maxsize - 1) // 2 or
-                (unbacked_only and k in self.var_to_val)
+                (unbacked_only and k in self.var_to_val) or
+                not vr.is_int
             ):
                 new_range_env[k] = vr
                 continue
+            # The goal is to take our symbols which have various lower bounds
+            # and reallocate them into new symbols which are exactly positive;
+            # e.g., if we have s0 in [2, inf], we want to turn it into ess0 in
+            # [1, inf], where s0 = ess0 + 1.  This gives the most information
+            # to sympy for subsequent simplifications.
+            #
             # Positive means >= 1
             # Positive - 1 means >= 0
             # Positive + lower - 1 means >= lower
@@ -4226,9 +4235,8 @@ class ShapeEnv:
 
         # Check if the range can solve it statically
         out = bound_sympy(new_expr, new_range_env)
-        if expect_rational:
-            if out.is_singleton():
-                return out.lower
+        if out.is_singleton():
+            return out.lower
 
         return new_expr if unbacked_only else None
 
