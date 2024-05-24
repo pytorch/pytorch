@@ -169,8 +169,6 @@ inductor_skips["cpu"] = {
     "nn.functional.cosine_embedding_loss": {b8},  # flaky
     ("index_reduce", "prod"): {f16},  # flaky
     ("index_reduce", "mean"): {f16},  # flaky
-    # see https://github.com/pytorch/pytorch/issues/126449
-    "_unsafe_masked_index": {b8},
 }
 
 if IS_MACOS and IS_X86:
