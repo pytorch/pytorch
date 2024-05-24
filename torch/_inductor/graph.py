@@ -965,6 +965,7 @@ class GraphLowering(torch.fx.Interpreter):
                 make_fallback(target, layout_constraint)
 
             elif get_decompositions([target]):
+                print('!!!!!!!!!!!!!!', get_decompositions([target]))
                 # There isn't a good way to dynamically patch this in
                 # since AOT Autograd already ran.  The error message tells
                 # the user how to fix it.
