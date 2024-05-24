@@ -2413,41 +2413,11 @@ class Scheduler:
         computed_deps = set()
         why = WhyNoFuse(node1, node2)
 
-        # StarDep doesn't match MemoryDep, different indices don't match
-        # However, broadcasting sometimes strips dimensions, and if that's the case
-        # we still can match unmet dep
-        # if there's indirect indexing, don't match it
-        def fusable_read_and_write(read: Dep, write: Dep) -> bool:
-            read_name = self.mutation_renames.get(read.name, read.name)
-            write_name = self.mutation_renames.get(write.name, write.name)
-            if (
-                isinstance(read, MemoryDep)
-                and isinstance(write, MemoryDep)
-                and read.mode == write.mode
-                and write.mode is not None
-            ):
-                return True
-            if (
-                isinstance(read, StarDep)
-                and isinstance(write, MemoryDep)
-                and read.mode == write.mode
-                and write.mode is not None
-                and read_name == write_name
-            ):
-                return True
-            return (
-                self.mutation_renames.get(read.name, read.name) == write.name
-                and (isinstance(read, MemoryDep) and isinstance(write, MemoryDep))
-                and not free_symbol_is_type(read.index, SymT.TMP)
-                and not free_symbol_is_type(write.index, SymT.TMP)
-                and read.index == write.index
-                and len(read.size) >= len(write.size)
-                and read.size[: len(write.size)] == write.size
-            )
-
-        for rd in node2.unmet_dependencies:
-            for cd in node1.read_writes.writes:
-                if fusable_read_and_write(rd, cd):
+        for cd in node1.read_writes.writes:
+            if not isinstance(cd, MemoryDep):
+                continue
+            for rd in node2.unmet_dependencies:
+                if self.fusable_read_and_write(rd, cd):
                     computed_deps.add(rd)
 
         remaining_deps = {dep.name for dep in node2.unmet_dependencies - computed_deps}
@@ -2466,16 +2436,48 @@ class Scheduler:
         # similar to can_inplace, if we are going to fuse a write subsequent to a read
         # require that the indexing and size is the same
         for write in node2.read_writes.writes:
+            if not isinstance(write, MemoryDep):
+                continue
             for read in node1.read_writes.reads:
                 if write.name != self.mutation_renames.get(read.name, read.name):
                     continue
 
                 # bail on StarDep
-                if not fusable_read_and_write(read=read, write=write):
+                if not self.fusable_read_and_write(read, write):
                     why("fusing a write into a read with different indexing formula")
                     return False
 
         return True
+
+    # StarDep doesn't match MemoryDep, different indices don't match
+    # However, broadcasting sometimes strips dimensions, and if that's the case
+    # we still can match unmet dep
+    # if there's indirect indexing, don't match it
+    def fusable_read_and_write(self, read: Dep, write: MemoryDep) -> bool:
+        if isinstance(read, MemoryDep):
+            if read.mode == write.mode and write.mode is not None:
+                return True
+            read_name = read.name
+            if read_name in self.mutation_renames:
+                read_name = self.mutation_renames[read_name]
+            return (
+                read_name == write.name
+                and not free_symbol_is_type(read.index, SymT.TMP)
+                and not free_symbol_is_type(write.index, SymT.TMP)
+                and read.index == write.index
+                and len(read.size) >= len(write.size)
+                and read.size[: len(write.size)] == write.size
+            )
+        elif isinstance(read, StarDep):
+            read_name = self.mutation_renames.get(read.name, read.name)
+            write_name = self.mutation_renames.get(write.name, write.name)
+            if (
+                read.mode == write.mode
+                and write.mode is not None
+                and read_name == write_name
+            ):
+                return True
+        return False
 
     def score_fusion(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
