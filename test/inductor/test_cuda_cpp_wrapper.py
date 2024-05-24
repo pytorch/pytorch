@@ -198,7 +198,6 @@ if RUN_CUDA:
         BaseTest("test_adding_tensor_offsets"),
         BaseTest("test_index_tensor"),
         BaseTest("test_inductor_layout_optimization_input_mutations"),
-        BaseTest("test_insignificant_strides"),
         BaseTest("test_layer_norm"),
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),

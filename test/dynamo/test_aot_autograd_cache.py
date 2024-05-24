@@ -5,11 +5,18 @@ import torch._dynamo
 import torch._dynamo.test_case
 
 import torch._functorch._aot_autograd
-from torch._functorch._aot_autograd.autograd_cache import autograd_cache_hash
+from torch._functorch._aot_autograd.autograd_cache import (
+    autograd_cache_hash,
+    BypassAOTAutogradCache,
+)
 from torch._functorch._aot_autograd.schemas import AOTConfig
 
 
 class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
+    @property
+    def device_type(self) -> str:
+        return "cuda" if torch.cuda.is_available() else "cpu"
+
     def default_config(self):
         return AOTConfig(
             fw_compiler=None,
@@ -97,6 +104,34 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         c1 = self.gen_cache_key(fn, config)
         c2 = self.gen_cache_key(fn, config2)
         self.assertNotEqual(c1, c2)
+
+    def test_incompatible_function(self):
+        @torch._dynamo.allow_in_graph
+        class AllowInGraphFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(_, x):
+                torch._dynamo.graph_break()
+                return x.sin()
+
+        def fn(x):
+            return AllowInGraphFunc.apply(x)
+
+        config = self.default_config()
+        self.assertRaises(
+            BypassAOTAutogradCache, lambda: self.gen_cache_key(fn, config)
+        )
+
+    def test_normal_torch_function(self):
+        @torch._dynamo.allow_in_graph
+        def fn(x):
+            y = torch.sin(x)
+            z = torch.cos(x)
+            w = y + z
+            w.abs()
+            return w
+
+        config = self.default_config()
+        self.gen_cache_key(fn, config)
 
 
 if __name__ == "__main__":
