@@ -18,5 +18,5 @@ mkdir build
 cd build
 cmake .. -G Ninja -DCMAKE_INSTALL_PREFIX=./install_dir -DCMAKE_BUILD_TYPE=Release -DAOTRITON_COMPRESS_KERNEL=OFF -DAOTRITON_NO_PYTHON=ON -DAOTRITON_NO_SHARED=ON
 ninja install
-SUDO mkdir -p "${AOTRITON_INSTALL_PREFIX}"
-SUDO cp -r install_dir/* "${AOTRITON_INSTALL_PREFIX}"
+mkdir -p "${AOTRITON_INSTALL_PREFIX}"
+cp -r install_dir/* "${AOTRITON_INSTALL_PREFIX}"
