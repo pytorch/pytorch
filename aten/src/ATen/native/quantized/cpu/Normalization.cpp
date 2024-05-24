@@ -380,7 +380,7 @@ Tensor q_batch_norm_impl(
 } // namespace
 
 Tensor quantized_batch_norm(
-    const Tensor& qx, const std::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
+    const Tensor& qx, const std::optional<Tensor>& weight_opt /* optional */, const std::optional<Tensor>& bias_opt /* optional */,
     const Tensor& mean /* optional */,
     const Tensor& var /* optional */,
     double eps,

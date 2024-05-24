@@ -14,6 +14,7 @@ from torch.distributed.pipelining import (
     PipelineStage,
     ScheduleGPipe,
 )
+from torch.distributed.pipelining._utils import PipeliningShapeError
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     MultiProcContinousTest,
@@ -24,13 +25,37 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skip_but_pass_in_sandcastle_if,
 )
-
+from torch.utils._pytree import tree_map_only
 
 d_hid = 512
 batch_size = 256
 chunks = 4
 
 torch.manual_seed(0)
+
+
+def get_dtype_change_hook(new_dtype):
+    """A simple hook for simulating mixed precision"""
+
+    def dtype_change_hook(module, input, output):
+        def f(x):
+            return x.to(new_dtype)
+
+        return tree_map_only(torch.Tensor, f, output)
+
+    return dtype_change_hook
+
+
+def get_flatten_hook():
+    """A simple hook for simulating wrong model output shape"""
+
+    def flatten_hook(module, input, output):
+        def f(x):
+            return x.flatten()
+
+        return tree_map_only(torch.Tensor, f, output)
+
+    return flatten_hook
 
 
 class StageTest(MultiProcContinousTest):
@@ -58,10 +83,12 @@ class StageTest(MultiProcContinousTest):
 
         x = torch.randn(batch_size, d_hid, device=self.device)
 
+        split_spec = mod.split_spec if hasattr(mod, "split_spec") else None
         pipe = pipeline(
             mod,
             chunks,
             example_args=(x,),
+            split_spec=split_spec,
         )
 
         stage = PipelineStage(
@@ -74,11 +101,13 @@ class StageTest(MultiProcContinousTest):
         schedule = ScheduleGPipe(stage, chunks)
 
         # Run
-        if self.rank == 0:
-            schedule.step(x)
-        else:
-            out = schedule.step()
+        def _run_step(x):
+            if self.rank == 0:
+                return schedule.step(x)
+            else:
+                return schedule.step()
 
+        out = _run_step(x)
         # Last rank checks result
         if self.rank == self.world_size - 1:
             ref_out = mod(x)
@@ -89,6 +118,27 @@ class StageTest(MultiProcContinousTest):
         # Confirm keys are consistent with original model
         old_keys = mod.state_dict().keys()
         assert all(k in old_keys for k in submod_keys)
+
+        if self.rank == 0:
+            # intended to run this code on all ranks, but the problem is if rank0 throws,
+            # it won't perform the send that unblocks rank 1.
+
+            # TODO(whc) can't test this until fixing args/kwargs issue
+            # with self.assertRaisesRegex(PipeliningShapeError, "shape mismatch"):
+            #     _run_step(torch.randn(batch_size + 1, d_hid, device=self.device))
+
+            with self.assertRaisesRegex(PipeliningShapeError, "dtype mismatch"):
+                _run_step(x.to(torch.int32))
+
+            # output of stage's mlp layer will be flattened by this hook, the stage should err
+            handle = stage.submod.register_forward_hook(get_flatten_hook())
+            with self.assertRaisesRegex(PipeliningShapeError, "shape mismatch"):
+                _run_step(x)
+            handle.remove()
+
+            stage.submod.register_forward_hook(get_dtype_change_hook(torch.bfloat16))
+            with self.assertRaisesRegex(PipeliningShapeError, "dtype mismatch"):
+                _run_step(x)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -117,12 +167,14 @@ class StageTest(MultiProcContinousTest):
         schedule = ScheduleGPipe(stage, chunks)
 
         # Run
-        if self.rank == 0:
-            schedule.step(x, y=y)
-        else:
-            out = schedule.step()
+        def _run_step(x):
+            if self.rank == 0:
+                return schedule.step(x, y=y)
+            else:
+                return schedule.step()
 
         # Last rank checks result
+        out = _run_step(x)
         if self.rank == self.world_size - 1:
             ref_out = mod(x, y=y)
             torch.testing.assert_close(out, ref_out, atol=1e-3, rtol=5e-2)
@@ -133,12 +185,29 @@ class StageTest(MultiProcContinousTest):
         old_keys = mod.state_dict().keys()
         assert all(k in old_keys for k in submod_keys)
 
+        if self.rank == 0:
+            with self.assertRaisesRegex(PipeliningShapeError, "shape mismatch"):
+                _run_step(torch.randn(batch_size + 1, d_hid, device=self.device))
+
+            with self.assertRaisesRegex(PipeliningShapeError, "dtype mismatch"):
+                _run_step(x.to(torch.int32))
+
+            # output of stage's mlp layer will be flattened by this hook, the stage should err
+            handle = stage.submod.register_forward_hook(get_flatten_hook())
+            with self.assertRaisesRegex(PipeliningShapeError, "shape mismatch"):
+                _run_step(x)
+            handle.remove()
+
+            stage.submod.register_forward_hook(get_dtype_change_hook(torch.bfloat16))
+            with self.assertRaisesRegex(PipeliningShapeError, "dtype mismatch"):
+                _run_step(x)
+
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_manual(self):
-        full_mod = MultiMLP(d_hid).to(self.device)
-        stage_mod = full_mod.get_submodule(f"mlp{self.rank}")
-        stage_mod.to(self.device)
+        full_mod = MultiMLP(d_hid, n_layers=self.world_size)
+        full_mod.to(self.device)
+        stage_mod = full_mod.get_submodule(f"layers.{self.rank}")
 
         x = torch.randn(batch_size, d_hid, device=self.device)
 
@@ -155,15 +224,34 @@ class StageTest(MultiProcContinousTest):
         schedule = ScheduleGPipe(stage, chunks)
 
         # Run
-        if self.rank == 0:
-            schedule.step(x)
-        else:
-            out = schedule.step()
+        def _run_step(x):
+            if self.rank == 0:
+                return schedule.step(x)
+            else:
+                return schedule.step()
 
+        out = _run_step(x)
         # Last rank checks result
         if self.rank == self.world_size - 1:
             ref_out = full_mod(x)
             torch.testing.assert_close(out, ref_out)
+
+        if self.rank == 0:
+            with self.assertRaisesRegex(PipeliningShapeError, "shape mismatch"):
+                _run_step(torch.randn(batch_size + 1, d_hid, device=self.device))
+
+            with self.assertRaisesRegex(PipeliningShapeError, "dtype mismatch"):
+                _run_step(x.to(torch.int32))
+
+            # output of stage's mlp layer will be flattened by this hook, the stage should err
+            handle = stage_mod.register_forward_hook(get_flatten_hook())
+            with self.assertRaisesRegex(PipeliningShapeError, "shape mismatch"):
+                _run_step(x)
+            handle.remove()
+
+            stage_mod.register_forward_hook(get_dtype_change_hook(torch.bfloat16))
+            with self.assertRaisesRegex(PipeliningShapeError, "dtype mismatch"):
+                _run_step(x)
 
 
 instantiate_parametrized_tests(StageTest)
