@@ -12,25 +12,8 @@
 
 #if defined(BUILD_ROWWISE_FP8_KERNEL)
 
-#include <cutlass/core_io.h>
-#include <cutlass/cutlass.h>
-#include <cutlass/gemm/device/gemm.h>
-#include <cutlass/half.h>
-#include <cutlass/numeric_types.h>
-#include <cutlass/trace.h>
-#include <cutlass/util/host_tensor.h>
-
-#include <cute/tensor.hpp>
-#include <cutlass/gemm/collective/collective_builder.hpp>
-#include <cutlass/gemm/device/gemm_universal_adapter.h>
-#include <cutlass/epilogue/collective/collective_builder.hpp>
-
-#include <cute/atom/mma_atom.hpp>
-#include <cutlass/gemm/dispatch_policy.hpp>
-#include <cutlass/gemm/kernel/gemm_universal.hpp>
-#include <cutlass/util/packed_stride.hpp>
-
-CUresult CUDAAPI cuTensorMapEncodeTiled(
+// We are going to override the cuTensorMapEncodeTiled driver api with our lazy loader
+static CUresult CUDAAPI nvrtc_cuTensorMapEncodeTiled(
     CUtensorMap* tensorMap,
     CUtensorMapDataType tensorDataType,
     cuuint32_t tensorRank,
@@ -57,6 +40,30 @@ CUresult CUDAAPI cuTensorMapEncodeTiled(
       l2Promotion,
       oobFill);
 }
+
+// Rename the global function symbol
+#define cuTensorMapEncodeTiled nvrtc_cuTensorMapEncodeTiled
+
+#include <cutlass/core_io.h>
+#include <cutlass/cutlass.h>
+#include <cutlass/gemm/device/gemm.h>
+#include <cutlass/half.h>
+#include <cutlass/numeric_types.h>
+#include <cutlass/trace.h>
+#include <cutlass/util/host_tensor.h>
+
+#include <cute/tensor.hpp>
+#include <cutlass/gemm/collective/collective_builder.hpp>
+#include <cutlass/gemm/device/gemm_universal_adapter.h>
+#include <cutlass/epilogue/collective/collective_builder.hpp>
+
+#include <cute/atom/mma_atom.hpp>
+#include <cutlass/gemm/dispatch_policy.hpp>
+#include <cutlass/gemm/kernel/gemm_universal.hpp>
+#include <cutlass/util/packed_stride.hpp>
+
+// Set everything back to normal
+#undef cuTensorMapEncodeTiled
 
 namespace {
 // Cutlass rowwise kernel
