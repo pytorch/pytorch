@@ -1942,7 +1942,6 @@ def wrap_fx_proxy_cls(
         getattr(torch.distributed, "get_world_size", _missing),
         # This always wants to be in the graph, even if the constraint
         # results in a constant int
-        torch._constrain_as_value,
         torch._constrain_as_size,
     ]:
         set_example_value(proxy.node, example_value)
