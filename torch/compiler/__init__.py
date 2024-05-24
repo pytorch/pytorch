@@ -32,22 +32,39 @@ def reset() -> None:
 
 def allow_in_graph(fn):
     """
-    Customize which functions compilation will include in the generated graph.
-    It bypasses all introspection of the symbolic python code in favor of
-    directly writing it to the graph.
+    Tells the compiler frontend (Dynamo) to skip symbolic introspection of the function
+    and instead directly write it to the graph when encountered.
+
+    If you are trying to black-box a Python function for use with torch.compile
+    (aka something similar to torch.fx.wrap),
+    do not use this API. Instead, please create a custom operator:
+    https://docs.google.com/document/d/1_W62p8WJOQQUzPsJYa7s701JXt0qf2OfLub2sbkHOaU/edit
+
+    The main use case for :func:`allow_in_graph()` is as an escape hatch for the compiler frontend:
+    if you know the function works w.r.t. to the downstream components of the compilation
+    stack (AOTAutograd and Inductor) but there is a Dynamo bug that prevents it from
+    symbolically introspecting the function properly, then one can decorate said function
+    with allow_in_graph to bypass Dynamo.
+
     If fn is a list or tuple of callables it recursively applies :func:`allow_in_graph()`
     to each function and returns a new list or tuple containing the modified functions
+
+    There are a number of restrictions on ``fn``: it must only accept inputs/outputs
+    of certain types (e.g. Tensor/int/bool/float/None and lists of the previous), and
+    all Tensors used inside of ``fn`` must be passed directly as inputs to ``fn``.
+    Failure to abide by these restrictions will result in undefined behavior.
 
     Args:
         fn: A callable representing the function to be included in the graph.
 
     .. warning::
 
-        :func:`allow_in_graph` skips TorchDynamo completely on the decorated function
-        skipping all TorchDynamo safety checks (graph breaks, handling closures, etc).
-        Therefore, one has to be very careful with :func:`allow_in_graph` since subsystems
-        like AOT Autograd rely on torchdynamo
-        If not careful, this could lead to soundness and really hard-to-debug issues.
+        If you're a typical torch.compile user (and not a PyTorch developer), you probably
+        don't want to use this function.
+        :func:`allow_in_graph` is a big footgun because it skips the compiler frontend
+        (Dynamo) that is responsible for doing safety checks (graph breaks, handling
+        closures, etc). Incorrect usage will lead to difficult-to-debug silent
+        incorrectness issues.
 
     """
     import torch._dynamo
