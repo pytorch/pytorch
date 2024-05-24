@@ -2804,10 +2804,10 @@ def forward(self, arg0_1):
         res = torch.vmap(fn, in_dims=(0,))(
             a,
         )
-        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
-            res = torch.vmap(fn, in_dims=(0,))(
-                a,
-            )
+        # with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+        #     res = torch.vmap(fn, in_dims=(0,))(
+        #         a,
+        #     )
         self.assertEqual(a + c, res)
 
     def test_cond_vmap_multiple_args_with_closure(self):

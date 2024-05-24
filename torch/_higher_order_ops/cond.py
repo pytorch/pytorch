@@ -193,8 +193,6 @@ def create_fw_bw_graph(true_fn, false_fn, *operands):
             example_flat_out = pytree.tree_map(
                 _from_fun, true_fn(*example_operands)
             )
-            if type(example_flat_out) != list and type(example_flat_out) != tuple:
-                example_flat_out = [example_flat_out]
             if any(
                 not isinstance(out, torch.Tensor)
                 for out in example_flat_out
