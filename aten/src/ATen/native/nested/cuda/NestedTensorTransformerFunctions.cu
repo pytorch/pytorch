@@ -542,7 +542,7 @@ static constexpr int32_t kWarpSize = 32;
 // Max thread num in one thread block
 static constexpr int32_t kMaxThreads = 1024;
 
-#define DEVICE_INLINE __device__ inline __attribute__((always_inline))
+#define DEVICE_INLINE __device__ C10_ALWAYS_INLINE
 
 __host__ DEVICE_INLINE int32_t div_round_up(int32_t a, int32_t b) {
   return (a + b - 1) / b;
