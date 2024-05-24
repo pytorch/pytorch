@@ -1018,7 +1018,6 @@ def aot_export_module(
     output_loss_index: Optional[int] = None,
     pre_dispatch: bool = False,
     kwargs=None,
-    keep_inference_input_mutations: bool = False,
 ) -> Tuple[torch.fx.GraphModule, GraphSignature]:
     """
     This function takes in a module, and returns:
@@ -1148,7 +1147,6 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             no_tangents=True,
             pre_dispatch=pre_dispatch,
             kwargs=kwargs,
-            keep_inference_input_mutations=keep_inference_input_mutations,
         )
     if trace_joint:
 
@@ -1326,7 +1324,6 @@ def _aot_export_function(
     no_tangents: bool = False,
     pre_dispatch: bool = False,
     kwargs=None,
-    keep_inference_input_mutations: bool = False,
 ) -> Tuple[torch.fx.GraphModule, ViewAndMutationMeta, pytree.TreeSpec, pytree.TreeSpec]:
     kwargs = kwargs or {}
 
@@ -1350,10 +1347,10 @@ def _aot_export_function(
         decompositions=decompositions,
         num_params_buffers=num_params_buffers,
         aot_id=next(AOT_COUNTER),
-        # Regarding aten operations with `out` parameter, we need to enable
-        # keep_inference_input_mutations to guarantee the correctness as
-        # the `out` parameter needs to be mutated.
-        keep_inference_input_mutations=keep_inference_input_mutations,
+        # For now there's no use case involving keeping input mutations in the graph
+        # (which we can only do in the inference case anyway).
+        # We can add this later if we need to.
+        keep_inference_input_mutations=False,
         dynamic_shapes=dynamic_shapes,
         aot_autograd_arg_pos_to_source=None,
         is_export=True,
