@@ -622,6 +622,16 @@ class MiscTests(torch._inductor.test_case.TestCase):
                 cleanup_op("mylib::a")
                 del lib
 
+    def test_allow_in_graph_deprecation(self):
+        def f(x):
+            return x
+
+        msg = "allow_in_graph is deprecated as of PyTorch 2.4"
+        with self.assertWarnsRegex(DeprecationWarning, msg):
+            torch._dynamo.allow_in_graph(f)
+        with self.assertWarnsRegex(DeprecationWarning, msg):
+            torch.compiler.allow_in_graph(f)
+
     def test_auto_functionalize(self):
         try:
             lib = torch.library.Library("mylib", "FRAGMENT")

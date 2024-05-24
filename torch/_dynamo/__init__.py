@@ -16,6 +16,7 @@ from .decorators import (
     mark_static_address,
     maybe_mark_dynamic,
     run,
+    unsafe_allow_in_graph,
 )
 from .eval_frame import (
     _reset_guarded_backend_cache,
@@ -55,6 +56,7 @@ __all__ = [
     "register_backend",
     "list_backends",
     "lookup_backend",
+    "unsafe_allow_in_graph",
 ]
 
 if torch.manual_seed is torch.random.manual_seed:

@@ -1,3 +1,4 @@
+import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -72,7 +73,7 @@ def assume_constant_result(fn):
     return fn
 
 
-def allow_in_graph(fn):
+def unsafe_allow_in_graph(fn):
     """
     Tells the compiler frontend (Dynamo) to skip symbolic introspection of the function
     and instead directly write it to the graph when encountered.
@@ -130,6 +131,26 @@ def allow_in_graph(fn):
         trace_rules._disallowed_callable_ids.remove(id(fn))
         trace_rules._allowed_callable_ids.add(id(fn))
     return fn
+
+
+def allow_in_graph(fn):
+    """This function is deprecated in favor of :func:`unsafe_allow_in_graph()`
+
+    If you are trying to black-box a Python function for use with torch.compile
+    (aka something similar to torch.fx.wrap),
+    do not use this API. Instead, please create a custom operator:
+    https://docs.google.com/document/d/1_W62p8WJOQQUzPsJYa7s701JXt0qf2OfLub2sbkHOaU/edit
+
+    :func:`unsafe_allow_in_graph()`/:func:`allow_in_graph()` are fairly difficult
+    to use correctly; please read the docs carefully.
+    """
+    warnings.warn(
+        "allow_in_graph is deprecated as of PyTorch 2.4 and will be removed "
+        "in a future version of PyTorch. Please use unsafe_allow_in_graph "
+        "instead.",
+        DeprecationWarning,
+    )
+    return unsafe_allow_in_graph(fn)
 
 
 def _disallow_in_graph_helper(throw_if_not_allowed):
