@@ -8,7 +8,7 @@ import re
 import sys
 from copy import copy, deepcopy
 from enum import Enum
-from typing import Any, cast, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, cast, Dict, List, Optional, Sequence, Set, Tuple, Union
 
 import sympy
 
@@ -2005,6 +2005,8 @@ class CppKernel(Kernel):
     @property
     def assert_function(self) -> str:
         if V.graph.aot_mode:
+            # TODO: Using AOTI_TORCH_CHECK is causing performance drop for some models
+            # compared with JIT Inductor which uses TORCH_CHECK
             return "AOTI_TORCH_CHECK"
         else:
             return "TORCH_CHECK"
@@ -3937,7 +3939,9 @@ class CppScheduling(BaseScheduling):
         )
 
     def codegen_template(
-        self, template_node: BaseSchedulerNode, epilogue_nodes: List[SchedulerNode]
+        self,
+        template_node: BaseSchedulerNode,
+        epilogue_nodes: Sequence[BaseSchedulerNode],
     ):
         """
         Codegen a CPP template, possibly with fused epilogues
@@ -3950,14 +3954,14 @@ class CppScheduling(BaseScheduling):
         _, (_, rnumel) = template_node.group
         assert rnumel == ()
         ctb: ir.CppTemplateBuffer = cast(ir.CppTemplateBuffer, template_node.node)
-        epilogue_ir_nodes: List[ir.Buffer] = [n.node for n in epilogue_nodes]
+        epilogue_ir_nodes: List[Optional[ir.Buffer]] = [n.node for n in epilogue_nodes]
         assert all(
             isinstance(n, ir.ComputedBuffer) for n in epilogue_ir_nodes
         ), "Epilogue nodes must all be instances of ir.ComputedBuffer"
         kernel, render = ctb.make_kernel_render(ctb, epilogue_nodes=epilogue_ir_nodes)
         with kernel:
             for node in [template_node, *epilogue_nodes]:
-                node.mark_run()
+                node.mark_run()  # type: ignore[attr-defined]
             src_code = render()
 
         with V.set_kernel_handler(kernel):

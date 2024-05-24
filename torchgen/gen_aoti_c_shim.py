@@ -333,8 +333,6 @@ def get_backend_index_for_aoti(
         backend_index = backend_indices[
             DispatchKey.CompositeExplicitAutogradNonFunctional
         ]
-    elif backend_indices[DispatchKey.CompositeImplicitAutograd].has_kernel(func):
-        backend_index = backend_indices[DispatchKey.CompositeImplicitAutograd]
 
     return backend_index
 
@@ -473,7 +471,6 @@ extern "C" {{
 #include <ATen/{str(dispatch_key)}Functions.h>
 #include <ATen/CompositeExplicitAutogradFunctions.h>
 #include <ATen/CompositeExplicitAutogradNonFunctionalFunctions.h>
-#include <ATen/CompositeImplicitAutogradFunctions.h>
 #else
 {includes}
 #endif
