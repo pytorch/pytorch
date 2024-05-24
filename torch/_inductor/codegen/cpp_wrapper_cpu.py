@@ -2275,11 +2275,12 @@ if (py_{buf_name}.get() == NULL) {{
         ):
             return "int32_t"
         elif isinstance(type_, torch.FloatType):
-            return "float"
+            return "double"
         else:
             raise AssertionError(f"Unexpected type in c_type_for_prim_type: {type_=}")
 
     def val_to_arg_str_for_prim_type(self, val, type_) -> str:
+        # TODO: not using type_ as the first step of refactoring. Will update this later.
         if isinstance(val, bool):
             if config.abi_compatible:
                 return "1" if val else "0"
