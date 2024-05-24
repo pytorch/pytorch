@@ -3267,6 +3267,7 @@ SKIP_DIRS = [
     "<frozen importlib",
     "<__array_function__ internals>",
     _config_module.__file__,
+    "triton/backends",
 ]
 SKIP_DIRS.extend(filter(None, (_module_dir(m) for m in BUILTIN_SKIPLIST)))
 
@@ -3307,7 +3308,7 @@ FORCE_SKIP_FILES = {f"{_module_dir(torch)}optim/lr_scheduler.py"}
 
 def _recompile_re():
     global SKIP_DIRS_RE
-    SKIP_DIRS_RE = re.compile(f"^({'|'.join(map(re.escape, SKIP_DIRS))})")
+    SKIP_DIRS_RE = re.compile(rf"^[^\s<]*({'|'.join(map(re.escape, SKIP_DIRS))})")
 
 
 def add(import_name: str):
@@ -3322,7 +3323,6 @@ def add(import_name: str):
     origin = module_spec.origin
     if origin is None:
         return
-    global SKIP_DIRS_RE
     SKIP_DIRS.append(_strip_init_py(origin))
     _recompile_re()
 
