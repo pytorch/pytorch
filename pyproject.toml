@@ -33,9 +33,11 @@ multi_line_output = 3
 include_trailing_comma = true
 
 
+[tool.usort.known]
+standard_library = ["typing_extensions"]
+
 [tool.usort.kown]
 first_party = ["caffe2", "torch", "torchgen", "functorch", "tests"]
-standard_library = ["typing_extensions"]
 
 
 [tool.ruff]
