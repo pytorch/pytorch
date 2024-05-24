@@ -45,18 +45,21 @@ class C10_API Job {
  * will be executed at a specific time.
  */
 class C10_API Run {
-  int _job_id;
+  int _job_id = -1;
   std::chrono::time_point<std::chrono::steady_clock> _time;
 
  public:
-  static bool gt(const std::shared_ptr<Run>& a, const std::shared_ptr<Run>& b);
+  static bool gt(const Run& a, const Run& b) { return a.time() > b.time(); }
 
+  Run() = default;
   Run(int job_id, std::chrono::time_point<std::chrono::steady_clock> time);
 
   int job_id() const { return _job_id; }
   std::chrono::time_point<std::chrono::steady_clock> time() const { return _time; }
 
   void set_time(std::chrono::time_point<std::chrono::steady_clock> time) { _time = time; }
+
+  bool operator==(const Run& other) { return _job_id == other.job_id() && _time == other.time(); }
 };
 
 /**
@@ -91,17 +94,13 @@ class C10_API FunctionScheduler {
   std::chrono::time_point<std::chrono::steady_clock> _paused_time;
 
   // Runs, sorted by wait time until execution.
-  std::priority_queue<
-      std::shared_ptr<Run>,
-      std::vector<std::shared_ptr<Run>>,
-      decltype(&Run::gt)>
-      _queue;
+  std::priority_queue<Run, std::vector<Run>, decltype(&Run::gt)> _queue;
 
   // Current active jobs.
   std::unordered_map<int, std::unique_ptr<Job>> _jobs;
 
   // Run selected to be executed next
-  std::shared_ptr<Run> _next_run;
+  Run _next_run;
 
   // The thread running the run execution loop
   std::thread _thread;
@@ -144,7 +143,7 @@ class C10_API FunctionScheduler {
   // If `immediate` is false, `function` runs for the
   // first time only after `interval` has passed.
   // `run_limit` is the max times `function` will run.
-  //  Use FunctionScheduler::RUN_FOREVER for no limit.
+  // Use FunctionScheduler::RUN_FOREVER for no limit.
   template <typename Rep, typename Period>
   int scheduleJob(
       std::function<void()> function,

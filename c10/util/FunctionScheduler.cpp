@@ -27,12 +27,6 @@ void Job::run() {
 
 /* Run */
 
-/* static */ bool Run::gt(
-    const std::shared_ptr<Run>& a,
-    const std::shared_ptr<Run>& b) {
-  return a->time() > b->time();
-}
-
 Run::Run(int job_id, std::chrono::time_point<std::chrono::steady_clock> time)
     : _job_id(job_id), _time(time) {}
 
@@ -50,20 +44,20 @@ std::chrono::microseconds FunctionScheduler::getNextWaitTime() {
   _next_run = _queue.top();
 
   // Finding the first run associated with an active job.
-  auto entry = _jobs.find(_next_run->job_id());
+  auto entry = _jobs.find(_next_run.job_id());
   while (!validEntry(entry)) {
     // Only pop runs associated with an invalid job.
     _queue.pop();
     if (_queue.empty())
       return std::chrono::microseconds(-1);
 
-    entry = _jobs.find(_next_run->job_id());
+    entry = _jobs.find(_next_run.job_id());
   }
 
   _next_run = _queue.top();
   auto now = std::chrono::steady_clock::now();
   return std::chrono::duration_cast<std::chrono::microseconds>(
-      _next_run->time() - now);
+      _next_run.time() - now);
 }
 
 void FunctionScheduler::run() {
@@ -104,7 +98,7 @@ void FunctionScheduler::runNextJob(const std::unique_lock<std::mutex>& lock) {
   _queue.pop(); // Remove this run from the queue
 
   // Check if the job was canceled in the meantime.
-  auto entry = _jobs.find(_next_run->job_id());
+  auto entry = _jobs.find(_next_run.job_id());
   if (validEntry(entry)) {
     entry->second->run();
     // Add a new run associated with this job to the queue
@@ -130,8 +124,8 @@ void FunctionScheduler::addRun(
     interval = std::chrono::microseconds(0);
 
   auto time = std::chrono::steady_clock::now() + interval;
-  auto run = std::make_shared<Run>(job_id, time);
-  _queue.push(std::move(run));
+  Run run = Run(job_id, time);
+  _queue.push(run);
 
   // Notify the thread handling run execution.
   if (_running)
@@ -226,7 +220,7 @@ int FunctionScheduler::resume() {
   while (!_queue_copy.empty()) {
     auto entry = _queue_copy.top();
     _queue_copy.pop();
-    entry->set_time(entry->time() + diff);
+    entry.set_time(entry.time() + diff);
   }
 
   _running = true;
