@@ -162,7 +162,7 @@ class BaseSchedulerNode:
     read_writes: dependencies.ReadWrites
     unmet_dependencies: Set[Dep]
     # Processed deps used while scoring fusion
-    common_deps: Set[Tuple[Dep, int]]
+    read_and_write_deps_with_hint: Set[Tuple[Dep, int]]
 
     def __init__(self, scheduler: "Scheduler", node: ir.Buffer) -> None:
         self.scheduler: Scheduler = scheduler
