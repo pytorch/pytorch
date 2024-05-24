@@ -124,7 +124,7 @@ DispatchResult DispatchStubImpl::try_get_call_ptr(
       // they will still compute the same value for cpu_dispatch_ptr.
       auto fptr = cpu_dispatch_ptr.load(std::memory_order_relaxed);
       if (!fptr) {
-        fptr = choose_cpu_impl(
+        auto result = try_choose_cpu_impl(
           DEFAULT
 #ifdef HAVE_AVX512_CPU_DEFINITION
           , AVX512
@@ -139,9 +139,12 @@ DispatchResult DispatchStubImpl::try_get_call_ptr(
           , ZVECTOR
 #endif
         );
-        cpu_dispatch_ptr.store(fptr, std::memory_order_relaxed);
+        if (!std::holds_alternative<ErrorType>(result)) {
+          cpu_dispatch_ptr.store(fptr, std::memory_order_relaxed);
+        }
+      return result;
       }
-      return fptr;
+      return DispatchResult(fptr);
     }
 
     case DeviceType::CUDA:
@@ -215,6 +218,55 @@ void* DispatchStubImpl::get_call_ptr(
 
   void* fptr = std::get<void*>(result);
   return fptr;
+}
+
+DispatchResult DispatchStubImpl::try_choose_cpu_impl(
+    void *DEFAULT
+#ifdef HAVE_AVX512_CPU_DEFINITION
+    , void *AVX512
+#endif
+#ifdef HAVE_AVX2_CPU_DEFINITION
+    , void *AVX2
+#endif
+#ifdef HAVE_VSX_CPU_DEFINITION
+    , void *VSX
+#endif
+#ifdef HAVE_ZVECTOR_CPU_DEFINITION
+    , void *ZVECTOR
+#endif
+  ){
+
+  auto capability = static_cast<int>(get_cpu_capability());
+  (void)capability;
+#ifdef HAVE_AVX512_CPU_DEFINITION
+  if (capability >= static_cast<int>(CPUCapability::AVX512)) {
+    // Quantization kernels have also been disabled on Windows
+    // for AVX512 because some of their tests are flaky on Windows.
+    // Ideally, we should have AVX512 kernels for all kernels.
+    if (C10_UNLIKELY(!AVX512)) {
+      // dispatch to AVX2, since the AVX512 kernel is missing
+      return AVX2 != nullptr ? DispatchResult(AVX2) : ErrorType::MissingDeviceKernel;
+    } else {
+      return DispatchResult(AVX512);
+    }
+  }
+#endif
+#ifdef HAVE_AVX2_CPU_DEFINITION
+  if (capability >= static_cast<int>(CPUCapability::AVX2)) {
+    return AVX2 != nullptr ? DispatchResult(AVX2) : ErrorType::MissingDeviceKernel;
+  }
+#endif
+#ifdef HAVE_VSX_CPU_DEFINITION
+  if (capability >= static_cast<int>(CPUCapability::VSX)) {
+    return VSX != nullptr ? DispatchResult(VSX) : ErrorType::MissingDeviceKernel;
+  }
+#endif
+#ifdef HAVE_ZVECTOR_CPU_DEFINITION
+  if (capability >= static_cast<int>(CPUCapability::ZVECTOR)) {
+    return ZVECTOR != nullptr ? DispatchResult(ZVECTOR) : ErrorType::MissingDeviceKernel;
+  }
+#endif
+  return DEFAULT != nullptr ? DispatchResult(DEFAULT) : ErrorType::MissingDeviceKernel;
 }
 
 void* DispatchStubImpl::choose_cpu_impl(

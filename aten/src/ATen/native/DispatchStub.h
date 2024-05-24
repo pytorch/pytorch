@@ -90,6 +90,12 @@ struct DispatchStub;
  * number of specialization of the DispatchStub<> class.
  */
 struct TORCH_API DispatchStubImpl {
+
+  // The DispatchStubImpl::try_get_call_ptr() method is used to get the call
+  // pointer for a given device type. If the call pointer is not found,
+  // DispatchStubImpl::try_get_call_ptr() returns an ErrorType.
+  // The main difference between try_get_call_ptr() and get_call_ptr() is that
+  // try_get_call_ptr() will return the ErrorType and not raise an exception.
   DispatchResult try_get_call_ptr(
     c10::DeviceType device_type
     , void *DEFAULT
@@ -106,6 +112,25 @@ struct TORCH_API DispatchStubImpl {
       , void *ZVECTOR
 #endif
   );
+
+  // Analogous to try_get_call_ptr(), but it will return the ErrorType and not
+  // raise an exception.
+  DispatchResult try_choose_cpu_impl(
+    void *DEFAULT
+#ifdef HAVE_AVX512_CPU_DEFINITION
+    , void *AVX512
+#endif
+#ifdef HAVE_AVX2_CPU_DEFINITION
+    , void *AVX2
+#endif
+#ifdef HAVE_VSX_CPU_DEFINITION
+    , void *VSX
+#endif
+#ifdef HAVE_ZVECTOR_CPU_DEFINITION
+    , void *ZVECTOR
+#endif
+  );
+
 
   void* get_call_ptr(
     c10::DeviceType device_type
