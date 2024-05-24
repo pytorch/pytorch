@@ -1,18 +1,17 @@
 #pragma once
-
+#include <ATen/cuda/CUDAEvent.h>
+#include <c10/core/ScalarType.h>
 #include <c10/util/ApproximateClock.h>
 #include <c10/util/irange.h>
+#include <c10/util/string_view.h>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
-
-#include <ATen/cuda/CUDAEvent.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/profiler/combined_traceback.h>
 
 #include <sys/types.h>
-
 #include <cstdlib>
 #include <fstream>
 #include <string>
@@ -26,7 +25,7 @@ static c10::IValue nccl_comm_key = "nccl_comm_state";
 static c10::IValue version_key = "version";
 // Update whenever changing contents or formatting of the dump
 // (minor when adding fields, major when changing existing fields)
-static c10::IValue version_val = "2.0";
+static c10::IValue version_val = "2.1";
 static c10::IValue pg_config_key = "pg_config";
 static c10::IValue record_id_key = "record_id";
 static c10::IValue pg_id_key = "pg_id";
@@ -37,7 +36,9 @@ static c10::IValue is_p2p_key = "is_p2p";
 static c10::IValue op_id_key = "op_id";
 static c10::IValue profiling_name_key = "profiling_name";
 static c10::IValue input_sizes_key = "input_sizes";
+static c10::IValue input_dtypes_key = "input_dtypes";
 static c10::IValue output_sizes_key = "output_sizes";
+static c10::IValue output_dtypes_key = "output_dtypes";
 static c10::IValue time_created_key = "time_created_ns";
 static c10::IValue duration_key = "duration_ms";
 
@@ -475,7 +476,9 @@ struct NCCLTraceBuffer {
 
     // size information for input/output tensors
     c10::SmallVector<int, 4> input_dims_;
+    std::vector<c10::ScalarType> input_dtypes_;
     c10::SmallVector<int, 4> output_dims_;
+    std::vector<c10::ScalarType> output_dtypes_;
     c10::SmallVector<int64_t, 8> sizes_; // flattened from inputs, outputs
     bool retired_ = false; // is this work entry no longer in the workMetaList_?
                            // a retired but not completed event has timed out
@@ -526,12 +529,14 @@ struct NCCLTraceBuffer {
 
     for (const auto& input : inputs) {
       c10::IntArrayRef sizes = input.sizes();
+      te.input_dtypes_.push_back(input.dtype().toScalarType());
       te.input_dims_.push_back(sizes.size());
       te.sizes_.insert(te.sizes_.end(), sizes.begin(), sizes.end());
     }
 
     for (const auto& output : outputs) {
       c10::IntArrayRef sizes = output.sizes();
+      te.output_dtypes_.push_back(output.dtype().toScalarType());
       te.output_dims_.push_back(sizes.size());
       te.sizes_.insert(te.sizes_.end(), sizes.begin(), sizes.end());
     }
@@ -699,7 +704,19 @@ struct NCCLTraceBuffer {
       };
 
       dict.insert(input_sizes_key, read_sizes(e.input_dims_));
+      std::vector<std::string> input_dtypes_strs;
+      input_dtypes_strs.reserve(e.input_dtypes_.size());
+      for (const auto& input_dtype : e.input_dtypes_) {
+        input_dtypes_strs.push_back(c10::toString(input_dtype));
+      }
+      dict.insert(input_dtypes_key, input_dtypes_strs);
       dict.insert(output_sizes_key, read_sizes(e.output_dims_));
+      std::vector<std::string> output_dtypes_strs;
+      output_dtypes_strs.reserve(e.output_dtypes_.size());
+      for (const auto& output_dtype : e.output_dtypes_) {
+        output_dtypes_strs.push_back(c10::toString(output_dtype));
+      }
+      dict.insert(output_dtypes_key, output_dtypes_strs);
       if (e.time_discovered_completed_.has_value()) {
         dict.insert(state_key, "completed");
       } else if (e.time_discovered_started_.has_value()) {

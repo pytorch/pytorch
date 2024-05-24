@@ -20,6 +20,7 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    skipIfRocm,
 )
 
 
@@ -79,6 +80,7 @@ class ProcessGroupCudaP2PTest(MultiProcessTestCase):
             pg_options=options,
         )
 
+    @skipIfRocm
     @skip_if_lt_x_gpu(2)
     def test_p2p_apis(self) -> None:
         BUFFER_SIZE = 4 * 1024
@@ -111,6 +113,7 @@ class ProcessGroupCudaP2PTest(MultiProcessTestCase):
         torch.cuda.synchronize()
         dist.destroy_process_group()
 
+    @skipIfRocm
     @skip_if_lt_x_gpu(2)
     def test_p2p_buffer(self) -> None:
         BUFFER_SIZE = 4 * 1024
@@ -136,6 +139,7 @@ class ProcessGroupCudaP2PTest(MultiProcessTestCase):
         torch.cuda.synchronize()
         dist.destroy_process_group()
 
+    @skipIfRocm
     @skip_if_lt_x_gpu(2)
     def test_fused_all_gather_matmul(self) -> None:
         B = 8
@@ -168,6 +172,7 @@ class ProcessGroupCudaP2PTest(MultiProcessTestCase):
         torch.cuda.synchronize()
         dist.destroy_process_group()
 
+    @skipIfRocm
     @skip_if_lt_x_gpu(2)
     def test_fused_matmul_reduce_scatter(self) -> None:
         B = 8
