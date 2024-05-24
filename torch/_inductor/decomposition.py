@@ -751,6 +751,10 @@ def _use_online_softmax(x, dim):
     if x.dim() < 2:
         return False
 
+    # Only do online softmax for GPU for now
+    if x.device.type != "cuda":
+        return False
+
     return x.size(dim) > 2**14
 
 
