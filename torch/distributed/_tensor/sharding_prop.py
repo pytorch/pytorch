@@ -407,11 +407,9 @@ class ShardingPropagator:
             # decide how to do redistribute on inputs
             if output_sharding.output_spec is None:
                 if output_sharding.redistribute_schema is None:
-                    if output_sharding.failed_reason is not None:
-                        raise RuntimeError(
-                            f"Sharding propagation failed on op {op_schema}!"
-                            f"Failed reason: {output_sharding.failed_reason}"
-                        )
+                    raise RuntimeError(
+                        f"Sharding propagation failed on op {op_schema}!"
+                    )
                 else:
                     # we do auto redistribute on inputs if necessary
                     # run sharding propagation again with suggested schema
