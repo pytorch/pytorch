@@ -561,6 +561,8 @@ flex_attention_backward_template = TritonTemplate(
             offs_m = curr_m + tl.arange(0, BLOCK_M1)
             m = tl.load(M + offs_m)
             qkT = tl.dot(k, qT)
+            if not SCORE_MOD_IS_LINEAR:
+                qkT *= 1.44269504
             pT = tl.math.exp2(qkT - m[None, :])
             # Autoregressive masking.
             # if MASK:
@@ -590,8 +592,13 @@ flex_attention_backward_template = TritonTemplate(
 
         # Write back dK.
         dk *= sm_scale
-        dk_ptrs = DK + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
-        tl.store(dk_ptrs, dk)
+        # dk_ptrs = DK + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
+        # tl.store(dk_ptrs, dk)
+        index_n = offs_n[:, None]
+        index_k = offs_k[None, :]
+        # TODO generalize and add proper mask support
+        mask = (index_n != -1) & (index_k != -1)
+        {{store_output(("off_z", "off_h", "index_n", "index_k"), "dk", "mask", indent_width=8)}}
     else:
         pid = pid - NUM_KV_BLOCKS
         # THIS BLOCK DOES DQ:
@@ -651,7 +658,7 @@ flex_attention_backward_template = TritonTemplate(
 
         # Write back dQ.
         dq_ptrs = DQ + offs_m_[:, None] * stride_tok + offs_k[None, :] * stride_d
-        dq *= LN2
+        # dq *= LN2
         tl.store(dq_ptrs, dq)
  """,
 )
