@@ -547,13 +547,13 @@ def radam(
     differentiable: bool = False,
     capturable: bool = False,
     has_complex: bool = False,
+    maximize: bool = False,
     *,
     beta1: float,
     beta2: float,
     lr: float,
     weight_decay: float,
     eps: float,
-    maximize: bool,
 ):
     r"""Functional API that performs RAdam algorithm computation.
 
