@@ -2815,16 +2815,20 @@ class CustomOpHandler:
     """
     Base class for handling custom operators.
     """
-    def namespace(self):
+    @classmethod
+    def namespace(cls):
         raise NotImplementedError(f"{cls.__class__} namespace() must be implemented")
 
-    def op_name(self, op_type):
+    @classmethod
+    def op_name(cls, op_type):
         raise NotImplementedError(f"{cls.__class__} op_name() must be implemented")
 
-    def op_type(self, op_name):
+    @classmethod
+    def op_type(cls, op_name):
         raise NotImplementedError(f"{cls.__class__} op_type() must be implemented")
 
-    def op_schema(self, op_type):
+    @classmethod
+    def op_schema(cls, op_type):
         raise NotImplementedError(f"{cls.__class__} op_schema() must be implemented")
 
 
