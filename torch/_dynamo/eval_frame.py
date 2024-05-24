@@ -406,13 +406,25 @@ class _TorchDynamoContext:
 
             cleanups = [enter() for enter in self.enter_exit_hooks]
             prior = set_eval_frame(callback)
+
+            # Ensure that if an assertion occurs after graph pushes
+            # something onto the DynamicLayerStack then we pop it off (the
+            # constructed graph code isn't guarded with try/finally).
+            #
+            # This used to be a context but putting a `with` here is a noticible
+            # perf regression (#126293)
+            saved_dynamic_layer_stack_depth = (
+                torch._C._functorch.get_dynamic_layer_stack_depth()
+            )
+
             try:
-                # Ensure that if an assertion occurs after graph pushes
-                # something onto the DynamicLayerStack then we pop it off (the
-                # constructed graph code isn't guarded with try/finally).
-                with torch._C._functorch._PreserveDynamicLayerStack():
-                    return fn(*args, **kwargs)
+                return fn(*args, **kwargs)
             finally:
+                # Restore the dynamic layer stack depth if necessary.
+                torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
+                    saved_dynamic_layer_stack_depth
+                )
+
                 set_eval_frame(prior)
                 for cleanup in cleanups:
                     cleanup()
