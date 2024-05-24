@@ -15,28 +15,29 @@ log = logging.getLogger(__name__)
 
 
 def get_kernel_argdefs(kernel):
-    arg_defs, _, _ = kernel.args.python_argdefs()
+    arg_defs, _, _, _ = kernel.args.python_argdefs()
     return arg_defs
 
 
-def _get_all_args(args_list):
+def _get_all_args(args_list, arg_types_list=None):
     all_args = max(args_list, key=len)[:]
+    arg_types = max(arg_types_list, key=len)[:] if arg_types_list is not None else None
     for args in args_list:
         assert set(args).issubset(set(all_args)), f"{args} v.s. {all_args}"
 
-    return all_args
+    return all_args, arg_types
 
 
 def get_all_kernel_argdefs(kernels):
     """
-    The logic here must match with `get_all_call_args`.
+    The logic here must match with `get_all_call_args`, except no need to get arg_types here
     """
     argdefs_list = [get_kernel_argdefs(kernel) for kernel in kernels]
 
-    return _get_all_args(argdefs_list)
+    return _get_all_args(argdefs_list)[0]
 
 
-def get_all_call_args(call_args_list):
+def get_all_call_args(call_args_list, arg_types_list):
     """
     Passed in the call_args for each subkernel and return the call_args for the
     combined multi-kernel.
@@ -57,7 +58,7 @@ def get_all_call_args(call_args_list):
     Instead, we pick the longest call args and assert that other call args are
     a subset of it.
     """
-    return _get_all_args(call_args_list)
+    return _get_all_args(call_args_list, arg_types_list)
 
 
 def get_numel_argdefs(kernel):
@@ -196,9 +197,13 @@ class MultiKernel:
         for the multi-kernel.
         """
         assert kernel_name == self.kernel_name
-        call_args_list = [kernel.get_call_args() for kernel in self.kernels]
+        call_args_list, arg_types = zip(
+            *[kernel.get_call_args() for kernel in self.kernels]
+        )
+        call_args_list = list(call_args_list)
+        arg_types_list = list(arg_types)
 
-        all_call_args = get_all_call_args(call_args_list)
+        all_call_args, arg_types = get_all_call_args(call_args_list, arg_types_list)
         grid: List[Any] = []
 
         if V.graph.cpp_wrapper:
@@ -207,33 +212,35 @@ class MultiKernel:
             picked_kernel = MultiKernelCall.lookup_choice(kernel_name)
             kernel_name = self.kernels[picked_kernel].kernel_name
             final_call_args = call_args_list[picked_kernel]
+            arg_types = arg_types_list[picked_kernel]
         else:
             final_call_args = all_call_args
 
         # numels for all subkernels should be the same. Use kernels[0] here
         self.kernels[0].add_numel_to_call_args_and_grid(
-            kernel_name, final_call_args, grid
+            kernel_name, final_call_args, arg_types, grid
         )
 
         grid = V.graph.wrapper_code.generate_default_grid(kernel_name, grid)
-
+        current_device = V.graph.scheduler.get_current_device_or_throw()
         V.graph.wrapper_code.generate_kernel_call(
             kernel_name,
             final_call_args,
             grid,
-            V.graph.scheduler.current_device.index,
+            current_device.index,
+            arg_types=arg_types,
         )
 
     def codegen_nan_check(self):
         wrapper = V.graph.wrapper_code
         seen = set()
         for k in self.kernels:
-            _, call_args, arg_types = k.args.python_argdefs()
-            for arg, arg_type in zip(call_args, arg_types):
+            _, call_args, precompile_args, _ = k.args.python_argdefs()
+            for arg, precompile_arg in zip(call_args, precompile_args):
                 if arg in seen:
                     continue
                 seen.add(arg)
-                if isinstance(arg_type, TensorArg):
+                if isinstance(precompile_arg, TensorArg):
                     line = f"assert not {arg}.isnan().any().item()"
                     wrapper.writeline(line)
                     line = f"assert not {arg}.isinf().any().item()"
