@@ -118,6 +118,7 @@ def generate_ttir(kernel, kwargs):
     from triton.runtime.jit import JITFunction
 
     import torch
+    import torch._inductor.ir
     from torch._subclasses.fake_tensor import FakeTensor
 
     if isinstance(kernel, Autotuner):
