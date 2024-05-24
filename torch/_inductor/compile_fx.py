@@ -243,7 +243,7 @@ def _unlift_graph(mod, gm, graph_signature):
         None,
         state_dict,
         {},
-        mutated_out_inputs=mutated_out_inputs,
+        mutated_inputs=mutated_out_inputs,
     )
 
     return unlifted_gm
