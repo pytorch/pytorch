@@ -10,7 +10,6 @@ __all__ = [
     "CleanDiv",
     "CeilDiv",
     "IntTrueDiv",
-    "Pow",
     "FloatTrueDiv",
     "LShift",
     "RShift",
@@ -18,6 +17,8 @@ __all__ = [
     "Round",
     "RoundDecimal",
     "ToFloat",
+    "FloatPow",
+    "PowByNatural",
 ]
 
 
@@ -422,19 +423,38 @@ class RShift(sympy.Function):
         return base // 2**shift
 
 
-# Overloaded to be compatible with regular Python.
-# https://github.com/pytorch/pytorch/issues/90900
-#
-# TODO: deal with pow
-class Pow(sympy.Function):
+class PowByNatural(sympy.Function):
+    is_integer = True
+
     @classmethod
     def eval(cls, base, exp):
-        if exp.is_zero:
-            return sympy.Integer(1)
-        elif base.is_zero and exp < 0:
-            raise ZeroDivisionError(f"{base} cannot be raised to a negative power")
-        else:
-            return base**exp
+        # exp can be assumed to be is_integer and is_nonnegative, but we may
+        # have concluded this externally from Sympy assumptions, so we can't
+        # assert the nonnegative
+        assert exp.is_integer, exp
+        if isinstance(base, sympy.Number) and isinstance(exp, sympy.Number):
+            return sympy.Integer(int(base) ** int(exp))
+        if isinstance(exp, sympy.Integer):
+            # Translate power into iterated multiplication
+            r = sympy.Integer(1)
+            for _ in range(int(exp)):
+                r *= base
+            return r
+        # NB: do NOT translate into sympy.Pow, we will lose knowledge that exp
+        # is a natural number if we do
+
+
+# base is assumed to be nonnegative, thereby prevent complex numbers from
+# occuring
+class FloatPow(sympy.Function):
+    is_integer = False
+    is_real = True
+
+    @classmethod
+    def eval(cls, base, exp):
+        if isinstance(base, sympy.Number) and isinstance(exp, sympy.Number):
+            return sympy.Float(float(base) ** float(exp))
+        # NB: do not do any nontrivial reasoning
 
 
 # Overloaded to be compatible with regular Python.

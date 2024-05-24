@@ -361,6 +361,10 @@ class ExprPrinter(Printer):
             return string
         return f"({string})"
 
+    def _print_ToFloat(self, expr):
+        assert len(expr.args) == 1
+        return f"float({self._print(expr.args[0])})"
+
     def _print_Infinity(self, expr):
         return "math.inf"
 

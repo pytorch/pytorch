@@ -264,32 +264,17 @@ class ExprPrinterTests(InductorTestCase):
                     do_print(expr)
 
     def test_print_floor_div(self):
-        for integer in [True, False]:
-            s1 = sympy.Symbol("s1", integer=integer)
-            s2 = sympy.Symbol("s2", integer=integer)
-            expr = FloorDiv(s1, s2)
-            self.assertEqual(pexpr(expr), "(s1 // s2)")
-            if integer:
-                self.assertEqual(cexpr(expr), "c10::div_floor_integer(s1, s2)")
-            else:
-                self.assertEqual(
-                    cexpr(expr),
-                    "c10::div_floor_floating(static_cast<double>(s1), static_cast<double>(s2))",
-                )
+        s1 = sympy.Symbol("s1", integer=True)
+        s2 = sympy.Symbol("s2", integer=True)
+        expr = FloorDiv(s1, s2)
+        self.assertEqual(pexpr(expr), "(s1 // s2)")
+        self.assertEqual(cexpr(expr), "c10::div_floor_integer(s1, s2)")
 
-        for integer in [True, False]:
-            s1 = sympy.Symbol("s1", integer=integer)
-            s2 = sympy.S(-1)
-            expr = FloorDiv(s1, s2)
-            if integer:
-                self.assertEqual(pexpr(expr), "(-1)*s1")
-                self.assertEqual(cexpr(expr), "(-1L)*s1")
-            else:
-                self.assertEqual(pexpr(expr), "(s1 // (-1))")
-                self.assertEqual(
-                    cexpr(expr),
-                    "c10::div_floor_floating(static_cast<double>(s1), static_cast<double>((-1L)))",
-                )
+        s1 = sympy.Symbol("s1", integer=True)
+        s2 = sympy.S(-1)
+        expr = FloorDiv(s1, s2)
+        self.assertEqual(pexpr(expr), "(-1)*s1")
+        self.assertEqual(cexpr(expr), "(-1L)*s1")
 
     def test_print_Min_Max(self):
         cases = (

@@ -294,6 +294,42 @@ class SymInt:
         assert isinstance(other, (builtins.int, SymInt))
         return self.__rint_floordiv__(other)
 
+    # nb: complex is impossible to handle correctly lol, with
+    # negative base and integral float need to diverge semantics and
+    # just always return complex.  Neener neener pretend this problem
+    # doesn't exist
+    def __pow__(self, other):
+        if isinstance(other, (builtins.float, SymFloat)):
+            return sym_float(self).__pow__(other)
+        assert isinstance(other, (builtins.int, SymInt))
+        # Guards!  This guard is necessary because we need to know it to
+        # determine the output type of this operation
+        if other >= 0:
+            return self.__pow_by_natural__(other)
+        else:
+            # Mercifully, when the exponent is negative, Python just promotes
+            # to doubles and does a float pow:
+            #
+            #   if (Py_SIZE(b) < 0 && c == NULL) {
+            #       /* if exponent is negative and there's no modulus:
+            #              return a float.  This works because we know
+            #              that this calls float_pow() which converts its
+            #              arguments to double. */
+            #       Py_DECREF(a);
+            #       Py_DECREF(b);
+            #       return PyFloat_Type.tp_as_number->nb_power(v, w, x);
+            #   }
+            return sym_float(self).__pow__(sym_float(other))
+
+    def __rpow__(self, other):
+        if isinstance(other, (builtins.float, SymFloat)):
+            return sym_float(self).__rpow__(other)
+        assert isinstance(other, (builtins.int, SymInt))
+        if self >= 0:  # self is exponent
+            return self.__rpow_by_natural__(other)
+        else:
+            return sym_float(self).__rpow__(sym_float(other))
+
     def __eq__(self, other: object) -> builtins.bool:
         raise AssertionError("type stub not overridden")
 
@@ -313,6 +349,12 @@ class SymInt:
         raise AssertionError("type stub not overridden")
 
     def __mul__(self, other) -> "SymInt":
+        raise AssertionError("type stub not overridden")
+
+    def __pow_by_natural__(self, other) -> "SymInt":
+        raise AssertionError("type stub not overridden")
+
+    def __rpow_by_natural__(self, other) -> "SymInt":
         raise AssertionError("type stub not overridden")
 
     def __int_truediv__(self, other) -> "SymFloat":
@@ -376,6 +418,16 @@ class SymFloat:
     def __bool__(self):
         return self.node.bool_()
 
+    # Symbolic power does NOT work with negative base, this is to avoid
+    # potential complex outputs
+    def __pow__(self, other):
+        torch._check(self >= 0)
+        return self.__float_pow__(other)
+
+    def __rpow__(self, other):
+        torch._check(other >= 0)
+        return self.__rfloat_pow__(other)
+
     # Magic methods installed by torch.fx.experimental.sym_node
 
     def __eq__(self, other: object) -> builtins.bool:
@@ -391,6 +443,12 @@ class SymFloat:
         raise AssertionError("type stub not overridden")
 
     def __ge__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __float_pow__(self, other) -> "SymFloat":
+        raise AssertionError("type stub not overridden")
+
+    def __rfloat_pow__(self, other) -> "SymFloat":
         raise AssertionError("type stub not overridden")
 
     def __float_truediv__(self, other) -> "SymFloat":

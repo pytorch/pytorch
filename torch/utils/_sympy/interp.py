@@ -16,14 +16,15 @@ from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 import torch
 from .functions import (
     CleanDiv,
+    FloatPow,
     FloatTrueDiv,
     FloorDiv,
     IntTrueDiv,
     IsNonOverlappingAndDenseIndicator,
     Mod,
-    PythonMod,
     ModularIndexing,
-    Pow,
+    PowByNatural,
+    PythonMod,
     Round,
     RoundDecimal,
     ToFloat,
@@ -63,8 +64,15 @@ def handlers():
         Where: "where",
         sympy.Add: "add",
         sympy.Mul: "mul",
-        Pow: "pow",
-        sympy.Pow: "pow",
+        FloatPow: "pow",
+        PowByNatural: "pow_by_natural",
+        # sympy simplifies x * x into Pow(x, 2), so we need to handle this.
+        # Do NOT use builtin Pow for floats
+        # TODO: There is a hazard here, if we have float * float it will
+        # also get turned into Pow(float, 2) but we don't want this because
+        # pow_by_natural is assumed to only be integers.  Probably the fix is
+        # to add a FloatMul to impede this optimization
+        sympy.Pow: "pow_by_natural",
         Mod: "mod",
         PythonMod: "mod",  # TODO: this is wrong
         sympy.Mod: "mod",

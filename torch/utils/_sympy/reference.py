@@ -1,11 +1,13 @@
 import math
 
 import operator
+
 import sympy
 
 import torch
 from torch.utils._sympy.functions import (
     _keep_float,
+    FloatPow,
     FloatTrueDiv,
     FloorDiv,
     IntTrueDiv,
@@ -13,6 +15,7 @@ from torch.utils._sympy.functions import (
     OpaqueUnaryFn_exp,
     OpaqueUnaryFn_log,
     OpaqueUnaryFn_sqrt,
+    PowByNatural,
     ToFloat,
     TruncToInt,
 )
@@ -70,7 +73,7 @@ class ReferenceAnalysis:
 
     @staticmethod
     def reciprocal(x):
-        return 1 / x
+        return FloatTrueDiv(1.0, x)
 
     @staticmethod
     def square(x):
@@ -138,7 +141,11 @@ class ReferenceAnalysis:
 
     @staticmethod
     def pow(a, b):
-        return a**b
+        return _keep_float(FloatPow)(a, b)
+
+    @staticmethod
+    def pow_by_natural(a, b):
+        return PowByNatural(a, b)
 
     @staticmethod
     def minimum(a, b):
@@ -215,3 +222,11 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
     @staticmethod
     def truediv(a, b):
         return a / b
+
+    @staticmethod
+    def pow(a, b):
+        return a**b
+
+    @staticmethod
+    def pow_by_natural(a, b):
+        return a**b

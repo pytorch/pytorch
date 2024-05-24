@@ -39,6 +39,7 @@ from .functions import (
     OpaqueUnaryFn_sinh,
     OpaqueUnaryFn_sqrt,
     OpaqueUnaryFn_tanh,
+    PowByNatural,
     Round,
     RoundDecimal,
     ToFloat,
@@ -165,11 +166,23 @@ class ValueRanges(Generic[_T]):
         # too hard to push the invariant through right now.
 
         object.__setattr__(
-            self, "is_int", not self.is_bool and (isinstance(lower, sympy.Integer) or isinstance(upper, sympy.Integer))
+            self,
+            "is_int",
+            not self.is_bool
+            and (isinstance(lower, sympy.Integer) or isinstance(upper, sympy.Integer)),
         )
+        """
+        # This assert is just impossible right now, too many sympy bugs
         if self.is_int:
-            assert (isinstance(lower, sympy.Integer) or lower == -sympy.oo), (lower, upper)
-            assert (isinstance(upper, sympy.Integer) or upper == sympy.oo), (lower, upper)
+            # NB: sympy will sometimes randomly lose the float-ness of zero,
+            # so we also need to account for that in the assertion here.
+            # See also https://github.com/sympy/sympy/issues/26620
+            assert isinstance(lower, sympy.Integer) or lower in [-sympy.oo, 0], (
+                lower,
+                upper,
+            )
+            assert isinstance(upper, sympy.Integer) or upper in [sympy.oo, 0], (lower, upper)
+        """
         # NB: [-oo, oo] always advertises as float!
         object.__setattr__(self, "is_float", not self.is_bool and not self.is_int)
         assert self.is_bool or self.is_int or self.is_float, (lower, upper)
@@ -528,7 +541,8 @@ class SymPyValueRangeAnalysis:
         b = ValueRanges.wrap(b)
         if 0 in b or (
             # TODO: make this more precise
-            (-sympy.oo in a or sympy.oo in a) or (-sympy.oo in b or sympy.oo in b)
+            (-sympy.oo in a or sympy.oo in a)
+            or (-sympy.oo in b or sympy.oo in b)
         ):
             return ValueRanges.unknown()
         else:
@@ -584,14 +598,44 @@ class SymPyValueRangeAnalysis:
         return ValueRanges.unknown()  # TODO: type here is wrong
 
     @classmethod
-    def pow(cls, a, b):
-        def is_integer(val):
-            return isinstance(val, int) or (
-                hasattr(val, "is_integer") and val.is_integer
-            )
-
+    def pow_by_natural(cls, a, b):
         a = ValueRanges.wrap(a)
         b = ValueRanges.wrap(b)
+        if a.is_singleton() and b.is_singleton():
+            return ValueRanges.wrap(a.lower**b.lower)
+        # NB: Exclude zero, because zero is special
+        elif a.lower >= 1:
+            # We should know that b >= 0 but we may have forgotten this fact due
+            # to replacements, so don't assert it, but DO clamp it to prevent
+            # degenerate problems
+            return ValueRanges.coordinatewise_increasing_map(
+                a, b & ValueRanges(0, sys.maxsize - 1), PowByNatural
+            )
+        elif b.is_singleton():
+            if b.lower % 2 == 0:
+                # x^n where n is even
+                return ValueRanges.convex_min_zero_map(a, lambda x: x**b.lower)
+            else:
+                # x^n where n is odd
+                return ValueRanges.increasing_map(a, lambda x: x**b.lower)
+        else:
+            # a is potentially negative, and we don't know if the exponent is
+            # even or odd.  So just conservatively set the upper and lower
+            # bound based on what the maximum absolute value could be, in both
+            # directions
+            max_base = max(a.upper, -a.lower)
+            return ValueRanges(-(max_base**b.upper), max_base**b.upper)
+
+    @classmethod
+    def pow(cls, a, b):
+        return ValueRanges.unknown()
+
+        # We could implement all this, but for floating point pow, is there
+        # really a point?
+        """
+        a = ValueRanges.wrap(a)
+        b = ValueRanges.wrap(b)
+
         # Not implemented yet. It's a bit tricky
         # If you want to implement it, compute the partial derivatives of a ** b
         # and check the ranges where the function is increasing / decreasing
@@ -611,8 +655,7 @@ class SymPyValueRangeAnalysis:
         if b == 0:
             if not a.lower.is_finite:
                 return ValueRanges.unknown()
-            type_ = sympy.Float if a.lower.is_real else sympy.Integer
-            return ValueRanges.wrap(type_(1))
+            return ValueRanges.wrap(1.0)
 
         if b < 0:
             a = cls.reciprocal(a)
@@ -621,21 +664,12 @@ class SymPyValueRangeAnalysis:
         if a == ValueRanges.unknown():
             return ValueRanges.unknown()
 
-        # Here b > 0
-        if not is_integer(b):
-            # If the base is positive, then we're good, otherwise nothing's defined
-            if a.lower >= 0:
-                return ValueRanges.increasing_map(a, lambda x: x**b)
-            else:
-                return ValueRanges.unknown()
+        # If the base is positive, then we're good, otherwise nothing's defined
+        if a.lower >= 0:
+            return ValueRanges.increasing_map(a, lambda x: x**b)
         else:
-            # b > 0 integer
-            if b % 2 == 0:
-                # x^n where n is even
-                return ValueRanges.convex_min_zero_map(a, lambda x: x**b)
-            else:
-                # x^n where n is odd
-                return ValueRanges.increasing_map(a, lambda x: x**b)
+            return ValueRanges.unknown()
+        """
 
     @staticmethod
     def reciprocal(x):
@@ -644,7 +678,7 @@ class SymPyValueRangeAnalysis:
         if 0 in x:
             return ValueRanges.unknown()
         else:
-            return ValueRanges.decreasing_map(x, lambda y: 1 / y)
+            return ValueRanges.decreasing_map(x, lambda y: FloatTrueDiv(1.0, y))
 
     @staticmethod
     def abs(x):

@@ -267,8 +267,11 @@ class SymNode:
     def mod(self, other) -> "SymNode":
         return self._mod(other)  # type: ignore[attr-defined]
 
-    def pow(self, other) -> "SymNode":
-        return self._pow(other)  # type: ignore[attr-defined]
+    def float_pow(self, other) -> "SymNode":
+        return self._float_pow(other)  # type: ignore[attr-defined]
+
+    def pow_by_natural(self, other) -> "SymNode":
+        return self._pow_by_natural(other)  # type: ignore[attr-defined]
 
     def and_(self, other) -> "SymNode":
         return self._and_(other)  # type: ignore[attr-defined]
@@ -370,6 +373,10 @@ class SymNode:
 
     def floordiv(self, other) -> "SymNode":
         return self.int_floordiv(other)
+
+    # We didn't bind integer pow in C++
+    def pow(self, other):
+        return self.float_pow(other)
 
     def is_non_overlapping_and_dense(self, sizes, strides):
         return self.is_non_overlapping_and_dense_indicator(sizes, strides).eq(to_node(self, 1))  # type: ignore[attr-defined]
@@ -499,7 +506,8 @@ METHOD_TO_OPERATOR = {
     "ne": operator.ne,
     "neg": operator.neg,
     "or": operator.or_,
-    "pow": operator.pow,
+    "float_pow": operator.pow,
+    "pow_by_natural": operator.pow,
     "round": builtins.round,
     "rshift": operator.rshift,
     "sub": operator.sub,
@@ -577,15 +585,14 @@ only_float_magic_methods = {"is_integer", "round", "sym_int"}
 magic_methods_on_operator_with_trailing_underscore = {"and", "or"}
 
 
-# TODO: pow is not always float...
-always_float_magic_methods = {"int_truediv", "float_truediv", "sym_float", "pow"}
+always_float_magic_methods = {"int_truediv", "float_truediv", "sym_float", "float_pow"}
 
 for name in math_op_names:
     sym_name = f"sym_{name}"
     always_float_magic_methods.add(sym_name)
 
 
-always_int_magic_methods = {"ceil", "floor", "trunc"}
+always_int_magic_methods = {"ceil", "floor", "trunc", "pow_by_natural"}
 always_bool_magic_methods = {
     "eq",
     "ne",
@@ -630,10 +637,16 @@ def _sympy_mod(a, b):
         return PythonMod(a, b)
 
 
-def _sympy_pow(a, b):
-    from torch.utils._sympy.functions import Pow
+def _sympy_pow_by_natural(a, b):
+    from torch.utils._sympy.functions import PowByNatural
 
-    return Pow(a, b)
+    return PowByNatural(a, b)
+
+
+def _sympy_float_pow(a, b):
+    from torch.utils._sympy.functions import FloatPow
+
+    return FloatPow(a, b)
 
 
 def _sympy_and(a, b):
@@ -665,7 +678,8 @@ reflectable_magic_methods = {
     "sub": operator.sub,
     "mul": operator.mul,
     "mod": _sympy_mod,
-    "pow": _sympy_pow,
+    "pow_by_natural": _sympy_pow_by_natural,
+    "float_pow": _sympy_float_pow,
     "and": _sympy_and,
     "or": _sympy_or,
     "float_truediv": _sympy_float_truediv,
@@ -679,6 +693,8 @@ reflectable_magic_methods = {
 def _floor_ceil_helper(a, fn):
     import sympy
 
+    from torch.utils._sympy.functions import TruncToInt
+
     if isinstance(a, sympy.Mul):
         aa = a.args
         if len(aa) == 2 and isinstance(aa[0], sympy.Float) and aa[1].is_integer:
@@ -691,9 +707,13 @@ def _floor_ceil_helper(a, fn):
         or isinstance(a, sympy.Integer)
     ):
         return sympy.Integer(a)
-    return fn(a)
+    # NB: the underlying operation is a float -> float, so we have to
+    # truncate it to get the types correct.
+    # TODO: Perhaps just make straight up sympy functions for these
+    return TruncToInt(fn(a))
 
 
+# NB: this is Python semantics so it returns an int
 def _sympy_floor(a):
     import sympy
 
@@ -708,6 +728,7 @@ def _sympy_trunc(a):
     return TruncToInt(a)
 
 
+# NB: this is Python semantics so it returns an int
 def _sympy_ceil(a):
     import sympy
 
@@ -1016,9 +1037,26 @@ def _make_node_magic(method, func):
                 self, handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {})
             )
         assert isinstance(other, SymNode)
-        # TODO: consider constant prop here
         try:
-            out = func(self.expr, other.expr)
+            if method == "mod":
+                from torch.utils._sympy.functions import Mod, PythonMod
+
+                # Special handling for mod that requires access to the value
+                # ranges
+                shape_env = self.shape_env
+                if (
+                    self.expr.is_nonnegative
+                    or shape_env.bound_sympy(self.expr).lower >= 0
+                ) and (
+                    other.expr.is_nonnegative
+                    or shape_env.bound_sympy(other.expr).lower >= 0
+                ):
+                    out = Mod(self.expr, other.expr)
+                else:
+                    out = PythonMod(self.expr, other.expr)
+            else:
+                # TODO: consider constant prop here
+                out = func(self.expr, other.expr)
         except Exception:
             log.warning("failed to eval %s(%s, %s)", method, self.expr, other.expr)
             raise
@@ -1342,7 +1380,7 @@ def _make_user_magic(method, user_type):
             "sub",
             "mul",
             "mod",
-            "pow",
+            "float_pow",
             "float_truediv",
             "int_floordiv",
             "sym_min",

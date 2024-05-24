@@ -4169,7 +4169,11 @@ class ShapeEnv:
             vr = self.var_to_range[k]
             if size_oblivious and k in self.size_like:
                 lower = max(2, vr.lower)
-                vr = ValueRanges(lower, vr.upper)
+                # This is a bit dodgy: what this means is that there was a
+                # size-like unbacked symbol whose upper bound < 2.  This
+                # causes... problems.
+                if lower <= vr.upper:
+                    vr = ValueRanges(lower, vr.upper)
             else:
                 lower = vr.lower
             # Don't do anything if we don't have a nontrivial lower bound
@@ -4218,6 +4222,10 @@ class ShapeEnv:
             log.warning("RecursionError in sympy.xreplace(%s, %s)", expr, new_shape_env)
             self.counter["sympy_recursion_error"] += 1
             return None
+
+        new_expr = safe_expand(new_expr)
+        if new_expr.is_number:
+            return new_expr
 
         # This is bad to do, the replacement with division leaves us with
         # rationals when atom.args[0] is addition, e.g., sympy will happily

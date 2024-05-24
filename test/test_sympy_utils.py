@@ -39,7 +39,8 @@ UNARY_OPS = [
 BINARY_OPS = [
     "truediv", "floordiv",
     # "truncdiv",  # TODO
-    "add", "mul", "sub", "pow", "minimum", "maximum", "mod"
+    # NB: pow is float_pow
+    "add", "mul", "sub", "pow", "pow_by_natural", "minimum", "maximum", "mod"
 ]
 
 UNARY_BOOL_OPS = ["not_"]
@@ -85,11 +86,19 @@ def valid_unary(fn, v):
 
 def valid_binary(fn, a, b):
     if fn == "pow" and (
+        # sympy will expand to x*x*... for integral b; don't do it if it's big
         b > 4
-        or (  # sympy will expand to x*x*... for integral b; don't do it if it's big
-            a <= 0 and b == -1
-        )
-        or (a == b == 0)  # no imaginary numbers  # 0**0 is undefined
+        # no imaginary numbers
+        or a <= 0
+        # 0**0 is undefined
+        or (a == b == 0)
+    ):
+        return False
+    elif fn == "pow_by_natural" and (
+        # sympy will expand to x*x*... for integral b; don't do it if it's big
+        b > 4
+        or b < 0
+        or (a == b == 0)
     ):
         return False
     elif fn == "mod" and (a < 0 or b <= 0):
@@ -137,6 +146,9 @@ class TestValueRanges(TestCase):
     @parametrize("dtype", ("int", "float"))
     def test_binary_ref(self, fn, dtype):
         to_dtype = {"int": sympy.Integer, "float": sympy.Float}
+        # Don't test float on int only methods
+        if dtype == "float" and fn in ["pow_by_natural", "mod"]:
+            return
         dtype = to_dtype[dtype]
         for a, b in itertools.product(CONSTANTS, repeat=2):
             if not valid_binary(fn, a, b):
@@ -149,10 +161,8 @@ class TestValueRanges(TestCase):
                     continue
                 ref_r = getattr(ReferenceAnalysis, fn)(a, b)
 
-                # sympy.floordiv does 1.0 // 1.0 == 1 rather than 1.0. wtf
-                if fn != "floordiv":
-                    self.assertEqual(r.lower.is_integer, r.upper.is_integer)
-                    self.assertEqual(ref_r.is_integer, r.upper.is_integer)
+                self.assertEqual(r.lower.is_integer, r.upper.is_integer)
+                self.assertEqual(ref_r.is_integer, r.upper.is_integer)
                 self.assertEqual(r.lower, r.upper)
                 self.assertEqual(ref_r, r.lower)
 
@@ -226,13 +236,13 @@ class TestValueRanges(TestCase):
             if fn == "pow" and b.upper > 4 and b.upper != sympy.oo:
                 continue
             with self.subTest(a=a, b=b):
-                ref_r = getattr(ValueRangeAnalysis, fn)(a, b)
                 for a0, b0 in itertools.product(LESS_CONSTANTS, repeat=2):
                     if a0 not in a or b0 not in b:
                         continue
                     if not valid_binary(fn, a0, b0):
                         continue
                     with self.subTest(a0=a0, b0=b0):
+                        ref_r = getattr(ValueRangeAnalysis, fn)(a, b)
                         r = getattr(ReferenceAnalysis, fn)(
                             sympy.Integer(a0), sympy.Integer(b0)
                         )
@@ -247,7 +257,13 @@ class TestSympyInterp(TestCase):
         if fn in ("div", "truncdiv", "minimum", "maximum", "mod"):
             return
 
-        from sympy.abc import x, y
+        is_integer = None
+        if fn == "pow_by_natural":
+            is_integer = True
+
+        x = sympy.Dummy('x', integer=is_integer)
+        y = sympy.Dummy('y', integer=is_integer)
+
         vals = CONSTANTS
         if fn in {*UNARY_BOOL_OPS, *BINARY_BOOL_OPS}:
             vals = [True, False]
@@ -289,28 +305,16 @@ class TestSympyInterp(TestCase):
         if fn in {*BINARY_OPS, *BINARY_BOOL_OPS, *COMPARE_OPS}:
             arity = 2
 
-        from sympy.abc import x, y
+        is_integer = None
+        if fn == "pow_by_natural":
+            is_integer = True
+
+        x = sympy.Dummy('x', integer=is_integer)
+        y = sympy.Dummy('y', integer=is_integer)
 
         symbols = [x]
         if arity == 2:
             symbols = [x, y]
-
-        # Workaround mpf from symbol error
-        if fn == "minimum":
-            sympy_expr = sympy.Min(x, y)
-        elif fn == "maximum":
-            sympy_expr = sympy.Max(x, y)
-        else:
-            sympy_expr = getattr(ReferenceAnalysis, fn)(*symbols)
-
-        if arity == 1:
-            def trace_f(px):
-                return sympy_interp(PythonReferenceAnalysis, {x: px}, sympy_expr)
-        else:
-            def trace_f(px, py):
-                return sympy_interp(PythonReferenceAnalysis, {x: px, y: py}, sympy_expr)
-
-        gm = fx.symbolic_trace(trace_f)
 
         for args in itertools.product(vals, repeat=arity):
             if arity == 1 and not valid_unary(fn, *args):
@@ -319,11 +323,28 @@ class TestSympyInterp(TestCase):
                 continue
             if fn == "truncdiv" and args[1] == 0:
                 continue
-            elif fn == "pow" and (args[0] == 0 and args[1] <= 0):
+            elif fn in ("pow", "pow_by_natural") and (args[0] == 0 and args[1] <= 0):
                 continue
             elif fn == "floordiv" and args[1] == 0:
                 continue
             with self.subTest(args=args):
+                # Workaround mpf from symbol error
+                if fn == "minimum":
+                    sympy_expr = sympy.Min(x, y)
+                elif fn == "maximum":
+                    sympy_expr = sympy.Max(x, y)
+                else:
+                    sympy_expr = getattr(ReferenceAnalysis, fn)(*symbols)
+
+                if arity == 1:
+                    def trace_f(px):
+                        return sympy_interp(PythonReferenceAnalysis, {x: px}, sympy_expr)
+                else:
+                    def trace_f(px, py):
+                        return sympy_interp(PythonReferenceAnalysis, {x: px, y: py}, sympy_expr)
+
+                gm = fx.symbolic_trace(trace_f)
+
                 self.assertEqual(
                     sympy_interp(PythonReferenceAnalysis, dict(zip(symbols, args)), sympy_expr),
                     gm(*args)

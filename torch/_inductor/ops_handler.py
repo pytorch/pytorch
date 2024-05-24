@@ -460,6 +460,7 @@ class OpsHandler(Protocol[T]):
     def mul(self, x0: T, x1: T) -> T:
         ...
 
+    # NB: this returns a float, like the torch operation
     def pow(self, x0: T, x1: T) -> T:
         ...
 

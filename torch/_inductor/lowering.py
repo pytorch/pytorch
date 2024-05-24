@@ -4374,7 +4374,7 @@ def upsample_nearest2d_backward(
     w_kernel_max = ceildiv(inp_w, out_w)
 
     def start_index(index, out_dim, inp_dim):
-        return CeilDiv(index * inp_dim, out_dim)
+        return CeilDiv(index * inp_dim, sympy.sympify(out_dim))
 
     def end_index(index, out_dim, inp_dim):
         return start_index((index + 1), out_dim, inp_dim)
