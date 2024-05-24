@@ -1220,9 +1220,12 @@ class Exporter:
         with self.options.diagnostic_context, torch._dynamo.config.patch(
             dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)
         ):
-            exported_program = torch.export.export(
-                self.model, args=self.model_args, kwargs=self.model_kwargs
-            )
+            if not isinstance(self.model, torch_export.ExportedProgram):
+                exported_program = torch.export.export(
+                    self.model, args=self.model_args, kwargs=self.model_kwargs
+                )
+            else:
+                exported_program = self.model
             exported_program = exported_program.run_decompositions(
                 self.options.decomposition_table
             )
@@ -1266,9 +1269,7 @@ class Exporter:
                 self.options.fx_tracer.output_adapter,
                 self.options.diagnostic_context,
                 fake_context=self.options.fake_context,
-                model_signature=getattr(
-                    self.model, "graph_signature", None
-                ),  # Available for isinstance(self.model, ExportedProgram) only
+                model_signature=exported_program.graph_signature,
                 exported_program=exported_program,
             )
 
