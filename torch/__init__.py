@@ -1912,9 +1912,7 @@ def compile(model: Optional[Callable] = None, *,
 
 
 from torch import export as export
-# TODO: This import is required for cond to be exposed under torch, e.g. torch.cond, but it causes import errors 
-# Such as module 'torch._functorch' has no attribute 'eager_transform'
-# from torch._higher_order_ops import cond
+from torch._higher_order_ops import cond
 
 def _register_device_module(device_type, module):
     r"""Register an external runtime module of the specific :attr:`device_type`

@@ -29,7 +29,6 @@ from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._subclasses.functional_tensor import (
     disable_functional_mode,
-    FunctionalTensor,
 )
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
@@ -38,10 +37,10 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
-from torch.multiprocessing.reductions import StorageWeakRef
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 from torch.fx.experimental.proxy_tensor import _temp_remove_pre_dispatch_torch_function_mode
+from .utils import _from_fun, clone_outputs_aliasing_inputs, prepare_fw_with_masks
 
 @exposed_in("torch")
 def cond(pred, true_fn, false_fn, operands):
@@ -152,10 +151,11 @@ We're going to define a `cond_op` operation.
 In order to do this, we need implementations for each of the dispatch keys.
 """
 cond_op = HigherOrderOperator("cond")
+cond_op.__module__ = "torch.ops.higher_order"
 
-def create_fw_bw_graph(true_fn, false_fn, operands):
+def create_fw_bw_graph(true_fn, false_fn, *operands):
     
-    from torch._functorch.aot_autograd import AOTConfig, create_joint, from_fun
+    from torch._functorch.aot_autograd import AOTConfig, create_joint
     dummy_aot_config = AOTConfig(
         fw_compiler=None,  # type: ignore[arg-type]
         bw_compiler=None,  # type: ignore[arg-type]
@@ -183,31 +183,6 @@ def create_fw_bw_graph(true_fn, false_fn, operands):
 
     with suspend_functionalization(), disable_functional_mode():
         with disable_proxy_modes_tracing():
-
-            def _from_fun(t):
-                if isinstance(t, torch.Tensor):
-                    if t.dtype != torch.bool:
-                        return torch.empty_strided(
-                            t.size(),
-                            t.stride(),
-                            dtype=t.dtype,
-                            requires_grad=t.requires_grad,
-                        )
-                    else:
-                        # clone of a functional tensor produces a functional tensor
-                        # but we want to avoid it so we clone a non-functional version
-                        maybe_unfunc_t = t
-                        if isinstance(t, FunctionalTensor):
-                            torch._sync(t)
-                            maybe_unfunc_t = from_fun(t)
-                        elif torch._is_functional_tensor(t):
-                            # need to handle both types of functionalization here:
-                            # these are the tensors that came from the user,
-                            # which could be either FunctionalTensorWrapper or FunctionalTensor
-                            torch._sync(t)
-                            maybe_unfunc_t = torch._from_functional_tensor(t)
-                        return maybe_unfunc_t.clone()
-                return t
 
             num_mapped_args = len(operands)
             unwrapped_mapped_operands = pytree.tree_map(_from_fun, operands)
@@ -238,19 +213,7 @@ def create_fw_bw_graph(true_fn, false_fn, operands):
             mapped_input = joint_mapped_args[:num_mapped_args]
             mapped_grads = joint_mapped_args[num_mapped_args:]
 
-            def fw_with_masks(*args):
-                fw_out = true_fn(*args)
-                # fw_out = [fw_out]
-                if type(fw_out) != list and type(fw_out) != tuple:
-                    fw_out = [fw_out]
-                return fw_out, [
-                    True
-                    if isinstance(ret, torch.Tensor) and ret.requires_grad
-                    else False
-                    for ret in fw_out
-                ]
-
-            joint = create_joint(fw_with_masks, aot_config=dummy_aot_config)
+            joint = create_joint(prepare_fw_with_masks(true_fn), aot_config=dummy_aot_config)
             _, grads = joint(
                 list(mapped_input),
                 [
@@ -261,20 +224,8 @@ def create_fw_bw_graph(true_fn, false_fn, operands):
             )
 
             # In order to keep map functional for backward graph,
-            # we clone outputs that are aliasing inputs
-            input_storage = {
-                StorageWeakRef(arg._typed_storage())
-                for arg in joint_mapped_args
-                if isinstance(arg, torch.Tensor)
-            }
-
-            def maybe_clone(t):
-                if (
-                    isinstance(t, torch.Tensor)
-                    and StorageWeakRef(t._typed_storage()) in input_storage
-                ):
-                    return t.clone()
-                return t
+            # we clone outputs that are aliasing inputs           
+            maybe_clone = clone_outputs_aliasing_inputs(joint_mapped_args)
 
             return pytree.tree_map(maybe_clone, grads)
         
@@ -282,19 +233,7 @@ def create_fw_bw_graph(true_fn, false_fn, operands):
             mapped_input = joint_mapped_args[:num_mapped_args]
             mapped_grads = joint_mapped_args[num_mapped_args:]
 
-            def fw_with_masks(*args):
-                fw_out = false_fn(*args)
-                # fw_out = [fw_out]
-                if type(fw_out) != list and type(fw_out) != tuple:
-                    fw_out = [fw_out]
-                return fw_out, [
-                    True
-                    if isinstance(ret, torch.Tensor) and ret.requires_grad
-                    else False
-                    for ret in fw_out
-                ]
-
-            joint = create_joint(fw_with_masks, aot_config=dummy_aot_config)
+            joint = create_joint(prepare_fw_with_masks(false_fn), aot_config=dummy_aot_config)
             _, grads = joint(
                 list(mapped_input),
                 [
@@ -306,19 +245,7 @@ def create_fw_bw_graph(true_fn, false_fn, operands):
 
             # In order to keep map functional for backward graph,
             # we clone outputs that are aliasing inputs
-            input_storage = {
-                StorageWeakRef(arg._typed_storage())
-                for arg in joint_mapped_args
-                if isinstance(arg, torch.Tensor)
-            }
-
-            def maybe_clone(t):
-                if (
-                    isinstance(t, torch.Tensor)
-                    and StorageWeakRef(t._typed_storage()) in input_storage
-                ):
-                    return t.clone()
-                return t
+            maybe_clone = clone_outputs_aliasing_inputs(joint_mapped_args)
 
             return pytree.tree_map(maybe_clone, grads)
 
@@ -448,7 +375,7 @@ class CondAutogradOp(torch.autograd.Function):
 @cond_op.py_impl(DispatchKey.Autograd)
 def cond_autograd(pred, true_fn, false_fn, operands):
     num_mapped_args = len(operands)
-    fw_true_graph, fw_false_graph, joint_true_graph, joint_false_graph = create_fw_bw_graph(true_fn, false_fn, operands)
+    fw_true_graph, fw_false_graph, joint_true_graph, joint_false_graph = create_fw_bw_graph(true_fn, false_fn, *operands)
     flat_out = CondAutogradOp.apply(pred, fw_true_graph, fw_false_graph, joint_true_graph, joint_false_graph, num_mapped_args, *operands)
     return flat_out
 

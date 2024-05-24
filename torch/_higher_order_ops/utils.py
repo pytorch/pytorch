@@ -201,3 +201,100 @@ def unique_graph_id(proxy_mode, prefix):
         else:
             next_name = candidate
     return i, next_name
+
+def _from_fun(t):
+    from torch._subclasses.functional_tensor import (
+        FunctionalTensor,
+    )
+    from torch._functorch.aot_autograd import from_fun
+
+    if isinstance(t, torch.Tensor):
+        if t.dtype != torch.bool:
+            return torch.empty_strided(
+                t.size(),
+                t.stride(),
+                dtype=t.dtype,
+                requires_grad=t.requires_grad,
+            )
+        else:
+            # clone of a functional tensor produces a functional tensor
+            # but we want to avoid it so we clone a non-functional version
+            maybe_unfunc_t = t
+            if isinstance(t, FunctionalTensor):
+                torch._sync(t)
+                maybe_unfunc_t = from_fun(t)
+            elif torch._is_functional_tensor(t):
+                # need to handle both types of functionalization here:
+                # these are the tensors that came from the user,
+                # which could be either FunctionalTensorWrapper or FunctionalTensor
+                torch._sync(t)
+                maybe_unfunc_t = torch._from_functional_tensor(t)
+            return maybe_unfunc_t.clone()
+    return t
+
+def clone_outputs_aliasing_inputs(args):
+    input_storage = {
+        StorageWeakRef(arg._typed_storage())
+        for arg in args
+        if isinstance(arg, torch.Tensor)
+    }
+
+    def maybe_clone(t):
+        if (
+            isinstance(t, torch.Tensor)
+            and StorageWeakRef(t._typed_storage()) in input_storage
+        ):
+            return t.clone()
+        return t
+    
+    return maybe_clone
+
+def prepare_fw_with_masks(fn):
+    def fw_with_masks(*args):
+        fw_out = fn(*args)
+        return fw_out, [
+            True
+            if isinstance(ret, torch.Tensor) and ret.requires_grad
+            else False
+            for ret in fw_out
+        ]
+    return fw_with_masks
+
+def _unstack_pytree(xs):
+    flat_xs, inspec = pytree.tree_flatten(xs)
+    if not all(isinstance(xs, torch.Tensor) for xs in flat_xs):
+        raise RuntimeError(f"Leaves of xs must be Tensor {flat_xs}")
+
+    if not all(xs.shape[0] == flat_xs[0].shape[0] for xs in flat_xs):
+        raise RuntimeError(
+            f"Leaves of xs must have same leading dimension size {[xs.shape for xs in flat_xs]}"
+        )
+
+    a = zip(*flat_xs)
+
+    pytrees = []
+    for tuple in a:
+        pytrees.append(pytree.tree_unflatten(tuple, inspec))
+    return pytrees
+
+
+def _stack_pytree(pytrees):
+    flat_out = []
+    out_spec = None
+    for pt in pytrees:
+        flat_pt, out_spec = pytree.tree_flatten(pt)
+        flat_out.append(flat_pt)
+    assert out_spec is not None
+    b = zip(*flat_out)
+    stacked_out = []
+    for leaves in b:
+        if all(isinstance(leaf, torch.Tensor) for leaf in leaves):
+            stacked_out.append(torch.stack(leaves))
+        elif all(leaf is None for leaf in leaves):
+            # Backward graph can return None output when forward inputs doesn't require grad.
+            # When we eagerly execute backward graph, we need to call _stack_pytree on its output,
+            # therefore we need to deal with None output.
+            stacked_out.append(None)  # type: ignore[arg-type]
+        else:
+            raise RuntimeError(f"Cannot stack {leaves}.")
+    return pytree.tree_unflatten(stacked_out, out_spec)
