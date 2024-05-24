@@ -543,9 +543,7 @@ class OpOverrides:
 
     @staticmethod
     def erfcx(x):
-        return ops.mul(
-            ops.pow(ops.constant(math.e, torch.float32), ops.square(x)), ops.erfc(x)
-        )
+        return ops.mul(ops.exp(ops.square(x)), ops.erfc(x))
 
     @staticmethod
     def expm1(x):
@@ -558,6 +556,52 @@ class OpOverrides:
     @staticmethod
     def log2(x):
         return ops.mul(ops.log(x), ops.constant(1 / math.log(2), torch.float32))
+
+    @staticmethod
+    def exp2(x):
+        return ops.exp(ops.mul(x, ops.constant(math.log(2), torch.float32)))
+
+    @staticmethod
+    def log1p(x):
+        return ops.log(ops.add(x, ops.constant(1, torch.int32)))
+
+    @staticmethod
+    def sigmoid(x):
+        one = ops.constant(1, torch.int32)
+        return ops.truediv(one, ops.add(one, ops.exp(ops.neg(x))))
+
+    @staticmethod
+    def libdevice_sigmoid(x):
+        one = ops.constant(1, torch.int32)
+        return ops.truediv(one, ops.add(one, ops.libdevice_exp(ops.neg(x))))
+
+    @staticmethod
+    def relu(x):
+        return ops.maximum(x, ops.constant(0, torch.int32))
+
+    @staticmethod
+    def libdevice_abs(x):
+        return ops.abs(x)
+
+    @staticmethod
+    def libdevice_sqrt(x):
+        return ops.sqrt(x)
+
+    @staticmethod
+    def libdevice_cos(x):
+        return ops.cos(x)
+
+    @staticmethod
+    def libdevice_sin(x):
+        return ops.sin(x)
+
+    @staticmethod
+    def libdevice_log(x):
+        return ops.log(x)
+
+    @staticmethod
+    def libdevice_exp(x):
+        return ops.exp(x)
 
     @staticmethod
     def bitwise_not(x):

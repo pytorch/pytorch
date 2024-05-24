@@ -222,32 +222,16 @@ class HalideOverrides(OpOverrides):
         return f"hl.abs({x})"
 
     @staticmethod
-    def libdevice_abs(x):
-        return f"hl.abs({x})"
-
-    @staticmethod
     def exp(x):
-        return f"hl.fast_exp({x})"
+        return f"hl.fast_exp(hl.cast(hl.Float(32), {x})) if {x.name}.type().bits() <= 32 else hl.exp({x})"
 
     @staticmethod
     def libdevice_exp(x):
-        return f"hl.exp({x})"
-
-    @staticmethod
-    def exp2(x):
-        return f"hl.exp2({x})"
+        return f"hl.exp({x})"  # higher precision that ops.exp
 
     @staticmethod
     def sqrt(x):
         return f"hl.sqrt({x})"
-
-    @staticmethod
-    def libdevice_sqrt(x):
-        return f"hl.sqrt({x})"
-
-    @staticmethod
-    def relu(x):
-        return f"hl.max(0, {x})"
 
     @staticmethod
     def minimum(a, b):
@@ -266,15 +250,7 @@ class HalideOverrides(OpOverrides):
         return f"hl.cos({x})"
 
     @staticmethod
-    def libdevice_cos(x):
-        return f"hl.cos({x})"
-
-    @staticmethod
     def sin(x):
-        return f"hl.sin({x})"
-
-    @staticmethod
-    def libdevice_sin(x):
         return f"hl.sin({x})"
 
     @staticmethod
@@ -398,24 +374,12 @@ class HalideOverrides(OpOverrides):
         return f"hl.fast_inverse_sqrt({x})"
 
     @staticmethod
-    def log1p(x):
-        return f"hl.fast_log(({x}) + 1)"
-
-    @staticmethod
     def tan(x):
         return f"hl.tan({x})"
 
     @staticmethod
     def tanh(x):
         return f"hl.tanh({x})"
-
-    @staticmethod
-    def sigmoid(x):
-        return f"1./(1. + hl.fast_exp(-({x})))"
-
-    @staticmethod
-    def libdevice_sigmoid(x):
-        return f"1./(1. + hl.exp(-({x})))"
 
     @staticmethod
     def signbit(x):
@@ -435,7 +399,7 @@ class HalideOverrides(OpOverrides):
 
     @staticmethod
     def libdevice_log(x):
-        return f"hl.log({x})"
+        return f"hl.log({x})"  # higher precision that ops.log
 
     @staticmethod
     def isinf(x):
