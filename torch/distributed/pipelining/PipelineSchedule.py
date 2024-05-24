@@ -10,13 +10,23 @@ import torch.distributed as dist
 from torch.profiler import record_function
 
 from ._IR import Pipe
-from ._PipelineStage import PipelineStageBase
 from .microbatch import merge_chunks, split_args_kwargs_into_chunks
+from .PipelineStage import _PipelineStageBase
+
+
+__all__ = [
+    "PipelineScheduleSingle",
+    "PipelineScheduleMulti",
+    "Schedule1F1B",
+    "ScheduleGPipe",
+    "ScheduleInterleaved1F1B",
+    "ScheduleLoopedBFS",
+]
 
 logger = logging.getLogger(__name__)
 
 
-class PipelineSchedule(ABC):
+class _PipelineSchedule(ABC):
     def __init__(
         self,
         n_microbatches: int,
@@ -228,7 +238,7 @@ def _sorted_batch_p2p(
     return work_by_peer
 
 
-class PipelineScheduleSingle(PipelineSchedule):
+class PipelineScheduleSingle(_PipelineSchedule):
     """
     Base class for single-stage schedules.
     Implements the `step` method.
@@ -237,7 +247,7 @@ class PipelineScheduleSingle(PipelineSchedule):
 
     def __init__(
         self,
-        stage: PipelineStageBase,
+        stage: _PipelineStageBase,
         n_microbatches: int,
         loss_fn: Optional[Callable] = None,
         output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
@@ -509,7 +519,7 @@ class Schedule1F1B(PipelineScheduleSingle):
         self._update_losses(self._stage, losses)
 
 
-class PipelineScheduleMulti(PipelineSchedule):
+class PipelineScheduleMulti(_PipelineSchedule):
     """
     Base class for multi-stage schedules.
     Implements the `step` method.
@@ -518,7 +528,7 @@ class PipelineScheduleMulti(PipelineSchedule):
 
     def __init__(
         self,
-        stages: List[PipelineStageBase],
+        stages: List[_PipelineStageBase],
         n_microbatches: int,
         loss_fn: Optional[Callable] = None,
         output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
@@ -652,7 +662,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
 
     def __init__(
         self,
-        stages: List[PipelineStageBase],
+        stages: List[_PipelineStageBase],
         n_microbatches: int,
         loss_fn: Optional[Callable] = None,
         output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
@@ -726,8 +736,8 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
                 - ((step - warmup_steps) // self.pp_group_size) % self.n_local_stages
             )
 
-        fwd_stage_mb_index: Dict[PipelineStageBase, int] = defaultdict(int)
-        bwd_stage_mb_index: Dict[PipelineStageBase, int] = defaultdict(int)
+        fwd_stage_mb_index: Dict[_PipelineStageBase, int] = defaultdict(int)
+        bwd_stage_mb_index: Dict[_PipelineStageBase, int] = defaultdict(int)
 
         # Delay send waits
         sends_to_wait: List[dist.Work] = []

@@ -8,8 +8,9 @@ import tempfile
 import torch
 import torch.distributed as dist
 
-from model_registry import ExampleCode, MultiMLP
+from model_registry import ModelWithKwargs, MultiMLP
 from torch.distributed.pipelining import (
+    ManualPipelineStage,
     pipeline,
     PipelineStage,
     Schedule1F1B,
@@ -52,58 +53,9 @@ class ScheduleTest(MultiProcContinousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_ec_forward(self):
-        # Setting this flag for numerical stability
-        torch.distributed.pipelining.microbatch._debug_mask_minibatches = True
-
-        mod = ExampleCode(d_hid)
-        mod.to(self.device)
-
-        x = torch.randn(batch_size, d_hid, device=self.device)
-        y = torch.randn(batch_size, d_hid, device=self.device)
-
-        pipe = pipeline(
-            mod,
-            chunks,
-            example_args=(x,),
-            example_kwargs={"y": y},
-        )
-
-        stage = PipelineStage(
-            pipe,
-            self.rank,
-            device=self.device,
-        )
-
-        # Attach to a schedule
-        schedule = ScheduleGPipe(stage, chunks)
-
-        # Run
-        if self.rank == 0:
-            schedule.step(x, y=y)
-        else:
-            out = schedule.step()
-
-        dist.barrier()
-
-        # Last rank checks result
-        if self.rank == self.world_size - 1:
-            ref_out = mod(x, y=y)
-            torch.testing.assert_close(out, ref_out)
-
-        # Test qualname mapping
-        submod_keys = stage.submod.state_dict().keys()
-        # Confirm keys are consistent with original model
-        old_keys = mod.state_dict().keys()
-        assert all(k in old_keys for k in submod_keys)
-        # Reset this flag
-        torch.distributed.pipelining.microbatch._debug_mask_minibatches = False
-
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
-    def test_ec_backward(self, ScheduleClass):
-        mod = ExampleCode(d_hid)
+    def test_kwargs_with_tracer(self, ScheduleClass):
+        mod = ModelWithKwargs(d_hid)
         mod.to(self.device)
 
         x = torch.randn(batch_size, d_hid, device=self.device)
@@ -149,8 +101,9 @@ class ScheduleTest(MultiProcContinousTest):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
-    def test_grad(self, ScheduleClass):
-        mod = MultiMLP(d_hid)
+    @parametrize("ModelClass", [MultiMLP])
+    def test_grad_with_tracer(self, ScheduleClass, ModelClass):
+        mod = ModelClass(d_hid)
         mod.to(self.device)
 
         ref_mod = copy.deepcopy(mod)
@@ -213,6 +166,79 @@ class ScheduleTest(MultiProcContinousTest):
         # Every rank checks gradients
         for name, p in stage_module.named_parameters():
             ref_p = ref_mod.get_parameter(name)
+            try:
+                torch.testing.assert_close(p.grad, ref_p.grad, rtol=1e-5, atol=4e-5)
+            except AssertionError:
+                print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
+                raise
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
+    def test_grad_with_manual(self, ScheduleClass):
+        full_mod = MultiMLP(d_hid)
+        full_mod.to(self.device)
+
+        ref_mod = copy.deepcopy(full_mod)
+        x = torch.randn(batch_size, d_hid, device=self.device)
+        with torch.no_grad():
+            y = ref_mod(x)
+            # Add a small perturbation
+            target = y + torch.randn(batch_size, d_hid, device=self.device)
+
+        loss_fn = torch.nn.MSELoss(reduction="sum")
+
+        # Run reference
+        for _ in range(2):
+            ref_mod.zero_grad()
+            ref_out = ref_mod(x)
+            ref_loss = loss_fn(ref_out, target)
+            ref_loss.backward()
+
+        # Get a submodule, e.g. mlp0 or mlp1
+        submod_name = f"mlp{self.rank}"
+        stage_module = full_mod.get_submodule(submod_name)
+        # Create a pipeline stage to wrap that submodule
+        stage = ManualPipelineStage(
+            stage_module,
+            self.rank,
+            self.world_size,
+            self.device,
+            chunks,
+            input_args=x.chunk(chunks)[0],
+        )
+
+        # Attach to a schedule
+        schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn)
+
+        # Run
+        for _ in range(2):
+            # Zero gradients
+            stage_module.zero_grad()
+            if self.rank == 0:
+                schedule.step(x)
+            elif self.rank == self.world_size - 1:
+                losses = []
+                out = schedule.step(target=target, losses=losses)
+            else:
+                schedule.step()
+
+        dist.barrier()
+
+        # Last rank checks result
+        if self.rank == self.world_size - 1:
+            # Check output
+            torch.testing.assert_close(out, ref_out)
+            # Check loss
+            # Since the reduction used in the loss function above is "sum", we use
+            # "sum" here to reduce microbatch losses into a single value too.
+            pipe_loss = sum(losses)
+            torch.testing.assert_close(pipe_loss, ref_loss)
+
+        # Every rank checks gradients
+        ref_submod = ref_mod.get_submodule(submod_name)
+        for name, p in stage_module.named_parameters():
+            ref_p = ref_submod.get_parameter(name)
             try:
                 torch.testing.assert_close(p.grad, ref_p.grad, rtol=1e-5, atol=4e-5)
             except AssertionError:

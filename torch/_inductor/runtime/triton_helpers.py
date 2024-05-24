@@ -115,20 +115,33 @@ def min_with_index(value, index, dim):
 def max_with_index(value, index, dim):
     return tl.reduce((value, index), dim, maximum_with_index)
 
+
 @triton.jit
 def online_softmax_reduce(lhs_max, lhs_sum, dim):
     out_max = max2(lhs_max, dim)
     out_sum = tl.sum(lhs_sum * math.exp(lhs_max - out_max[:, None]), dim)
     return out_max, out_sum
 
+
 @triton.jit
-def online_softmax_combine(lhs_max, lhs_sum, rhs_max, rhs_sum):
+def online_softmax_combine(lhs_max, lhs_sum, rhs_max):
+    """
+    When we do combine, we assume lhs is the accumulator and rhs is the next
+    block of data.
+    Then rhs_sum is always 1. With that assumption, we can save some registers
+    and computation.
+    """
     out_max = maximum(lhs_max, rhs_max)
     lhs_scale = math.exp(lhs_max - out_max)
     out_sum = lhs_sum * lhs_scale
     rhs_scale = math.exp(rhs_max - out_max)
-    out_sum = out_sum + rhs_sum * rhs_scale
+
+    # Should be
+    #   out_sum = out_sum + rhs_sum * rhs_scale
+    # but since rhs_sum is all 1, we can simpliy it.
+    out_sum = out_sum + rhs_scale
     return out_max, out_sum
+
 
 @triton.jit
 def welford_reduce(value, mean, m2, weight, first_iteration):

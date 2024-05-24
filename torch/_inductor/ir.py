@@ -1368,7 +1368,7 @@ class MultiOutputReduction(Reduction):
         return ops.store_reduction(output_name, indexer(vars), value)
 
     @classmethod
-    def create(
+    def create(  # type: ignore[override]
         cls,
         device: torch.device,
         dst_dtype: torch.dtype,
@@ -1400,6 +1400,7 @@ class MultiOutputReduction(Reduction):
         for t in results:
             t.realize()
         return results
+
 
 class WelfordReduction(Reduction):
     output_index: int

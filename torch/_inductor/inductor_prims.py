@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Tuple
 
 import torch
 from torch import _prims, Tensor
@@ -46,9 +46,11 @@ def eager_force_stride(input_tensor: Tensor, stride) -> Tensor:
     new_tensor.copy_(input_tensor)
     return new_tensor
 
-def eager_online_softmax(x: Tensor, dim: int) -> (Tensor, Tensor):
+
+def eager_online_softmax(x: Tensor, dim: int) -> Tuple[Tensor, Tensor]:
     amax = torch.amax(x, dim, keepdim=True)
     return amax, torch.sum(torch.exp(x - amax), dim, keepdim=True)
+
 
 # Custom prims used for handling randomness
 seed = make_prim(

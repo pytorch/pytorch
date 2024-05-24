@@ -56,8 +56,6 @@ inductor_decompositions = get_decompositions(
         aten.lcm,
         aten.leaky_relu,
         aten.linalg_vector_norm,
-        # aten._log_softmax,
-        # aten._softmax,
         aten.max_pool2d_with_indices_backward,
         aten._native_batch_norm_legit,
         aten._native_batch_norm_legit_functional,
@@ -96,8 +94,8 @@ decomps_to_exclude = [
     aten.squeeze,  # inductor lowers this directly
     aten.sum,  # inductor lowers this directly
     aten.unbind,  # inductor lowers this directly
-    aten._softmax, # inductor will override this rule
-    aten._log_softmax, # inductor will override this rule
+    aten._softmax,  # inductor will override this rule
+    aten._log_softmax,  # inductor will override this rule
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
@@ -744,6 +742,18 @@ def max_pool2d_with_indices(
     )
     return vals, indices
 
+
+def _use_online_softmax(x, dim):
+    if not config.online_softmax:
+        return False
+
+    # Don't do online softmax for scalar or 1d tensor
+    if x.dim() < 2:
+        return False
+
+    return x.size(dim) > 2**14
+
+
 @register_decomposition(aten._softmax)
 def _softmax(x: torch.Tensor, dim: int, half_to_float: bool):
     # eager softmax returns a contiguous tensor. Ensure that decomp also returns
@@ -758,7 +768,7 @@ def _softmax(x: torch.Tensor, dim: int, half_to_float: bool):
     if x.numel() == 0:
         unnormalized = torch.exp(x)
         result = unnormalized / torch.sum(unnormalized, dim, keepdim=True)
-    elif x.size(dim) <= 2 ** 14 or not config.online_softmax:
+    elif not _use_online_softmax(x, dim):
         # don't want to affect small softmax. That may inferfere with
         # the attention patterns.
         x_max = torch.amax(x, dim, keepdim=True)
@@ -771,6 +781,7 @@ def _softmax(x: torch.Tensor, dim: int, half_to_float: bool):
     if not half_to_float:
         result = result.to(result_dtype)
     return result
+
 
 @register_decomposition(aten._log_softmax)
 def _log_softmax(x: torch.Tensor, dim: int, half_to_float: bool):
@@ -786,7 +797,7 @@ def _log_softmax(x: torch.Tensor, dim: int, half_to_float: bool):
     if x.numel() == 0:
         shifted = x
         shifted_logsumexp = torch.log(torch.sum(torch.exp(shifted), dim, keepdim=True))
-    elif x.size(dim) <= 2 ** 14 or not config.online_softmax:
+    elif not _use_online_softmax(x, dim):
         x_max = torch.amax(x, dim, keepdim=True)
         shifted = x - x_max
         shifted_logsumexp = torch.log(torch.sum(torch.exp(shifted), dim, keepdim=True))
@@ -799,4 +810,3 @@ def _log_softmax(x: torch.Tensor, dim: int, half_to_float: bool):
     if not half_to_float:
         result = result.to(result_dtype)
     return result
-

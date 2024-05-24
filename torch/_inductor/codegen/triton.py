@@ -1477,7 +1477,6 @@ class TritonKernel(SIMDKernel):
             elif reduction_type == "online_softmax_reduce":
                 accumulator_max = f"_{result_var}_max"
                 accumulator_sum = f"_{result_var}_sum"
-                ones = f"_{result_var}_ones"
 
                 # setup accumulator
                 self.body.writeline(
@@ -1486,17 +1485,15 @@ class TritonKernel(SIMDKernel):
                 self.body.writeline(
                     f"{accumulator_sum} = tl.zeros({self.dense_size_str()}, {acc_type})"
                 )
-                self.body.writeline(
-                    f"{ones} = tl.full({self.dense_size_str()}, 1, {acc_type})"
-                )
 
                 # combine
                 self.compute.splice(
                     f"""
-                    {accumulator_max}_next, {accumulator_sum}_next = triton_helpers.online_softmax_combine({accumulator_max}, {accumulator_sum}, {value}, {ones})
+                    {accumulator_max}_next, {accumulator_sum}_next = triton_helpers.online_softmax_combine(
+                        {accumulator_max}, {accumulator_sum}, {value}
+                    )
                     """
                 )
-
 
                 # mask
                 self.compute.splice(
@@ -1512,7 +1509,8 @@ class TritonKernel(SIMDKernel):
 
                 self.suffix.splice(
                     f"""
-                    {result_max}_tmp, {result_sum}_tmp = triton_helpers.online_softmax_reduce({accumulator_max}, {accumulator_sum}, {dim})
+                    {result_max}_tmp, {result_sum}_tmp = triton_helpers.online_softmax_reduce(
+                        {accumulator_max}, {accumulator_sum}, {dim})
                     {result_max} = {self.reduction_resize(f'{result_max}_tmp')}
                     {result_sum} = {self.reduction_resize(f'{result_sum}_tmp')}
                     """
@@ -1829,7 +1827,8 @@ class TritonKernel(SIMDKernel):
             grid_arg = f"{extra_args_str}grid=grid({', '.join(grid)})"
         else:
             grid_arg = f"grid={grid}"
-        index = V.graph.scheduler.current_device.index
+        current_device = V.graph.scheduler.get_current_device_or_throw()
+        index = current_device.index
         with result.indent():
             result.writeline(f"with {V.graph.device_ops.device_guard(index)}:")
             with result.indent():
@@ -1993,7 +1992,9 @@ class TritonKernel(SIMDKernel):
         )
         triton_meta = {
             "signature": triton_meta_signature,
-            "device": DeviceProperties.create(V.graph.scheduler.current_device),
+            "device": DeviceProperties.create(
+                V.graph.scheduler.get_current_device_or_throw()
+            ),
             "constants": {},
         }
 
@@ -2002,6 +2003,8 @@ class TritonKernel(SIMDKernel):
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
             "no_x_dim": self.no_x_dim,
+            "num_load": self.num_load,
+            "num_reduction": self.num_reduction,
             **self.inductor_meta_common(),
         }
 
@@ -2160,7 +2163,7 @@ class TritonKernel(SIMDKernel):
         call_args, arg_types = self.get_call_args()
         grid: List[Any] = []
         self.add_numel_to_call_args_and_grid(name, call_args, arg_types, grid)
-        current_device = V.graph.scheduler.current_device
+        current_device = V.graph.scheduler.get_current_device_or_throw()
 
         if self.args.workspace_arg is not None:
             ws = self.args.workspace_arg
@@ -2270,9 +2273,8 @@ class TritonScheduling(SIMDScheduling):
             compile_wrapper = IndentedBuffer()
             compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
             compile_wrapper.splice(src_code, strip=True)
-            compile_wrapper.writeline(
-                f"''', device_str='{V.graph.scheduler.current_device.type}')"
-            )
+            current_device = V.graph.scheduler.get_current_device_or_throw()
+            compile_wrapper.writeline(f"''', device_str='{current_device.type}')")
 
             metadata_comment = f"# kernel path: {kernel_path}"
             origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
