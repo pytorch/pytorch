@@ -593,6 +593,7 @@ def create_aot_dispatcher_function(
                             subclass_fw_graph_out_meta=fw_metadata.subclass_fw_graph_out_meta,
                             subclass_tangent_meta=fw_metadata.subclass_tangent_meta,
                             is_train=needs_autograd,
+                            tokens=fw_metadata.tokens,
                         )
 
         if fw_metadata.num_intermediate_bases > 0:
@@ -682,7 +683,6 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
             )
         # Once all fw_metadata_wrappers have run, runtime_metadata is fixed
         runtime_metadata = fw_metadata
-
         compiled_fn = compiler_fn(
             flat_fn, fake_flat_args, aot_config, fw_metadata=runtime_metadata
         )
