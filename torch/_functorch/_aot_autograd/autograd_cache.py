@@ -63,6 +63,11 @@ class BypassAOTAutogradCache(Exception):
     pass
 
 
+# Used to signify when FXGraphCache missed when AOTAutogradCache uses it
+class FXGraphCacheMiss(BypassAOTAutogradCache):
+    pass
+
+
 def check_node_safe(node: Node):
     """
     Checks that the node only uses supported operators. We are starting with very
@@ -129,6 +134,9 @@ def check_cacheable(gm: torch.fx.GraphModule):
         raise BypassAOTAutogradCache(
             "Cannot cache a graph with compiled autograd enabled"
         )
+
+    if not torch._inductor.config.fx_graph_cache:
+        raise BypassAOTAutogradCache("FX graph cache is not enabled")
 
     tracing_context = torch._guards.TracingContext.try_get()
     if tracing_context and tracing_context.fakify_first_call:
@@ -216,7 +224,9 @@ def autograd_cache_key(
     details = AOTAutogradCacheDetails(gm, example_inputs, config)
     # The prefix distinguishes among the other kinds of objects we cache
     key = "a" + AOTAutogradCachePickler.get_hash(details)
-    log.debug("FX graph cache hash details for key %s:\n%s", key, details.debug_str())
+    log.debug(
+        "Autograd graph cache hash details for key %s:\n%s", key, details.debug_str()
+    )
     return key
 
 
@@ -236,7 +246,8 @@ class FXGraphCacheLoadable:
             self.fx_graph_cache_key, example_inputs, True, False
         )
         if result is None:
-            raise BypassAOTAutogradCache("Failed to load from FXGraphCache")
+            log.info("FXGraphCache cache miss for key %s", self.fx_graph_cache_key)
+            raise FXGraphCacheMiss
         result._boxed_call = True
         return result
 
@@ -446,18 +457,21 @@ class AOTAutogradCache:
         compiled_fn = None
         try:
             cache_key = autograd_cache_key(gm, args, aot_config)
-            check_cacheable(gm)
             entry: Optional[AOTAutogradCacheEntry] = AOTAutogradCache._lookup(cache_key)
             if entry is not None:
                 compiled_fn = entry.wrap_post_compile(args, aot_config)
                 log.info("AOTAutograd cache hit for key %s", cache_key)
                 counters["aot_autograd"]["autograd_cache_hit"] += 1
+            if compiled_fn is None:
+                log.info("AOTAutograd cache miss for key %s", cache_key)
+                counters["aot_autograd"]["autograd_cache_miss"] += 1
+        # Count missing the FXGraphCache as a miss not a bypass
+        except FXGraphCacheMiss:
+            counters["aot_autograd"]["autograd_cache_miss"] += 1
         except BypassAOTAutogradCache:
             cache_key = None
-
+            counters["aot_autograd"]["autograd_cache_bypass"] += 1
         if compiled_fn is None:
-            log.info("AOTAutograd cache miss for key %s", cache_key)
-            counters["aot_autograd"]["autograd_cache_miss"] += 1
             # Set the cache key so we can save a cache result later
             aot_config.cache_key = cache_key
             compiled_fn = dispatch_and_compile()
