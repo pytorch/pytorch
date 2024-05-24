@@ -77,6 +77,9 @@ RUN rm install_rocm.sh
 COPY ./common/install_rocm_magma.sh install_rocm_magma.sh
 RUN bash ./install_rocm_magma.sh
 RUN rm install_rocm_magma.sh
+COPY ./common/install_amdsmi.sh install_amdsmi.sh
+RUN bash ./install_amdsmi.sh
+RUN rm install_amdsmi.sh
 ENV PATH /opt/rocm/bin:$PATH
 ENV PATH /opt/rocm/hcc/bin:$PATH
 ENV PATH /opt/rocm/hip/bin:$PATH

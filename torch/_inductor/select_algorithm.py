@@ -2,6 +2,7 @@ import builtins
 import functools
 import inspect
 import itertools
+import json
 import logging
 
 import math
@@ -17,6 +18,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from unittest.mock import patch
 
 import sympy
+from filelock import FileLock
 
 import torch
 from torch._dynamo.testing import rand_strided
@@ -156,7 +158,7 @@ class TritonTemplateKernel(TritonKernel):
         if self.use_jit:
             return "@triton.jit"
 
-        argdefs, _, signature = self.args.python_argdefs()
+        argdefs, _, signature, _ = self.args.python_argdefs()
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
             "device": DeviceProperties.create(self.output_node.get_device()),
@@ -272,7 +274,9 @@ class TritonTemplateKernel(TritonKernel):
             val = self.named_input_nodes[name].get_stride()[index]
         return texpr(self.rename_indexing(val))
 
-    def modification(self, subgraph_number: int, **fixed_inputs) -> str:
+    def modification(
+        self, subgraph_number: int, output_name: str, **fixed_inputs
+    ) -> str:
         """This creates a modification function for a subgraph.
         To use this inside a template, the first argument should specify which subgraph to codegen for
 
@@ -317,7 +321,7 @@ class TritonTemplateKernel(TritonKernel):
                 out = subgraph.data.inner_fn((1,))
 
         self.codegen_body()
-        self.body.writeline(f"{fixed_inputs['out']} = {out.value}")
+        self.body.writeline(f"{output_name} = {out.value}")
 
         body_val = self.body.getvalue()
         self.body.clear()
@@ -459,7 +463,7 @@ class TritonTemplateKernel(TritonKernel):
 
     def call_kernel(self, name: str, node: Optional[ir.IRNode] = None):
         wrapper = V.graph.wrapper_code
-        _, call_args, _ = self.args.python_argdefs()
+        _, call_args, _, arg_types = self.args.python_argdefs()
         call_args = [str(a) for a in call_args]
 
         for i in range(len(call_args)):
@@ -467,6 +471,8 @@ class TritonTemplateKernel(TritonKernel):
                 call_args[i] = call_args[i] + ".item()"
             if isinstance(call_args[i], sympy.Symbol):
                 call_args[i] = texpr(call_args[i])
+
+        current_device = V.graph.scheduler.get_current_device_or_throw()
 
         if V.graph.cpp_wrapper:
             # In the cpp_wrapper case, we have to compute CUDA launch grid at runtime
@@ -482,14 +488,13 @@ class TritonTemplateKernel(TritonKernel):
             wrapper.generate_kernel_call(
                 name,
                 call_args,
-                device_index=V.graph.scheduler.current_device.index,
+                device_index=current_device.index,
+                arg_types=arg_types,
                 grid=grid,
                 triton_meta=self.triton_meta,
             )
         else:
-            stream_name = wrapper.write_get_raw_stream(
-                V.graph.scheduler.current_device.index
-            )
+            stream_name = wrapper.write_get_raw_stream(current_device.index)
 
             wrapper.add_import_once(f"import {self.grid_fn.__module__}")
             meta = wrapper.add_meta_once(self.meta)
@@ -709,17 +714,19 @@ class ExternKernelChoice:
         has_out_variant=True,
         op_overload=None,
         use_fallback_kernel=False,
+        kernel_creator=None,
     ):
         super().__init__()
         name = name or kernel.__name__
         assert callable(kernel)
-        assert not hasattr(extern_kernels, name), "duplicate extern kernel"
+        assert not hasattr(extern_kernels, name), f"duplicate extern kernel: {name}"
         self.name = name
         self.cpp_kernel_name = cpp_kernel
         self.has_out_variant = has_out_variant
         setattr(extern_kernels, name, kernel)
         self.op_overload = op_overload
         self.use_fallback_kernel = use_fallback_kernel
+        self.kernel_creator = kernel_creator
 
     def to_callable(self):
         return getattr(extern_kernels, self.name)
@@ -886,6 +893,8 @@ class ExternKernelCaller(ChoiceCaller):
             inner = ir.FallbackKernel.create(
                 self.choice.op_overload, *self.input_nodes, **self.kwargs
             )
+        elif self.choice.kernel_creator is not None:
+            inner = self.choice.kernel_creator(*self.input_nodes, **self.kwargs)
         else:
             cls = ir.ExternKernelOut if self.has_out_variant else ir.ExternKernelAlloc
             inner = cls(
@@ -906,6 +915,114 @@ class ExternKernelCaller(ChoiceCaller):
             "backend": "extern",
             "kernel_call_name": self.choice.call_name(),
         }
+
+
+@functools.lru_cache(None)
+def get_mm_log_filename() -> Optional[str]:
+    mm_file_name = os.environ.get("TORCHINDUCTOR_MM_LOGGING_FILE", None)
+    if not mm_file_name:
+        return None
+
+    if "json" not in mm_file_name:
+        mm_file_name = f"{mm_file_name}.json"
+
+    return mm_file_name
+
+
+def append_to_log(filename, data):
+    lock_file = filename.replace(".json", ".lock")
+    lock = FileLock(lock_file)
+    with lock:
+        try:
+            with open(filename) as f:
+                log_data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            log_data = []
+
+        log_data.append(data)
+
+        with open(filename, "w") as f:
+            json.dump(log_data, f, indent=4)
+
+
+class DataProcessorChoiceCallerWrapper:
+    def __init__(self, wrapped, preprocessor, postprocessor):
+        self._wrapped = wrapped
+        if preprocessor is not None:
+            self._preprocessor = preprocessor
+        else:
+            self._preprocessor = lambda x, y: (x, y)
+        if postprocessor is not None:
+            self._postprocessor = postprocessor
+        else:
+            self._postprocessor = lambda x: x
+
+    def __getattr__(self, name):
+        return getattr(self._wrapped, name)
+
+    def benchmark(self, *args, out) -> float:
+        new_args, new_out = self._preprocessor(args, out)
+        result = self._wrapped.benchmark(*new_args, out=new_out)
+        new_out = self._postprocessor(new_out)
+        if out is not new_out:
+            out.copy_(new_out)
+        return result
+
+    def output_node(self) -> ir.TensorBox:
+        result = self._wrapped.output_node()
+        return self._postprocessor(result)
+
+    def __repr__(self) -> str:
+        return f"DataProcessorChoiceCallerWrapper({self._wrapped})"
+
+
+class DataProcessorTemplateWrapper:
+    """
+    A wrapper class for a kernel template.
+
+    This class together with `DataProcessorChoiceCallerWrapper` provides a convenient way to
+    preprocess and postprocess data before and after using the wrapped template. A typical
+    usage is to reorder or filter the input nodes in order to match the expected input of other
+    kernel choices like a ATen kernel. A more complicated usage is to prepack the weights.
+    See the example from :mod:`cpp_gemm_template` for more details.
+    """
+
+    def __init__(
+        self,
+        wrapped_template_cls,
+        preprocessor,
+        postprocessor,
+        **kwargs,
+    ):
+        if preprocessor is not None:
+            self._preprocessor = preprocessor
+        else:
+            self._preprocessor = lambda x, y: (x, y)
+        if postprocessor is not None:
+            self._postprocessor = postprocessor
+        else:
+            self._postprocessor = lambda x: x
+        assert "input_nodes" in kwargs
+        assert "layout" in kwargs
+        kwargs["input_nodes"], kwargs["layout"] = preprocessor(
+            kwargs["input_nodes"], kwargs["layout"]
+        )
+        self._wrapped = wrapped_template_cls(**kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._wrapped, name)
+
+    def maybe_append_choice(self, choices, **kwargs):
+        return type(self._wrapped).maybe_append_choice(self, choices, **kwargs)
+
+    def generate(self, **kwargs):
+        choice_caller = self._wrapped.generate(**kwargs)
+        return DataProcessorChoiceCallerWrapper(
+            choice_caller, self._preprocessor, self._postprocessor
+        )
+
+    def __repr__(self) -> str:
+        return f"DataProcessorTemplateWrapper({self._wrapped})"
 
 
 class ErrorFromChoice(RuntimeError):
@@ -955,13 +1072,19 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # Templates selected with input_gen_fns require specific input data to avoid IMA
         # Passing custom input gen fns to benchmark_fusion NYI, so skip deferred template selection
-        if input_gen_fns is not None:
+        # TODO(jgong5): support multi-template on CPU
+        if input_gen_fns is not None or layout.device.type == "cpu":
             return_multi_template = False
 
         # TODO - assert that we have not mutating kernels here
 
         # TODO(nmacchioni): remove once CI tests are fixed
         choices = [choice for choice in choices if choice is not None]
+
+        if mm_file_name := get_mm_log_filename():
+            M, K = input_nodes[-2].get_size()[:2]
+            N = input_nodes[-1].get_size()[-1]
+            append_to_log(mm_file_name, {"invoke": str((M, K, N))})
 
         if len(choices) == 0:
             raise NoValidChoicesError(
@@ -1192,7 +1315,9 @@ class AlgorithmSelectorCache(PersistentCache):
             }
             example_inputs = list(unique_example_inputs.values())
             example_inputs_extern = [
-                torch.as_strided(
+                unique_example_inputs[input_node.get_name()]
+                if unique_example_inputs[input_node.get_name()].is_mkldnn
+                else torch.as_strided(
                     unique_example_inputs[input_node.get_name()],
                     V.graph.sizevars.size_hints(
                         input_node.get_size(),
@@ -1344,9 +1469,48 @@ class AlgorithmSelectorCache(PersistentCache):
                 for n in input_nodes
             ]
         )
+
         n = None if log.getEffectiveLevel() == logging.DEBUG else 10
         top_k = sorted(timings, key=timings.__getitem__)[:n]
         best = top_k[0]
+
+        def get_choice_info(choice):
+            if isinstance(choice, torch._inductor.select_algorithm.ExternKernelCaller):
+                return {"type": "cublas", "time": timings[choice]}
+
+            assert isinstance(
+                choice, torch._inductor.select_algorithm.TritonTemplateCaller
+            )
+
+            info = choice.info_dict()
+            tile = info["tile_shape"]
+
+            tile_vals = eval(tile)  # type: ignore[arg-type]
+            BLOCK_M = tile_vals[0]
+            BLOCK_K = tile_vals[1]
+            BLOCK_N = tile_vals[2]
+
+            return {
+                "type": "triton",
+                "time": timings[choice],
+                "BLOCK_M": BLOCK_M,
+                "BLOCK_K": BLOCK_K,
+                "BLOCK_N": BLOCK_N,
+                "num_stages": info["num_stages"],
+                "num_warps": info["num_warps"],
+            }
+
+        mm_filename = get_mm_log_filename()
+        if mm_filename and "mm" in name:
+            M, K = input_nodes[-2].get_size()[:2]
+            N = input_nodes[-1].get_size()[-1]
+
+            out_dict = {
+                str((M, K, N)): [get_choice_info(choice) for choice in timings.keys()]
+            }
+
+            append_to_log(mm_filename, out_dict)
+
         best_time = timings[best]
         sys.stderr.write(f"AUTOTUNE {name}({sizes})\n")
         for choice in top_k:
