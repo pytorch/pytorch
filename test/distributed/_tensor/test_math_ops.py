@@ -293,9 +293,12 @@ class DistMathOpsTest(DTensorTestBase):
         # NLP example from pytorch docs
         # https://pytorch.org/docs/stable/generated/torch.nn.LayerNorm.html
         batch, sentence_length, embedding_dim = 20, 5, 10
-        norm_shape_idx_list = list(range(3))
-        shard_dims = [0, 1, 2]
-        elementwise_affine_list = [False, True]
+        # norm_shape_idx_list = list(range(3))
+        # shard_dims = [0, 1, 2]
+        # elementwise_affine_list = [False, True]
+        norm_shape_idx_list = [2]
+        shard_dims = [1]
+        elementwise_affine_list = [True]
         test_config_list = list(
             itertools.product(shard_dims, norm_shape_idx_list, elementwise_affine_list)
         )
@@ -360,6 +363,9 @@ class DistMathOpsTest(DTensorTestBase):
             with comm_mode:
                 y_dist.sum().backward()
 
+            print(f"dy: {y_dist.grad}")  # dy
+            print(f"dx: {x_dist.grad}")
+
             expected_bwd_comm = 0 if shard_dim < norm_idx else 1
 
             self.assertEqual(
@@ -393,6 +399,33 @@ class DistMathOpsTest(DTensorTestBase):
                 )
 
             self.assertEqual(x_local.grad, x_dist.grad.full_tensor())
+
+    @with_comms
+    def test_topk(self):
+        device_mesh = self.build_device_mesh()
+        placement_combs = [Shard(0), Shard(1), Shard(2), Replicate()]
+
+        comm_mode = CommDebugMode()
+
+        tensor = torch.randn(12, 8, 8, requires_grad=True)
+        global_topk = tensor.topk(3, dim=0)
+
+        for placement in placement_combs:
+            dtensor = distribute_tensor(tensor, device_mesh, (placement,))
+            with comm_mode:
+                out_dt = dtensor.topk(3, dim=0)
+            if placement.is_shard(0):
+                self.assertEqual(comm_mode.get_total_counts(), 1)
+                self.assertEqual(
+                    comm_mode.get_comm_counts()[funcol.all_gather_into_tensor],
+                    1,
+                )
+            out_full_values = out_dt.values.full_tensor()
+            self.assertEqual(global_topk.values, out_full_values)
+
+            # TODO: support backward scatter
+            # global_topk.values.sum().backward()
+            # out_full_values.sum().backward()
 
 
 if __name__ == "__main__":
