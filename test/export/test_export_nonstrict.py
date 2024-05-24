@@ -6,6 +6,7 @@ except ImportError:
     import test_export
     import testing
 from torch.export import export
+from torch.export._trace import _export
 
 test_classes = {}
 
@@ -17,6 +18,13 @@ def mocked_non_strict_export(*args, **kwargs):
     return export(*args, **kwargs, strict=False)
 
 
+def mocked_non_strict_private_export(*args, **kwargs):
+    # If user already specified strict, don't make it non-strict
+    if "strict" in kwargs:
+        return _export(*args, **kwargs)
+    return _export(*args, **kwargs, strict=False)
+
+
 def make_dynamic_cls(cls):
     cls_prefix = "NonStrictExport"
 
@@ -25,6 +33,7 @@ def make_dynamic_cls(cls):
         cls_prefix,
         test_export.NON_STRICT_SUFFIX,
         mocked_non_strict_export,
+        mocked_non_strict_private_export,
         xfail_prop="_expected_failure_non_strict",
     )
 

@@ -6,6 +6,7 @@ except ImportError:
     import test_export
     import testing
 from torch.export import export
+from torch.export._trace import _export
 
 test_classes = {}
 
@@ -20,6 +21,16 @@ def mocked_retraceability_export(*args, **kwargs):
     return ep
 
 
+def mocked_retraceability_private_export(*args, **kwargs):
+    ep = _export(*args, **kwargs)
+    if "dynamic_shapes" in kwargs:
+        if isinstance(kwargs["dynamic_shapes"], dict):
+            kwargs["dynamic_shapes"] = tuple(kwargs["dynamic_shapes"].values())
+
+    ep = _export(ep.module(), *(args[1:]), **kwargs)
+    return ep
+
+
 def make_dynamic_cls(cls):
     cls_prefix = "RetraceExport"
 
@@ -28,6 +39,7 @@ def make_dynamic_cls(cls):
         cls_prefix,
         test_export.RETRACEABILITY_SUFFIX,
         mocked_retraceability_export,
+        mocked_retraceability_private_export,
         xfail_prop="_expected_failure_retrace",
     )
 

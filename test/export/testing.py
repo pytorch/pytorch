@@ -4,7 +4,12 @@ from unittest.mock import patch
 
 
 def make_test_cls_with_mocked_export(
-    cls, cls_prefix, fn_suffix, mocked_export_fn, xfail_prop=None
+    cls,
+    cls_prefix,
+    fn_suffix,
+    mocked_export_fn,
+    mocked_private_export_fn,
+    xfail_prop=None,
 ):
     MockedTestClass = type(f"{cls_prefix}{cls.__name__}", cls.__bases__, {})
     MockedTestClass.__qualname__ = MockedTestClass.__name__
@@ -16,7 +21,9 @@ def make_test_cls_with_mocked_export(
                 setattr(MockedTestClass, name, getattr(cls, name))
                 continue
             new_name = f"{name}{fn_suffix}"
-            new_fn = _make_fn_with_mocked_export(fn, mocked_export_fn)
+            new_fn = _make_fn_with_mocked_export(
+                fn, mocked_export_fn, mocked_private_export_fn
+            )
             new_fn.__name__ = new_name
             if xfail_prop is not None and hasattr(fn, xfail_prop):
                 new_fn = unittest.expectedFailure(new_fn)
@@ -28,7 +35,7 @@ def make_test_cls_with_mocked_export(
     return MockedTestClass
 
 
-def _make_fn_with_mocked_export(fn, mocked_export_fn):
+def _make_fn_with_mocked_export(fn, mocked_export_fn, mocked_private_export_fn):
     @functools.wraps(fn)
     def _fn(*args, **kwargs):
         try:
@@ -37,7 +44,8 @@ def _make_fn_with_mocked_export(fn, mocked_export_fn):
             import test_export
 
         with patch(f"{test_export.__name__}.export", mocked_export_fn):
-            return fn(*args, **kwargs)
+            with patch(f"{test_export.__name__}._export", mocked_private_export_fn):
+                return fn(*args, **kwargs)
 
     return _fn
 
