@@ -232,6 +232,8 @@ def _unlift_graph(mod, gm, graph_signature):
             input_node = graph_signature.user_inputs_to_mutate[out_node.name]
             assert input_node in placeholder_node_list
             mutated_out_inputs[out_node] = placeholder_node_list[input_node]
+        else:
+            mutated_out_inputs[out_node] = None
 
     unlifted_gm = _unlift(
         gm,

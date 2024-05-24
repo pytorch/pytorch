@@ -260,7 +260,6 @@ option(USE_OPENMP "Use OpenMP for parallel code" ON)
 option(USE_PRECOMPILED_HEADERS "Use pre-compiled headers to accelerate build." OFF)
 
 option(USE_PROF "Use profiling" OFF)
-option(USE_QNNPACK "Use QNNPACK (quantized 8-bit operators)" ON)
 option(USE_PYTORCH_QNNPACK "Use ATen/QNNPACK (quantized 8-bit operators)" ON)
 option(USE_SNPE "Use Qualcomm's SNPE library" OFF)
 option(USE_SYSTEM_EIGEN_INSTALL
@@ -631,7 +630,6 @@ if(INTERN_BUILD_MOBILE)
   set(USE_DISTRIBUTED OFF)
   set(NO_API ON)
   set(USE_FBGEMM OFF)
-  set(USE_QNNPACK OFF)
   set(INTERN_DISABLE_ONNX ON)
   if(USE_BLAS)
     set(INTERN_USE_EIGEN_BLAS ON)
@@ -777,10 +775,6 @@ endif(DEBUG_CUDA)
 
 if(USE_FBGEMM)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_FBGEMM")
-endif()
-
-if(USE_QNNPACK)
-  string(APPEND CMAKE_CXX_FLAGS " -DUSE_QNNPACK")
 endif()
 
 if(USE_PYTORCH_QNNPACK)
