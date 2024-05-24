@@ -48,8 +48,8 @@ void Job::run() {
 /* Run */
 
 /* static */ bool Run::gt(
-    std::shared_ptr<Run> const& a,
-    std::shared_ptr<Run> const& b) {
+    const std::shared_ptr<Run>& a,
+    const std::shared_ptr<Run>& b) {
   return a->time() > b->time();
 }
 
@@ -157,7 +157,7 @@ int FunctionScheduler::id() {
 void FunctionScheduler::addRun(
     const std::unique_lock<std::mutex>& lock,
     int job_id,
-    std::unique_ptr<Job> const& job) {
+    const std::unique_ptr<Job>& job) {
   // This function is always called with the mutex previously acquired.
   TORCH_INTERNAL_ASSERT(lock.owns_lock(), "Mutex not acquired");
 

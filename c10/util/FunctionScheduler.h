@@ -52,7 +52,7 @@ class C10_API Run {
   std::chrono::time_point<std::chrono::steady_clock> _time;
 
  public:
-  static bool gt(std::shared_ptr<Run> const& a, std::shared_ptr<Run> const& b);
+  static bool gt(const std::shared_ptr<Run>& a, const std::shared_ptr<Run>& b);
 
   Run(int job_id, std::chrono::time_point<std::chrono::steady_clock> time);
 
@@ -126,7 +126,7 @@ class C10_API FunctionScheduler {
   void addRun(
       const std::unique_lock<std::mutex>& lock,
       int job_id,
-      std::unique_ptr<Job> const& job);
+      const std::unique_ptr<Job>& job);
 
   // Registers a new job.
   int scheduleJob(std::unique_ptr<Job> job);
