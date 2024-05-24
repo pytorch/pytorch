@@ -170,7 +170,7 @@ std::vector<ParameterMetadata> unpack_input_parameters(
       inputs_metadata.push_back(ParameterMetadata(tensor_list, arg_order));
     } else if (
         *arguments[idx].real_type() ==
-        *c10::getTypePtr<c10::optional<at::Tensor>>()) {
+        *c10::getTypePtr<std::optional<at::Tensor>>()) {
       // optional tensor
       if (stack[idx].toOptional<at::Tensor>().has_value()) {
         inputs_metadata.push_back(ParameterMetadata(
