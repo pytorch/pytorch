@@ -1,10 +1,9 @@
 import contextlib
 import copy
 import math
-from typing import Tuple
 
 from collections import namedtuple
-from typing import Dict, List
+from typing import Dict, List, Tuple
 from unittest.mock import patch
 
 import sympy
@@ -12,8 +11,8 @@ import sympy
 import torch
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from .. import ir
-from ..virtualized import V
 from ..utils import IndentedBuffer
+from ..virtualized import V
 
 from .common import CSEVariable, ExprPrinter, Kernel
 
