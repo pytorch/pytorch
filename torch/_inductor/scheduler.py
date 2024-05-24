@@ -255,10 +255,20 @@ class BaseSchedulerNode:
         self.prune_deps()
         # read_and_write_deps_with_hint are a summary of read_writes used by
         # score_fusion_memory()
+        def dep_size_hint(dep):
+            try:
+                if dep.has_unbacked_symbols():
+                    return 0
+                return dep.numbytes_hint()
+            except KeyError:
+                # In at least one test (test/inductor/test_torchbind.py) we
+                # create a StarDep that doesn't exist in the graph and calling
+                # `has_unbacked_symbols()` throws an error.
+                return 0
         self.read_and_write_deps_with_hint = {
             (dep, hint)
             for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes)
-            if not dep.has_unbacked_symbols() and (hint := dep.numbytes_hint()) > 0
+            if (hint := dep_size_hint(dep)) > 0
         }
 
     def op_counts(self) -> Counter[str]:
@@ -735,12 +745,15 @@ def debug_triton_code(node: Union["SchedulerNode", "FusedSchedulerNode"]) -> Lis
     if multi_template and multi_template.make_kernel_render is None:
         lines.append(f"{node.get_name()} Unfinalized multi template buffer")
     else:
+        from torch._inductor.codegen.cuda_combined_scheduling import (
+            CUDACombinedScheduling,
+        )
         from torch._inductor.codegen.triton import TritonScheduling
 
         snodes = (node,) if isinstance(node, SchedulerNode) else node.snodes
         device = snodes[0].get_device()
         backend = node.scheduler.get_backend(device)
-        assert isinstance(backend, TritonScheduling)
+        assert isinstance(backend, (TritonScheduling, CUDACombinedScheduling))
         V.graph.scheduler.current_device = device
 
         # Don't increment kernel count when generating debug string.
