@@ -2112,3 +2112,15 @@ def _constrain_as_size(symbol, min: Optional[builtins.int] = None, max: Optional
 
 from . import _logging
 _logging._init_logs()
+
+
+# load device extensions
+from importlib.metadata import entry_points
+discovered_plugins = entry_points(group='device_extension')
+for plugin in discovered_plugins:
+    try:
+        # just loads the plugin without calling
+        plugin.load()
+    except Exception:
+        # keep quiet
+        pass
