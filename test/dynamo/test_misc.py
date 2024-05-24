@@ -9751,12 +9751,47 @@ fn
             lambda mod: mod[0],
         )
 
-    @unittest.expectedFailure
     def test_linear_module_free(self):
         self._test_compile_model_free(
             lambda: (torch.nn.Linear(100, 100), torch.randn(100, 100)),
             lambda mod: mod,
         )
+
+    def test_outside_linear_module_free(self):
+        # Compared to test_linear_module_free, the linear
+        # layer is not the code object that is directly compiled.
+        def model_inp_ctr():
+            fc = torch.nn.Linear(100, 100)
+
+            class Mod(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.fc_ref = fc
+
+                def forward(self, x):
+                    return self.fc_ref(x[0])
+
+            # return fc to keep it alive in _test_compile_model_free
+            return Mod(), (torch.randn(100, 100), fc)
+
+        self._test_compile_model_free(model_inp_ctr, lambda mod: mod.fc_ref)
+
+    def test_parameter_free(self):
+        def model_inp_ctr():
+            param = torch.nn.Parameter(torch.randn(100, 100))
+
+            class Mod(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.param = param
+
+                def forward(self, x):
+                    return self.param * x[0]
+
+            # return param to keep it alive in _test_compile_model_free
+            return Mod(), (torch.randn(100, 100), param)
+
+        self._test_compile_model_free(model_inp_ctr, lambda mod: mod.param)
 
     def test_dynamo_cache_move_to_front(self):
         class Mod(torch.nn.Module):
