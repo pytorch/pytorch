@@ -25,6 +25,7 @@ device_types_t = Optional[Union[str, Sequence[str]]]
 @exposed_in("torch.library")
 def custom_op(
     name: str,
+    fn: Optional[Callable] = None,
     /,
     *,
     mutates_args: Iterable[str],
@@ -135,7 +136,9 @@ def custom_op(
         result.register_kernel(device_types)(fn)
         return result
 
-    return inner
+    if fn is None:
+        return inner
+    return inner(fn)
 
 
 class CustomOpDef:
@@ -450,7 +453,7 @@ class CustomOpDef:
 
         lib.define(
             schema_str,
-            tags=[_C.Tag.pt2_compliant_tag, _C.Tag.needs_fixed_stride_order],
+            tags=[_C.Tag.pt2_compliant_tag],
         )
         self._opoverload = _library.utils.lookup_op(self._qualname)
 
