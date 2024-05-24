@@ -672,12 +672,22 @@ class OutputGraph:
         def handle_tensor(t, src):
             for i, s in enumerate(t.size()):
                 bind_symint(s, TensorPropertySource(src, TensorProperty.SIZE, i))
-            for i, s in enumerate(t.stride()):
-                bind_symint(s, TensorPropertySource(src, TensorProperty.STRIDE, i))
-            bind_symint(
-                t.storage_offset(),
-                TensorPropertySource(src, TensorProperty.STORAGE_OFFSET),
-            )
+            if t.layout is torch.strided:
+                for i, s in enumerate(t.stride()):
+                    bind_symint(s, TensorPropertySource(src, TensorProperty.STRIDE, i))
+                bind_symint(
+                    t.storage_offset(),
+                    TensorPropertySource(src, TensorProperty.STORAGE_OFFSET),
+                )
+            elif t.layout is torch.sparse_coo:
+                handle_tensor(t._indices(), src)
+                handle_tensor(t._values(), src)
+            elif t.layout in {torch.sparse_csr, torch.sparse_bsr}:
+                handle_tensor(t.crow_indices(), src)
+                handle_tensor(t.col_indices(), src)
+            elif t.layout in {torch.sparse_csc, torch.sparse_bsc}:
+                handle_tensor(t.ccol_indices(), src)
+                handle_tensor(t.row_indices(), src)
             if is_traceable_wrapper_subclass(t):
                 attrs, ctx = t.__tensor_flatten__()
                 for attr in attrs:
