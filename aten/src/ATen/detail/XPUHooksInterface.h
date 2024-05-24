@@ -62,7 +62,7 @@ struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
     TORCH_CHECK(false, "Cannot get XPU pinned memory allocator without ATen_xpu library.");
   }
 
-  virtual bool isPinnedPtr(const void* /*data*/) const override {
+  virtual bool isPinnedPtr(const void* data) const override {
     return false;
   }
 

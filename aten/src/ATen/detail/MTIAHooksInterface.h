@@ -91,7 +91,7 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
 
-  virtual bool isPinnedPtr(const void* /*data*/) const override {
+  virtual bool isPinnedPtr(const void* data) const override {
     return false;
   }
 

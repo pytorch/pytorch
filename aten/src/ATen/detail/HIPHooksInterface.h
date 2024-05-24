@@ -43,7 +43,7 @@ struct TORCH_API HIPHooksInterface : AcceleratorHooksInterface {
     return -1;
   }
 
-  virtual bool isPinnedPtr(const void* /*data*/) const override {
+  virtual bool isPinnedPtr(const void* data) const override {
     return false;
   }
 

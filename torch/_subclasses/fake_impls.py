@@ -95,6 +95,8 @@ _device_not_kwarg_ops = ordered_set(
     aten.is_pinned.default,
     aten.to.device,
     aten.to.prim_Device,
+    aten._pin_memory.default,
+    aten._pin_memory.out,
     aten._resize_output.default,
     aten._resize_output.out,
 )

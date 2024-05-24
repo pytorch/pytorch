@@ -3,7 +3,6 @@
 #include <ATen/CPUFunctions.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/mps/MPSAllocator.h>
-#include <ATen/mps/MPSPinnedMemory.h>
 #include <c10/core/Allocator.h>
 #include <c10/core/Storage.h>
 
@@ -863,7 +862,7 @@ IMPSAllocator* getIMPSAllocator(bool sharedAllocator) {
 // Pinned memory will be helpful on Apple Silicon Macs with Unified memory as we
 // will be able to use SharedStorageMode for MTLBuffer allocations. This will
 // avoid extra copies on DataLoading operations.
-bool _is_pinned_ptr(const void* data) {
+bool isMPSPinnedPtr(const void* data) {
   return at::mps::_getSharedAllocator().isSharedBuffer(data);
 }
 

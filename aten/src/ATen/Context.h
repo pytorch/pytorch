@@ -98,15 +98,20 @@ class TORCH_API Context {
       AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
     }
   }
-  bool isPinnedPtr(const void* data) {
-    auto opt_device_type = at::getAccelerator();
+  bool isPinnedPtr(
+      const void* data,
+      std::optional<DeviceType> device_type = std::nullopt) {
+    auto opt_device_type =
+        device_type.has_value() ? device_type.value() : at::getAccelerator();
     if (!opt_device_type.has_value()) {
       return false;
     }
-    return getAcceleratorHooksInterface(opt_device_type.value()).isPinnedPtr(data);
+    return getAcceleratorHooksInterface(opt_device_type.value())
+        .isPinnedPtr(data);
   }
-  Allocator* getPinnedMemoryAllocator() {
-    return getAcceleratorHooksInterface().getPinnedMemoryAllocator();
+  Allocator* getPinnedMemoryAllocator(
+      std::optional<DeviceType> device_type = std::nullopt) {
+    return getAcceleratorHooksInterface(device_type).getPinnedMemoryAllocator();
   }
   static bool hasOpenMP();
   static bool hasMKL();
