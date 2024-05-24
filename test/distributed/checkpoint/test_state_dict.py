@@ -535,7 +535,6 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         set_model_state_dict(ddp_model, get_model_state_dict(ddp_model))
         self.assertEqual(model.state_dict()["u1._extra_state"], "MyState")
         self.assertEqual(model.state_dict(), get_model_state_dict(ddp_model))
-        
     @with_comms
     @skip_if_lt_x_gpu(1)
     def test_activation_ckpt_fqns_fsdp1(self) -> None:
