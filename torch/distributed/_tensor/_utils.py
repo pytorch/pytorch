@@ -224,3 +224,17 @@ def compute_local_stride(
     return tuple(
         global_stride[i] // stride_divisors[i] for i in range(len(global_stride))
     )
+
+
+def _disable_dynamo(fn=None, recursive=True):
+    """
+    This util is merely a wrapper on top of torch._disable_dynamo. torch._disable_dynamo
+    uses funtools wrap where it incurs high CPU overhead. This util is used to
+    avoid circular imports issues, and early exit if it's not in compiling.
+    """
+    import torch.compiler
+
+    if not torch.compiler.is_compiling():
+        return fn  # no-op if not compiling
+
+    return torch._disable_dynamo(fn, recursive)

@@ -9,7 +9,7 @@ import torch.distributed._tensor.dispatch as op_dispatch
 import torch.distributed._tensor.random as random
 import torch.nn as nn
 from torch.distributed._tensor._collective_utils import mesh_broadcast
-from torch.distributed._tensor._utils import compute_global_tensor_info
+from torch.distributed._tensor._utils import _disable_dynamo, compute_global_tensor_info
 from torch.distributed._tensor.placement_types import (
     _Partial,
     DTensorSpec,
@@ -198,7 +198,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
     _op_dispatcher: op_dispatch.OpDispatcher = op_dispatch.OpDispatcher()
 
     @staticmethod
-    @torch._disable_dynamo
+    @_disable_dynamo
     def __new__(
         cls,
         local_tensor: torch.Tensor,
@@ -289,7 +289,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         )
 
     @classmethod
-    @torch._disable_dynamo
+    @_disable_dynamo
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
