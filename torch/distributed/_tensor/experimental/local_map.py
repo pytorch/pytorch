@@ -107,10 +107,8 @@ def local_map(
         # we assume every DTensor object is placed on the same device mesh
         flat_local_args = []
         nonlocal device_mesh  # access var device_mesh from the outer scope
-        # print(f"# of args = {len(args)}")
         for idx, arg in enumerate(flat_args):
             if isinstance(arg, DTensor):
-                # print(f"func {func} idx {idx}, arg placement={arg.placements}")
                 # TODO: the current code doesn't consider the uneven sharding case
                 # Need to think about what the consequence is when the input DTensor
                 # is uneven sharded.
@@ -143,7 +141,7 @@ def local_map(
                             raise ValueError(
                                 f"arg {arg} in local_map has a mismatched placements:"
                                 f"arg placements is {arg.placements} but the input"
-                                f"placements is {spec}! Argument index = {idx}."
+                                f"placements is {spec}!"
                                 "If redistribute_inputs is wanted, set redistribute_inputs=True to local_map."
                             )
 
@@ -153,15 +151,11 @@ def local_map(
 
         local_args = pytree.tree_unflatten(flat_local_args, args_spec)
 
-        # out = func(device_mesh, *local_args, **kwargs)
-        # for idx, arg in enumerate(local_args):
-        #    print(f"arg idx {idx}, arg={arg}")
         out = func(*local_args, **kwargs)
 
         # process output
         flat_out, out_spec = pytree.tree_flatten(out)
         flat_dist_out = []
-        # print(f"flat_out lenght={len(flat_out)}; flat_out={flat_out}")
         for idx, out in enumerate(flat_out):
             spec = (
                 out_placements[idx]
@@ -173,8 +167,6 @@ def local_map(
                     out, DTensor
                 ), f"torch.Tensor output expected but received {type(out)}: {out}"
 
-                # print(f"from_local tensor={out}")
-                # print(f"spec={spec}")
                 flat_dist_out.append(
                     DTensor.from_local(out, device_mesh, spec, run_check=False)
                 )

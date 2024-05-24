@@ -293,12 +293,9 @@ class DistMathOpsTest(DTensorTestBase):
         # NLP example from pytorch docs
         # https://pytorch.org/docs/stable/generated/torch.nn.LayerNorm.html
         batch, sentence_length, embedding_dim = 20, 5, 10
-        # norm_shape_idx_list = list(range(3))
-        # shard_dims = [0, 1, 2]
-        # elementwise_affine_list = [False, True]
-        norm_shape_idx_list = [2]
-        shard_dims = [1]
-        elementwise_affine_list = [True]
+        norm_shape_idx_list = list(range(3))
+        shard_dims = [0, 1, 2]
+        elementwise_affine_list = [False, True]
         test_config_list = list(
             itertools.product(shard_dims, norm_shape_idx_list, elementwise_affine_list)
         )
@@ -362,9 +359,6 @@ class DistMathOpsTest(DTensorTestBase):
             y_local.sum().backward()
             with comm_mode:
                 y_dist.sum().backward()
-
-            print(f"dy: {y_dist.grad}")  # dy
-            print(f"dx: {x_dist.grad}")
 
             expected_bwd_comm = 0 if shard_dim < norm_idx else 1
 

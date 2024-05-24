@@ -18,13 +18,13 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
-def equal_forward(device_mesh, X, Y):
+def equal_allgather_forward(device_mesh, X, Y):
     eq = torch.tensor([torch.equal(X, Y)], device=X.device)
     eq_gather = funcol.all_gather_tensor(eq, 0, device_mesh)
     return torch.all(eq_gather).item()
 
 
-def mm_forward(device_mesh, W, X):
+def mm_forward(W, X):  # no device mesh needed since we don't do collective
     return torch.mm(W, X)
 
 
@@ -34,7 +34,7 @@ def mm_allreduce_forward(device_mesh, W, X):
     return reduced_tensor
 
 
-def mul_forward(device_mesh, X, scalar):
+def mul_forward(X, scalar):  # no device mesh needed since we don't do collective
     return torch.mul(X, scalar)
 
 
@@ -71,11 +71,11 @@ class TestLocalMap(DTensorTestBase):
         local_mm_allreduce_forward = local_map(
             mm_allreduce_forward,
             out_placements=[Replicate()],
-            in_placements=(col_wise, row_wise),
+            in_placements=(None, col_wise, row_wise),
             device_mesh=device_mesh,
         )
         with comm_mode:
-            Y_dt = local_mm_allreduce_forward(W_dt, X_dt)
+            Y_dt = local_mm_allreduce_forward(device_mesh, W_dt, X_dt)
 
         # output redistribution to Replicate
         self.assertEqual(comm_mode.get_total_counts(), 1)
@@ -99,9 +99,11 @@ class TestLocalMap(DTensorTestBase):
         row_wise = [Shard(0)]
         X_dt = distribute_tensor(X, device_mesh, row_wise)
         Y_dt = distribute_tensor(Y, device_mesh, row_wise)
-        local_equal_forward = local_map(equal_forward, out_placements=None)
+        local_equal_allgather_forward = local_map(
+            equal_allgather_forward, out_placements=None
+        )
         with comm_mode:
-            equal_dt = local_equal_forward(X_dt, Y_dt)  # a bool
+            equal_dt = local_equal_allgather_forward(device_mesh, X_dt, Y_dt)  # a bool
 
         self.assertEqual(comm_mode.get_total_counts(), 1)
         self.assertTrue(not equal_dt)
@@ -199,12 +201,12 @@ class TestLocalMap(DTensorTestBase):
         local_mm_allreduce_forward = local_map(
             mm_allreduce_forward,
             out_placements=[Replicate()],
-            in_placements=(col_wise, row_wise),
+            in_placements=(None, col_wise, row_wise),
             device_mesh=device_mesh,
             redistribute_inputs=True,
         )
         with comm_mode:
-            Y_dt = local_mm_allreduce_forward(W_dt, X_dt)
+            Y_dt = local_mm_allreduce_forward(device_mesh, W_dt, X_dt)
 
         # 2 for input redistribution and 1 for output
         self.assertEqual(comm_mode.get_total_counts(), 3)
@@ -216,12 +218,12 @@ class TestLocalMap(DTensorTestBase):
         local_mm_allreduce_forward = local_map(
             mm_allreduce_forward,
             out_placements=[Replicate()],
-            in_placements=(col_wise, row_wise),
+            in_placements=(None, col_wise, row_wise),
             device_mesh=device_mesh,
             redistribute_inputs=False,
         )
         with self.assertRaisesRegex(ValueError, "set redistribute_inputs=True"):
-            Y_dt = local_mm_allreduce_forward(W_dt, X_dt)
+            Y_dt = local_mm_allreduce_forward(device_mesh, W_dt, X_dt)
 
 
 if __name__ == "__main__":
