@@ -5,10 +5,10 @@ import os
 import sys
 import tempfile
 
+from model_registry import ModelWithKwargs, MultiMLP
+
 import torch
 import torch.distributed as dist
-
-from model_registry import ModelWithKwargs, MultiMLP
 from torch.distributed.pipelining import (
     ManualPipelineStage,
     pipeline,
