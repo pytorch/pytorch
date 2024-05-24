@@ -15,6 +15,7 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupRoundRobin.hpp>
 #endif
 #include <torch/csrc/distributed/c10d/FakeProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/Healthcheck.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/PyProcessGroup.hpp>
 
@@ -24,6 +25,7 @@
 #endif
 
 #ifdef USE_C10D_NCCL
+#include <torch/csrc/distributed/c10d/HealthcheckNCCL.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupCudaP2P.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
@@ -1692,6 +1694,28 @@ communication mechanism.
           py::arg("rank"),
           py::arg("world_size"));
 
+  auto healthcheck =
+      py::class_<::c10d::Healthcheck, c10::intrusive_ptr<::c10d::Healthcheck>>(
+          module,
+          "Healthcheck",
+          R"(
+Base class for all Healthcheck implementations.
+)")
+          .def(
+              "shutdown",
+              &::c10d::Healthcheck::shutdown,
+              py::call_guard<py::gil_scoped_release>())
+          .def_static(
+              "calculate_group_info",
+              &::c10d::Healthcheck::calculateGroupInfo,
+              py::arg("side"),
+              py::arg("rank"),
+              py::arg("world_size"),
+              py::arg("local_world_size"),
+              py::call_guard<py::gil_scoped_release>())
+          .def_property(
+              "num_failures", &::c10d::Healthcheck::getNumFailures, nullptr);
+
   auto processGroup =
       py::class_<
           ::c10d::ProcessGroup,
@@ -2772,6 +2796,26 @@ Example::
           "nccl_options", &::c10d::ProcessGroupCudaP2P::Options::nccl_options)
       .def_readwrite(
           "buffer_size", &::c10d::ProcessGroupCudaP2P::Options::buffer_size);
+
+  auto healthcheckNCCL = intrusive_ptr_class_<::c10d::HealthcheckNCCL>(
+                             module, "HealthcheckNCCL", healthcheck)
+                             .def(
+                                 py::init<
+                                     const c10::intrusive_ptr<::c10d::Store>&,
+                                     int,
+                                     int,
+                                     int,
+                                     c10::optional<int>,
+                                     std::chrono::milliseconds,
+                                     std::chrono::milliseconds>(),
+                                 py::arg("store"),
+                                 py::arg("rank"),
+                                 py::arg("world_size"),
+                                 py::arg("local_world_size"),
+                                 py::arg("exit_on_error"),
+                                 py::arg("interval"),
+                                 py::arg("timeout"),
+                                 py::call_guard<py::gil_scoped_release>());
 
 #endif
 
