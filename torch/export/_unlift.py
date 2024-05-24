@@ -65,7 +65,7 @@ def _unlift_inputs_as_getattr(
     return unlifted_name_to_node, input_name_to_node
 
 
-def _insert_copy_for_out_input_mutations(
+def _insert_copy_for_input_mutations(
     gm: torch.fx.GraphModule,
     out_inputs: Optional[Dict[torch.fx.Node, torch.fx.Node]],
 ) -> None:
@@ -189,7 +189,7 @@ def _unlift(
     state_dict: Dict[str, Any],
     constants: Dict[str, Any],
     forward_arg_names: Optional[List[str]] = None,
-    mutated_out_inputs: Optional[Dict[torch.fx.Node, torch.fx.Node]] = None,
+    mutated_inputs: Optional[Dict[torch.fx.Node, torch.fx.Node]] = None,
 ):
     """
     Args:
@@ -212,9 +212,9 @@ def _unlift(
     _insert_copy_for_mutations(
         gm, mutated_outputs, unlifted_name_to_node, input_name_to_node
     )
-    _insert_copy_for_out_input_mutations(
+    _insert_copy_for_input_mutations(
         gm,
-        mutated_out_inputs,
+        mutated_inputs,
     )
     gm.graph._codegen = _get_codegen(in_spec, out_spec, forward_arg_names)
     gm.graph.lint()
