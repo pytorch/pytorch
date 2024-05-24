@@ -538,7 +538,8 @@ class HalideCSEVariable(CSEVariable):
     def index_str(self, dims):
         if len(dims) == 0:
             return self.name
-        return f"{self.name}[{', '.join(map(str, dims))}]"
+        # Reversed since Halide is column major
+        return f"{self.name}[{', '.join(map(str, reversed(dims)))}]"
 
     def __str__(self):
         if self.used_dims is None:
@@ -583,7 +584,6 @@ class HalideKernel(SIMDKernel):
         self.compute = self.body
         self.loads = self.body
         self.stores = self.body
-        self.indexing_code = IndentedBuffer()
         self.indexing_code_dom = IndentedBuffer()
         self.needs_dom_indexing = self.inside_reduction
         self.has_reduction = self.inside_reduction
@@ -738,13 +738,13 @@ class HalideKernel(SIMDKernel):
                     if eq(strides[0], 1):
                         div = self.kexpr(strides[1])
                         value_str = (
-                            f"{value.name}[{index_str} % {div}, {index_str} // {div}]"
+                            f"{value.name}[{index_str} // {div}, {index_str} % {div}]"
                         )
                     else:
                         assert eq(strides[1], 1)
                         div = self.kexpr(strides[0])
                         value_str = (
-                            f"{value.name}[{index_str} // {div}, {index_str} % {div}]"
+                            f"{value.name}[{index_str} % {div}, {index_str} // {div}]"
                         )
                     return index_str, value_str
 
@@ -1037,6 +1037,7 @@ class HalideKernel(SIMDKernel):
 
 class HalideScheduling(SIMDScheduling):
     int32_type = "hl.Int(32)"
+    # TODO(jansel): Halide doesn't actually support 64 bit indexing...
     int64_type = "hl.Int(64)"
     kernel_type = HalideKernel
 
