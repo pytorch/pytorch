@@ -386,12 +386,14 @@ class TritonTemplateKernel(TritonKernel):
             output_index,
             self.epilogue_fn(*epilogue_args),
         )
-        self.codegen_body()
+        # self.codegen_body()
+        value = self.body.getvalue()
+        self.body.clear()
 
         def hook():
             # more stuff might have been added since the codegen_body above
-            self.codegen_body()
-            return textwrap.indent(self.body.getvalue(), " " * indent_width).strip()
+            # self.codegen_body()
+            return textwrap.indent(value, " " * indent_width).strip()
 
         assert "<STORE_OUTPUT>" not in self.render_hooks
         self.render_hooks["<STORE_OUTPUT>"] = hook
