@@ -195,9 +195,9 @@ int FunctionScheduler::removeJob(int id) {
   return _jobs.erase(id) ? id : -1;
 }
 
-void FunctionScheduler::start() {
+int FunctionScheduler::start() {
   if (_running || _paused)
-    return;
+    return -1;
 
   std::unique_lock<std::mutex> lock(_mutex);
   auto now = std::chrono::steady_clock::now();
@@ -208,11 +208,12 @@ void FunctionScheduler::start() {
   _running = true;
   _paused = false;
   _thread = std::thread(&FunctionScheduler::run, this);
+  return 1;
 }
 
-void FunctionScheduler::stop() {
+int FunctionScheduler::stop() {
   if (!_running)
-    return;
+    return -1;
 
   _running = false;
   _paused = false;
@@ -232,11 +233,12 @@ void FunctionScheduler::stop() {
   for (const auto& entry : _jobs) {
     entry.second->reset_counter();
   }
+  return 1;
 }
 
-void FunctionScheduler::pause() {
+int FunctionScheduler::pause() {
   if (_paused || !_running)
-    return;
+    return -1;
 
   _running = false;
   // Unblock the thread executing
@@ -249,11 +251,12 @@ void FunctionScheduler::pause() {
 
   _paused_time = std::chrono::steady_clock::now();
   _paused = true;
+  return 1;
 }
 
-void FunctionScheduler::resume() {
+int FunctionScheduler::resume() {
   if (!_paused)
-    return;
+    return -1;
 
   auto diff = std::chrono::steady_clock::now() - _paused_time;
   auto _queue_copy = _queue;
@@ -266,6 +269,7 @@ void FunctionScheduler::resume() {
   _running = true;
   _paused = false;
   _thread = std::thread(&FunctionScheduler::run, this);
+  return 1;
 }
 
 bool FunctionScheduler::isRunning() const {

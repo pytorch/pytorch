@@ -151,17 +151,23 @@ class C10_API FunctionScheduler {
   int removeJob(int id);
 
   // Starts the FunctionScheduler.
-  void start();
+  // Returns -1 if the Scheduler is already running.
+  int start();
 
   // Stops the FunctionScheduler
   // and resets all jobs (_run_count = 0).
-  void stop();
+  // Returns -1 if the Scheduler is already stopped.
+  int stop();
 
   // Pauses FunctionScheduler execution.
-  void pause();
+  // Returns -1 if the Scheduler is already
+  // paused or not running.
+  int pause();
 
   // Resumes FunctionScheduler execution.
-  void resume();
+  // Returns -1 if the Scheduler is already
+  // unpaused or not running.
+  int resume();
 
   bool isRunning() const;
   int currentId() const;
