@@ -1,7 +1,6 @@
 """ Triton Implementation of the flex_attention Kernel"""
 
 import logging
-import math
 from enum import auto, Enum
 from typing import Any, List, Tuple
 
@@ -446,13 +445,21 @@ def flex_attention(*args, **kwargs):
 # ---------------------------- Backward HOP Implementation ----------------------------
 
 
-def flex_attention_backward_grid(batch_size, num_heads, num_key_value, d_model, meta):
+def flex_attention_backward_grid(batch_size, num_heads, num_queries, d_model, meta):
     """How is this kernel parallelized?
     Currently this is only parallelizing over batch * num_heads, but we can, and want to
     parallelize over ceil_div(num_key_value, key_value_block_size). To do this will either require
     atomic updates to some grad values or to have a two pass kernel design.
     """
-    return (batch_size * num_heads, 1, 1)
+    import triton
+
+    num_key_value = num_queries
+    return (
+        triton.cdiv(num_queries, meta["BLOCK_M2"])
+        + triton.cdiv(num_key_value, meta["BLOCK_N1"]),
+        1,
+        batch_size * num_heads,
+    )
 
 
 flex_attention_backward_template = TritonTemplate(
@@ -478,49 +485,69 @@ flex_attention_backward_template = TritonTemplate(
     # is not masked out? If so, we can skip an extra safety check
     # OUTPUT_LOGSUMEXP: We only need to store the logsumexp if we require grad
 
+    sm_scale = 1.0
+    M = LSE
+    D = DELTA
+    DK = OUT
+
     # Define Q Strides
-    stride_qz = {{stride("Q", 0)}}
-    stride_qh = {{stride("Q", 1)}}
-    stride_qm = {{stride("Q", 2)}}
-    stride_qk = {{stride("Q", 3)}}
-    # Define K Strides
-    stride_kz = {{stride("K", 0)}}
-    stride_kh = {{stride("K", 1)}}
-    stride_kn = {{stride("K", 2)}}
-    stride_kk = {{stride("K", 3)}}
-    # Define V Strides
-    stride_vz = {{stride("V", 0)}}
-    stride_vh = {{stride("V", 1)}}
-    stride_vn = {{stride("V", 2)}}
-    stride_vk = {{stride("V", 3)}}
+    stride_z = {{stride("Q", 0)}}
+    stride_h = {{stride("Q", 1)}}
+    stride_tok = {{stride("Q", 2)}}
+    stride_d = {{stride("Q", 3)}}
 
     Z = {{size("Q", 0)}}
     H = {{size("Q", 1)}}
     N_CTX = {{size("Q", 2)}}
+    KV_LEN = {{size("K", 2)}}
 
-    qk_scale = 1.0
+    LN2: tl.constexpr = 0.6931471824645996  # = ln(2)
+    pid = tl.program_id(0)
+    NUM_KV_BLOCKS = KV_LEN // BLOCK_N1
+
     MATMUL_PRECISION = Q.dtype.element_ty
 
-    off_hz = tl.program_id(0)
+    bhid = tl.program_id(2)
+    off_chz = (bhid * N_CTX).to(tl.int64)
+    adj = (stride_h * (bhid % H) + stride_z * (bhid // H)).to(tl.int64)
+
+    off_hz = tl.program_id(2)
     off_z = off_hz // H # batch idx
     off_h = off_hz % H # head idx
 
     # offset pointers for batch/head
-    Q += off_z * stride_qz + off_h * stride_qh
-    K += off_z * stride_kz + off_h * stride_kh
-    V += off_z * stride_vz + off_h * stride_vh
+    Q += adj
+    K += adj
+    V += adj
+    DO += adj
+    DQ += adj
+    # DK += adj
+    DV += adj
+    M += off_chz
+    D += off_chz
 
-    # Asserting contiguous for now...
-    DO += off_z * stride_qz + off_h * stride_qh
-    DQ += off_z * stride_qz + off_h * stride_qh
-    DV += off_z * stride_vz + off_h * stride_vh
+    offs_k = tl.arange(0, BLOCK_DMODEL)
 
-    # TODO I think that this should be N_CTX/BLOCK_N blocks
-    for start_n in range(0, NUM_Q_BLOCKS):
-        # We are not doing the causal optimization yet allowing us to start further down the
-        # kv column
-        offs_n = start_n * BLOCK_N + tl.arange(0, BLOCK_N)
-        offs_m = tl.arange(0, BLOCK_M)
+    if pid < NUM_KV_BLOCKS:
+        # load scales
+
+        start_n = pid * BLOCK_N1
+        start_m = 0
+
+        offs_n = start_n + tl.arange(0, BLOCK_N1)
+
+        dv = tl.zeros([BLOCK_N1, BLOCK_DMODEL], dtype=tl.float32)
+        dk = tl.zeros([BLOCK_N1, BLOCK_DMODEL], dtype=tl.float32)
+
+        # load K and V: they stay in SRAM throughout the inner loop.
+        k = tl.load(K + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d)
+        v = tl.load(V + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d)
+
+        num_steps = N_CTX // BLOCK_M1
+
+        # start bwd dkdv
+        offs_m = start_m + tl.arange(0, BLOCK_M1)
+        offs_n = start_n + tl.arange(0, BLOCK_N1)
         offs_k = tl.arange(0, BLOCK_DMODEL)
 
         # initialize pointers to value-like data
@@ -619,14 +646,75 @@ flex_attention_backward_template = TritonTemplate(
         index_n = offs_n[:, None]
         index_k = offs_k[None, :]
 
-        # Store grad_key and grad_value
-        dv_ptrs = DV + (index_n * stride_vn + index_k * stride_vk)
+        dv_ptrs = DV + index_n * stride_tok + index_k * stride_d
         tl.store(dv_ptrs, dv)
 
+        # Write back dK.
+        dk *= sm_scale
+        # dk_ptrs = DK + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
+        # tl.store(dk_ptrs, dk)
         # TODO generalize and add proper mask support
         mask = (index_n != -1) & (index_k != -1)
         {{store_output(("off_z", "off_h", "index_n", "index_k"), "dk", "mask", indent_width=8)}}
+    else:
+        pid = pid - NUM_KV_BLOCKS
+        # THIS BLOCK DOES DQ:
+        start_m = pid * BLOCK_M2
+        end_n = N_CTX
 
+        offs_m_ = start_m + tl.arange(0, BLOCK_M2)
+
+        q = tl.load(Q + offs_m_[:, None] * stride_tok + offs_k[None, :] * stride_d)
+        dq = tl.zeros([BLOCK_M2, BLOCK_DMODEL], dtype=tl.float32)
+        do = tl.load(DO + offs_m_[:, None] * stride_tok + offs_k[None, :] * stride_d)
+
+        m_ = tl.load(M + offs_m_)
+        m_ = m_[:, None]
+
+        num_steps = end_n // BLOCK_N2
+
+        # start bwd_dq
+        start_n = 0
+        offs_m_ = start_m + tl.arange(0, BLOCK_M2)
+        offs_n_ = start_n + tl.arange(0, BLOCK_N2)
+        offs_k = tl.arange(0, BLOCK_DMODEL)
+        kT_ptrs = K + offs_n_[None, :] * stride_tok + offs_k[:, None] * stride_d
+        vT_ptrs = V + offs_n_[None, :] * stride_tok + offs_k[:, None] * stride_d
+        # D (= delta) is pre-divided by ds_scale.
+        Di = tl.load(D + offs_m_)
+        # BLOCK_M2 must be a multiple of BLOCK_N2, otherwise the code wouldn't work.
+        tl.static_assert(BLOCK_M2 % BLOCK_N2 == 0)
+        curr_n = start_n
+        step_n = BLOCK_N2
+        for blk_idx in range(num_steps):
+            kT = tl.load(kT_ptrs)
+            vT = tl.load(vT_ptrs)
+            qk = tl.dot(q, kT)
+            p = tl.math.exp2(qk - m_)
+            # Autoregressive masking.
+            # if MASK:
+            #     offs_n = curr_n + tl.arange(0, BLOCK_N2)
+            #     mask = (offs_m[:, None] >= offs_n[None, :])
+            #     p = tl.where(mask, p, 0.0)
+            # Compute dP and dS.
+            dp = tl.dot(do, vT).to(tl.float32)
+            ds = p * (dp - Di[:, None])
+            ds = ds.to(MATMUL_PRECISION)
+            # Compute dQ.
+            # NOTE: We need to de-scale dq in the end, because kT was pre-scaled.
+            dq += tl.dot(ds, tl.trans(kT))
+            # Increment pointers.
+            curr_n += step_n
+            kT_ptrs += step_n * stride_tok
+            vT_ptrs += step_n * stride_tok
+        # return dq
+
+        # end bwd_dq
+
+        # Write back dQ.
+        dq_ptrs = DQ + offs_m_[:, None] * stride_tok + offs_k[None, :] * stride_d
+        dq *= LN2
+        tl.store(dq_ptrs, dq)
  """,
 )
 
@@ -722,10 +810,11 @@ def flex_attention_backward(*args, **kwargs):
             mutated_inputs=[grad_query, grad_value],
             num_stages=num_stages,
             num_warps=num_warps,
-            BLOCK_M=BLOCK_M,
-            BLOCK_N=BLOCK_N,
+            BLOCK_M1=BLOCK_M,
+            BLOCK_N1=BLOCK_N,
+            BLOCK_M2=BLOCK_N,
+            BLOCK_N2=BLOCK_N,
             BLOCK_DMODEL=query.get_size()[-1],
-            NUM_Q_BLOCKS=math.ceil(query.get_size()[-2] / BLOCK_M),
             # For now, we always assume the "sound" option
             SCORE_MOD_IS_LINEAR=False,
         )

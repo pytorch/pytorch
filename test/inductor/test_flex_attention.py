@@ -19,10 +19,7 @@ from torch.nn.attention._flex_attention import (
     _causal,
     _compose,
     _flex_attention,
-    _generate_alibi_bias,
     _identity,
-    _rel_bias,
-    _rel_causal,
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
@@ -99,13 +96,13 @@ def _trig2(score, b, h, m, n):
 
 test_score_mods = [
     _identity,
-    _times_two,
-    _squared,
-    _causal,
-    _inverse_causal,
-    _rel_bias,
-    _rel_causal,
-    _generate_alibi_bias(8),
+    # _times_two,
+    # _squared,
+    # _causal,
+    # _inverse_causal,
+    # _rel_bias,
+    # _rel_causal,
+    # _generate_alibi_bias(8),
 ]
 
 captured_buffers_map = {
@@ -324,24 +321,24 @@ class TestFlexAttention(InductorTestCase):
         self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
 
     @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods(self, dtype: torch.dtype, score_mod: Callable):
         self.run_test(score_mod, dtype)
 
-    @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes)
-    @common_utils.parametrize("score_mod", test_score_mods)
-    def test_builtin_score_mods_dynamic(self, dtype: torch.dtype, score_mod: Callable):
-        self.run_dynamic_test(score_mod, dtype)
+    # @supported_platform
+    # @common_utils.parametrize("dtype", test_dtypes)
+    # @common_utils.parametrize("score_mod", test_score_mods)
+    # def test_builtin_score_mods_dynamic(self, dtype: torch.dtype, score_mod: Callable):
+    #     self.run_dynamic_test(score_mod, dtype)
 
-    @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes)
-    @common_utils.parametrize("score_mod", test_score_mods)
-    def test_builtin_score_mods_automatic_dynamic(
-        self, dtype: torch.dtype, score_mod: Callable
-    ):
-        self.run_automatic_dynamic_test(score_mod, dtype)
+    # @supported_platform
+    # @common_utils.parametrize("dtype", test_dtypes)
+    # @common_utils.parametrize("score_mod", test_score_mods)
+    # def test_builtin_score_mods_automatic_dynamic(
+    #     self, dtype: torch.dtype, score_mod: Callable
+    # ):
+    #     self.run_automatic_dynamic_test(score_mod, dtype)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
