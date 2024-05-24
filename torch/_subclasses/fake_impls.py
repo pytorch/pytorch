@@ -345,7 +345,7 @@ def unique_dim(
         func,
         arg,
         # normalize dim to be non-negative
-        dim if dim >= 0 else arg.ndim + dim,
+        dim if dim >= 0 else dim % max(arg.ndim, 1),
         sorted,
         return_inverse,
         return_counts
