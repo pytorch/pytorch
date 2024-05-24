@@ -43,7 +43,6 @@ TORCH_API std::vector<at::Tensor> getTensorShapes(
 "Environment variable " + deprecated_env + " is deprecated; use " + \
 new_env + " instead");
 
-
 // Turns at::IntArrayRef into "(1, 2, 3, 4)".
 inline std::string toString(at::IntArrayRef l) {
   std::stringstream ss;
