@@ -590,6 +590,7 @@ def create_aot_dispatcher_function(
                             subclass_fw_graph_out_meta=fw_metadata.subclass_fw_graph_out_meta,
                             subclass_tangent_meta=fw_metadata.subclass_tangent_meta,
                             is_train=needs_autograd,
+                            tokens=fw_metadata.tokens,
                         )
 
         if fw_metadata.num_intermediate_bases > 0:
