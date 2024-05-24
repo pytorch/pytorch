@@ -130,16 +130,19 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(c1, c2)
 
         c1 = self.gen_cache_key(fn, config)
-        # Change global config
-        functorch_config.debug_assert = True
-        c2 = self.gen_cache_key(fn, config)
+
+        # Change functorch config
+        with functorch_config.patch(
+            {"debug_assert": not functorch_config.debug_assert}
+        ):
+            c2 = self.gen_cache_key(fn, config)
 
         self.assertNotEqual(c1, c2)
 
         c1 = self.gen_cache_key(fn, config)
         # Change inductor config
-        inductor_config.debug = True
-        c2 = self.gen_cache_key(fn, config)
+        with inductor_config.patch({"debug": not inductor_config.debug}):
+            c2 = self.gen_cache_key(fn, config)
 
         self.assertNotEqual(c1, c2)
 
