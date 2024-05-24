@@ -595,6 +595,7 @@ def create_aot_dispatcher_function(
                             subclass_fw_graph_out_meta=fw_metadata.subclass_fw_graph_out_meta,
                             subclass_tangent_meta=fw_metadata.subclass_tangent_meta,
                             is_train=needs_autograd,
+                            tokens=fw_metadata.tokens,
                         )
 
         if fw_metadata.num_intermediate_bases > 0:
@@ -652,7 +653,6 @@ If you need this feature, please comment on <CREATE_ISSUE_LINK>"""
 Functionalized RNG is not currently supported in the aot_export workflow. Please file a github issue,
 or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
                 )
-
         def choose_dispatcher(needs_autograd, aot_config):
             """
             Pick a dispatcher based on the config rules.
