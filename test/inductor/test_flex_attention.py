@@ -19,7 +19,10 @@ from torch.nn.attention._flex_attention import (
     _causal,
     _compose,
     _flex_attention,
+    _generate_alibi_bias,
     _identity,
+    _rel_bias,
+    _rel_causal,
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
@@ -96,13 +99,13 @@ def _trig2(score, b, h, m, n):
 
 test_score_mods = [
     _identity,
-    # _times_two,
-    # _squared,
-    # _causal,
-    # _inverse_causal,
-    # _rel_bias,
-    # _rel_causal,
-    # _generate_alibi_bias(8),
+    _times_two,
+    _squared,
+    _causal,
+    _inverse_causal,
+    _rel_bias,
+    _rel_causal,
+    _generate_alibi_bias(8),
 ]
 
 captured_buffers_map = {

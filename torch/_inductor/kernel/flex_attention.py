@@ -528,93 +528,7 @@ flex_attention_backward_template = TritonTemplate(
 
     offs_k = tl.arange(0, BLOCK_DMODEL)
 
-    if pid < NUM_KV_BLOCKS:
-        # load scales
-
-        start_n = pid * BLOCK_N1
-        start_m = 0
-
-        offs_n = start_n + tl.arange(0, BLOCK_N1)
-
-        dv = tl.zeros([BLOCK_N1, BLOCK_DMODEL], dtype=tl.float32)
-        dk = tl.zeros([BLOCK_N1, BLOCK_DMODEL], dtype=tl.float32)
-
-        # load K and V: they stay in SRAM throughout the inner loop.
-        k = tl.load(K + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d)
-        v = tl.load(V + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d)
-
-        num_steps = N_CTX // BLOCK_M1
-
-        # start bwd dkdv
-        offs_m = start_m + tl.arange(0, BLOCK_M1)
-        offs_n = start_n + tl.arange(0, BLOCK_N1)
-        offs_k = tl.arange(0, BLOCK_DMODEL)
-        qT_ptrs = Q + offs_m[None, :] * stride_tok + offs_k[:, None] * stride_d
-        do_ptrs = DO + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d
-        # BLOCK_N1 must be a multiple of BLOCK_M1, otherwise the code wouldn't work.
-        tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
-        curr_m = start_m
-        step_m = BLOCK_M1
-        for blk_idx in range(num_steps):
-            qT = tl.load(qT_ptrs)
-            # Load m before computing qk to reduce pipeline stall.
-            offs_m = curr_m + tl.arange(0, BLOCK_M1)
-            m = tl.load(M + offs_m)
-            qkT = tl.dot(k, qT)
-            # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
-            post_mod_scores = qkT
-            m_ = offs_m[:, None]
-            n_ = offs_n[None, :]
-            {{ modification(
-                subgraph_number=0,
-                output_name="post_mod_scores",
-                score="qkT",
-                b="off_z",
-                h="off_h",
-                m="m_",
-                n="n_",
-                out="qkT"
-            ) | indent_except_first(3) }}
-            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-            if not SCORE_MOD_IS_LINEAR:
-                post_mod_scores *= 1.44269504
-            pT = tl.math.exp2(post_mod_scores - m[None, :])
-            # Autoregressive masking.
-            # if MASK:
-            #     mask = (offs_m[None, :] >= offs_n[:, None])
-            #     pT = tl.where(mask, pT, 0.0)
-            do = tl.load(do_ptrs)
-            # Compute dV.
-            ppT = pT
-            ppT = ppT.to(tl.float16)
-            dv += tl.dot(ppT, do)
-            # D (= delta) is pre-divided by ds_scale.
-            Di = tl.load(D + offs_m)
-            # Compute dP and dS.
-            dpT = tl.dot(v, tl.trans(do)).to(tl.float32)
-            dsT = pT * (dpT - Di[None, :])
-            dsT = dsT.to(tl.float16)
-            dk += tl.dot(dsT, tl.trans(qT))
-            # Increment pointers.
-            curr_m += step_m
-            qT_ptrs += step_m * stride_tok
-            do_ptrs += step_m * stride_tok
-        # return dk, dv
-        # end bwd dkdv
-
-        dv_ptrs = DV + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
-        tl.store(dv_ptrs, dv)
-
-        # Write back dK.
-        dk *= sm_scale
-        # dk_ptrs = DK + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
-        # tl.store(dk_ptrs, dk)
-        index_n = offs_n[:, None]
-        index_k = offs_k[None, :]
-        # TODO generalize and add proper mask support
-        mask = (index_n != -1) & (index_k != -1)
-        {{store_output(("off_z", "off_h", "index_n", "index_k"), "dk", "mask", indent_width=8)}}
-    else:
+    if pid >= NUM_KV_BLOCKS:
         pid = pid - NUM_KV_BLOCKS
         # THIS BLOCK DOES DQ:
         start_m = pid * BLOCK_M2
@@ -649,7 +563,7 @@ flex_attention_backward_template = TritonTemplate(
             vT = tl.load(vT_ptrs)
             qk = tl.dot(q, kT)
             # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
-            post_mod_scores = qk
+            pre_mod_scores = qk
             _m = offs_m_[:, None]
             _n = offs_n_[None, :]
             {{ modification(
@@ -675,6 +589,21 @@ flex_attention_backward_template = TritonTemplate(
             dp = tl.dot(do, vT).to(tl.float32)
             ds = p * (dp - Di[:, None])
             ds = ds.to(MATMUL_PRECISION)
+
+            # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
+            {{ modification(
+                subgraph_number=1,
+                output_name = "grad_scores",
+                score="pre_mod_scores",
+                b="off_z",
+                h="off_h",
+                m="_m",
+                n="_n",
+                grad_score_mod="ds"
+            ) | indent_except_first(3) }}
+            ds = grad_scores
+            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
             # Compute dQ.
             # NOTE: We need to de-scale dq in the end, because kT was pre-scaled.
             dq += tl.dot(ds, tl.trans(kT))
@@ -690,6 +619,108 @@ flex_attention_backward_template = TritonTemplate(
         dq_ptrs = DQ + offs_m_[:, None] * stride_tok + offs_k[None, :] * stride_d
         # dq *= LN2
         tl.store(dq_ptrs, dq)
+    else:
+        # if pid < NUM_KV_BLOCKS:
+        # load scales
+
+        start_n = pid * BLOCK_N1
+        start_m = 0
+
+        offs_n = start_n + tl.arange(0, BLOCK_N1)
+
+        dv = tl.zeros([BLOCK_N1, BLOCK_DMODEL], dtype=tl.float32)
+        dk = tl.zeros([BLOCK_N1, BLOCK_DMODEL], dtype=tl.float32)
+
+        # load K and V: they stay in SRAM throughout the inner loop.
+        k = tl.load(K + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d)
+        v = tl.load(V + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d)
+
+        num_steps = N_CTX // BLOCK_M1
+
+        # start bwd dkdv
+        offs_m = start_m + tl.arange(0, BLOCK_M1)
+        offs_n = start_n + tl.arange(0, BLOCK_N1)
+        offs_k = tl.arange(0, BLOCK_DMODEL)
+        qT_ptrs = Q + offs_m[None, :] * stride_tok + offs_k[:, None] * stride_d
+        do_ptrs = DO + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d
+        # BLOCK_N1 must be a multiple of BLOCK_M1, otherwise the code wouldn't work.
+        tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
+        curr_m = start_m
+        step_m = BLOCK_M1
+        for blk_idx in range(num_steps):
+            qT = tl.load(qT_ptrs)
+            # Load m before computing qk to reduce pipeline stall.
+            offs_m = curr_m + tl.arange(0, BLOCK_M1)
+            m = tl.load(M + offs_m)
+            qkT = tl.dot(k, qT)
+            # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
+            pre_mod_scores = qkT
+            m_ = offs_m[:, None]
+            n_ = offs_n[None, :]
+            {{ modification(
+                subgraph_number=0,
+                output_name="post_mod_scores",
+                score="qkT",
+                b="off_z",
+                h="off_h",
+                m="m_",
+                n="n_",
+                out="qkT"
+            ) | indent_except_first(3) }}
+            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            if not SCORE_MOD_IS_LINEAR:
+                post_mod_scores *= 1.44269504
+            pT = tl.math.exp2(post_mod_scores - m[None, :])
+            # Autoregressive masking.
+            # if MASK:
+            #     mask = (offs_m[None, :] >= offs_n[:, None])
+            #     pT = tl.where(mask, pT, 0.0)
+            do = tl.load(do_ptrs)
+            # Compute dV.
+            ppT = pT
+            ppT = ppT.to(tl.float16)
+            dv += tl.dot(ppT, do)
+            # D (= delta) is pre-divided by ds_scale.
+            Di = tl.load(D + offs_m)
+            # Compute dP and dS.
+            dpT = tl.dot(v, tl.trans(do)).to(tl.float32)
+            dsT = pT * (dpT - Di[None, :])
+            dsT = dsT.to(tl.float16)
+
+             # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
+            {{ modification(
+                subgraph_number=1,
+                output_name = "grad_scores",
+                score="pre_mod_scores",
+                b="off_z",
+                h="off_h",
+                m="m_",
+                n="n_",
+                grad_score_mod="dsT"
+            ) | indent_except_first(3) }}
+            dsT = grad_scores
+            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+            dk += tl.dot(dsT, tl.trans(qT))
+            # Increment pointers.
+            curr_m += step_m
+            qT_ptrs += step_m * stride_tok
+            do_ptrs += step_m * stride_tok
+        # return dk, dv
+        # end bwd dkdv
+
+        dv_ptrs = DV + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
+        tl.store(dv_ptrs, dv)
+
+        # Write back dK.
+        dk *= sm_scale
+        # dk_ptrs = DK + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
+        # tl.store(dk_ptrs, dk)
+        index_n = offs_n[:, None]
+        index_k = offs_k[None, :]
+        # TODO generalize and add proper mask support
+        mask = (index_n != -1) & (index_k != -1)
+        {{store_output(("off_z", "off_h", "index_n", "index_k"), "dk", "mask", indent_width=8)}}
  """,
 )
 
