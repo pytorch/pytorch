@@ -15,6 +15,7 @@ NATIVE_TO_PY_MAPPING = {
     funcol_native.all_gather_into_tensor: funcol_py.all_gather_into_tensor,
     funcol_native.all_gather_into_tensor_coalesced: funcol_py.all_gather_into_tensor_coalesced,
     funcol_native.all_reduce: funcol_py.all_reduce,
+    funcol_native.all_reduce_coalesced: funcol_py.all_reduce_coalesced,
     funcol_native.all_to_all_single: funcol_py.all_to_all_single,
     funcol_native.broadcast: funcol_py.broadcast,
     funcol_native.reduce_scatter_tensor: funcol_py.reduce_scatter_tensor,
