@@ -310,9 +310,23 @@ _efficient_attention_backward(
   int64_t Kv = value.size(3);
 
   at::Tensor grad_q, grad_k, grad_v, grad_bias;
-  grad_q = at::empty(query.sizes(), query.options());
-  grad_k = at::empty(key.sizes(), key.options());
-  grad_v = at::empty(value.sizes(), value.options());
+  if (query.size(1) == key.size(1) && query.size(3) == value.size(3) &&
+      query.storage().is_alias_of(key.storage()) &&
+      query.storage().is_alias_of(value.storage())) {
+    // Create one big contiguous chunk
+    // This is because q, k and v usually come from a single
+    // output of a linear layer that is chunked.
+    // Creating the gradients with the right layout saves us
+    // a `torch.cat` call in the backward pass
+    at::Tensor chunk = at::empty({B, M, 3, nH, K}, query.options());
+    grad_q = chunk.select(2, 0);
+    grad_k = chunk.select(2, 1);
+    grad_v = chunk.select(2, 2);
+  } else {
+    grad_q = at::empty(query.sizes(), query.options());
+    grad_k = at::empty(key.sizes(), key.options());
+    grad_v = at::empty(value.sizes(), value.options());
+  }
 
   if (bias_requires_grad) {
     // force alignment for the last dim
@@ -439,8 +453,7 @@ _efficient_attention_backward(
     ASSIGN_CHECK_OVERFLOW(p.gQ_strideH, grad_q.stride(2));
     ASSIGN_CHECK_OVERFLOW(p.gK_strideH, grad_k.stride(2));
     ASSIGN_CHECK_OVERFLOW(p.gV_strideH, grad_v.stride(2));
-    // We removed the chunk/cat optimization and the multiplier is always 1
-    p.gQKV_strideM_multiplier = 1;
+    p.gQKV_strideM_multiplier = grad_q.is_contiguous() ? 1 : 3;
     TORCH_INTERNAL_ASSERT(p.gQ_strideM() == grad_q.stride(1));
     TORCH_INTERNAL_ASSERT(p.gK_strideM() == grad_k.stride(1));
     TORCH_INTERNAL_ASSERT(p.gV_strideM() == grad_v.stride(1));
@@ -503,8 +516,12 @@ _efficient_attention_backward(
     auto parallelism_without_split_key =
         p.getBlocksGrid().x * p.getBlocksGrid().y * p.getBlocksGrid().z;
     p.num_splits_key = cutlass::ceil_div(p.num_keys, Kernel::kBlockSizeJ);
-    if (num_splits_key.has_value()) { // Skip heuristic, if user provided an explicit value
-      p.num_splits_key = std::max<int64_t>(p.num_splits_key, num_splits_key.value());
+    if (num_splits_key.has_value()) {
+      p.num_splits_key =
+          std::min<int64_t>(p.num_splits_key, num_splits_key.value());
+    } else {
+      // Keys splitting heuristic
+
       // If we already have enough parallelism, split-keys can help
       // better use L2 cache.
       // This is negligible when the seqlen is too small tho
@@ -544,6 +561,15 @@ _efficient_attention_backward(
       if (p.should_zero_workspace()) {
         workspace.zero_();
       }
+    }
+
+    // Handle the edge-cases where some tensors are empty
+    if (p.num_queries == 0 || p.num_keys == 0 || p.num_batches == 0 ||
+        p.num_heads == 0) {
+      grad_k.zero_();
+      grad_v.zero_();
+      grad_q.zero_();
+      return;
     }
     Kernel::check_supported(p);
 
