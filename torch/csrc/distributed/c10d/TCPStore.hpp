@@ -64,6 +64,9 @@ struct TCPStoreOptions {
 
   // A boolean value indicating whether to use the experimental libUV backend.
   bool useLibUV = false;
+
+  // A boolean value to indicate if we want no_delay socket option.
+  bool noDelay = true;
 };
 
 class TORCH_API TCPStore : public Store {
