@@ -64,11 +64,6 @@ DEVICE_TO_ATEN = {
     "cuda": "at::kCUDA",
 }
 
-LAYOUT_TO_ATEN = {
-    torch.strided: "at::kStrided",
-    torch._mkldnn: "at::kMkldnn",  # type: ignore[attr-defined]
-}
-
 INDEX_TYPE = "long"
 
 GemmBlocking = namedtuple("GemmBlocking", ["block_m", "block_n", "block_k"])
