@@ -44,7 +44,7 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
             os.remove(m.__file__)
         torch._inductor.codecache.PyCodeCache.cache_clear()
 
-    @torch._inductor.config.patch("fx_graph_cache", True)
+    @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
     def test_basic(self):
         """
@@ -74,7 +74,66 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
-    @torch._inductor.config.patch({"fx_graph_cache": True})
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_clear_fx_graph_cache(self):
+        """
+        Verify the interactions between FXGraphCache and AOTAutogradCache.
+        """
+
+        def fn(x, y):
+            return (x * 2, y @ y)
+
+        a = torch.rand(25)
+        b = torch.rand(5, 5)
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+
+        # A first call should miss in the cache.
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        # Clear FX graph cache: second call should also be a miss
+        self._clear_dynamo_and_codecache()
+        torch._inductor.codecache.FxGraphCache.clear()
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        # We save again into the cache
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
+
+    @inductor_config.patch("fx_graph_cache", False)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_fx_graph_cache_off(self):
+        """
+        Should not use cache if FXGraphCache is not enabled
+        """
+
+        def fn(x, y):
+            return (x * 2, y @ y)
+
+        a = torch.rand(25)
+        b = torch.rand(5, 5)
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+
+        # A first call should miss in the cache.
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
+
+        # Clear FX graph cache: second call should also be a miss
+        self._clear_dynamo_and_codecache()
+
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 2)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
+
+    @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
     def test_autograd_function(self):
         """
@@ -122,6 +181,7 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
 
+@inductor_config.patch("fx_graph_cache", True)
 class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
     @property
     def device_type(self) -> str:
