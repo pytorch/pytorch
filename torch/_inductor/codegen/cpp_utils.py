@@ -363,6 +363,7 @@ class LocalBufferScope:
         self.kernel = kernel
         self.exit_stack = contextlib.ExitStack()
         self.local_buffers: Dict[str, ir.Buffer] = {}
+        # Map between local buffer name and original scheduler node
         self.local_buffers_nodes: Dict[str, BaseSchedulerNode] = {}
 
     def __enter__(self):

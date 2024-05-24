@@ -1980,8 +1980,9 @@ class CppKernel(Kernel):
                     assert len(local_buffers.items()) == 1
                     local_buffer = next(iter(local_buffers.items()))[1]
 
+                    # Checked in try_outer_loop_fusion_with_local_buf assuming last dim size and contiguous
+                    assert len(local_buffer.get_layout().size) == 1
                     # For dynamic size, rename s to ks
-                    # Hardcode to use the last dim, since we have check in try_outer_loop_fusion_with_local_buf
                     local_buf_size = self.rename_indexing(
                         local_buffer.get_layout().size[-1]
                     )
@@ -3858,6 +3859,8 @@ class CppScheduling(BaseScheduling):
             from .cpp_utils import LocalBufferScope
 
             with LocalBufferScope(outer_fusion_cpp_kernel_proxy) as scope:
+                # Also need the local buffer inform in codegen loop
+                # which is used to allocate the local buffer.
                 if local_buffers:
                     assert len(local_buffers) == 1
                     scope.add_local_buffer(
