@@ -1917,6 +1917,69 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         self._test_quantizer(m, example_inputs, quantizer, node_occurrence, node_list)
 
     @skipIfNoX86
+    def test_set_module_name_qconfig_case2(self):
+        """Test that quantize the specific submodule."""
+
+        class Sub(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(5, 10)
+                self.relu1 = torch.nn.ReLU(inplace=False)
+                self.linear2 = torch.nn.Linear(10, 5)
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = self.relu1(x)
+                x = self.linear2(x)
+                return x
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+                self.sub = Sub()
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.sub(x)
+                return x
+
+        m = M().eval()
+        example_inputs = (torch.randn(3, 5),)
+        # Set global to no quantization and then default config for a specific submodule.
+        quantizer = X86InductorQuantizer()
+        quantizer.set_module_name_qconfig(
+            "sub", xiq.get_default_x86_inductor_quantization_config()
+        )
+        node_occurrence = {
+            torch.ops.aten.linear.default: 3,
+            # quantize and dequantize the input of the two linear layers from `sub`
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
+            # dequantize the weight of the two linear layers from `sub`
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
+        }
+        # node_list = None
+        node_list = [
+            # first linear is not quantized
+            torch.ops.aten.linear.default,
+            # two linear layers from `sub` are quantized
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.linear.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.linear.default,
+        ]
+        self._test_quantizer(
+            m,
+            example_inputs,
+            quantizer,
+            node_occurrence,
+            node_list,
+        )
+
+    @skipIfNoX86
     def test_set_module_name_qconfig_with_underscores(self) -> None:
         """Test that if a module name has an underscore, we can still quantize it."""
 
@@ -2021,7 +2084,11 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             torch.ops.aten.linear.default,
         ]
         self._test_quantizer(
-            m, example_inputs, quantizer, node_occurrence, node_list, debug=True
+            m,
+            example_inputs,
+            quantizer,
+            node_occurrence,
+            node_list,
         )
 
     @skipIfNoX86
@@ -2078,7 +2145,11 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             torch.ops.aten.linear.default,
         ]
         self._test_quantizer(
-            m, example_inputs, quantizer, node_occurrence, node_list, debug=True
+            m,
+            example_inputs,
+            quantizer,
+            node_occurrence,
+            node_list,
         )
 
     @skipIfNoX86
@@ -2183,7 +2254,6 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 node_occurrence,
                 node_list,
                 is_qat=True,
-                debug=True,
             )
 
     @skipIfNoX86
