@@ -561,9 +561,24 @@ flex_attention_backward_template = TritonTemplate(
             offs_m = curr_m + tl.arange(0, BLOCK_M1)
             m = tl.load(M + offs_m)
             qkT = tl.dot(k, qT)
+            # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
+            post_mod_scores = qkT
+            m_ = offs_m[:, None]
+            n_ = offs_n[None, :]
+            {{ modification(
+                subgraph_number=0,
+                output_name="post_mod_scores",
+                score="qkT",
+                b="off_z",
+                h="off_h",
+                m="m_",
+                n="n_",
+                out="qkT"
+            ) | indent_except_first(3) }}
+            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             if not SCORE_MOD_IS_LINEAR:
-                qkT *= 1.44269504
-            pT = tl.math.exp2(qkT - m[None, :])
+                post_mod_scores *= 1.44269504
+            pT = tl.math.exp2(post_mod_scores - m[None, :])
             # Autoregressive masking.
             # if MASK:
             #     mask = (offs_m[None, :] >= offs_n[:, None])
@@ -633,9 +648,24 @@ flex_attention_backward_template = TritonTemplate(
             kT = tl.load(kT_ptrs)
             vT = tl.load(vT_ptrs)
             qk = tl.dot(q, kT)
+            # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
+            post_mod_scores = qk
+            _m = offs_m_[:, None]
+            _n = offs_n_[None, :]
+            {{ modification(
+                subgraph_number=0,
+                output_name="post_mod_scores",
+                score="qk",
+                b="off_z",
+                h="off_h",
+                m="_m",
+                n="_n",
+                out="qk"
+            ) | indent_except_first(3) }}
+            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             if not SCORE_MOD_IS_LINEAR:
-                qk *= 1.44269504
-            p = tl.math.exp2(qk - m_)
+                post_mod_scores *= 1.44269504
+            p = tl.math.exp2(post_mod_scores - m_)
             # Autoregressive masking.
             # if MASK:
             #     offs_n = curr_n + tl.arange(0, BLOCK_N2)
