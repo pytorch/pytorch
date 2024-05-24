@@ -891,11 +891,25 @@ class _ModuleFrame:
                 self.finalize_outputs()
                 return node_idx
 
-            node_module_stack = (
-                [path for path, ty in node.meta["nn_module_stack"].values()]
-                if "nn_module_stack" in node.meta
-                else self.module_stack
+            if len(node.meta.get("nn_module_stack", {})) == 0:
+                raise RuntimeError(f"Unable to find nn_module_stack for node {node}")
+
+            nn_module_stack = node.meta["nn_module_stack"]
+            from torch._export.passes._node_metadata_hook import (
+                _EMPTY_NN_MODULE_STACK_KEY,
             )
+
+            if (
+                len(nn_module_stack) == 1
+                and _EMPTY_NN_MODULE_STACK_KEY in nn_module_stack
+            ):
+                # Empty case from the node_metadata_hook
+                node_module_stack = self.module_stack
+            else:
+                node_module_stack = [
+                    path for path, ty in node.meta["nn_module_stack"].values()
+                ]
+
             if node_module_stack[: len(self.module_stack)] != self.module_stack:
                 # This means that the current module is done executing and the
                 # current node is the beginning of a new module.
