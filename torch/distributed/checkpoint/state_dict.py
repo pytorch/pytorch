@@ -1082,11 +1082,7 @@ def set_state_dict(
         model (nn.Module): the nn.Module to the model.
         optimizers (Union[Optimizer, Iterable[Optimizer]]):
             The optimizers that are used to optimize ``model``.
-        model_state_dict: (Union[Dict[nn.Module, Dict[str, ValueType]], Dict[str, ValueType]]):
-           the model state_dict to load. If the key of the ``model_state_dict``
-           is nn.Module, the key is a submodule of ``model`` and the value should
-           be the state_dict of the submodule. When loading the state_dict,
-           the prefix of the submodule will be append to the state_dict.
+        model_state_dict: (Dict[str, ValueType]]): the model state_dict to load.
         optim_state_dict: OptimizerStateType:
             the optimizer state_dict to load.
         options (StateDictOptions): the options to control how
@@ -1102,9 +1098,6 @@ def set_state_dict(
     :type optim_state_dict: typing.OptimizerStateType
     """
 
-    model_state_dict: Dict[str, ValueType] = _unflatten_model_state_dict(
-        model, model_state_dict
-    )
     with gc_context():
         optimizers = (
             (optimizers,)
