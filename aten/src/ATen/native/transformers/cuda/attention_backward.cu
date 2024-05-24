@@ -230,7 +230,8 @@ _efficient_attention_backward(
     const bool bias_requires_grad,
     const std::optional<double> scale,
     std::optional <int64_t> num_splits_key,
-    const std::optional<int64_t> window_size) {
+    const std::optional<int64_t> window_size,
+    const bool shared_storage_dqdkdv) {
   #if defined(USE_MEM_EFF_ATTENTION)
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
@@ -310,14 +311,24 @@ _efficient_attention_backward(
   int64_t Kv = value.size(3);
 
   at::Tensor grad_q, grad_k, grad_v, grad_bias;
-  if (query.size(1) == key.size(1) && query.size(3) == value.size(3) &&
-      query.storage().is_alias_of(key.storage()) &&
-      query.storage().is_alias_of(value.storage())) {
+  if (shared_storage_dqdkdv) {
     // Create one big contiguous chunk
     // This is because q, k and v usually come from a single
     // output of a linear layer that is chunked.
     // Creating the gradients with the right layout saves us
     // a `torch.cat` call in the backward pass
+    TORCH_CHECK(
+      query.size(1) == key.size(1),
+      "`shared_storage_dqdkdv` is only supported when Q/K/V "
+      "have the same sequence length: got ", query.size(1),
+      " query tokens and ", key.size(1), " key/value tokens"
+    );
+    TORCH_CHECK(
+      query.size(3) == key.size(3),
+      "`shared_storage_dqdkdv` is only supported when Q/K/V "
+      "have the same number of heads: got ", query.size(3),
+      " query heads, and ", key.size(3), " key heads"
+    );
     at::Tensor chunk = at::empty({B, M, 3, nH, K}, query.options());
     grad_q = chunk.select(2, 0);
     grad_k = chunk.select(2, 1);
