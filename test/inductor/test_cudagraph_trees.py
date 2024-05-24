@@ -1629,9 +1629,13 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             def foo(x):
                 return x.item()
 
+            # NB: This doesn't work with float, because float unbacked codegen
+            # is currently broken.  But testing the float case here is also
+            # awkward, because we plan to Tensor-ify the float compute, and as
+            # a result we'd actually expect this to work with cuda graphs!
             with capture_stderr() as captured_output:
-                self.assertEqual(foo(torch.tensor(3.0, device="cuda")), 3.0)
-                self.assertEqual(foo(torch.tensor(6.0, device="cuda")), 6.0)
+                self.assertEqual(foo(torch.tensor(3, device="cuda")), 3)
+                self.assertEqual(foo(torch.tensor(6, device="cuda")), 6)
 
             # NOTE: this test is named after incompatible ops, but is not skipping due to incompatible ops.
             # This should get fixed.
