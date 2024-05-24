@@ -674,13 +674,11 @@ class ONNXProgram:
         fake_context: Optional[ONNXFakeContext] = None,
         export_exception: Optional[Exception] = None,
         model_signature: Optional[torch.export.ExportGraphSignature] = None,
-        model_torch: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
+        exported_program: torch_export.ExportedProgram | None = None,
     ):
         self._model_proto = model_proto
         self._model_signature = model_signature
-        self._model_torch = model_torch
+        self._exported_program = exported_program
         self._input_adapter = input_adapter
         self._output_adapter = output_adapter
         self._diagnostic_context = diagnostic_context
@@ -1209,15 +1207,7 @@ class Exporter:
         self.model = model
         self.model_args = model_args
         self.model_kwargs = model_kwargs
-
-        # TODO: https://github.com/pytorch/pytorch/issues/107714
-        # NOTE: FXSymbolicTracer would fail in this assert, as it does not use `enable_fake_mode`
-        from torch.onnx._internal.fx import fx_symbolic_graph_extractor
-
-        if not isinstance(
-            self.options.fx_tracer, fx_symbolic_graph_extractor.FXSymbolicTracer
-        ):
-            self._assert_fake_tensor_mode()
+        self._assert_fake_tensor_mode()
 
     def export(self) -> ONNXProgram:
         from torch.export._trace import (  # TODO: Prevent circular dependency
@@ -1226,16 +1216,20 @@ class Exporter:
 
         # TODO: Defer `import onnxscript` out of `import torch` path
         # https://github.com/pytorch/pytorch/issues/103764
-        from torch.onnx._internal.fx import decomposition_skip
 
-        with self.options.diagnostic_context, decomposition_skip.enable_decomposition_skips(
-            self.options
-        ), torch._dynamo.config.patch(
+        with self.options.diagnostic_context, torch._dynamo.config.patch(
             dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)
         ):
-            graph_module = self.options.fx_tracer.generate_fx(
-                self.options, self.model, self.model_args, self.model_kwargs
+            if not isinstance(self.model, torch_export.ExportedProgram):
+                exported_program = torch.export.export(
+                    self.model, args=self.model_args, kwargs=self.model_kwargs
+                )
+            else:
+                exported_program = self.model
+            exported_program = exported_program.run_decompositions(
+                self.options.decomposition_table
             )
+
             # TODO: Defer `import onnxscript` out of `import torch` path
             # https://github.com/pytorch/pytorch/issues/103764
             from torch.onnx._internal.fx import fx_onnx_interpreter
@@ -1244,7 +1238,7 @@ class Exporter:
                 diagnostic_context=self.options.diagnostic_context
             )
             onnxscript_graph = fx_interpreter.run(
-                fx_graph_module=graph_module,
+                fx_graph_module=exported_program.graph_module,
                 onnxfunction_dispatcher=self.options.onnxfunction_dispatcher,
                 op_level_debug=self.options.op_level_debug,
             )
@@ -1264,19 +1258,10 @@ class Exporter:
                 onnxscript_graph.initializers = initializers_with_real_tensors
 
             # Export TorchScript graph to ONNX ModelProto.
+            # TODO(justinchuby): Get the IR instead
             onnx_model = onnxscript_graph.to_model_proto(
                 self.options.onnx_registry.opset_version,
             )
-
-            try:
-                from onnxscript import optimizer
-
-                onnx_model = optimizer.optimize(onnx_model)
-            except ImportError:
-                warnings.warn(
-                    "ONNXScript optimizer is not available. Skipping optimization. "
-                    "Please `pip install onnxscript -U` to enable post-export optimization."
-                )
 
             return torch.onnx.ONNXProgram(
                 onnx_model,
@@ -1284,10 +1269,8 @@ class Exporter:
                 self.options.fx_tracer.output_adapter,
                 self.options.diagnostic_context,
                 fake_context=self.options.fake_context,
-                model_signature=getattr(
-                    self.model, "graph_signature", None
-                ),  # Available for isinstance(self.model, ExportedProgram) only
-                model_torch=self.model,
+                model_signature=exported_program.graph_signature,
+                exported_program=exported_program,
             )
 
     def _assert_fake_tensor_mode(self):
