@@ -109,7 +109,7 @@ std::optional<AutocastScope> parseAutocast(
     TORCH_CHECK(
         dtype != c10::ScalarType::Undefined,
         "Autocast has invalid fast_dtype attribute");
-    if (device == "cuda") {
+    if (device == "cuda" || device == "mps") {
       scope.context.gpu_enabled = enabled.value();
       scope.context.gpu_scalar_type = dtype;
     } else if (device == "cpu") {

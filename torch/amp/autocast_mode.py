@@ -315,6 +315,13 @@ class autocast:
                 )
                 warnings.warn(error_message)
                 enabled = False
+        elif self.device == 'mps':
+            supported_dtype = [torch.float16]
+            if self.fast_dtype not in supported_dtype:
+                error_message = 'In MPS autocast, but the target dtype is not supported. Disabling autocast.\n'
+                error_message += 'MPS Autocast only supports dtype of torch.float16 currently.'
+                warnings.warn(error_message)
+                enabled = False
         self._enabled = enabled
 
     def __enter__(self):

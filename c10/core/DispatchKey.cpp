@@ -149,6 +149,8 @@ const char* toString(DispatchKey t) {
       return "AutocastXLA";
     case DispatchKey::AutocastPrivateUse1:
       return "AutocastPrivateUse1";
+    case DispatchKey::AutocastMPS:
+      return "AutocastMPS";
 
     case DispatchKey::FuncTorchBatched:
       return "FuncTorchBatched";

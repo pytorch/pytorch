@@ -367,6 +367,19 @@ class TestTorchAutocast(TestCase):
         with self.assertRaisesRegex(expected_exception=ValueError, expected_regex=msg):
             torch.autocast(device_type=dev)
 
+@unittest.skipIf(not torch.backends.mps.is_available(), "requires mps")
+class TestAutocastMPS(TestCase):
+    def test_cast_cache_is_global(self):
+        #torch.set_autocast_cache_enabled(False)
+        data = torch.randn(2, 3).to('mps')
+        weight = torch.nn.Parameter(torch.randn(4, 3).to('mps'))
+
+        with WeightDTypeCastCounterMode(weight) as mode:
+            with torch.autocast(device_type='mps'):
+                output = CustomLinear.apply(data, weight)
+                s = output.sum()
+            s.backward()
+        self.assertEqual(mode.dtype_cast_counter, 1)
 
 if __name__ == "__main__":
     run_tests()

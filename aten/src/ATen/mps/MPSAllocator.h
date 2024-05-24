@@ -6,6 +6,8 @@
 #include <ATen/mps/MPSEvent.h>
 #include <ATen/mps/MPSStream.h>
 
+#include <ATen/autocast_mode.h>
+
 #include <cstdio>
 #include <mutex>
 #include <set>
@@ -257,6 +259,11 @@ public:
     init_allocator();
   }
   ~MPSHeapAllocatorImpl() {
+    // `cached_casts` and `s_allocatorImpl` are both global objects.
+    // The order in which their destructors are called cannot be guaranteed.
+    // `cached_casts` depends on `MPSHeapAllocatorImpl` when it is being destructed.
+    // Therefore, the autocast cache should be cleared first.
+    autocast::clear_cache();
     emptyCache();
   }
   // interface exposed to at::Allocator
