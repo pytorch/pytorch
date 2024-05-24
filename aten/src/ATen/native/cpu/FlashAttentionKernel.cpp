@@ -45,29 +45,6 @@ inline void _scale_attn_mask_fusion_kernel(
   }
 }
 
-// out = val * a + b
-template <typename T1>
-inline void _scale_attn_mask_fusion_kernel(
-    T1* a,
-    T1* b,
-    const int& size,
-    T1* out,
-    T1& val) {
-  auto vec_size = at::vec::Vectorized<T1>::size();
-  auto vec_scale = at::vec::Vectorized<T1>(val);
-  for (long i = 0; i < vec_size * (size / vec_size); i += vec_size) {
-    auto tmp0 = at::vec::Vectorized<T1>::loadu(a + i);
-    auto tmp1 = at::vec::Vectorized<T1>::loadu(b + i);
-    auto tmp2 = tmp0 * vec_scale + tmp1;
-    _store(out + i, tmp2);
-  }
-  for (long i = vec_size * (size / vec_size); i < size; i++) {
-    auto tmp0 = a[i];
-    auto tmp1 = b[i];
-    out[i] = tmp0 * val + tmp1;
-  }
-}
-
 // 1) out = exp(a - val)
 // 2) val = sum(out)
 template <typename T1, typename T2>
