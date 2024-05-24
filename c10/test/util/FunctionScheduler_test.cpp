@@ -1,9 +1,14 @@
-#include <c10/util/FunctionScheduler.h>
 #include <c10/util/Exception.h>
+#include <c10/util/FunctionScheduler.h>
 
 #include <gtest/gtest.h>
+
+#include <atomic>
 #include <chrono>
+#include <functional>
+#include <memory>
 #include <thread>
+#include <vector>
 
 TEST(Job, Initialization) {
   std::function<void()> function = []() {};
@@ -433,15 +438,16 @@ TEST(FunctionScheduler, InvalidJobInterval) {
   std::chrono::milliseconds interval(-1);
   c10::FunctionScheduler fs;
 
-  EXPECT_THROW({
-    try {
-      fs.scheduleJob(function, interval);
-    }
-    catch(const c10::Error& e) {
-      ASSERT_EQ("Job interval must be positive.", e.msg());
-      throw;
-    }
-  }, c10::Error);
+  EXPECT_THROW(
+      {
+        try {
+          fs.scheduleJob(function, interval);
+        } catch (const c10::Error& e) {
+          ASSERT_EQ("Job interval must be positive.", e.msg());
+          throw;
+        }
+      },
+      c10::Error);
 }
 
 TEST(FunctionScheduler, InvalidFunction) {
@@ -449,15 +455,16 @@ TEST(FunctionScheduler, InvalidFunction) {
   std::chrono::milliseconds interval(1);
   c10::FunctionScheduler fs;
 
-  EXPECT_THROW({
-    try {
-      fs.scheduleJob(function, interval);
-    }
-    catch(const c10::Error& e) {
-      ASSERT_EQ("Job function can't be null.", e.msg());
-      throw;
-    }
-  }, c10::Error);
+  EXPECT_THROW(
+      {
+        try {
+          fs.scheduleJob(function, interval);
+        } catch (const c10::Error& e) {
+          ASSERT_EQ("Job function can't be null.", e.msg());
+          throw;
+        }
+      },
+      c10::Error);
 }
 
 TEST(FunctionScheduler, InvalidRunLimit) {
@@ -465,13 +472,16 @@ TEST(FunctionScheduler, InvalidRunLimit) {
   std::chrono::milliseconds interval(1);
   c10::FunctionScheduler fs;
 
-  EXPECT_THROW({
-    try {
-      fs.scheduleJob(function, interval, false, 0);
-    }
-    catch(const c10::Error& e) {
-      ASSERT_EQ("Job run limit must be greater than 0 or -1.", e.msg());
-      throw;
-    }
-  }, c10::Error);
+  EXPECT_THROW(
+      {
+        try {
+          fs.scheduleJob(function, interval, false, 0);
+        } catch (const c10::Error& e) {
+          ASSERT_EQ(
+              "Job run limit must be greater than 0 or FunctionScheduler::RUN_FOREVER (-1).",
+              e.msg());
+          throw;
+        }
+      },
+      c10::Error);
 }

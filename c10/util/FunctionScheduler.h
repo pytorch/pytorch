@@ -9,12 +9,9 @@
 #include <memory>
 #include <mutex>
 #include <queue>
-#include <string>
 #include <thread>
 #include <unordered_map>
 #include <vector>
-
-#define RUN_FOREVER -1
 
 namespace c10 {
 
@@ -32,7 +29,7 @@ class C10_API Job {
   Job(std::function<void()> function,
       std::chrono::microseconds interval,
       bool immediate = false,
-      int run_limit = RUN_FOREVER);
+      int run_limit = -1); // -1 = FunctionScheduler::RUN_FOREVER
 
   std::chrono::microseconds interval() const;
   int counter() const;
@@ -81,6 +78,10 @@ class C10_API Run {
  *
  */
 class C10_API FunctionScheduler {
+ public:
+  static constexpr int RUN_FOREVER = -1;
+
+ private:
   // The id to be attributed to a new job.
   int _current_id = 0;
 
@@ -139,6 +140,11 @@ class C10_API FunctionScheduler {
   FunctionScheduler();
   ~FunctionScheduler();
 
+  // Registers a new job that runs `function` every `interval`.
+  // If `immediate` is false, `function` runs for the
+  // first time only after `interval` has passed.
+  // `run_limit` is the max times `function` will run.
+  //  Use FunctionScheduler::RUN_FOREVER for no limit.
   template <typename Rep, typename Period>
   int scheduleJob(
       std::function<void()> function,
@@ -184,7 +190,9 @@ int FunctionScheduler::scheduleJob(
   TORCH_CHECK(interval.count() >= 0, "Job interval must be positive.");
   TORCH_CHECK(
       run_limit > 0 || run_limit == RUN_FOREVER,
-      "Job run limit must be greater than 0 or ", RUN_FOREVER, ".");
+      "Job run limit must be greater than 0 or FunctionScheduler::RUN_FOREVER (",
+      RUN_FOREVER,
+      ").");
 
   auto duration =
       std::chrono::duration_cast<std::chrono::microseconds>(interval);
