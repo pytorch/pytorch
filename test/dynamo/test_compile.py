@@ -146,7 +146,7 @@ class PublicTorchCompilerTests(TestCase):
     def test_dynamo_signatures(self):
         function_names = [
             "reset",
-            "allow_in_graph",
+            "unsafe_allow_in_graph",
             "list_backends",
             "assume_constant_result",
             "disable",

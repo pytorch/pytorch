@@ -106,7 +106,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         self.assertNotEqual(c1, c2)
 
     def test_incompatible_function(self):
-        @torch._dynamo.allow_in_graph
+        @torch._dynamo.unsafe_allow_in_graph
         class AllowInGraphFunc(torch.autograd.Function):
             @staticmethod
             def forward(_, x):
@@ -122,7 +122,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         )
 
     def test_normal_torch_function(self):
-        @torch._dynamo.allow_in_graph
+        @torch._dynamo.unsafe_allow_in_graph
         def fn(x):
             y = torch.sin(x)
             z = torch.cos(x)

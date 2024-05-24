@@ -83,18 +83,18 @@ def unsafe_allow_in_graph(fn):
     do not use this API. Instead, please create a custom operator:
     https://docs.google.com/document/d/1_W62p8WJOQQUzPsJYa7s701JXt0qf2OfLub2sbkHOaU/edit
 
-    The main use case for :func:`allow_in_graph()` is as an escape hatch for the compiler frontend:
+    The main use case for :func:`unsafe_allow_in_graph()` is as an escape hatch for the compiler frontend:
     if you know the function works w.r.t. to the downstream components of the compilation
     stack (AOTAutograd and Inductor) but there is a Dynamo bug that prevents it from
     symbolically introspecting the function properly, then one can decorate said function
-    with allow_in_graph to bypass Dynamo.
+    with unsafe_allow_in_graph to bypass Dynamo.
 
     There are a number of restrictions on ``fn``: it must only accept inputs/outputs
     of certain types (e.g. Tensor/int/bool/float/None and lists of the previous), and
     all Tensors used inside of ``fn`` must be passed directly as inputs to ``fn``.
     Failure to abide by these restrictions will result in undefined behavior.
 
-    If fn is a list or tuple of callables it recursively applies :func:`allow_in_graph()`
+    If fn is a list or tuple of callables it recursively applies :func:`unsafe_allow_in_graph()`
     to each function and returns a new list or tuple containing the modified functions
 
     Args:
@@ -104,14 +104,14 @@ def unsafe_allow_in_graph(fn):
 
         If you're a typical torch.compile user (and not a PyTorch developer), you probably
         don't want to use this function.
-        :func:`allow_in_graph` is a big footgun because it skips the compiler frontend
+        :func:`unsafe_allow_in_graph` is a big footgun because it skips the compiler frontend
         (Dynamo) that is responsible for doing safety checks (graph breaks, handling
         closures, etc). Incorrect usage will lead to difficult-to-debug silent
         incorrectness issues.
 
     ::
 
-        torch._dynamo.allow_in_graph(my_custom_function)
+        torch._dynamo.unsafe_allow_in_graph(my_custom_function)
 
         @torch._dynamo.optimize(...)
         def fn(a):
@@ -125,8 +125,8 @@ def unsafe_allow_in_graph(fn):
     Will capture a single graph containing `my_custom_function()`.
     """
     if isinstance(fn, (list, tuple)):
-        return [allow_in_graph(x) for x in fn]
-    assert callable(fn), "allow_in_graph expects a callable"
+        return [unsafe_allow_in_graph(x) for x in fn]
+    assert callable(fn), "unsafe_allow_in_graph expects a callable"
     if trace_rules.lookup_callable(fn) != variables.TorchInGraphFunctionVariable:
         trace_rules._disallowed_callable_ids.remove(id(fn))
         trace_rules._allowed_callable_ids.add(id(fn))
@@ -209,7 +209,7 @@ def forbid_in_graph(fn):
     Customize which functions TorchDynamo will assert are not present while tracing.
 
     If you want a graph break on this function instead, use disallow_in_graph.
-    TODO(voz): We now have allow_in_graph, disallow_in_graph, forbid_in_graph - some more robust
+    TODO(voz): We now have unsafe_allow_in_graph, disallow_in_graph, forbid_in_graph - some more robust
     documentation would not be amiss.
     """
     if isinstance(fn, (list, tuple)):
@@ -371,8 +371,8 @@ def mark_static_address(t, guard=True):
 
 
 # Note: this carefully avoids eagerly import einops.
-# TODO: we should delete this whole _allow_in_graph_einops logic by approximately 2024 Q2
-def _allow_in_graph_einops():
+# TODO: we should delete this whole _unsafe_allow_in_graph_einops logic by approximately 2024 Q2
+def _unsafe_allow_in_graph_einops():
     import einops
 
     try:
@@ -385,16 +385,16 @@ def _allow_in_graph_einops():
         pass
     except ImportError:
         # einops <= 0.6.1
-        allow_in_graph(einops.rearrange)
-        allow_in_graph(einops.reduce)
+        unsafe_allow_in_graph(einops.rearrange)
+        unsafe_allow_in_graph(einops.reduce)
         if hasattr(einops, "repeat"):
-            allow_in_graph(einops.repeat)  # available since einops 0.2.0
+            unsafe_allow_in_graph(einops.repeat)  # available since einops 0.2.0
         if hasattr(einops, "einsum"):
-            allow_in_graph(einops.einsum)  # available since einops 0.5.0
+            unsafe_allow_in_graph(einops.einsum)  # available since einops 0.5.0
         if hasattr(einops, "pack"):
-            allow_in_graph(einops.pack)  # available since einops 0.6.0
+            unsafe_allow_in_graph(einops.pack)  # available since einops 0.6.0
         if hasattr(einops, "unpack"):
-            allow_in_graph(einops.unpack)  # available since einops 0.6.0
+            unsafe_allow_in_graph(einops.unpack)  # available since einops 0.6.0
 
 
-trace_rules.add_module_init_func("einops", _allow_in_graph_einops)
+trace_rules.add_module_init_func("einops", _unsafe_allow_in_graph_einops)

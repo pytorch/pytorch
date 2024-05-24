@@ -40,7 +40,7 @@ from functorch import (
 )
 from functorch.experimental import functionalize, replace_all_batch_norm_modules_
 from torch._C import _ExcludeDispatchKeyGuard, DispatchKey, DispatchKeySet
-from torch._dynamo import allow_in_graph
+from torch._dynamo import unsafe_allow_in_graph
 from torch._functorch.eager_transforms import _slice_argnums
 from torch._functorch.make_functional import (
     functional_init,
@@ -5066,7 +5066,7 @@ class TestHigherOrderOperatorInteraction(TestCase):
 
 
 def traceable(f):
-    f = allow_in_graph(f)
+    f = unsafe_allow_in_graph(f)
 
     @wraps(f)
     def wrapper(*args, **kwargs):

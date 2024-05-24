@@ -359,7 +359,7 @@ class OutputGraph:
         # Tracks if the output graph has a user defined allowed function in the
         # graph. This is used later to determine if we should fallback to eager
         # for certain exceptions. THe idea is that if the user has applied
-        # allow_in_graph, they would like to see the error instead of falling
+        # unsafe_allow_in_graph, they would like to see the error instead of falling
         # back for backend errors.
         self.has_user_defined_allowed_in_graph = False
 

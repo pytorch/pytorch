@@ -42,13 +42,13 @@ def unsafe_allow_in_graph(fn):
     do not use this API. Instead, please create a custom operator:
     https://docs.google.com/document/d/1_W62p8WJOQQUzPsJYa7s701JXt0qf2OfLub2sbkHOaU/edit
 
-    The main use case for :func:`allow_in_graph()` is as an escape hatch for the compiler frontend:
+    The main use case for :func:`unsafe_allow_in_graph()` is as an escape hatch for the compiler frontend:
     if you know the function works w.r.t. to the downstream components of the compilation
     stack (AOTAutograd and Inductor) but there is a Dynamo bug that prevents it from
     symbolically introspecting the function properly, then one can decorate said function
-    with allow_in_graph to bypass Dynamo.
+    with unsafe_allow_in_graph to bypass Dynamo.
 
-    If fn is a list or tuple of callables it recursively applies :func:`allow_in_graph()`
+    If fn is a list or tuple of callables it recursively applies :func:`unsafe_allow_in_graph()`
     to each function and returns a new list or tuple containing the modified functions
 
     There are a number of restrictions on ``fn``: it must only accept inputs/outputs
@@ -63,7 +63,7 @@ def unsafe_allow_in_graph(fn):
 
         If you're a typical torch.compile user (and not a PyTorch developer), you probably
         don't want to use this function.
-        :func:`allow_in_graph` is a big footgun because it skips the compiler frontend
+        :func:`unsafe_allow_in_graph` is a big footgun because it skips the compiler frontend
         (Dynamo) that is responsible for doing safety checks (graph breaks, handling
         closures, etc). Incorrect usage will lead to difficult-to-debug silent
         incorrectness issues.

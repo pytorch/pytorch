@@ -4098,7 +4098,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     # https://github.com/pytorch/pytorch/issues/118799
     def test_subclass_graph_output_repro(self):
-        @torch._dynamo.allow_in_graph
+        @torch._dynamo.unsafe_allow_in_graph
         def to_subclass(x):
             return TwoTensor(x.clone(), x.clone())
 

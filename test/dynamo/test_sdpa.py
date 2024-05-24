@@ -8,11 +8,11 @@ from torch.backends.cuda import SDPAParams
 
 
 @contextlib.contextmanager
-def allow_in_graph_sdpa_params():
+def unsafe_allow_in_graph_sdpa_params():
     global SDPAParams
     try:
         old = SDPAParams
-        SDPAParams = torch._dynamo.allow_in_graph(SDPAParams)
+        SDPAParams = torch._dynamo.unsafe_allow_in_graph(SDPAParams)
         yield
     finally:
         SDPAParams = old
@@ -26,7 +26,7 @@ class TestSDPA(torch._dynamo.test_case.TestCase):
         self.assertIs(actual.attn_mask, expected.attn_mask)
 
     def test_returns_SDPAParams(self):
-        with allow_in_graph_sdpa_params():
+        with unsafe_allow_in_graph_sdpa_params():
             counter = CompileCounter()
 
             @torch.compile(fullgraph=True, backend=counter)
@@ -43,7 +43,7 @@ class TestSDPA(torch._dynamo.test_case.TestCase):
             self.assertEqual(counter.frame_count, 1)
 
     def test_graph_break_SDPAParams(self):
-        with allow_in_graph_sdpa_params():
+        with unsafe_allow_in_graph_sdpa_params():
             counter = CompileCounter()
 
             @torch.compile(backend=counter)
@@ -62,7 +62,7 @@ class TestSDPA(torch._dynamo.test_case.TestCase):
             self.assertEqual(counter.frame_count, 2)
 
     def test_input_SDPAParams(self):
-        with allow_in_graph_sdpa_params():
+        with unsafe_allow_in_graph_sdpa_params():
             counter = CompileCounter()
 
             @torch.compile(backend=counter)
@@ -80,7 +80,7 @@ class TestSDPA(torch._dynamo.test_case.TestCase):
             self.assertEqual(counter.frame_count, 1)
 
     def test_intermediate_attr_access_SDPAParams(self):
-        with allow_in_graph_sdpa_params():
+        with unsafe_allow_in_graph_sdpa_params():
             counter = CompileCounter()
 
             @torch.compile(fullgraph=True, backend=counter)

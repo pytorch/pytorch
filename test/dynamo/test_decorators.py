@@ -30,7 +30,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.disallow_in_graph(torch.sub)
         fn(torch.randn(10))
-        torch._dynamo.allow_in_graph(torch.sub)
+        torch._dynamo.unsafe_allow_in_graph(torch.sub)
 
         # check for graph break on sub
         self.assertEqual(cnts.frame_count, 2)
@@ -183,7 +183,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             all(node.target is not torch.sigmoid for node in gm1.graph.nodes)
         )
 
-    def test_allow_in_graph(self):
+    def test_unsafe_allow_in_graph(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
         @torch._dynamo.optimize(cnts)
@@ -195,7 +195,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             x = torch.add(x, 1)
             return x
 
-        torch._dynamo.allow_in_graph(my_custom_function)
+        torch._dynamo.unsafe_allow_in_graph(my_custom_function)
         fn(torch.randn(10))
         torch._dynamo.disallow_in_graph(my_custom_function)
 

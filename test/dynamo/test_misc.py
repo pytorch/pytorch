@@ -34,7 +34,11 @@ import torch.onnx.operators
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C import FileCheck
-from torch._dynamo import allow_in_graph, bytecode_analysis, bytecode_transformation
+from torch._dynamo import (
+    bytecode_analysis,
+    bytecode_transformation,
+    unsafe_allow_in_graph,
+)
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.source import ConstantSource, GetItemSource, LocalSource
@@ -7547,7 +7551,7 @@ def fn():
         def fail():
             raise AssertionError("fail")
 
-        @allow_in_graph
+        @unsafe_allow_in_graph
         def h(a):
             r = a.sum()
             # Trigger an exception in backwards
@@ -7668,7 +7672,7 @@ def fn():
         value = None
         cnt = CompileCounter()
 
-        @torch._dynamo.allow_in_graph
+        @torch._dynamo.unsafe_allow_in_graph
         def check_state():
             nonlocal value
             value = torch.is_grad_enabled()
@@ -7702,7 +7706,7 @@ def fn():
         warn_only = None
         cnt = CompileCounter()
 
-        @torch._dynamo.allow_in_graph
+        @torch._dynamo.unsafe_allow_in_graph
         def check_state():
             nonlocal value
             nonlocal warn_only

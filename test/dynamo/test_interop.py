@@ -34,10 +34,10 @@ class InteropTests(torch._dynamo.test_case.TestCase):
     def test_vmap_in_graph(self):
         from functools import wraps
 
-        from torch._dynamo import allow_in_graph
+        from torch._dynamo import unsafe_allow_in_graph
 
         def traceable(f):
-            f = allow_in_graph(f)
+            f = unsafe_allow_in_graph(f)
 
             @wraps(f)
             def wrapper(*args, **kwargs):

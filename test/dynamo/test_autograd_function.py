@@ -328,11 +328,11 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         opt_model(x)
 
-    def test_allow_in_graph(self):
+    def test_unsafe_allow_in_graph(self):
         torch._dynamo.utils.counters.clear()
         cnt = torch._dynamo.testing.CompileCounter()
 
-        @torch._dynamo.allow_in_graph
+        @torch._dynamo.unsafe_allow_in_graph
         class AllowInGraphFunc(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
@@ -923,7 +923,7 @@ class GraphModule(torch.nn.Module):
         x = copy.deepcopy(x_ref)
         scale = torch.tensor(1.0)
         # Weird that this is needed, but not having this breaks a lot of things
-        torch._dynamo.allow_in_graph(FooTensor)
+        torch._dynamo.unsafe_allow_in_graph(FooTensor)
 
         def foo(x, scale):
             config = (

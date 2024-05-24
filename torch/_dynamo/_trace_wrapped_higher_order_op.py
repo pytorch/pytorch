@@ -18,7 +18,7 @@ __all__ = ["trace_wrapped"]
 # if you make_fx trace through this call, we will not actually trace into fn; instead,
 # we will directly insert it as a call_function to fn in the graph.
 # (Unlike make_fx, Dynamo WILL inline into fn.)
-# You can think of this as a one off allow_in_graph equivalent for proxy tensor tracing.
+# You can think of this as a one off unsafe_allow_in_graph equivalent for proxy tensor tracing.
 #
 # Because proxy tensor tracing does not actually run the function, there are
 # requirements on the behavior of fn. We are still figuring it out, but here is the current state:

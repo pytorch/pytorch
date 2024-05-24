@@ -126,7 +126,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
             cls._load_dispatch_table()
 
             # we can also register the classes with dynamo when the warning is shown.
-            torch._dynamo.allow_in_graph(cls)
+            torch._dynamo.unsafe_allow_in_graph(cls)
 
         if packed is not None:
             previous_tensor = packed
