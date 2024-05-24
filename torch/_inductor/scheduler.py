@@ -1135,7 +1135,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
 
             producer = typing.cast(ForeachKernelSchedulerNode, producer)
             producer_subnode = producer.get_producer_subnode_for(consumer)
-            if producer_subnode is not None and not producer_subnode.is_reduction():
+            if producer_subnode is not None:
                 return producer.scheduler.can_fuse(producer_subnode, consumer)
 
             why("candidate consumer has no dep in any foreach producer")
