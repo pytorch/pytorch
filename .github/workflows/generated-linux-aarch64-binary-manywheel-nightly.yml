@@ -118,7 +118,7 @@ jobs:
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_8-cuda-aarch64
       build_environment: linux-aarch64-binary-manywheel
-      timeout-minutes: 360
+      timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cuda-aarch64-upload:  # Uploading
@@ -226,7 +226,7 @@ jobs:
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_9-cuda-aarch64
       build_environment: linux-aarch64-binary-manywheel
-      timeout-minutes: 360
+      timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda-aarch64-upload:  # Uploading
@@ -334,7 +334,7 @@ jobs:
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_10-cuda-aarch64
       build_environment: linux-aarch64-binary-manywheel
-      timeout-minutes: 360
+      timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda-aarch64-upload:  # Uploading
@@ -442,7 +442,7 @@ jobs:
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_11-cuda-aarch64
       build_environment: linux-aarch64-binary-manywheel
-      timeout-minutes: 360
+      timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda-aarch64-upload:  # Uploading
@@ -550,7 +550,7 @@ jobs:
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_12-cuda-aarch64
       build_environment: linux-aarch64-binary-manywheel
-      timeout-minutes: 360
+      timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda-aarch64-upload:  # Uploading

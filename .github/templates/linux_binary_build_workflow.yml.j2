@@ -72,7 +72,7 @@ jobs:
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ config.pytorch_extra_install_requirements }}
       {%- endif %}
       {%- if config["gpu_arch_type"] == "cuda-aarch64" %}
-      timeout-minutes: 360
+      timeout-minutes: 420
       {%- endif %}
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
