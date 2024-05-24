@@ -28,8 +28,11 @@ c10d_collective_ops = {
     c10d_ops.allreduce_,
     c10d_ops._allgather_base_,
     c10d_ops._reduce_scatter_base_,
-    c10d_ops.broadcast_,
     c10d_ops.allreduce_coalesced_,
+    c10d_ops.broadcast_,
+    c10d_ops.gather_,
+    c10d_ops.scatter_,
+    c10d_ops.reduce_,
 }
 
 
