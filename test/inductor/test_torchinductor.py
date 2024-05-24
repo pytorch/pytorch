@@ -9394,6 +9394,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8),))
 
+    @skip_if_halide  # erfinv not implemented
     def test_erfinv(self):
         def fn(x):
             return torch.erfinv(x)
@@ -10161,6 +10162,8 @@ class CommonTemplate:
             def fn(x, n):
                 return op(x, n)
 
+        elif name == "erfinv" and is_halide_backend(self.device):
+            raise unittest.SkipTest("halide does not support erfinv")
         else:
             args = (torch.randn(8, 8, dtype=dtype, device=self.device),)
 

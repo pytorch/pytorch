@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import itertools
 import logging
-import math
 import re
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
@@ -245,10 +244,6 @@ class HalideOverrides(OpOverrides):
         return f"hl.exp2({x})"
 
     @staticmethod
-    def expm1(x):
-        return f"hl.exp({x}) - hl.f32(1.0)"
-
-    @staticmethod
     def sqrt(x):
         return f"hl.sqrt({x})"
 
@@ -337,24 +332,12 @@ class HalideOverrides(OpOverrides):
         raise Unsupported("copysign")
 
     @staticmethod
-    def erfc(x):
-        raise Unsupported("erfc")
-
-    @staticmethod
     def erfinv(x):
         raise Unsupported("erfinv")
 
     @staticmethod
     def hypot(x, y):
         return f"hl.hypot({x}, {y})"
-
-    @staticmethod
-    def log10(x):
-        return f"hl.fast_log({x}) * {1/math.log(10)!r}"
-
-    @staticmethod
-    def log2(x):
-        return f"hl.fast_log({x}) * {1/math.log(2)!r}"
 
     @staticmethod
     def nextafter(x, y):
@@ -515,6 +498,12 @@ class HalideOverrides(OpOverrides):
             return ops.to_dtype(var, dtype)
         return var
 
+    @classmethod
+    def indirect_indexing(cls, index_var, size, check=True):
+        # TODO(jansel): Halide only supports 32-bit indexing, we should error on overflow
+        index_var = ops.to_dtype(index_var, torch.int32)
+        return sympy_index_symbol(str(index_var))
+
     @staticmethod
     def masked(mask, body, other):
         with V.kernel.mask_loads(mask) as new_mask:
@@ -647,7 +636,7 @@ class HalideKernel(SIMDKernel):
             assert isinstance(sym, sympy.Symbol)
             if symbol_is_type(sym, SymT.TMP):
                 # indirect indexing
-                cse_var = self.cse.varname_map[sym.name]
+                cse_var = self.lookup_cse_var(sym.name)
                 assert (
                     isinstance(cse_var, HalideCSEVariable)
                     and cse_var.used_dims is not None
@@ -671,16 +660,11 @@ class HalideKernel(SIMDKernel):
     def load(self, name: str, index: sympy.Expr):
         """Codegen a load from an InputBuffer"""
         var = self.args.input(name)
-
-        indirect_indexing = self.is_indirect_indexing(index)
-        if indirect_indexing:
-            raise Unsupported("indirect_indexing")
-
         indexing = self.indexing(index, block_ptr=False)
         assert isinstance(indexing, IndexingOptions)
         index_str = self.index_to_str(indexing.index)
 
-        if indexing.has_tmpmask():
+        if indexing.has_tmpmask() or self.is_indirect_indexing(index):
             # Halide doesn't have a great way to do masked loads
             var = f"hl.BoundaryConditions.constant_exterior({var}, 0)"
             # TODO(jansel): figure out why this didn't work
@@ -712,6 +696,9 @@ class HalideKernel(SIMDKernel):
                 ), sym.name
                 replacements[sym] = sympy.Symbol(f"{sym.name}_{suffix}")
         return sympy_subs(index, replacements)
+
+    def lookup_cse_var(self, name: str):
+        return super().lookup_cse_var(re.sub(r"\[.*", "", name))
 
     def determine_store_indexing(
         self, name: str, index: sympy.Expr, value: HalideCSEVariable, var: str
@@ -909,7 +896,8 @@ class HalideKernel(SIMDKernel):
                 assert "in_ptr" in arg.name
                 return 0
 
-        return sorted(zip(*self.args.python_argdefs()[1:]), key=arg_order)
+        _, a, b, _ = self.args.python_argdefs()
+        return sorted(zip(a, b), key=arg_order)
 
     def halide_kernel_meta(self) -> HalideMeta:
         """Compute metadata required by codecache.py"""
@@ -1057,6 +1045,9 @@ class HalideKernel(SIMDKernel):
             call_args,
             cuda=False,
         )
+
+    def generate_assert(self, check):
+        return False  # TODO(jansel): support asserts
 
 
 class HalideScheduling(SIMDScheduling):
