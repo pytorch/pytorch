@@ -2,7 +2,6 @@
 # flake8: noqa: B950
 
 import functools
-import unittest
 from collections import namedtuple
 from typing import Callable, Optional
 
@@ -529,7 +528,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
-    @unittest.skip("Silu decomp failing for full in backwards")
     def test_silu_on_score(self, dtype):
         def silu_score(score, b, h, q, kv):
             return torch.nn.functional.silu(score)
