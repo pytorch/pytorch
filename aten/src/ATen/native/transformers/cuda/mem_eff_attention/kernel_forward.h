@@ -138,7 +138,6 @@ struct AttentionKernel {
     const int32_t* seqstart_q_ptr = nullptr;
     const int32_t* seqstart_k_ptr = nullptr;
 
-    const int32_t* causal_diagonal_ptr = nullptr;
     const int32_t* seqlen_k_ptr = nullptr;
     uint32_t causal_diagonal_offset = 0;
 
