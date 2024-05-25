@@ -141,13 +141,13 @@ void FunctionScheduler::addRun(
 int FunctionScheduler::scheduleJob(std::unique_ptr<Job> job) {
   std::unique_lock<std::mutex> lock(_mutex);
   int job_id = id();
-  _jobs.insert(std::make_pair(job_id, std::move(job)));
 
   if (_running) {
     addRun(lock, job_id, job);
     // Notify the thread handling run execution.
     _cond.notify_one();
   }
+  _jobs.insert(std::make_pair(job_id, std::move(job)));
 
   return job_id;
 }
