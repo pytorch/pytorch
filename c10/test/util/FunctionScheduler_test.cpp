@@ -3,12 +3,6 @@
 
 #include <gtest/gtest.h>
 
-#include <atomic>
-#include <chrono>
-#include <functional>
-#include <thread>
-#include <vector>
-
 TEST(Job, Initialization) {
   std::function<void()> function = []() {};
   std::chrono::microseconds interval(10);
