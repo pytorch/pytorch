@@ -388,7 +388,7 @@ class TritonTemplateKernel(TritonKernel):
             output_index,
             self.epilogue_fn(*epilogue_args),
         )
-        # self.codegen_body()
+        self.codegen_body()
         value = self.body.getvalue()
         self.body.clear()
 
