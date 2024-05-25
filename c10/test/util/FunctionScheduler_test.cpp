@@ -134,20 +134,25 @@ TEST(FunctionScheduler, RunJobWithZeroInterval) {
 }
 
 TEST(FunctionScheduler, RunJobWithInterval) {
-  bool ran = false;
-  std::function<void()> function = [&ran]() { ran = true; };
-  std::chrono::milliseconds interval(400);
+  std::atomic<int> count = 0;
+  std::function<void()> function = [&count]() { count++; };
+  std::chrono::milliseconds interval(200);
 
   c10::FunctionScheduler fs;
   fs.scheduleJob(function, interval);
   fs.start();
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
-  ASSERT_FALSE(ran);
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  ASSERT_EQ(count, 0);
 
-  std::this_thread::sleep_for(std::chrono::milliseconds(800));
+  std::this_thread::sleep_for(std::chrono::milliseconds(200)); // 250
+  ASSERT_EQ(count, 1);
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(50)); // 300
+  ASSERT_EQ(count, 1);
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(150)); // 450
+  ASSERT_EQ(count, 2);
   fs.stop();
-
-  ASSERT_TRUE(ran);
 }
 
 TEST(FunctionScheduler, RemoveJobWhileRunning) {
