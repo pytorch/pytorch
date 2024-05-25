@@ -4768,10 +4768,16 @@ class MutationOutput(ExternKernel):
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
 
-    def __init__(self, layout, input, parent):
+    def __init__(self, layout, mutated_node, node_doing_mutating):
         # NB: Do not directly construct this - use `mark_node_as_mutating`
-        super().__init__(None, layout, [input, parent], ())
+        super().__init__(None, layout, [mutated_node], ())
+        self.node_doing_mutating = node_doing_mutating
         self.name = V.graph.register_buffer(self)
+
+    def get_read_writes(self):
+        read_writes = super().get_read_writes()
+        read_writes.reads.add(dependencies.WeakDep(self.node_doing_mutating.get_name()))
+        return read_writes
 
     def should_allocate(self):
         return False
