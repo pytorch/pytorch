@@ -1751,7 +1751,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         elif isinstance(
             cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
         ):
-            raise UserError(  # noqa: TRY200
+            raise UserError(  # noqa: B904
                 UserErrorType.CONSTRAINT_VIOLATION,
                 "Tried to use data-dependent value in the subsequent computation. "
                 "This can happen when we encounter unbounded dynamic value that is unknown during tracing time.  "
@@ -2642,3 +2642,11 @@ def get_locals_to_steal(maybe_gm):
 
 def set_locals_to_steal(gm, locals_to_steal):
     gm.meta["locals_to_steal"] = locals_to_steal
+
+
+class Lit:
+    def __init__(self, s):
+        self.s = s
+
+    def __repr__(self):
+        return self.s

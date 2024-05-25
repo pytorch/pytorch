@@ -85,7 +85,7 @@ fi
 CMAKE_VERSION=3.18.5
 
 _UCX_COMMIT=7bb2722ff2187a0cad557ae4a6afa090569f83fb
-_UCC_COMMIT=1522ccff5e107451d747b1085b3f84714a6c2eea
+_UCC_COMMIT=20eae37090a4ce1b32bcce6144ccad0b49943e0b
 
 # It's annoying to rename jobs every time you want to rewrite a
 # configuration, so we hardcode everything here rather than do it
@@ -138,6 +138,21 @@ case "$image" in
     CUDA_VERSION=12.1.1
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    CONDA_CMAKE=yes
+    TRITON=yes
+    INDUCTOR_BENCHMARKS=yes
+    ;;
+  pytorch-linux-focal-cuda12.1-cudnn8-py3.12-gcc9-inductor-benchmarks)
+    CUDA_VERSION=12.1.1
+    CUDNN_VERSION=8
+    ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
