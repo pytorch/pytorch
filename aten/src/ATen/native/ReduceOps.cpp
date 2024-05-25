@@ -869,7 +869,7 @@ Tensor cummaxmin_backward(const Tensor& grad, const Tensor& input, const Tensor&
   return result.scatter_add_(dim, indices, grad);
 }
 
-static Tensor prepend_append_on_dim(const Tensor& self, const std::optional<Tensor>& prepend, const c10::optional<Tensor>& append, int64_t dim) {
+static Tensor prepend_append_on_dim(const Tensor& self, const std::optional<Tensor>& prepend, const std::optional<Tensor>& append, int64_t dim) {
   // Helper for diff that handles prepending and appending when at least one is present
   TORCH_INTERNAL_ASSERT(prepend.has_value() || append.has_value(), "either prepend or append must be have value");
   if (!prepend.has_value() && append.has_value()) {
@@ -902,7 +902,7 @@ static inline void diff_check_compatible_shape(const Tensor& self, const std::op
   }
 }
 
-static inline void diff_check(const Tensor& self, int64_t n, int64_t dim, const std::optional<Tensor>&prepend, const c10::optional<Tensor>& append) {
+static inline void diff_check(const Tensor& self, int64_t n, int64_t dim, const std::optional<Tensor>&prepend, const std::optional<Tensor>& append) {
   // Helper for diff that checks whether its parameters are valid
   TORCH_CHECK(
       self.dim() >= 1,
@@ -943,7 +943,7 @@ static inline Tensor diff_helper(const Tensor& self, int64_t n, int64_t dim) {
   return result;
 }
 
-Tensor diff(const Tensor& self, int64_t n, int64_t dim, const std::optional<Tensor>& prepend, const c10::optional<Tensor>& append) {
+Tensor diff(const Tensor& self, int64_t n, int64_t dim, const std::optional<Tensor>& prepend, const std::optional<Tensor>& append) {
   diff_check(self, n, dim, prepend, append);
   if ((!prepend.has_value() && !append.has_value()) || n == 0) {
     return diff_helper(self, n, dim);
@@ -987,7 +987,7 @@ static inline Tensor& diff_out_helper(const Tensor& self, int64_t n, int64_t dim
   return result;
 }
 
-Tensor& diff_out(const Tensor& self, int64_t n, int64_t dim, const std::optional<Tensor>& prepend, const c10::optional<Tensor>& append, Tensor& result) {
+Tensor& diff_out(const Tensor& self, int64_t n, int64_t dim, const std::optional<Tensor>& prepend, const std::optional<Tensor>& append, Tensor& result) {
   diff_check(self, n, dim, prepend, append);
   if ((!prepend.has_value() && !append.has_value()) || n == 0) {
     return diff_out_helper(self, n, dim, result);
@@ -1146,7 +1146,7 @@ std::vector<Tensor> gradient(const Tensor& self, const Scalar& unit_size, IntArr
   return gradient_helper_float(self, spacing, dim, edge_order);
 }
 
-std::vector<Tensor> gradient(const Tensor& self, const std::optional<Scalar>& unit_size, c10::optional<int64_t> dim, int64_t edge_order) {
+std::vector<Tensor> gradient(const Tensor& self, const std::optional<Scalar>& unit_size, std::optional<int64_t> dim, int64_t edge_order) {
   const auto processed_dim = gradient_dim_preprocess(self, dim);
   // When unit_size not provided, it is always assumed to be equal to 1.
   // When dim has integer value it implies we are looking for gradient in the specific direction, however when
