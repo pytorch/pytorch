@@ -49,20 +49,7 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
     mapped_xs = args[:num_mapped_args]
     pos_args = args[num_mapped_args:]
 
-    # Note:[HOP create fw_bw graph] We create "clean" environments for make_fx by suspending all dispatch keys
-    # between Autograd and Python key. Currently, we only suspend functionalization but more can be
-    # added when required. Will encounter two problems if we don't suspend functionalization:
-    #
-    # 1. make_fx fails to capture operations on input: the inputs are wrapped as _to_functional_tensor_wrapper,
-    # but they will be unwrapped before entering ProxyTorchDispatchMode as part of the dispatching.
-    # However, it's the outside wrapper that tracer creates proxies for. This casuses tracer fail to
-    # fetch the proxy for the inputs and fail to capture any operations on them.
-    #
-    # 2. make_fx fails to capture output: the outputs after ProxyTorchDispatchMode are further
-    # wrapped as FunctionalTensorWrapper in Functionalize key after return. However, the tracer
-    # only associates the inner tensor with proxy in ProxyTorchDispatchMode. Therefore,
-    # when creating the output node, it fails to associate the wrapped tensor with its proxy.
-    # Instead, it will create _tensor_constant as output.
+    # See Note [HOP create fw_bw graph] in create_fw_bw_graph in utils.py
 
     with suspend_functionalization(), disable_functional_mode():
         with disable_proxy_modes_tracing():
