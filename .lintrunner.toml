@@ -1064,7 +1064,6 @@ exclude_patterns = [
     'test/test_fx_experimental.py',
     'test/test_fx_passes.py',
     'test/test_fx_reinplace_pass.py',
-    'test/test_hub.py',
     'test/test_import_stats.py',
     'test/test_itt.py',
     'test/test_jit.py',
