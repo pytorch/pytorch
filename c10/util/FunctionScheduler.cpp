@@ -216,12 +216,14 @@ int FunctionScheduler::resume() {
     return -1;
 
   auto diff = std::chrono::steady_clock::now() - _paused_time;
-  auto _queue_copy = _queue;
-  while (!_queue_copy.empty()) {
-    auto entry = _queue_copy.top();
-    _queue_copy.pop();
+  std::priority_queue<Run, std::vector<Run>, decltype(&Run::gt)> updated_queue;
+  while (!_queue.empty()) {
+    auto entry = _queue.top();
+    _queue.pop();
     entry.set_time(entry.time() + diff);
+    updated_queue.push(entry);
   }
+  _queue.swap(updated_queue);
 
   _running = true;
   _paused = false;
