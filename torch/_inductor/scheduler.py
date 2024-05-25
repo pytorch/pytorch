@@ -1698,9 +1698,6 @@ class Scheduler:
             # add normal non-mutation dependencies
             for read in node.read_writes.reads:
                 is_weak = isinstance(read, WeakDep)
-                # If the node doesn't do anything, then it's purely needed for
-                # ordering, and so is a weakdep
-                is_weak |= isinstance(node, NopKernelSchedulerNode)
                 add_user(read.name, node, node.can_inplace(read), is_weak)
 
             node.update_mutated_names(self.mutation_renames)
