@@ -61,7 +61,7 @@ aten = torch.ops.aten
 DispatchReturn = Tuple[Callable, ViewAndMutationMeta]
 
 
-def _create_pre_dispatch_wrappers(needs_autograd: bool) -> List[CompilerWrapper]:
+def _create_wrappers_for_dispatch(needs_autograd: bool) -> List[CompilerWrapper]:
     """
     Wrappers that run on every dispatch function
     """
@@ -78,7 +78,7 @@ def aot_dispatch_export(
     fw_metadata: ViewAndMutationMeta,
     needs_autograd: bool,
 ) -> DispatchReturn:
-    wrappers = _create_pre_dispatch_wrappers(needs_autograd)
+    wrappers = _create_wrappers_for_dispatch(needs_autograd)
     flat_fn, flat_args, fw_metadata = pre_compile(
         wrappers,
         flat_fn,
@@ -120,7 +120,7 @@ def aot_dispatch_base(
     """
     Handles functions that don't need autograd. Runs wrappers and compiles with fw_compiler.
     """
-    wrappers = _create_pre_dispatch_wrappers(needs_autograd=False)
+    wrappers = _create_wrappers_for_dispatch(needs_autograd=False)
     flat_fn, flat_args, fw_metadata = pre_compile(
         wrappers, flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
     )
@@ -228,7 +228,7 @@ def aot_dispatch_autograd(
     Autograd logic. Generates a joint graph, partitions it, manipulates the input with various wrappers,
     and returns a wrapped torch.autograd.Function with a forward and backward.
     """
-    wrappers = _create_pre_dispatch_wrappers(needs_autograd=True)
+    wrappers = _create_wrappers_for_dispatch(needs_autograd=True)
     flat_fn, flat_args, fw_metadata = pre_compile(
         wrappers,
         flat_fn,
