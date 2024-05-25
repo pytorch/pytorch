@@ -202,11 +202,10 @@ def unique_graph_id(proxy_mode, prefix):
             next_name = candidate
     return i, next_name
 
+
 def _from_fun(t):
-    from torch._subclasses.functional_tensor import (
-        FunctionalTensor,
-    )
     from torch._functorch.aot_autograd import from_fun
+    from torch._subclasses.functional_tensor import FunctionalTensor
 
     if isinstance(t, torch.Tensor):
         if t.dtype != torch.bool:
@@ -232,6 +231,7 @@ def _from_fun(t):
             return maybe_unfunc_t.clone()
     return t
 
+
 def clone_outputs_aliasing_inputs(args):
     input_storage = {
         StorageWeakRef(arg._typed_storage())
@@ -246,22 +246,26 @@ def clone_outputs_aliasing_inputs(args):
         ):
             return t.clone()
         return t
-    
+
     return maybe_clone
+
 
 def prepare_fw_with_masks(fn):
     def fw_with_masks(*args):
         fw_out = fn(*args)
         return fw_out, [
-            True
-            if isinstance(ret, torch.Tensor) and ret.requires_grad
-            else False
+            True if isinstance(ret, torch.Tensor) and ret.requires_grad else False
             for ret in fw_out
         ]
+
     return fw_with_masks
 
-def create_fw_bw_graph(fn, *operands):
+
+# TODO: There is a major issue that the create_fw_bw in the higher_order_op is invoked twice:
+# Once in the forward path (as it should) and once in the backward path, where it shouldn't be called
+def create_fw_bw_graph(fn, use_output_and_grad_bw, num_mapped_args, *args):
     from torch._functorch.aot_autograd import AOTConfig, create_joint
+
     dummy_aot_config = AOTConfig(
         fw_compiler=None,  # type: ignore[arg-type]
         bw_compiler=None,  # type: ignore[arg-type]
@@ -271,38 +275,70 @@ def create_fw_bw_graph(fn, *operands):
         aot_id=0,
         keep_inference_input_mutations=False,
     )
-    
-    example_flat_out = pytree.tree_map(
-        _from_fun, fn(*operands)
-    )
-    num_mapped_args = len(operands)
+
+    operands = args[:num_mapped_args]
+    pos_args = args[num_mapped_args:]
+
+    example_flat_out = pytree.tree_map(_from_fun, fn(*operands))
     example_grad = [_from_fun(out) for out in example_flat_out]
+    num_grads = len(example_grad)
     fw_graph = make_fx(fn)(*operands)
 
     def joint_fn(*joint_mapped_args):
-        mapped_input = joint_mapped_args[:num_mapped_args]
-        mapped_grads = joint_mapped_args[num_mapped_args:]
+        if use_output_and_grad_bw:
+            mapped_grads = joint_mapped_args[0]
+            mapped_input = joint_mapped_args[1][:num_mapped_args][-1:]
+            mapped_pos_args = joint_mapped_args[1][num_mapped_args:]
+        else:
+            mapped_grads = joint_mapped_args[:num_grads]
+            mapped_input = joint_mapped_args[num_grads : num_grads + num_mapped_args]
+            mapped_pos_args = joint_mapped_args[num_grads + num_mapped_args :]
+
+        # mapped_grads = joint_mapped_args[0]
+        # mapped_input = joint_mapped_args[1][:num_mapped_args][-1:]
+        # mapped_pos_args = joint_mapped_args[1][num_mapped_args:]
+
+        bw_path = False
+
+        if len(mapped_pos_args) > 0 and mapped_pos_args[0]:
+            bw_path = True
 
         joint = create_joint(prepare_fw_with_masks(fn), aot_config=dummy_aot_config)
-        _, grads = joint(
-            list(mapped_input),
-            [
-                grad
-                for grad in mapped_grads
-                if grad is not None and grad.requires_grad
-            ],
-        )
+        if bw_path:
+            grads = list(mapped_grads)
+        else:
+            _, grads = joint(
+                list(mapped_input),
+                [
+                    grad
+                    for grad in mapped_grads
+                    if grad is not None and grad.requires_grad
+                ],
+            )
 
         # In order to keep map functional for backward graph,
-        # we clone outputs that are aliasing inputs           
+        # we clone outputs that are aliasing inputs
         maybe_clone = clone_outputs_aliasing_inputs(joint_mapped_args)
 
         return pytree.tree_map(maybe_clone, grads)
-    
-    joint_operands_grads = list(operands) + list(example_grad)
+
+    if use_output_and_grad_bw:
+        example_xs_out = list(operands) + list(example_flat_out)
+        num_mapped_args = len(example_xs_out)
+        example_xs_out = example_xs_out + list(pos_args)
+        joint_operands_grads = (list(example_grad), list(example_xs_out))
+    else:
+        example_xs_out = list(operands) + list(pos_args)
+        joint_operands_grads = list(example_grad) + list(example_xs_out)
+
+    # example_xs_out = list(operands) + list(example_flat_out)
+    # num_mapped_args = len(example_xs_out)
+    # example_xs_out = example_xs_out + list(pos_args)
+    # joint_operands_grads = (list(example_grad), list(example_xs_out))
+
     joint_graph = make_fx(joint_fn)(*joint_operands_grads)
-    
     return fw_graph, joint_graph
+
 
 def _unstack_pytree(xs):
     flat_xs, inspec = pytree.tree_flatten(xs)

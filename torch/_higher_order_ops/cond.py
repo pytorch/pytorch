@@ -6,13 +6,13 @@ import torch._subclasses.functional_tensor
 import torch.utils._pytree as pytree
 
 from torch._C import DispatchKey
-from torch._dispatch.python import suspend_functionalization
 from torch._C._functorch import (
     _add_batch_dim,
     get_unwrapped,
     is_batchedtensor,
     maybe_get_bdim,
 )
+from torch._dispatch.python import suspend_functionalization
 from torch._functorch.utils import exposed_in
 from torch._guards import detect_fake_mode
 
@@ -27,20 +27,17 @@ from torch._higher_order_ops.utils import (
 
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch._subclasses.functional_tensor import (
-    disable_functional_mode,
-)
+from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
-    disable_proxy_modes_tracing,
-    make_fx,
     _temp_remove_pre_dispatch_torch_function_mode,
+    disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils._python_dispatch import _get_current_dispatch_mode
-from torch.fx.experimental.proxy_tensor import _temp_remove_pre_dispatch_torch_function_mode
-from .utils import _from_fun, clone_outputs_aliasing_inputs, prepare_fw_with_masks, create_fw_bw_graph
+from .utils import _from_fun, create_fw_bw_graph
+
 
 @exposed_in("torch")
 def cond(pred, true_fn, false_fn, operands):
@@ -146,6 +143,7 @@ def cond(pred, true_fn, false_fn, operands):
                     pred, true_fn, false_fn, operands
                 )
 
+
 """
 We're going to define a `cond_op` operation.
 In order to do this, we need implementations for each of the dispatch keys.
@@ -153,8 +151,8 @@ In order to do this, we need implementations for each of the dispatch keys.
 cond_op = HigherOrderOperator("cond")
 cond_op.__module__ = "torch.ops.higher_order"
 
+
 def create_fw_bw_graph_branches(true_fn, false_fn, *operands):
-    
     # from torch._functorch.aot_autograd import AOTConfig, create_joint
     # dummy_aot_config = AOTConfig(
     #     fw_compiler=None,  # type: ignore[arg-type]
@@ -183,16 +181,13 @@ def create_fw_bw_graph_branches(true_fn, false_fn, *operands):
 
     with suspend_functionalization(), disable_functional_mode():
         with disable_proxy_modes_tracing():
-
             # num_mapped_args = len(operands)
             unwrapped_mapped_operands = pytree.tree_map(_from_fun, operands)
             example_operands = unwrapped_mapped_operands
 
-            #Note, the true_fn and the false_fn produce the same output
-            #shape, thus we can simply generate the example outputs from the true_fn.
-            example_flat_out = pytree.tree_map(
-                _from_fun, true_fn(*example_operands)
-            )
+            # Note, the true_fn and the false_fn produce the same output
+            # shape, thus we can simply generate the example outputs from the true_fn.
+            example_flat_out = pytree.tree_map(_from_fun, true_fn(*example_operands))
             if any(
                 not isinstance(out, torch.Tensor)
                 for out in example_flat_out
@@ -203,8 +198,12 @@ def create_fw_bw_graph_branches(true_fn, false_fn, *operands):
                     f"Got types {[type(out) for out in example_flat_out]}."
                 )
             # example_grad = [_from_fun(out) for out in example_flat_out]
-            fw_true_graph, joint_true_graph = create_fw_bw_graph(true_fn, *example_operands)
-            fw_false_graph, joint_false_graph = create_fw_bw_graph(false_fn, *example_operands)
+            fw_true_graph, joint_true_graph = create_fw_bw_graph(
+                true_fn, False, len(example_operands), *example_operands
+            )
+            fw_false_graph, joint_false_graph = create_fw_bw_graph(
+                false_fn, False, len(example_operands), *example_operands
+            )
 
             # fw_true_graph = make_fx(true_fn)(*example_operands)
             # fw_false_graph = make_fx(false_fn)(*example_operands)
@@ -224,11 +223,11 @@ def create_fw_bw_graph_branches(true_fn, false_fn, *operands):
         #     )
 
         #     # In order to keep map functional for backward graph,
-        #     # we clone outputs that are aliasing inputs           
+        #     # we clone outputs that are aliasing inputs
         #     maybe_clone = clone_outputs_aliasing_inputs(joint_mapped_args)
 
         #     return pytree.tree_map(maybe_clone, grads)
-        
+
         # def joint_f_false(*joint_mapped_args):
         #     mapped_input = joint_mapped_args[:num_mapped_args]
         #     mapped_grads = joint_mapped_args[num_mapped_args:]
@@ -288,7 +287,16 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     for i in range(0, len(flat_true_outs)):
         true_out = flat_true_outs[i]
         false_out = flat_false_outs[i]
-        if true_out.meta["tensor_meta"] != false_out.meta["tensor_meta"]:
+        # TODO: If a torch nn module such as Linear or GRUCell is used, then the
+        # meta data of the output is None and cannot be compared
+        # TODO: If inside the dictionary, inside the list, the first element
+        # is composed of the multiplication, then the requires_grad attribute is
+        # set to False and thus the tracing of the cond errors out.
+        if (
+            true_out is not None
+            and false_out is not None
+            and true_out.meta["tensor_meta"] != false_out.meta["tensor_meta"]
+        ):
             raise torch._dynamo.exc.CondOpArgsMismatchError(
                 f"Expected each tensor to have same metadata but got:"
                 f"\n  {true_fn.__name__} returns {true_out.meta['tensor_meta']}"
@@ -350,23 +358,29 @@ def cond_op_dense(pred, true_fn, false_fn, operands):
 
 class CondAutogradOp(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, pred, fw_true_graph, fw_false_graph, joint_true_graph, joint_false_graph, *operands):
+    def forward(
+        ctx,
+        pred,
+        fw_true_graph,
+        fw_false_graph,
+        joint_true_graph,
+        joint_false_graph,
+        *operands,
+    ):
         ctx._pred = pred
         ctx._joint_true_graph = joint_true_graph
         ctx._joint_false_graph = joint_false_graph
         ctx.save_for_backward(*operands)
-        
+
         with torch._C._AutoDispatchBelowAutograd():
             # with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
             #     return torch.compile(cond_op, backend="eager", fullgraph=True)(
             #         pred, fw_true_graph, fw_false_graph, operands
             #     )
-            return cond_op(
-                pred, fw_true_graph, fw_false_graph, operands
-            )
+            return cond_op(pred, fw_true_graph, fw_false_graph, operands)
 
     @staticmethod
-    def backward(ctx, *flat_grads):       
+    def backward(ctx, *flat_grads):
         operands = ctx.saved_tensors
 
         # with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
@@ -374,14 +388,30 @@ class CondAutogradOp(torch.autograd.Function):
         #         ctx._pred, ctx._joint_true_graph, ctx._joint_false_graph, operands + flat_grads
         #     )
         grads = cond_op(
-            ctx._pred, ctx._joint_true_graph, ctx._joint_false_graph, operands + flat_grads
+            ctx._pred,
+            ctx._joint_true_graph,
+            ctx._joint_false_graph,
+            flat_grads + operands,
         )
         return None, None, None, None, None, *grads
 
+
 @cond_op.py_impl(DispatchKey.Autograd)
 def cond_autograd(pred, true_fn, false_fn, operands):
-    fw_true_graph, fw_false_graph, joint_true_graph, joint_false_graph = create_fw_bw_graph_branches(true_fn, false_fn, *operands)
-    flat_out = CondAutogradOp.apply(pred, fw_true_graph, fw_false_graph, joint_true_graph, joint_false_graph, *operands)
+    (
+        fw_true_graph,
+        fw_false_graph,
+        joint_true_graph,
+        joint_false_graph,
+    ) = create_fw_bw_graph_branches(true_fn, false_fn, *operands)
+    flat_out = CondAutogradOp.apply(
+        pred,
+        fw_true_graph,
+        fw_false_graph,
+        joint_true_graph,
+        joint_false_graph,
+        *operands,
+    )
     return flat_out
 
 
