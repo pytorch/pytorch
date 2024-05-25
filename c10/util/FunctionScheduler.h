@@ -94,7 +94,7 @@ class C10_API FunctionScheduler {
   std::chrono::time_point<std::chrono::steady_clock> _paused_time;
 
   // Runs, sorted by wait time until execution.
-  std::priority_queue<Run, std::vector<Run>, decltype(&Run::gt)> _queue;
+  std::vector<Run> _queue;
 
   // Current active jobs.
   std::unordered_map<int, std::unique_ptr<Job>> _jobs;

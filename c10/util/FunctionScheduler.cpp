@@ -32,7 +32,7 @@ Run::Run(int job_id, std::chrono::time_point<std::chrono::steady_clock> time)
 
 /* FunctionScheduler */
 
-FunctionScheduler::FunctionScheduler() : _queue(&Run::gt) {}
+FunctionScheduler::FunctionScheduler() = default;
 
 FunctionScheduler::~FunctionScheduler() {
   stop();
@@ -41,20 +41,22 @@ FunctionScheduler::~FunctionScheduler() {
 std::chrono::microseconds FunctionScheduler::getNextWaitTime() {
   // We can't pop the next run instantly,
   // as it may still change while we're waiting.
-  _next_run = _queue.top();
+  _next_run = _queue.front();
 
   // Finding the first run associated with an active job.
   auto entry = _jobs.find(_next_run.job_id());
   while (!validEntry(entry)) {
     // Only pop runs associated with an invalid job.
-    _queue.pop();
+    std::pop_heap(_queue.begin(), _queue.end(), Run::gt);
+    _queue.pop_back();
+
     if (_queue.empty())
       return std::chrono::microseconds(-1);
 
+    _next_run = _queue.front();
     entry = _jobs.find(_next_run.job_id());
   }
 
-  _next_run = _queue.top();
   auto now = std::chrono::steady_clock::now();
   return std::chrono::duration_cast<std::chrono::microseconds>(
       _next_run.time() - now);
@@ -94,8 +96,11 @@ void FunctionScheduler::runNextJob(const std::unique_lock<std::mutex>& lock) {
   // This function is always called with the mutex previously acquired.
   TORCH_INTERNAL_ASSERT(lock.owns_lock(), "Mutex not acquired");
   TORCH_INTERNAL_ASSERT(
-      _next_run == _queue.top(), "Next run does not match queue top.");
-  _queue.pop(); // Remove this run from the queue
+      _next_run == _queue.front(), "Next run does not match queue top.");
+
+ // Remove this run from the queue
+  std::pop_heap(_queue.begin(), _queue.end(), Run::gt);
+  _queue.pop_back();
 
   // Check if the job was canceled in the meantime.
   auto entry = _jobs.find(_next_run.job_id());
@@ -125,7 +130,9 @@ void FunctionScheduler::addRun(
 
   auto time = std::chrono::steady_clock::now() + interval;
   Run run = Run(job_id, time);
-  _queue.push(run);
+
+  _queue.push_back(run);
+  std::push_heap(_queue.begin(), _queue.end(), Run::gt);
 
   // Notify the thread handling run execution.
   if (_running)
@@ -183,8 +190,7 @@ int FunctionScheduler::stop() {
   }
 
   // clear queue
-  while (!_queue.empty())
-    _queue.pop();
+  _queue.clear();
 
   // reset counters
   for (const auto& entry : _jobs) {
@@ -215,15 +221,12 @@ int FunctionScheduler::resume() {
   if (!_paused)
     return -1;
 
+  // Since we're shifting the time of all elements by the same amount
+  // the min-heap is still valid, no need to rebuild it.
   auto diff = std::chrono::steady_clock::now() - _paused_time;
-  std::priority_queue<Run, std::vector<Run>, decltype(&Run::gt)> updated_queue;
-  while (!_queue.empty()) {
-    auto entry = _queue.top();
-    _queue.pop();
-    entry.set_time(entry.time() + diff);
-    updated_queue.push(entry);
+  for (auto& run : _queue) {
+    run.set_time(run.time() + diff);
   }
-  _queue.swap(updated_queue);
 
   _running = true;
   _paused = false;
