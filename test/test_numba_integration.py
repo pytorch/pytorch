@@ -121,7 +121,6 @@ class TestNumbaIntegration(common.TestCase):
         ]
 
         for dt in torch_dtypes:
-
             # CPU tensors of all types do not register as cuda arrays,
             # attempts to convert raise a type error.
             cput = torch.arange(10).to(dt)

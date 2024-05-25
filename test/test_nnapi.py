@@ -28,7 +28,6 @@ def nhwc(t):
     "This Pytorch Build has not been built with or does not support QNNPACK",
 )
 class TestNNAPI(TestCase):
-
     def setUp(self):
         # Avoid saturation in fbgemm
         torch.backends.quantized.engine = "qnnpack"
