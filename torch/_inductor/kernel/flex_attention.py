@@ -561,6 +561,8 @@ flex_attention_backward_template = TritonTemplate(
         for blk_idx in range(num_steps):
             kT = tl.load(kT_ptrs)
             vT = tl.load(vT_ptrs)
+            # q = q.to(MATMUL_PRECISION)
+            # kT = kT.to(MATMUL_PRECISION)
             qk = tl.dot(q, kT)
             # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
             pre_mod_scores = qk
@@ -579,7 +581,7 @@ flex_attention_backward_template = TritonTemplate(
             # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             if not SCORE_MOD_IS_LINEAR:
                 post_mod_scores *= 1.44269504
-            p = tl.math.exp2(post_mod_scores - m_)
+            p = tl.math.exp2(post_mod_scores - m_).to(MATMUL_PRECISION)
             # Autoregressive masking.
             # if MASK:
             #     offs_n = curr_n + tl.arange(0, BLOCK_N2)
@@ -588,7 +590,6 @@ flex_attention_backward_template = TritonTemplate(
             # Compute dP and dS.
             dp = tl.dot(do, vT).to(tl.float32)
             ds = p * (dp - Di[:, None])
-            ds = ds.to(MATMUL_PRECISION)
 
             # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
             {{ modification(
@@ -604,6 +605,7 @@ flex_attention_backward_template = TritonTemplate(
             ds = grad_scores
             # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+            ds = ds.to(MATMUL_PRECISION)
             # Compute dQ.
             # NOTE: We need to de-scale dq in the end, because kT was pre-scaled.
             dq += tl.dot(ds, tl.trans(kT))
@@ -678,14 +680,14 @@ flex_attention_backward_template = TritonTemplate(
             do = tl.load(do_ptrs)
             # Compute dV.
             ppT = pT
-            ppT = ppT.to(tl.float16)
+            ppT = ppT.to(MATMUL_PRECISION)
             dv += tl.dot(ppT, do)
             # D (= delta) is pre-divided by ds_scale.
             Di = tl.load(D + offs_m)
             # Compute dP and dS.
             dpT = tl.dot(v, tl.trans(do)).to(tl.float32)
             dsT = pT * (dpT - Di[None, :])
-            dsT = dsT.to(tl.float16)
+            dsT = dsT
 
              # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
             {{ modification(
@@ -700,6 +702,8 @@ flex_attention_backward_template = TritonTemplate(
             ) | indent_except_first(3) }}
             dsT = grad_scores
             # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+            dsT = dsT.to(MATMUL_PRECISION)
 
             dk += tl.dot(dsT, tl.trans(qT))
             # Increment pointers.
