@@ -66,7 +66,7 @@ void FunctionScheduler::run() {
   std::unique_lock<std::mutex> lock(_mutex);
 
   while (_running) {
-    if (_queue.empty()) {
+    if (_queue.empty() || _paused) {
       _cond.wait(lock);
       continue;
     }
@@ -80,10 +80,13 @@ void FunctionScheduler::run() {
       // Waiting for the next run to be ready.
       // We need to wake up if a new run is added
       // to the queue, as it may need to happen
-      // before the current ´_next_run´
+      // before the current ´_next_run´. We also
+      // need to wake up if ´_paused´ changes, to
+      // pause execution.
       if (_cond.wait_for(lock, wait_time) == std::cv_status::timeout) {
-        // Lock timed out, i.e., no new run was added while we waited.
-        // The run selected as next is still the correct one.
+        // Lock timed out, i.e., nothing happened while we waited.
+        // The run selected as next is still the correct one and we
+        // aren't paused.
         runNextJob(lock);
       }
     } else {
@@ -203,15 +206,6 @@ int FunctionScheduler::pause() {
   if (_paused || !_running)
     return -1;
 
-  _running = false;
-  // Unblock the thread executing
-  // `FunctionScheduler::run` so it
-  // exits the loop.
-  _cond.notify_one();
-  if (_thread.joinable()) {
-    _thread.join();
-  }
-
   _paused_time = std::chrono::steady_clock::now();
   _paused = true;
   return 1;
@@ -228,9 +222,13 @@ int FunctionScheduler::resume() {
     run.set_time(run.time() + diff);
   }
 
-  _running = true;
   _paused = false;
-  _thread = std::thread(&FunctionScheduler::run, this);
+
+  // Unblock the thread executing
+  // `FunctionScheduler::run` so it
+  // continues execution.
+  _cond.notify_one();
+
   return 1;
 }
 
