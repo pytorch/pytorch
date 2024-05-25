@@ -578,10 +578,6 @@ if(NOT INTERN_BUILD_MOBILE AND NOT BUILD_LITE_INTERPRETER)
     ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
   )
 
-  set_source_files_properties(
-    ${TORCH_SRC_DIR}/csrc/jit/serialization/import.cpp
-    PROPERTIES COMPILE_FLAGS "-DC10_DISABLE_LEGACY_IMPORT"
-  )
   if(USE_DISTRIBUTED)
     append_filelist("libtorch_distributed_base_sources" TORCH_SRCS)
     if(NOT WIN32)
