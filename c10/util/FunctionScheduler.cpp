@@ -76,20 +76,21 @@ void FunctionScheduler::run() {
     if (_queue.empty())
       continue;
 
-    if (wait_time.count() > 0) {
-      // Waiting for the next run to be ready.
-      // We need to wake up if a new run is added
-      // to the queue, as it may need to happen
-      // before the current ´_next_run´. We also
-      // need to wake up if ´_paused´ changes, to
-      // pause execution.
-      if (_cond.wait_for(lock, wait_time) == std::cv_status::timeout) {
-        // Lock timed out, i.e., nothing happened while we waited.
-        // The run selected as next is still the correct one and we
-        // aren't paused.
-        runNextJob(lock);
-      }
-    } else {
+    if (wait_time.count() <= 0) {
+      runNextJob(lock);
+      continue;
+    }
+
+    // Waiting for the next run to be ready.
+    // We need to wake up if a new run is added
+    // to the queue, as it may need to happen
+    // before the current ´_next_run´. We also
+    // need to wake up if ´_paused´ changes, to
+    // pause execution.
+    if (_cond.wait_for(lock, wait_time) == std::cv_status::timeout) {
+      // Lock timed out, i.e., nothing happened while we waited.
+      // The run selected as next is still the correct one and we
+      // aren't paused.
       runNextJob(lock);
     }
   }
@@ -101,7 +102,7 @@ void FunctionScheduler::runNextJob(const std::unique_lock<std::mutex>& lock) {
   TORCH_INTERNAL_ASSERT(
       _next_run == _queue.front(), "Next run does not match queue top.");
 
- // Remove this run from the queue
+  // Remove this run from the queue
   std::pop_heap(_queue.begin(), _queue.end(), Run::gt);
   _queue.pop_back();
 
