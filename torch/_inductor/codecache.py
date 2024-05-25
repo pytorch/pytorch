@@ -522,7 +522,13 @@ class FxGraphCachePickler(pickle.Pickler):
         """
         with io.BytesIO() as stream:
             pickler = cls(stream)
-            pickler.dump(obj)
+            try:
+                pickler.dump(obj)
+            except (TypeError, AttributeError) as e:
+                # Some configs options are callables, e.g., post_grad_custom_pre_pass,
+                # and may not pickle.
+                log.warning("Can't pickle", exc_info=True)
+                raise BypassFxGraphCache from e
             return stream.getvalue()
 
     @classmethod
@@ -661,14 +667,7 @@ class FxGraphHashDetails:
         # Also hash on various system info (including the triton compiler version).
         self.torch_version = torch_key()
         self.system_info = CacheBase.get_system()
-
-        try:
-            self.inductor_config = config.save_config()
-        except (TypeError, AttributeError) as e:
-            # Some configs options are callables, e.g., post_grad_custom_pre_pass,
-            # and may not pickle.
-            log.debug("Can't pickle inductor config: %s", e)
-            raise BypassFxGraphCache from e
+        self.inductor_config = config.save_config_portable()
 
     def debug_str(self) -> str:
         """
