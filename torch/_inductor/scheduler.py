@@ -567,7 +567,11 @@ class BaseSchedulerNode:
         writes = {dep.name for dep in self.read_writes.writes}
 
         def is_materialized(buf: str, snodes: Sequence[BaseSchedulerNode]) -> bool:
-            users = self.scheduler.name_to_node[buf].users
+            users = [
+                user
+                for user in self.scheduler.name_to_node[buf].users
+                if not user.is_weak
+            ]
             buf_uses = {user.node for user in users}
             return len(buf_uses - set(snodes)) > 0
 
