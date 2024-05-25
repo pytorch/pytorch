@@ -5,10 +5,6 @@
 #include <ATen/core/Generator.h>
 #include <c10/util/Registry.h>
 
-#include <cstddef>
-#include <functional>
-#include <memory>
-
 namespace at {
 
 constexpr const char* XPU_HELP =
