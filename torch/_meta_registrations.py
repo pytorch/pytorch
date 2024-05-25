@@ -5557,11 +5557,11 @@ def meta__efficient_attention_backward(
     if shared_storage_dqdkdv:
         torch._check(
             query.shape[1] == key.shape[1],
-            lambda: f"seqlen must match for `shared_storage_dqdkdv",
+            lambda: "seqlen must match for `shared_storage_dqdkdv",
         )
         torch._check(
             query.shape[3] == key.shape[3],
-            lambda: f"embedding dim must match for `shared_storage_dqdkdv",
+            lambda: "embedding dim must match for `shared_storage_dqdkdv",
         )
         chunk = torch.empty(
             (*query.shape[0:-2], 3, query.shape[-2], query.shape[-1]),
