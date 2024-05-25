@@ -70,8 +70,9 @@ bw_graph_cell = [None]
 fw_compiler = functools.partial(extract_graph, graph_cell=fw_graph_cell)
 bw_compiler = functools.partial(extract_graph, graph_cell=bw_graph_cell)
 
-from functorch.compile import min_cut_rematerialization_partition
 from torch._dynamo.backends.common import aot_autograd
+
+from functorch.compile import min_cut_rematerialization_partition
 
 aot_eager_graph = aot_autograd(
     fw_compiler=fw_compiler,
