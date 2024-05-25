@@ -5,11 +5,12 @@ import sympy
 from sympy.parsing.sympy_parser import parse_expr
 
 import torch
+from torch.utils._sympy.symbol import SymT
 from .. import codecache, config, ir, lowering as L
 
 from ..autotune_process import CppBenchmarkRequest
 from ..select_algorithm import PartialRender
-from ..utils import sympy_index_symbol
+from ..utils import sympy_index_symbol, sympy_index_symbol_with_prefix
 from ..virtualized import V
 from .common import Kernel, OpOverrides
 from .cpp import CppKernelProxy, KernelGroup
@@ -51,13 +52,26 @@ class CppTemplateKernel(Kernel):
         self,
         inputs: Dict[str, ir.Buffer],
         outputs: Dict[str, ir.Buffer],
+        aliases: Optional[List[Tuple[ir.Buffer, ir.Buffer]]] = None,
     ) -> str:
         for name, inp in inputs.items():
             if inp is not None:
                 self.args.input_buffers[inp.get_name()] = name
         for name, out in outputs.items():
-            if out.get_name() not in self.args.inplace_buffers:
-                self.args.output_buffers[out.get_name()] = name
+            self.args.output_buffers[out.get_name()] = name
+        if aliases is not None:
+            for alias, orig in aliases:
+                orig_name = orig.get_name()
+                alias_name = alias.get_name()
+                if orig_name in self.args.input_buffers:
+                    self.args.input_buffers[alias_name] = self.args.input_buffers[
+                        orig_name
+                    ]
+                if orig_name in self.args.output_buffers:
+                    self.args.output_buffers[alias_name] = self.args.output_buffers[
+                        orig_name
+                    ]
+
         unique_sizevars = {
             s
             for input in inputs.values()
@@ -78,6 +92,14 @@ class CppTemplateKernel(Kernel):
             self.args.sizevars[sizevar] = f"k{sizevar}"
 
         def hook():
+            # remove all aliases before generate function definition
+            if aliases is not None:
+                for alias, _ in aliases:
+                    alias_name = alias.get_name()
+                    if alias_name in self.args.input_buffers:
+                        self.args.input_buffers[alias_name] = "REMOVED"
+                    if alias_name in self.args.output_buffers:
+                        self.args.output_buffers[alias_name] = "REMOVED"
             cpp_argdefs, _, _ = self.args.cpp_argdefs()
             return f"void {self.kernel_name}({', '.join(cpp_argdefs)})"
 
@@ -183,7 +205,10 @@ class CppTemplateKernel(Kernel):
         reindexer: Optional[Callable[[List[Any]], List[Any]]] = None,
     ) -> str:
         var_sizes = (tuple(dst.get_size()), ())
-        var_ranges = {sympy.Symbol(f"z{i}"): sz for i, sz in enumerate(var_sizes[0])}
+        var_ranges = {
+            sympy_index_symbol_with_prefix(SymT.INDEX, i): sz
+            for i, sz in enumerate(var_sizes[0])
+        }
         if not offsets:
             offsets = [sympy.Integer(0)] * len(var_sizes[0])
         assert len(offsets) == len(var_sizes[0])
@@ -203,7 +228,7 @@ class CppTemplateKernel(Kernel):
                 assert len(args[0]) == len(var_sizes[0])
                 assert len(args[1]) == 0
                 new_args = [arg + offset for arg, offset in zip(args[0], offsets)]  # type: ignore[arg-type]
-                if reindexer is not None:
+                if reindexer is not None and i == len(nodes) - 1:
                     new_args = reindexer(new_args)
                 V.ops.store(
                     output_name,
@@ -223,6 +248,7 @@ class CppTemplateKernel(Kernel):
         self,
         dst: ir.Buffer,
         src: ir.Buffer,
+        orig_src: Optional[ir.Buffer] = None,
         epilogue_nodes: Optional[List[ir.IRNode]] = None,
         offsets: Optional[List[Any]] = None,
         reindexer: Optional[Callable[[List[Any]], List[Any]]] = None,
@@ -244,12 +270,23 @@ class CppTemplateKernel(Kernel):
               the sizes of `src` and `dst`.
            b) `dst` might be indexed in a different way as the `epilogue_nodes`, hence a `reindexer` is
               needed on the indices to `epilogue_nodes` to match the indexing of `dst`.
+           c) If `src` is local, we need to add a local buffer for it and localize the `orig_src` buffer
+              in `epilogue_nodes` with `src`.
         """
         assert dst.get_size() == src.get_size()
         if offsets:
             offsets = parse_expr_with_index_symbols(offsets)
         if epilogue_nodes:
-            return self.store_pointwise_nodes(dst, epilogue_nodes, offsets, reindexer)
+            with LocalBufferScope(self) as scope:
+                assert orig_src is not None
+                if orig_src.get_name() != src.get_name():
+                    scope.add_local_buffer(src)
+                    epilogue_nodes = scope.localize_buffer(
+                        orig_src, src, epilogue_nodes
+                    )
+                return self.store_pointwise_nodes(
+                    dst, epilogue_nodes, offsets, reindexer  # type: ignore[arg-type]
+                )
         else:
             if dst.get_name() != src.get_name():
                 # src is local
