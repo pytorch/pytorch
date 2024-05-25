@@ -144,13 +144,10 @@ int FunctionScheduler::scheduleJob(std::unique_ptr<Job> job) {
   std::unique_lock<std::mutex> lock(_mutex);
   int job_id = id();
 
-  if (_running) {
+  if (_running)
     addRun(lock, job_id, job);
-    // Notify the thread handling run execution.
-    _cond.notify_one();
-  }
-  _jobs.insert(std::make_pair(job_id, std::move(job)));
 
+  _jobs.insert(std::make_pair(job_id, std::move(job)));
   _dirty--;
   _cond.notify_one();
   return job_id;
@@ -159,15 +156,14 @@ int FunctionScheduler::scheduleJob(std::unique_ptr<Job> job) {
 int FunctionScheduler::removeJob(int id) {
   _dirty++;
   std::lock_guard<std::mutex> lock(_mutex);
+  _dirty--;
+  _cond.notify_one();
+
   // The scheduler checks if the job associated
   // with a run is valid, so, to cancel a job
   // and it's run, we just need to erase
   // it (thus making it invalid).
-  int job_id = _jobs.erase(id) ? id : -1;
-
-  _dirty--;
-  _cond.notify_one();
-  return job_id;
+  return _jobs.erase(id) ? id : -1;
 }
 
 int FunctionScheduler::start() {
