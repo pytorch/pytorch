@@ -89,6 +89,32 @@ TEST(FunctionScheduler, RemoveNonExistentJob) {
   ASSERT_EQ(remove_id, -1);
 }
 
+TEST(FunctionScheduler, RemoveFirstQueuedJob) {
+  std::atomic<bool> yes1 = false;
+  std::atomic<bool> yes2 = false;
+  std::function<void()> function0 = []() {
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  };
+  std::function<void()> function1 = [&yes1]() { yes1 = true; };
+  std::function<void()> function2 = [&yes2]() { yes2 = true; };
+  std::chrono::seconds interval0(1);
+  std::chrono::milliseconds interval1(200);
+  std::chrono::milliseconds interval2(400);
+
+  c10::FunctionScheduler fs;
+  fs.scheduleJob(function0, interval0, true, 1);
+  int job_id1 = fs.scheduleJob(function1, interval1);
+  int job_id2 = fs.scheduleJob(function2, interval2);
+
+  fs.start();
+  fs.removeJob(job_id1);
+  std::this_thread::sleep_for(std::chrono::milliseconds(600));
+  fs.stop();
+
+  ASSERT_FALSE(yes1);
+  ASSERT_TRUE(yes2);
+}
+
 TEST(FunctionScheduler, StartAndStop) {
   c10::FunctionScheduler fs;
 
