@@ -511,7 +511,7 @@ TEST(ExternalCall, Prepacked_Linear_float) {
               const std::optional<at::Scalar>&,
               const std::optional<at::Scalar>&)>();
   auto prepacked = linear_clamp_prepack_op.call(
-      weight, bias, std::optional<at::Scalar>(), c10::optional<at::Scalar>());
+      weight, bias, std::optional<at::Scalar>(), std::optional<at::Scalar>());
 
   BufHandle DummyPrepacked("DummyPrepacked", {1}, kFloat);
   Tensor Result = Tensor(
