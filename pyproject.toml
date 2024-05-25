@@ -34,11 +34,8 @@ include_trailing_comma = true
 
 
 [tool.usort.known]
-first_party = ["caffe2", "torchgen", "functorch", "test"]
+first_party = ["caffe2", "torch", "torchgen", "functorch", "test"]
 standard_library = ["typing_extensions"]
-
-[tool.usort.kown]
-first_party = ["torch"]
 
 
 [tool.ruff]
