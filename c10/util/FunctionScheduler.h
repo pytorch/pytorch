@@ -133,6 +133,7 @@ class C10_API FunctionScheduler {
   // Synchronization variables.
   std::mutex _mutex;
   std::condition_variable _cond;
+  std::atomic_int _dirty = 0;
 
   // Returns a new job id, updating _current_id.
   int id() {

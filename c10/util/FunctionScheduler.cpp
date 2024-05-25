@@ -66,7 +66,7 @@ void FunctionScheduler::run() {
   std::unique_lock<std::mutex> lock(_mutex);
 
   while (_running) {
-    if (_queue.empty() || _paused) {
+    if (_queue.empty() || _paused || _dirty) {
       _cond.wait(lock);
       continue;
     }
@@ -140,6 +140,7 @@ void FunctionScheduler::addRun(
 }
 
 int FunctionScheduler::scheduleJob(std::unique_ptr<Job> job) {
+  _dirty++;
   std::unique_lock<std::mutex> lock(_mutex);
   int job_id = id();
 
@@ -150,16 +151,23 @@ int FunctionScheduler::scheduleJob(std::unique_ptr<Job> job) {
   }
   _jobs.insert(std::make_pair(job_id, std::move(job)));
 
+  _dirty--;
+  _cond.notify_one();
   return job_id;
 }
 
 int FunctionScheduler::removeJob(int id) {
+  _dirty++;
   std::lock_guard<std::mutex> lock(_mutex);
   // The scheduler checks if the job associated
   // with a run is valid, so, to cancel a job
   // and it's run, we just need to erase
   // it (thus making it invalid).
-  return _jobs.erase(id) ? id : -1;
+  int job_id = _jobs.erase(id) ? id : -1;
+
+  _dirty--;
+  _cond.notify_one();
+  return job_id;
 }
 
 int FunctionScheduler::start() {
