@@ -148,7 +148,21 @@ class C10_API FunctionScheduler {
       std::function<void()> function,
       std::chrono::duration<Rep, Period> interval,
       bool immediate = false,
-      int run_limit = RUN_FOREVER);
+      int run_limit = RUN_FOREVER) {
+    TORCH_CHECK(function != nullptr, "Job function can't be null.");
+    TORCH_CHECK(interval.count() >= 0, "Job interval must be positive.");
+    TORCH_CHECK(
+        run_limit > 0 || run_limit == RUN_FOREVER,
+        "Job run limit must be greater than 0 or FunctionScheduler::RUN_FOREVER (",
+        RUN_FOREVER,
+        ").");
+
+    auto duration =
+        std::chrono::duration_cast<std::chrono::microseconds>(interval);
+    auto job = std::make_unique<Job>(
+        std::move(function), duration, immediate, run_limit);
+    return scheduleJob(std::move(job));
+  }
 
   // Removes the job registered with `id` and returns it.
   // Returns -1 if a job registered with `id` doesn't exist.
