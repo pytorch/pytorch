@@ -30,11 +30,25 @@ class C10_API Job {
       bool immediate = false,
       int run_limit = -1); // -1 = FunctionScheduler::RUN_FOREVER
 
-  std::chrono::microseconds interval() const { return _interval; }
-  int counter() const { return _counter; }
-  void reset_counter() { _counter = 0; }
-  bool immediate() const { return _immediate; }
-  int run_limit() const { return _run_limit; }
+  std::chrono::microseconds interval() const {
+    return _interval;
+  }
+
+  int counter() const {
+    return _counter;
+  }
+
+  void reset_counter() {
+    _counter = 0;
+  }
+
+  bool immediate() const {
+    return _immediate;
+  }
+
+  int run_limit() const {
+    return _run_limit;
+  }
 
   void run();
 };
@@ -48,17 +62,29 @@ class C10_API Run {
   std::chrono::time_point<std::chrono::steady_clock> _time;
 
  public:
-  static bool gt(const Run& a, const Run& b) { return a.time() > b.time(); }
+  static bool gt(const Run& a, const Run& b) {
+    return a.time() > b.time();
+  }
 
   Run() = default;
+
   Run(int job_id, std::chrono::time_point<std::chrono::steady_clock> time);
 
-  int job_id() const { return _job_id; }
-  std::chrono::time_point<std::chrono::steady_clock> time() const { return _time; }
+  int job_id() const {
+    return _job_id;
+  }
 
-  void set_time(std::chrono::time_point<std::chrono::steady_clock> time) { _time = time; }
+  std::chrono::time_point<std::chrono::steady_clock> time() const {
+    return _time;
+  }
 
-  bool operator==(const Run& other) { return _job_id == other.job_id() && _time == other.time(); }
+  void set_time(std::chrono::time_point<std::chrono::steady_clock> time) {
+    _time = time;
+  }
+
+  bool operator==(const Run& other) {
+    return _job_id == other.job_id() && _time == other.time();
+  }
 };
 
 /**
@@ -109,7 +135,9 @@ class C10_API FunctionScheduler {
   std::condition_variable _cond;
 
   // Returns a new job id, updating _current_id.
-  int id() { return _current_id++; }
+  int id() {
+    return _current_id++;
+  }
 
   // Main run execution loop function.
   void run();
@@ -187,30 +215,12 @@ class C10_API FunctionScheduler {
   // unpaused or not running.
   int resume();
 
-  bool isRunning() const { return _running; }
-  int currentId() const { return _current_id; }
+  bool isRunning() const {
+    return _running;
+  }
+  int currentId() const {
+    return _current_id;
+  }
 };
-
-// Template function must be defined in the header file
-template <typename Rep, typename Period>
-int FunctionScheduler::scheduleJob(
-    std::function<void()> function,
-    std::chrono::duration<Rep, Period> interval,
-    bool immediate,
-    int run_limit) {
-  TORCH_CHECK(function != nullptr, "Job function can't be null.");
-  TORCH_CHECK(interval.count() >= 0, "Job interval must be positive.");
-  TORCH_CHECK(
-      run_limit > 0 || run_limit == RUN_FOREVER,
-      "Job run limit must be greater than 0 or FunctionScheduler::RUN_FOREVER (",
-      RUN_FOREVER,
-      ").");
-
-  auto duration =
-      std::chrono::duration_cast<std::chrono::microseconds>(interval);
-  auto job = std::make_unique<Job>(
-      std::move(function), duration, immediate, run_limit);
-  return scheduleJob(std::move(job));
-}
 
 } // namespace c10
