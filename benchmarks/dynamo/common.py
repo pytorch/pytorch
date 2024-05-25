@@ -36,12 +36,9 @@ from typing import (
     Type,
     TYPE_CHECKING,
 )
-from unittest.mock import MagicMock
 
 from typing_extensions import Self
-
-if TYPE_CHECKING:
-    from torch.onnx._internal.fx import diagnostics
+from unittest.mock import MagicMock
 
 import numpy as np
 import pandas as pd
@@ -61,6 +58,8 @@ from torch._dynamo.testing import (
     reset_rng_state,
     same,
 )
+
+from tqdm.auto import tqdm, trange
 
 try:
     from torch._dynamo.utils import (
@@ -83,7 +82,6 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map, tree_map_only
 
-from tqdm.auto import tqdm, trange
 
 try:
     import torch_xla
@@ -94,6 +92,11 @@ try:
 except ImportError:
     # ignore the error if torch_xla is not installed
     pass
+
+
+if TYPE_CHECKING:
+    from torch.onnx._internal.fx import diagnostics
+
 
 log = logging.getLogger(__name__)
 
@@ -2101,7 +2104,7 @@ class BenchmarkRunner:
             #  which is bad as Gradscaler has state and can adjust the scaling
             #  factor between eager and dynamo run, making accuracy check
             #  harder.
-            # self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
+            # self.grad_scaler = torch.amp.GradScaler(device="cuda", init_scale=2.0)
             self.autocast = functools.partial(
                 torch.amp.autocast, device_type=devices[0]
             )
