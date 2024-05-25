@@ -6,7 +6,6 @@
 #include <atomic>
 #include <chrono>
 #include <functional>
-#include <memory>
 #include <thread>
 #include <vector>
 
@@ -46,8 +45,8 @@ TEST(Run, gt) {
   auto time1 = std::chrono::steady_clock::now();
   auto time2 = time1 + std::chrono::milliseconds(10);
 
-  auto r1 = std::make_shared<c10::Run>(job_id1, time1);
-  auto r2 = std::make_shared<c10::Run>(job_id2, time2);
+  auto r1 = c10::Run(job_id1, time1);
+  auto r2 = c10::Run(job_id2, time2);
 
   ASSERT_TRUE(c10::Run::gt(r2, r1));
   ASSERT_FALSE(c10::Run::gt(r1, r2));
