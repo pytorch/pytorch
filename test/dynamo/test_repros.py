@@ -4739,6 +4739,17 @@ def forward(self, primals_1, primals_2):
             compiled_str = str(e)
         self.assertEqual(orig_str, compiled_str)
 
+    def test_nn_module_callable(self):
+        class M(nn.Module):
+            def forward(self, x):
+                return x.sin()
+
+        def f(m):
+            return callable(m)
+
+        res = torch.compile(f, fullgraph=True)(M())
+        self.assertTrue(res)
+
     def test_stk_sdd_is_transposed(self):
         trigger_graph_break = False
 
