@@ -117,6 +117,8 @@ class C10_API FunctionScheduler {
   std::atomic_bool _running = false;
   std::atomic_bool _paused = false;
   std::chrono::time_point<std::chrono::steady_clock> _paused_time;
+  // Tracks how many operations (sheduleJob/removeJob) are pending
+  std::atomic_int _dirty = 0;
 
   // Runs, sorted by wait time until execution.
   std::vector<Run> _queue;
@@ -133,7 +135,6 @@ class C10_API FunctionScheduler {
   // Synchronization variables.
   std::mutex _mutex;
   std::condition_variable _cond;
-  std::atomic_int _dirty = 0;
 
   // Returns a new job id, updating _current_id.
   int id() {
