@@ -192,6 +192,10 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
         return a / b
 
     @staticmethod
+    def to_float(a):
+        return float(a)
+
+    @staticmethod
     def exp(x):
         raise AssertionError("exp is not valid shape sympy expr")
 

@@ -4458,7 +4458,7 @@ class ShapeEnv:
                 b = next(iter(tgt.free_symbols))
                 # Try to invert the equality
                 r = try_solve(sympy.Eq(a, tgt), b, floordiv_inequality=False)
-                if r is not None:
+                if r is not None and all(t.is_integer for t in sympy.preorder_traversal(r[1])):
                     b_bound = self.bound_sympy(r[1])
                     self.var_to_range[b] = b_bound & self.var_to_range[b]
                     tgt_bound = self.bound_sympy(tgt)

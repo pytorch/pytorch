@@ -709,7 +709,8 @@ def _floor_ceil_helper(a, fn):
         return sympy.Integer(a)
     # NB: the underlying operation is a float -> float, so we have to
     # truncate it to get the types correct.
-    # TODO: Perhaps just make straight up sympy functions for these
+    # TODO: Perhaps just make straight up sympy functions for these,
+    # these would enable use of things like llrint directly in Triton
     return TruncToInt(fn(a))
 
 
