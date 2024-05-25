@@ -158,7 +158,7 @@ kernel_name_to_op = {
 
 
 class BaseSchedulerNode:
-    group: Tuple[torch.device, Sequence[Sequence[sympy.Expr]]]
+    group: Tuple[torch.device, Tuple[Tuple[sympy.Expr, ...], ...]]
 
     def __init__(self, scheduler: "Scheduler", node: ir.Buffer) -> None:
         self.scheduler: Scheduler = scheduler
@@ -724,12 +724,15 @@ def debug_triton_code(node: Union["SchedulerNode", "FusedSchedulerNode"]) -> Lis
     if multi_template and multi_template.make_kernel_render is None:
         lines.append(f"{node.get_name()} Unfinalized multi template buffer")
     else:
+        from torch._inductor.codegen.cuda_combined_scheduling import (
+            CUDACombinedScheduling,
+        )
         from torch._inductor.codegen.triton import TritonScheduling
 
         snodes = (node,) if isinstance(node, SchedulerNode) else node.snodes
         device = snodes[0].get_device()
         backend = node.scheduler.get_backend(device)
-        assert isinstance(backend, TritonScheduling)
+        assert isinstance(backend, (TritonScheduling, CUDACombinedScheduling))
         V.graph.scheduler.current_device = device
 
         # Don't increment kernel count when generating debug string.
@@ -1112,6 +1115,12 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 for l, r in zip(producer.snodes, consumer.snodes)
             )
         elif consumer.is_foreach():
+            if producer.is_reduction():
+                why(
+                    "candidate producer is a reduction, foreach ops cannot be fused with reductions currently"
+                )
+                return False
+
             consumer = typing.cast(ForeachKernelSchedulerNode, consumer)
             consumer_subnode = consumer.get_consumer_subnode_for(producer)
             if consumer_subnode is not None:
@@ -1121,6 +1130,12 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             return False
 
         elif producer.is_foreach():
+            if consumer.is_reduction():
+                why(
+                    "candidate consumer is a reduction, foreach ops cannot be fused with reductions currently"
+                )
+                return False
+
             producer = typing.cast(ForeachKernelSchedulerNode, producer)
             producer_subnode = producer.get_producer_subnode_for(consumer)
             if producer_subnode is not None:
@@ -1235,7 +1250,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             for name in other_node.get_names():
                 self.name_to_node[name] = other_node
 
-        self.group = (nodes[0].get_device(), [[sympy.Expr("foreach")]])
+        self.group = (nodes[0].get_device(), ((sympy.Expr("foreach"),),))
 
         self.origins: Set[torch.fx.Node] = set()
 
@@ -2485,7 +2500,7 @@ class Scheduler:
         if len(possible_fusions) == 0:
             return possible_fusions
         possible_fusions_group_by_priority: Dict[
-            int, List[Tuple["BaseSchedulerNode", "BaseSchedulerNode"]]
+            int, List[Tuple[BaseSchedulerNode, BaseSchedulerNode]]
         ] = {}
 
         for node1, node2 in possible_fusions:
@@ -2788,7 +2803,7 @@ class BaseScheduling:
 
     def group_fn(
         self, sizes: Sequence[Sequence[sympy.Expr]]
-    ) -> Sequence[Sequence[sympy.Expr]]:
+    ) -> Tuple[Tuple[sympy.Expr, ...], ...]:
         """
         Process the iteration sizes in case a transformation needs to be applied.
         """
