@@ -5,8 +5,6 @@ from dataclasses import dataclass
 from functools import partial, wraps
 from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Union
 
-from functorch import make_fx
-
 import torch
 import torch.distributed as dist
 
@@ -14,6 +12,8 @@ import torch.distributed as dist
 import torch.distributed._functional_collectives
 import torch.nn as nn
 import torch.utils._pytree as pytree
+
+from functorch import make_fx
 
 from torch import fx
 from torch._decomp.decompositions import native_layer_norm_backward
