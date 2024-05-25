@@ -2,6 +2,7 @@ from collections import namedtuple
 
 import benchmark_utils
 from benchmark_test_generator import _register_test
+
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 
