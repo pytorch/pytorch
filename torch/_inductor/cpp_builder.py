@@ -20,6 +20,7 @@ from typing import List, Sequence, Tuple, Union
 import torch
 from torch._inductor import config, exc
 from torch._inductor.codecache import (
+    _transform_cuda_paths,
     get_lock_dir,
     invalid_vec_isa,
     LOCK_TIMEOUT,
@@ -786,7 +787,7 @@ def _get_cuda_related_args(cuda: bool, aot_mode: bool):
         and "CUDA_HOME" not in os.environ
         and "CUDA_PATH" not in os.environ
     ):
-        os.environ["CUDA_HOME"] = os.path.dirname(build_paths.cuda())
+        os.environ["CUDA_HOME"] = build_paths.cuda()
 
     from torch.utils import cpp_extension
 
@@ -815,29 +816,19 @@ def _get_cuda_related_args(cuda: bool, aot_mode: bool):
         cpp_prefix_include_dir = [f"{os.path.dirname(_cpp_prefix_path())}"]
         include_dirs += cpp_prefix_include_dir
 
-        if config.is_fbcode():
-            include_dirs.append(build_paths.cuda())
-            # This is a special treatment for Meta internal cuda-12 where all libs
-            # are in lib/cuda-12 and lib/cuda-12/stubs
+        if cuda and torch.version.hip is None:
+            _transform_cuda_paths(libraries_dirs)
 
-            # TODO: Verify process libcudart_static.a
-            for i, path in enumerate(libraries_dirs):
-                if path.startswith(os.environ["CUDA_HOME"]) and not os.path.exists(
-                    f"{path}/libcudart_static.a"
-                ):
-                    for root, dirs, files in os.walk(path):
-                        if "libcudart_static.a" in files:
-                            libraries_dirs[i] = os.path.join(path, root)
-                            libraries_dirs.append(
-                                os.path.join(libraries_dirs[i], "stubs")
-                            )
-                            break
-        else:
-            if not _IS_WINDOWS:
-                # TODO: make static link better on Linux.
-                passthough_args = ["-Wl,-Bstatic -lcudart_static -Wl,-Bdynamic"]
+        if config.is_fbcode():
+            if torch.version.hip is not None:
+                include_dirs.append(os.path.join(build_paths.rocm(), "include"))
             else:
-                libraries.append("cudart_static")
+                include_dirs.append(os.path.join(build_paths.cuda(), "include"))
+
+    if aot_mode and cuda and config.is_fbcode():
+        if torch.version.hip is None:
+            # TODO: make static link better on Linux.
+            passthough_args = ["-Wl,-Bstatic -lcudart_static -Wl,-Bdynamic"]
 
     return (
         definations,
