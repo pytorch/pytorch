@@ -232,14 +232,21 @@ max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 force_same_precision = (
     True if is_fbcode() else os.environ.get("TORCHINDUCTOR_FORCE_SAME_PRECISION") == "1"
 )
+
 # Specify candidate backends for gemm autotune.
-# Possible choices are combinations of: ATen, Triton, CUTLASS, CPP.
+# Possible choices are combinations of: ATen, Triton, CUTLASS.
 # ATen: default Pytorch ATen kernels.
 # Triton: Triton templates defined in torch inductor.
 # CUTLASS: Cutlass templates and kernels.
-# CPP: CPP templates and kernels for CPU.
 max_autotune_gemm_backends = os.environ.get(
-    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP"
+    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON"
+).upper()
+
+# Specify the size of the search space for GEMM autotuning.
+# DEFAULT     - balance between compile time overhead and performance
+# EXHAUSTIVE  - maximize performance
+max_autotune_gemm_search_space = os.environ.get(
+    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_SEARCH_SPACE", "DEFAULT"
 ).upper()
 
 # the value used as a fallback for the unbacked SymInts
@@ -321,15 +328,13 @@ loop_ordering_after_fusion = (
     os.environ.get("TORCHINDUCTOR_LOOP_ORDERING_AFTER_FUSION", "1") == "1"
 )
 
-benchmark_multi_templates = (
-    os.environ.get(
-        "TORCHINDUCTOR_BENCHMARK_MULTI_TEMPLATES", "0" if is_fbcode() else "1"
-    )
-    == "1"
+# For Triton Templates, select fastest of best template + epilogue vs best template + separate epilogue kernel
+benchmark_epilogue_fusion = (
+    os.environ.get("TORCHINDUCTOR_BENCHMARK_EPILOGUE_FUSION", "1") == "1"
 )
 
 # Take how many of the top triton kernels to benchmark epilogue
-max_epilogue_benchmarked_choices = 3
+max_epilogue_benchmarked_choices = 1
 
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
@@ -462,6 +467,9 @@ pad_channels_last = False
 # For user visible outputs, inductor will make sure the stride matches with eager.
 bw_outputs_user_visible = True
 
+# Whether to always use shape padding if it is enabled and possible
+force_shape_pad: bool = False
+
 # Fx-based linear/matmul/bmm + permute/transpose vertical fusion
 permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
 
@@ -503,7 +511,7 @@ freezing_discard_parameters: bool = False
 # Kill switch for allowing temporary tensors to be allocated as stack arrays. Tests
 # should be run with this flag both on and off to make sure we have coverage.
 allow_stack_allocation: bool = (
-    os.environ.get("TORCHINDUCTOR_STACK_ALLOCATION", "1") == "1"
+    os.environ.get("TORCHINDUCTOR_STACK_ALLOCATION", "1" if is_fbcode() else "0") == "1"
 )
 
 # Enables an alternate DSO interface (the "minimal ArrayRef interface") intended
@@ -721,6 +729,10 @@ class aot_inductor:
     output_path = ""
 
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
+
+    debug_dump_consts_bin: bool = (
+        os.environ.get("AOT_INDUCTOR_DEBUG_DUMP_CONSTS_BIN", "0") == "1"
+    )
 
     # Serialized tree spec for flattening inputs
     serialized_in_spec = ""

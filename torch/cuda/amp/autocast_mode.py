@@ -1,5 +1,6 @@
 import collections
 import functools
+import warnings
 
 import torch
 
@@ -17,7 +18,7 @@ __all__ = ["autocast", "custom_fwd", "custom_bwd"]
 class autocast(torch.amp.autocast_mode.autocast):
     r"""See :class:`torch.autocast`.
 
-    ``torch.cuda.amp.autocast(args...)`` is equivalent to ``torch.autocast("cuda", args...)``
+    ``torch.cuda.amp.autocast(args...)`` is deprecated. Please use ``torch.amp.autocast("cuda", args...)`` instead.
     """
 
     def __init__(
@@ -31,6 +32,10 @@ class autocast(torch.amp.autocast_mode.autocast):
             self.device = "cuda"
             self.fast_dtype = dtype
             return
+        warnings.warn(
+            "torch.cuda.amp.autocast(args...) is deprecated. Please use torch.amp.autocast('cuda', args...) instead.",
+            DeprecationWarning,
+        )
         super().__init__(
             "cuda", enabled=enabled, dtype=dtype, cache_enabled=cache_enabled
         )
