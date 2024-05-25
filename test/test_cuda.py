@@ -241,6 +241,7 @@ class TestCuda(TestCase):
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats()
 
+    @serialTest()
     def test_set_per_process_memory_fraction(self):
         # test invalid fraction value.
         with self.assertRaisesRegex(TypeError, "Invalid type"):
