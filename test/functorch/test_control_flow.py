@@ -279,10 +279,7 @@ class TestControlFlow(TestCase):
             grad_out = torch.ones_like(result)
             return torch.autograd.grad(result, (x,), grad_out)
 
-        # can use make_fx to capture the graph
         gm = make_fx(f)(pred, x)
-        # check the graph
-        # self.assertExpectedInline(gm.print_readable().strip(), """hahaha""")
         self.assertExpectedInline(gm.true_graph_0._code.strip(), """\
 def forward(self, arg0_1):
     sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
@@ -298,7 +295,7 @@ def forward(self, arg0_1, arg1_1):
     sin = torch.ops.aten.sin.default(arg0_1)
     cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
     mul = torch.ops.aten.mul.Tensor(arg1_1, cos);  arg1_1 = cos = None
-    return (mul,)""",  # noqa: B950
+    return [mul]""",  # noqa: B950
     )
         self.assertExpectedInline(gm.false_graph_1._code.strip(), """\
 def forward(self, arg0_1, arg1_1):
@@ -306,7 +303,7 @@ def forward(self, arg0_1, arg1_1):
     sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
     neg = torch.ops.aten.neg.default(sin);  sin = None
     mul = torch.ops.aten.mul.Tensor(arg1_1, neg);  arg1_1 = neg = None
-    return (mul,)""",  # noqa: B950
+    return [mul]""",  # noqa: B950
     )
             
     def test_cond_autograd_complex(self):
@@ -331,9 +328,7 @@ def forward(self, arg0_1, arg1_1):
             grad_out = torch.ones_like(result)
             return torch.autograd.grad(result, (x,), grad_out)
 
-        # can use make_fx to capture the graph
         gm = make_fx(f)(pred, x)
-        # check the graph
         self.assertExpectedInline(gm.true_graph_0._code.strip(), """\
 def forward(self, arg0_1):
     pow_1 = torch.ops.aten.pow.Tensor_Scalar(arg0_1, 2);  arg0_1 = None
@@ -359,7 +354,7 @@ def forward(self, arg0_1, arg1_1):
     pow_2 = torch.ops.aten.pow.Tensor_Scalar(arg0_1, 1.0);  arg0_1 = None
     mul_2 = torch.ops.aten.mul.Scalar(pow_2, 2.0);  pow_2 = None
     mul_3 = torch.ops.aten.mul.Tensor(mul_1, mul_2);  mul_1 = mul_2 = None
-    return (mul_3,)""",  # noqa: B950
+    return [mul_3]""",  # noqa: B950
     )
         self.assertExpectedInline(gm.false_graph_1._code.strip(), """\
 def forward(self, arg0_1, arg1_1):
@@ -368,7 +363,7 @@ def forward(self, arg0_1, arg1_1):
     sin = torch.ops.aten.sin.default(add);  add = None
     neg = torch.ops.aten.neg.default(sin);  sin = None
     mul = torch.ops.aten.mul.Tensor(arg1_1, neg);  arg1_1 = neg = None
-    return (mul,)""",  # noqa: B950
+    return [mul]""",  # noqa: B950
     )
             
     def test_cond_autograd_inner_fn(self):
@@ -408,9 +403,7 @@ def forward(self, arg0_1, arg1_1):
             grad_out = torch.ones_like(result)
             return torch.autograd.grad(result, (x,), grad_out)
 
-        # can use make_fx to capture the graph
         gm = make_fx(f)(pred, x)
-        # check the graph
         self.assertExpectedInline(gm.true_graph_0._code.strip(), """\
 def forward(self, arg0_1):
     pow_1 = torch.ops.aten.pow.Tensor_Scalar(arg0_1, 2);  arg0_1 = None
@@ -437,7 +430,7 @@ def forward(self, arg0_1, arg1_1):
     pow_2 = torch.ops.aten.pow.Tensor_Scalar(arg0_1, 1.0);  arg0_1 = None
     mul_2 = torch.ops.aten.mul.Scalar(pow_2, 2.0);  pow_2 = None
     mul_3 = torch.ops.aten.mul.Tensor(mul_1, mul_2);  mul_1 = mul_2 = None
-    return (mul_3,)""",  # noqa: B950
+    return [mul_3]""",  # noqa: B950
     )
         self.assertExpectedInline(gm.false_graph_1._code.strip(), """\
 def forward(self, arg0_1, arg1_1):
@@ -451,7 +444,7 @@ def forward(self, arg0_1, arg1_1):
     pow_2 = torch.ops.aten.pow.Tensor_Scalar(arg0_1, 1.0);  arg0_1 = None
     mul_2 = torch.ops.aten.mul.Scalar(pow_2, 2.0);  pow_2 = None
     mul_3 = torch.ops.aten.mul.Tensor(mul_1, mul_2);  mul_1 = mul_2 = None
-    return (mul_3,)""",  # noqa: B950
+    return [mul_3]""",  # noqa: B950
     )
         
     def test_cond_autograd_inner_tensor(self):
@@ -477,9 +470,7 @@ def forward(self, arg0_1, arg1_1):
             grad_out = torch.ones_like(result)
             return torch.autograd.grad(result, (x,), grad_out)
 
-        # can use make_fx to capture the graph
         gm = make_fx(f)(pred, x)
-        # check the graph
         self.assertExpectedInline(gm.true_graph_0._code.strip(), """\
 def forward(self, arg0_1):
     pow_1 = torch.ops.aten.pow.Tensor_Scalar(arg0_1, 2);  arg0_1 = None
@@ -507,7 +498,7 @@ def forward(self, arg0_1, arg1_1):
     pow_2 = torch.ops.aten.pow.Tensor_Scalar(arg0_1, 1.0);  arg0_1 = None
     mul_2 = torch.ops.aten.mul.Scalar(pow_2, 2.0);  pow_2 = None
     mul_3 = torch.ops.aten.mul.Tensor(mul_1, mul_2);  mul_1 = mul_2 = None
-    return (mul_3,)""",  # noqa: B950
+    return [mul_3]""",  # noqa: B950
     )
         self.assertExpectedInline(gm.false_graph_1._code.strip(), """\
 def forward(self, arg0_1, arg1_1):
@@ -519,7 +510,7 @@ def forward(self, arg0_1, arg1_1):
     neg = torch.ops.aten.neg.default(sin);  sin = None
     mul_2 = torch.ops.aten.mul.Tensor(arg1_1, neg);  arg1_1 = neg = None
     mul_3 = torch.ops.aten.mul.Tensor(mul_2, mul);  mul_2 = mul = None
-    return (mul_3,)""",  # noqa: B950
+    return [mul_3]""",  # noqa: B950
     )
         
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
@@ -805,61 +796,59 @@ def forward(self, l_operands_0_):
     return (cos,)""",  # noqa: B950
         )
         
-        #TODO: In the cond forward, the cond_op is compiled, which leads to the graph
-        # not capturing the backward graph, but only the forward. Hence this part of the test fails
-#         def f(pred, x):
-#             result = cond(pred, true_fn, false_fn, (x,))
-#             grad_out = torch.ones_like(result)
-#             return torch.autograd.grad(result, (x,), grad_out)
+        def f(pred, x):
+            result = cond(pred, true_fn, false_fn, (x,))
+            grad_out = torch.ones_like(result)
+            return torch.autograd.grad(result, (x,), grad_out)
         
-#         grad_out = torch.ones_like(result)
-#         backend = EagerAndRecordGraphs()
-#         grad = torch.compile(f, backend=backend)(torch.tensor(False), x)
-#         self.assertEqual(len(backend.graphs), 2)
-#         gm = backend.graphs[0]
+        grad_out = torch.ones_like(result)
+        backend = EagerAndRecordGraphs()
+        grad = torch.compile(f, backend=backend)(torch.tensor(False), x)
+        self.assertEqual(len(backend.graphs), 2)
+        gm = backend.graphs[0]
         
-#         self.assertExpectedInline(
-#             gm.cond_true_0.code.strip(),
-#             """\
-# def forward(self, l_x_):
-#     l_x__1 = l_x_
-#     sin = l_x__1.sin();  l_x__1 = None
-#     return (sin,)""",  # noqa: B950
-#         )
-#         self.assertExpectedInline(
-#             gm.cond_false_0.code.strip(),
-#             """\
-# def forward(self, l_x_):
-#     l_x__1 = l_x_
-#     cos = l_x__1.cos();  l_x__1 = None
-#     return (cos,)""",  # noqa: B950
-#         )
+        self.assertExpectedInline(
+            gm.cond_true_0.code.strip(),
+            """\
+def forward(self, l_x_):
+    l_x__1 = l_x_
+    sin = l_x__1.sin();  l_x__1 = None
+    return (sin,)""",  # noqa: B950
+        )
+        self.assertExpectedInline(
+            gm.cond_false_0.code.strip(),
+            """\
+def forward(self, l_x_):
+    l_x__1 = l_x_
+    cos = l_x__1.cos();  l_x__1 = None
+    return (cos,)""",  # noqa: B950
+        )
         
-#         gm = backend.graphs[1]
+        gm = backend.graphs[1]
         
-#         self.assertExpectedInline(
-#             gm.cond_true_0.code.strip(),
-#             """\
-# def forward(self, l_ctx_saved_tensors_0_, l_flat_grads_0_):
-#     l_ctx_saved_tensors_0__1 = l_ctx_saved_tensors_0_
-#     l_flat_grads_0__1 = l_flat_grads_0_
-#     sin_default = torch.ops.aten.sin.default(l_ctx_saved_tensors_0__1)
-#     cos_default = torch.ops.aten.cos.default(l_ctx_saved_tensors_0__1);  l_ctx_saved_tensors_0__1 = None
-#     mul_tensor = torch.ops.aten.mul.Tensor(l_flat_grads_0__1, cos_default);  l_flat_grads_0__1 = cos_default = None
-#     return (mul_tensor,)""",  # noqa: B950
-#         )
-#         self.assertExpectedInline(
-#             gm.cond_false_0.code.strip(),
-#             """\
-# def forward(self, l_ctx_saved_tensors_0_, l_flat_grads_0_):
-#     l_ctx_saved_tensors_0__1 = l_ctx_saved_tensors_0_
-#     l_flat_grads_0__1 = l_flat_grads_0_
-#     cos_default = torch.ops.aten.cos.default(l_ctx_saved_tensors_0__1)
-#     sin_default = torch.ops.aten.sin.default(l_ctx_saved_tensors_0__1);  l_ctx_saved_tensors_0__1 = None
-#     neg_default = torch.ops.aten.neg.default(sin_default);  sin_default = None
-#     mul_tensor = torch.ops.aten.mul.Tensor(l_flat_grads_0__1, neg_default);  l_flat_grads_0__1 = neg_default = None
-#     return (mul_tensor,)""",  # noqa: B950
-#         )
+        self.assertExpectedInline(
+            gm.cond_true_0.code.strip(),
+            """\
+def forward(self, l_ctx_saved_tensors_0_, l_flat_grads_0_):
+    l_ctx_saved_tensors_0__1 = l_ctx_saved_tensors_0_
+    l_flat_grads_0__1 = l_flat_grads_0_
+    sin_default = torch.ops.aten.sin.default(l_ctx_saved_tensors_0__1)
+    cos_default = torch.ops.aten.cos.default(l_ctx_saved_tensors_0__1);  l_ctx_saved_tensors_0__1 = None
+    mul_tensor = torch.ops.aten.mul.Tensor(l_flat_grads_0__1, cos_default);  l_flat_grads_0__1 = cos_default = None
+    return (mul_tensor,)""",  # noqa: B950
+        )
+        self.assertExpectedInline(
+            gm.cond_false_0.code.strip(),
+            """\
+def forward(self, l_ctx_saved_tensors_0_, l_flat_grads_0_):
+    l_ctx_saved_tensors_0__1 = l_ctx_saved_tensors_0_
+    l_flat_grads_0__1 = l_flat_grads_0_
+    cos_default = torch.ops.aten.cos.default(l_ctx_saved_tensors_0__1)
+    sin_default = torch.ops.aten.sin.default(l_ctx_saved_tensors_0__1);  l_ctx_saved_tensors_0__1 = None
+    neg_default = torch.ops.aten.neg.default(sin_default);  sin_default = None
+    mul_tensor = torch.ops.aten.mul.Tensor(l_flat_grads_0__1, neg_default);  l_flat_grads_0__1 = neg_default = None
+    return (mul_tensor,)""",  # noqa: B950
+        )
 
     def test_while_loop_nested_traced(self):
         fn, inp = WHILE_LOOP_TESTS["nested"]
@@ -1684,11 +1673,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
 def forward(self, x_1, pred_1, pred2_1):
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, [x_1]);  pred_1 = true_graph_0 = false_graph_0 = None
+    conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1,));  pred_1 = true_graph_0 = false_graph_0 = None
     getitem = conditional[0];  conditional = None
     true_graph_1 = self.true_graph_1
     false_graph_1 = self.false_graph_1
-    conditional_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, [x_1]);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
+    conditional_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, (x_1,));  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
     getitem_1 = conditional_1[0];  conditional_1 = None
     add = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
     return add""",  # noqa: B950
@@ -1857,11 +1846,11 @@ def forward(self, arg0_1):
 def forward(self, x_1, pred_1, pred2_1):
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, [x_1]);  pred_1 = true_graph_0 = false_graph_0 = None
+    conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1,));  pred_1 = true_graph_0 = false_graph_0 = None
     getitem = conditional[0];  conditional = None
     true_graph_1 = self.true_graph_1
     false_graph_1 = self.false_graph_1
-    conditional_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, [x_1]);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
+    conditional_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, (x_1,));  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
     getitem_1 = conditional_1[0];  conditional_1 = None
     add = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
     return add""",  # noqa: B950
@@ -2188,6 +2177,29 @@ def forward(self, arg0_1):
             UnsupportedAliasMutationException, "torch.map is mutating the input!"
         ):
             functional_f(*example_inputs)
+            
+    def test_cond_autograd_backward(self):
+        def true_fn(x):
+            return x.cos()
+
+        def false_fn(x):
+            return x.sin()
+
+        def f(x, y):
+            return control_flow.cond(x.shape[0] > 4, true_fn, false_fn, [y])
+
+        example_inputs = (
+            torch.ones(3, 2, 4, requires_grad=True),
+            torch.ones(4, requires_grad=True),
+        )
+        # with self.assertRaisesRegex(RuntimeError, "Autograd not implemented for cond"):
+        f(*example_inputs).sum().backward()
+
+        # Ensure no error is thrown when not running backward
+        res = f(*example_inputs)
+        
+        # Ensure no error is thrown when not running backward
+        res = torch.compile(f)(*example_inputs)
 
     def test_map_functionalized_elem_alias(self):
         def map_fn(x):
@@ -2305,7 +2317,7 @@ def forward(self, x_1):
     eq = sym_size_int == 4;  sym_size_int = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1]);  eq = true_graph_0 = false_graph_0 = x_1 = None
+    conditional = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, (x_1,));  eq = true_graph_0 = false_graph_0 = x_1 = None
     getitem = conditional[0];  conditional = None
     return getitem""",  # noqa: B950
         )
@@ -2388,7 +2400,7 @@ def forward(self, x_1):
     false_graph_0 = self.false_graph_0
     _tensor_constant0 = self._tensor_constant0
     _tensor_constant1 = self._tensor_constant1
-    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [x_1, _tensor_constant0, _tensor_constant1]);  true_graph_0 = false_graph_0 = x_1 = _tensor_constant0 = _tensor_constant1 = None
+    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, (x_1, _tensor_constant0, _tensor_constant1));  true_graph_0 = false_graph_0 = x_1 = _tensor_constant0 = _tensor_constant1 = None
     getitem = conditional[0];  conditional = None
     return getitem""",  # noqa: B950
         )
@@ -2599,8 +2611,8 @@ def forward(self, arg0_1, arg1_1):
             )
 
         # each iteration captures a cond and a getitem from the tuple output
-        self.assertEqual(counters["stats"]["calls_captured"], iter_n * 4)
-        self.assertEqual(counters["stats"]["unique_graphs"], iter_n * 2)
+        self.assertEqual(counters["stats"]["calls_captured"], iter_n * 2)
+        self.assertEqual(counters["stats"]["unique_graphs"], iter_n)
 
     def test_cond_with_consecutive_make_fx_symbolic(self):
         def true_fn(x):
@@ -2623,7 +2635,7 @@ def forward(self, x_1):
     eq = sym_size_int == 4;  sym_size_int = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1]);  eq = true_graph_0 = false_graph_0 = x_1 = None
+    conditional = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, (x_1,));  eq = true_graph_0 = false_graph_0 = x_1 = None
     getitem = conditional[0];  conditional = None
     return getitem""",  # noqa: B950
             )
