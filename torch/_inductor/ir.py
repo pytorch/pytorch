@@ -4394,17 +4394,21 @@ class ExternKernel(InputsKernel):
         pass
 
     def codegen_const_args(self):
-        result = []
-        for i, x in enumerate(self.constant_args):
-            idx = len(self.inputs) + i
-            assert self.arg_properties and i < len(
-                self.arg_properties
-            ), "Invalid access to ExternKernel.arg_properties"
-            type_ = self.arg_properties[i].get("type")
-            result.append(
-                V.graph.wrapper_code.val_to_arg_str(x, type_)  # type: ignore[arg-type]
-            )
-        return result
+        if V.graph.cpp_wrapper:
+            result = []
+            for i, x in enumerate(self.constant_args):
+                idx = len(self.inputs) + i
+                type_ = (
+                    self.arg_properties[i].get("type")
+                    if self.arg_properties and idx < len(self.arg_properties)
+                    else None
+                )
+                result.append(
+                    V.graph.wrapper_code.val_to_arg_str(x, type_)  # type: ignore[arg-type]
+                )
+            return result
+        else:
+            return map(V.graph.wrapper_code.val_to_arg_str, self.constant_args)
 
     def codegen_args(self):
         args = []
