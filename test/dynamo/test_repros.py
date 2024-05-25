@@ -166,8 +166,9 @@ bw_graph = [None]
 
 
 def aot_graph_capture_backend(gm, args):
-    from functorch.compile import min_cut_rematerialization_partition
     from torch._functorch.aot_autograd import aot_module_simplified
+
+    from functorch.compile import min_cut_rematerialization_partition
 
     def fw_compiler(gm, _):
         fw_graph[0] = gm
