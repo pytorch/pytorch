@@ -27,7 +27,7 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
 #define FAIL_MTIAHOOKS_FUNC(func) \
   TORCH_CHECK(false, "Cannot execute ", func, "() without MTIA backend.");
 
-  virtual ~MTIAHooksInterface() override = default;
+  ~MTIAHooksInterface() override = default;
 
   virtual void initMTIA() const {
     // Avoid logging here, since MTIA needs init devices first then it will know
@@ -52,7 +52,7 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
 
-  virtual bool hasPrimaryContext(DeviceIndex device_index) const override {
+  bool hasPrimaryContext(DeviceIndex device_index) const override {
     return false;
   }
 
