@@ -136,21 +136,19 @@ void FunctionScheduler::addRun(
 
   _queue.push_back(run);
   std::push_heap(_queue.begin(), _queue.end(), Run::gt);
-
-  // Notify the thread handling run execution.
-  if (_running)
-    _cond.notify_one();
 }
 
 int FunctionScheduler::scheduleJob(std::unique_ptr<Job> job) {
   std::unique_lock<std::mutex> lock(_mutex);
   int job_id = id();
+  _jobs.insert(std::make_pair(job_id, std::move(job)));
 
   if (_running) {
     addRun(lock, job_id, job);
+    // Notify the thread handling run execution.
+    _cond.notify_one();
   }
 
-  _jobs.insert(std::make_pair(job_id, std::move(job)));
   return job_id;
 }
 
@@ -214,6 +212,8 @@ int FunctionScheduler::pause() {
 int FunctionScheduler::resume() {
   if (!_paused)
     return -1;
+
+  std::lock_guard<std::mutex> lock(_mutex);
 
   // Since we're shifting the time of all elements by the same amount
   // the min-heap is still valid, no need to rebuild it.
