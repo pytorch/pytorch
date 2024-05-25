@@ -84,6 +84,12 @@ TEST(FunctionScheduler, RemoveNonExistentJob) {
 }
 
 TEST(FunctionScheduler, RemoveFirstQueuedJob) {
+  // This test verifies that the FunctionScheduler correctly handles the removal
+  // of a scheduled job and ensures that the next job is executed in its place.
+  // It specifically tests the FunctionScheduler::getNextWaitTime() method to
+  // ensure that it properly skips over jobs that have been removed from the
+  // queue.
+
   std::atomic<bool> yes1 = false;
   std::atomic<bool> yes2 = false;
   std::function<void()> function0 = []() {
@@ -101,6 +107,7 @@ TEST(FunctionScheduler, RemoveFirstQueuedJob) {
   int job_id2 = fs.scheduleJob(function2, interval2);
 
   fs.start();
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
   fs.removeJob(job_id1);
   std::this_thread::sleep_for(std::chrono::milliseconds(600));
   fs.stop();
