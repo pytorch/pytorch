@@ -430,7 +430,7 @@ class WrapperCodeGen(CodeGen):
         # If the generated source code is exactly the same, reuse the
         # pre-existing kernel for it
         self.src_to_kernel: Dict[str, str] = {}
-        self.kernel_numel_expr: Set[Tuple[str, "GraphLowering"]] = set()
+        self.kernel_numel_expr: Set[Tuple[str, GraphLowering]] = set()
         self.lines: List[Union[MemoryPlanningLine, LineContext]] = []
         self.declare = ""
         self.declare_maybe_reference = ""
@@ -1685,6 +1685,10 @@ class WrapperCodeGen(CodeGen):
     @staticmethod
     def statically_known_int_or_none(x):
         try:
+            if getattr(x, "free_symbols", None):
+                # _maybe_evaluate_static will return (s0 // (2 // s0)) as 2, but
+                # the actual codegen will still generate the full expression here.
+                return None
             val = V.graph._shape_env._maybe_evaluate_static(x)
             return int(val)
         except Exception:
