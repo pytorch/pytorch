@@ -60,7 +60,6 @@ class TestNumbaIntegration(common.TestCase):
             numpy.uint8,
         ]
         for tp, npt in zip(types, dtypes):
-
             # CPU tensors do not implement the interface.
             cput = tp(10)
 
