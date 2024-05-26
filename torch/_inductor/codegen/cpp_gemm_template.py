@@ -8,7 +8,7 @@ from ..kernel.mm_common import mm_args
 from ..select_algorithm import DataProcessorTemplateWrapper
 from ..utils import cache_on_self, has_free_symbols, parallel_num_threads
 from ..virtualized import V
-from .cpp_micro_gemm import create_micro_gemm
+from .cpp_micro_gemm import create_micro_gemm, LayoutType
 from .cpp_template import CppTemplate
 
 from .cpp_template_kernel import CppTemplateKernel
@@ -336,6 +336,17 @@ class CppPackedGemmTemplate(CppTemplate):
                 blocked_w = (
                     W.reshape(k, n // block_n, block_n).transpose(0, 1).contiguous()
                 )
+                if micro_gemm.get_layout_b() != LayoutType.NORMAL:
+                    assert (
+                        micro_gemm.get_layout_b() == LayoutType.VNNI2
+                    ), "We only support VNNI2 for now"
+                    assert k % 2 == 0, "k should be even for VNNI2 layout"
+                    blocked_w = (
+                        blocked_w.view(n // block_n, k // 2, 2, block_n)
+                        .transpose(-1, -2)
+                        .contiguous()
+                        .view(n // block_n, k, block_n)
+                    )
                 # normalize stride to be "contiguous_strides" per size
                 # this avoids the problems in L.view during template codegen
                 new_stride = [1]
