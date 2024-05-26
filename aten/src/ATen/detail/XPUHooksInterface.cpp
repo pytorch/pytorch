@@ -7,7 +7,6 @@
 namespace at {
 namespace detail {
 
-
 const XPUHooksInterface& getXPUHooks() {
   static XPUHooksInterface* xpu_hooks = nullptr;
   static c10::once_flag once;

@@ -19,7 +19,7 @@ constexpr const char* XPU_HELP =
     "be loaded, EVEN IF you don't directly use any symbols from that!";
 
 struct TORCH_API XPUHooksInterface {
-  virtual ~XPUHooksInterface() {}
+  virtual ~XPUHooksInterface() = default;
 
   virtual void initXPU() const {
     TORCH_CHECK(
