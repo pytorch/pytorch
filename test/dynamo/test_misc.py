@@ -9604,7 +9604,7 @@ ShapeEnv not equal: field values don't match:
   >  Left: {0: 0, 1: 1, 2: s1, 3: s0}
   > Right: {0: 0, 1: 1}
 ==> var_to_range: values don't match.
-  >  Left: {s0: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False)}
+  >  Left: {s0: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False, is_int=True, is_float=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False, is_int=True, is_float=False)}
   > Right: {}
 ==> var_to_sources: values don't match.
   >  Left: {s0: [TensorPropertySource(base=ConstantSource(source_name='x'), prop=<TensorProperty.SIZE: 0>, idx=0)], s1: [TensorPropertySource(base=ConstantSource(source_name='x'), prop=<TensorProperty.SIZE: 0>, idx=1)]}

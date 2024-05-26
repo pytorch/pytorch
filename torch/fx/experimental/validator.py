@@ -363,6 +363,9 @@ try:
                 return z3.BoolVal(bool(value))
             raise ValueError(f"unsupported dtype (SympyToZ3): {dtype}")
 
+        def to_float(self, x: z3.ArithRef) -> z3.ArithRef:
+            return z3.ToReal(x)
+
         def truediv(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
             return self._ops.div(numerator, denominator)
 

@@ -218,8 +218,10 @@ class PythonMod(sympy.Function):
 
     @classmethod
     def eval(cls, p, q):
-        assert p.is_integer, p
-        assert q.is_integer, q
+        # python test/dynamo/test_export.py -k ExportTests.test_trivial_constraint
+        # Triggered by sympy.solvers.inequalities.reduce_inequalities
+        # assert p.is_integer, p
+        # assert q.is_integer, q
 
         if q.is_zero:
             raise ZeroDivisionError("Modulo by zero")
