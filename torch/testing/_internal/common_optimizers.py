@@ -962,13 +962,6 @@ def optim_error_inputs_func_sparseadam(device, dtype):
     error_inputs = get_error_inputs_for_all_optims(device, dtype)
 
     if str(device) == "cpu":
-        # SparseAdam raises a warning and not an error for the first entry. We
-        # update it here:
-        error_inputs[0].error_type = FutureWarning
-        error_inputs[
-            0
-        ].error_regex = "Passing in a raw Tensor as ``params`` to SparseAdam"
-
         error_inputs += [
             ErrorOptimizerInput(
                 OptimizerInput(
@@ -1472,6 +1465,18 @@ optim_db: List[OptimizerInfo] = [
             # Fails on MacOS 13.2.1 in CI https://github.com/pytorch/pytorch/issues/117094
             DecorateInfo(
                 skipIfMps, "TestOptimRenewed", "test_can_load_older_state_dict"
+            ),
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.complex64: tol(
+                            rtol=4.5e-5,
+                            atol=5e-5,
+                        )
+                    }
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
             ),
             DecorateInfo(
                 unittest.skip("Does not support param groups"),

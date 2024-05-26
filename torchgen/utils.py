@@ -25,7 +25,6 @@ from typing import (
     TypeVar,
     Union,
 )
-
 from typing_extensions import Self
 
 from torchgen.code_template import CodeTemplate
