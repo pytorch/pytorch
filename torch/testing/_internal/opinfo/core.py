@@ -685,9 +685,6 @@ class OpInfo:
     # information about which tests to skip
     skips: Tuple = tuple()
 
-    # skip the test for a device
-    skip_device: Tuple = tuple()
-
     # decorators to apply to generated tests
     decorators: Tuple = tuple()
 
