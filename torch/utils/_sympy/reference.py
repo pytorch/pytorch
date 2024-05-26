@@ -233,4 +233,7 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
 
     @staticmethod
     def pow_by_natural(a, b):
+        # Pray that safe_pow is not needed here lol.  In particular, this
+        # never participates in VR low/high ranges, so overflow should be
+        # unlikely
         return a**b

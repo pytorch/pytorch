@@ -203,6 +203,19 @@ class Where(sympy.Function):
 
     nargs = (3,)
 
+    def _eval_is_integer(self):
+        return True if self.args[1].is_integer and self.args[2].is_integer else None  # type: ignore[attr-defined]
+
+    def _eval_is_nonnegative(self):
+        return (
+            True
+            if self.args[1].is_nonnegative and self.args[2].is_nonnegative  # type: ignore[attr-defined]
+            else None
+        )
+
+    def _eval_is_positive(self):
+        return True if self.args[1].is_positive and self.args[2].is_positive else None  # type: ignore[attr-defined]
+
     @classmethod
     def eval(cls, c, p, q):
         if c == sympy.true:
@@ -211,6 +224,7 @@ class Where(sympy.Function):
             return q
 
 
+# Python-style modulus: take sign from RHS
 class PythonMod(sympy.Function):
     nargs = (2,)
 
@@ -264,6 +278,7 @@ class PythonMod(sympy.Function):
         return True if self.args[1].is_negative else None  # type: ignore[attr-defined]
 
 
+# C-style modulus: take sign from LHS
 class CMod(sympy.Function):
     nargs = (2,)
 
@@ -319,12 +334,8 @@ class CMod(sympy.Function):
         return True if self.args[0].is_negative else None  # type: ignore[attr-defined]
 
 
+# Generic modulus: only defined on non-negative arguments
 class Mod(sympy.Function):
-    """
-    We maintain this so that we avoid SymPy correctness issues, such as:
-    https://github.com/sympy/sympy/issues/25146
-    """
-
     nargs = (2,)
 
     is_integer = True
@@ -427,7 +438,15 @@ class RShift(sympy.Function):
         return base // 2**shift
 
 
-def safe_pow(base, exponent):
+def safe_pow(base, exp):
+    sign = 1
+    if base < 0:
+        base = -base
+        sign = 1 if exp % 2 == 0 else -1
+    return sign * _safe_pow(base, exp)
+
+
+def _safe_pow(base, exponent):
     if exponent < 0:
         raise ValueError("Exponent must be non-negative.")
 
@@ -460,11 +479,7 @@ class PowByNatural(sympy.Function):
         # assert the nonnegative
         assert exp.is_integer, exp
         if isinstance(base, sympy.Number) and isinstance(exp, sympy.Number):
-            sign = 1
-            if base < 0:
-                base = -base
-                sign = 1 if exp % 2 == 0 else -1
-            return sympy.Integer(sign * safe_pow(base, exp))
+            return sympy.Integer(safe_pow(base, exp))
         if isinstance(exp, sympy.Integer):
             # Translate power into iterated multiplication
             r = sympy.Integer(1)

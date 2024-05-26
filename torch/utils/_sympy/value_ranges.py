@@ -42,6 +42,7 @@ from .functions import (
     PowByNatural,
     Round,
     RoundDecimal,
+    safe_pow,
     ToFloat,
     TruncToFloat,
     TruncToInt,
@@ -602,7 +603,7 @@ class SymPyValueRangeAnalysis:
         a = ValueRanges.wrap(a)
         b = ValueRanges.wrap(b)
         if a.is_singleton() and b.is_singleton():
-            return ValueRanges.wrap(a.lower**b.lower)
+            return ValueRanges.wrap(safe_pow(a.lower, b.lower))
         # NB: Exclude zero, because zero is special
         elif a.lower >= 1:
             # We should know that b >= 0 but we may have forgotten this fact due
@@ -614,17 +615,21 @@ class SymPyValueRangeAnalysis:
         elif b.is_singleton():
             if b.lower % 2 == 0:
                 # x^n where n is even
-                return ValueRanges.convex_min_zero_map(a, lambda x: x**b.lower)
+                return ValueRanges.convex_min_zero_map(
+                    a, lambda x: safe_pow(x, b.lower)
+                )
             else:
                 # x^n where n is odd
-                return ValueRanges.increasing_map(a, lambda x: x**b.lower)
+                return ValueRanges.increasing_map(a, lambda x: safe_pow(x, b.lower))
         else:
             # a is potentially negative, and we don't know if the exponent is
             # even or odd.  So just conservatively set the upper and lower
             # bound based on what the maximum absolute value could be, in both
             # directions
             max_base = max(a.upper, -a.lower)
-            return ValueRanges(-(max_base**b.upper), max_base**b.upper)
+            return ValueRanges(
+                -(safe_pow(max_base, b.upper)), safe_pow(max_base, b.upper)
+            )
 
     @classmethod
     def pow(cls, a, b):
