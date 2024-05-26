@@ -17,7 +17,7 @@ Job::Job(
       _immediate(immediate) {}
 
 void Job::run() {
-  _counter++;
+  ++_counter;
   try {
     _function();
   } catch (const std::exception& e) {
@@ -133,42 +133,41 @@ void FunctionScheduler::addRun(
     interval = std::chrono::microseconds(0);
 
   auto time = std::chrono::steady_clock::now() + interval;
-  Run run = Run(job_id, time);
 
-  _queue.push_back(run);
+  _queue.emplace_back(job_id, time);
   std::push_heap(_queue.begin(), _queue.end(), Run::gt);
 }
 
 int FunctionScheduler::scheduleJob(const Job& job) {
-  _dirty++;
+  ++_dirty;
   std::unique_lock<std::mutex> lock(_mutex);
   int job_id = id();
 
   if (_running)
     addRun(lock, job_id, job);
 
-  _jobs.insert(std::make_pair(job_id, job));
-  _dirty--;
+  _jobs.emplace(job_id, job);
+  --_dirty;
   _cond.notify_one();
   return job_id;
 }
 
-int FunctionScheduler::removeJob(int id) {
-  _dirty++;
+bool FunctionScheduler::removeJob(int id) {
+  ++_dirty;
   std::lock_guard<std::mutex> lock(_mutex);
-  _dirty--;
+  --_dirty;
   _cond.notify_one();
 
   // The scheduler checks if the job associated
   // with a run is valid, so, to cancel a job
   // and it's run, we just need to erase
   // it (thus making it invalid).
-  return _jobs.erase(id) ? id : -1;
+  return _jobs.erase(id);
 }
 
-int FunctionScheduler::start() {
+bool FunctionScheduler::start() {
   if (_running || _paused)
-    return -1;
+    return false;
 
   std::unique_lock<std::mutex> lock(_mutex);
   for (const auto& entry : _jobs) {
@@ -178,12 +177,12 @@ int FunctionScheduler::start() {
   _running = true;
   _paused = false;
   _thread = std::thread(&FunctionScheduler::run, this);
-  return 1;
+  return true;
 }
 
-int FunctionScheduler::stop() {
+bool FunctionScheduler::stop() {
   if (!_running)
-    return -1;
+    return false;
 
   _running = false;
   _paused = false;
@@ -202,21 +201,21 @@ int FunctionScheduler::stop() {
   for (auto& entry : _jobs) {
     entry.second.reset_counter();
   }
-  return 1;
+  return true;
 }
 
-int FunctionScheduler::pause() {
+bool FunctionScheduler::pause() {
   if (_paused || !_running)
-    return -1;
+    return false;
 
   _paused_time = std::chrono::steady_clock::now();
   _paused = true;
-  return 1;
+  return true;
 }
 
-int FunctionScheduler::resume() {
+bool FunctionScheduler::resume() {
   if (!_paused)
-    return -1;
+    return false;
 
   std::lock_guard<std::mutex> lock(_mutex);
 
@@ -234,7 +233,7 @@ int FunctionScheduler::resume() {
   // continues execution.
   _cond.notify_one();
 
-  return 1;
+  return true;
 }
 
 } // namespace c10

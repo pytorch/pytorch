@@ -9,7 +9,7 @@ TEST(Job, Initialization) {
 
   c10::Job j(function, interval);
 
-  ASSERT_EQ(j.interval(), interval);
+  EXPECT_EQ(j.interval(), interval);
 }
 
 TEST(Job, Run) {
@@ -20,7 +20,7 @@ TEST(Job, Run) {
   c10::Job j(function, interval);
   j.run();
 
-  ASSERT_TRUE(ran);
+  EXPECT_TRUE(ran);
 }
 
 TEST(Run, Initialization) {
@@ -29,8 +29,8 @@ TEST(Run, Initialization) {
 
   c10::Run r(job_id, time);
 
-  ASSERT_EQ(r.job_id(), job_id);
-  ASSERT_EQ(r.time(), time);
+  EXPECT_EQ(r.job_id(), job_id);
+  EXPECT_EQ(r.time(), time);
 }
 
 TEST(Run, gt) {
@@ -42,15 +42,15 @@ TEST(Run, gt) {
   auto r1 = c10::Run(job_id1, time1);
   auto r2 = c10::Run(job_id2, time2);
 
-  ASSERT_TRUE(c10::Run::gt(r2, r1));
-  ASSERT_FALSE(c10::Run::gt(r1, r2));
+  EXPECT_TRUE(c10::Run::gt(r2, r1));
+  EXPECT_FALSE(c10::Run::gt(r1, r2));
 }
 
 TEST(FunctionScheduler, Initialization) {
   c10::FunctionScheduler fs;
 
-  ASSERT_FALSE(fs.isRunning());
-  ASSERT_EQ(fs.currentId(), 0);
+  EXPECT_FALSE(fs.isRunning());
+  EXPECT_EQ(fs.currentId(), 0);
 }
 
 TEST(FunctionScheduler, ScheduleJob) {
@@ -60,8 +60,8 @@ TEST(FunctionScheduler, ScheduleJob) {
   c10::FunctionScheduler fs;
   int job_id = fs.scheduleJob(function, interval);
 
-  ASSERT_EQ(job_id, 0);
-  ASSERT_EQ(fs.currentId(), 1);
+  EXPECT_EQ(job_id, 0);
+  EXPECT_EQ(fs.currentId(), 1);
 }
 
 TEST(FunctionScheduler, RemoveJob) {
@@ -71,16 +71,13 @@ TEST(FunctionScheduler, RemoveJob) {
   c10::FunctionScheduler fs;
 
   int job_id = fs.scheduleJob(function, interval);
-  ASSERT_EQ(job_id, 0);
-  int remove_id = fs.removeJob(job_id);
-  ASSERT_EQ(job_id, remove_id);
+  EXPECT_EQ(job_id, 0);
+  EXPECT_TRUE(fs.removeJob(job_id));
 }
 
 TEST(FunctionScheduler, RemoveNonExistentJob) {
   c10::FunctionScheduler fs;
-
-  int remove_id = fs.removeJob(0);
-  ASSERT_EQ(remove_id, -1);
+  EXPECT_FALSE(fs.removeJob(0));
 }
 
 TEST(FunctionScheduler, RemoveFirstQueuedJob) {
@@ -112,8 +109,8 @@ TEST(FunctionScheduler, RemoveFirstQueuedJob) {
   std::this_thread::sleep_for(std::chrono::milliseconds(600));
   fs.stop();
 
-  ASSERT_FALSE(yes1);
-  ASSERT_TRUE(yes2);
+  EXPECT_FALSE(yes1);
+  EXPECT_TRUE(yes2);
 }
 
 TEST(FunctionScheduler, StartAndStop) {
@@ -123,7 +120,7 @@ TEST(FunctionScheduler, StartAndStop) {
   ASSERT_TRUE(fs.isRunning());
 
   fs.stop();
-  ASSERT_FALSE(fs.isRunning());
+  EXPECT_FALSE(fs.isRunning());
 }
 
 TEST(FunctionScheduler, RunJobWithZeroInterval) {
@@ -137,7 +134,7 @@ TEST(FunctionScheduler, RunJobWithZeroInterval) {
   std::this_thread::sleep_for(std::chrono::milliseconds(200));
   fs.stop();
 
-  ASSERT_TRUE(ran);
+  EXPECT_TRUE(ran);
 }
 
 TEST(FunctionScheduler, RunJobWithInterval) {
@@ -158,7 +155,7 @@ TEST(FunctionScheduler, RunJobWithInterval) {
   ASSERT_EQ(count, 1);
 
   std::this_thread::sleep_for(std::chrono::milliseconds(150)); // 450
-  ASSERT_EQ(count, 2);
+  EXPECT_EQ(count, 2);
   fs.stop();
 }
 
@@ -175,7 +172,7 @@ TEST(FunctionScheduler, RemoveJobWhileRunning) {
   std::this_thread::sleep_for(std::chrono::milliseconds(300));
   fs.stop();
 
-  ASSERT_EQ(counter, 2);
+  EXPECT_EQ(counter, 2);
 }
 
 TEST(FunctionScheduler, RunMultipleJobs) {
@@ -193,7 +190,7 @@ TEST(FunctionScheduler, RunMultipleJobs) {
   std::this_thread::sleep_for(std::chrono::milliseconds(550));
   fs.stop();
 
-  ASSERT_EQ(counter, 4);
+  EXPECT_EQ(counter, 4);
 }
 
 TEST(FunctionScheduler, RunMultipleJobsWithSameInterval) {
@@ -212,8 +209,7 @@ TEST(FunctionScheduler, RunMultipleJobsWithSameInterval) {
   std::this_thread::sleep_for(std::chrono::milliseconds(350));
   fs.stop();
 
-  ASSERT_EQ(counter1, 1);
-  ASSERT_EQ(counter1, 1);
+  EXPECT_EQ(counter1, 1);
 }
 
 TEST(FunctionScheduler, ScheduleJobAfterCurrentlyWaiting) {
@@ -231,11 +227,11 @@ TEST(FunctionScheduler, ScheduleJobAfterCurrentlyWaiting) {
   std::this_thread::sleep_for(std::chrono::milliseconds(300));
   fs.scheduleJob(function2, interval2);
   std::this_thread::sleep_for(std::chrono::milliseconds(300));
-  ASSERT_TRUE(yes1);
-  ASSERT_FALSE(yes2);
+  EXPECT_TRUE(yes1);
+  EXPECT_FALSE(yes2);
   std::this_thread::sleep_for(std::chrono::milliseconds(200));
-  ASSERT_TRUE(yes1);
-  ASSERT_TRUE(yes2);
+  EXPECT_TRUE(yes1);
+  EXPECT_TRUE(yes2);
   fs.stop();
 }
 
@@ -253,11 +249,11 @@ TEST(FunctionScheduler, ScheduleJobBeforeCurrenltyWaiting) {
 
   std::this_thread::sleep_for(std::chrono::milliseconds(300));
   fs.scheduleJob(function2, interval2);
-  ASSERT_FALSE(yes1);
-  ASSERT_FALSE(yes2);
+  EXPECT_FALSE(yes1);
+  EXPECT_FALSE(yes2);
   std::this_thread::sleep_for(std::chrono::milliseconds(300));
-  ASSERT_FALSE(yes1);
-  ASSERT_TRUE(yes2);
+  EXPECT_FALSE(yes1);
+  EXPECT_TRUE(yes2);
   fs.stop();
 }
 
@@ -276,8 +272,8 @@ TEST(FunctionScheduler, ScheduleJobBeforeAndAfterCurrenltyWaiting) {
   std::this_thread::sleep_for(std::chrono::milliseconds(300));
   fs.scheduleJob(function2, interval2);
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
-  ASSERT_EQ(counter1, 1);
-  ASSERT_EQ(counter2, 2);
+  EXPECT_EQ(counter1, 1);
+  EXPECT_EQ(counter2, 2);
   fs.stop();
 }
 
@@ -299,7 +295,7 @@ TEST(FunctionScheduler, SchedulerRestart) {
   std::this_thread::sleep_for(std::chrono::milliseconds(250));
   fs.stop();
 
-  ASSERT_EQ(counter, 4);
+  EXPECT_EQ(counter, 4);
 }
 
 TEST(FunctionScheduler, ConcurrentJobScheduling) {
@@ -327,7 +323,7 @@ TEST(FunctionScheduler, ConcurrentJobScheduling) {
   std::this_thread::sleep_for(std::chrono::milliseconds(300));
   fs.stop();
 
-  ASSERT_EQ(counter, num_threads * 10 * 5);
+  EXPECT_EQ(counter, num_threads * 10 * 5);
 }
 
 TEST(FunctionScheduler, ConcurrentJobRemoval) {
@@ -358,7 +354,7 @@ TEST(FunctionScheduler, ConcurrentJobRemoval) {
   std::this_thread::sleep_for(std::chrono::milliseconds(200));
   fs.stop();
 
-  ASSERT_EQ(counter, 0);
+  EXPECT_EQ(counter, 0);
 }
 
 TEST(FunctionScheduler, JobExceptions) {
@@ -374,7 +370,7 @@ TEST(FunctionScheduler, JobExceptions) {
   std::this_thread::sleep_for(std::chrono::milliseconds(150));
   fs.stop();
 
-  ASSERT_GE(counter, 1);
+  EXPECT_GE(counter, 1);
 }
 
 TEST(FunctionScheduler, RunImmediately) {
@@ -387,7 +383,7 @@ TEST(FunctionScheduler, RunImmediately) {
 
   fs.start();
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
-  ASSERT_EQ(counter, 1);
+  EXPECT_EQ(counter, 1);
 
   std::this_thread::sleep_for(std::chrono::milliseconds(450));
   ASSERT_EQ(counter, 2);
@@ -406,7 +402,7 @@ TEST(FunctionScheduler, RunLimit) {
   std::this_thread::sleep_for(std::chrono::milliseconds(700));
   fs.stop();
 
-  ASSERT_EQ(counter, 2);
+  EXPECT_EQ(counter, 2);
 }
 
 TEST(FunctionScheduler, RunLimitReset) {
@@ -427,7 +423,7 @@ TEST(FunctionScheduler, RunLimitReset) {
   std::this_thread::sleep_for(std::chrono::milliseconds(700));
   fs.stop();
 
-  ASSERT_EQ(counter, 6);
+  EXPECT_EQ(counter, 6);
 }
 
 TEST(FunctionScheduler, ImmediateJobWithRunLimit) {
@@ -442,7 +438,7 @@ TEST(FunctionScheduler, ImmediateJobWithRunLimit) {
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
   fs.stop();
 
-  ASSERT_EQ(counter, 3);
+  EXPECT_EQ(counter, 3);
 }
 
 TEST(FunctionScheduler, PauseWhileRunning) {
@@ -461,7 +457,7 @@ TEST(FunctionScheduler, PauseWhileRunning) {
   std::this_thread::sleep_for(std::chrono::milliseconds(200));
   fs.stop();
 
-  ASSERT_EQ(counter, 4);
+  EXPECT_EQ(counter, 4);
 }
 
 TEST(FunctionScheduler, InvalidJobInterval) {

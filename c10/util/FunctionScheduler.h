@@ -6,7 +6,6 @@
 #include <chrono>
 #include <condition_variable>
 #include <functional>
-#include <memory>
 #include <mutex>
 #include <thread>
 #include <unordered_map>
@@ -193,27 +192,27 @@ class C10_API FunctionScheduler {
   }
 
   // Removes the job registered with `id` and returns it.
-  // Returns -1 if a job registered with `id` doesn't exist.
-  int removeJob(int id);
+  // Returns false if a job registered with `id` doesn't exist.
+  bool removeJob(int id);
 
   // Starts the FunctionScheduler.
-  // Returns -1 if the Scheduler is already running.
-  int start();
+  // Returns false if the Scheduler is already running.
+  bool start();
 
   // Stops the FunctionScheduler
   // and resets all jobs (_run_count = 0).
-  // Returns -1 if the Scheduler is already stopped.
-  int stop();
+  // Returns false if the Scheduler is already stopped.
+  bool stop();
 
   // Pauses FunctionScheduler execution.
-  // Returns -1 if the Scheduler is already
+  // Returns false if the Scheduler is already
   // paused or not running.
-  int pause();
+  bool pause();
 
   // Resumes FunctionScheduler execution.
-  // Returns -1 if the Scheduler is already
+  // Returns false if the Scheduler is already
   // unpaused or not running.
-  int resume();
+  bool resume();
 
   bool isRunning() const {
     return _running;
