@@ -446,9 +446,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_no_update_mps(const Tenso
                                                                      const c10::optional<Tensor>& running_var,
                                                                      double momentum,
                                                                      double eps) {
+  const Tensor& running_mean_t = c10::value_or_else(running_mean, [] {return Tensor();});
+  const Tensor& running_var_t = c10::value_or_else(running_var, [] {return Tensor();});
+  const bool train = !running_mean_t.defined() || !running_var_t.defined();
   Tensor output, save_mean, save_var;
   std::tie(output, save_mean, save_var) =
-      batch_norm_mps(input, weight_opt, bias_opt, running_mean, running_var, /*train*/ false, momentum, eps);
+      batch_norm_mps(input, weight_opt, bias_opt, running_mean, running_var, train, momentum, eps);
   Tensor reserve = at::empty({0}, input.options().dtype(kByte));
   return std::tuple<Tensor, Tensor, Tensor, Tensor>(output, save_mean, save_var, reserve);
 }

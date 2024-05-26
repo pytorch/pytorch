@@ -673,8 +673,13 @@ Tensor batch_norm(
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
   const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
+  const bool running_stats_defined = running_mean.defined() && running_var.defined();
 
-  if (training && running_mean.defined() && running_var.defined()) {
+  if (!training && !running_stats_defined) {
+    AT_ERROR("running_mean and running_var must be defined in evaluation mode");
+  }
+
+  if (training && running_stats_defined) {
     BatchNormBackend backend = _select_batch_norm_backend(input, weight, bias, running_mean, running_var, training, eps);
     if (backend == BatchNormBackend::Cudnn || backend == BatchNormBackend::Miopen) {
       auto input_c = input;
@@ -875,8 +880,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_no_update_cpu(
   const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
   // Passing in undefined Tensors to `batch_norm_cpu` in eval mode leads to seg fault
-  // If the batch norm stats are undefined anyway, it's OK to update them
-  bool update = !running_mean.defined() && !running_var.defined();
+  bool update = !running_mean.defined() || !running_var.defined();
   Tensor output, save_mean, save_var;
   std::tie(output, save_mean, save_var) =
     batch_norm_cpu(input, weight_opt, bias_opt, const_cast<Tensor&>(running_mean), const_cast<Tensor&>(running_var), update, momentum, eps);

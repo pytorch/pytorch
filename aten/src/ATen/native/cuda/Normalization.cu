@@ -542,7 +542,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_no_update_cuda(
     double momentum, double eps) {
   const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
-  return _batch_norm_maybe_update_cuda_helper(input, weight_opt, bias_opt, const_cast<Tensor&>(running_mean), const_cast<Tensor&>(running_var), momentum, eps, /*update*/false);
+  const bool train = !running_mean.defined() || !running_var.defined();
+  return _batch_norm_maybe_update_cuda_helper(input, weight_opt, bias_opt, const_cast<Tensor&>(running_mean), const_cast<Tensor&>(running_var), momentum, eps, train);
 }
 
 std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_cuda(const Tensor& self, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt, Tensor& running_mean, Tensor& running_var, bool train, double momentum, double epsilon) {
