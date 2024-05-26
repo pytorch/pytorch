@@ -18,6 +18,7 @@ from torch._dynamo.utils import preserve_rng_state
 from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
 from torch._prims_common import is_integer_dtype
 from torch.utils._triton import has_triton_package
+from ...utils._sympy.symbol import symbol_is_type, SymT
 from ...utils._sympy.value_ranges import ValueRanges
 
 from .. import config, ir
@@ -25,7 +26,7 @@ from ..codecache import code_hash, get_path, PyCodeCache
 from ..ir import IRNode
 from ..metrics import is_metric_table_enabled, log_kernel_metadata
 from ..runtime.hints import ReductionHint, TRITON_MAX_BLOCK
-from ..runtime.runtime_utils import do_bench_gpu, next_power_of_2
+from ..runtime.runtime_utils import do_bench_gpu, get_max_y_grid, next_power_of_2
 from ..utils import (
     cache_on_self,
     get_bounds_index_expr,
@@ -33,6 +34,8 @@ from ..utils import (
     get_kernel_metadata,
     is_welford_reduction,
     Placeholder,
+    sympy_dot,
+    sympy_subs,
 )
 from ..virtualized import _ops as ops, OpsHandler, ReductionType, StoreMode, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
@@ -46,14 +49,7 @@ from .common import (
     SizeArg,
     TensorArg,
 )
-from .simd import (
-    IndexingOptions,
-    IterationRangesEntry,
-    pexpr,
-    SIMDKernel,
-    SIMDScheduling,
-    triton_constant,
-)
+from .simd import constant_repr, IterationRangesEntry, pexpr, SIMDKernel, SIMDScheduling
 from .triton_utils import config_of, signature_of, signature_to_meta
 
 log = logging.getLogger(__name__)
@@ -99,6 +95,28 @@ def gen_common_triton_imports():
         """
     )
     return imports.getvalue()
+
+
+@dataclasses.dataclass
+class IndexingOptions:
+    index_str: str
+    mask_vars: Set[sympy.Symbol]
+    mask_str: str
+    expand_str: Optional[str]
+    _has_rindex: bool
+    index: sympy.Expr
+
+    def has_mask(self):
+        return bool(self.mask_vars)
+
+    def has_rindex(self):
+        return self._has_rindex
+
+    def has_tmpmask(self):
+        return "tmp" in self.mask_str
+
+    def has_rmask(self):
+        return "rmask" in self.mask_str
 
 
 @dataclasses.dataclass
@@ -492,7 +510,7 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def _shaped_constant(value, dtype, shape):
         type_ = torch._prims_common.dtype_to_type(dtype)
-        triton_val = triton_constant(type_(value))
+        triton_val = constant_repr(type_(value))
         triton_type = triton_compute_type(dtype)
 
         if triton_type == "tl.float32":
@@ -745,10 +763,6 @@ class TritonOverrides(OpOverrides):
         return f"tl.sigmoid({x})"
 
     @staticmethod
-    def libdevice_sigmoid(x):
-        return f"1/(1 + libdevice.exp(-({x})))"
-
-    @staticmethod
     def signbit(x):
         # XX: This is wrong for the value -0.0 in floating point
         return f"libdevice.signbit({x}) if ({x}).dtype is tl.float32 else {x} < 0"
@@ -866,7 +880,7 @@ class TritonKernelOverrides(TritonOverrides):
         # Take dtype from result to prevent accidental promotion
         other = V.kernel.cse.generate(
             V.kernel.compute,
-            f"tl.full({result}.shape, {triton_constant(other)}, {result}.dtype)",
+            f"tl.full({result}.shape, {constant_repr(other)}, {result}.dtype)",
             bounds=ValueRanges.wrap(other),
         )
         return ops.where(new_mask, result, other)
@@ -977,11 +991,13 @@ class TritonKernel(SIMDKernel):
         for tree in self.range_trees:
             # reduction indexing goes inside a loop
             if not tree.is_loop:
-                tree.codegen_header(self.body)
+                self.iteration_ranges_codegen_header(tree, self.body)
         if self.inside_reduction and self.range_trees[-1].is_loop:
             # workaround for this issue:
             # https://gist.github.com/jansel/6527126f781559095c5531f98a4235a7
-            self.body.writeline(f"rbase = {self.range_trees[-1].ranges_code()}")
+            self.body.writeline(
+                f"rbase = {self.iteration_ranges_ranges_code(self.range_trees[-1])}"
+            )
 
     def need_numel_args(self):
         r"""
@@ -1036,6 +1052,129 @@ class TritonKernel(SIMDKernel):
     def assert_function(self) -> str:
         return "tl.device_assert"
 
+    def indexing(
+        self,
+        index: sympy.Expr,
+        *,
+        copy_shape=None,
+        dense_indexing=False,
+        override_mask=None,
+        block_ptr=False,
+    ):
+        """
+        Compute the index and mask to pass to tl.load() or tl.store()
+        """
+        index = self.prepare_indexing(index)
+        index_vars = index.free_symbols
+        has_rindex = False
+
+        mask_vars: Set[str] = set()
+        for var in index_vars:
+            assert isinstance(var, sympy.Symbol)
+            has_rindex = has_rindex or symbol_is_type(var, SymT.RINDEX)
+            if override_mask:
+                pass
+            elif symbol_is_type(var, SymT.TMP):
+                # indirect indexing
+                cse_var = self.cse.varname_map[var.name]
+                mask_vars.update(cse_var.mask_vars)
+            elif symbol_is_type(
+                var,
+                (
+                    SymT.UNBACKED_INT,
+                    SymT.SIZE,
+                    SymT.PRECOMPUTED_SIZE,
+                    SymT.INDEX,
+                    SymT.FLOAT,
+                    SymT.UNBACKED_FLOAT,
+                ),
+            ):
+                pass
+            else:
+                # var is one of xN, yN or rN
+                assert symbol_is_type(
+                    var, (SymT.RINDEX, SymT.XBLOCK, SymT.YBLOCK)
+                ), var.name
+                mask_vars.add(f"{var.name[0]}mask")
+
+        need_dense = (
+            config.triton.dense_indexing
+            or dense_indexing
+            or self._load_mask is not None
+        ) and index != 0
+
+        have_dense = True
+        have_loop_vars = False
+        dense_mask_vars = set()
+
+        for tree in self.active_range_trees():
+            if index_vars.intersection(tree.var_list):
+                have_loop_vars = True
+            else:
+                have_dense = False
+            dense_mask_vars.add(f"{tree.prefix}mask")
+
+        if (
+            block_ptr
+            and self.allow_block_ptr
+            and config.triton.use_block_ptr
+            and not override_mask
+            and not self._load_mask
+            and len(mask_vars - dense_mask_vars) == 0
+            and not self.is_indirect_indexing(index)
+            and have_loop_vars
+            # workaround https://github.com/openai/triton/issues/2821
+            and self.index_dtype == "tl.int32"
+        ):
+            index_relative_to_xyr_index = sympy_subs(
+                index, {v: t.expr for v, t in self.range_tree_nodes.items()}
+            )
+            range_trees = self.active_range_trees(reorder=True)
+            symbols = [t.symbol() for t in range_trees]
+            strides = [sympy.Wild(f"stride_{s}", exclude=symbols) for s in symbols]
+            offset = sympy.Wild("_offset", exclude=symbols)
+            m = index_relative_to_xyr_index.match(sympy_dot(symbols, strides) + offset)
+            # TODO(jansel): it is sometimes possible to do higher dimensional block_ptrs with
+            #               a tl.reshape the correct block.  We will miss these cases today.
+            if m:
+                self.filter_masks(mask_vars)
+                from .triton import BlockPtrOptions
+
+                return BlockPtrOptions.create(
+                    [m[s] for s in strides],
+                    m[offset],
+                    range_trees,
+                    mask_vars,  # type: ignore[arg-type]
+                )
+
+        expand_str = None
+        index_str = self.index_to_str(index)
+        if isinstance(index, sympy.Integer):
+            expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
+            index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
+            return IndexingOptions(
+                index_str, set(), "None", expand_str, has_rindex, index
+            )
+
+        if need_dense and not have_dense:
+            expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
+            index_str = f"tl.broadcast_to({index_str}, {expand_str})"
+            mask_vars = dense_mask_vars
+        elif not have_loop_vars and copy_shape:
+            index_str = f"tl.broadcast_to({index_str}, {copy_shape}.shape)"
+            mask_vars = dense_mask_vars
+
+        if override_mask:
+            mask_vars = {override_mask}
+
+        if self._load_mask:
+            mask_vars.add(self._load_mask)
+
+        self.filter_masks(mask_vars)
+
+        mask_str = " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
+        return IndexingOptions(index_str, mask_vars, mask_str, expand_str, has_rindex, index)  # type: ignore[arg-type]
+
     def codegen_block_ptr(
         self, name: str, var: str, indexing: BlockPtrOptions, other=""
     ) -> Tuple[str, Optional[DeferredLine], str]:
@@ -1078,6 +1217,21 @@ class TritonKernel(SIMDKernel):
         # workaround https://github.com/openai/triton/issues/2814
         value = f"{value}.to({triton_store_type(V.graph.get_dtype(name))})"
         return f"tl.store({block_ptr}, {value}{other})"
+
+    def load_mask(self, var):
+        mask = ""
+        mask_vars = set(var.mask_vars)
+        if self._load_mask:
+            mask_vars.add(self._load_mask)
+
+        if mask_vars:
+            mask = (
+                f"{next(iter(mask_vars))}"
+                if len(mask_vars) == 1
+                # sorted for deterministic order
+                else f"({' & '.join(sorted(map(str, mask_vars)))})"
+            )
+        return mask
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
@@ -1342,7 +1496,7 @@ class TritonKernel(SIMDKernel):
 
         if self.persistent_reduction:
             default = ir.Reduction.default_value(reduction_type, src_dtype)
-            default = self._map_tuple_or_scalar(triton_constant, default)
+            default = self._map_tuple_or_scalar(constant_repr, default)
 
             def _mask_value(value, default):
                 return self.cse.generate(self.compute, where_cond(value, default))
@@ -1367,16 +1521,7 @@ class TritonKernel(SIMDKernel):
                 # For persistent reductions, don't bother with
                 # welford's algorithm since it uses more registers, and
                 # taking two reductions doesn't increase memory usage.
-                sum_ = ops.reduction(dtype, dtype, "sum", value)
-                self.inside_reduction = False
-                rnumel = ops.index_expr(self.numels[-1], dtype)
-                mean = ops.truediv(sum_, rnumel)
-
-                self.inside_reduction = True
-                dx = ops.sub(value, mean)
-                dx2 = ops.mul(dx, dx)
-                m2 = ops.reduction(dtype, dtype, "sum", dx2)
-                result_var = (mean, m2, rnumel)
+                result_var = self.welford_reduce_fallback(dtype, value)
             elif reduction_type == "welford_combine":
                 mean, m2, weight = masked_value
                 welford = f"triton_helpers.welford({mean}, {m2}, {weight}, {dim})"
@@ -1394,7 +1539,7 @@ class TritonKernel(SIMDKernel):
         else:
             accumulator = f"_{result_var}"
             default = ir.Reduction.default_accumulator(reduction_type, src_dtype)
-            default = self._map_tuple_or_scalar(triton_constant, default)
+            default = self._map_tuple_or_scalar(constant_repr, default)
             if not isinstance(default, tuple):
                 self.body.writeline(
                     f"{accumulator} = tl.full({self.dense_size_str()}, {default}, {acc_type})"
@@ -1501,8 +1646,10 @@ class TritonKernel(SIMDKernel):
         self.cse.reduction_cache[cache_key] = result_var
 
         if isinstance(result_var, tuple):
+            assert all(isinstance(x, TritonCSEVariable) for x in result_var)
             self.outside_loop_vars |= set(result_var)
         else:
+            assert isinstance(result_var, TritonCSEVariable)
             self.outside_loop_vars.add(result_var)
 
         return result_var
@@ -1709,7 +1856,7 @@ class TritonKernel(SIMDKernel):
             self.body.writeline("for roffset in range(0, rnumel, RBLOCK):")
             with self.body.indent():
                 # last range tree is always reduction
-                self.range_trees[-1].codegen_header(self.body)
+                self.iteration_ranges_codegen_header(self.range_trees[-1], self.body)
                 self.body.splice(self.indexing_code)
                 self.body.splice(self.loads)
                 self.body.splice(self.compute)
@@ -2164,6 +2311,56 @@ class TritonKernel(SIMDKernel):
         else:
             # lift non-reduction stores outside loop
             self.body.writeline(line)
+
+    def iteration_ranges_ranges_code(self, entry):
+        assert entry.tensor_dim is not None
+        size = self.indexing_size_str(entry.tensor_dim)
+        index_dtype = self.index_dtype
+        convert = f".to({index_dtype})" if index_dtype != "tl.int32" else ""
+        return f"tl.arange(0, {entry.prefix.upper()}BLOCK){size}{convert}"
+
+    def iteration_ranges_scalar_code(self, entry, value):
+        index_dtype = self.index_dtype
+        ndim = self.triton_tensor_ndim()
+        size = [1] * ndim
+        return f"tl.full({size}, {value}, {index_dtype})"
+
+    def iteration_ranges_get_pid(self, entry):
+        assert entry.grid_dim is not None
+        key = f"tl.program_id({entry.grid_dim})"
+        # y_grid has a limit, so express it in terms of y and z in case of overflow.
+        # z grid is only exercised when max_tiles == 3 (off by default).
+        if (
+            entry.grid_dim == 1
+            and not entry.has_zdim
+            and not (isinstance(entry.numel, int) and entry.numel <= get_max_y_grid())
+        ):
+            key = f"{key} * (tl.program_id({entry.grid_dim + 1}) + 1)"
+        pid = entry.pid_cache.get(key, key)
+        if self.index_dtype != "tl.int32":
+            return f"{pid}.to({self.index_dtype})"
+        return pid
+
+    def iteration_ranges_codegen_header(self, entry, code):
+        x = entry.prefix
+        if entry.is_loop:
+            code.writeline(f"{entry.name} = {x}offset + {x}base")
+        elif entry.grid_dim is None:
+            # no need to "{x}offset = "
+            code.writeline(f"{entry.name} = {self.iteration_ranges_ranges_code(entry)}")
+            code.writeline(f"{x}offset = 0")
+        else:
+            if entry.tensor_dim is not None:
+                line = f"{x}offset + {self.iteration_ranges_ranges_code(entry)}"
+            else:
+                line = self.iteration_ranges_scalar_code(entry, f"{x}offset")
+            code.writelines(
+                [
+                    f"{x}offset = {self.iteration_ranges_get_pid(entry)} * {x.upper()}BLOCK",
+                    f"{entry.name} = {line}",
+                ]
+            )
+        code.writeline(f"{x}mask = {entry.name} < {x}numel")
 
 
 class TritonScheduling(SIMDScheduling):
