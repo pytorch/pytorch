@@ -15,7 +15,6 @@ from typing import Dict, List
 import torch
 import torch._dynamo as torchdynamo
 import torch.nn.functional as F
-from functorch.experimental.control_flow import cond, map
 from torch import Tensor
 from torch._dynamo.test_case import TestCase
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
@@ -58,6 +57,8 @@ from torch.utils._pytree import (
     treespec_dumps,
     treespec_loads,
 )
+
+from functorch.experimental.control_flow import cond, map
 
 try:
     from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
