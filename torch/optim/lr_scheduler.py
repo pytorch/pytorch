@@ -1,3 +1,4 @@
+import copy
 import math
 import types
 import warnings
@@ -77,7 +78,7 @@ class LRScheduler:
         # Initialize epoch and base learning rates
         if last_epoch == -1:
             for group in optimizer.param_groups:
-                group.setdefault("initial_lr", group["lr"])
+                group.setdefault("initial_lr", copy.deepcopy(group["lr"]))
         else:
             for i, group in enumerate(optimizer.param_groups):
                 if "initial_lr" not in group:
@@ -1496,7 +1497,7 @@ class CyclicLR(LRScheduler):
             for lr, group in zip(base_lrs, optimizer.param_groups):
                 if isinstance(group["lr"], Tensor):
                     lr_val = lr.item() if isinstance(lr, Tensor) else lr
-                    group["lr"].fill_(lr)
+                    group["lr"].fill_(lr_val)
                 else:
                     group["lr"] = lr
 
@@ -1564,16 +1565,17 @@ class CyclicLR(LRScheduler):
             self._scale_fn_ref = partial(self._exp_range_scale_fn, self.gamma)
             self.scale_mode = "iterations"
 
-    def _format_param(self, name, optimizer, param):
+    def _format_param(self, name, optimizer, param, deepcopy: bool = True):
         """Return correctly formatted lr/momentum for each param group."""
         if isinstance(param, (list, tuple)):
             if len(param) != len(optimizer.param_groups):
                 raise ValueError(
                     f"expected {len(optimizer.param_groups)} values for {name}, got {len(param)}"
                 )
-            return param
         else:
-            return [param] * len(optimizer.param_groups)
+            param = [param] * len(optimizer.param_groups)
+
+        return copy.deepcopy(param) if deepcopy else param
 
     def scale_fn(self, x) -> float:
         if self._scale_fn_custom is not None:
@@ -2047,16 +2049,17 @@ class OneCycleLR(LRScheduler):
 
         super().__init__(optimizer, last_epoch, verbose)
 
-    def _format_param(self, name, optimizer, param):
+    def _format_param(self, name, optimizer, param, deepcopy: bool = True):
         """Return correctly formatted lr/momentum for each param group."""
         if isinstance(param, (list, tuple)):
             if len(param) != len(optimizer.param_groups):
                 raise ValueError(
                     f"expected {len(optimizer.param_groups)} values for {name}, got {len(param)}"
                 )
-            return param
         else:
-            return [param] * len(optimizer.param_groups)
+            param = [param] * len(optimizer.param_groups)
+
+        return copy.deepcopy(param) if deepcopy else param
 
     def _anneal_func(self, *args, **kwargs):
         if hasattr(self, "_anneal_func_type"):
