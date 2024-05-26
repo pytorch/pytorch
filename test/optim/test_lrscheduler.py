@@ -2416,8 +2416,6 @@ class TestLRScheduler(TestCase):
             partial(ExponentialLR, gamma=0.9),
             PolynomialLR,
             partial(CosineAnnealingLR, T_max=10),
-            partial(CyclicLR, base_lr=0.01, max_lr=0.1),
-            partial(OneCycleLR, max_lr=0.01, total_steps=10, anneal_strategy="linear"),
             partial(CosineAnnealingWarmRestarts, T_0=20),
         ],
     )
@@ -2432,8 +2430,10 @@ class TestLRScheduler(TestCase):
         for i in range(2):
             opt.step()
             sch.step(i)
+            lr.multiply_(0.1)
             for group, ori_group in zip(opt.param_groups, ori_param_groups):
                 self.assertEqual(group["initial_lr"], ori_group["initial_lr"])
+                self.assertEqual(sch.base_lrs, [0.1])
 
     def test_constant_initial_params_cyclelr(self):
         # Test that the initial learning rate is constant
