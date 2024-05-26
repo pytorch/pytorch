@@ -150,11 +150,20 @@ class C10_API FunctionScheduler {
   // the wait time until execution.
   std::chrono::microseconds getNextWaitTime();
 
-  // Registers a new run.
+  // Used when adding a run while the scheduler is not running,
+  // so there's no need to lock.
+  void addRun(int job_id, const Job& job);
+
+  // Used when adding a run while the scheduler is running,
+  // must be called with a lock acquired.
   void addRun(
       const std::unique_lock<std::mutex>& lock,
       int job_id,
       const Job& job);
+
+  // Registers a new run. Should not be used directly,
+  // use addRun instead.
+  void addRunInternal(int job_id, const Job& job);
 
   // Registers a new job.
   int scheduleJob(const Job& job);

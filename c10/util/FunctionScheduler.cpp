@@ -121,12 +121,24 @@ bool FunctionScheduler::validEntry(
       entry->second.counter() != entry->second.run_limit();
 }
 
+void FunctionScheduler::addRun(int job_id, const Job& job) {
+  // We can only call addRun without a mutex locked if we are not yet running.
+  TORCH_INTERNAL_ASSERT(!_running, "Function called without a mutex while scheduler is running");
+  addRunInternal(job_id, job);
+}
+
+
 void FunctionScheduler::addRun(
     const std::unique_lock<std::mutex>& lock,
     int job_id,
     const Job& job) {
   // This function is always called with the mutex previously acquired.
   TORCH_INTERNAL_ASSERT(lock.owns_lock(), "Mutex not acquired");
+  addRunInternal(job_id, job);
+}
+
+void FunctionScheduler::addRunInternal(int job_id, const Job& job) {
+  // This function should not be called directly, use addRun instead.
 
   auto interval = job.interval();
   if (job.immediate() && job.counter() == 0)
@@ -169,9 +181,8 @@ bool FunctionScheduler::start() {
   if (_running || _paused)
     return false;
 
-  std::unique_lock<std::mutex> lock(_mutex);
   for (const auto& entry : _jobs) {
-    addRun(lock, entry.first, entry.second);
+    addRun(entry.first, entry.second);
   }
 
   _running = true;
@@ -216,8 +227,6 @@ bool FunctionScheduler::pause() {
 bool FunctionScheduler::resume() {
   if (!_paused)
     return false;
-
-  std::lock_guard<std::mutex> lock(_mutex);
 
   // Since we're shifting the time of all elements by the same amount
   // the min-heap is still valid, no need to rebuild it.
