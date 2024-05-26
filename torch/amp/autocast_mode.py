@@ -1,3 +1,4 @@
+import collections
 import functools
 import warnings
 
@@ -6,7 +7,20 @@ from typing import Any, Optional
 import torch
 from torch.types import _dtype
 
-__all__ = ["autocast_decorator", "autocast", "is_autocast_available"]
+try:
+    import numpy as np
+
+    HAS_NUMPY = True
+except ModuleNotFoundError:
+    np = None  # type: ignore[assignment]
+
+__all__ = [
+    "autocast_decorator",
+    "autocast",
+    "is_autocast_available",
+    "custom_fwd",
+    "custom_bwd",
+]
 
 
 def is_autocast_available(device_type: str) -> bool:
@@ -366,3 +380,123 @@ def _exit_autocast(mode):
     if torch._C._is_torch_function_mode_enabled():
         return torch.overrides.handle_torch_function(torch.amp._exit_autocast, [], mode)
     mode.__exit__(None, None, None)
+
+
+# Casts Tensors and containers of Tensors.  Special-cases passthroughs for strings and np.ndarrays, which
+# may be falsely detected as "Iterables."
+def _cast(value, device_type: str, dtype: _dtype):
+    if isinstance(value, torch.Tensor):
+        is_eligible = (
+            value.is_floating_point()
+            and value.device.type == device_type
+            and (value.dtype is not torch.float64)
+        )
+        return value.to(dtype) if is_eligible else value
+    elif isinstance(value, (str, bytes)):
+        return value
+    elif HAS_NUMPY and isinstance(value, np.ndarray):
+        return value
+    elif isinstance(value, collections.abc.Mapping):
+        return {
+            _cast(k, device_type, dtype): _cast(v, device_type, dtype)
+            for k, v in value.items()
+        }
+    elif isinstance(value, collections.abc.Iterable):
+        iterable = (_cast(v, device_type, dtype) for v in value)
+        if isinstance(value, (list, tuple)):
+            return type(value)(iterable)
+        else:
+            return iterable
+    else:
+        return value
+
+
+def custom_fwd(
+    fwd=None,
+    *,
+    device_type: str,
+    cast_inputs: Optional[_dtype] = None,
+):
+    """
+    Create a helper decorator for ``forward`` methods of custom autograd functions.
+
+    Autograd functions are subclasses of :class:`torch.autograd.Function`.
+    See the :ref:`example page<amp-custom-examples>` for more detail.
+
+    Args:
+        device_type(str):  Device type to use. 'cuda', 'cpu', 'xpu' and so on.
+            The type is the same as the `type` attribute of a :class:`torch.device`.
+            Thus, you may obtain the device type of a tensor using `Tensor.device.type`.
+        cast_inputs (:class:`torch.dtype` or None, optional, default=None):  If not ``None``,
+            when ``forward`` runs in an autocast-enabled region, casts incoming
+            floating-point Tensors to the target dtype (non-floating-point Tensors are not affected),
+            then executes ``forward`` with autocast disabled.
+            If ``None``, ``forward``'s internal ops execute with the current autocast state.
+
+    .. note::
+        If the decorated ``forward`` is called outside an autocast-enabled region,
+        :func:`custom_fwd<custom_fwd>` is a no-op and ``cast_inputs`` has no effect.
+    """
+    if not isinstance(device_type, str):
+        raise ValueError(
+            f"Expected `device_type` of type `str`, got: `{type(device_type)}`"
+        )
+    if fwd is None:
+        return functools.partial(
+            custom_fwd, device_type=device_type, cast_inputs=cast_inputs
+        )
+
+    @functools.wraps(fwd)
+    def decorate_fwd(*args, **kwargs):
+        args[0]._dtype = torch.get_autocast_dtype(device_type)
+        if cast_inputs is None:
+            args[0]._fwd_used_autocast = torch.is_autocast_enabled(device_type)
+            return fwd(*args, **kwargs)
+        else:
+            autocast_context = torch.is_autocast_enabled(device_type)
+            args[0]._fwd_used_autocast = False
+            if autocast_context:
+                with autocast(device_type=device_type, enabled=False):
+                    return fwd(
+                        *_cast(args, device_type, cast_inputs),
+                        **_cast(kwargs, device_type, cast_inputs),
+                    )
+            else:
+                return fwd(*args, **kwargs)
+
+    return decorate_fwd
+
+
+# Autograd ensures incoming gradients are the same type as forward outputs.  Allowing a separate
+# cast_inputs argument on custom_bwd is unnecessary and could cause errors if it doesn't match
+# cast_inputs supplied to custom_fwd.
+def custom_bwd(bwd=None, *, device_type: str):
+    """Create a helper decorator for backward methods of custom autograd functions.
+
+    Autograd functions are subclasses of :class:`torch.autograd.Function`.
+    Ensures that ``backward`` executes with the same autocast state as ``forward``.
+    See the :ref:`example page<amp-custom-examples>` for more detail.
+
+    Args:
+        device_type(str):  Device type to use. 'cuda', 'cpu', 'xpu' and so on.
+            The type is the same as the `type` attribute of a :class:`torch.device`.
+            Thus, you may obtain the device type of a tensor using `Tensor.device.type`.
+    """
+
+    if not isinstance(device_type, str):
+        raise ValueError(
+            f"Expected `device_type` of type `str`, got: `{type(device_type)}`"
+        )
+    if bwd is None:
+        return functools.partial(custom_bwd, device_type=device_type)
+
+    @functools.wraps(bwd)
+    def decorate_bwd(*args, **kwargs):
+        with autocast(
+            device_type=device_type,
+            enabled=args[0]._fwd_used_autocast,
+            dtype=args[0]._dtype,
+        ):
+            return bwd(*args, **kwargs)
+
+    return decorate_bwd

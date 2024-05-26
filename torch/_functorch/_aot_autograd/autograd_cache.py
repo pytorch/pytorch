@@ -8,11 +8,13 @@ import logging
 import os
 
 import torch
+from torch._functorch import config
 from torch._inductor.codecache import (
     _ident,
+    BypassFxGraphCache,
     FxGraphCachePickler,
+    FxGraphHashDetails,
     get_code_hash,
-    get_inductor_root,
 )
 from torch.fx.node import Node
 
@@ -79,8 +81,7 @@ def check_node_safe(node: Node):
 @functools.lru_cache(None)
 def get_autograd_code_hash():
     autograd_root = os.path.dirname(__file__)
-    inductor_root = get_inductor_root()
-    return get_code_hash([autograd_root, inductor_root])
+    return get_code_hash([autograd_root])
 
 
 def check_cacheable(gm: torch.fx.GraphModule):
@@ -88,42 +89,59 @@ def check_cacheable(gm: torch.fx.GraphModule):
     Checks that the graph module only uses supported operators
     """
     nodes = gm.graph.nodes
+    if torch._dynamo.compiled_autograd.compiled_autograd_enabled_count:
+        raise BypassAOTAutogradCache(
+            "Cannot cache a graph with compiled autograd enabled"
+        )
     for node in nodes:
         check_node_safe(node)
 
 
-class AOTAutogradCacheDetails:
+class AOTAutogradCacheDetails(FxGraphHashDetails):
     """
     Object to capture all the details for a dynamo graph module relevant to computing
     a safe and stable cache key for AOTAutograd.
     """
 
-    def __init__(self, gm: torch.fx.GraphModule, config: AOTConfig):
-        self.gm = gm  # TODO: we'll handle different parts of the graph module
-        # TODO: We'll want to handle the full_args passed in as well
-        self.config = config  # Gets reduced by the Pickler
+    def __init__(
+        self,
+        gm: torch.fx.GraphModule,
+        example_inputs,
+        aot_config: AOTConfig,
+    ):
         check_cacheable(gm)
+        # FxGraphHashDetails contains all the keys related to inductor. Also includes some system info
+        self.aot_config = aot_config
+        self.grad_enabled = torch.is_grad_enabled()
+        self.disable_amp = torch._C._is_any_autocast_enabled()
+        self.deterministic_algorithms = torch.are_deterministic_algorithms_enabled()
         self.code_hash = get_autograd_code_hash()
+        self.autograd_config = config.save_config()
+        try:
+            super().__init__(gm, example_inputs, {})
+        except BypassFxGraphCache as e:
+            # Sometimes inductor configs are unpickleable and can fail
+            raise BypassAOTAutogradCache from e
 
     def debug_str(self) -> str:
         return AOTAutogradCachePickler.debug_str(self)
 
 
-def _reduce_aot_config(config: AOTConfig):
+def _reduce_aot_config(aot_config: AOTConfig):
     """
     Reduce the config to a stable key for caching.
     """
     return (
         _ident,
         (
-            config.num_params_buffers,
-            config.keep_inference_input_mutations,
-            config.is_export,
-            config.no_tangents,
-            config.dynamic_shapes,
-            config.aot_autograd_arg_pos_to_source,
-            config.enable_log,
-            config.pre_dispatch,
+            aot_config.num_params_buffers,
+            aot_config.keep_inference_input_mutations,
+            aot_config.is_export,
+            aot_config.no_tangents,
+            aot_config.dynamic_shapes,
+            aot_config.aot_autograd_arg_pos_to_source,
+            aot_config.enable_log,
+            aot_config.pre_dispatch,
         ),
     )
 
@@ -135,13 +153,14 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
 
 def autograd_cache_hash(
     gm: torch.fx.GraphModule,
+    example_inputs,
     config: AOTConfig,
     # TODO: add args and parameters
 ) -> str:
     """
     Generate a unique hash of the FX graph for caching.
     """
-    details = AOTAutogradCacheDetails(gm, config)
+    details = AOTAutogradCacheDetails(gm, example_inputs, config)
     # The prefix distinguishes among the other kinds of objects we cache
     key = "a" + AOTAutogradCachePickler.get_hash(details)
     log.debug("FX graph cache hash details for key %s:\n%s", key, details.debug_str())
