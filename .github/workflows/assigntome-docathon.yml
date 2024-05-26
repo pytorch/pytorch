@@ -8,6 +8,8 @@ on:
 jobs:
   assign:
     runs-on: ubuntu-latest
+    permissions:
+      issues: write
     steps:
       - name: Check for "/assigntome" in comment
         uses: actions/github-script@v6
@@ -26,14 +28,14 @@ jobs:
                   repo: context.repo.repo,
                   issue_number: issueNumber
                 });
-              const hasLabel = issue.labels.some(label => label.name === 'docathon-h2-2023');
+              const hasLabel = issue.labels.some(label => label.name === 'docathon-h1-2024');
               if (hasLabel) {
                 if (issue.assignee !== null) {
                   await github.rest.issues.createComment({
                     owner: context.repo.owner,
                     repo: context.repo.repo,
                     issue_number: issueNumber,
-                    body: "The issue is already assigned. Please pick an opened and unnasigned issue with the [docathon-h2-2023 label](https://github.com/pytorch/pytorch/issues?q=is%3Aopen+is%3Aissue+label%3Adocathon-h2-2023)."
+                    body: "The issue is already assigned. Please pick an opened and unnasigned issue with the [docathon-h1-2024 label](https://github.com/pytorch/pytorch/issues?q=is%3Aopen+is%3Aissue+label%3Adocathon-h1-2024)."
                   });
                 } else {
                   await github.rest.issues.addAssignees({
@@ -44,7 +46,7 @@ jobs:
                   });
                 }
               } else {
-                const commmentMessage = "This issue does not have the correct label. Please pick an opened and unnasigned issue with the [docathon-h2-2023 label](https://github.com/pytorch/pytorch/issues?q=is%3Aopen+is%3Aissue+label%3Adocathon-h2-2023)."
+                const commmentMessage = "This issue does not have the correct label. Please pick an opened and unnasigned issue with the [docathon-h1-2024 label](https://github.com/pytorch/pytorch/issues?q=is%3Aopen+is%3Aissue+label%3Adocathon-h1-2024)."
                 await github.rest.issues.createComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
