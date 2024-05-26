@@ -469,7 +469,7 @@ class Tensor(torch._C.TensorBase):
         The graph is differentiated using the chain rule. If the tensor is
         non-scalar (i.e. its data has more than one element) and requires
         gradient, the function additionally requires specifying a ``gradient``.
-        It should be a tensor of matching type and shape, that rerpesents
+        It should be a tensor of matching type and shape, that represents
         the gradient of the differentiated function w.r.t. ``self``.
 
         This function accumulates gradients in the leaves - you might need to zero
