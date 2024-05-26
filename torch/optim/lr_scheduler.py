@@ -1565,7 +1565,7 @@ class CyclicLR(LRScheduler):
             self._scale_fn_ref = partial(self._exp_range_scale_fn, self.gamma)
             self.scale_mode = "iterations"
 
-    def _format_param(self, name, optimizer, param, deepcopy: bool = True):
+    def _format_param(self, name, optimizer, param, deep_copy: bool = True):
         """Return correctly formatted lr/momentum for each param group."""
         if isinstance(param, (list, tuple)):
             if len(param) != len(optimizer.param_groups):
@@ -1575,7 +1575,7 @@ class CyclicLR(LRScheduler):
         else:
             param = [param] * len(optimizer.param_groups)
 
-        return copy.deepcopy(param) if deepcopy else param
+        return copy.deepcopy(param) if deep_copy else param
 
     def scale_fn(self, x) -> float:
         if self._scale_fn_custom is not None:
@@ -2049,7 +2049,7 @@ class OneCycleLR(LRScheduler):
 
         super().__init__(optimizer, last_epoch, verbose)
 
-    def _format_param(self, name, optimizer, param, deepcopy: bool = True):
+    def _format_param(self, name, optimizer, param, deep_copy: bool = True):
         """Return correctly formatted lr/momentum for each param group."""
         if isinstance(param, (list, tuple)):
             if len(param) != len(optimizer.param_groups):
@@ -2059,7 +2059,7 @@ class OneCycleLR(LRScheduler):
         else:
             param = [param] * len(optimizer.param_groups)
 
-        return copy.deepcopy(param) if deepcopy else param
+        return copy.deepcopy(param) if deep_copy else param
 
     def _anneal_func(self, *args, **kwargs):
         if hasattr(self, "_anneal_func_type"):
