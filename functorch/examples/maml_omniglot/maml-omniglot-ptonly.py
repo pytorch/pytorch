@@ -38,9 +38,10 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
-from functorch import make_functional_with_buffers
 from support.omniglot_loaders import OmniglotNShot
 from torch import nn
+
+from functorch import make_functional_with_buffers
 
 mpl.use("Agg")
 plt.style.use("bmh")
