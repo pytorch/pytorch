@@ -2107,8 +2107,8 @@ def sample_inputs_singular_matrix_factors(op_info, device, dtype, requires_grad=
     """
 
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    batches = [(), (2,)]
-    size = [3, 4]
+    batches = [(), (0, ), (2, ), (1, 1)]
+    size = [1, 5, 10]
     for batch, m, n in product(batches, size, size):
         k = 2
         a = make_arg((*batch, m, k))
