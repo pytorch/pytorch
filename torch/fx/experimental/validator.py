@@ -163,11 +163,6 @@ try:
         def to_int(x: z3.ArithRef) -> z3.ArithRef:
             return x if x.is_int() else z3.ToInt(x)
 
-        # Returns an integer expression from 'x'.
-        @staticmethod
-        def to_float(x: z3.ArithRef) -> z3.ArithRef:
-            return x if x.is_real() else z3.ToReal(x)
-
         # Implements Python division semantics.
         def div(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
             self.validator.add_assertion(denominator != 0)  # type: ignore[arg-type]
@@ -365,6 +360,12 @@ try:
 
         def to_float(self, x: z3.ArithRef) -> z3.ArithRef:
             return z3.ToReal(x)
+
+        def to_int(self, x: z3.ArithRef) -> z3.ArithRef:
+            return z3.ToInt(x)
+
+        def int_truediv(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
+            return self._ops.div(numerator, denominator)
 
         def truediv(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
             return self._ops.div(numerator, denominator)

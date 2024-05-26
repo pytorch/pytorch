@@ -427,6 +427,29 @@ class RShift(sympy.Function):
         return base // 2**shift
 
 
+def safe_pow(base, exponent):
+    if exponent < 0:
+        raise ValueError("Exponent must be non-negative.")
+
+    if exponent == 0:
+        return 1
+
+    half_exp = safe_pow(base, exponent // 2)
+    if half_exp > sys.maxsize - 1:
+        return sys.maxsize - 1
+
+    result = half_exp * half_exp
+    if result > sys.maxsize - 1:
+        return sys.maxsize - 1
+
+    if exponent % 2 == 1:
+        result *= base
+        if result > sys.maxsize - 1:
+            return sys.maxsize - 1
+
+    return result
+
+
 class PowByNatural(sympy.Function):
     is_integer = True
 
@@ -437,7 +460,11 @@ class PowByNatural(sympy.Function):
         # assert the nonnegative
         assert exp.is_integer, exp
         if isinstance(base, sympy.Number) and isinstance(exp, sympy.Number):
-            return sympy.Integer(int(base) ** int(exp))
+            sign = 1
+            if base < 0:
+                base = -base
+                sign = 1 if exp % 2 == 0 else -1
+            return sympy.Integer(sign * safe_pow(base, exp))
         if isinstance(exp, sympy.Integer):
             # Translate power into iterated multiplication
             r = sympy.Integer(1)

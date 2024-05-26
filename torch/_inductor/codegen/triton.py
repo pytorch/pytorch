@@ -262,6 +262,10 @@ class TritonPrinter(PythonPrinter):
             f"libdevice.trunc({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
         )
 
+    def _print_ToFloat(self, expr):
+        assert len(expr.args) == 1
+        return f"{self.paren(self._print(expr.args[0]))}.to(tl.float64)"
+
     def _print_ceiling(self, expr):
         assert len(expr.args) == 1
         return f"libdevice.ceil({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
