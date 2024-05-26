@@ -20,7 +20,7 @@ target-version = ["py38", "py39", "py310", "py311"]
 
 
 [tool.isort]
-src_paths = ["caffe2", "torch", "torchgen", "functorch", "tests"]
+src_paths = ["caffe2", "torch", "torchgen", "functorch", "test"]
 extra_standard_library = ["typing_extensions"]
 skip_gitignore = true
 skip_glob = ["third_party/*"]
@@ -33,9 +33,12 @@ multi_line_output = 3
 include_trailing_comma = true
 
 
-[tool.usort.kown]
-first_party = ["caffe2", "torch", "torchgen", "functorch", "tests"]
+[tool.usort.known]
+first_party = ["caffe2", "torchgen", "functorch", "test"]
 standard_library = ["typing_extensions"]
+
+[tool.usort.kown]
+first_party = ["torch"]
 
 
 [tool.ruff]

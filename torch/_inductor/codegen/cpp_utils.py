@@ -3,7 +3,7 @@ import copy
 import math
 
 from collections import namedtuple
-from typing import Dict, List
+from typing import Dict, List, Tuple
 from unittest.mock import patch
 
 import sympy
@@ -11,9 +11,11 @@ import sympy
 import torch
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from .. import ir
+from ..utils import IndentedBuffer
 from ..virtualized import V
 
-from .common import ExprPrinter, Kernel
+from .common import CSEVariable, ExprPrinter, Kernel
+
 
 DTYPE_TO_CPP = {
     torch.float32: "float",
@@ -62,6 +64,11 @@ DTYPE_TO_ATEN = {
 DEVICE_TO_ATEN = {
     "cpu": "at::kCPU",
     "cuda": "at::kCUDA",
+}
+
+LAYOUT_TO_ATEN = {
+    torch.strided: "at::kStrided",
+    torch._mkldnn: "at::kMkldnn",  # type: ignore[attr-defined]
 }
 
 INDEX_TYPE = "long"
@@ -366,3 +373,22 @@ class LocalBufferScope:
             return inner
 
         return [wrap_inner_fn_for_node(node, inner_fn_wrapper) for node in nodes]
+
+
+def unify_mask_base_type(
+    buffer: IndentedBuffer,
+    vars: Tuple[CSEVariable, ...],
+    dtype=torch.float,
+):
+    """
+    Given list of cse variables,
+    Cast each to new mask base dtype and return casted cse variable.
+    """
+    new_vars = (
+        V.kernel.cse.generate(
+            buffer,
+            f"{V.kernel._get_mask_cast(var, dtype)}",
+        )
+        for var in vars
+    )
+    return new_vars
