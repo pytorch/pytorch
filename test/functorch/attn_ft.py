@@ -6,8 +6,9 @@
 import math
 
 import torch
-from functorch.dim import cat, dimlists, dims, softmax
 from torch import nn
+
+from functorch.dim import cat, dimlists, dims, softmax
 
 
 class Linear(nn.Linear):

@@ -14,9 +14,9 @@ import subprocess
 from typing import Any, Dict, List, Optional
 from unittest.mock import patch
 
-from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_compiled
-
 import torch
+
+from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_compiled
 from torch import fx as fx
 
 from torch._dynamo.repro.after_aot import save_graph_repro, wrap_compiler_debug

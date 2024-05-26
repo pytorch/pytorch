@@ -8,10 +8,11 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from functorch.compile import nop
 from torch._dynamo import compiled_autograd
 from torch._functorch.aot_autograd import aot_module_simplified
 from torch.utils.hooks import RemovableHandle
+
+from functorch.compile import nop
 
 
 def compiler_fn(gm):
