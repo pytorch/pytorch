@@ -123,10 +123,10 @@ bool FunctionScheduler::validEntry(
 
 void FunctionScheduler::addRun(int job_id, const Job& job) {
   // We can only call addRun without a mutex locked if we are not yet running.
-  TORCH_INTERNAL_ASSERT(!_running, "Function called without a mutex while scheduler is running");
+  TORCH_INTERNAL_ASSERT(
+      !_running, "Function called without a mutex while scheduler is running");
   addRunInternal(job_id, job);
 }
-
 
 void FunctionScheduler::addRun(
     const std::unique_lock<std::mutex>& lock,
