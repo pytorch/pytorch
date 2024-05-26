@@ -3,6 +3,7 @@ import dataclasses
 import functools
 import itertools
 import logging
+import math
 import operator
 import re
 from itertools import chain
@@ -120,7 +121,7 @@ device_op_overrides_dict: Dict[str, DeviceOpOverrides] = {}
 # https://github.com/intel/intel-extension-for-pytorch/blob/5dcc9d57e5422cf295e1a1ee97896d6b6a554a85/intel_extension_for_pytorch/_inductor/__init__.py#L9
 def register_backend_for_device(
     device: str,
-    device_scheduling: type,
+    device_scheduling: Any,
     device_wrapper_codegen: type,
     device_cpp_wrapper_codegen: type = type(None),
 ):
@@ -535,6 +536,72 @@ class OpOverrides:
     @staticmethod
     def square(x):
         return ops.mul(x, x)
+
+    @staticmethod
+    def erfc(x):
+        return ops.sub(ops.constant(1, torch.float32), ops.erf(x))
+
+    @staticmethod
+    def erfcx(x):
+        return ops.mul(ops.exp(ops.square(x)), ops.erfc(x))
+
+    @staticmethod
+    def expm1(x):
+        return ops.sub(ops.exp(x), ops.constant(1, torch.float32))
+
+    @staticmethod
+    def log10(x):
+        return ops.mul(ops.log(x), ops.constant(1 / math.log(10), torch.float32))
+
+    @staticmethod
+    def log2(x):
+        return ops.mul(ops.log(x), ops.constant(1 / math.log(2), torch.float32))
+
+    @staticmethod
+    def exp2(x):
+        return ops.exp(ops.mul(x, ops.constant(math.log(2), torch.float32)))
+
+    @staticmethod
+    def log1p(x):
+        return ops.log(ops.add(x, ops.constant(1, torch.int32)))
+
+    @staticmethod
+    def sigmoid(x):
+        one = ops.constant(1, torch.int32)
+        return ops.truediv(one, ops.add(one, ops.exp(ops.neg(x))))
+
+    @staticmethod
+    def libdevice_sigmoid(x):
+        one = ops.constant(1, torch.int32)
+        return ops.truediv(one, ops.add(one, ops.libdevice_exp(ops.neg(x))))
+
+    @staticmethod
+    def relu(x):
+        return ops.maximum(x, ops.constant(0, torch.int32))
+
+    @staticmethod
+    def libdevice_abs(x):
+        return ops.abs(x)
+
+    @staticmethod
+    def libdevice_sqrt(x):
+        return ops.sqrt(x)
+
+    @staticmethod
+    def libdevice_cos(x):
+        return ops.cos(x)
+
+    @staticmethod
+    def libdevice_sin(x):
+        return ops.sin(x)
+
+    @staticmethod
+    def libdevice_log(x):
+        return ops.log(x)
+
+    @staticmethod
+    def libdevice_exp(x):
+        return ops.exp(x)
 
     @staticmethod
     def bitwise_not(x):
@@ -1141,6 +1208,9 @@ class CSEVariable:
     def update_on_args(self, name, args, kwargs):
         pass
 
+    def __repr__(self):
+        return f"{self.__class__.__name__}({self.name!r})"
+
 
 class CppWrapperKernelArgs(KernelArgs):
     def wrap_ptr_arg(self, buf, dtype):
@@ -1521,7 +1591,7 @@ class Kernel(CodeGen):
                     return ValueRanges.unknown()
 
                 fx_node = V.interpreter.current_node
-                if fx_node.target == name:
+                if fx_node.target == name and self.node_to_bounds is not None:
                     assert isinstance(self.node_to_bounds, dict)
                     return self.node_to_bounds.get(fx_node, ValueRanges.unknown())
                 elif config.compute_all_bounds and hasattr(ValueRangeAnalysis, name):

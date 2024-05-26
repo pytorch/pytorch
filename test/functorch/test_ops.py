@@ -29,7 +29,6 @@ from common_utils import (
     tol2,
     xfail,
 )
-from functorch import grad, jacfwd, jacrev, vjp, vmap
 from functorch_additional_op_db import additional_op_db
 from torch import Tensor
 from torch._functorch.eager_transforms import _as_tuple, jvp
@@ -61,6 +60,8 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.opinfo.core import SampleInput
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+
+from functorch import grad, jacfwd, jacrev, vjp, vmap
 
 aten = torch.ops.aten
 
