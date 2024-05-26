@@ -215,9 +215,6 @@ class BaseSchedulerNode:
     def update_mutated_names(self, renames: Dict[str, str]) -> None:
         self.set_read_writes(self.read_writes.rename(renames))
 
-    def add_mutation_dep(self, dep: Dep) -> None:
-        self.set_read_writes(self.read_writes.with_read(dep))
-
     def add_fake_dep(self, dep: Dep) -> None:
         self.set_read_writes(self.read_writes.with_read(dep))
 
@@ -1061,7 +1058,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def update_mutated_names(self, renames: Dict[str, str]) -> None:
         raise NotImplementedError
 
-    def add_mutation_dep(self, name: Dep) -> None:
+    def add_fake_dep(self, name: Dep) -> None:
         raise NotImplementedError
 
     def set_users(self, users: List["NodeUser"]) -> None:
@@ -1683,7 +1680,7 @@ class Scheduler:
                 alt_name = rename(alt_name)
                 # this node must run after the prior writer
                 add_user(alt_name, node)
-                node.add_mutation_dep(StarDep(alt_name, mode=node_mode))
+                node.add_fake_dep(StarDep(alt_name, mode=node_mode))
                 for other_node in name_to_users[alt_name].items:
                     # this node must run after all prior readers
                     other_name = rename(other_node.get_name())
@@ -1691,7 +1688,7 @@ class Scheduler:
                     if other_name not in known_dep_node_names:
                         # If this node already directly or indirectly depends on other_node,
                         # we don't need to insert an extra dep.
-                        node.add_mutation_dep(WeakDep(other_name))
+                        node.add_fake_dep(WeakDep(other_name))
                         add_user(other_name, node, is_weak=True)
 
             # add normal non-mutation dependencies
