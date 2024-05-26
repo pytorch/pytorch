@@ -9214,6 +9214,10 @@ class foreach_inputs_sample_func:
         if self.arity == 1:
             if "foreach_abs" in opinfo.name and dtype in complex_types():
                 return True
+            if (opinfo.name == "_foreach_max"
+                    and dtype in integral_types_and(torch.bool)
+                    and dtype not in (torch.int8, torch.int16)):
+                return False
             # unary
             if opinfo.ref in (torch.abs, torch.neg):
                 return False
@@ -11090,6 +11094,29 @@ foreach_pointwise_op_db: List[ForeachFuncInfo] = [
 ]
 
 foreach_reduce_op_db: List[ForeachFuncInfo] = [
+    ForeachFuncInfo(
+        "max",
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
+        decorators=(
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_autodiff",
+                device_type="cuda",
+                dtypes=(torch.complex128, torch.complex64),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_foreach_reduce_large_input",
+                device_type="cuda",
+                dtypes=(torch.complex128, torch.complex64),
+            ),
+        ),
+    ),
     ForeachFuncInfo(
         "norm",
         sample_inputs_func=foreach_norm_sample_func(1, False, False),

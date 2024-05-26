@@ -11119,6 +11119,14 @@
     CUDA: foreach_tensor_log2_cuda_
   autogen: _foreach_log2.out
 
+- func: _foreach_max(Tensor[] self) -> Tensor[]
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_max_slow
+    CUDA: foreach_tensor_max_cuda
+  autogen: _foreach_max.out
+
 - func: _foreach_neg(Tensor[] self) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
