@@ -555,6 +555,234 @@ class f(torch.nn.Module):
             add_2: "f32[4]" = torch.ops.aten.add.Tensor(arg0_1, arg0_1);  arg0_1 = None
             return [add_2, None]""",  # noqa: B950
         )
+        
+    def test_cond_autograd_grad_through_cond(self):
+        nn_module = torch.nn.Linear(4, 4)
+        def true_fn(x):
+            return nn_module(x)
+
+        def false_fn(X):
+            return x*nn_module(x)
+
+        x = torch.randn(4, requires_grad=True)
+
+        for pred, fn in zip(
+            [torch.tensor(False), torch.tensor(True)], [false_fn, true_fn]
+        ):
+            result = cond(pred, true_fn, false_fn, (x,))
+            self.assertEqual(result, fn(x))
+
+            grad_out = torch.ones_like(result)
+            grads = torch.autograd.grad(result, (nn_module.weight,), grad_out)
+            expected_grads = torch.autograd.grad(fn(x,), (nn_module.weight,), grad_out)
+            self.assertEqual(expected_grads, grads)
+
+        def f(pred, x):
+            result = cond(pred, true_fn, false_fn, (x,))
+            grad_out = torch.ones_like(result)
+            return torch.autograd.grad(result, (nn_module.weight,), grad_out)
+
+        gm = make_fx(f)(pred, x)
+        self.assertExpectedInline(
+            gm.print_readable(print_output=False).strip(),
+            """\
+class f(torch.nn.Module):
+    def forward(self, pred_1: "b8[]", x_1: "f32[4]"):
+        # No stacktrace found for following nodes
+        true_graph_0 = self.true_graph_0
+        false_graph_0 = self.false_graph_0
+        _param_constant0 = self._param_constant0
+        _param_constant1 = self._param_constant1
+        conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (_param_constant0, _param_constant1, x_1));  true_graph_0 = false_graph_0 = _param_constant0 = _param_constant1 = None
+        getitem: "f32[4]" = conditional[0];  conditional = None
+        ones_like: "f32[4]" = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
+        true_graph_1 = self.true_graph_1
+        false_graph_1 = self.false_graph_1
+        _param_constant0_1 = self._param_constant0
+        _param_constant1_1 = self._param_constant1
+        conditional_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, _param_constant0_1, _param_constant1_1, x_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = _param_constant0_1 = _param_constant1_1 = x_1 = None
+        getitem_1: "f32[4]" = conditional_1[0]
+        getitem_2: "f32[4, 4]" = conditional_1[1]
+        getitem_3: "f32[4]" = conditional_1[2];  conditional_1 = None
+        return (getitem_2,)
+        
+    class <lambda>(torch.nn.Module):
+        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4, 4]", arg2_1: "f32[4]"):
+            # No stacktrace found for following nodes
+            view: "f32[1, 4]" = torch.ops.aten.view.default(arg2_1, [1, 4]);  arg2_1 = None
+            t: "f32[4, 4]" = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
+            addmm: "f32[1, 4]" = torch.ops.aten.addmm.default(arg0_1, view, t);  arg0_1 = view = t = None
+            view_1: "f32[4]" = torch.ops.aten.view.default(addmm, [4]);  addmm = None
+            return (view_1,)
+            
+    class <lambda>(torch.nn.Module):
+        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4, 4]", arg2_1: "f32[4]"):
+            # No stacktrace found for following nodes
+            view: "f32[1, 4]" = torch.ops.aten.view.default(arg2_1, [1, 4])
+            t: "f32[4, 4]" = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
+            addmm: "f32[1, 4]" = torch.ops.aten.addmm.default(arg0_1, view, t);  arg0_1 = view = t = None
+            view_1: "f32[4]" = torch.ops.aten.view.default(addmm, [4]);  addmm = None
+            mul: "f32[4]" = torch.ops.aten.mul.Tensor(arg2_1, view_1);  arg2_1 = view_1 = None
+            return (mul,)
+            
+    class <lambda>(torch.nn.Module):
+        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]", arg2_1: "f32[4, 4]", arg3_1: "f32[4]"):
+            # No stacktrace found for following nodes
+            view: "f32[1, 4]" = torch.ops.aten.view.default(arg3_1, [1, 4]);  arg3_1 = None
+            t: "f32[4, 4]" = torch.ops.aten.t.default(arg2_1);  arg2_1 = None
+            addmm: "f32[1, 4]" = torch.ops.aten.addmm.default(arg1_1, view, t);  arg1_1 = None
+            view_1: "f32[4]" = torch.ops.aten.view.default(addmm, [4]);  addmm = None
+            view_2: "f32[1, 4]" = torch.ops.aten.view.default(arg0_1, [1, 4]);  arg0_1 = None
+            t_1: "f32[4, 4]" = torch.ops.aten.t.default(t);  t = None
+            mm: "f32[1, 4]" = torch.ops.aten.mm.default(view_2, t_1);  t_1 = None
+            t_2: "f32[4, 1]" = torch.ops.aten.t.default(view_2)
+            mm_1: "f32[4, 4]" = torch.ops.aten.mm.default(t_2, view);  t_2 = view = None
+            t_3: "f32[4, 4]" = torch.ops.aten.t.default(mm_1);  mm_1 = None
+            sum_1: "f32[1, 4]" = torch.ops.aten.sum.dim_IntList(view_2, [0], True);  view_2 = None
+            view_3: "f32[4]" = torch.ops.aten.view.default(sum_1, [4]);  sum_1 = None
+            t_4: "f32[4, 4]" = torch.ops.aten.t.default(t_3);  t_3 = None
+            view_4: "f32[4]" = torch.ops.aten.view.default(mm, [4]);  mm = None
+            return [view_3, t_4, view_4]
+            
+    class <lambda>(torch.nn.Module):
+        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]", arg2_1: "f32[4, 4]", arg3_1: "f32[4]"):
+            # No stacktrace found for following nodes
+            view: "f32[1, 4]" = torch.ops.aten.view.default(arg3_1, [1, 4])
+            t: "f32[4, 4]" = torch.ops.aten.t.default(arg2_1);  arg2_1 = None
+            addmm: "f32[1, 4]" = torch.ops.aten.addmm.default(arg1_1, view, t);  arg1_1 = None
+            view_1: "f32[4]" = torch.ops.aten.view.default(addmm, [4]);  addmm = None
+            mul: "f32[4]" = torch.ops.aten.mul.Tensor(arg3_1, view_1)
+            mul_1: "f32[4]" = torch.ops.aten.mul.Tensor(arg0_1, arg3_1);  arg3_1 = None
+            mul_2: "f32[4]" = torch.ops.aten.mul.Tensor(arg0_1, view_1);  arg0_1 = view_1 = None
+            view_2: "f32[1, 4]" = torch.ops.aten.view.default(mul_1, [1, 4]);  mul_1 = None
+            t_1: "f32[4, 4]" = torch.ops.aten.t.default(t);  t = None
+            mm: "f32[1, 4]" = torch.ops.aten.mm.default(view_2, t_1);  t_1 = None
+            t_2: "f32[4, 1]" = torch.ops.aten.t.default(view_2)
+            mm_1: "f32[4, 4]" = torch.ops.aten.mm.default(t_2, view);  t_2 = view = None
+            t_3: "f32[4, 4]" = torch.ops.aten.t.default(mm_1);  mm_1 = None
+            sum_1: "f32[1, 4]" = torch.ops.aten.sum.dim_IntList(view_2, [0], True);  view_2 = None
+            view_3: "f32[4]" = torch.ops.aten.view.default(sum_1, [4]);  sum_1 = None
+            t_4: "f32[4, 4]" = torch.ops.aten.t.default(t_3);  t_3 = None
+            view_4: "f32[4]" = torch.ops.aten.view.default(mm, [4]);  mm = None
+            add: "f32[4]" = torch.ops.aten.add.Tensor(mul_2, view_4);  mul_2 = view_4 = None
+            return [view_3, t_4, add]""",  # noqa: B950
+        )
+        
+    def test_cond_in_forloop(self):
+        
+        def for_loop_fake(x):
+            for i in range(3):
+                x = x * x + 1
+            return x
+        
+        def for_loop_test(x):
+            for i in range(3):
+                pred = i < 3
+        
+                def true_fn(x):
+                    return x * x + 1
+
+                def false_fn(x):
+                    return x
+                
+                x = cond(pred, true_fn, false_fn, (x,))
+                
+            return x
+
+        x = torch.ones(4, requires_grad=True)
+        x_new = for_loop_test(x)
+        x_exp = for_loop_fake(x)
+        
+        self.assertEqual(x_new, x_exp)
+
+        grad_out = torch.ones_like(x_new)
+        grads = torch.autograd.grad(x_new, (x,), grad_out)
+        expected_grads = torch.autograd.grad(x_exp, (x,), grad_out)
+        self.assertEqual(expected_grads, grads)
+
+        def f(x):
+            x_new = for_loop_test(x)
+            grad_out = torch.ones_like(x_new)
+            return torch.autograd.grad(x_new, (x,), grad_out)
+
+        # TODO: During compilation, the metadata of the true_fn has the 
+        # requires_grad attribute set to False, while the false_fn has it
+        # set to true. Therefore, the tracing of the cond errors out.
+        # Similar to behavior to the test case test_cond_autograd_same_pytree_output
+        gm = make_fx(f)(x)
+        self.assertExpectedInline(
+            gm.print_readable(print_output=False).strip(),
+            """""",  # noqa: B950
+        )
+        
+    def test_cond_in_while(self):
+        
+        def while_loop_fake(x):
+            def cond_fn(cnt, x):
+                return cnt < 3
+
+            def body_fn(cnt, x):
+                return (cnt + 1, x * x + 1)
+            
+            cnt = torch.tensor(0)
+            cnt, x = _fake_while_loop(cond_fn, body_fn, (cnt, x,))
+            return x, cnt
+        
+        # TODO: Once the while loop does support autograd, replace the manual while
+        # loop with the higher_order_operator
+        def while_loop_test(x):
+            cnt = torch.tensor(0)
+            while cnt < 3:
+                pred = cnt < 3
+        
+                def true_fn(x):
+                    return x * x + 1
+
+                def false_fn(x):
+                    return x
+                
+                x = cond(pred, true_fn, false_fn, (x,))
+                cnt += 1
+                
+            return x, cnt
+        
+        # def while_loop_test(x):
+        #     def cond_fn(cnt, x):
+        #         return cnt < 3
+
+        #     def body_fn(cnt, x):
+        #         return (cnt + 1, x * x + 1)
+            
+        #     cnt = torch.tensor(0)
+        #     cnt, x = while_loop(cond_fn, body_fn, (cnt, x,))
+        #     return x, cnt
+
+        x = torch.ones(4, requires_grad=True)
+        x_new, cnt = while_loop_test(x)
+        x_exp, cnt_exp = while_loop_fake(x)
+        
+        self.assertEqual(x_new, x_exp)
+        self.assertEqual(cnt, cnt_exp)
+
+        grad_out = torch.ones_like(x_new)
+        grads = torch.autograd.grad(x_new, (x,), grad_out)
+        expected_grads = torch.autograd.grad(x_exp, (x,), grad_out)
+        self.assertEqual(expected_grads, grads)
+
+        def f(x):
+            x_new, cnt = while_loop_test(x)
+            grad_out = torch.ones_like(x_new)
+            return torch.autograd.grad(x_new, (x,), grad_out)
+
+        # TODO: During compilation, the metadata of the true_fn has the 
+        # requires_grad attribute set to False, while the false_fn has it
+        # set to true. Therefore, the tracing of the cond errors out.
+        # Similar to behavior to the test case test_cond_autograd_same_pytree_output
+        gm = make_fx(f)(x)
+        self.assertExpectedInline(
+            gm.print_readable(print_output=False).strip(),
+            """""",  # noqa: B950
+        )
 
     def test_cond_autograd_pytree_input(self):
         def true_fn(x):
