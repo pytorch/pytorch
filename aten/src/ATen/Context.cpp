@@ -63,12 +63,6 @@ static void fp32_precision_valid_check(
     if (invalid) {
       if (rewrite_precision) {
         precision = "default";
-        TORCH_WARN(
-            "Invalid precision for ",
-            backend,
-            " precision: ",
-            precision,
-            " reset precision to default");
       } else {
         TORCH_CHECK(
             false,
