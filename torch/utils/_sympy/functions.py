@@ -136,9 +136,9 @@ class ModularIndexing(sympy.Function):
 
     @classmethod
     def eval(cls, base, divisor, modulus):
-        assert base.is_integer, base
-        assert divisor.is_integer, divisor
-        assert modulus.is_integer, modulus
+        assert isinstance(base, int) or base.is_integer, base
+        assert isinstance(divisor, int) or divisor.is_integer, divisor
+        assert isinstance(modulus, int) or modulus.is_integer, modulus
 
         if base == 0 or modulus == 1:
             return sympy.Integer(0)
@@ -390,8 +390,9 @@ class CeilDiv(sympy.Function):
     is_integer = True
 
     def __new__(cls, base, divisor):
-        assert base.is_integer, base
-        assert divisor.is_integer, divisor
+        # int base/divisor grandfathered in
+        assert isinstance(base, int) or base.is_integer, base
+        assert isinstance(divisor, int) or divisor.is_integer, divisor
         if sympy.gcd(base, divisor) == divisor:
             return CleanDiv(base, divisor)
         else:

@@ -375,6 +375,9 @@ try:
         def pow(self, base: z3.ArithRef, exp: z3.ArithRef) -> z3.ArithRef:
             return self._ops.pow(base, exp)
 
+        def pow_by_natural(self, base: z3.ArithRef, exp: z3.ArithRef) -> z3.ArithRef:
+            return self._ops.pow(base, exp)
+
         def mod(self, p: z3.ArithRef, q: z3.ArithRef) -> z3.ArithRef:
             return self._ops.mod(p, q)
 

@@ -347,9 +347,7 @@ class TritonPrinter(PythonPrinter):
 
     def _print_Round(self, expr):
         assert len(expr.args) == 1
-        return (
-            f"libdevice.rint({self._print(expr.args[0])})"
-        )
+        return f"libdevice.rint({self._print(expr.args[0])})"
 
     def _print_RoundDecimal(self, expr):
         assert len(expr.args) == 2

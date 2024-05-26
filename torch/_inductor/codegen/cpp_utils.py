@@ -111,7 +111,11 @@ class CppPrinter(ExprPrinter):
 
     def _print_FloatTrueDiv(self, expr):
         lhs, rhs = expr.args
-        return f"{self._print(lhs)} / {self._print(rhs)}"
+        return f"{self.paren(self._print(lhs))} / {self.paren(self._print(rhs))}"
+
+    def _print_FloatPow(self, expr):
+        base, exp = expr.args
+        return f"std::pow({self._print(base)}, {self._print(exp)})"
 
     def _print_Pow(self, expr):
         # Uses float constants to perform FP div
