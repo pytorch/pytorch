@@ -413,7 +413,7 @@ class SWALR(LRScheduler):
     def _format_param(
         optimizer: Optimizer,
         swa_lrs: Union[float, List[float], Tuple[float, ...]],
-        deep_copy: bool = False,
+        deep_copy: bool = True,
     ) -> Union[List[float], Tuple[float, ...]]:
         if isinstance(swa_lrs, (list, tuple)):
             if len(swa_lrs) != len(optimizer.param_groups):

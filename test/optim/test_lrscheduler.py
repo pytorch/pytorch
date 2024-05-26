@@ -2498,6 +2498,25 @@ class TestLRScheduler(TestCase):
                 self.assertEqual(group["max_momentum"], 0.95)
                 self.assertEqual(group["base_momentum"], 0.85)
 
+    def test_constant_initial_params_swalr(self):
+        # Test that the initial learning rate is constant
+        lr = torch.as_tensor(0.1)
+        swa_lr = torch.as_tensor(0.05)
+        opt = SGD([torch.nn.Parameter(torch.randn(1))], lr=lr)
+        sch = SWALR(opt, swa_lr=swa_lr)
+        ori_param_groups = copy.deepcopy(opt.param_groups)
+
+        for i in range(2):
+            lr.multiply_(0.5)
+            swa_lr.multiply_(0.5)
+            opt.step()
+            sch.step()
+            for group, ori_group in zip(opt.param_groups, ori_param_groups):
+                self.assertEqual(group["initial_lr"], ori_group["initial_lr"])
+                self.assertEqual(group["swa_lr"], ori_group["swa_lr"])
+                self.assertEqual(group["swa_lr"], 0.05)
+                self.assertEqual(sch.base_lrs, [0.1])
+
 
 instantiate_parametrized_tests(TestLRScheduler)
 
