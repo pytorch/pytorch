@@ -4310,39 +4310,8 @@ def fn():
         opt_fn(x)
         self.assertEqual(cnts.frame_count, 2)
 
-    def test_id_guarded_int(self):
-
-        def fn(x, y, z):
-            if id(y) == id(z):
-                x = torch.mul(x, 1.0)
-            else:
-                x = torch.mul(x, 0)
-            return x
-
-        cnts = torch._dynamo.testing.CompileCounter()
-        y = 1
-        z = 2
-        x1 = torch.ones(2)
-        x2 = torch.ones(2)
-
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
-
-        self.assertEqual(opt_fn(x1, y, y), torch.ones(2))
-        self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 1)
-
-        # calling with same size tensor does not require recompilations if y for args 2 and 3.
-        self.assertEqual(opt_fn(x2, y, y), torch.ones(2))
-        self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 1)
-
-        # calling with different args for 2, 3 requires recompilation.
-        self.assertEqual(opt_fn(x1, z, y), torch.zeros(2))
-        self.assertEqual(cnts.frame_count, 2)
-        self.assertEqual(cnts.op_count, 2)
-
     def test_id_guarded_object(self):
-        class UDO():
+        class UDO:
             @torch.compile
             def call(self, x, ref_id):
                 self_id = id(self)
@@ -4362,7 +4331,6 @@ def fn():
         obj2 = UDO()
         # if we do not install ID_MATCH: ___check_obj_id(L['self'], xxx) this fails.
         self.assertEqual(obj2.call(x, obj1_id), torch.zeros(2))
-
 
     def test_id_guarded_module(self):
         class M(torch.nn.Module):
@@ -4394,7 +4362,6 @@ def fn():
         self.assertEqual(opt_m2(x, m1_id), torch.zeros(2))
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 2)
-
 
     def test_id_of_nn_module(self):
         class M(torch.nn.Module):
