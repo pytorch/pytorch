@@ -116,7 +116,7 @@ void FunctionScheduler::runNextJob(const std::unique_lock<std::mutex>& lock) {
 }
 
 bool FunctionScheduler::validEntry(
-    const std::unordered_map<int,Job>::iterator& entry) {
+    const std::unordered_map<int, Job>::iterator& entry) {
   return entry != _jobs.end() &&
       entry->second.counter() != entry->second.run_limit();
 }

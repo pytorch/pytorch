@@ -101,7 +101,7 @@ TEST(FunctionScheduler, RemoveFirstQueuedJob) {
   c10::FunctionScheduler fs;
   fs.scheduleJob(function0, interval0, true, 1);
   int job_id1 = fs.scheduleJob(function1, interval1);
-  int job_id2 = fs.scheduleJob(function2, interval2);
+  fs.scheduleJob(function2, interval2);
 
   fs.start();
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
