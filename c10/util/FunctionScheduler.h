@@ -21,8 +21,8 @@ class C10_API Job {
   std::function<void()> _function;
   std::chrono::microseconds _interval;
   int _counter = 0;
-  bool _immediate;
   int _run_limit;
+  bool _immediate;
 
  public:
   Job(std::function<void()> function,
@@ -124,7 +124,7 @@ class C10_API FunctionScheduler {
   std::vector<Run> _queue;
 
   // Current active jobs.
-  std::unordered_map<int, std::unique_ptr<Job>> _jobs;
+  std::unordered_map<int, Job> _jobs;
 
   // Run selected to be executed next
   Run _next_run;
@@ -155,14 +155,13 @@ class C10_API FunctionScheduler {
   void addRun(
       const std::unique_lock<std::mutex>& lock,
       int job_id,
-      const std::unique_ptr<Job>& job);
+      const Job& job);
 
   // Registers a new job.
-  int scheduleJob(std::unique_ptr<Job> job);
+  int scheduleJob(const Job& job);
 
   // Checks if a job is still valid.
-  bool validEntry(
-      const std::unordered_map<int, std::unique_ptr<Job>>::iterator& entry);
+  bool validEntry(const std::unordered_map<int, Job>::iterator& entry);
 
  public:
   FunctionScheduler();
@@ -189,9 +188,8 @@ class C10_API FunctionScheduler {
 
     auto duration =
         std::chrono::duration_cast<std::chrono::microseconds>(interval);
-    auto job = std::make_unique<Job>(
-        std::move(function), duration, immediate, run_limit);
-    return scheduleJob(std::move(job));
+    Job job = Job(std::move(function), duration, immediate, run_limit);
+    return scheduleJob(job);
   }
 
   // Removes the job registered with `id` and returns it.

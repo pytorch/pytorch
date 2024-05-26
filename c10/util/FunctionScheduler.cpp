@@ -13,8 +13,8 @@ Job::Job(
     int run_limit)
     : _function(std::move(function)),
       _interval(interval),
-      _immediate(immediate),
-      _run_limit(run_limit) {}
+      _run_limit(run_limit),
+      _immediate(immediate) {}
 
 void Job::run() {
   _counter++;
@@ -109,27 +109,27 @@ void FunctionScheduler::runNextJob(const std::unique_lock<std::mutex>& lock) {
   // Check if the job was canceled in the meantime.
   auto entry = _jobs.find(_next_run.job_id());
   if (validEntry(entry)) {
-    entry->second->run();
+    entry->second.run();
     // Add a new run associated with this job to the queue
     addRun(lock, entry->first, entry->second);
   }
 }
 
 bool FunctionScheduler::validEntry(
-    const std::unordered_map<int, std::unique_ptr<Job>>::iterator& entry) {
+    const std::unordered_map<int,Job>::iterator& entry) {
   return entry != _jobs.end() &&
-      entry->second->counter() != entry->second->run_limit();
+      entry->second.counter() != entry->second.run_limit();
 }
 
 void FunctionScheduler::addRun(
     const std::unique_lock<std::mutex>& lock,
     int job_id,
-    const std::unique_ptr<Job>& job) {
+    const Job& job) {
   // This function is always called with the mutex previously acquired.
   TORCH_INTERNAL_ASSERT(lock.owns_lock(), "Mutex not acquired");
 
-  auto interval = job->interval();
-  if (job->immediate() && job->counter() == 0)
+  auto interval = job.interval();
+  if (job.immediate() && job.counter() == 0)
     interval = std::chrono::microseconds(0);
 
   auto time = std::chrono::steady_clock::now() + interval;
@@ -139,7 +139,7 @@ void FunctionScheduler::addRun(
   std::push_heap(_queue.begin(), _queue.end(), Run::gt);
 }
 
-int FunctionScheduler::scheduleJob(std::unique_ptr<Job> job) {
+int FunctionScheduler::scheduleJob(const Job& job) {
   _dirty++;
   std::unique_lock<std::mutex> lock(_mutex);
   int job_id = id();
@@ -147,7 +147,7 @@ int FunctionScheduler::scheduleJob(std::unique_ptr<Job> job) {
   if (_running)
     addRun(lock, job_id, job);
 
-  _jobs.insert(std::make_pair(job_id, std::move(job)));
+  _jobs.insert(std::make_pair(job_id, job));
   _dirty--;
   _cond.notify_one();
   return job_id;
@@ -199,8 +199,8 @@ int FunctionScheduler::stop() {
   _queue.clear();
 
   // reset counters
-  for (const auto& entry : _jobs) {
-    entry.second->reset_counter();
+  for (auto& entry : _jobs) {
+    entry.second.reset_counter();
   }
   return 1;
 }
