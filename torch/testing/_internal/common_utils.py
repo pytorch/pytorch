@@ -35,6 +35,7 @@ import time
 import types
 import unittest
 import warnings
+import yaml
 from collections.abc import Mapping, Sequence
 from contextlib import closing, contextmanager
 from copy import deepcopy
@@ -5051,3 +5052,16 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
         s = re.sub(r"Cannot export model.+\n\n", "", s)
     s = re.sub(r" +$", "", s, flags=re.M)
     return s
+
+def enable_skipped_op_dict():
+    enable_op_dict = {}
+    if TEST_XPU:
+        device = 'xpu'     
+        xpu_op_db = os.getcwd() + "/xpu/xpu_op_db.yaml" if os.path.exists(os.getcwd() + "/xpu/xpu_op_db.yaml") else os.getcwd() + "../xpu/xpu_op_db.yaml"
+        if os.path.exists(xpu_op_db):
+            with open(xpu_op_db) as stream:
+                try:
+                    enable_op_dict = yaml.safe_load(stream)
+                except yaml.YAMLError:
+                    print("Error in loading xpu_op_db.yaml.")
+    return enable_op_dict

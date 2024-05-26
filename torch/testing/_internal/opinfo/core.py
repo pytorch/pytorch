@@ -33,6 +33,8 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     torch_to_numpy_dtype_dict,
     TrackedInputIter,
+    TEST_XPU,
+    enable_skipped_op_dict,
 )
 from torch.testing._internal.opinfo import utils
 
@@ -686,9 +688,6 @@ class OpInfo:
     # skip the test for a device
     skip_device: Tuple = tuple()
 
-    # enable the test for a device
-    enable_skipped_device: Tuple = tuple()
-
     # decorators to apply to generated tests
     decorators: Tuple = tuple()
 
@@ -900,6 +899,15 @@ class OpInfo:
 
     is_factory_function: bool = False
 
+    def enable_skipped_device(self):
+        op_db_dict = enable_skipped_op_dict()
+        if TEST_XPU and (not op_db_dict or self.name not in op_db_dict['supported']):
+            if self.skips is not None:
+                self.skips = (*self.skips, DecorateInfo(unittest.skip, device_type='xpu', dtypes=None))
+            else:
+                self.skips = (DecorateInfo(unittest.skip, device_type='xpu', dtypes=None))
+
+
     def __post_init__(self):
         self._original_opinfo_args = asdict(self).copy()
 
@@ -1024,13 +1032,7 @@ class OpInfo:
             else:
                 self.inplace_operator_variant = None
 
-        # Skip XPU test by default
-        self.skip_device = ('xpu',)
-        for device in (set(self.skip_device).difference(set(self.enable_skipped_device))):
-            if self.skips is not None:
-                self.skips = (*self.skips, DecorateInfo(unittest.skip, device_type=device, dtypes=None))
-            else:
-                self.skips = (DecorateInfo(unittest.skip, device_type=device, dtypes=None))
+        self.enable_skipped_device()
 
         self.decorators = (*self.decorators, *self.skips)
 

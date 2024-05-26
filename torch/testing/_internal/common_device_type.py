@@ -702,8 +702,8 @@ def get_desired_device_type_test_bases(except_for=None, only_for=None, include_l
     test_bases = device_type_test_bases.copy()
     if allow_mps and TEST_MPS and MPSTestBase not in test_bases:
         test_bases.append(MPSTestBase)
-    if only_for == 'xpu' and TEST_XPU and XPUTestBase not in test_bases:
-        test_bases.append(XPUTestBase)
+    if (only_for == 'xpu' or 'xpu' in os.getenv(PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY)) and TEST_XPU and XPUTestBase not in test_bases:
+       test_bases.append(XPUTestBase)
     # Filter out the device types based on user inputs
     desired_device_type_test_bases = filter_desired_device_types(test_bases, except_for, only_for)
     if include_lazy:
@@ -1170,15 +1170,20 @@ class expectedFailure:
 
 class onlyOn:
 
-    def __init__(self, device_type):
-        self.device_type = device_type
+    def __init__(self, device_type: Union[str, List[str]]):
+        self.device_types = []
+        if isinstance(device_type, str):
+            self.device_types.append(device_type)
+        else:
+            assert isinstance(device_type, list)
+            self.device_types = device_type
 
     def __call__(self, fn):
 
         @wraps(fn)
         def only_fn(slf, *args, **kwargs):
-            if self.device_type != slf.device_type:
-                reason = f"Only runs on {self.device_type}"
+            if slf.device_type not in self.device_types:
+                reason = f"Only runs on {self.device_types}"
                 raise unittest.SkipTest(reason)
 
             return fn(slf, *args, **kwargs)
@@ -1375,15 +1380,7 @@ def onlyCUDAAndPRIVATEUSE1(fn):
     return only_fn
 
 def onlyCUDAAndXPU(fn):
-    @wraps(fn)
-    def only_fn(self, *args, **kwargs):
-        if self.device_type not in ('cuda', 'xpu'):
-            reason = f"onlyCUDAAndXPU: doesn't run on {self.device_type}"
-            raise unittest.SkipTest(reason)
-
-        return fn(self, *args, **kwargs)
-
-    return only_fn
+    return onlyOn(['cuda', 'xpu'])(fn)
 
 def disablecuDNN(fn):
 

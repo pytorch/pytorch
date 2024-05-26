@@ -810,7 +810,7 @@ class TestCommon(TestCase):
             # NOTE: only extracts on the CPU and CUDA device types since some
             #   device types don't have storage
             def _extract_data_ptrs(out):
-                if self.device_type != "cpu" and self.device_type != "cuda":
+                if self.device_type != "cpu" and self.device_type != "cuda" and self.device_type != "xpu":
                     return ()
 
                 if isinstance(out, torch.Tensor):
@@ -938,7 +938,7 @@ class TestCommon(TestCase):
             # NOTE: only extracts on the CPU and CUDA device types since some
             #   device types don't have storage
             def _extract_data_ptrs(out):
-                if self.device_type != "cpu" and self.device_type != "cuda":
+                if self.device_type != "cpu" and self.device_type != "cuda" and self.device_type != "xpu":
                     return ()
 
                 if isinstance(out, torch.Tensor):
@@ -1016,7 +1016,6 @@ class TestCommon(TestCase):
             elif torch.cuda.is_available():
                 wrong_device = "cuda"
             elif torch.xpu.is_available(): 
-                # Daisy ????
                 wrong_device = "xpu"
 
             factory_fn_msg = (
@@ -1674,7 +1673,8 @@ class TestCompositeCompliance(TestCase):
             composite_compliance.check_forward_ad_formula(
                 op.get_op(), args, kwargs, op.gradcheck_wrapper, self.assertEqual
             )
-
+         
+    @skipXPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_cow_input(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=op.supports_autograd)
@@ -2678,12 +2678,12 @@ class TestFakeTensor(TestCase):
             self.assertEqual(strided_result.layout, torch.strided)
 
 
-instantiate_device_type_tests(TestCommon, globals(), only_for="xpu")
-#instantiate_device_type_tests(TestCompositeCompliance, globals(), only_for="xpu")
-#instantiate_device_type_tests(TestMathBits, globals())
-#instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")
-#instantiate_device_type_tests(TestFakeTensor, globals())
-#instantiate_device_type_tests(TestTags, globals())
+instantiate_device_type_tests(TestCommon, globals())
+instantiate_device_type_tests(TestCompositeCompliance, globals())
+instantiate_device_type_tests(TestMathBits, globals())
+instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")
+instantiate_device_type_tests(TestFakeTensor, globals())
+instantiate_device_type_tests(TestTags, globals())
 
 if __name__ == "__main__":
     TestCase._default_dtype_check_enabled = True
