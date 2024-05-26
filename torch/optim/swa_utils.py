@@ -413,6 +413,7 @@ class SWALR(LRScheduler):
     def _format_param(
         optimizer: Optimizer,
         swa_lrs: Union[float, List[float], Tuple[float, ...]],
+        deep_copy: bool = False,
     ) -> Union[List[float], Tuple[float, ...]]:
         if isinstance(swa_lrs, (list, tuple)):
             if len(swa_lrs) != len(optimizer.param_groups):
@@ -421,9 +422,10 @@ class SWALR(LRScheduler):
                     f"optimizer.param_groups: swa_lr has {len(swa_lrs)}, "
                     f"optimizer.param_groups has {len(optimizer.param_groups)}"
                 )
-            return swa_lrs
         else:
-            return [swa_lrs] * len(optimizer.param_groups)
+            swa_lrs = [swa_lrs] * len(optimizer.param_groups)
+
+        return deepcopy(swa_lrs) if deep_copy else swa_lrs
 
     @staticmethod
     def _linear_anneal(t):
