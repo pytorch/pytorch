@@ -8,6 +8,12 @@ from typing import Dict, List, Sequence
 from unittest.mock import Mock, patch
 from warnings import warn
 
+from tools.autograd.gen_python_functions import (
+    group_overloads,
+    load_signatures,
+    should_generate_py_binding,
+)
+
 from torchgen.api.python import (
     PythonSignatureGroup,
     PythonSignatureNativeFunctionPair,
@@ -17,12 +23,6 @@ from torchgen.gen import parse_native_yaml, parse_tags_yaml
 
 from torchgen.model import _TorchDispatchModeKey, DispatchKey, Variant
 from torchgen.utils import FileManager
-
-from tools.autograd.gen_python_functions import (
-    group_overloads,
-    load_signatures,
-    should_generate_py_binding,
-)
 
 """
 This module implements generation of type stubs for PyTorch,
