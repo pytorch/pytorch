@@ -669,7 +669,9 @@ Tensor batch_norm(
     const Tensor& input, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt,
     const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt,
     bool training, double momentum, double eps, bool cudnn_enabled) {
-  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
   const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
