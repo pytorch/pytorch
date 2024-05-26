@@ -11,7 +11,6 @@ from re import escape
 from typing import List, Set
 
 import torch
-from functorch.experimental.control_flow import cond
 from torch._dynamo.eval_frame import is_dynamo_supported
 from torch._export.non_strict_utils import (
     _fakify_script_objects,
@@ -53,6 +52,8 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 from torch.utils import _pytree as pytree
+
+from functorch.experimental.control_flow import cond
 
 
 def count_call_function(graph: torch.fx.Graph, target: torch.ops.OpOverload) -> int:
