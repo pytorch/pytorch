@@ -69,7 +69,8 @@ def _insert_copy_for_input_mutations(
     gm: torch.fx.GraphModule,
     out_inputs: Optional[Dict[torch.fx.Node, torch.fx.Node]],
 ) -> None:
-    if not out_inputs:
+    # No need to insert copy if all out inputs are None
+    if all(val is None for _, val in out_inputs.items()):
         return
 
     output_nodes = gm.graph.find_nodes(op="output")
