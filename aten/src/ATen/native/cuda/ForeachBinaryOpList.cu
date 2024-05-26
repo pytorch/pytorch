@@ -285,42 +285,44 @@ struct Copy<dst_t, c10::complex<float>> {
   }
 };
 
-#define AT_DISPATCH_SOURCE_TYPES(TYPE, NAME, ...)                              \
-  AT_DISPATCH_SWITCH(                                                          \
-      TYPE,                                                                    \
-      NAME,                                                                    \
-      AT_PRIVATE_CASE_TYPE_USING_HINT(                                         \
-          at::ScalarType::Byte, src_t, __VA_ARGS__)                            \
-          AT_PRIVATE_CASE_TYPE_USING_HINT(                                     \
-              at::ScalarType::Char, src_t, __VA_ARGS__)                        \
-              AT_PRIVATE_CASE_TYPE_USING_HINT(                                 \
-                  at::ScalarType::Long, src_t, __VA_ARGS__)                    \
-                  AT_PRIVATE_CASE_TYPE_USING_HINT(                             \
-                      at::ScalarType::Short, src_t, __VA_ARGS__)               \
-                      AT_PRIVATE_CASE_TYPE_USING_HINT(                         \
-                          at::ScalarType::Double, src_t, __VA_ARGS__)          \
-                          AT_PRIVATE_CASE_TYPE_USING_HINT(                     \
-                              at::ScalarType::Float, src_t, __VA_ARGS__)       \
-                              AT_PRIVATE_CASE_TYPE_USING_HINT(                 \
-                                  at::ScalarType::ComplexDouble,               \
-                                  src_t,                                       \
-                                  __VA_ARGS__)                                 \
-                                  AT_PRIVATE_CASE_TYPE_USING_HINT(             \
-                                      at::ScalarType::ComplexFloat,            \
-                                      src_t,                                   \
-                                      __VA_ARGS__)                             \
-                                      AT_PRIVATE_CASE_TYPE_USING_HINT(         \
-                                          at::ScalarType::Half,                \
-                                          src_t,                               \
-                                          __VA_ARGS__)                         \
-                                          AT_PRIVATE_CASE_TYPE_USING_HINT(     \
-                                              at::ScalarType::BFloat16,        \
-                                              src_t,                           \
-                                              __VA_ARGS__)                     \
-                                              AT_PRIVATE_CASE_TYPE_USING_HINT( \
-                                                  at::ScalarType::Bool,        \
-                                                  src_t,                       \
-                                                  __VA_ARGS__))
+#define AT_DISPATCH_SOURCE_TYPES(TYPE, NAME, ...)                                  \
+  AT_DISPATCH_SWITCH(                                                              \
+      TYPE,                                                                        \
+      NAME,                                                                        \
+      AT_PRIVATE_CASE_TYPE_USING_HINT(                                             \
+          at::ScalarType::Byte, src_t, __VA_ARGS__)                                \
+          AT_PRIVATE_CASE_TYPE_USING_HINT(                                         \
+              at::ScalarType::Char, src_t, __VA_ARGS__)                            \
+              AT_PRIVATE_CASE_TYPE_USING_HINT(                                     \
+                  at::ScalarType::Long, src_t, __VA_ARGS__)                        \
+                  AT_PRIVATE_CASE_TYPE_USING_HINT(                                 \
+                      at::ScalarType::Short, src_t, __VA_ARGS__)                   \
+                      AT_PRIVATE_CASE_TYPE_USING_HINT(                             \
+                          at::ScalarType::Int, src_t, __VA_ARGS__)                 \
+                          AT_PRIVATE_CASE_TYPE_USING_HINT(                         \
+                              at::ScalarType::Double, src_t, __VA_ARGS__)          \
+                              AT_PRIVATE_CASE_TYPE_USING_HINT(                     \
+                                  at::ScalarType::Float, src_t, __VA_ARGS__)       \
+                                  AT_PRIVATE_CASE_TYPE_USING_HINT(                 \
+                                      at::ScalarType::ComplexDouble,               \
+                                      src_t,                                       \
+                                      __VA_ARGS__)                                 \
+                                      AT_PRIVATE_CASE_TYPE_USING_HINT(             \
+                                          at::ScalarType::ComplexFloat,            \
+                                          src_t,                                   \
+                                          __VA_ARGS__)                             \
+                                          AT_PRIVATE_CASE_TYPE_USING_HINT(         \
+                                              at::ScalarType::Half,                \
+                                              src_t,                               \
+                                              __VA_ARGS__)                         \
+                                              AT_PRIVATE_CASE_TYPE_USING_HINT(     \
+                                                  at::ScalarType::BFloat16,        \
+                                                  src_t,                           \
+                                                  __VA_ARGS__)                     \
+                                                  AT_PRIVATE_CASE_TYPE_USING_HINT( \
+                                                      at::ScalarType::Bool,        \
+                                                      src_t,                       \
+                                                      __VA_ARGS__))
 
 namespace {
 
