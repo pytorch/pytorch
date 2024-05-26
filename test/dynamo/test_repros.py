@@ -166,8 +166,9 @@ bw_graph = [None]
 
 
 def aot_graph_capture_backend(gm, args):
-    from functorch.compile import min_cut_rematerialization_partition
     from torch._functorch.aot_autograd import aot_module_simplified
+
+    from functorch.compile import min_cut_rematerialization_partition
 
     def fw_compiler(gm, _):
         fw_graph[0] = gm
@@ -4738,6 +4739,17 @@ def forward(self, primals_1, primals_2):
         except Exception as e:
             compiled_str = str(e)
         self.assertEqual(orig_str, compiled_str)
+
+    def test_nn_module_callable(self):
+        class M(nn.Module):
+            def forward(self, x):
+                return x.sin()
+
+        def f(m):
+            return callable(m)
+
+        res = torch.compile(f, fullgraph=True)(M())
+        self.assertTrue(res)
 
     def test_stk_sdd_is_transposed(self):
         trigger_graph_break = False
