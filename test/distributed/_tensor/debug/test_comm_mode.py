@@ -127,6 +127,27 @@ class TestCommMode(TestCase):
         self.assertEqual(comm_counts[c10d_ops._reduce_scatter_base_], 1)
         self.assertEqual(comm_counts[c10d_ops.broadcast_], 1)
 
+    @requires_nccl()
+    def test_comm_mode_with_c10d_allreduce_coalesced(self):
+        world_pg = self.world_pg
+
+        inp = torch.rand(2, 8, 16).cuda()
+        all_gather_out = inp.new_empty(self.world_size * 2, 8, 16)
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            dist.all_reduce_coalesced(inp)
+            dist.all_gather_into_tensor(all_gather_out, inp)
+            dist.reduce_scatter_tensor(inp, all_gather_out)
+            dist.broadcast(inp, 0)
+
+        comm_counts = comm_mode.get_comm_counts()
+        self.assertEqual(comm_mode.get_total_counts(), 4)
+        self.assertEqual(comm_counts[c10d_ops.allreduce_coalesced_], 1)
+        self.assertEqual(comm_counts[c10d_ops._allgather_base_], 1)
+        self.assertEqual(comm_counts[c10d_ops._reduce_scatter_base_], 1)
+        self.assertEqual(comm_counts[c10d_ops.broadcast_], 1)
+
 
 if __name__ == "__main__":
     run_tests()
