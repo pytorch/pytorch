@@ -2671,18 +2671,18 @@ class TestBatchNorm(TestCase):
         rv = torch.randn(3)
 
         # train=True, passes
-        torch.ops.aten.batch_norm(x, weight, bias, None, None, True, 0.5, 0.6, True)
-        torch.ops.aten.batch_norm(x, weight, bias, rm, None, True, 0.5, 0.6, True)
-        torch.ops.aten.batch_norm(x, weight, bias, None, rv, True, 0.5, 0.6, True)
+        aten.batch_norm(x, weight, bias, None, None, True, 0.5, 0.6, True)
+        aten.batch_norm(x, weight, bias, rm, None, True, 0.5, 0.6, True)
+        aten.batch_norm(x, weight, bias, None, rv, True, 0.5, 0.6, True)
 
         # train=False, expected RuntimeError
         error_str = "must be defined in evaluation mode"
         with self.assertRaisesRegex(RuntimeError, error_str):
-            torch.ops.aten.batch_norm(x, weight, bias, None, None, False, 0.5, 0.6, True)
+            aten.batch_norm(x, weight, bias, None, None, False, 0.5, 0.6, True)
         with self.assertRaisesRegex(RuntimeError, error_str):
-            torch.ops.aten.batch_norm(x, weight, bias, rm, None, False, 0.5, 0.6, True)
+            aten.batch_norm(x, weight, bias, rm, None, False, 0.5, 0.6, True)
         with self.assertRaisesRegex(RuntimeError, error_str):
-            torch.ops.aten.batch_norm(x, weight, bias, None, rv, False, 0.5, 0.6, True)
+            aten.batch_norm(x, weight, bias, None, rv, False, 0.5, 0.6, True)
 
 
 instantiate_device_type_tests(TestCommon, globals())
