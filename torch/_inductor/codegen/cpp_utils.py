@@ -22,13 +22,13 @@ DTYPE_TO_CPP = {
     torch.float64: "double",
     torch.float16: "half",
     torch.int64: "int64_t",
-    torch.int32: "int",
-    torch.int16: "short",
-    torch.int8: "signed char",
+    torch.int32: "int32_t",
+    torch.int16: "int16_t",
+    torch.int8: "int8_t",
     torch.uint64: "uint64_t",
-    torch.uint32: "unsigned int",
-    torch.uint16: "unsigned short",
-    torch.uint8: "unsigned char",
+    torch.uint32: "uint32_t",
+    torch.uint16: "uint16_t",
+    torch.uint8: "uint8_t",
     torch.bool: "bool",
     torch.bfloat16: "bfloat16",
     torch.complex64: "complex64",
@@ -64,6 +64,11 @@ DTYPE_TO_ATEN = {
 DEVICE_TO_ATEN = {
     "cpu": "at::kCPU",
     "cuda": "at::kCUDA",
+}
+
+LAYOUT_TO_ATEN = {
+    torch.strided: "at::kStrided",
+    torch._mkldnn: "at::kMkldnn",  # type: ignore[attr-defined]
 }
 
 INDEX_TYPE = "long"
@@ -407,7 +412,6 @@ class LocalBufferScope:
         from ..scheduler import Scheduler
 
         if isinstance(V.graph.scheduler, Scheduler):
-
             original_get_name_to_node = V.graph.scheduler.get_name_to_node
 
             def get_name_to_node(name):
