@@ -9,10 +9,11 @@ import sympy
 from sympy import Expr
 
 import torch
+
+import torch._inductor.async_compile
 import torch._ops
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey
 from .. import config, ir
-
 from ..codecache import CudaKernelParamCache
 from ..utils import cache_on_self, sympy_product
 from ..virtualized import V

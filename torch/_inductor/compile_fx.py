@@ -13,6 +13,8 @@ from unittest import mock
 
 from functorch.compile import min_cut_rematerialization_partition
 
+import torch._inductor.async_compile
+
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo import (

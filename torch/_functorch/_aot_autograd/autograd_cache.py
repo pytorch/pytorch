@@ -6,6 +6,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+import torch._inductor.async_compile
 from torch._inductor.codecache import _ident, FxGraphCachePickler
 
 from .schemas import AOTConfig  # noqa: F401

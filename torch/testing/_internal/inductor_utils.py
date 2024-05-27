@@ -5,7 +5,7 @@ import re
 import unittest
 import functools
 from subprocess import CalledProcessError
-
+import torch._inductor.async_compile
 from torch._inductor.codecache import CppCodeCache
 from torch.utils._triton import has_triton
 from torch.testing._internal.common_utils import (
