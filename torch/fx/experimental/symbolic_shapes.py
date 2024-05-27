@@ -490,6 +490,18 @@ class CallMethodKey:
 
 
 @dataclass(frozen=True)
+class InnerTensorKey:
+    inner_name: str
+
+    def __str__(self) -> str:
+        return f".{self.inner_name}"
+
+    def get(self, o: Any) -> Any:
+        """Get the inner tensor attribute"""
+        return getattr(o, self.inner_name)
+
+
+@dataclass(frozen=True)
 class DivideByKey:
     divisor: int
 
@@ -537,6 +549,14 @@ def compute_unbacked_bindings(shape_env, example_value, old_example_value=None, 
                             a[i], path + (pytree.SequenceKey(i),),
                             real=real[i] if real is not None else None
                         )
+                    )
+            elif is_traceable_wrapper_subclass(a):
+                # TODO: Determine if this is correct
+                attrs, _ = a.__tensor_flatten__()
+                for attr in attrs:
+                    sub = getattr(a, attr)
+                    r.update(
+                        free_unbacked_symbols_with_path(sub, path + (InnerTensorKey(attr),))
                     )
             elif isinstance(a, torch.Tensor):
                 r.update(
@@ -1754,10 +1774,12 @@ class DimConstraints:
             assert isinstance(solution, sympy.Eq), f"Expected an equality constraint for {s}, got {solution}"
             symbol, val = solution.args
             assert symbol == s, f"Expected a constraint on {s} instead of on {symbol}"
-            # because this is univariate, the solution is a specialization
-            self._static_results.add(f"{self._dcp.symbol_to_source[s][0].name()} == {val}")
-            # add this as a substitution to simplify other constraints
-            self._substitutions[s] = val
+            # really don't force specializations here
+            if not (_disable_forced_specializations and s in self._marked_dynamic):
+                # because this is univariate, the solution is a specialization
+                self._static_results.add(f"{self._dcp.symbol_to_source[s][0].name()} == {val}")
+                # add this as a substitution to simplify other constraints
+                self._substitutions[s] = val
 
             # simplify multivariate inequalities: some of them will now become univariate!
             multivariate_inequalities = self._multivariate_inequalities
@@ -2478,7 +2500,7 @@ class ShapeEnv:
 
         def maybe_transform_fake(fake: TrackedFake):
             inner_fake = fake.fake \
-                if isinstance(fake.fake, torch.SymInt) \
+                if isinstance(fake.fake, (torch.SymInt, torch.SymFloat)) \
                 else FakeTensorMeta.from_fake(fake.fake)
             # Even though TrackedFake accepts either a Union[SymInt, FakeTensor], here we give it a
             # FakeTensorMeta for two reasons:
@@ -3146,7 +3168,7 @@ class ShapeEnv:
     @record_shapeenv_event()
     def create_unspecified_symbol(
         self,
-        val: Union[int, SymInt],
+        val: Union[int, SymInt, float, SymFloat],
         source: Source,
         dynamic_dim: DimDynamic = DimDynamic.DUCK,
         constraint_dim: DimConstraint = None,  # NB: includes None
@@ -4352,7 +4374,7 @@ class ShapeEnv:
             )
         fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(True)
         if expr.is_integer:
-            msg = "Could extract specialized integer from data-dependent expression"
+            msg = "Could not extract specialized integer from data-dependent expression"
         else:
             msg = "Could not guard on data-dependent expression"
         return GuardOnDataDependentSymNode(
@@ -4499,7 +4521,7 @@ class ShapeEnv:
                 "symbolic_shape_specialization",
                 metadata_fn=lambda: {
                     "symbol": repr(a),
-                    "sources": [s.name() for s in self.var_to_sources[a]],
+                    "sources": [s.name() for s in self.var_to_sources.get(a, [])],
                     "value": repr(tgt),
                     "reason": msg,
                     "stack": structured.from_traceback(CapturedTraceback.extract(skip=1).summary()),
@@ -4919,17 +4941,17 @@ class ShapeEnv:
                 )
                 return concrete_val
 
-            if isinstance(g, sympy.Rel):
-                # TODO: If we successfully eliminate a symbol via equality, it
-                # is not actually necessary to save a guard for the equality,
-                # as we will implicitly generate a guard when we match that
-                # input against the symbol.  Probably the easiest way to
-                # implement this is to have maybe_guard_rel return a bool
-                # saying if it "subsumed" the guard (and therefore the guard
-                # is no longer necessary)
-                self._maybe_guard_rel(g)
-
             if not self._suppress_guards_tls():
+                if isinstance(g, sympy.Rel):
+                    # TODO: If we successfully eliminate a symbol via equality, it
+                    # is not actually necessary to save a guard for the equality,
+                    # as we will implicitly generate a guard when we match that
+                    # input against the symbol.  Probably the easiest way to
+                    # implement this is to have maybe_guard_rel return a bool
+                    # saying if it "subsumed" the guard (and therefore the guard
+                    # is no longer necessary)
+                    self._maybe_guard_rel(g)
+
                 stack = CapturedTraceback.extract(skip=1)
                 guard = ShapeGuard(g, stack)
                 self.guards.append(guard)
@@ -4959,7 +4981,7 @@ class ShapeEnv:
                         )
                         self.evaluate_expr(s, forcing_spec=True)
             else:
-                self.log.debug("eval %s [guard suppressed]", g)
+                self._log_guard("eval [guard suppressed]", g, forcing_spec=forcing_spec)
 
         return concrete_val
 
@@ -5023,11 +5045,11 @@ class ShapeEnv:
 
         self._check_frozen(expr, sympy.true)
 
-        # eliminate symbols on equality tests / refine ranges
-        if isinstance(expr, sympy.Rel):
-            self._maybe_guard_rel(expr)
-
         if not self._suppress_guards_tls():
+            # eliminate symbols on equality tests / refine ranges
+            if isinstance(expr, sympy.Rel):
+                self._maybe_guard_rel(expr)
+
             # canonicalise to remove equations that are trivially equal
             orig_expr = expr
             expr = canonicalize_bool_expr(expr)
@@ -5043,7 +5065,7 @@ class ShapeEnv:
             self._update_version_counter()
             self._log_guard("runtime_assert", orig_expr, forcing_spec=False)
         else:
-            self.log.debug("runtime_assert %s [guard suppressed]", expr)
+            self._log_guard("runtime_assert [guard suppressed]", orig_expr, forcing_spec=False)
 
         return True
 
