@@ -15,7 +15,6 @@ from typing import Callable, DefaultDict, Dict, List
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
-from torch._C._functorch import is_functorch_wrapped_tensor, unwrap_if_dead
 from torch._guards import detect_fake_mode
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
@@ -264,7 +263,7 @@ def run_functionalized_fw_and_collect_metadata(
         out_storage_to_tensors: DefaultDict = collections.defaultdict(set)
         curr_storage = None
         for o in flat_f_outs:
-            if isinstance(o, torch.Tensor) and not is_functorch_wrapped_tensor(o):
+            if isinstance(o, torch.Tensor):
                 curr_storage = StorageWeakRef(o.untyped_storage())
                 out_tensor_alias_counts[curr_storage] += 1
                 # Note: [AOTAutograd: differentiable outputs that alias each other from a multi-output view call]
@@ -395,7 +394,7 @@ def run_functionalized_fw_and_collect_metadata(
             )
             curr_storage = (
                 None
-                if not isinstance(o, torch.Tensor) or is_functorch_wrapped_tensor(o)
+                if not isinstance(o, torch.Tensor)
                 else StorageWeakRef(o.untyped_storage())
             )
             outs_with_identical_metadata_that_require_grad = (
