@@ -20,22 +20,6 @@ import torch._dynamo as torchdynamo
 import torch.nn as nn
 import torch.utils._pytree as pytree
 from common_utils import decorate, decorateForModules, skip, skipOps, xfail
-from functorch import grad, jacrev, make_fx, vjp, vmap
-from functorch.compile import (
-    aot_function,
-    aot_module,
-    compiled_function,
-    compiled_module,
-    default_decompositions,
-    default_partition,
-    get_aot_compilation_context,
-    make_boxed_compiler,
-    memory_efficient_fusion,
-    min_cut_rematerialization_partition,
-    nnc_jit,
-    nop,
-)
-from functorch.experimental import control_flow
 from torch._decomp import decomposition_table
 from torch._functorch.aot_autograd import (
     aot_export_joint_simple,
@@ -76,6 +60,23 @@ from torch.testing._internal.optests import (
     aot_autograd_check,
 )
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
+
+from functorch import grad, jacrev, make_fx, vjp, vmap
+from functorch.compile import (
+    aot_function,
+    aot_module,
+    compiled_function,
+    compiled_module,
+    default_decompositions,
+    default_partition,
+    get_aot_compilation_context,
+    make_boxed_compiler,
+    memory_efficient_fusion,
+    min_cut_rematerialization_partition,
+    nnc_jit,
+    nop,
+)
+from functorch.experimental import control_flow
 
 USE_TORCHVISION = False
 try:
