@@ -112,9 +112,7 @@ def _format_import_statement(name: str, obj: Any, importer: Importer) -> str:
 
 
 def _format_import_block(globals: Dict[str, Any], importer: Importer):
-    import_strs: Set[str] = set()
-    for name, obj in globals.items():
-        import_strs.add(_format_import_statement(name, obj, importer))
+    import_strs: Set[str] = {_format_import_statement(name, obj, importer) for name, obj in globals.items()}
     # Sort the imports so we have a stable import block that allows us to
     # hash the graph module and get a consistent key for use in a cache.
     return "\n".join(sorted(import_strs))
@@ -312,7 +310,7 @@ class _WrappedCall:
                     _WrappedCall._generate_error_message(topmost_framesummary),
                     file=sys.stderr,
                 )
-                raise e.with_traceback(None)  # noqa: TRY200
+                raise e.with_traceback(None)  # noqa: B904
             else:
                 raise e
 
@@ -445,6 +443,8 @@ class GraphModule(torch.nn.Module):
         # Dictionary to store metadata
         self.meta: Dict[str, Any] = {}
         self._replace_hook = None
+        self._create_node_hooks: List[Callable] = []
+        self._erase_node_hooks: List[Callable] = []
 
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
@@ -801,6 +801,8 @@ class {module_name}(torch.nn.Module):
             "_load_state_dict_pre_hooks",
             "_load_state_dict_post_hooks",
             "_replace_hook",
+            "_create_node_hooks",
+            "_erase_node_hooks"
         ]
         for attr in extra_preserved_attrs:
             if attr in self.__dict__:
@@ -869,6 +871,37 @@ class {module_name}(torch.nn.Module):
         finally:
             self._replace_hook = prev
 
+    def _register_create_node_hook(self, f):
+        """
+        Takes a callable which will be called after we create a new node. The
+        callable takes the newly created node as input and returns None.
+        """
+        assert callable(f), "create_node hook must be a callable."
+        self._create_node_hooks.append(f)
+
+    def _unregister_create_node_hook(self, f):
+        """
+        Takes a callable which was previously registered to be called after we create a node.
+        This function will unregister that callable so it is no longer invoked on node creation.
+        """
+        assert callable(f), "create_node hook must be a callable."
+        self._create_node_hooks.remove(f)
+
+    def _register_erase_node_hook(self, f):
+        """
+        Takes a callable which will be called after we erase a node. The
+        callable takes the node that is being erased as input and returns None.
+        """
+        assert callable(f), "erase_node hook must be a callable."
+        self._erase_node_hooks.append(f)
+
+    def _unregister_erase_node_hook(self, f):
+        """
+        Takes a callable which was previously registered to be called after we erase a node.
+        This function will unregister that callable so it is no longer invoked on node erasure.
+        """
+        assert callable(f), "erase_node hook must be a callable."
+        self._erase_node_hooks.remove(f)
 
 # workarounds for issues in __torch_function__
 

@@ -2,7 +2,6 @@ import atexit
 import collections
 import contextlib
 import copy
-import cProfile
 import dataclasses
 import datetime
 import dis
@@ -16,9 +15,7 @@ import logging
 import math
 import operator
 import os
-import pstats
 import re
-import subprocess
 import sys
 import textwrap
 import threading
@@ -28,7 +25,6 @@ import typing
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
-from pathlib import Path
 from types import MethodWrapperType
 from typing import (
     Any,
@@ -95,9 +91,11 @@ import torch.fx.experimental.symbolic_shapes
 import torch.utils._pytree as pytree
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
+from torch._guards import TracingContext
 from torch._subclasses.meta_utils import is_sparse_compressed
 from torch._utils_internal import log_compilation_event
 
+from torch.fx._utils import _format_graph_code, lazy_format_graph_code
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._triton import has_triton, has_triton_package
 
@@ -129,60 +127,6 @@ def tabulate(rows, headers):
         return "\n".join(
             ", ".join(map(str, row)) for row in itertools.chain([headers], rows)
         )
-
-
-def maybe_cprofile(func):
-    if config.cprofile:
-        return cprofile_wrapper(func)
-    return func
-
-
-def cprofile_wrapper(func):
-    @wraps(func)
-    def profile_wrapper(*args, **kwargs):
-        global timer_counter
-        profile_cnt = next(timer_counter)
-        profile_path = Path(func.__name__ + f"{profile_cnt}.profile")
-        prof = cProfile.Profile()
-        prof.enable()
-        start_ts = time.time()
-        retval = prof.runcall(func, *args, **kwargs)
-        profile_latency = time.time() - start_ts
-        prof.disable()
-        print(
-            f"### Cprofile for {func.__name__} iter {profile_cnt} took {profile_latency:.3f} seconds ###"
-        )
-        ps = pstats.Stats(prof)
-        prof.dump_stats(profile_path)
-        svg_path = profile_path.with_suffix(".svg")
-        try:
-            gprof2dot_process = subprocess.Popen(
-                [
-                    "gprof2dot",
-                    "-f",
-                    "pstats",
-                    "--node-label=total-time-percentage",
-                    "--node-label=self-time-percentage",
-                    "--node-label=total-time",
-                    str(profile_path),
-                ],
-                stdout=subprocess.PIPE,
-            )
-            subprocess.check_call(
-                ["dot", "-Tsvg", "-o", str(svg_path)],
-                stdin=gprof2dot_process.stdout,
-            )
-            print(f"Generated SVG from profile at {str(svg_path)}")
-        except FileNotFoundError:
-            print(
-                "Failed to generate SVG from profile -- dumping stats instead."
-                "Try installing gprof2dot and dot for a better visualization"
-            )
-            ps.sort_stats(pstats.SortKey.TIME).print_stats(20)
-            ps.sort_stats(pstats.SortKey.CUMULATIVE).print_stats(20)
-        return retval
-
-    return profile_wrapper
 
 
 curr_frame = 0
@@ -670,6 +614,10 @@ class CompilationMetrics:
     compliant_custom_ops: Set[str]
     restart_reasons: Set[str]
     dynamo_time_before_restart_s: float
+    # Sometimes, we will finish analyzing a frame but conclude we don't want
+    # to install any guarded code.  True means we actually decided to install
+    # a compiled frame
+    has_guarded_code: bool
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
@@ -1141,6 +1089,21 @@ def enum_repr(value, local):
     scope = "L" if local else "G"
     local_name = f'{scope}["{name}"].{val}'
     return local_name
+
+
+def set_example_value(node, example_value):
+    # NB: example_value is a bit of a misnomer, because this is always a fake
+    # tensor of some sort.  Furthermore, these example values serve as the
+    # runtime state of Dynamo tracing, which means if metadata mutation
+    # occurs, the example_value gets directly updated (so you can't rely on
+    # this to accurately reflect what the state of the value was at the time
+    # the program was traced).
+    node.meta["example_value"] = example_value
+    shape_env = TracingContext.get().fake_mode.shape_env
+    if symbol_to_path := torch.fx.experimental.symbolic_shapes.compute_unbacked_bindings(
+        shape_env, example_value
+    ):
+        node.meta["unbacked_bindings"] = symbol_to_path
 
 
 def _get_fake_tensor(vt):
@@ -1788,12 +1751,12 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         elif isinstance(
             cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
         ):
-            raise UserError(  # noqa: TRY200
+            raise UserError(  # noqa: B904
                 UserErrorType.CONSTRAINT_VIOLATION,
                 "Tried to use data-dependent value in the subsequent computation. "
                 "This can happen when we encounter unbounded dynamic value that is unknown during tracing time.  "
                 "You will need to explicitly give hint to the compiler. Please take a look at "
-                f"constrain_as_value OR constrain_as_size APIs.  {cause}",
+                f"torch._check OR torch._check_is_size APIs.  {cause}",
                 case_name="constrain_as_size_example",
             )
         elif isinstance(cause, ValueRangeError):
@@ -2020,26 +1983,6 @@ def tensor_always_has_static_shape(
     return False, None
 
 
-def lazy_format_graph_code(name, gm, maybe_id=None):
-    def format_name():
-        if maybe_id is not None:
-            return f"{name} {maybe_id}"
-        else:
-            return name
-
-    return LazyString(
-        lambda: _format_graph_code(
-            f"===== {format_name()} =====\n",
-            gm.forward.__code__.co_filename,
-            gm.print_readable(print_output=False),
-        )
-    )
-
-
-def _format_graph_code(name, filename, graph_str):
-    return f"TRACED GRAPH\n {name} {filename} {graph_str}\n"
-
-
 def lazy_format_graph_tabular(fn_name, gm):
     def inner():
         try:
@@ -2219,8 +2162,8 @@ class numpy_operator_wrapper:
 def defake(x):
     if not isinstance(x, FakeTensor):
         return x
-    size: "torch._prims_common.ShapeType"
-    stride: "torch._prims_common.StrideType"
+    size: torch._prims_common.ShapeType
+    stride: torch._prims_common.StrideType
     if x._has_symbolic_sizes_strides:
         size = []
         for s in x.size():
@@ -2261,7 +2204,7 @@ def build_checkpoint_variable(**options):
 
     # TODO - This is a temporary situation where we have two versions of
     # checkpointing implementation. We will converge on one and remove the other.
-    activation_checkpoint_op: "torch._ops.HigherOrderOperator" = (
+    activation_checkpoint_op: torch._ops.HigherOrderOperator = (
         higher_order_ops.tag_activation_checkpoint
     )
     if torch._functorch.config.functionalize_rng_ops:
@@ -2699,3 +2642,11 @@ def get_locals_to_steal(maybe_gm):
 
 def set_locals_to_steal(gm, locals_to_steal):
     gm.meta["locals_to_steal"] = locals_to_steal
+
+
+class Lit:
+    def __init__(self, s):
+        self.s = s
+
+    def __repr__(self):
+        return self.s

@@ -4,9 +4,7 @@ from copy import deepcopy
 
 import torch
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
-from torch.distributed.tensor.parallel.api import (
-    parallelize_module,
-)
+from torch.distributed.tensor.parallel.api import parallelize_module
 from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
     PrepareModuleInput,
@@ -177,9 +175,8 @@ class TensorParallelAPITests(DTensorTestBase):
             module,
             device_mesh,
             PrepareModuleInput(
-                input_layouts=Shard(0),
-                desired_input_layouts=Replicate()
-            )
+                input_layouts=Shard(0), desired_input_layouts=Replicate()
+            ),
         )
         inp = torch.rand(5, 7, device=self.device_type)
         output = module(inp).redistribute(device_mesh, [Shard(0)]).to_local()
@@ -193,9 +190,8 @@ class TensorParallelAPITests(DTensorTestBase):
             module,
             device_mesh,
             PrepareModuleOutput(
-                output_layouts=Replicate(),
-                desired_output_layouts=Shard(0)
-            )
+                output_layouts=Replicate(), desired_output_layouts=Shard(0)
+            ),
         )
         torch.manual_seed(15)
         inp = torch.rand(16, 7, device=self.device_type)

@@ -8,6 +8,7 @@ from typing import (
     Sequence,
     Tuple,
     cast,
+    TYPE_CHECKING,
 )
 import copy
 import warnings
@@ -19,7 +20,6 @@ import torch
 import torch.distributed as dist
 from torch.distributed import rpc
 from torch.distributed import distributed_c10d
-from torch.distributed._shard.metadata import ShardMetadata
 import torch.distributed._shard.sharding_spec as shard_spec
 from torch.distributed._shard.sharding_spec.api import (
     _dispatch_custom_op,
@@ -46,6 +46,9 @@ from .utils import (
 from torch.distributed.remote_device import _remote_device
 from torch.utils import _pytree as pytree
 import operator
+
+if TYPE_CHECKING:
+    from torch.distributed._shard.metadata import ShardMetadata
 
 # Tracking for sharded tensor objects.
 _sharded_tensor_lock = threading.Lock()
@@ -262,7 +265,7 @@ class ShardedTensor(ShardedTensorBase):
 
         self._metadata.tensor_properties.memory_format = memory_format
 
-        current_rank = dist.get_rank(self._process_group)
+        current_rank = dist.get_rank()  # global rank
 
         for shard_metadata in self._metadata.shards_metadata:
             rank, device = _parse_and_validate_remote_device(self._process_group, shard_metadata.placement)

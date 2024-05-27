@@ -1873,7 +1873,20 @@ def _run_test_output_match(
                     == pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
                 ):
                     try:
-                        model = torch.export.export(model, inputs)
+                        # TODO (tugsbayasgalan) Migrate to pre-dispatch IR
+                        # BUG1: python test/onnx/test_fx_op_consistency.py -k test_output_match_triu_cpu_int32
+                        # has unexpected success, but don't know how to remove from xfail list
+                        # BUG2: User output to_sparse is not in the correct order or is not found in the
+                        # exported program's user_output list (https://github.com/pytorch/pytorch/issues/124328)
+                        # python test/onnx/test_fx_op_consistency.py -k test_output_match_to_sparse_cpu_float32
+                        # BUG3: [ShapeInferenceError] Inference error(s): (op_type:aten_view, node name: aten_view_4):
+                        # [ShapeInferenceError]
+                        # Inference error(s): (op_type:Reshape, node name: n1): [ShapeInferenceError] Invalid position of 0.
+                        # python test/onnx/test_fx_op_consistency.py -k test_output_match_stack_cpu_int32
+                        from torch.export import _trace
+
+                        model = _trace._export(model, inputs, pre_dispatch=False)
+
                     except AssertionError as e:
                         # NOTE: avoid fake_mode detection bug in torch.export.export
                         pytest.xfail(
@@ -2001,6 +2014,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         "nn.functional.multilabel_soft_margin_loss": [4e-2, 5e-3],
         "nn.functional.local_response_norm": [1e-2, 5e-3],
         "nn.functional.poisson_nll_loss": [3e-2, 1e-3],
+        "nn.functional.nll_loss": [3e-2, 1e-3],
         "native_batch_norm": [3e-2, 1e-3],
         "dot": [3e-2, 1e-3],
         "logit": [3e-2, 1e-3],

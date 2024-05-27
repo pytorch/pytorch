@@ -11,6 +11,7 @@ extern "C" {
 
 #define IS_PYTHON_3_11_PLUS PY_VERSION_HEX >= 0x030B00C1
 #define IS_PYTHON_3_12_PLUS PY_VERSION_HEX >= 0x030C0000
+#define IS_PYTHON_3_13_PLUS PY_VERSION_HEX >= 0x030D0000
 
 PYCAPI_COMPAT_STATIC_INLINE(int)
 PyCode_GetNCellvars(PyCodeObject* code) {
@@ -31,6 +32,9 @@ PyCode_GetNFreevars(PyCodeObject* code) {
   return PyTuple_GET_SIZE(code->co_freevars);
 #endif
 }
+
+// Provided by CPython but getting the header for them is very hard
+extern void _PyWeakref_ClearRef(PyWeakReference* self);
 
 #ifdef __cplusplus
 }

@@ -6,10 +6,10 @@ import torch
 
 class Setup:
     def setup(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def shutdown(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 class FileSetup:

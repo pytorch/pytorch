@@ -134,6 +134,24 @@ class VecMask {
     return VectorizedN<T, N>(VectorizedN<T, N>::loadu(mask));
   }
 
+  static VecMask<T, N> blendv(
+    const VecMask<T, N>& c,
+    const VecMask<T, N>& b,
+    const VecMask<T, N>& a) {
+    VectorizedN<T, N> result = VectorizedN<T, N>::blendv(
+      VectorizedN<T, N>(c),
+      VectorizedN<T, N>(b),
+      VectorizedN<T, N>(a));
+    return result;
+  }
+
+  void store(bool* b, int count = size()) {
+    constexpr int L = (VectorizedN<T, N>::size() + Vectorized<bool>::size() - 1)/ Vectorized<bool>::size();
+    auto res = this->to<bool, L>();
+    res.store(b, count);
+    return;
+  }
+
   template <typename U, int L, std::enable_if_t<L >= 2, int> = 0>
   inline VectorizedN<U, L> to() const {
     return VecMaskTo<U, L, T, N>::apply(*this);
@@ -239,6 +257,7 @@ VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(operator<, ~a& b)
 VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(operator==, ~(a ^ b))
 VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(operator>=, (a == b) | (a > b))
 VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(operator<=, (a == b) | (a < b))
+VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(operator!=, (a ^ b))
 
 #undef VEC_MASK_DEFINE_UNARY_OP_GLOBAL
 #undef VEC_MASK_DEFINE_BINARY_OP_GLOBAL

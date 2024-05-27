@@ -15,8 +15,6 @@ import unittest
 import warnings
 from functools import partial, wraps
 
-import functorch
-
 # NB: numpy is a testing dependency!
 import numpy as np
 import torch
@@ -24,6 +22,49 @@ import torch.autograd.forward_ad as fwAD
 import torch.nn as nn
 import torch.nn.functional as F
 from common_utils import expectedFailureIf
+from torch._C import _ExcludeDispatchKeyGuard, DispatchKey, DispatchKeySet
+from torch._dynamo import allow_in_graph
+from torch._functorch.eager_transforms import _slice_argnums
+from torch._functorch.make_functional import (
+    functional_init,
+    functional_init_with_buffers,
+)
+from torch._functorch.utils import enable_single_level_autograd_function
+from torch._ops import HigherOrderOperator
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.func import functional_call, linearize, stack_module_state
+from torch.testing import make_tensor
+from torch.testing._internal.common_cuda import (
+    SM70OrLater,
+    TEST_CUDA,
+    tf32_on_and_off,
+    with_tf32_off,
+)
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    instantiate_device_type_tests,
+    onlyCPU,
+    onlyCUDA,
+)
+from torch.testing._internal.common_dtype import get_all_fp_dtypes
+from torch.testing._internal.common_utils import (
+    freeze_rng_state,
+    instantiate_parametrized_tests,
+    IS_FBCODE,
+    IS_WINDOWS,
+    markDynamoStrictTest,
+    parametrize,
+    run_tests,
+    skipIfRocm,
+    skipIfTorchDynamo,
+    subtest,
+    TEST_WITH_TORCHDYNAMO,
+    TestCase,
+)
+
+from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+
+import functorch
 from functorch import (
     combine_state_for_ensemble,
     grad,
@@ -39,44 +80,6 @@ from functorch import (
     vmap,
 )
 from functorch.experimental import functionalize, replace_all_batch_norm_modules_
-from torch._C import _ExcludeDispatchKeyGuard, DispatchKey, DispatchKeySet
-from torch._dynamo import allow_in_graph
-from torch._functorch.eager_transforms import _slice_argnums
-from torch._functorch.make_functional import (
-    functional_init,
-    functional_init_with_buffers,
-)
-from torch._functorch.utils import enable_single_level_autograd_function
-from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.func import functional_call, linearize, stack_module_state
-from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import SM70OrLater, TEST_CUDA, with_tf32_off
-from torch.testing._internal.common_device_type import (
-    dtypes,
-    instantiate_device_type_tests,
-    onlyCPU,
-    onlyCUDA,
-)
-from torch.testing._internal.common_dtype import get_all_fp_dtypes
-from torch.testing._internal.common_utils import (
-    freeze_rng_state,
-    instantiate_parametrized_tests,
-    IS_ARM64,
-    IS_FBCODE,
-    IS_MACOS,
-    IS_WINDOWS,
-    markDynamoStrictTest,
-    parametrize,
-    run_tests,
-    skipIfRocm,
-    skipIfTorchDynamo,
-    subtest,
-    TEST_WITH_TORCHDYNAMO,
-    TestCase,
-)
-
-from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 USE_TORCHVISION = False
 try:
@@ -1688,6 +1691,7 @@ class TestVmapOfGrad(TestCase):
             for key in result:
                 self.assertEqual(result[key], expected[key], atol=0, rtol=1.5e-3)
 
+    @tf32_on_and_off(0.005)
     @parametrize("mechanism", ["make_functional", "functional_call"])
     def test_per_sample_grads_embeddingnet(self, device, mechanism):
         class SampleNet(nn.Module):
@@ -5076,9 +5080,7 @@ class TestCompileTransforms(TestCase):
     @skipIfRocm(msg="test leaks memory on ROCm")
     # torch.compile is not supported on Windows
     # Triton only supports GPU with SM70 or later.
-    @expectedFailureIf(
-        (IS_ARM64 and not IS_MACOS) or IS_WINDOWS or (TEST_CUDA and not SM70OrLater)
-    )
+    @expectedFailureIf(IS_WINDOWS or (TEST_CUDA and not SM70OrLater))
     def test_compile_vmap_hessian(self, device):
         # The model and inputs are a smaller version
         # of code at benchmark repo:

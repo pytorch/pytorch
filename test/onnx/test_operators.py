@@ -283,7 +283,7 @@ class TestOperators(common_utils.TestCase):
             def symbolic(g, x):
                 # The inside of this function should never be invoked, because
                 # we will fail due to an argument mismatch first.
-                raise AssertionError()
+                raise AssertionError
 
             @staticmethod
             def forward(ctx, x, y):
@@ -939,6 +939,15 @@ class TestOperators(common_utils.TestCase):
 
         input = torch.arange(24, dtype=torch.uint8).reshape(3, 4, 2)
         self.assertONNX(BitshiftModel(), input, opset_version=11)
+
+    def test_bitwise_and(self):
+        class BiwiseAndModel(torch.nn.Module):
+            def forward(self, input, other):
+                return torch.bitwise_and(input, other), input & 2
+
+        input = torch.randint(0, 100, (2, 3, 4), dtype=torch.uint8)
+        other = torch.randint(-50, 50, (2, 3, 4), dtype=torch.int8)
+        self.assertONNX(BiwiseAndModel(), (input, other), opset_version=18)
 
     @skipIfCaffe2
     def test_layer_norm_aten(self):
