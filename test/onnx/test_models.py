@@ -3,8 +3,6 @@
 import unittest
 
 import pytorch_test_common
-
-import torch
 from model_defs.dcgan import _netD, _netG, bsz, imgsz, nz, weights_init
 from model_defs.emb_seq import EmbeddingNetwork1, EmbeddingNetwork2
 from model_defs.mnist import MNIST
@@ -13,11 +11,6 @@ from model_defs.squeezenet import SqueezeNet
 from model_defs.srresnet import SRResNet
 from model_defs.super_resolution import SuperResolutionNet
 from pytorch_test_common import skipIfUnsupportedMinOpsetVersion, skipScriptTest
-from torch.ao import quantization
-from torch.autograd import Variable
-from torch.onnx import OperatorExportTypes
-from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import skipIfNoLapack
 from torchvision.models import shufflenet_v2_x1_0
 from torchvision.models.alexnet import alexnet
 from torchvision.models.densenet import densenet121
@@ -30,6 +23,13 @@ from torchvision.models.segmentation import deeplabv3_resnet101, fcn_resnet101
 from torchvision.models.vgg import vgg16, vgg16_bn, vgg19, vgg19_bn
 from torchvision.models.video import mc3_18, r2plus1d_18, r3d_18
 from verify import verify
+
+import torch
+from torch.ao import quantization
+from torch.autograd import Variable
+from torch.onnx import OperatorExportTypes
+from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import skipIfNoLapack
 
 if torch.cuda.is_available():
 

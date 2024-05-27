@@ -43,8 +43,8 @@ def raise_comms(
     Greedily moves comms as early as possible (i.e. until we reach an input).
     Optimal in terms of communication overlap.
     """
-    new_order_reversed: List["scheduler.BaseSchedulerNode"] = []
-    cur_comms: List["scheduler.BaseSchedulerNode"] = []
+    new_order_reversed: List[scheduler.BaseSchedulerNode] = []
+    cur_comms: List[scheduler.BaseSchedulerNode] = []
     for snode in reversed(snodes):
         if contains_collective(snode):
             cur_comms.append(snode)
