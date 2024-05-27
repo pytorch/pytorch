@@ -22,6 +22,7 @@ from torch.distributed.checkpoint.state_dict import (
     _patch_model_state_dict,
     _patch_optimizer_state_dict,
     get_model_state_dict,
+    get_optimizer_state_dict,
     get_state_dict,
     set_model_state_dict,
     set_state_dict,
@@ -565,6 +566,19 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         ddp_model = DDP(copy.deepcopy(model))
         set_model_state_dict(ddp_model, get_model_state_dict(ddp_model))
         self.assertEqual(model.state_dict(), get_model_state_dict(ddp_model))
+    
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp_root_not_initialized(self) -> None:
+        # This test verifies that FSDP root is not initialized but we should
+        # still be able to  get the state_dict without errors because
+        # fsdp_model.state_dict() will trigger the FSDP initialization.
+        device_mesh = init_device_mesh("cuda", (self.world_size,))
+        model = CompositeParamModel(device=torch.device("cuda"))
+        fsdp_model = FSDP(copy.deepcopy(model), device_mesh=device_mesh)
+        fsdp_optim = torch.optim.Adam(fsdp_model.parameters())
+        get_model_state_dict(fsdp_model)
+        get_optimizer_state_dict(fsdp_model, fsdp_optim)
 
 
 if __name__ == "__main__":
