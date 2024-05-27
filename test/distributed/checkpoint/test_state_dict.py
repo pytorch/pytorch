@@ -22,6 +22,7 @@ from torch.distributed.checkpoint.state_dict import (
     _patch_model_state_dict,
     _patch_optimizer_state_dict,
     get_model_state_dict,
+    get_optimizer_state_dict,
     get_state_dict,
     set_model_state_dict,
     set_state_dict,
