@@ -26,8 +26,8 @@ static std::vector<std::string> mkldnn_precisions = {"default", "bf16"};
 
 // This method first check whether the backend and operators are legal
 // After that, if there is non-empty precision
-// it will futher checks whether the precision is legal
-// and return the the result
+// it will futher check whether the precision is legal
+// and return the result
 static bool validate_fp32_prec_with_backend_and_op(
     const std::string& backend,
     const std::string& op,
