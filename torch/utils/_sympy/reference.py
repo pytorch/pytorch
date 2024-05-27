@@ -77,11 +77,27 @@ class ReferenceAnalysis:
 
     @staticmethod
     def square(x):
-        return x * x
+        return PowByNatural(x, 2)
 
     @staticmethod
-    def to_int(x):
+    def trunc_to_int(x):
         return TruncToInt(x)
+
+    @staticmethod
+    def ceil_to_int(x):
+        return sympy.ceiling(x)
+
+    @staticmethod
+    def floor_to_int(x):
+        return sympy.floor(x)
+
+    @staticmethod
+    def floor(x):
+        return _keep_float(sympy.floor)(x)
+
+    @staticmethod
+    def ceil(x):
+        return _keep_float(sympy.ceiling)(x)
 
     @staticmethod
     def to_float(x):
@@ -155,14 +171,6 @@ class ReferenceAnalysis:
     def maximum(a, b):
         return sympy.Max(a, b)
 
-    @staticmethod
-    def floor(x):
-        return sympy.floor(x)
-
-    @staticmethod
-    def ceil(x):
-        return sympy.ceiling(x)
-
 
 # Unlike ReferenceAnalysis, does NOT sympyify, instead, works with plain
 # Python types and is FX traceable.  Inheritance here is purely for code
@@ -216,12 +224,20 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
         return torch.sym_max(a, b)
 
     @staticmethod
-    def floor(x):
+    def floor_to_int(x):
         return math.floor(x)
 
     @staticmethod
-    def ceil(x):
+    def ceil_to_int(x):
         return math.ceil(x)
+
+    @staticmethod
+    def floor(x):
+        return float(math.floor(x))
+
+    @staticmethod
+    def ceil(x):
+        return float(math.ceil(x))
 
     @staticmethod
     def truediv(a, b):

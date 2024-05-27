@@ -25,11 +25,10 @@ __all__ = [
 
 def _keep_float(f):
     @functools.wraps(f)
-    def inner(a, b):
-        r = f(a, b)
+    def inner(*args):
+        r = f(*args)
         if (
-            isinstance(a, sympy.Float)
-            or isinstance(b, sympy.Float)
+            any(isinstance(a, sympy.Float) for a in args)
             and not isinstance(r, sympy.Float)
         ):
             r = sympy.Float(float(r))
@@ -54,6 +53,14 @@ def fuzzy_eq(x, y):
 # are NOT integers.
 
 
+# TODO: In Triton, // rounds to zero, but in Python, it is floor division.
+# When we can prove both arguments are non-negative, we should just have a
+# GenericFloorDiv (name pending) which can codegen efficiently in Python/C,
+# and then PythonFloorDiv and CIntDiv which have the appropriate rounding
+# semantics.
+#
+# Right now, FloorDiv de facto changes behavior if arguments are negative or
+# not, this can potentially cause correctness issues.
 class FloorDiv(sympy.Function):
     """
     We maintain this so that:
@@ -510,6 +517,7 @@ class FloatPow(sympy.Function):
 # where 1 is an integer, but this must be a float if x was float.
 class FloatTrueDiv(sympy.Function):
     is_integer = False
+    is_real = True
 
     @classmethod
     def eval(cls, base, divisor):
@@ -533,6 +541,7 @@ class FloatTrueDiv(sympy.Function):
 # NB: Right now, Inductor codegen doesn't implement this correctly lol
 class IntTrueDiv(sympy.Function):
     is_integer = False
+    is_real = True
 
     @classmethod
     def eval(cls, base, divisor):
@@ -581,6 +590,7 @@ class IsNonOverlappingAndDenseIndicator(sympy.Function):
 # NB: this is inconsistent with math.trunc in Python
 class TruncToFloat(sympy.Function):
     is_integer = False
+    is_real = True
 
     @classmethod
     def eval(cls, number):
@@ -615,6 +625,7 @@ class TruncToInt(sympy.Function):
 # RoundDecimal (we do have lowering for RoundDecimal, need to use that...)
 class Round(sympy.Function):
     is_integer = False
+    is_real = True
 
     @classmethod
     def eval(cls, number):
@@ -643,6 +654,7 @@ class Round(sympy.Function):
 # NB: Like Round, this only ever returns floats.  ndigits cannot be None
 class RoundDecimal(sympy.Function):
     is_integer = False
+    is_real = True
 
     @classmethod
     def eval(cls, number, ndigits):
@@ -654,6 +666,7 @@ class RoundDecimal(sympy.Function):
 
 class ToFloat(sympy.Function):
     is_integer = False
+    is_real = True
 
     @classmethod
     def eval(cls, number):

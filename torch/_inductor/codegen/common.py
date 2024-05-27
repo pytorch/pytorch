@@ -332,6 +332,8 @@ class DataTypePropagation:
         DataTypePropagation.propagate_loopbody(node._body)
 
 
+# This printer contains rules that are supposed to be generic for both C/C++ and
+# Python
 class ExprPrinter(Printer):
     @staticmethod
     def paren(string):
@@ -599,7 +601,7 @@ class OpOverrides:
         return ops.where(cond, ops.add(r, b), r)
 
     @staticmethod
-    def to_int(a):
+    def trunc_to_int(a):
         return ops.to_dtype(ops.trunc(a), torch.int64)
 
     @staticmethod

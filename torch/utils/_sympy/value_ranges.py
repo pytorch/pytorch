@@ -422,7 +422,7 @@ class SymPyValueRangeAnalysis:
         return r
 
     @staticmethod
-    def to_int(a):
+    def trunc_to_int(a):
         return ValueRanges.increasing_map(a, TruncToInt)
 
     @staticmethod
@@ -715,13 +715,41 @@ class SymPyValueRangeAnalysis:
         return ValueRanges.coordinatewise_increasing_map(a, b, fn)
 
     @classmethod
-    def floor(cls, x):
+    def floor_to_int(cls, x):
         return ValueRanges.increasing_map(x, sympy.functions.elementary.integers.floor)
+
+    @classmethod
+    def ceil_to_int(cls, x):
+        return ValueRanges.increasing_map(
+            x, sympy.functions.elementary.integers.ceiling
+        )
+
+    # I think these implementations are sound.  The hazard here is that sympy
+    # will carry out the floor/ceil at too high precision and then something
+    # bad will happen when we convert it to float.
+    #
+    # For truncation, the implementation is clearly sound, because the desired
+    # target float is always exactly representable, since you're just chopping
+    # off bits the mantissa.  But what about ceil/floor?
+    #
+    # The important constraint here is that we're not defining floor on
+    # arbitrary real numbers, only representable float numbers.  So we can
+    # take advantage of the fact that before we reach the first
+    # unrepresentable integer in floating point space, we have the range of
+    # numbers corresponding to exponent zero: all integers, with no fractional
+    # amounts.  floor/ceil is an identity operation in this case.  In the
+    # range below here, representable floating point numbers are spaced
+    # exactly 1/2 apart, and notably, both the floor/ceil are defined floating
+    # point numbers.  There is no "gap" as you step up to the next exponent.
+
+    @classmethod
+    def floor(cls, x):
+        return ValueRanges.increasing_map(x, _keep_float(sympy.functions.elementary.integers.floor))
 
     @classmethod
     def ceil(cls, x):
         return ValueRanges.increasing_map(
-            x, sympy.functions.elementary.integers.ceiling
+            x, _keep_float(sympy.functions.elementary.integers.ceiling)
         )
 
     @classmethod
@@ -911,7 +939,7 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
 
     @staticmethod
     def square(x):
-        return ValueRanges.convex_min_zero_map(x, lambda y: y * y)
+        return ValueRanges.convex_min_zero_map(x, lambda y: PowByNatural(y, 2))
 
     @staticmethod
     def neg(x):

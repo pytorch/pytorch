@@ -138,11 +138,25 @@ class OpsHandler(Protocol[T]):
         """
         ...
 
-    def to_int(self, x: T) -> T:
+    def trunc_to_int(self, x: T) -> T:
         """
         Convert x to int64 with truncation semantics (similar to how the int
         constructor works in Python).  In Inductor codegen, this just decays
         to trunc and then to_dtype, but this composite operation helps
+        roundtrips for Sympy evaluation.
+        """
+        ...
+
+    def ceil_to_int(self, x: T) -> T:
+        """
+        Convert x to int64 with ceiling semantics.  This composite operation helps
+        roundtrips for Sympy evaluation.
+        """
+        ...
+
+    def floor_to_int(self, x: T) -> T:
+        """
+        Convert x to int64 with ceiling semantics.  This composite operation helps
         roundtrips for Sympy evaluation.
         """
         ...
