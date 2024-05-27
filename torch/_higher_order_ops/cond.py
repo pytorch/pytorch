@@ -182,7 +182,9 @@ def create_fw_bw_graph_branches(true_fn, false_fn, *operands):
                     f"Got types {[type(out) for out in example_flat_out]}."
                 )
                 
-                
+            # TODO: There is a major issue that the create_fw_bw in the higher_order_op is invoked twice:
+            # Once in the forward path (as it should) and once in the backward path, where it shouldn't be called
+            # If we can get rid of the second invokation, it would simplify this function 
             fw_true_graph, joint_true_graph = create_fw_bw_graph(
                 true_fn, False, num_wrapped_operands, *unwrapped_operands
             )

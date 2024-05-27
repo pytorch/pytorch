@@ -260,11 +260,9 @@ def prepare_fw_with_masks(fn):
 
     return fw_with_masks
 
-
-# TODO: There is a major issue that the create_fw_bw in the higher_order_op is invoked twice:
-# Once in the forward path (as it should) and once in the backward path, where it shouldn't be called
-# If we can get rid of the second invokation, it would simplify this function
-def create_fw_bw_graph(fn, use_output_and_grad_bw, num_args, *args):
+# TODO: The parameter use_output_and_grad_bw is required because some operations
+# that utilize this function, such as the while_loop, may require (grad, fwd_outputs)
+def create_fw_bw_graph(fn, use_output_and_grad_bw, *operands):
     from torch._functorch.aot_autograd import AOTConfig, create_joint
 
     # Note:[HOP create fw_bw graph] We create "clean" environments for make_fx by suspending all dispatch keys
@@ -292,9 +290,6 @@ def create_fw_bw_graph(fn, use_output_and_grad_bw, num_args, *args):
         keep_inference_input_mutations=False,
     )
 
-    operands = args[:num_args]
-    pos_args = args[num_args:]
-
     example_flat_out = pytree.tree_map(_from_fun, fn(*operands))
     example_grad = [_from_fun(out) for out in example_flat_out]
     num_grads = len(example_grad)
@@ -303,35 +298,20 @@ def create_fw_bw_graph(fn, use_output_and_grad_bw, num_args, *args):
     def joint_fn(*joint_operands_grads):
         if use_output_and_grad_bw:
             grads = joint_operands_grads[0]
-            inputs = joint_operands_grads[1][:num_args][-1:]
-            pos_args = joint_operands_grads[1][num_args:]
+            inputs = joint_operands_grads[1][-1:]
         else:
             grads = joint_operands_grads[:num_grads]
-            inputs = joint_operands_grads[num_grads : num_grads + num_args]
-            pos_args = joint_operands_grads[num_grads + num_args :]
-
-        # grads = joint_operands_grads[0]
-        # inputs = joint_operands_grads[1][:num_mapped_args][-1:]
-        # pos_args = joint_operands_grads[1][num_mapped_args:]
-
-        bw_path = False
-
-        # TODO: Detection of invokation in backward pass required
-        if len(pos_args) > 0 and pos_args[0]:
-            bw_path = True
+            inputs = joint_operands_grads[num_grads:]
 
         joint = create_joint(prepare_fw_with_masks(fn), aot_config=dummy_aot_config)
-        if bw_path:
-            grads = list(grads)
-        else:
-            _, grads = joint(
-                list(inputs),
-                [
-                    grad
-                    for grad in grads
-                    if grad is not None and grad.requires_grad
-                ],
-            )
+        _, grads = joint(
+            list(inputs),
+            [
+                grad
+                for grad in grads
+                if grad is not None and grad.requires_grad
+            ],
+        )
 
         # In order to keep map functional for backward graph,
         # we clone outputs that are aliasing inputs
@@ -341,15 +321,10 @@ def create_fw_bw_graph(fn, use_output_and_grad_bw, num_args, *args):
 
     if use_output_and_grad_bw:
         example_xs_out = list(operands) + list(example_flat_out)
-        example_xs_out = example_xs_out + list(pos_args)
         joint_operands_grads = (list(example_grad), list(example_xs_out))
     else:
-        example_xs_out = list(operands) + list(pos_args)
+        example_xs_out = list(operands)
         joint_operands_grads = list(example_grad) + list(example_xs_out)
-
-    # example_xs_out = list(operands) + list(example_flat_out)
-    # example_xs_out = example_xs_out + list(pos_args)
-    # joint_operands_grads = (list(example_grad), list(example_xs_out))
 
     joint_graph = make_fx(joint_fn)(*joint_operands_grads)
     return fw_graph, joint_graph
