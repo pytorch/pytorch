@@ -6990,6 +6990,11 @@
   dispatch:
     CUDA: _scaled_mm_out_cuda
 
+- func: _fp8_mm(Tensor self, Tensor mat2, Tensor? scale_a=None, Tensor? scale_b=None, Tensor? bias=None, *, ScalarType? out_dtype=None, bool use_fast_accum=False) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: _fp8_mm_cuda
+
 # NOTE [ Sparse: autograd and API ]
 #
 #
