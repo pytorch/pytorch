@@ -131,14 +131,15 @@ __global__ void lpmax_cleanup(
 std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
   check_foreach_api_restrictions(tensors);
   // we currently use -INF as the identity value to compare against, which
-  // does not work for int8 or int16. Fall back to slow path here.
-  const bool has_small_int =
+  // does not work for int8, int16, nor bool. Fall back to slow path here.
+  const bool has_small_int_or_bool =
       std::any_of(tensors.begin(), tensors.end(), [](const auto& t) {
         const auto scalar_type = t.scalar_type();
         return scalar_type == at::ScalarType::Short ||
-            scalar_type == at::ScalarType::Char;
+            scalar_type == at::ScalarType::Char ||
+            scalar_type == at::ScalarType::Bool;
       });
-  if (!can_use_fast_route(tensors) || has_small_int) {
+  if (!can_use_fast_route(tensors) || has_small_int_or_bool) {
     return foreach_tensor_max_slow(tensors);
   }
 

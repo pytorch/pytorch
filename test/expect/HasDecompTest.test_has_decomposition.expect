@@ -248,6 +248,8 @@ aten::_foreach_log2
 aten::_foreach_log2.out
 aten::_foreach_log2_
 aten::_foreach_log_
+aten::_foreach_max
+aten::_foreach_max.out
 aten::_foreach_maximum.List
 aten::_foreach_maximum.List_out
 aten::_foreach_maximum.Scalar

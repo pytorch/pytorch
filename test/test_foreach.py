@@ -1015,7 +1015,7 @@ class TestForeach(TestCase):
     def test_foreach_reduce_large_input(self, device, dtype, op):
         # test inputs larger than kChunkSize = 65536
         N = 65536 * 2
-        disable_fastpath = dtype in (torch.int8, torch.int16)
+        disable_fastpath = dtype in (torch.int8, torch.int16, torch.bool)
         kwargs = {}
         if op.name == "_foreach_norm":
             ord = 2
@@ -1453,14 +1453,6 @@ def check_autodiff_sample(op, sample, dtype, is_inplace):
                     False,
                     "result type ComplexDouble can't be cast to the desired output type Double",
                 )
-    if op.name == "_foreach_max" and (
-        (
-            isinstance(sample.input[0], list)
-            and any(t.numel() == 0 for t in sample.input[0])
-        )
-        or any(t.numel() == 0 for t in sample.input if isinstance(t, torch.Tensor))
-    ):
-        return False, ""
     return True, ""
 
 
