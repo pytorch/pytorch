@@ -80,9 +80,6 @@ else()
   # shared library.
   # TODO: this list might be incomplete.
   append_torchlib_if_found(c10)
-  if(@BUILD_CAFFE2@)
-    append_torchlib_if_found(Caffe2_perfkernels_avx512 Caffe2_perfkernels_avx2 Caffe2_perfkernels_avx)
-  endif()
 
   if(@USE_NNPACK@)
     append_torchlib_if_found(nnpack)
@@ -90,10 +87,6 @@ else()
 
   if(@USE_PYTORCH_QNNPACK@)
     append_torchlib_if_found(pytorch_qnnpack)
-  endif()
-
-  if(@USE_QNNPACK@)
-    append_torchlib_if_found(qnnpack)
   endif()
 
   if(@USE_XNNPACK@)

@@ -7,8 +7,6 @@ import torch
 import torch._dynamo.testing
 
 import torch._inductor.test_case
-from torch._dynamo import config
-from torch._dynamo.testing import make_test_cls_with_patches
 
 from torch._higher_order_ops.triton_kernel_wrap import (
     generate_ttir,
@@ -18,7 +16,7 @@ from torch._higher_order_ops.triton_kernel_wrap import (
 from torch._inductor import metrics
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import skipIfRocm
+from torch.testing._internal.common_utils import skipIfRocm, TEST_WITH_ROCM
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
@@ -26,6 +24,12 @@ from torch.testing._internal.triton_utils import *  # noqa: F403
 if HAS_CUDA:
     import triton
     from triton import language as tl
+
+    if not TEST_WITH_ROCM:
+        from triton.language.extra.cuda.libdevice import (
+            fast_dividef,
+            fast_dividef as my_fast_dividef,
+        )
 
 
 # Define shared triton constants here.
@@ -784,6 +788,42 @@ def forward(self, x_1, output_1):
         out.sum().backward()
 
     @requires_cuda
+    @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
+    def test_triton_kernel_inputs_buffer_reuse(self):
+        def _mul2(x):
+            y = torch.empty_like(x)
+            mul2_kernel[(10,)](
+                in_ptr0=x,
+                out_ptr=y,
+                n_elements=x.numel(),
+                BLOCK_SIZE=1,
+            )
+            return y
+
+        @torch.compile
+        def f(x):
+            for _ in range(4):
+                # The output of one kernel is the input to the next kernel, but
+                # at some point we should re-use buffers not allocate new ones.
+                x = _mul2(x)
+            return x + 1
+
+        x = torch.randn(10, device="cuda", dtype=torch.float32)
+        eager_out = f(x)
+        compiled_out, (code,) = run_and_get_code(torch.compile(f), x)
+        self.assertEqual(compiled_out, eager_out)
+
+        # Check that we're allocating the minimal # of buffers.
+        num_bufs_allocated = code.count(
+            "empty_strided_cuda((10, ), (1, ), torch.float32)"
+        )
+        self.assertEqual(num_bufs_allocated, 2)
+
+        # Check we're re-using buffers if not allocating.
+        num_bufs_reused = code.count("# reuse")
+        self.assertEqual(num_bufs_reused, 3)
+
+    @requires_cuda
     def test_triton_kernel_matmul_tracking(self):
         @triton.jit
         def ones_kernel(x_ptr, n_elements, BLOCK_SIZE: "tl.constexpr"):
@@ -1010,6 +1050,100 @@ def forward(self, x_1, output_1):
 
     @requires_cuda
     @skipIfRocm
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_triton_kernel_equal_to_1_float_arg(self, dynamic):
+        def f(x, y):
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+            scaling_factor = (n_elements**0) / 1.0
+            add_kernel_with_scaling[(n_elements,)](
+                x,
+                y,
+                out,
+                n_elements,
+                scaling_factor,
+                BLOCK_SIZE=16,
+            )
+            return out
+
+        x = torch.randn(2, device="cuda")
+        y = torch.randn(2, device="cuda")
+        eager_out = f(x, y)
+        compiled_out, sources = run_and_get_code(
+            torch.compile(f, dynamic=dynamic), x, y
+        )
+
+        # float 1.0 (both literal or symbolic)
+        # should not be added to equal_to_1
+        self.assertTrue("equal_to_1=()" in sources[0])
+        self.assertEqual(compiled_out, eager_out)
+
+    @requires_cuda
+    @skipIfRocm
+    def test_triton_kernel_with_imported_symbol(self):
+        @triton.jit
+        def add_kernel_with_imported_symbol(
+            in_ptr,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr + offsets, mask=mask)
+            output = fast_dividef(x, 3.14)
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def f(x):
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+            add_kernel_with_imported_symbol[(n_elements,)](
+                x, out, n_elements, BLOCK_SIZE=16
+            )
+            return out
+
+        x = torch.randn(4, device="cuda")
+        eager_out = f(x)
+        compiled_out = torch.compile(f)(x)
+
+        self.assertEqual(compiled_out, eager_out)
+
+    @requires_cuda
+    @skipIfRocm
+    def test_triton_kernel_with_imported_symbol_with_custom_name(self):
+        @triton.jit
+        def add_kernel_with_imported_symbol(
+            in_ptr,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr + offsets, mask=mask)
+            output = my_fast_dividef(x, 3.14)
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def f(x):
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+            add_kernel_with_imported_symbol[(n_elements,)](
+                x, out, n_elements, BLOCK_SIZE=16
+            )
+            return out
+
+        x = torch.randn(4, device="cuda")
+        eager_out = f(x)
+        compiled_out = torch.compile(f)(x)
+
+        self.assertEqual(compiled_out, eager_out)
+
+    @requires_cuda
+    @skipIfRocm
     @common_utils.parametrize("size", [4, 16])
     @common_utils.parametrize("dynamic", [False, True])
     def test_triton_kernel_different_shapes(self, size, dynamic):
@@ -1185,6 +1319,23 @@ def forward(self, x_1, output_1):
     @requires_cuda
     @skipIfRocm
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_triton_kernel_num_ctas(self, backend):
+        @triton.jit
+        def kernel(X):
+            return
+
+        @torch.compile(backend=backend)
+        def f(x):
+            kernel[(1,)](x, num_ctas=1)
+            kernel.run(x, num_ctas=1, grid=(1,), warmup=False)
+            return x
+
+        x = torch.randn(4, device="cuda")
+        f(x)
+
+    @requires_cuda
+    @skipIfRocm
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_special_kwargs_without_autotune(self, backend):
         @triton.jit
         def add_kernel(
@@ -1225,7 +1376,6 @@ def forward(self, x_1, output_1):
 
 def make_mutation_test(fn):
     @requires_cuda
-    @requires_lark
     @skipIfRocm
     def test_fn(self):
         from torch._higher_order_ops.triton_kernel_wrap import identify_mutated_tensors
@@ -1775,8 +1925,128 @@ class MutationTests(torch._inductor.test_case.TestCase):
             ["O_ptr"],
         )
 
+    @make_mutation_test
+    def test_for_loop_arg_2():
+        @triton.jit
+        def fwd_kernel(
+            x_ptr,
+            o_ptr,
+            M,
+            N,
+            stride_m,
+            stride_n,
+            BLOCK_B: tl.constexpr,
+            BLOCK_M: tl.constexpr,
+            BLOCK_N: tl.constexpr,
+        ):
+            # Get program ids
+            pid_m = tl.program_id(0)
+            X_block_ptr = tl.make_block_ptr(
+                base=x_ptr,
+                shape=(M, N),
+                strides=(stride_m, stride_n),
+                offsets=(0, 0),
+                block_shape=(BLOCK_M, BLOCK_N),
+                order=(1, 0),
+            )
+            O_block_ptr = tl.make_block_ptr(
+                base=o_ptr,
+                shape=(M, N),
+                strides=(stride_m, stride_n),
+                offsets=(0, 0),
+                block_shape=(BLOCK_M, BLOCK_N),
+                order=(1, 0),
+            )
 
-if HAS_CUDA and HAS_LARK:
+            for _ in range(BLOCK_B):
+                x = tl.load(X_block_ptr)
+                tl.store(O_block_ptr, x)
+
+                X_block_ptr = tl.advance(X_block_ptr, (BLOCK_M, 0))
+                O_block_ptr = tl.advance(O_block_ptr, (BLOCK_M, 0))
+
+        t = torch.randn((32, 64, 128))
+        o = torch.empty_like(t)
+        B, M, N = t.shape
+        return (
+            fwd_kernel,
+            {
+                "x_ptr": t,
+                "o_ptr": o,
+                "M": M,
+                "N": N,
+                "stride_m": N,
+                "stride_n": 1,
+                "BLOCK_B": B,
+                "BLOCK_M": M,
+                "BLOCK_N": N,
+            },
+            ["o_ptr"],
+        )
+
+    @make_mutation_test
+    def test_while_loop():
+        @triton.jit
+        def fwd_kernel(
+            x_ptr,
+            o_ptr,
+            M,
+            N,
+            stride_m,
+            stride_n,
+            BLOCK_B: tl.constexpr,
+            BLOCK_M: tl.constexpr,
+            BLOCK_N: tl.constexpr,
+        ):
+            # Get program ids
+            pid_m = tl.program_id(0)
+            X_block_ptr = tl.make_block_ptr(
+                base=x_ptr,
+                shape=(M, N),
+                strides=(stride_m, stride_n),
+                offsets=(0, 0),
+                block_shape=(BLOCK_M, BLOCK_N),
+                order=(1, 0),
+            )
+            O_block_ptr = tl.make_block_ptr(
+                base=o_ptr,
+                shape=(M, N),
+                strides=(stride_m, stride_n),
+                offsets=(0, 0),
+                block_shape=(BLOCK_M, BLOCK_N),
+                order=(1, 0),
+            )
+
+            i = 0
+            while i < BLOCK_B:
+                x = tl.load(X_block_ptr)
+                tl.store(O_block_ptr, x)
+
+                X_block_ptr = tl.advance(X_block_ptr, (BLOCK_M, 0))
+                O_block_ptr = tl.advance(O_block_ptr, (BLOCK_M, 0))
+                i += 1
+
+        t = torch.randn((32, 64, 128))
+        o = torch.empty_like(t)
+        B, M, N = t.shape
+        return (
+            fwd_kernel,
+            {
+                "x_ptr": t,
+                "o_ptr": o,
+                "M": M,
+                "N": N,
+                "stride_m": N,
+                "stride_n": 1,
+                "BLOCK_B": B,
+                "BLOCK_M": M,
+                "BLOCK_N": N,
+            },
+            ["o_ptr"],
+        )
+
+
+if HAS_CUDA:
     t = torch.randn(4)
     tt = torch.randn(4, 1)
     tests = [
@@ -1921,15 +2191,6 @@ if HAS_CUDA and HAS_LARK:
 
 common_utils.instantiate_parametrized_tests(KernelTests)
 
-no_opt_test_class = make_test_cls_with_patches(
-    KernelTests,
-    "NoOptimization",
-    "_no_optimizations",
-    (config, "optimize_user_defined_triton_kernels", False),
-)
-
-globals()[no_opt_test_class.__name__] = no_opt_test_class
-no_opt_test_class.__module__ = __name__
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

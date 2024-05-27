@@ -15,7 +15,7 @@ from .api import RequestQueue, TimerClient, TimerRequest, TimerServer
 
 __all__ = ['LocalTimerClient', 'MultiprocessingRequestQueue', 'LocalTimerServer']
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 class LocalTimerClient(TimerClient):
     """
@@ -118,8 +118,8 @@ class LocalTimerServer(TimerServer):
             os.kill(worker_id, signal.SIGKILL)
             return True
         except ProcessLookupError:
-            log.info("Process with pid=%s does not exist. Skipping", worker_id)
+            logger.info("Process with pid=%s does not exist. Skipping", worker_id)
             return True
         except Exception:
-            log.exception("Error terminating pid=%s", worker_id)
+            logger.exception("Error terminating pid=%s", worker_id)
         return False

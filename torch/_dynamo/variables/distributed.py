@@ -10,7 +10,7 @@ from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import unimplemented
 from ..external_utils import call_module_hooks_from_backward_state
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, GlobalSource
+from ..source import AttrSource
 from ..utils import istype
 from .base import VariableTracker
 from .constant import ConstantVariable
@@ -106,6 +106,9 @@ class PlacementClassVariable(DistributedVariable):
         from torch.distributed._tensor.placement_types import Placement
 
         return type(value) is type and issubclass(value, Placement)
+
+    def as_python_constant(self):
+        return self.value
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -285,33 +288,6 @@ class ProcessGroupVariable(DistributedVariable):
         from torch.testing._internal.distributed.fake_pg import FakeProcessGroup
 
         return istype(value, (ProcessGroup, FakeProcessGroup))
-
-    @staticmethod
-    def get_global_pg_variable():
-        """
-        Make a ProcessGroupVariable from torch.distributed.group.WORLD and
-        intall guards.
-        """
-        import torch.distributed as dist
-
-        source = AttrSource(
-            AttrSource(
-                base=AttrSource(
-                    base=GlobalSource(global_name="torch"),
-                    member="distributed",
-                    get_static=False,
-                ),
-                member="group",
-                get_static=False,
-            ),
-            member="WORLD",
-            get_static=False,
-        )
-        install_guard(source.make_guard(GuardBuilder.ID_MATCH))
-        return ProcessGroupVariable(
-            dist.group.WORLD,
-            source=source,
-        )
 
 
 class BackwardHookVariable(VariableTracker):

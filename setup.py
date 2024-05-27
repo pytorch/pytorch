@@ -88,35 +88,14 @@
 #     disables use of system-wide nccl (we will use our submoduled
 #     copy in third_party/nccl)
 #
-#   BUILD_CAFFE2_OPS=0
-#     disable Caffe2 operators build
-#
-#   BUILD_CAFFE2=0
-#     disable Caffe2 build
-#
-#   USE_IBVERBS
-#     toggle features related to distributed support
-#
-#   USE_OPENCV
-#     enables use of OpenCV for additional operators
-#
 #   USE_OPENMP=0
 #     disables use of OpenMP for parallelization
-#
-#   USE_FFMPEG
-#     enables use of ffmpeg for additional operators
 #
 #   USE_FLASH_ATTENTION=0
 #     disables building flash attention for scaled dot product attention
 #
 #   USE_MEM_EFF_ATTENTION=0
 #    disables building memory efficient attention for scaled dot product attention
-#
-#   USE_LEVELDB
-#     enables use of LevelDB for storage
-#
-#   USE_LMDB
-#     enables use of LMDB for storage
 #
 #   BUILD_BINARY
 #     enables the additional binaries/ build
@@ -153,12 +132,6 @@
 #
 #   MKL_THREADING
 #     MKL threading mode: SEQ, TBB or OMP (default)
-#
-#   USE_REDIS
-#     Whether to use Redis for distributed workflows (Linux only)
-#
-#   USE_ZSTD
-#     Enables use of ZSTD, if the libraries are found
 #
 #   USE_ROCM_KERNEL_ASSERT=1
 #     Enable kernel assert in ROCm platform
@@ -207,13 +180,6 @@
 #     possible values:
 #       OMP - use OpenMP for intra-op and native backend for inter-op tasks
 #       NATIVE - use native thread pool for both intra- and inter-op tasks
-#       TBB - using TBB for intra- and native thread pool for inter-op parallelism
-#
-#   USE_TBB
-#      enable TBB support
-#
-#   USE_SYSTEM_TBB
-#      Use system-provided Intel TBB.
 #
 #   USE_SYSTEM_LIBS (work in progress)
 #      Use system-provided libraries to satisfy the build dependencies.
@@ -223,6 +189,9 @@
 #   USE_MIMALLOC
 #      Static link mimalloc into C10, and use mimalloc in alloc_cpu & alloc_free.
 #      By default, It is only enabled on Windows.
+#
+#   USE_PRIORITIZED_TEXT_FOR_LD
+#      Uses prioritized text form cmake/prioritized_text.txt for LD
 
 import sys
 
@@ -263,6 +232,7 @@ from tools.build_pytorch_libs import build_caffe2
 from tools.generate_torch_version import get_torch_version
 from tools.setup_helpers.cmake import CMake
 from tools.setup_helpers.env import build_type, IS_DARWIN, IS_LINUX, IS_WINDOWS
+from tools.setup_helpers.generate_linker_script import gen_linker_script
 
 ################################################################################
 # Parameters parsed from environment
@@ -352,7 +322,6 @@ def get_submodule_folders():
         for name in [
             "gloo",
             "cpuinfo",
-            "tbb",
             "onnx",
             "foxi",
             "QNNPACK",
@@ -548,7 +517,9 @@ class build_ext(setuptools.command.build_ext.build_ext):
         omp_lib_name = (
             "libomp.dylib" if os.uname().machine == "arm64" else "libiomp5.dylib"
         )
-        if os.path.join("@rpath", omp_lib_name) not in libs:
+        omp_rpath_lib_path = os.path.join("@rpath", omp_lib_name)
+        omp_loader_lib_path = os.path.join("@loader_path", omp_lib_name)
+        if omp_rpath_lib_path not in libs:
             return
 
         # Copy libomp/libiomp5 from rpath locations
@@ -558,6 +529,20 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 continue
             target_lib = os.path.join(self.build_lib, "torch", "lib", omp_lib_name)
             self.copy_file(source_lib, target_lib)
+            # Change OMP library load path to loader_path and delete old rpath
+            # This should prevent delocate from attempting to package another instance
+            # of OpenMP library in torch wheel
+            subprocess.check_call(
+                [
+                    "install_name_tool",
+                    "-change",
+                    omp_rpath_lib_path,
+                    omp_loader_lib_path,
+                    "-delete_rpath",
+                    rpath,
+                    libtorch_cpu_path,
+                ]
+            )
             break
 
         # Copy omp.h from OpenMP_C_FLAGS and copy it into include folder
@@ -1098,6 +1083,31 @@ def main():
         'mkl>=2021.1.1,<=2021.4.0; platform_system == "Windows"',
     ]
 
+    use_prioritized_text = str(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD", ""))
+    if (
+        use_prioritized_text == ""
+        and platform.system() == "Linux"
+        and platform.processor() == "aarch64"
+    ):
+        print_box(
+            """
+            WARNING: we strongly recommend enabling linker script optimization for ARM + CUDA.
+            To do so please export USE_PRIORITIZED_TEXT_FOR_LD=1
+            """
+        )
+    if use_prioritized_text == "1" or use_prioritized_text == "True":
+        gen_linker_script(
+            filein="cmake/prioritized_text.txt", fout="cmake/linker_script.ld"
+        )
+        linker_script_path = os.path.abspath("cmake/linker_script.ld")
+        os.environ["LDFLAGS"] = os.getenv("LDFLAGS", "") + f" -T{linker_script_path}"
+        os.environ["CFLAGS"] = (
+            os.getenv("CFLAGS", "") + " -ffunction-sections -fdata-sections"
+        )
+        os.environ["CXXFLAGS"] = (
+            os.getenv("CXXFLAGS", "") + " -ffunction-sections -fdata-sections"
+        )
+
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
     dist = Distribution()
@@ -1124,7 +1134,7 @@ def main():
     install_requires += extra_install_requires
 
     extras_require = {
-        "optree": ["optree>=0.9.1"],
+        "optree": ["optree>=0.11.0"],
         "opt-einsum": ["opt-einsum>=3.3"],
     }
 
@@ -1191,6 +1201,7 @@ def main():
         "include/ATen/native/nested/*.h",
         "include/ATen/native/quantized/*.h",
         "include/ATen/native/quantized/cpu/*.h",
+        "include/ATen/native/transformers/*.h",
         "include/ATen/native/sparse/*.h",
         "include/ATen/native/utils/*.h",
         "include/ATen/quantized/*.h",
@@ -1271,6 +1282,7 @@ def main():
         "include/torch/csrc/onnx/*.h",
         "include/torch/csrc/profiler/*.h",
         "include/torch/csrc/profiler/orchestration/*.h",
+        "include/torch/csrc/profiler/standalone/*.h",
         "include/torch/csrc/profiler/stubs/*.h",
         "include/torch/csrc/profiler/unwind/*.h",
         "include/torch/csrc/profiler/python/*.h",
@@ -1338,6 +1350,12 @@ def main():
                 "include/tensorpipe/transport/ibv/*.h",
                 "include/tensorpipe/transport/shm/*.h",
                 "include/tensorpipe/transport/uv/*.h",
+            ]
+        )
+    if get_cmake_cache_vars()["USE_KINETO"]:
+        torch_package_data.extend(
+            [
+                "include/kineto/*.h",
             ]
         )
     torchgen_package_data = [

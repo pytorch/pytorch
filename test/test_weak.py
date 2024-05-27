@@ -525,7 +525,7 @@ class WeakKeyDictionaryTestCase(TestCase):
                 return self
 
             def __next__(self):
-                raise Exc()
+                raise Exc
 
         self.assertRaises(Exc, d.update, badseq())
 
@@ -866,7 +866,7 @@ class WeakKeyDictionaryScriptObjectTestCase(TestCase):
                 return self
 
             def __next__(self):
-                raise Exc()
+                raise Exc
 
         self.assertRaises(Exc, d.update, badseq())
 

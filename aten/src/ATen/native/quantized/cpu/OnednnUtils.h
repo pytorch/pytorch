@@ -115,20 +115,13 @@ enum PostOps {
   Gelu
 };
 
-static std::unordered_map<std::string, PostOps> POST_OP_TABLE = {
-  {"none", NoPostOp},
-  {"relu", Relu},
-  {"leaky_relu", LeakyRelu},
-  {"tanh", Tanh},
-  {"gelu", Gelu}
-};
 
 struct PackedLinearWeightsOnednn : public LinearPackedParamsBase {
   PackedLinearWeightsOnednn(
       std::unique_ptr<ideep::tensor> weight,
-      c10::optional<ideep::tensor> bias,
+      std::optional<ideep::tensor> bias,
       at::Tensor orig_weight,
-      c10::optional<at::Tensor> orig_bias)
+      std::optional<at::Tensor> orig_bias)
       : weight_(std::move(weight)),
         bias_(std::move(bias)),
         orig_weight_(std::move(orig_weight)),
@@ -136,9 +129,9 @@ struct PackedLinearWeightsOnednn : public LinearPackedParamsBase {
     cache_initialized_flag = std::make_unique<c10::once_flag>();
   }
   std::unique_ptr<ideep::tensor> weight_;
-  c10::optional<ideep::tensor> bias_;
+  std::optional<ideep::tensor> bias_;
   at::Tensor orig_weight_;
-  c10::optional<at::Tensor> orig_bias_;
+  std::optional<at::Tensor> orig_bias_;
 
   at::Tensor apply(
       at::Tensor input,
@@ -163,15 +156,15 @@ struct PackedLinearWeightsOnednn : public LinearPackedParamsBase {
       double output_scale,
       int64_t output_zero_point);
 
-  std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
+  std::tuple<at::Tensor, std::optional<at::Tensor>> unpack() override;
 
-  c10::optional<at::Tensor> bias() override {
+  std::optional<at::Tensor> bias() override {
     return orig_bias_;
   }
 
   static c10::intrusive_ptr<LinearPackedParamsBase> prepack(
       at::Tensor weight,
-      c10::optional<at::Tensor> bias);
+      std::optional<at::Tensor> bias);
 
  private:
   LinearPrimitiveCache prim_cache;
@@ -196,9 +189,9 @@ template <int kSpatialDim = 2>
 struct PackedConvWeightsOnednn : public ConvPackedParamsBase<kSpatialDim> {
   PackedConvWeightsOnednn(
       std::unique_ptr<ideep::tensor> weight,
-      c10::optional<ideep::tensor> bias,
+      std::optional<ideep::tensor> bias,
       at::Tensor orig_weight,
-      c10::optional<at::Tensor> orig_bias,
+      std::optional<at::Tensor> orig_bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> output_padding,
@@ -219,9 +212,9 @@ struct PackedConvWeightsOnednn : public ConvPackedParamsBase<kSpatialDim> {
   }
 
   std::unique_ptr<ideep::tensor> weight_;
-  c10::optional<ideep::tensor> bias_;
+  std::optional<ideep::tensor> bias_;
   at::Tensor orig_weight_;
-  c10::optional<at::Tensor> orig_bias_;
+  std::optional<at::Tensor> orig_bias_;
   torch::List<int64_t> stride_;
   torch::List<int64_t> padding_;
   torch::List<int64_t> output_padding_;
@@ -255,11 +248,11 @@ struct PackedConvWeightsOnednn : public ConvPackedParamsBase<kSpatialDim> {
       double output_scale,
       int64_t output_zero_point);
 
-  std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
+  std::tuple<at::Tensor, std::optional<at::Tensor>> unpack() override;
 
   static c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> prepack(
       at::Tensor weight,
-      c10::optional<at::Tensor> bias,
+      std::optional<at::Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> output_padding,
@@ -299,7 +292,7 @@ struct PackedConvWeightsOnednn : public ConvPackedParamsBase<kSpatialDim> {
   template <bool ReluFused>
   at::Tensor apply_impl(
       const at::Tensor& input,
-      const c10::optional<at::Tensor>& accum,
+      const std::optional<at::Tensor>& accum,
       double output_scale,
       int64_t output_zero_point);
 
@@ -317,19 +310,81 @@ struct PackedConvWeightsOnednn : public ConvPackedParamsBase<kSpatialDim> {
 namespace onednn_utils {
 
 static ideep::attr_t create_attr_by_post_op(
-    const std::string& post_op_name,
-    const torch::List<c10::optional<at::Scalar>>& post_op_args,
-    const dnnl::algorithm post_algorithm) {
+    const c10::string_view& binary_post_op,
+    double binary_alpha,
+    double input1_scale,
+    int64_t input1_zero_point,
+    const ideep::tensor::desc& input1_desc,
+    const c10::string_view& unary_post_op,
+    const torch::List<std::optional<at::Scalar>>& unary_post_op_args,
+    const c10::string_view& unary_post_op_algorithm) {
   using ideep::tensor;
-  PostOps post_op = POST_OP_TABLE[post_op_name];
-  if (post_op == Relu) {
-    return ideep::attr_t::fuse_relu();
-  } else if (post_op == LeakyRelu) {
-    return ideep::attr_t::fuse_relu_v2(/*alpha=*/post_op_args[0].value().to<float>());
-  } else if (post_op == Tanh) {
-    return ideep::attr_t::fuse_tanh();
-  } else if (post_op == Gelu) {
-    return ideep::attr_t::fuse_gelu_v2(0.f, 0.f, post_algorithm);
+  if (binary_post_op == "none") {
+    if (unary_post_op == "relu") {
+      return ideep::attr_t::fuse_relu();
+    } else if (unary_post_op == "leaky_relu") {
+      TORCH_CHECK(
+          unary_post_op_args.size() == 1,
+          "onednn qlinear: expect one argument for post op leaky_relu but got ", unary_post_op_args.size(), " args");
+      auto alpha = unary_post_op_args[0].value().to<float>();
+      return ideep::attr_t::fuse_relu_v2(alpha);
+    } else if (unary_post_op == "tanh") {
+      return ideep::attr_t::fuse_tanh();
+    } else if (unary_post_op == "gelu") {
+      TORCH_CHECK(
+          unary_post_op_algorithm == "none" || unary_post_op_algorithm == "tanh",
+          "onednn qlinear: algorithm for post op gelu must be none or tanh but got ", unary_post_op_algorithm);
+      auto post_algorithm = unary_post_op_algorithm == "none" ?
+        dnnl::algorithm::eltwise_gelu_erf :
+        dnnl::algorithm::eltwise_gelu_tanh;
+      return ideep::attr_t::fuse_gelu_v2(0.f, 0.f, post_algorithm);
+    } else if (unary_post_op == "hardtanh") {
+      TORCH_CHECK(
+          unary_post_op_args.size() == 2 &&
+              unary_post_op_args[0].has_value() &&
+              unary_post_op_args[1].has_value(),
+          "hardtanh is expected to have two scalar input: min_val and max_val");
+      auto lower_bound_value =
+          unary_post_op_args[0].value().to<float>();
+      auto upper_bound_value =
+          unary_post_op_args[1].value().to<float>();
+      return ideep::attr_t::fuse_clamp(lower_bound_value, upper_bound_value);
+    } else if (unary_post_op == "hardswish") {
+      return ideep::attr_t::fuse_hardswish();
+    } else if (unary_post_op == "swish") {
+      return ideep::attr_t::fuse_swish();
+    } else {
+      TORCH_CHECK(
+          unary_post_op == "none",
+          "onednn qlinear: unsupported unary post op ", unary_post_op);
+    }
+  } else if (binary_post_op == "sum") {
+    if (unary_post_op == "none") {
+      return ideep::attr_t::fuse_sum(input1_scale, input1_zero_point);
+    } else if (unary_post_op == "relu") {
+      return ideep::attr_t::residual_with_sum_zero_point(input1_scale, input1_zero_point);
+    } else {
+      TORCH_CHECK(
+          false,
+          "onednn qlinear: unsupported unary post op ", unary_post_op, " with binary post op sum");
+    }
+  } else if (binary_post_op == "add") {
+    if (unary_post_op == "none") {
+      return ideep::attr_t::fuse_binary(ideep::algorithm::binary_add, input1_desc);
+    } else if (unary_post_op == "relu") {
+      ideep::post_ops po;
+      po.append_binary(ideep::algorithm::binary_add, input1_desc);
+      po.append_eltwise(ideep::algorithm::eltwise_relu, 0, 0);
+      return ideep::attr_t::attr_post_ops(po);
+    } else {
+      TORCH_CHECK(
+          false,
+          "onednn qlinear: unsupported unary post op ", unary_post_op, " with binary post op add");
+    }
+  } else {
+    TORCH_CHECK(
+        false,
+        "onednn qlinear: unsupported binary post op ", binary_post_op);
   }
   return ideep::attr_t();
 }
@@ -415,7 +470,7 @@ at::Tensor _qconv_prepack_onednn(
     torch::List<int64_t> padding,
     torch::List<int64_t> dilation,
     int64_t groups,
-    c10::optional<torch::List<int64_t>> input_shape=c10::nullopt);
+    std::optional<torch::List<int64_t>> input_shape=c10::nullopt);
 
 static at::Tensor _quantized_convolution_onednn(
     at::Tensor act, // contains quantized values but not QTensor
@@ -424,22 +479,22 @@ static at::Tensor _quantized_convolution_onednn(
     at::Tensor weight, // MKLDNN tensor with quantized values
     at::Tensor weight_scales,
     at::Tensor weight_zero_points,
-    c10::optional<at::Tensor> bias, // Bias is packed if not None
+    std::optional<at::Tensor> bias, // Bias is packed if not None
     torch::List<int64_t> stride,
     torch::List<int64_t> padding,
     torch::List<int64_t> dilation,
     bool transposed,
     int64_t groups,
-    double inv_output_scale,
+    double output_scale,
     int64_t output_zero_point,
-    c10::optional<at::Tensor> accum=c10::nullopt, // accum to fused with conv add
+    std::optional<at::Tensor> accum=c10::nullopt, // accum to fused with conv add
     double accum_scale=1.0,
     int64_t accum_zero_point=0,
     bool fp32_output=false,
-    c10::optional<c10::string_view> binary_attr=c10::nullopt,
-    c10::optional<at::Scalar> binary_alpha=c10::nullopt,
-    c10::optional<c10::string_view> unary_attr=c10::nullopt,
-    torch::List<c10::optional<at::Scalar>> unary_scalars=torch::List<c10::optional<at::Scalar>>(),
-    c10::optional<c10::string_view> unary_algorithm=c10::nullopt);
+    std::optional<c10::string_view> binary_attr=c10::nullopt,
+    std::optional<at::Scalar> binary_alpha=c10::nullopt,
+    std::optional<c10::string_view> unary_attr=c10::nullopt,
+    torch::List<std::optional<at::Scalar>> unary_scalars=torch::List<std::optional<at::Scalar>>(),
+    std::optional<c10::string_view> unary_algorithm=c10::nullopt);
 
 #endif // #if AT_MKLDNN_ENABLED()

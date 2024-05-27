@@ -22,10 +22,9 @@ SymPy expressions yet, despite sympy.Min and sympy.Max existing.
 import itertools
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Literal, Optional, overload, Tuple, Union
+from typing_extensions import TypeAlias
 
 import sympy
-
-from typing_extensions import TypeAlias
 
 import torch
 from torch._prims_common import dtype_to_type, is_integer_dtype
@@ -81,6 +80,10 @@ class SymPyOps:
         value: TypedExpr, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None
     ) -> TypedExpr:
         return TypedExpr(value.expr, dtype)
+
+    @staticmethod
+    def abs(x: TypedExpr) -> TypedExpr:
+        return TypedExpr(abs(x.expr), x.dtype)  # type: ignore[arg-type]
 
     @staticmethod
     def square(x: TypedExpr) -> TypedExpr:

@@ -47,6 +47,7 @@ _side_effectful_functions: Set[Callable] = {
     _ops.aten._assert_async.msg,
     _ops.aten._assert_scalar.default,
     _ops.aten.copy_.default,
+    _ops.aten.set_.source_Tensor,
     _ops.aten.index_put_.default,
     _ops.aten.sym_constrain_range.default,
     _ops.aten.sym_constrain_range_for_size.default,
@@ -721,8 +722,17 @@ class Node:
                 assert isinstance(value, str)
                 for user in self.users:
                     m._replace_hook(old=self, new=value, user=user)
+        update = False
+        if (
+                hasattr(self, name) and
+                hasattr(self.graph, "_find_nodes_lookup_table") and
+                self in self.graph._find_nodes_lookup_table
+        ):
+            update = True
+            self.graph._find_nodes_lookup_table.remove(self)
         object.__setattr__(self, name, value)
-
+        if update:
+            self.graph._find_nodes_lookup_table.insert(self)
 
 @compatibility(is_backward_compatible=True)
 def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:

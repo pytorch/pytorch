@@ -6,18 +6,26 @@
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 
-namespace c10d {
-namespace intra_node_comm {
+namespace c10d::intra_node_comm {
 
 constexpr size_t kMaxDevices = 8;
-constexpr size_t kDefaultBufferSize = 10 * 1024 * 1024;
+constexpr size_t kDefaultBufferSize = 10ull * 1024 * 1024;
 
 using NvlMesh = std::array<std::array<size_t, kMaxDevices>, kMaxDevices>;
 using HybridCubeMesh = std::array<std::array<int, 4>, kMaxDevices>;
 
-enum class Topology { UNKNOWN = 0, FULLY_CONNECTED = 1, HYBRID_CUBE_MESH = 2 };
+enum class Topology : uint8_t {
+  UNKNOWN = 0,
+  FULLY_CONNECTED = 1,
+  HYBRID_CUBE_MESH = 2
+};
 
-enum class AllReduceAlgo { NONE = 0, ONE_SHOT = 1, TWO_SHOT = 2, HCM = 3 };
+enum class AllReduceAlgo : uint8_t {
+  NONE = 0,
+  ONE_SHOT = 1,
+  TWO_SHOT = 2,
+  HCM = 3
+};
 
 class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
  public:
@@ -25,9 +33,9 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
       c10::intrusive_ptr<c10d::Store> store,
       size_t rank,
       size_t worldSize,
-      c10::optional<size_t> bufferSize = c10::nullopt);
+      std::optional<size_t> bufferSize = c10::nullopt);
 
-  ~IntraNodeComm();
+  ~IntraNodeComm() override;
 
   static bool isEnabled();
 
@@ -38,6 +46,14 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
    */
   bool rendezvous();
 
+  Topology getTopology() {
+    return topology_;
+  }
+
+  size_t getBufferSize() {
+    return bufferSize_;
+  }
+
   /**
    * Selects a AllReduceAlgo that we think will outperform nccl.
    * Returns AllReduceAlgo::NONE if we don't think we can outperform nccl.
@@ -45,6 +61,17 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
   AllReduceAlgo selectAllReduceAlgo(const at::Tensor& input);
 
   at::Tensor allReduce(const at::Tensor& input, AllReduceAlgo algo);
+
+  /**
+   * Perform a barrier among the specified ranks.
+   */
+  void barrier(std::optional<std::vector<int64_t>> ranks = c10::nullopt);
+
+  at::Tensor getBuffer(
+      size_t rank,
+      const std::vector<int64_t>& sizes,
+      c10::ScalarType dtype,
+      int64_t storageOffset);
 
  private:
   at::Tensor oneShotAllReduce(
@@ -63,17 +90,18 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
   size_t rank_;
   size_t worldSize_;
   size_t bufferSize_;
+  at::cuda::CUDAEvent barrierReady_;
 
   /**
    * Members initialized after rendezvous
    */
   bool isInitialized_ = false;
   Topology topology_ = Topology::UNKNOWN;
-  std::array<void*, kMaxDevices> p2pStates_;
-  std::array<void*, kMaxDevices> buffers_;
-  void* p2pStatesDev_;
-  void* buffersDev_;
-  void* topoInfo_;
+  std::array<void*, kMaxDevices> p2pStates_{};
+  std::array<void*, kMaxDevices> buffers_{};
+  void* p2pStatesDev_{};
+  void* buffersDev_{};
+  void* topoInfo_{};
 };
 
 /**
@@ -115,5 +143,4 @@ class IntraNodeCommWork : public c10d::Work {
 
 TORCH_API int64_t getIntraNodeCommUsageCounter();
 
-} // namespace intra_node_comm
-} // namespace c10d
+} // namespace c10d::intra_node_comm

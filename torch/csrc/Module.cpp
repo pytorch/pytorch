@@ -1,3 +1,4 @@
+#include <ATen/DeviceAccelerator.h>
 #include <c10/util/Optional.h>
 #include <fmt/core.h>
 #include <sys/types.h>
@@ -8,6 +9,7 @@
 #endif
 
 #include <ATen/ATen.h>
+#include <ATen/BlasBackend.h>
 #include <ATen/DLConvertor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/LegacyVmapMode.h>
@@ -15,10 +17,12 @@
 #include <ATen/Parallel.h>
 #include <ATen/Utils.h>
 #include <ATen/core/Vitals.h>
+#include <ATen/detail/AcceleratorHooksInterface.h>
 #include <ATen/dlpack.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/Normalization.h>
+#include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
@@ -39,6 +43,7 @@
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/Event.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
@@ -70,6 +75,7 @@
 #include <torch/csrc/lazy/python/init.h>
 #include <torch/csrc/monitor/python_init.h>
 #include <torch/csrc/mps/Module.h>
+#include <torch/csrc/mtia/Module.h>
 #include <torch/csrc/multiprocessing/init.h>
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/profiler/python/init.h>
@@ -162,12 +168,14 @@ static PyObject* THPModule_initExtension(
     PyObject* shm_manager_path) {
   HANDLE_TH_ERRORS
 #if !defined(FBCODE_CAFFE2)
-  if (torch::get_cpp_stacktraces_enabled() && !torch::get_disable_addr2line()) {
+  if (torch::get_cpp_stacktraces_enabled()) {
     c10::SetStackTraceFetcher([]() -> std::string {
       auto tb = torch::CapturedTraceback::gather(false, false, true);
-      LOG(WARNING)
-          << "symbolizing C++ stack trace for exception; if this hangs, rerun with TORCH_DISABLE_ADDR2LINE=1..."
-          << std::endl;
+      if (torch::get_symbolize_mode() == torch::unwind::Mode::addr2line) {
+        LOG(WARNING)
+            << "symbolizing C++ stack trace for exception; if this hangs, rerun with TORCH_DISABLE_ADDR2LINE=1..."
+            << std::endl;
+      }
       auto s_tbs = torch::symbolize({tb.get()});
       std::stringstream oss;
       oss << "C++ CapturedTraceback:" << std::endl;
@@ -390,10 +398,10 @@ PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
 
   // The TensorImpls contain PyObjectSlots that have a reference to the PyObject
   // associated with the TensorImpl. Swap this field as well.
-  c10::optional<PyObject*> mb_obj_a =
+  std::optional<PyObject*> mb_obj_a =
       a->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
           getPyInterpreter(), /*ignore_hermetic_tls=*/false);
-  c10::optional<PyObject*> mb_obj_b =
+  std::optional<PyObject*> mb_obj_b =
       b->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
           getPyInterpreter(), /*ignore_hermetic_tls=*/false);
   TORCH_INTERNAL_ASSERT(
@@ -411,6 +419,19 @@ PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
       getPyInterpreter(), b_, c10::impl::PyInterpreterStatus::TAGGED_BY_US);
 
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_check_tp_alloc_is_default(
+    PyObject* _unused,
+    PyObject* cls) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK_TYPE(
+      PyType_Check(cls),
+      "cls must be a type (got ",
+      Py_TYPE(cls)->tp_name,
+      ")");
+  return PyBool_FromLong(Py_TYPE(cls)->tp_alloc == PyType_GenericAlloc);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1042,9 +1063,7 @@ PyObject* THPModule_setFlushDenormal(PyObject* _unused, PyObject* arg) {
 PyObject* THPModule_getDefaultDtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   auto scalar_type = torch::tensors::get_default_scalar_type();
-  auto dtype = (PyObject*)torch::getTHPDtype(scalar_type);
-  Py_INCREF(dtype);
-  return dtype;
+  return Py_NewRef(torch::getTHPDtype(scalar_type));
   END_HANDLE_TH_ERRORS
 }
 
@@ -1262,6 +1281,10 @@ static PyMethodDef TorchMethods[] = { // NOLINT
     {"_autograd_init", THPAutograd_initExtension, METH_NOARGS, nullptr},
     {"_add_docstr", THPModule_addDocStr, METH_VARARGS, nullptr},
     {"_swap_tensor_impl", THPModule_swap_tensor_impl, METH_VARARGS, nullptr},
+    {"_check_tp_alloc_is_default",
+     THPModule_check_tp_alloc_is_default,
+     METH_O,
+     nullptr},
     {"_init_names", THPModule_initNames, METH_O, nullptr},
     {"_has_distributed", THPModule_hasDistributed, METH_NOARGS, nullptr},
     {"_set_default_tensor_type",
@@ -1603,6 +1626,7 @@ PyObject* initModule() {
   THPQScheme_init(module);
   THPDevice_init(module);
   THPStream_init(module);
+  THPEvent_init(module);
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));
@@ -1638,6 +1662,7 @@ PyObject* initModule() {
 #ifdef USE_XPU
   torch::xpu::initModule(module);
 #endif
+  torch::mtia::initModule(module);
   torch::cpu::initModule(module);
   torch::initVerboseBindings(module);
   ASSERT_TRUE(THPStorage_init(module));
@@ -1797,7 +1822,7 @@ Call this whenever a new thread is created in order to propagate values from
       "_select_conv_backend",
       [](const at::Tensor& input,
          const at::Tensor& weight,
-         const c10::optional<at::Tensor>& bias_opt,
+         const std::optional<at::Tensor>& bias_opt,
          at::SymIntArrayRef stride_,
          at::SymIntArrayRef padding_,
          at::SymIntArrayRef dilation_,
@@ -1831,14 +1856,14 @@ Call this whenever a new thread is created in order to propagate values from
       "_select_conv_backend",
       [](const at::Tensor& input,
          const at::Tensor& weight,
-         const c10::optional<at::Tensor>& bias,
+         const std::optional<at::Tensor>& bias,
          at::SymIntArrayRef stride_,
          at::SymIntArrayRef padding_,
          at::SymIntArrayRef dilation_,
          bool transposed_,
          at::SymIntArrayRef output_padding_,
          c10::SymInt groups_,
-         c10::optional<std::vector<c10::SymInt>> bias_sizes_opt) {
+         std::optional<std::vector<c10::SymInt>> bias_sizes_opt) {
         c10::OptionalArrayRef<c10::SymInt> ref = c10::nullopt;
         if (bias_sizes_opt) {
           ref = (*bias_sizes_opt);
@@ -1877,7 +1902,7 @@ Call this whenever a new thread is created in order to propagate values from
       .def(py::init([](at::Tensor const& query,
                        at::Tensor const& key,
                        at::Tensor const& value,
-                       c10::optional<at::Tensor> attn_mask,
+                       std::optional<at::Tensor> attn_mask,
                        double dropout,
                        bool is_causal) {
         return sdp::sdp_params{
@@ -1933,6 +1958,17 @@ Call this whenever a new thread is created in order to propagate values from
     return at::globalContext().linalgPreferredBackend();
   });
 
+  py::enum_<at::BlasBackend>(py_module, "_BlasBackend")
+      .value("Cublas", at::BlasBackend::Cublas)
+      .value("Cublaslt", at::BlasBackend::Cublaslt);
+
+  py_module.def("_set_blas_preferred_backend", [](at::BlasBackend b) {
+    at::globalContext().setBlasPreferredBackend(b);
+  });
+  py_module.def("_get_blas_preferred_backend", []() {
+    return at::globalContext().blasPreferredBackend();
+  });
+
   py_module.def(
       "_construct_storage_from_data_pointer",
       [](int64_t data_ptr, c10::Device device, size_t size_bytes) {
@@ -1960,6 +1996,70 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def("_is_key_in_tls", [](const std::string& key) -> bool {
     return at::impl::ThreadLocalPythonObjects::get_state().contains(key);
   });
+
+  py_module.def("_accelerator_hooks_device_count", []() {
+    auto device_type = at::getAccelerator();
+    if (device_type.has_value()) {
+      return at::globalContext()
+          .getAcceleratorHooksInterface(device_type.value())
+          .deviceCount();
+    }
+    return c10::DeviceIndex(-1);
+  });
+
+  py_module.def(
+      "_accelerator_hooks_set_current_device",
+      [](c10::DeviceIndex device_index) {
+        auto device_type = at::getAccelerator();
+        if (device_type.has_value()) {
+          at::globalContext()
+              .getAcceleratorHooksInterface(device_type.value())
+              .setCurrentDevice(device_index);
+        }
+      });
+
+  py_module.def("_accelerator_hooks_get_current_device", []() {
+    auto device_type = at::getAccelerator();
+    if (device_type.has_value()) {
+      return at::globalContext()
+          .getAcceleratorHooksInterface(device_type.value())
+          .getCurrentDevice();
+    }
+    return c10::DeviceIndex(-1);
+  });
+
+  py_module.def(
+      "_accelerator_hooks_exchange_device", [](c10::DeviceIndex device_index) {
+        auto device_type = at::getAccelerator();
+        if (device_type.has_value()) {
+          return at::globalContext()
+              .getAcceleratorHooksInterface(device_type.value())
+              .exchangeDevice(device_index);
+        }
+        return c10::DeviceIndex(-1);
+      });
+
+  py_module.def(
+      "_accelerator_hooks_maybe_exchange_device",
+      [](c10::DeviceIndex device_index) {
+        auto device_type = at::getAccelerator();
+        if (device_type.has_value()) {
+          return at::globalContext()
+              .getAcceleratorHooksInterface(device_type.value())
+              .maybeExchangeDevice(device_index);
+        }
+        return c10::DeviceIndex(-1);
+      });
+
+  py_module.def(
+      "_get_accelerator",
+      [](std::optional<bool> check = c10::nullopt) {
+        return c10::Device(
+            at::getAccelerator(check.value_or(false))
+                .value_or(c10::DeviceType::CPU),
+            -1);
+      },
+      py::arg("check") = nullptr);
 
 #ifdef USE_CUDA
   PyObject* has_cuda = Py_True;
@@ -2094,7 +2194,7 @@ Call this whenever a new thread is created in order to propagate values from
       _DeviceDtypeHasher>;
   py_module.def(
       "_group_tensors_by_device_and_dtype",
-      [](const std::vector<std::vector<c10::optional<at::Tensor>>>&
+      [](const std::vector<std::vector<std::optional<at::Tensor>>>&
              nested_tensorlist,
          const bool with_indices) {
         _FlatMap map;
