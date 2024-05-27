@@ -14,11 +14,10 @@ import onnx_test_common
 import onnxruntime  # type: ignore[import]
 import parameterized  # type: ignore[import]
 import pytorch_test_common
-
-import transformers  # type: ignore[import]
-
 import torch
 import torch.onnx
+
+import transformers  # type: ignore[import]
 from torch import nn
 
 from torch._subclasses import fake_tensor

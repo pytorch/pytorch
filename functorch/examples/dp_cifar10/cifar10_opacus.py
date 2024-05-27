@@ -12,16 +12,15 @@ import sys
 from datetime import datetime, timedelta
 
 import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torch.utils.data
 import torchvision.transforms as transforms
 from opacus import PrivacyEngine
 from torchvision import models
 from torchvision.datasets import CIFAR10
 from tqdm import tqdm
-
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import torch.utils.data
 
 
 logging.basicConfig(

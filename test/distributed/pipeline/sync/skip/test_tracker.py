@@ -10,7 +10,6 @@ import threading
 from queue import Queue
 
 import pytest
-
 import torch
 from torch import nn
 

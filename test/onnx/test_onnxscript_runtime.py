@@ -5,9 +5,8 @@ from typing import List
 
 import onnx_test_common
 import onnxscript
-from onnxscript.onnx_types import FLOAT
-
 import torch
+from onnxscript.onnx_types import FLOAT
 from torch.onnx._internal import jit_utils
 from torch.testing._internal import common_utils
 
