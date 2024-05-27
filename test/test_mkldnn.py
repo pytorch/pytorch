@@ -1628,10 +1628,9 @@ class TestMkldnn(TestCase):
 
     @recover_orig_fp32_precision()
     def test_invalid(self):
-        with self.assertRaisesRegex(RuntimeError, "Invalid precision"):
-            torch.backends.mkldnn.matmul.fp32_precision = "tf32"
-        with self.assertRaisesRegex(RuntimeError, "Invalid precision"):
-            torch.backends.cuda.matmul.fp32_precision = "bf16"
+        # use default if user set a not supported precision
+        torch.backends.mkldnn.matmul.fp32_precision = "tf32"
+        self.assertEqual(torch.backends.mkldnn.matmul.fp32_precision, "default")
 
 instantiate_device_type_tests(TestMkldnn, globals(), only_for=('cpu',))
 
