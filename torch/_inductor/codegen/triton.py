@@ -1203,14 +1203,16 @@ class TritonKernel(SIMDKernel):
         value = f"{value}.to({triton_store_type(V.graph.get_dtype(name))})"
         return f"tl.store({block_ptr}, {value}{other})"
 
-    def issue_check_bounds(
+    def check_bounds(
         self,
-        buffer: IndentedBuffer,
         expr: sympy.Expr,
         size: sympy.Expr,
         lower: bool,
         upper: bool,
     ):
+        if not (lower or upper):
+            return
+
         assert isinstance(expr, sympy.Expr)
         indexing = self.indexing(expr, block_ptr=False)
         assert isinstance(indexing, IndexingOptions)
@@ -1223,6 +1225,11 @@ class TritonKernel(SIMDKernel):
         line = self.indirect_assert(
             index_str, "0" if lower else None, size_str, mask_str
         )
+
+        indirect = self.is_indirect_indexing(expr) or any(
+            self.is_indirect_indexing(m) for m in indexing.mask_vars
+        )
+        buffer = self.compute if indirect else self.indexing_code
         self.cse.generate(buffer, line, assignment=False)
 
     def load(self, name: str, index: sympy.Expr):
