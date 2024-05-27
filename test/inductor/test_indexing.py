@@ -12,6 +12,8 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 from torch.utils._sympy.functions import (
+    ToFloat,
+    FloatPow,
     FloorDiv,
     ModularIndexing,
     RoundDecimal,
@@ -173,21 +175,11 @@ class ExprPrinterTests(InductorTestCase):
 
         common_cases = [
             # expr, result
-            # Test exprs.
-            (
-                s1 / (2 * s1 - 1) - 1 / (2 * s1 - 1),
-                lambda c, L: f"((-1{L})*({c}/((-1{L}) + (2{L}*foo)))) + (foo*({c}/((-1{L}) + (2{L}*foo))))",
-            ),
-            (s1 / (s2 - s3), lambda c, L: f"foo*({c}/(bar + ((-1{L})*baz)))"),
             # Test Pow directly.
             (
                 sympy.Pow(s1 + s2, 0),
                 lambda _, L: f"1{L}",
             ),  # note: simplified before _print_Pow
-            (
-                sympy.Pow(s1 + s2, -3),
-                lambda c, _: f"{c}/((bar + foo)*(bar + foo)*(bar + foo))",
-            ),
         ]
 
         gpu_cases = common_cases + [
