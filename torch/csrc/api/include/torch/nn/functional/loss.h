@@ -887,7 +887,7 @@ inline Tensor nll_loss(
     const Tensor& target,
     const Tensor& weight,
     int64_t ignore_index,
-    const NLLLossFuncOptions::reduction_t reduction) {
+    const NLLLossFuncOptions::reduction_t& reduction) {
   if (input.dim() < 2) {
     TORCH_CHECK(false, "Expected 2 or more dimensions (got ", input.dim(), ")");
   }

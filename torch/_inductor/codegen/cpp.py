@@ -8,7 +8,7 @@ import re
 import sys
 from copy import copy, deepcopy
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, cast, Dict, List, Optional, Sequence, Set, Tuple, Union
 
 import sympy
 
@@ -20,6 +20,7 @@ from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
+from ..._dynamo.utils import counters
 
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
@@ -45,7 +46,7 @@ from ..utils import (
     sympy_subs,
 )
 
-from ..virtualized import ops, OpsValue, V
+from ..virtualized import NullKernelHandler, ops, OpsValue, V
 from .common import (
     BracesBuffer,
     CppWrapperKernelArgs,
@@ -2808,9 +2809,8 @@ class CppVecKernelChecker(CppVecKernel):
         return self.simd_vec
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        assert self._orig_wrapper_code is not None
         # Restore the wrapper_code
-        V.graph.wrapper_code = self._orig_wrapper_code
+        V.graph.wrapper_code = self._orig_wrapper_code  # type: ignore[assignment]
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
     def __enter__(self):
@@ -3027,7 +3027,7 @@ class CppKernelProxy(CppKernel):
         scheduler_node._lowp_fp_type = _lowp_fp_type  # type: ignore[attr-defined]
         return True
 
-    def legalize_lowp_fp_dtype(self, nodes):
+    def legalize_lowp_fp_dtype_loopbody(self, loop_body: ir.LoopBody):
         def add_to_dtype(sub_graph: torch.fx.Graph):
             def is_lowp_fp_load(node: torch.fx.Node):
                 if node.target not in ["load"]:
@@ -3165,11 +3165,11 @@ class CppKernelProxy(CppKernel):
 
             eliminate_to_dtype(sub_graph)
 
-        def _legalize_lowp_fp(loop_body: ir.LoopBody):
-            sub_blocks = [loop_body.root_block] + list(loop_body.subblocks.values())
-            for sub_block in sub_blocks:
-                add_to_dtype(sub_block.graph)
+        sub_blocks = [loop_body.root_block] + list(loop_body.subblocks.values())
+        for sub_block in sub_blocks:
+            add_to_dtype(sub_block.graph)
 
+    def legalize_lowp_fp_dtype(self, nodes):
         if all(
             isinstance(_node, SchedulerNode) and self.is_lowp_fp_scheduler(_node)
             for _node in nodes
@@ -3206,29 +3206,13 @@ class CppKernelProxy(CppKernel):
             should_legalize = not is_memory_copy_scheduler_node(node)
             if should_legalize:
                 body: ir.LoopBody = node._body
-                _legalize_lowp_fp(body)
+                self.legalize_lowp_fp_dtype_loopbody(body)
 
-    def codegen_nodes(self, nodes: List[SchedulerNode]):
-        # Legalize BF16 node by adding to_dtype explicitly
-        self.legalize_lowp_fp_dtype(nodes)
-        self.data_type_propagation(nodes)
-
-        assert len(nodes) >= 1
-        first_node = nodes[0]
-        vec_dtype = (
-            first_node._lowp_fp_type  # type: ignore[attr-defined]
-            if all(
-                hasattr(_node, "_lowp_fp_type")
-                and _node._lowp_fp_type == first_node._lowp_fp_type  # type: ignore[attr-defined]
-                for _node in nodes
-            )
-            else torch.float
-        )
-
+    def codegen_functions(self, fn_list, var_sizes_list, vec_dtype=torch.float):
+        # TODO(jgong5): remove vec_dtype arg with alternative tiling factors for various dtypes
+        assert len(fn_list) == len(var_sizes_list)
         kernel_group = self.kernel_group
-        _, (group, reduction_group) = max(
-            nodes, key=lambda x: int(x.is_reduction())
-        ).group
+        group, reduction_group = max(var_sizes_list, key=lambda sizes: len(sizes[1]))
 
         self.set_ranges(group, reduction_group)
 
@@ -3244,22 +3228,22 @@ class CppKernelProxy(CppKernel):
         def run(kernel):
             vars, reduction_vars = kernel.set_ranges(group, reduction_group)
             in_suffix = False
-            for node in nodes:
-                if node.group[1] in [
+            for fn, var_sizes in zip(fn_list, var_sizes_list):
+                if var_sizes in [
                     (group, reduction_group),
                     (tuple(itertools.chain(group, reduction_group)), ()),
                 ]:
                     assert not in_suffix
-                    node.run(vars, reduction_vars)
+                    fn(vars, reduction_vars)
                 else:
                     in_suffix = True
-                    assert node.group[1] == (
+                    assert var_sizes == (
                         group,
                         (),
-                    ), f"unexpected group: {node.group[1]} != {group}, {reduction_group}"
+                    ), f"unexpected group: {var_sizes} != {group}, {reduction_group}"
                     # we can fuse in some extra pointwise into the suffix
                     with kernel.write_to_suffix():
-                        node.run(vars, ())
+                        fn(vars, ())
 
         scalar_kernel = codegen_kernel(CppKernel)
         V.graph.removed_buffers |= scalar_kernel.removed_buffers
@@ -3271,8 +3255,8 @@ class CppKernelProxy(CppKernel):
 
         def select_tiling_indices(tiling_factor):
             all_index = []
-            for node in nodes:
-                rw = dependencies.extract_read_writes(node._body, *node._sizes)
+            for fn, var_sizes in zip(fn_list, var_sizes_list):
+                rw = dependencies.extract_read_writes(fn, *var_sizes)
                 all_index += [dep.index for dep in itertools.chain(rw.reads, rw.writes)]
             contig_vars = set()
             contig_vars_list = []
@@ -3386,6 +3370,41 @@ class CppKernelProxy(CppKernel):
                 inner_main_loop.set_kernel(tile2d_kernel)
                 inner_tail_loop.set_kernel(vec_kernel)
 
+    def codegen_loop_bodies(self, loop_bodies, var_sizes_list):
+        for body in loop_bodies:
+            self.legalize_lowp_fp_dtype_loopbody(body)
+            DataTypePropagation.propagate_loopbody(body)
+        self.codegen_functions(loop_bodies, var_sizes_list)
+
+    def codegen_nodes(self, nodes: List[SchedulerNode]):
+        # Legalize BF16 node by adding to_dtype explicitly
+        self.legalize_lowp_fp_dtype(nodes)
+        self.data_type_propagation(nodes)
+
+        assert len(nodes) >= 1
+        first_node = nodes[0]
+        vec_dtype = (
+            first_node._lowp_fp_type  # type: ignore[attr-defined]
+            if all(
+                hasattr(_node, "_lowp_fp_type")
+                and _node._lowp_fp_type == first_node._lowp_fp_type  # type: ignore[attr-defined]
+                for _node in nodes
+            )
+            else torch.float
+        )
+
+        def fn(node, *index_vars):
+            node.decide_inplace_update()
+            node.mark_run()
+            if isinstance(V.kernel, NullKernelHandler):
+                return node._body(*index_vars)
+            else:
+                return node.codegen(index_vars)
+
+        fn_list = [functools.partial(fn, node) for node in nodes]
+        var_sizes_list = [node.group[1] for node in nodes]
+        self.codegen_functions(fn_list, var_sizes_list, vec_dtype)
+
     def codegen_loops(self, code, worksharing):
         self.codegen_loops_impl(self.loop_nest, code, worksharing)
 
@@ -3393,7 +3412,7 @@ class CppKernelProxy(CppKernel):
 class OuterLoopFusedKernel(CppKernel):
     def __init__(self, kernel_group):
         super().__init__(kernel_group.args, kernel_group.ws.num_threads)
-        self.inner: List["LoopLevel"] = []
+        self.inner: List[LoopLevel] = []
 
     def decide_parallel_depth(self, max_parallel_depth, threads) -> int:
         kernels_parallel_depth = []
@@ -3450,6 +3469,9 @@ class CppScheduling(BaseScheduling):
     def fuse(self, node1, node2):
         if node1.is_foreach() or node2.is_foreach():
             return ForeachKernelSchedulerNode.fuse(node1, node2)
+        elif node1.is_template():
+            assert not node2.is_template()
+            return FusedSchedulerNode.fuse(node1, node2)
         else:
             if (
                 self._why_fuse_nodes(node1, node2)
@@ -3582,6 +3604,8 @@ class CppScheduling(BaseScheduling):
         return self._why_fuse_nodes(node1, node2) is not None
 
     def can_fuse_horizontal(self, node1, node2):
+        if node1.is_template() or node2.is_template():
+            return False
         if (
             len(node1.get_nodes()) + len(node2.get_nodes())
             > config.cpp.max_horizontal_fusion_size
@@ -3646,7 +3670,9 @@ class CppScheduling(BaseScheduling):
 
     def can_fuse_vertical_outer_loop(self, node1, node2):
         return (
-            node1.get_names() & node2.ancestors
+            not node1.is_template()
+            and not node2.is_template()
+            and node1.get_names() & node2.ancestors
             and not (
                 self._can_fuse_horizontal_impl(node1, node2)
                 and not node1.is_reduction()
@@ -3662,6 +3688,11 @@ class CppScheduling(BaseScheduling):
             return 0
 
     def can_fuse_vertical(self, node1, node2):
+        if node2.is_template():
+            # TODO(jgong5): support pre-op fusion with template
+            return False
+        if node1.is_template():
+            return not node2.is_reduction()
         return (
             self._can_fuse_horizontal_impl(node1, node2) and not node1.is_reduction()
         ) or self.can_fuse_vertical_outer_loop(node1, node2)
@@ -3718,6 +3749,44 @@ class CppScheduling(BaseScheduling):
         if args_num > CppScheduling.MAX_FUSED_KERNEL_ARGS_NUM:
             self._set_flush_status(True)
 
+    def is_cpp_template(self, node: BaseSchedulerNode) -> bool:
+        return isinstance(node, SchedulerNode) and isinstance(
+            node.node, ir.CppTemplateBuffer
+        )
+
+    def codegen_template(
+        self,
+        template_node: BaseSchedulerNode,
+        epilogue_nodes: Sequence[BaseSchedulerNode],
+    ):
+        """
+        Codegen a CPP template, possibly with fused epilogues
+        """
+        counters["inductor"]["cpp_epilogue_fusion_counter"] += len(epilogue_nodes)
+        assert self.is_cpp_template(
+            template_node
+        ), "Template node passed to CppScheduler.codegen_template must be a SchedulerNode that wraps a CppTemplateBuffer"
+        template_node = cast(SchedulerNode, template_node)
+        _, (_, rnumel) = template_node.group
+        assert rnumel == ()
+        ctb: ir.CppTemplateBuffer = cast(ir.CppTemplateBuffer, template_node.node)
+        epilogue_ir_nodes: List[Optional[ir.Buffer]] = [n.node for n in epilogue_nodes]
+        assert all(
+            isinstance(n, ir.ComputedBuffer) for n in epilogue_ir_nodes
+        ), "Epilogue nodes must all be instances of ir.ComputedBuffer"
+        kernel, render = ctb.make_kernel_render(ctb, epilogue_nodes=epilogue_ir_nodes)
+        with kernel:
+            for node in [template_node, *epilogue_nodes]:
+                node.mark_run()  # type: ignore[attr-defined]
+            src_code = render()
+
+        with V.set_kernel_handler(kernel):
+            node_schedule = [template_node, *epilogue_nodes]
+            kernel_name = self.define_kernel(src_code, node_schedule, kernel.args)
+        kernel.call_kernel(kernel_name, ctb)
+        V.graph.removed_buffers |= kernel.removed_buffers
+        self.scheduler.free_buffers()
+
     def _get_scheduled_num_args(self):
         return self.kernel_group.get_num_args()
 
@@ -3727,7 +3796,7 @@ class CppScheduling(BaseScheduling):
     def codegen_sync(self):
         pass
 
-    def define_kernel(self, src_code, nodes):
+    def define_kernel(self, src_code, nodes, kernel_args=None):
         wrapper = V.graph.wrapper_code
         fused_name = (
             get_fused_kernel_name(nodes, config.cpp.descriptive_names)
@@ -3743,7 +3812,8 @@ class CppScheduling(BaseScheduling):
         src_code = src_code.replace("#pragma CMT", "//")
 
         compile_wrapper = IndentedBuffer()
-        _, _, arg_types = self.kernel_group.args.cpp_argdefs()
+        args = self.kernel_group.args if kernel_args is None else kernel_args
+        _, _, arg_types = args.cpp_argdefs()
         if not V.graph.cpp_wrapper:
             compile_wrapper.writeline(f"async_compile.cpp_pybinding({arg_types!r}, '''")
         compile_wrapper.splice(src_code, strip=True)

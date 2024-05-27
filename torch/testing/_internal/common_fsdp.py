@@ -893,7 +893,7 @@ class MLPStack(nn.Sequential):
         tp_mesh: DeviceMesh,
         dp_mesh: DeviceMesh,
         use_activation_checkpointing: bool,
-        reshard_after_forward: bool,
+        **fsdp_kwargs,
     ) -> "MLPStack":
         parallelize_plan = {
             # Pass `use_local_output=False` to keep as DTensor to preserve
@@ -915,10 +915,8 @@ class MLPStack(nn.Sequential):
                 continue
             if use_activation_checkpointing:
                 checkpoint(module)
-            fully_shard(
-                module, mesh=dp_mesh, reshard_after_forward=reshard_after_forward
-            )
-        fully_shard(self, mesh=dp_mesh, reshard_after_forward=reshard_after_forward)
+            fully_shard(module, mesh=dp_mesh, **fsdp_kwargs)
+        fully_shard(self, mesh=dp_mesh, **fsdp_kwargs)
         return self
 
 
