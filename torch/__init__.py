@@ -2065,9 +2065,12 @@ def _constrain_as_size(symbol, min: Optional[builtins.int] = None, max: Optional
     """
     torch.sym_constrain_range_for_size(symbol, min=min, max=max)
 
+<<<<<<< HEAD
 # jczaja: Here we load device_extensions
 # TODO: logging
 # TODO: UTs
+=======
+>>>>>>> 0a9c5cd (Implement device extension autoload mechanism)
 def import_device_backends():
     if sys.version_info < (3, 10):
         from importlib_metadata import entry_points
