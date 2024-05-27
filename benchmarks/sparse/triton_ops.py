@@ -125,7 +125,6 @@ if __name__ == "__main__":
     import sys
 
     import triton
-
     from torch.testing import make_tensor
 
     torch.manual_seed(0)

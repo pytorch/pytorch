@@ -10,7 +10,6 @@ from itertools import chain, product
 from numbers import Number
 
 import numpy as np
-
 import torch
 
 import torch.autograd.forward_ad as fwAD

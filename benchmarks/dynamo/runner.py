@@ -47,13 +47,12 @@ import matplotlib.pyplot as plt
 
 import numpy as np
 import pandas as pd
-from matplotlib import rcParams
-from scipy.stats import gmean
-from tabulate import tabulate
-
 import torch
 
 import torch._dynamo
+from matplotlib import rcParams
+from scipy.stats import gmean
+from tabulate import tabulate
 
 rcParams.update({"figure.autolayout": True})
 plt.rc("axes", axisbelow=True)

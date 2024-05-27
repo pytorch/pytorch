@@ -10,7 +10,6 @@ from copy import deepcopy
 from itertools import chain
 
 import pytest
-
 import torch
 from torch import nn, optim
 

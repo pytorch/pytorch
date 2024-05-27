@@ -4,7 +4,6 @@
 import io
 
 import cv2
-
 import torch
 import torch.utils.bundled_inputs
 from torch.testing._internal.common_utils import TestCase
