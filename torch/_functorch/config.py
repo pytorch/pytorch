@@ -11,6 +11,8 @@ import os
 import sys
 from typing import TYPE_CHECKING
 
+move_view_chain_to_bwd_graph = False
+
 # Converts torch rng ops to their functional philox rng equivalents. Note that
 # we functionalize only CUDA rng ops today.
 functionalize_rng_ops = False

@@ -5,6 +5,10 @@ from contextlib import contextmanager, nullcontext
 from functools import partial, wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from unittest.mock import patch
+import sys
+import logging
+torch_log = logging.getLogger("torch")
+import torch.distributed as dist
 
 import torch
 import torch.nn as nn

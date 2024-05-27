@@ -133,10 +133,11 @@ def are_all_mutations_under_no_grad_or_inference_mode(t):
 def was_inductor_storage_resized(t):
     if is_traceable_wrapper_subclass(t):
         attrs, _ = t.__tensor_flatten__()
-        if any(was_inductor_storage_resized(getattr(t, attr)) for attr in attrs):
-            raise RuntimeError(
-                f"storage resizing is not supported on tensor subclass: {type(t)}"
-            )
+        # if any(was_inductor_storage_resized(getattr(t, attr)) for attr in attrs):
+        #     raise RuntimeError(
+        #         f"storage resizing is not supported on tensor subclass: {type(t)}"
+        #     )
+        return any(was_inductor_storage_resized(getattr(t, attr)) for attr in attrs)
     elif not isinstance(t, torch.Tensor):
         return False
     else:

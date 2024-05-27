@@ -5,6 +5,8 @@ from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
+from torch.autograd.variable import queue_callback
+from torch.autograd.graph import register_multi_grad_hook
 from torch.distributed._composable_state import (
     _get_module_state,
     _insert_module_state,
@@ -114,8 +116,9 @@ class FSDPState(_State):
                     )
                 state._is_root = False
             self._state_ctx.all_states.append(state)
-        if self._fsdp_param_group:
-            # For the root, do not reshard after forward since for training,
+        if self._fsdp_param_group and not self._reshard_after_forward_root:
+            # For the root, if `self._reshard_after_forward_root` is not set,
+            # do not reshard after forward since for training,
             # the parameters would be freed and all-gathered immediately
             self._fsdp_param_group.post_forward_mesh_info = None
         self._init_fqns()

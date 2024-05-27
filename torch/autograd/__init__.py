@@ -20,6 +20,7 @@ from .function import Function, NestedIOFunction
 from .grad_mode import (
     _force_original_view_tracking,
     _unsafe_preserve_version_counter,
+    _unsafe_preserve_version_counter_for_tensors,
     enable_grad,
     inference_mode,
     no_grad,

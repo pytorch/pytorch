@@ -887,7 +887,13 @@ class TensorVariable(VariableTracker):
 
         tx = InstructionTranslator.current_tx()
 
-        if not self.source:
+        # It is always sound to treat any hook as intermediary.
+        # In this case - it was very tricky getting residual hook mapping right,
+        # so Jansel proposed we just use the same higher order op pattern Voz uses for
+        # intermediaries.
+        compiled_autograd_enabled = compiled_autograd.compiled_autograd_enabled
+        should_treat_post_acc_grad_hook_as_intermediary = compiled_autograd_enabled and name == "register_post_accumulate_grad_hook"
+        if not self.source or should_treat_post_acc_grad_hook_as_intermediary:
             if not compiled_autograd.compiled_autograd_enabled:
                 # TODO(voz):
                 # We can relax this by speculating the callable and ensuring that it doesn't modify arbitrary
