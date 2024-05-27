@@ -422,7 +422,6 @@ struct amx_tilecfg {
   uint8_t rows[16];
 };
 
-template <typename scalar_t>
 class AMXState {
  private:
   amx_tilecfg tilecfg_;
@@ -434,7 +433,6 @@ class AMXState {
  public:
   AMXState() : rows_(0), colsb_(0), num_tile_rows_(0), num_tile_columns_(0) {
     memset(&tilecfg_, 0, sizeof(tilecfg_));
-    tilecfg_.palette_id = 1;
   }
 
   inline void configure(
@@ -466,7 +464,7 @@ class AMXState {
     }
     // For B
     for (int i = 0; i < num_tile_columns; i++) {
-      tilecfg_.rows[i + num_c_tiles + num_tile_rows] = colsb / sizeof(scalar_t);
+      tilecfg_.rows[i + num_c_tiles + num_tile_rows] = colsb / 4;
       tilecfg_.colsb[i + num_c_tiles + num_tile_rows] = 64;
     }
     loadconfig(tilecfg_);

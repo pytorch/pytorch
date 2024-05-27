@@ -470,8 +470,8 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
     uint8_t tilecfg_rows
 ) {
     // TODO(jgong5): add prefetch hint for A, B, C
-    thread_local AMXState<{{input_t}}> state;
-    auto loadconfig = [&](const amx_tilecfg& cfg) {
+    thread_local AMXState state;
+    auto loadconfig = [](const amx_tilecfg& cfg) {
         _tile_loadconfig(&cfg);
     };
     const auto last_k_offset = K / {{block_k}} * {{block_k}};
@@ -487,8 +487,8 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         {%- for tile_col in range(num_columns) %}
         {%- set tile_idx = tile_row * num_columns + tile_col %}
         _tile_loadd({{tile_idx}}, C + {{tile_row * 16}} * ldc + {{tile_col * 16}}, ldc);
-        {%- endif %}
-    {%- endif %}
+        {%- endfor %}
+    {%- endfor %}
     } else {
     {%- for tile_row in range(num_rows // 16) %}
         {%- for tile_col in range(num_columns) %}
@@ -506,16 +506,16 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
             {%- set tile_idx_a = tile_offset_a + tile_row %}
             {%- set tile_idx_b = tile_offset_b + tile_col %}
             {%- set tile_idx_c = tile_row * num_columns + tile_col %}
-            {%- if col == 0 %}
+            {%- if tile_col == 0 %}
             _tile_loadd({{tile_idx_a}}, A + {{tile_row * 16}} * lda + k * (64 / sizeof({{input_t}})), lda);
             {%- endif %}
-            {%- if row == 0 %}
+            {%- if tile_row == 0 %}
             _tile_loadd({{tile_idx_b}}, B + k * (64 / sizeof({{input_t}})) * ldb + {{tile_col * 16}}, ldb);
             {%- endif %}
             _tile_dpbf16ps({{tile_idx_c}}, {{tile_idx_a}}, {{tile_idx_b}});
             {%- endfor %}
         {%- endfor %}
-    }
+    };
 
     {{kernel.unroll_pragma(4)}}
     for (int k = 0; k < last_k_offset; k += {{block_k}}) {
@@ -525,7 +525,7 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
     // TODO(jgong5): move tail k computation to separate loopnest to save tile configuration overhead
     if C10_UNLIKELY (tail_k_size > 0) {
         if C10_LIKELY (last_k_offset > 0) {
-            state.configure(tile_rows, tail_k_size * sizeof({{input_t}}), {{num_rows}} / 16, {{num_columns}}, loadconfig);
+            state.configure(tilecfg_rows, tail_k_size * sizeof({{input_t}}), {{num_rows}} / 16, {{num_columns}}, loadconfig);
         }
         compute(last_k_offset);
     }
@@ -535,8 +535,8 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         {%- for tile_col in range(num_columns) %}
         {%- set tile_idx = tile_row * num_columns + tile_col %}
         _tile_stored({{tile_idx}}, C + {{tile_row * 16}} * ldc + {{tile_col * 16}}, ldc);
-        {%- endif %}
-    {%- endif %}
+        {%- endfor %}
+    {%- endfor %}
 }
 """
 
@@ -606,7 +606,7 @@ def create_micro_gemm(
     matched_configs = []
     for cls, configs in micro_gemm_configs.items():
         for config in configs:
-            if not isinstance(vec_isa, config.vec_isa_cls):
+            if not issubclass(config.vec_isa_cls, vec_isa.__class__):
                 continue
             if (
                 config.input_dtype == input_dtype
@@ -619,24 +619,35 @@ def create_micro_gemm(
                     continue
                 block_m, block_n, block_k = config.register_blocking
                 # Criteria on the ranking of configurations
-                # 1. Dividable by block sizes (block_m, block_k)
-                # 2. Number of mxn blocks is large enough to occupy all the threads
-                # 3. Register blocks are larger
+                # 1. ISA: AMX > VEC
+                # 2. Dividable by block sizes (block_m, block_n, block_k)
+                # 3. Number of mxn blocks is large enough to occupy all the threads
+                # 4. Register blocks are larger
+                isa_score = 0
+                if config.vec_isa_cls == VecAMX:
+                    isa_score += 1
                 dividable_score = 0
-                if k % block_k == 0:
-                    dividable_score += 1
                 if m % block_m == 0:
                     dividable_score += 1
+                if n % block_n == 0:
+                    dividable_score += 1
+                if k % block_k == 0:
+                    dividable_score += 1
                 occupancy_score = 0
-                n_blocks = n // block_n
-                total_mxn_blocks = n // block_n * ((m + block_m - 1) // block_m)
+                n_blocks = (n + block_n - 1) // block_n
+                total_mxn_blocks = n_blocks * ((m + block_m - 1) // block_m)
                 if n_blocks >= num_threads:
                     occupancy_score += 1
                 if total_mxn_blocks >= num_threads:
                     occupancy_score += 1
+                register_bytes = (
+                    block_m * block_n * config.compute_dtype.itemsize
+                    + (block_m * block_k + block_k * block_n)
+                    * config.input_dtype.itemsize
+                )
                 matched_configs.append(
                     (
-                        (dividable_score, occupancy_score, block_m * block_n * block_k),
+                        (isa_score, dividable_score, occupancy_score, register_bytes),
                         cls,
                         config,
                     )

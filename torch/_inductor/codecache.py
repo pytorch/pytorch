@@ -1362,8 +1362,11 @@ class VecAMX(VecAVX512):
 
     @functools.lru_cache(None)
     def __bool__(self) -> bool:
-        # TODO: check AMX validity
-        return super().__bool__()
+        if super().__bool__():
+            # TODO: check AMX validity
+            if torch._C._cpu._init_amx():
+                return True
+        return False
 
 
 @dataclasses.dataclass
