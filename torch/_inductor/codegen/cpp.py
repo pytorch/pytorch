@@ -2365,13 +2365,22 @@ class CppVecKernel(CppKernel):
             )
             if self.tiling_idx >= self.reduction_depth:
                 # calculate the reduction size that will be vectorized
-                reduction_inner_size = self.ranges[-1] if self.reduction_depth < len(self.ranges) - 1 else self.ranges[self.reduction_depth] 
+                reduction_inner_size = (
+                    self.ranges[-1]
+                    if self.reduction_depth < len(self.ranges) - 1
+                    else self.ranges[self.reduction_depth]
+                )
                 # calculate loops size outside the vectorized loop
                 self.reduction_outer_size = reduction_size / reduction_inner_size
                 # calculate the main loop size
-                self.reduction_main_size = FloorDiv(reduction_inner_size, self.tiling_factor) * self.tiling_factor
+                self.reduction_main_size = (
+                    FloorDiv(reduction_inner_size, self.tiling_factor)
+                    * self.tiling_factor
+                )
                 # calculate the tail loop size
-                self.reduction_tail_size = reduction_inner_size - self.reduction_main_size
+                self.reduction_tail_size = (
+                    reduction_inner_size - self.reduction_main_size
+                )
             else:
                 self.reduction_main_size = reduction_size
 
@@ -2503,26 +2512,30 @@ class CppVecKernel(CppKernel):
     def welford_weight_reciprocal_vec(self, dtype, num_threads=None):
         if self.tiling_idx >= self.reduction_depth:
             reduction_main_size_thread = (
-                CeilDiv(self.reduction_main_size / self.tiling_factor, num_threads) * self.tiling_factor
+                CeilDiv(self.reduction_main_size / self.tiling_factor, num_threads)
+                * self.tiling_factor
                 if num_threads
                 else self.reduction_main_size
             )
             reduction_main_size_thread_expr = cexpr_index(reduction_main_size_thread)
             reduction_outer_size_expr = cexpr_index(self.reduction_outer_size)
             reduction_tail_size_expr = cexpr_index(self.reduction_tail_size)
-            return (f"static WeightRecp<{self._get_vec_type(dtype)}> weight_recps"
-                    f"("
-                    f"{reduction_outer_size_expr}, "
-                    f"{reduction_main_size_thread_expr}, "
-                    f"{reduction_tail_size_expr}"
-                    f");")
+            return (
+                f"static WeightRecp<{self._get_vec_type(dtype)}> weight_recps"
+                f"("
+                f"{reduction_outer_size_expr}, "
+                f"{reduction_main_size_thread_expr}, "
+                f"{reduction_tail_size_expr}"
+                f");"
+            )
         else:
             reduction_main_size_thread_expr = cexpr_index(self.reduction_main_size)
-            return (f"static WeightRecp<{self._get_vec_type(dtype)}> weight_recps"
-                    f"("
-                    f"{reduction_main_size_thread_expr}"
-                    f");")
-
+            return (
+                f"static WeightRecp<{self._get_vec_type(dtype)}> weight_recps"
+                f"("
+                f"{reduction_main_size_thread_expr}"
+                f");"
+            )
 
     def reduction_combine_vec(
         self, reduction_type, var, next_value, use_weight_recps=False
