@@ -46,6 +46,7 @@ struct Welford {
   T mean = T(0);
   T m2 = T(0);
   T weight = T(0);
+  int64_t index = 0;
 };
 
 
@@ -56,6 +57,46 @@ struct IsVecType: std::false_type {};
 template <typename T>
 struct IsVecType<at::vec::Vectorized<T>>: std::true_type {};
 #endif
+
+template <typename T>
+struct WeightRecp {
+  int64_t outer_size;
+  int64_t main_size;
+  int64_t tail_size;
+  std::vector<T> weight_recps;
+
+  // For masked vectorized welford reduction
+  WeightRecp(int64_t outer_size, int64_t main_size, int64_t tail_size) : outer_size(outer_size), main_size(main_size), tail_size(tail_size) {
+    auto weight = T(0);
+    auto ones =  T(1);
+    auto masked_ones = T::set(weight, ones, tail_size);
+    weight_recps.reserve(outer_size * (main_size / T::size() + tail_size > 0 ? 1 : 0) + 1);
+    weight_recps.push_back(ones);
+    for (const auto o : c10::irange(outer_size)) {
+      for (int64_t m = 0; m < main_size; m += T::size()) {
+        weight += ones;
+        weight_recps.push_back(ones / weight);
+      }
+      for (int64_t t = 0; t < tail_size; t += T::size()) {
+        weight += masked_ones;
+        weight_recps.push_back(ones / weight);
+      }
+    }
+  }
+
+  // For vectorized welford reduction
+  WeightRecp(int64_t main_size) : main_size(main_size){
+    auto weight = T(0);
+    auto ones =  T(1);
+    weight_recps.reserve(outer_size * main_size + 1);
+    // first element is not used
+    weight_recps.push_back(ones);
+    for (int64_t m = 0; m < main_size; m += 1) {
+      weight += ones;
+      weight_recps.push_back(ones / weight);
+    }
+  }
+};
 
 template <typename T>
 Welford<T> welford_combine(const Welford<T>& a, const Welford<T>& b) {
@@ -77,22 +118,33 @@ Welford<T> welford_combine(const Welford<T>& a, const Welford<T>& b) {
   auto result = Welford<T>{
     a.mean + delta * wb_over_w,
     a.m2 + b.m2 + delta * delta * a.weight * wb_over_w,
-    new_weight
+    new_weight,
   };
   return result;
 }
 
 template <typename T>
-Welford<T> welford_combine(const Welford<T>& acc, const T& data) {
+Welford<T> welford_combine(const Welford<T> &acc, const T& data, const WeightRecp<T>* w=nullptr) {
   // Add a single data point
-  auto delta = data - acc.mean;
+  int64_t new_index = acc.index + 1;
   auto new_weight = acc.weight + T(1);
-  auto new_mean = acc.mean + delta / new_weight;
+  auto delta = data - acc.mean;
+  T new_mean;
+  if constexpr (!IsVecType<T>::value) {
+    new_mean = acc.mean + delta / new_weight;
+  } else {
+    // use new_index to fecth 1 / new_weight to avoid divisions
+    new_mean = acc.mean +
+      ((w == nullptr || new_index <= 0 || new_index >= w->weight_recps.size())
+            ? delta / new_weight
+            : delta * w->weight_recps[new_index]);
+  }
   auto new_delta = data - new_mean;
   auto result = Welford<T>{
     new_mean,
     acc.m2 + delta * new_delta,
-    new_weight
+    new_weight,
+    new_index
   };
   return result;
 }
@@ -110,22 +162,33 @@ Welford<T> welford_combine(const Welford<T>& a, const Welford<T>& b, const int64
   return Welford<T>{
     T::set(a.mean, new_mean, tail_size),
     T::set(a.m2, new_m2, tail_size),
-    T::set(a.weight, new_weight, tail_size)
+    T::set(a.weight, new_weight, tail_size),
   };
 }
 
 template <typename T>
-Welford<T> welford_combine(const Welford<T>& acc, const T& data, const int64_t tail_size) {
+Welford<T> welford_combine(const Welford<T>& acc, const T& data, const int64_t tail_size, const WeightRecp<T>* w=nullptr) {
   // Add a single data point
   auto delta = data - acc.mean;
+  int64_t new_index = acc.index + 1;
   auto new_weight = acc.weight + T(1);
-  auto new_mean = acc.mean + delta / new_weight;
+  T new_mean;
+  if constexpr (!IsVecType<T>::value) {
+    new_mean = acc.mean + delta / new_weight;
+  } else {
+    // use new_index to fecth 1 / new_weight to avoid divisions
+    new_mean = acc.mean +
+      ((w == nullptr || new_index <= 0 || new_index >= w->weight_recps.size())
+            ? delta / new_weight
+            : delta * w->weight_recps[new_index]);
+  }
   auto new_delta = data - new_mean;
   auto new_m2 = acc.m2 + delta * new_delta;
   return Welford<T>{
     T::set(acc.mean, new_mean, tail_size),
     T::set(acc.m2, new_m2, tail_size),
-    T::set(acc.weight, new_weight, tail_size)
+    T::set(acc.weight, new_weight, tail_size),
+    new_index
   };
 }
 
@@ -236,7 +299,7 @@ Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> 
     auto shuffled = Welford<Vec>{
       vec_shuffle_down(acc.mean, n),
       vec_shuffle_down(acc.m2, n),
-      vec_shuffle_down(acc.weight, n)
+      vec_shuffle_down(acc.weight, n),
     };
     acc = welford_combine(acc, shuffled);
   }

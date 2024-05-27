@@ -260,12 +260,10 @@ option(USE_OPENMP "Use OpenMP for parallel code" ON)
 option(USE_PRECOMPILED_HEADERS "Use pre-compiled headers to accelerate build." OFF)
 
 option(USE_PROF "Use profiling" OFF)
-option(USE_QNNPACK "Use QNNPACK (quantized 8-bit operators)" ON)
 option(USE_PYTORCH_QNNPACK "Use ATen/QNNPACK (quantized 8-bit operators)" ON)
 option(USE_SNPE "Use Qualcomm's SNPE library" OFF)
 option(USE_SYSTEM_EIGEN_INSTALL
     "Use system Eigen instead of the one under third_party" OFF)
-option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
 cmake_dependent_option(
     USE_VALGRIND "Use Valgrind. Only available on Linux." ON
     "LINUX" OFF)
@@ -279,11 +277,13 @@ endif()
 option(USE_SLEEF_FOR_ARM_VEC256 "Use sleef for arm" OFF)
 option(USE_SOURCE_DEBUG_ON_MOBILE "Enable" ON)
 option(USE_LITE_INTERPRETER_PROFILER "Enable" ON)
+cmake_dependent_option(
+  USE_LITE_AOTI "Include AOTI sources" OFF
+  "BUILD_LITE_INTERPRETER" OFF)
 option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference" OFF)
 option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
 # option USE_XNNPACK: try to enable xnnpack by default.
 option(USE_XNNPACK "Use XNNPACK" ON)
-option(USE_ZSTD "Use ZSTD" OFF)
 option(USE_ROCM_KERNEL_ASSERT "Use Kernel Assert for ROCm" OFF)
 # Ensure that an ITT build is the default for x86 CPUs
 cmake_dependent_option(
@@ -413,7 +413,6 @@ option(USE_SYSTEM_FXDIV "Use system-provided fxdiv." OFF)
 option(USE_SYSTEM_BENCHMARK "Use system-provided google benchmark." OFF)
 option(USE_SYSTEM_ONNX "Use system-provided onnx." OFF)
 option(USE_SYSTEM_XNNPACK "Use system-provided xnnpack." OFF)
-option(USE_SYSTEM_ZSTD "Use system-provided zstd." OFF)
 option(USE_GOLD_LINKER "Use ld.gold to link" OFF)
 if(USE_SYSTEM_LIBS)
   set(USE_SYSTEM_CPUINFO ON)
@@ -434,9 +433,6 @@ if(USE_SYSTEM_LIBS)
   endif()
   if(USE_TBB)
     set(USE_SYSTEM_TBB ON)
-  endif()
-  if(USE_ZSTD)
-    set(USE_SYSTEM_ZSTD ON)
   endif()
 endif()
 
@@ -634,7 +630,6 @@ if(INTERN_BUILD_MOBILE)
   set(USE_DISTRIBUTED OFF)
   set(NO_API ON)
   set(USE_FBGEMM OFF)
-  set(USE_QNNPACK OFF)
   set(INTERN_DISABLE_ONNX ON)
   if(USE_BLAS)
     set(INTERN_USE_EIGEN_BLAS ON)
@@ -780,10 +775,6 @@ endif(DEBUG_CUDA)
 
 if(USE_FBGEMM)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_FBGEMM")
-endif()
-
-if(USE_QNNPACK)
-  string(APPEND CMAKE_CXX_FLAGS " -DUSE_QNNPACK")
 endif()
 
 if(USE_PYTORCH_QNNPACK)

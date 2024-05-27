@@ -1107,6 +1107,26 @@ class DeviceCachingAllocator {
               .current;
       auto observers_local = oom_observers_;
 
+      size_t allocated_in_private_pools = 0;
+      auto get_size_block = [](const BlockPool& pool) {
+        size_t res = 0;
+        for (const auto& block : pool.blocks) {
+          res += block->size;
+        }
+        return res;
+      };
+      for (const auto& p : graph_pools) {
+        allocated_in_private_pools += get_size_block(p.second->large_blocks);
+        allocated_in_private_pools += get_size_block(p.second->small_blocks);
+      }
+
+      std::string private_pool_msg;
+
+      if (allocated_in_private_pools > 0) {
+        private_pool_msg = "with " + format_size(allocated_in_private_pools) +
+            " allocated in private pools (e.g., CUDA Graphs), ";
+      }
+
       // Make sure we do not have the device lock before calling our
       // observers which might need hold the GIL
       // It is safe to release at this point because will no longer
@@ -1153,9 +1173,12 @@ class DeviceCachingAllocator {
           " is free. ",
           proc_info,
           "Of the allocated memory ",
-          format_size(allocated_bytes),
-          " is allocated by PyTorch, and ",
-          format_size(reserved_bytes - allocated_bytes),
+          format_size(allocated_bytes + allocated_in_private_pools),
+          " is allocated by PyTorch, ",
+          private_pool_msg,
+          "and ",
+          format_size(
+              reserved_bytes - allocated_bytes - allocated_in_private_pools),
           " is reserved by PyTorch but unallocated.",
           " If reserved but unallocated memory is large try setting",
           " PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid"
@@ -1755,12 +1778,11 @@ class DeviceCachingAllocator {
   // them, the values are 1024, 1280, 1536, and 1792. So the function will
   // return 1280 as the nearest ceiling of power-2 divison.
   static size_t roundup_power2_next_division(size_t size, size_t divisions) {
-    if (C10_UNLIKELY(size <= 4 || divisions <= 1)) {
-      return size;
-    }
     if (llvm::isPowerOf2_64(size)) {
       return size;
     }
+
+    TORCH_CHECK(divisions >= 2, "Only 2 or more divisions are supported");
 
     // divide the space between these 2's power into equal divisions
     // If division is zero, return the power-of-2 ceiling.
@@ -1780,7 +1802,7 @@ class DeviceCachingAllocator {
       return kMinBlockSize;
     } else {
       auto divisions = CUDAAllocatorConfig::roundup_power2_divisions(size);
-      if (divisions > 0 && size > (kMinBlockSize * divisions)) {
+      if (divisions > 1 && size > (kMinBlockSize * divisions)) {
         return roundup_power2_next_division(size, divisions);
       } else {
         return kMinBlockSize * ((size + kMinBlockSize - 1) / kMinBlockSize);
