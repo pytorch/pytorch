@@ -22,14 +22,13 @@ SymPy expressions yet, despite sympy.Min and sympy.Max existing.
 import itertools
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Literal, Optional, overload, Tuple, Union
+from typing_extensions import TypeAlias
 
 import sympy
 
-from typing_extensions import TypeAlias
-
 import torch
 from torch._prims_common import dtype_to_type, is_integer_dtype
-from torch.utils._sympy.functions import Boxed, FloorDiv, ModularIndexing, Where
+from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Where
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from .utils import generate_assert
 
@@ -302,8 +301,8 @@ class IndexPropagation:
 
               The proper way of handling this would be to have a global shape_env that adds
               runtime_asserts as they happen in the code. Then, it shuld be used in SimplifyIndexing
-              to perform wrap_expr and in CSEProxy.check_bounds_lazy to elide upper / lower bounds
-              also for indirect_indexing
+              to perform wrap_expr and in CSEProxy.check_bounds to elide upper / lower bounds also
+              for indirect_indexing
         """
         evaluated = self.shape_env._maybe_evaluate_static(
             e,
@@ -341,9 +340,9 @@ class IndexPropagation:
             expr = wrap_expr(expr)
             if generate_assert(check):
                 self.fallback(
-                    "check_bounds_lazy",
-                    (Boxed(expr), size),
+                    "check_bounds",
+                    (expr, size),
                     dict(lower=not can_prove_lower, upper=not can_prove_upper),
                 )
-            return Boxed(expr)
+            return expr
         return self.fallback("indirect_indexing", (index, size, check), {}).value

@@ -15,7 +15,6 @@ from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 
 import torch
 from .functions import (
-    Boxed,
     CleanDiv,
     FloorDiv,
     IsNonOverlappingAndDenseIndicator,
@@ -74,7 +73,6 @@ def handlers():
         IsNonOverlappingAndDenseIndicator: "is_non_overlapping_and_dense_indicator",
         Round: "round",
         RoundDecimal: "round",
-        Boxed: "identity",
     }
     for name in ["cos", "sin", "tan", "sinh", "cosh", "tanh", "asin", "acos", "atan"]:
         HANDLERS[getattr(sympy, name)] = name
