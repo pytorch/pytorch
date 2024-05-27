@@ -16,10 +16,10 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import TypeGuard
 
 import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
-from typing_extensions import TypeGuard
 
 import torch
 
@@ -589,10 +589,6 @@ class SymPyValueRangeAnalysis:
     @staticmethod
     def abs(x):
         return ValueRanges.convex_min_zero_map(x, abs)
-
-    @staticmethod
-    def identity(x):
-        return x
 
     @staticmethod
     def exp(x):

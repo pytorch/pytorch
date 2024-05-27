@@ -1,10 +1,11 @@
 # Owner(s): ["module: functorch"]
 
 import torch
-from functorch import make_fx
-from functorch.compile import minifier
 from torch._functorch.compile_utils import get_outputs, get_placeholders
 from torch.testing._internal.common_utils import run_tests, TestCase
+
+from functorch import make_fx
+from functorch.compile import minifier
 
 
 class TestMinifier(TestCase):
