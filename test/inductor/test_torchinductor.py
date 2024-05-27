@@ -465,6 +465,10 @@ def check_model(
         correct = tree_unflatten(correct_flat, correct_spec)
 
     if assert_equal:
+
+        print("---- actual is: {}".format(actual), flush=True)
+        print("---- correct is: {}".format(correct), flush=True)
+
         self.assertEqual(
             actual,
             correct,

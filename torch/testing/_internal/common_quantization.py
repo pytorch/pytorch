@@ -76,6 +76,10 @@ from torch.testing import FileCheck
 from typing import Callable, Tuple, Dict, Any, Union, Type, Optional
 import torch._dynamo as torchdynamo
 
+import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
+from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
+import contextlib
+
 class NodeSpec:
     ''' Used for checking GraphModule Node
     '''
@@ -2933,3 +2937,35 @@ class TestHelperModules:
         def forward(self, x):
             x = self.relu(self.fc(x))
             return x
+
+def _generate_qdq_quantized_model(
+    mod, inputs, is_qat=False, is_dynamic=False, quantizer=None
+):
+
+    def get_default_quantizer(is_qat, is_dynamic):
+        quantizer = X86InductorQuantizer()
+        quantizer.set_global(
+            xiq.get_default_x86_inductor_quantization_config(
+                is_qat=is_qat, is_dynamic=is_dynamic
+            )
+        )
+        return quantizer
+
+    maybe_no_grad = contextlib.nullcontext() if is_qat else torch.no_grad()
+    with maybe_no_grad:
+        export_model = capture_pre_autograd_graph(
+            mod,
+            inputs,
+        )
+        quantizer = (
+            quantizer if quantizer else get_default_quantizer(is_qat, is_dynamic)
+        )
+        prepare_model = (
+            prepare_qat_pt2e(export_model, quantizer)
+            if is_qat
+            else prepare_pt2e(export_model, quantizer)
+        )
+        prepare_model(*inputs)
+        convert_model = convert_pt2e(prepare_model)
+        torch.ao.quantization.move_exported_model_to_eval(convert_model)
+        return convert_model

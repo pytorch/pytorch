@@ -13,17 +13,13 @@ from torch._export import capture_pre_autograd_graph
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
-from torch.ao.quantization.quantize_pt2e import (
-    convert_pt2e,
-    prepare_pt2e,
-    prepare_qat_pt2e,
-)
 from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
 from torch.nn import functional as F
 from torch.testing._internal.common_quantization import (
     skipIfNoDynamoSupport,
     skipIfNoONEDNN,
     skipIfNoONEDNNBF16,
+    _generate_qdq_quantized_model,
 )
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm, TEST_MKL
 from torch.testing._internal.inductor_utils import _check_has_dynamic_shape, HAS_CPU
@@ -73,16 +69,6 @@ quantization_inplace_add_fn_list = [
 ]
 
 
-def get_default_quantizer(is_qat, is_dynamic):
-    quantizer = X86InductorQuantizer()
-    quantizer.set_global(
-        xiq.get_default_x86_inductor_quantization_config(
-            is_qat=is_qat, is_dynamic=is_dynamic
-        )
-    )
-    return quantizer
-
-
 @config.patch({"freezing": True})
 class TestPatternMatcherBase(TestCase):
     def _check_unary_is_decomposed(self, unary_fn):
@@ -98,28 +84,6 @@ class TestPatternMatcherBase(TestCase):
             return x.clone()
 
         return tuple(clone(x) for x in inputs)
-
-    def _generate_qdq_quantized_model(
-        self, mod, inputs, is_qat=False, is_dynamic=False, quantizer=None
-    ):
-        maybe_no_grad = contextlib.nullcontext() if is_qat else torch.no_grad()
-        with maybe_no_grad:
-            export_model = capture_pre_autograd_graph(
-                mod,
-                inputs,
-            )
-            quantizer = (
-                quantizer if quantizer else get_default_quantizer(is_qat, is_dynamic)
-            )
-            prepare_model = (
-                prepare_qat_pt2e(export_model, quantizer)
-                if is_qat
-                else prepare_pt2e(export_model, quantizer)
-            )
-            prepare_model(*inputs)
-            convert_model = convert_pt2e(prepare_model)
-            torch.ao.quantization.move_exported_model_to_eval(convert_model)
-            return convert_model
 
     def _test_common(
         self,
@@ -159,7 +123,7 @@ class TestPatternMatcherBase(TestCase):
             maybe_autocast = contextlib.nullcontext()
 
         if check_quantization:
-            convert_model = self._generate_qdq_quantized_model(
+            convert_model = _generate_qdq_quantized_model(
                 mod, inputs, is_qat, is_dynamic, quantizer
             )
             with torch.no_grad(), maybe_autocast:
@@ -207,7 +171,7 @@ class TestPatternMatcherBase(TestCase):
         with torch.no_grad():
             clone_inputs = self._clone_inputs(inputs)
             if check_quantization:
-                mod = self._generate_qdq_quantized_model(mod, inputs)
+                mod = _generate_qdq_quantized_model(mod, inputs)
             expected = mod(*inputs)
             actual, (source_code,) = run_and_get_code(
                 torch.compile(mod, fullgraph=True, dynamic=check_dynamic),
