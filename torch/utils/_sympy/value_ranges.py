@@ -30,18 +30,12 @@ from .functions import (
     FloatTrueDiv,
     FloorDiv,
     IntTrueDiv,
-    OpaqueUnaryFn_acos,
-    OpaqueUnaryFn_asinh,
-    OpaqueUnaryFn_atan,
-    OpaqueUnaryFn_cosh,
     OpaqueUnaryFn_exp,
     OpaqueUnaryFn_log,
-    OpaqueUnaryFn_sinh,
     OpaqueUnaryFn_sqrt,
-    OpaqueUnaryFn_tanh,
     PowByNatural,
-    Round,
     RoundDecimal,
+    RoundToInt,
     safe_pow,
     ToFloat,
     TruncToFloat,
@@ -755,17 +749,20 @@ class SymPyValueRangeAnalysis:
         )
 
     @classmethod
-    def round(cls, number, ndigits=None):
-        if ndigits is None:
-            fn = Round
-        else:
-            assert ndigits.is_singleton()
-            ndigits = ndigits.lower
-            # We can't use functools.partial here since sympy doesn't support keyword arguments, but we have to bind
-            # the second parameter.
-            fn = lambda number: RoundDecimal(number, ndigits)  # type: ignore[misc, assignment]  # noqa: E731
+    def round_decimal(cls, number, ndigits):
+        # TODO: this needs to work even when ndigits is not singleton
+        assert ndigits.is_singleton()
+
+        ndigits = ndigits.lower
+        # We can't use functools.partial here since sympy doesn't support keyword arguments, but we have to bind
+        # the second parameter.
+        fn = lambda number: RoundDecimal(number, ndigits)  # type: ignore[misc, assignment]  # noqa: E731
 
         return ValueRanges.increasing_map(number, fn)
+
+    @classmethod
+    def round_to_int(cls, number, ndigits=None):
+        return ValueRanges.increasing_map(number, RoundToInt)
 
     # It's used in some models on symints
     @staticmethod
@@ -821,12 +818,15 @@ class SymPyValueRangeAnalysis:
 
     @staticmethod
     def cosh(x):
+        return ValueRanges(0.0, sympy.oo)
+        """
         x = ValueRanges.wrap(x)
         if x.lower > 0:
             return ValueRanges.increasing_map(x, OpaqueUnaryFn_cosh)
         elif x.upper < 0:
             return ValueRanges.decreasing_map(x, OpaqueUnaryFn_cosh)
         return ValueRanges(0.0, sympy.oo)
+        """
 
     @staticmethod
     def sin(x):
@@ -836,7 +836,8 @@ class SymPyValueRangeAnalysis:
 
     @staticmethod
     def sinh(x):
-        return ValueRanges.increasing_map(x, OpaqueUnaryFn_sinh)
+        # return ValueRanges.increasing_map(x, OpaqueUnaryFn_sinh)
+        return ValueRanges(-sympy.oo, sympy.oo)
 
     @staticmethod
     def tan(x):
@@ -844,25 +845,33 @@ class SymPyValueRangeAnalysis:
 
     @staticmethod
     def tanh(x):
-        return ValueRanges.increasing_map(x, OpaqueUnaryFn_tanh)
+        # return ValueRanges.increasing_map(x, OpaqueUnaryFn_tanh)
+        return ValueRanges(-sympy.oo, sympy.oo)
 
     @staticmethod
     def asin(x):
+        return ValueRanges(-sympy.oo, sympy.oo)
+        """
         x = ValueRanges.wrap(x)
         if -1 <= x.lower and x.upper <= 1:
             return ValueRanges.increasing_map(x, OpaqueUnaryFn_asinh)
         return ValueRanges.unknown()
+        """
 
     @staticmethod
     def acos(x):
+        return ValueRanges(-sympy.oo, sympy.oo)
+        """
         x = ValueRanges.wrap(x)
         if -1 <= x.lower and x.upper <= 1:
             return ValueRanges.decreasing_map(x, OpaqueUnaryFn_acos)
         return ValueRanges.unknown()
+        """
 
     @staticmethod
     def atan(x):
-        return ValueRanges.increasing_map(x, OpaqueUnaryFn_atan)
+        return ValueRanges(-sympy.oo, sympy.oo)
+        # return ValueRanges.increasing_map(x, OpaqueUnaryFn_atan)
 
     @staticmethod
     def trunc(x):

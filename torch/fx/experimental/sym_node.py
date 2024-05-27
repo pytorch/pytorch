@@ -812,12 +812,10 @@ def _sympy_abs(a):
 
 
 def _sympy_round(number, ndigits=None):
-    from torch.utils._sympy.functions import Round, RoundDecimal, TruncToInt
+    from torch.utils._sympy.functions import RoundDecimal, RoundToInt
 
     if ndigits is None:
-        return TruncToInt(Round(number))
-    elif ndigits == 0:
-        return Round(number)
+        return RoundToInt(number)
     else:
         return RoundDecimal(number, ndigits)
 
@@ -1366,7 +1364,7 @@ def _make_user_magic(method, user_type):
             return x
 
     def promote2(self, other):
-        # Notably missing from this list eq and other relations.
+        # TODO: Remove eq and other relations from this list.
         # CPython has fancy implementations for these to get as much precision
         # as possible instead of just promoting to float64 and praying, so we
         # need to handle them specially too.
@@ -1382,6 +1380,13 @@ def _make_user_magic(method, user_type):
             "int_floordiv",
             "sym_min",
             "sym_max",
+            # TODO: remove these
+            "eq",
+            "ne",
+            "gt",
+            "lt",
+            "le",
+            "ge",
         ]:
             return self, other
         f_self = isinstance(self, (float, torch.SymFloat))
@@ -1407,7 +1412,7 @@ def _make_user_magic(method, user_type):
         return wrap_node(getattr(self.node, method_attr)())
 
     def binary_magic_impl(self, other):
-        if isinstance(other, torch.Tensor):
+        if not isinstance(other, (int, float, bool, SymInt, SymFloat, SymBool)):
             return NotImplemented
         sym_node_log.debug("MAGIC %s %s %s", method, self, other)
         self = promote(self)
@@ -1424,6 +1429,8 @@ def _make_user_magic(method, user_type):
         return get_constant(ret) if is_constant(ret) else ret
 
     def rbinary_magic_impl(self, other):
+        if not isinstance(other, (int, float, bool, SymInt, SymFloat, SymBool)):
+            return NotImplemented
         self = promote(self)
         other = promote(other)
         self, other = promote2(self, other)

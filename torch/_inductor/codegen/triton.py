@@ -264,6 +264,34 @@ class TritonPrinter(PythonPrinter):
         assert len(expr.args) == 1
         return f"{self.paren(self._print(expr.args[0]))}.to(tl.float64)"
 
+    # TODO: This is wrong if one of the inputs is negative.  This is hard to
+    # tickle though, as the inputs are typically positive (and if we can prove
+    # they are positive, we will have used Mod instead, for which this codegen
+    # is right).
+    def _print_PythonMod(self, expr):
+        return " % ".join(map(self.paren, map(self._print, expr.args)))
+
+    # Au contraire, this is correct!
+    def _print_CMod(self, expr):
+        return " % ".join(map(self.paren, map(self._print, expr.args)))
+
+    # TODO: This is wrong, see
+    # https://github.com/triton-lang/triton/issues/955
+    # But for Sympy expressions, things will /mostly/ work out because we
+    # don't usually deal with negative numbers in the division
+    def _print_FloorDiv(self, expr):
+        assert expr.is_integer
+        x, div = expr.args
+        x = self.paren(self.doprint(x))
+        div = self.paren(self.doprint(div))
+        return f"({x} // {div})"
+
+    # TODO: This is wrong, when lhs, rhs > 2**53, Python does a higher
+    # precision algorithm, which we would need to replicate here
+    def _print_IntTrueDiv(self, expr):
+        lhs, rhs = expr.args
+        return f"{self.paren(self._print(lhs))} / {self.paren(self._print(rhs))}"
+
     # NB: sympy.floor/ceiling produce integers, so we have to do the
     # conversion to index dtype
     def _print_floor(self, expr):
@@ -346,18 +374,9 @@ class TritonPrinter(PythonPrinter):
         assert len(expr.args) == 1
         return f"libdevice.atan(({self._print(expr.args[0])}).to(tl.float32))"
 
-    def _print_FloorDiv(self, expr):
-        if expr.is_integer:
-            return super()._print_FloorDiv(expr)
-
-        x, div = expr.args
-        x = self.paren(self.doprint(x))
-        div = self.paren(self.doprint(div))
-        return f"libdevice.floor({x} / {div}).to({V.kernel.index_dtype})"
-
-    def _print_Round(self, expr):
+    def _print_RoundToInt(self, expr):
         assert len(expr.args) == 1
-        return f"libdevice.rint({self._print(expr.args[0])})"
+        return f"libdevice.llrint({self._print(expr.args[0])})"
 
     def _print_RoundDecimal(self, expr):
         assert len(expr.args) == 2

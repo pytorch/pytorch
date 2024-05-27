@@ -104,10 +104,27 @@ class CppPrinter(ExprPrinter):
         assert len(expr.args) == 1
         return f"static_cast<double>({self._print(expr.args[0])})"
 
+    # TODO: This is wrong if one of the inputs is negative.  This is hard to
+    # tickle though, as the inputs are typically positive (and if we can prove
+    # they are positive, we will have used Mod instead, for which this codegen
+    # is right).
+    def _print_PythonMod(self, expr):
+        return " % ".join(map(self.paren, map(self._print, expr.args)))
+
+    def _print_CMod(self, expr):
+        return " % ".join(map(self.paren, map(self._print, expr.args)))
+
     def _print_IntTrueDiv(self, expr):
         lhs, rhs = expr.args
         # TODO: This is only accurate up to 2**53
         return f"static_cast<double>({self._print(lhs)}) / static_cast<double>({self._print(rhs)})"
+
+    # TODO: PowByNatural: we need to implement our own int-int pow.  Do NOT
+    # use std::pow, that operates on floats
+    def _print_PowByNatural(self, expr):
+        raise NotImplementedError(
+            f"_print_PowByNatural not implemented for {type(self)}"
+        )
 
     def _print_FloatTrueDiv(self, expr):
         lhs, rhs = expr.args
@@ -212,8 +229,9 @@ class CppPrinter(ExprPrinter):
     def _print_OpaqueUnaryFn_sqrt(self, expr):
         return f"std::sqrt({self._print(expr.args[0])})"
 
-    def _print_Round(self, expr):
+    def _print_RoundToInt(self, expr):
         assert len(expr.args) == 1
+        # TODO: dispatch to llrint depending on index type
         return f"std::lrint({self._print(expr.args[0])})"
 
     def _print_RoundDecimal(self, expr):

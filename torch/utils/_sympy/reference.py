@@ -16,6 +16,8 @@ from torch.utils._sympy.functions import (
     OpaqueUnaryFn_log,
     OpaqueUnaryFn_sqrt,
     PowByNatural,
+    RoundDecimal,
+    RoundToInt,
     ToFloat,
     TruncToInt,
 )
@@ -171,6 +173,14 @@ class ReferenceAnalysis:
     def maximum(a, b):
         return sympy.Max(a, b)
 
+    @staticmethod
+    def round_to_int(a):
+        return RoundToInt(a)
+
+    @staticmethod
+    def round_decimal(a, b):
+        return RoundDecimal(a, b)
+
 
 # Unlike ReferenceAnalysis, does NOT sympyify, instead, works with plain
 # Python types and is FX traceable.  Inheritance here is purely for code
@@ -253,3 +263,11 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
         # never participates in VR low/high ranges, so overflow should be
         # unlikely
         return a**b
+
+    @staticmethod
+    def round_to_int(a):
+        return round(a)
+
+    @staticmethod
+    def round_decimal(a, b):
+        return round(a, ndigits=b)

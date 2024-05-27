@@ -286,14 +286,14 @@ class SymInt:
 
     def __floordiv__(self, other):
         if isinstance(other, (builtins.float, SymFloat)):
-            return math.floor(sym_float(self) / other)
+            return torch.sym_float(math.floor(sym_float(self) / other))
         if not isinstance(other, (builtins.int, SymInt)):
             return NotImplemented
         return self.__int_floordiv__(other)
 
     def __rfloordiv__(self, other):
         if isinstance(other, (builtins.float, SymFloat)):
-            return math.floor(other / sym_float(self))
+            return torch.sym_float(math.floor(other / sym_float(self)))
         if not isinstance(other, (builtins.int, SymInt)):
             return NotImplemented
         return self.__rint_floordiv__(other)
@@ -416,10 +416,10 @@ class SymFloat:
         return self.__rfloat_truediv__(sym_float(other))
 
     def __floordiv__(self, other):
-        return math.floor(self / sym_float(other))
+        return torch.sym_float(math.floor(self / sym_float(other)))
 
     def __rfloordiv__(self, other):
-        return math.floor(sym_float(other) / self)
+        return torch.sym_float(math.floor(sym_float(other) / self))
 
     def __bool__(self):
         return self.node.bool_()

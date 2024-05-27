@@ -11,7 +11,12 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Round, RoundDecimal
+from torch.utils._sympy.functions import (
+    FloorDiv,
+    ModularIndexing,
+    RoundDecimal,
+    RoundToInt,
+)
 
 
 class TestIndexingSimplification(InductorTestCase):
@@ -168,21 +173,11 @@ class ExprPrinterTests(InductorTestCase):
 
         common_cases = [
             # expr, result
-            # Test exprs.
-            (
-                s1 / (2 * s1 - 1) - 1 / (2 * s1 - 1),
-                lambda c, L: f"((-1{L})*({c}/((-1{L}) + (2{L}*foo)))) + (foo*({c}/((-1{L}) + (2{L}*foo))))",
-            ),
-            (s1 / (s2 - s3), lambda c, L: f"foo*({c}/(bar + ((-1{L})*baz)))"),
             # Test Pow directly.
             (
                 sympy.Pow(s1 + s2, 0),
                 lambda _, L: f"1{L}",
             ),  # note: simplified before _print_Pow
-            (
-                sympy.Pow(s1 + s2, -3),
-                lambda c, _: f"{c}/((bar + foo)*(bar + foo)*(bar + foo))",
-            ),
         ]
 
         gpu_cases = common_cases + [
@@ -231,10 +226,10 @@ class ExprPrinterTests(InductorTestCase):
                 self.assertExpectedInline(cexpr(expr), """std::ceil((1.0/2.0)*s1)""")
 
     def test_print_round(self):
-        expr = Round(sympy.Symbol("x", integer=True) / 2)
+        expr = RoundToInt(sympy.Symbol("x", integer=True) / 2)
         self.assertExpectedInline(pexpr(expr), """round((1/2)*x)""")
         self.assertExpectedInline(cexpr(expr), """std::lrint((1.0/2.0)*x)""")
-        self.assertExpectedInline(texpr(expr), """libdevice.rint((1/2)*x)""")
+        self.assertExpectedInline(texpr(expr), """libdevice.llrint((1/2)*x)""")
 
     @parametrize("ndigits", [-1, 0, 1])
     def test_print_round_decimal(self, ndigits):

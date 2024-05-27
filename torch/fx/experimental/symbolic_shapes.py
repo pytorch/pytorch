@@ -1351,7 +1351,7 @@ SYMPY_INTERP = {
     'floor': math.floor,
     'ceiling': math.ceil,
     'cast_symbool_to_symint_guardless': cast_symbool_to_symint_guardless,
-    'Round': builtins.round,
+    'RoundToInt': builtins.round,
     'RoundDecimal': builtins.round,
     'TruncToInt': math.trunc,
     'IntTrueDiv': operator.truediv,
@@ -3335,6 +3335,7 @@ class ShapeEnv:
 
     def add_var_to_val(self, expr: sympy.Symbol, val: int):
         """ Adds a new symbol to the symbolic environment. """
+        log.debug("add_var_to_val %s %s", expr, val, stack_info=True)
         assert expr not in self.var_to_val, f"{expr} already exists"
         self.var_to_val[expr] = sympy.Integer(val)
 
