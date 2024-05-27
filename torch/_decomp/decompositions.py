@@ -744,7 +744,7 @@ def slice_forward(
         raise RuntimeError("slice step must be positive")
 
     start_val = start if start is not None else 0
-    end_val = end if end is not None else sys.maxsize  # 2^63 – 1
+    end_val = end if end is not None else sys.maxsize  # 2^63 - 1
 
     if start_val < 0:
         start_val += sizes[dim]
@@ -1413,6 +1413,15 @@ def tensor_split_tensor_indices_or_sections_py_impl(
         return self.tensor_split(sections, dim)
     else:
         indices = [i.item() for i in tensor_indices_or_sections]
+        # WARNING: Tempted to torch._check_is_size on the indices here?  You
+        # can't: tensor_split works with negative values in indices:
+        #
+        # >>> torch.tensor_split(torch.randn(10), torch.tensor([-5, 5]))
+        # (tensor([ 0.3540,  2.1074, -0.8507,  1.1639,  0.3055]), tensor([]),
+        # tensor([-0.4285,  1.0692, -0.1776,  0.9362,  1.6143]))
+        #
+        # Sorry, I don't make the rules.  Explicitly do the item call in user
+        # code if you KNOW that they are non-negative.
         return self.tensor_split(indices, dim)
 
 
@@ -2057,13 +2066,6 @@ def _fused_dropout_decomposition(input, p, generator=None):
     return (res, mask)
 
 
-def device_hint(tensor):
-    if isinstance(tensor, torch._subclasses.FakeTensor):
-        return tensor.fake_device
-    else:
-        return None
-
-
 @register_decomposition(aten._to_copy)
 @out_wrapper()
 def _to_copy(
@@ -2081,7 +2083,6 @@ def _to_copy(
     if device is None and dtype is None and memory_format is None:
         return x.clone()
     dtype_converted = False
-    common_device = device_hint(x)
 
     if device is not None and device != x.device:
         # avoid conversions on cpu
@@ -2316,6 +2317,32 @@ def native_batch_norm_backward_out(
             _safe_copy_out(copy_from=r, copy_to=grad_input[i], exact_dtype=True)
 
     return grad_input
+
+
+@register_decomposition(aten.miopen_batch_norm_backward)
+@out_wrapper("out0", "out1", "out2")
+def miopen_batch_norm_backward(
+    input: Tensor,
+    grad_output: Tensor,
+    weight: Tensor,
+    running_mean: Optional[Tensor],
+    running_var: Optional[Tensor],
+    save_mean: Optional[Tensor],
+    save_var: Optional[Tensor],
+    epsilon: float,
+):
+    return aten.native_batch_norm_backward(
+        grad_output,
+        input,
+        weight,
+        running_mean,
+        running_var,
+        save_mean,
+        save_var,
+        True,
+        epsilon,
+        [True, True, True],
+    )
 
 
 @register_decomposition(aten.cudnn_batch_norm_backward)
@@ -2647,71 +2674,45 @@ def get_scale_value(scales, idx):
 
 
 @register_decomposition(aten.upsample_nearest1d.vec)
+@register_decomposition(aten.upsample_nearest2d.vec)
+@register_decomposition(aten.upsample_nearest3d.vec)
 @aten.upsample_nearest1d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.upsample_nearest1d.vec.py_impl(DispatchKey.Autograd)
-def upsample_nearest1d_vec(input, output_size, scale_factors):
+@aten.upsample_nearest2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten.upsample_nearest2d.vec.py_impl(DispatchKey.Autograd)
+@aten.upsample_nearest3d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten.upsample_nearest3d.vec.py_impl(DispatchKey.Autograd)
+def _upsample_nearest_vec(
+    input: Tensor,
+    output_size: Optional[List[int]],
+    scale_factors: Optional[List[float]],
+) -> Tensor:
     osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
-    scale = get_scale_value(scale_factors, 0)
-
-    return aten.upsample_nearest1d.default(input, osize, scale)
+    scales = (
+        scale_factors if scale_factors else [None] * len(osize)  # type: ignore[list-item]
+    )
+    return _upsample_nearest(input, osize, scales)
 
 
 @register_decomposition(aten._upsample_nearest_exact1d.vec)
+@register_decomposition(aten._upsample_nearest_exact2d.vec)
+@register_decomposition(aten._upsample_nearest_exact3d.vec)
 @aten._upsample_nearest_exact1d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten._upsample_nearest_exact1d.vec.py_impl(DispatchKey.Autograd)
-def _upsample_nearest_exact1d_vec(input, output_size, scale_factors):
-    osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
-    scale = get_scale_value(scale_factors, 0)
-
-    return aten._upsample_nearest_exact1d.default(input, osize, scale)
-
-
-@register_decomposition(aten.upsample_nearest2d.vec)
-@aten.upsample_nearest2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
-@aten.upsample_nearest2d.vec.py_impl(DispatchKey.Autograd)
-def upsample_nearest2d_vec(input, output_size, scale_factors):
-    osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
-    scale_h = get_scale_value(scale_factors, 0)
-    scale_w = get_scale_value(scale_factors, 1)
-
-    return aten.upsample_nearest2d.default(input, osize, scale_h, scale_w)
-
-
-@register_decomposition(aten._upsample_nearest_exact2d.vec)
 @aten._upsample_nearest_exact2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten._upsample_nearest_exact2d.vec.py_impl(DispatchKey.Autograd)
-def _upsample_nearest_exact2d_vec(input, output_size, scale_factors):
-    osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
-    scale_h = get_scale_value(scale_factors, 0)
-    scale_w = get_scale_value(scale_factors, 1)
-
-    return aten._upsample_nearest_exact2d.default(input, osize, scale_h, scale_w)
-
-
-@register_decomposition(aten.upsample_nearest3d.vec)
-@aten.upsample_nearest3d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
-@aten.upsample_nearest3d.vec.py_impl(DispatchKey.Autograd)
-def upsample_nearest3d_vec(input, output_size, scale_factors):
-    osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
-    scale_d = get_scale_value(scale_factors, 0)
-    scale_h = get_scale_value(scale_factors, 1)
-    scale_w = get_scale_value(scale_factors, 2)
-
-    return aten.upsample_nearest3d.default(input, osize, scale_d, scale_h, scale_w)
-
-
-@register_decomposition(aten._upsample_nearest_exact3d.vec)
 @aten._upsample_nearest_exact3d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten._upsample_nearest_exact3d.vec.py_impl(DispatchKey.Autograd)
-def _upsample_nearest_exact3d_vec(input, output_size, scale_factors):
+def _upsample_nearest_exact_vec(
+    input: Tensor,
+    output_size: Optional[List[int]],
+    scale_factors: Optional[List[float]],
+) -> Tensor:
     osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
-    scale_d = get_scale_value(scale_factors, 0)
-    scale_h = get_scale_value(scale_factors, 1)
-    scale_w = get_scale_value(scale_factors, 2)
-
-    return aten._upsample_nearest_exact3d.default(
-        input, osize, scale_d, scale_h, scale_w
+    scales = (
+        scale_factors if scale_factors else [None] * len(osize)  # type: ignore[list-item]
     )
+    return _upsample_nearest(input, osize, scales, exact=True)
 
 
 def _compute_upsample_nearest_indices(input, output_size, scales, exact=False):
@@ -2743,88 +2744,67 @@ def _compute_upsample_nearest_indices(input, output_size, scales, exact=False):
         for _ in range(num_spatial_dims - 1 - d):
             input_indices = input_indices.unsqueeze(-1)
         indices.append(input_indices)
-    return tuple(indices)
+    return indices
 
 
-@register_decomposition(aten.upsample_nearest1d.default)
+@register_decomposition([aten.upsample_nearest1d.default, aten.upsample_nearest1d.out])
 @aten.upsample_nearest1d.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.upsample_nearest1d.default.py_impl(DispatchKey.Autograd)
-@pw_cast_for_opmath
+@out_wrapper(preserve_memory_format=True, exact_dtype=True)
 def upsample_nearest1d(
     input: Tensor,
     output_size: List[int],
     scales: Optional[float] = None,
 ) -> Tensor:
-    (l_indices,) = _compute_upsample_nearest_indices(input, output_size, (scales,))
-    return aten._unsafe_index(input, (None, None, l_indices))
+    return _upsample_nearest(input, output_size, [scales])
 
 
-@register_decomposition(aten._upsample_nearest_exact1d.default)
+@register_decomposition(
+    [aten._upsample_nearest_exact1d.default, aten._upsample_nearest_exact1d.out]
+)
 @aten._upsample_nearest_exact1d.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten._upsample_nearest_exact1d.default.py_impl(DispatchKey.Autograd)
-@pw_cast_for_opmath
-def _upsample_nearest_exact1d(
+@out_wrapper(preserve_memory_format=True, exact_dtype=True)
+def upsample_nearest_exact1d(
     input: Tensor,
     output_size: List[int],
     scales: Optional[float] = None,
 ) -> Tensor:
-    (l_indices,) = _compute_upsample_nearest_indices(
-        input, output_size, (scales,), exact=True
-    )
-    return aten._unsafe_index(input, (None, None, l_indices))
+    return _upsample_nearest(input, output_size, [scales], exact=True)
 
 
-def _upsample_nearest2d_common(input, h_indices, w_indices):
-    result = aten._unsafe_index(input, (None, None, h_indices, w_indices))
-
-    # convert output to correct memory format, if necessary
-    memory_format = utils.suggest_memory_format(input)
-
-    # following "heuristic: only use channels_last path when it's faster than the contiguous path"
-    _, n_channels, _, _ = input.shape
-    if input.device.type == "cuda" and n_channels < 4:
-        memory_format = torch.contiguous_format
-
-    result = result.contiguous(memory_format=memory_format)
-    return result
-
-
-@register_decomposition(aten.upsample_nearest2d.default)
+@register_decomposition([aten.upsample_nearest2d.default, aten.upsample_nearest2d.out])
 @aten.upsample_nearest2d.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.upsample_nearest2d.default.py_impl(DispatchKey.Autograd)
-@pw_cast_for_opmath
+@out_wrapper(preserve_memory_format=True, exact_dtype=True)
 def upsample_nearest2d(
     input: Tensor,
     output_size: List[int],
     scales_h: Optional[float] = None,
     scales_w: Optional[float] = None,
 ) -> Tensor:
-    h_indices, w_indices = _compute_upsample_nearest_indices(
-        input, output_size, (scales_h, scales_w)
-    )
-    return _upsample_nearest2d_common(input, h_indices, w_indices)
+    return _upsample_nearest(input, output_size, [scales_h, scales_w])
 
 
-@register_decomposition(aten._upsample_nearest_exact2d.default)
+@register_decomposition(
+    [aten._upsample_nearest_exact2d.default, aten._upsample_nearest_exact2d.out]
+)
 @aten._upsample_nearest_exact2d.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten._upsample_nearest_exact2d.default.py_impl(DispatchKey.Autograd)
-@pw_cast_for_opmath
+@out_wrapper(preserve_memory_format=True, exact_dtype=True)
 def _upsample_nearest_exact2d(
     input: Tensor,
     output_size: List[int],
     scales_h: Optional[float] = None,
     scales_w: Optional[float] = None,
 ) -> Tensor:
-    h_indices, w_indices = _compute_upsample_nearest_indices(
-        input, output_size, (scales_h, scales_w), exact=True
-    )
-    return _upsample_nearest2d_common(input, h_indices, w_indices)
+    return _upsample_nearest(input, output_size, [scales_h, scales_w], exact=True)
 
 
-@register_decomposition(aten.upsample_nearest3d.default)
+@register_decomposition([aten.upsample_nearest3d.default, aten.upsample_nearest3d.out])
 @aten.upsample_nearest3d.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.upsample_nearest3d.default.py_impl(DispatchKey.Autograd)
-@pw_cast_for_opmath
+@out_wrapper(preserve_memory_format=True, exact_dtype=True)
 def upsample_nearest3d(
     input: Tensor,
     output_size: List[int],
@@ -2832,18 +2812,15 @@ def upsample_nearest3d(
     scales_h: Optional[float] = None,
     scales_w: Optional[float] = None,
 ) -> Tensor:
-    d_indices, h_indices, w_indices = _compute_upsample_nearest_indices(
-        input, output_size, (scales_d, scales_h, scales_w)
-    )
-    result = aten._unsafe_index(input, (None, None, d_indices, h_indices, w_indices))
-
-    return result
+    return _upsample_nearest(input, output_size, [scales_d, scales_h, scales_w])
 
 
-@register_decomposition(aten._upsample_nearest_exact3d.default)
+@register_decomposition(
+    [aten._upsample_nearest_exact3d.default, aten._upsample_nearest_exact3d.out]
+)
 @aten._upsample_nearest_exact3d.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten._upsample_nearest_exact3d.default.py_impl(DispatchKey.Autograd)
-@pw_cast_for_opmath
+@out_wrapper(preserve_memory_format=True, exact_dtype=True)
 def _upsample_nearest_exact3d(
     input: Tensor,
     output_size: List[int],
@@ -2851,11 +2828,35 @@ def _upsample_nearest_exact3d(
     scales_h: Optional[float] = None,
     scales_w: Optional[float] = None,
 ) -> Tensor:
-    d_indices, h_indices, w_indices = _compute_upsample_nearest_indices(
-        input, output_size, (scales_d, scales_h, scales_w), exact=True
+    return _upsample_nearest(
+        input, output_size, [scales_d, scales_h, scales_w], exact=True
     )
-    result = aten._unsafe_index(input, (None, None, d_indices, h_indices, w_indices))
 
+
+@pw_cast_for_opmath
+def _upsample_nearest(
+    input: Tensor,
+    output_size: List[int],
+    scales: List[Optional[float]],
+    exact: bool = False,
+) -> Tensor:
+    spatial_indices = _compute_upsample_nearest_indices(
+        input, output_size, scales, exact=exact
+    )
+
+    indices = [None, None] + spatial_indices
+    result = aten._unsafe_index(input, indices)
+
+    if result.ndim == 4:
+        # convert output to correct memory format, if necessary
+        memory_format = utils.suggest_memory_format(input)
+
+        # following "heuristic: only use channels_last path when it's faster than the contiguous path"
+        n_channels = input.shape[1]
+        if input.device.type == "cuda" and n_channels < 4:
+            memory_format = torch.contiguous_format
+
+        result = result.contiguous(memory_format=memory_format)
     return result
 
 
@@ -4289,8 +4290,9 @@ def matmul(tensor1, tensor2, *, is_out=False):
         torch._check(False, lambda: "both arguments to matmul need to be at least 1D")
 
 
-@register_decomposition(aten.upsample_bicubic2d.default)
+@register_decomposition([aten.upsample_bicubic2d.default, aten.upsample_bicubic2d.out])
 @aten.upsample_bicubic2d.default.py_impl(DispatchKey.Autograd)
+@out_wrapper()
 @pw_cast_for_opmath
 def upsample_bicubic2d_default(
     input: Tensor,

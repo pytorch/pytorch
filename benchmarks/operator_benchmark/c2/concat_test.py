@@ -2,9 +2,9 @@ import random
 
 import benchmark_caffe2 as op_bench_c2
 from benchmark_caffe2 import Caffe2BenchmarkBase  # noqa: F401
-from caffe2.python import core
 
 import operator_benchmark as op_bench
+from caffe2.python import core
 
 
 """Microbenchmarks for Concat operator. Supports both Caffe2/PyTorch."""

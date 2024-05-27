@@ -14,6 +14,13 @@ import torch
 from attn_ft import BertSelfAttention as BertSelfAttentionA, Linear
 from attn_positional import BertSelfAttention as BertSelfAttentionB
 
+from torch.testing._internal.common_utils import (
+    run_tests,
+    skipIfTorchDynamo,
+    TEST_CUDA,
+    TestCase,
+)
+
 from functorch._C import dim as _C
 from functorch.dim import (
     Dim,
@@ -23,13 +30,6 @@ from functorch.dim import (
     dims,
     stack,
     Tensor,
-)
-
-from torch.testing._internal.common_utils import (
-    run_tests,
-    skipIfTorchDynamo,
-    TEST_CUDA,
-    TestCase,
 )
 
 try:
@@ -403,7 +403,7 @@ class TestMin(TestCase):
         # test with too many elements
         try:
             A[1, ..., 1, 1]
-            raise NotImplementedError()
+            raise NotImplementedError
         except IndexError:
             pass
         c, d = dims()
@@ -415,7 +415,7 @@ class TestMin(TestCase):
         )
         try:
             A[..., 3, ...]
-            raise NotImplementedError()
+            raise NotImplementedError
         except DimensionBindError:
             pass
 

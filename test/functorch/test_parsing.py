@@ -27,6 +27,8 @@ SOFTWARE.
 from typing import Any, Callable, Dict
 from unittest import mock
 
+from torch.testing._internal.common_utils import run_tests, TestCase
+
 from functorch.einops._parsing import (
     _ellipsis,
     AnonymousAxis,
@@ -34,7 +36,6 @@ from functorch.einops._parsing import (
     ParsedExpression,
     validate_rearrange_expressions,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
 
 mock_anonymous_axis_eq: Callable[[AnonymousAxis, object], bool] = (
     lambda self, other: isinstance(other, AnonymousAxis) and self.value == other.value
@@ -107,7 +108,7 @@ class TestParsedExpression(TestCase):
             ParsedExpression("(a) ((b c) (d ...))")
 
         # invalid identifiers
-        ParsedExpression("camelCase under_scored cApiTaLs ß ...")
+        ParsedExpression("camelCase under_scored cApiTaLs \u00DF ...")
         with self.assertRaises(ValueError):
             ParsedExpression("1a")
         with self.assertRaises(ValueError):

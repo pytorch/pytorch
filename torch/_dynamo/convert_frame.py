@@ -1,10 +1,13 @@
 import collections
+import cProfile
 import dis
 import functools
 import itertools
 import logging
 import os
+import pstats
 import random
+import subprocess
 import sys
 import threading
 import time
@@ -12,7 +15,10 @@ import traceback
 import types
 import typing
 import weakref
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
+
+from torch._utils_internal import maybe_upload_prof_stats_to_manifold
 
 from torch.fx._lazy_graph_module import (  # type: ignore[attr-defined]
     _use_lazy_graph_module,
@@ -28,7 +34,7 @@ import torch
 import torch._logging
 from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._logging import structured
-from torch._utils_internal import compiletime_sl_profile_meta, signpost_event
+from torch._utils_internal import compile_time_strobelight_meta, signpost_event
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     GuardOnDataDependentSymNode,
@@ -71,7 +77,6 @@ from .guards import (
     GuardedCode,
 )
 from .hooks import Hooks
-from .output_graph import OutputGraph
 from .replay_record import ExecutionRecord
 from .symbolic_convert import InstructionTranslator, SpeculationLog
 from .trace_rules import is_numpy
@@ -88,7 +93,6 @@ from .utils import (
     is_namedtuple,
     istype,
     LazyString,
-    maybe_cprofile,
     orig_code_map,
     record_compilation_metrics,
     reset_graph_break_dup_checker,
@@ -287,6 +291,76 @@ FRAME_COUNTER = 0
 FRAME_COMPILE_COUNTER: typing.Counter[int] = collections.Counter()
 
 
+def maybe_cprofile(func):
+    if config.cprofile:
+        return cprofile_wrapper(func)
+    return func
+
+
+def cprofile_wrapper(func):
+    @functools.wraps(func)
+    def profile_wrapper(*args, **kwargs):
+        trace_id = CompileContext.current_trace_id()
+        assert trace_id, "Trace id is None"
+        profile_path = Path(
+            f"/tmp/{func.__name__}_{str(trace_id).replace('/','_')}.profile"
+        )
+        prof = cProfile.Profile()
+        prof.enable()
+        start_ts = time.time()
+        retval = prof.runcall(func, *args, **kwargs)
+        profile_latency = time.time() - start_ts
+        prof.disable()
+        log.warning(
+            "### Cprofile for %s trace id [%s] took %.3f seconds ###",
+            func.__name__,
+            trace_id,
+            profile_latency,
+        )
+        ps = pstats.Stats(prof)
+        try:
+            prof.dump_stats(profile_path)
+        except PermissionError:
+            log.warning("Cannot write to %s", str(profile_path))
+        svg_path = profile_path.with_suffix(".svg")
+        try:
+            gprof2dot_process = subprocess.Popen(
+                [
+                    "gprof2dot",
+                    "-f",
+                    "pstats",
+                    "--node-label=total-time-percentage",
+                    "--node-label=self-time-percentage",
+                    "--node-label=total-time",
+                    str(profile_path),
+                ],
+                stdout=subprocess.PIPE,
+            )
+            subprocess.check_call(
+                ["dot", "-Tsvg", "-o", str(svg_path)],
+                stdin=gprof2dot_process.stdout,
+            )
+            log.warning("Generated SVG from profile at %s", str(svg_path))
+        except FileNotFoundError:
+            log.warning(
+                "Failed to generate SVG from profile -- dumping stats instead."
+                "Try installing gprof2dot and dot for a better visualization"
+            )
+            ps.sort_stats(pstats.SortKey.TIME).print_stats(20)
+            ps.sort_stats(pstats.SortKey.CUMULATIVE).print_stats(20)
+
+        if manifold_link := maybe_upload_prof_stats_to_manifold(
+            str(profile_path)
+        ):  # fb-only
+            torch._logging.trace_structured(
+                "link",
+                lambda: {"name": "cprofile_manifold_url", "url": manifold_link},
+            )
+        return retval
+
+    return profile_wrapper
+
+
 def convert_frame_assert(
     compiler_fn: CompilerFn,
     one_graph: bool = True,
@@ -304,12 +378,6 @@ def convert_frame_assert(
         code = frame.f_code
 
         cache_size = compute_cache_size(frame, cache_entry)
-        recompile_reasons = None
-        if is_recompilation(cache_size):
-            recompile_reasons = get_and_maybe_log_recompilation_reason(
-                cache_entry, frame
-            )
-
         input_codes.add(code)
         if code in output_codes:
             return None
@@ -355,29 +423,6 @@ def convert_frame_assert(
 
         if is_generator(code):
             unimplemented("generator")
-        exceeded, limit_type = exceeds_cache_size_limit(cache_size)
-        if exceeded:
-
-            def format_func_info(code):
-                return f"'{code.co_name}' ({code.co_filename}:{code.co_firstlineno})"
-
-            def format_guard_failures():
-                assert recompile_reasons, "TODO(whc) any other recompile reasons?"
-                return recompile_reasons[-1]
-
-            log.warning(
-                "torch._dynamo hit config.%s (%s)\n"
-                "   function: %s\n"
-                "   last reason: %s\n"
-                'To log all recompilation reasons, use TORCH_LOGS="recompiles".\n'
-                "To diagnose recompilation issues, see %s.",
-                limit_type,
-                getattr(config, limit_type),
-                format_func_info(code),
-                format_guard_failures(),
-                troubleshooting_url,
-            )
-            unimplemented(f"{limit_type} reached")
 
         if not has_tensor_in_frame(frame):
             return None
@@ -418,6 +463,7 @@ def convert_frame_assert(
             export,
             export_constraints,
             hooks,
+            cache_entry,
             cache_size,
             frame,
             frame_state=frame_state,
@@ -438,6 +484,9 @@ from collections import OrderedDict
 
 from torch.utils.hooks import RemovableHandle
 
+if typing.TYPE_CHECKING:
+    from .output_graph import OutputGraph
+
 # we have to use `OrderedDict` to make `RemovableHandle` work.
 _bytecode_hooks: Dict[int, BytecodeHook] = OrderedDict()
 
@@ -452,9 +501,8 @@ def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
     return handle
 
 
-@compiletime_sl_profile_meta(phase_name="_compile")
+@compile_time_strobelight_meta(phase_name="_compile")
 @_use_lazy_graph_module(config.use_lazy_graph_module)
-@maybe_cprofile
 def _compile(
     code: types.CodeType,
     globals: Dict[str, object],
@@ -465,6 +513,7 @@ def _compile(
     export: bool,
     export_constraints,
     hooks: Hooks,
+    cache_entry,
     cache_size: CacheSizeRelevantForFrame,
     frame: Optional[types.FrameType] = None,
     frame_state=None,
@@ -537,6 +586,7 @@ def _compile(
             instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
     @dynamo_timed(phase_name="entire_frame_compile")
+    @maybe_cprofile
     def compile_inner(
         code: types.CodeType,
         one_graph: bool,
@@ -673,6 +723,38 @@ def _compile(
         return guarded_code
 
     with compile_context(CompileContext(compile_id)):
+        # Check recompilations
+        recompile_reasons = None
+        if is_recompilation(cache_size) and frame:
+            recompile_reasons = get_and_maybe_log_recompilation_reason(
+                cache_entry, frame
+            )
+
+        exceeded, limit_type = exceeds_cache_size_limit(cache_size)
+        if exceeded:
+
+            def format_func_info(code):
+                return f"'{code.co_name}' ({code.co_filename}:{code.co_firstlineno})"
+
+            def format_guard_failures():
+                if not recompile_reasons:
+                    return "Unable to find recompilation reasons"
+                return recompile_reasons[-1]
+
+            log.warning(
+                "torch._dynamo hit config.%s (%s)\n"
+                "   function: %s\n"
+                "   last reason: %s\n"
+                'To log all recompilation reasons, use TORCH_LOGS="recompiles".\n'
+                "To diagnose recompilation issues, see %s.",
+                limit_type,
+                getattr(config, limit_type),
+                format_func_info(code),
+                format_guard_failures(),
+                troubleshooting_url,
+            )
+            unimplemented(f"{limit_type} reached")
+
         log.debug(
             "torchdynamo start compiling %s %s:%s, stack (elided %s frames):\n%s",
             code.co_name,
@@ -683,6 +765,22 @@ def _compile(
             "".join(CapturedTraceback.extract(skip=2 + skip).format()),
         )
         # -4: -2 as above, plus trace_structured frames
+        #
+        # NB: the frame looks like this:
+        #
+        # # handled by skip argument
+        # torch/_dynamo/convert_frame.py:1069 in catch_errors
+        # torch/_dynamo/convert_frame.py:910 in _convert_frame
+        # torch/_dynamo/convert_frame.py:464 in _convert_frame_assert
+        # torch/_utils_internal.py:70 in wrapper_function
+        #
+        # # 2 current frame and context lib
+        # env/lib/python3.10/contextlib.py:79 in inner
+        # torch/_dynamo/convert_frame.py:776 in _compile
+        #
+        # # 2 extra here
+        # torch/_logging/_internal.py:1064 in trace_structured
+        # torch/_dynamo/convert_frame.py:780 in <lambda>
         torch._logging.trace_structured(
             "dynamo_start",
             lambda: {
@@ -696,6 +794,7 @@ def _compile(
         fail_reason: Optional[str] = None
         fail_user_frame_filename: Optional[str] = None
         fail_user_frame_lineno: Optional[int] = None
+        guarded_code = None
         try:
             guarded_code = compile_inner(code, one_graph, hooks, transform)
             return guarded_code
@@ -801,6 +900,7 @@ def _compile(
                 compliant_custom_ops,
                 restart_reasons,
                 dynamo_time_before_restart,
+                guarded_code is not None,
             )
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()

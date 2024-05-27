@@ -40,7 +40,12 @@
 #define AOTI_TORCH_EXPORT __attribute__((__visibility__("default")))
 #else // !__GNUC__
 #ifdef _WIN32
-#define AOTI_TORCH_EXPORT __declspec(dllexport)
+// PyTorch2 doesn't currently work on Windows. Exporting these APIs can lead
+// to symbol clashes at link time if libtorch is included in a DLL and binary
+// that depends on the DLL. As a short term fix, we don't export the symbols.
+// In the long term, this will need to be addressed when Windows is supported.
+// #define AOTI_TORCH_EXPORT __declspec(dllexport)
+#define AOTI_TORCH_EXPORT
 #else // !_WIN32
 #define AOTI_TORCH_EXPORT
 #endif // _WIN32
@@ -66,6 +71,9 @@ extern "C" {
 // the ABI boundary.)
 struct AtenTensorOpaque;
 using AtenTensorHandle = AtenTensorOpaque*;
+
+struct AtenGeneratorOpaque;
+using AtenGeneratorHandle = AtenGeneratorOpaque*;
 
 struct AOTIProxyExecutorOpaque;
 using AOTIProxyExecutorHandle = AOTIProxyExecutorOpaque*;
@@ -103,6 +111,9 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_bool();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex32();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex64();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex128();
+
+AOTI_TORCH_EXPORT int32_t aoti_torch_layout_strided();
+AOTI_TORCH_EXPORT int32_t aoti_torch_layout__mkldnn();
 
 // Functions for converting a single-element tensor to a scalar value
 AOTI_TORCH_EXPORT AOTITorchError
@@ -261,6 +272,20 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_tensor_from_blob(
     int32_t device_index,
     AtenTensorHandle* ret // returns new reference
 );
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_tensor_from_blob_v2(
+    void* data,
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    int64_t storage_offset,
+    int32_t dtype,
+    int32_t device_type,
+    int32_t device_index,
+    AtenTensorHandle* ret, // returns new reference
+    int32_t layout,
+    const uint8_t* opaque_metadata,
+    int64_t opaque_metadata_size);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch__embedding_bag(
     AtenTensorHandle weight,

@@ -144,10 +144,12 @@ class TestInitialization(FSDPTest):
         # Check that the composable module does not add any wrapper class
         local_module_classes = set()
         composable_module_classes = set()
-        for submodule in local_model.modules():
-            local_module_classes.add(type(submodule))
-        for submodule in composable_module.modules():
-            composable_module_classes.add(type(submodule))
+        local_module_classes.update(
+            type(submodule) for submodule in local_model.modules()
+        )
+        composable_module_classes.update(
+            type(submodule) for submodule in composable_module.modules()
+        )
         self.assertEqual(local_module_classes, composable_module_classes)
 
         # Check that the composable module has the same FSDP states with the
@@ -310,14 +312,14 @@ class TestInitialization(FSDPTest):
         ]
         for data_structure_name in data_structure_names:
             all_structures = set()
-            for module in (
-                composable_module.u1,
-                composable_module.u2,
-                composable_module,
-            ):
-                all_structures.add(
-                    id(getattr(fully_shard.state(module), data_structure_name))
+            all_structures.update(
+                id(getattr(fully_shard.state(module), data_structure_name))
+                for module in (
+                    composable_module.u1,
+                    composable_module.u2,
+                    composable_module,
                 )
+            )
             self.assertEqual(len(all_structures), 1)
 
 

@@ -60,6 +60,7 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    TYPE_CHECKING,
     Union,
 )
 
@@ -76,11 +77,19 @@ from torch._inductor.compile_fx import (
     remove_unaligned_input_idxs,
     static_input,
 )
+from torch._inductor.cudagraph_utils import (
+    check_for_mutation,
+    FunctionID,
+    log_cudagraph_skip_and_bump_counter,
+    WrappedFunction,
+)
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.storage import UntypedStorage
-from torch.types import _bool
 from torch.utils import _pytree as pytree
 from torch.utils.weak import TensorWeakRef
+
+if TYPE_CHECKING:
+    from torch.types import _bool
 
 StorageWeakRefPointer = int
 StorageDataPtr = int
@@ -110,26 +119,6 @@ from . import config
 class GraphID:
     "Unique counter of a cuda graph recording"
     id: int
-
-
-@dataclasses.dataclass(frozen=True)
-class FunctionID:
-    "Unique counter of a function wrapped in cudagraphify_impl"
-    id: int
-
-
-@dataclasses.dataclass(frozen=True)
-class WrappedFunction:
-    """
-    Represents a function that you want to record for CUDA graph replay,
-    with a little more metadata so we can identify if we have an applicable
-    CUDA graph in our CUDA graph tree for it.
-    """
-
-    model: Callable[..., Any]
-    static_input_idxs: List[int]
-    id: FunctionID
-    constants: Tuple[torch.Tensor, ...]
 
 
 def clear_cublass_cache():
@@ -398,6 +387,8 @@ def cudagraphify(
     is_inference: bool,
     stack_traces: Optional[StackTraces] = None,
     constants: Tuple[torch.Tensor, ...] = (),
+    placeholders: Tuple[torch.fx.Node, ...] = (),
+    mutated_input_idxs: Tuple[int, ...] = (),
 ):
     manager = get_container(device_index).get_tree_manager()
     assert not (is_backward and is_inference)
@@ -414,6 +405,8 @@ def cudagraphify(
         stack_traces,
         mode,
         constants,
+        placeholders,
+        mutated_input_idxs,
     )
 
 
@@ -569,6 +562,7 @@ class CUDAWarmupNode:
         stack_traces: Optional[StackTraces],
         stream: torch.cuda.Stream,
         already_warm: bool,
+        id: GraphID,
     ):
         self.wrapped_function = wrapped_function
         self.parent = parent
@@ -581,6 +575,7 @@ class CUDAWarmupNode:
         self.stack_traces = stack_traces
         self.stream = stream
         self.already_warm = already_warm
+        self.id = id
 
     def run(self, new_inputs):
         assert not self.has_run, "Wrapped function should never be run twice"
@@ -592,16 +587,16 @@ class CUDAWarmupNode:
         }
 
         def get_non_cudagraph_inps():
-            non_cudagraph_inps = set()
+            non_cudagraph_inps = []
             for t in itertools.chain(new_inputs, self.wrapped_function.constants):
                 if (
                     isinstance(t, torch.Tensor)
                     and t.untyped_storage().data_ptr() not in existing_path_data_ptrs
                 ):
-                    non_cudagraph_inps.add(t.untyped_storage().data_ptr())
+                    non_cudagraph_inps.append(weakref.ref(t.untyped_storage()))
             return non_cudagraph_inps
 
-        non_cudagraph_inps = get_non_cudagraph_inps()
+        non_cudagraph_inps_storages = get_non_cudagraph_inps()
 
         if config.triton.slow_path_cudagraph_asserts and not self.already_warm:
             refs = list(self.path_live_weakrefs())
@@ -614,15 +609,26 @@ class CUDAWarmupNode:
         ), get_history_recording():
             out = self.wrapped_function.model(new_inputs)
 
+        # We need to know which outputs are allocated within the cudagraph pool
+        # so that we can deallocate them at the beginning of the next cudagraph step,
+        # and set their access to error.
+        # We use a weakref to the inputs storage, in case a block which was previously
+        # allocated to the general caching allocator pool gets reallocated to a private pool.
+
+        non_cudagraph_inps_storage_ptrs = set()
+        for storage in non_cudagraph_inps_storages:
+            s = storage()
+            if s is not None:
+                non_cudagraph_inps_storage_ptrs.add(s._cdata)
+
         assert len(new_inputs) == 0
 
         # sdpa returns cpu tensors when not recording cuda graph
         def add_ref(o):
             return (
-                o is not None
-                and isinstance(o, torch.Tensor)
+                isinstance(o, torch.Tensor)
                 and o.is_cuda
-                and o.untyped_storage().data_ptr() not in non_cudagraph_inps
+                and o.untyped_storage()._cdata not in non_cudagraph_inps_storage_ptrs
                 and o.untyped_storage().data_ptr() != 0
             )
 
@@ -634,11 +640,8 @@ class CUDAWarmupNode:
         )
 
         if config.triton.slow_path_cudagraph_asserts and not self.already_warm:
-            out_refs = self.path_live_weakrefs()
-            new_storages = [
-                t for t in out_refs if t.data_ptr() not in non_cudagraph_inps
-            ]
-            check_memory_pool(self.device_index, self.cuda_graphs_pool, new_storages)
+            out_refs = list(self.path_live_weakrefs())
+            check_memory_pool(self.device_index, self.cuda_graphs_pool, out_refs)
 
         return out
 
@@ -661,6 +664,12 @@ class CUDAWarmupNode:
 
     def all_outputs_are_dead(self):
         return not list(self.path_live_weakrefs())
+
+    def _is_cuda_graph_recorded_tensor(self, t: torch.Tensor):
+        for storage_weak_ref in self.path_live_weakrefs():
+            if t.untyped_storage().data_ptr() == storage_weak_ref.data_ptr():
+                return True
+        return False
 
 
 # Aliases for List that say what the indices denote
@@ -1710,6 +1719,9 @@ class CUDAGraphTreeManager:
         self.warned_functions: Set[FunctionID] = set()
         torch._C._set_cached_tensors_enabled(True)
 
+        # warn only once if a function mutates inputs
+        self.warned_mutation: Set[FunctionID] = set()
+
         # NB: cuda caching allocator will remember the stream a segment is allocated to
         # and only allocate that segment to the same stream. we need to use a single stream
         # for all allocations to the memory pool, otherwise the allocations to separate streams
@@ -1735,6 +1747,13 @@ class CUDAGraphTreeManager:
 
         self.graph_counter = itertools.count(0)
         self.func_counter = itertools.count(0)
+
+        # mapping from graph_id to (function id to mutation type hint) since we are
+        # specializing on a particular combination of Parent Node -> Function ID.
+        self.non_cudagraph_managed_mutation_hint: Dict[
+            Optional[GraphID], Dict[FunctionID, bool]
+        ] = defaultdict(dict)
+        self.warmup_node_counter = itertools.count(start=-1, step=-1)
 
         # whether we the current node is in a state of warmup, recording, execution. If
         # there is no current node the state will be ExecutionState.None.
@@ -1792,6 +1811,42 @@ class CUDAGraphTreeManager:
     def set_to_running_backward(self):
         self.running_forwards_with_pending_backwards = False
 
+    def _get_cuda_graph_recorded_tensor_checker(self) -> Callable[[Tensor], bool]:
+        return (
+            self.current_node._is_cuda_graph_recorded_tensor
+            if isinstance(self.current_node, (CUDAGraphNode, CUDAWarmupNode))
+            else lambda _: False
+        )
+
+    def new_warmup_node_id(self) -> GraphID:
+        return GraphID(next(self.warmup_node_counter))
+
+    def _update_non_cudagraph_managed_mutation(
+        self, function_id: FunctionID, inputs: List[Tensor]
+    ):
+        node_id = self._get_node_id()
+        if maybe_mutation_str := check_for_mutation(
+            self.ids_to_funcs[function_id],
+            inputs,
+            self._get_cuda_graph_recorded_tensor_checker(),
+        ):
+            self.non_cudagraph_managed_mutation_hint[node_id][function_id] = True
+            # warn once per function_id
+            if function_id in self.warned_mutation:
+                return
+            self.warned_mutation.add(function_id)
+            log_cudagraph_skip_and_bump_counter(maybe_mutation_str)
+        else:
+            self.non_cudagraph_managed_mutation_hint[node_id][function_id] = False
+
+    def _get_node_id(self) -> Optional[GraphID]:
+        if self.current_node is None:
+            return None
+        elif isinstance(self.current_node, (CUDAGraphNode, CUDAWarmupNode)):
+            return self.current_node.id
+        else:
+            raise RuntimeError(f"Unknown node type {type(self.current_node)}")
+
     def _run(self, new_inputs: List[Tensor], function_id: FunctionID):
         # we will try to end the current execution lazily, since
         # we dont want to do unnecessary checking of the existing outputs
@@ -1802,6 +1857,16 @@ class CUDAGraphTreeManager:
 
         if self.in_warmup:
             self.try_end_curr_warmup(function_id)
+
+        node_id = self._get_node_id()
+        if function_id not in self.non_cudagraph_managed_mutation_hint[node_id]:
+            self._update_non_cudagraph_managed_mutation(function_id, new_inputs)
+
+        # Early exit if the function mutates inputs which are neither parameters/buffers nor
+        # cudagraph recorded tensors. This check should happen after `try_end_curr_recording`
+        # and `try_end_curr_warmup` which may change self.current_node.
+        if self.non_cudagraph_managed_mutation_hint[node_id][function_id]:
+            return self.ids_to_funcs[function_id].model(new_inputs)
 
         # warming up a function and subsequentally recording may use different memory addresses
         # because both depend on the state of the caching allocator. if we warm up graph A,
@@ -1847,6 +1912,13 @@ class CUDAGraphTreeManager:
                 # run again to hit the root matching case which must succeed
                 if self.current_node is None:
                     return self.run(new_inputs, function_id)
+
+            if len(self.ids_to_funcs[function_id].mutated_input_idxs) > 0:
+                self._update_non_cudagraph_managed_mutation(function_id, new_inputs)
+                if self.non_cudagraph_managed_mutation_hint[self._get_node_id()][
+                    function_id
+                ]:
+                    return self.ids_to_funcs[function_id].model(new_inputs)
 
             # at this point, we necessarily will do a new recording
             self.debug_fail_counter += 1
@@ -1934,6 +2006,7 @@ class CUDAGraphTreeManager:
             self.ids_to_stack_traces[function_id],
             self.stream,
             already_warm,
+            self.new_warmup_node_id(),
         )
         self.current_node = node
         self.path_state = ExecutionState.WARMUP
@@ -1954,6 +2027,8 @@ class CUDAGraphTreeManager:
         stack_traces,
         mode,
         constants,
+        placeholders,
+        mutated_input_idxs,
     ) -> Tuple[Callable[..., Any], List[Optional[Tensor]]]:
         id = self.new_func_id()
         self.ids_to_stack_traces[id] = stack_traces
@@ -1962,6 +2037,8 @@ class CUDAGraphTreeManager:
             list(static_input_idxs),
             id,
             tuple(t for t in constants if isinstance(t, torch.Tensor) and t.is_cuda),
+            placeholders,
+            mutated_input_idxs,
         )
         self.id_to_mode[id] = mode
         fn = functools.partial(self.run, function_id=id)

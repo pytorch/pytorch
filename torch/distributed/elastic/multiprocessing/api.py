@@ -50,6 +50,8 @@ __all__ = [
     "get_std_cm",
     "MultiprocessContext",
     "SubprocessContext",
+    "LogsDest",
+    "LogsSpecs",
 ]
 
 class SignalException(Exception):
@@ -244,7 +246,7 @@ class DefaultLogsSpecs(LogsSpecs):
             if not log_dir:
                 log_dir = tempfile.mkdtemp(prefix="torchelastic_")
             elif not os.path.exists(log_dir):
-                os.makedirs(log_dir)
+                os.makedirs(log_dir, exist_ok=True)
             else:
                 if os.path.isfile(log_dir):
                     raise NotADirectoryError(f"log_dir: {log_dir} is a file")
@@ -458,7 +460,7 @@ class PContext(abc.ABC):
     @abc.abstractmethod
     def _start(self) -> None:
         """Start processes using strategy defined in a particular context."""
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @abc.abstractmethod
     def _poll(self) -> Optional[RunProcsResult]:
@@ -469,7 +471,7 @@ class PContext(abc.ABC):
         successfully or any process fails. Returns ``None`` if
         all processes are still running.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def wait(self, timeout: float = -1, period: float = 1) -> Optional[RunProcsResult]:
         """
@@ -514,7 +516,7 @@ class PContext(abc.ABC):
     @abc.abstractmethod
     def pids(self) -> Dict[int, int]:
         """Return pids of processes mapped by their respective local_ranks."""
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @abc.abstractmethod
     def _close(self, death_sig: signal.Signals, timeout: int = 30) -> None:
@@ -522,7 +524,7 @@ class PContext(abc.ABC):
         Terminates all processes managed by this context and cleans up any
         meta resources (e.g. redirect, error_file files).
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def close(
         self, death_sig: Optional[signal.Signals] = None, timeout: int = 30
@@ -670,9 +672,13 @@ class MultiprocessContext(PContext):
             if self._is_done():
                 # we should ALWAYS have ALL the return values when all the processes are done
                 self._worker_finished_event.set()
-                # Wait untill all processes are finished. At this point workers finished executing
-                # user function
-                self._pc.join()
+
+                # At this point workers finished running the user function
+                # But the child process might still have not exited. Wait for them.
+                # pc.join() blocks [forever] until "a" proc exits. Loop until all of them exits.
+                while not self._pc.join():
+                    logger.debug("entrypoint fn finished, waiting for all child procs to exit...")
+
                 _validate_full_rank(
                     self._return_values, self.nprocs, "return_value queue"
                 )

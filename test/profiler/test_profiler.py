@@ -1,18 +1,34 @@
 # Owner(s): ["oncall: profiler"]
+
+# if tqdm is not shutdown properly, it will leave the monitor thread alive.
+# This causes an issue in the multithreading test because we check all events
+# in that test with their tids. The events that correspond to these lingering
+# threads all have TID of (uint64_t)(-1) which is invalid.
+# The work around is turnning off monitoring thread when tqdm is loaded.
+# Since these are unit tests, it is safe to turn off monitor thread.
+try:
+    import tqdm
+
+    tqdm.tqdm.monitor_interval = 0
+except ImportError:
+    pass
+
 import collections
 import gc
 import json
+import mmap
 import os
+import pickle
+import random
 import re
+import struct
 import subprocess
 import sys
-import tempfile
-import textwrap
 import threading
+import time
 import unittest
-import weakref
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 from unittest.mock import patch
 
 import expecttest
@@ -20,18 +36,11 @@ import torch
 import torch.nn as nn
 import torch.optim
 import torch.utils.data
-import torch.utils.data.datapipes as dp
-from torch._C._profiler import _TensorMetadata
-from torch.autograd import (
-    _record_function_with_args_enter,
-    _record_function_with_args_exit,
-)
 from torch.autograd.profiler import KinetoStepTracker, profile as _profile
 from torch.autograd.profiler_legacy import profile as _profile_legacy
 from torch.profiler import (
     _utils,
     DeviceType,
-    ExecutionTraceObserver,
     kineto_available,
     profile,
     ProfilerAction,
@@ -52,14 +61,19 @@ from torch.profiler._pattern_matcher import (
     report_all_anti_patterns,
     SynchronizedDataLoaderPattern,
 )
+
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
+
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_ARM64,
     IS_JETSON,
+    IS_LINUX,
     IS_WINDOWS,
     parametrize,
     run_tests,
+    serialTest,
     skipIfTorchDynamo,
     TemporaryDirectoryName,
     TemporaryFileName,
@@ -69,15 +83,13 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
-Json = Dict[str, Any]
-
 try:
     import psutil
 
     HAS_PSUTIL = True
 except ImportError:
     HAS_PSUTIL = False
-import pickle
+
 
 from torch._C._profiler import _ExperimentalConfig, _ExtraFields_PyCall
 
@@ -211,454 +223,6 @@ class TestProfilerITT(TestCase):
             q.backward()
 
 
-class TestRecordFunction(TestCase):
-    def _record_function_with_param(self):
-        u = torch.randn(3, 4, 5, requires_grad=True)
-        with _profile(
-            with_stack=True, use_kineto=kineto_available(), record_shapes=True
-        ) as prof:
-            with record_function("## TEST 1 ##", "1, 2, 3"):
-                rf_handle = _record_function_with_args_enter(
-                    "## TEST 2 ##", 1, False, 2.5, [u, u], "hello", u
-                )
-                _record_function_with_args_exit(rf_handle)
-            with record_function("## TEST 3 ##"):
-                rf_handle = _record_function_with_args_enter("## TEST 4 ##")
-                _record_function_with_args_exit(rf_handle)
-        return prof
-
-    def test_record_function(self):
-        prof_result = self._record_function_with_param()
-        found_test_1 = False
-        found_test_2 = False
-        found_test_3 = False
-        found_test_4 = False
-        for e in prof_result.function_events:
-            if "## TEST 1 ##" == e.name:
-                found_test_1 = True
-                self.assertTrue(e.input_shapes == [[]])
-            elif "## TEST 2 ##" == e.name:
-                found_test_2 = True
-                self.assertTrue(e.input_shapes == [[], [], [], [], [], [3, 4, 5]])
-            elif "## TEST 3 ##" == e.name:
-                found_test_3 = True
-                self.assertTrue(e.input_shapes == [])
-            elif "## TEST 4 ##" == e.name:
-                found_test_4 = True
-                self.assertTrue(e.input_shapes == [])
-        self.assertTrue(found_test_1)
-        self.assertTrue(found_test_2)
-        self.assertTrue(found_test_3)
-        self.assertTrue(found_test_4)
-
-    def test_datapipe_with_record_function(self):
-        with _profile(
-            with_stack=True, use_kineto=kineto_available(), record_shapes=True
-        ) as prof:
-            input_dp1 = dp.iter.IterableWrapper(range(4))
-            input_dp2 = dp.iter.IterableWrapper(range(4, 8))
-            input_dp3 = dp.iter.IterableWrapper(range(8, 12))
-            output_dp = input_dp1.mux(input_dp2, input_dp3)
-            output = list(output_dp)
-
-        has_iter = False
-        has_mux = False
-        for e in prof.function_events:
-            if has_iter and has_mux:
-                break
-
-            if not has_iter and "IterableWrapper" in e.name:
-                has_iter = True
-            if not has_mux and "Multiplexer" in e.name:
-                has_mux = True
-        self.assertTrue(has_iter)
-        self.assertTrue(has_mux)
-
-    def test_datapipe_delegation_with_profiler(self):
-        class IDPIterator(torch.utils.data.IterDataPipe):
-            def __init__(self):
-                self.data = list(range(10))
-                self._idx = 0
-
-            def __iter__(self):
-                return self
-
-            def __next__(self):
-                if self._idx >= 10:
-                    self._idx = 0
-                    raise StopIteration
-                self._idx += 1
-                return self.data[self._idx - 1]
-
-            def get_value(self, idx):
-                return self.data[idx]
-
-        dp1 = IDPIterator()  # The object itself is an iterator
-        self.assertEqual(5, dp1.get_value(5))
-        it_dp1 = iter(dp1)  # This creates the 1st iterator
-        self.assertEqual(5, it_dp1.get_value(5))  # type: ignore[attr-defined]
-        self.assertEqual(list(range(10)), list(it_dp1))
-
-        class IDPDelegator(torch.utils.data.IterDataPipe):
-            def __init__(self, datapipe):
-                self.datapipe = datapipe
-
-            def __iter__(self):
-                return iter(self.datapipe)
-
-        dp2 = IDPDelegator(dp1)
-        it_dp2 = iter(dp2)
-        self.assertEqual(5, it_dp2.get_value(5))
-        self.assertEqual(list(range(10)), list(it_dp2))
-
-    def test_datapipe_with_record_function_fork(self):
-        with _profile(
-            with_stack=True, use_kineto=kineto_available(), record_shapes=True
-        ) as prof:
-            input_dp = dp.iter.IterableWrapper(range(10))
-            dp1, dp2, dp3 = input_dp.fork(num_instances=3)
-            output1 = list(dp1)
-        has_iter = False
-        has_child = False
-        for e in prof.function_events:
-            if has_iter and has_child:
-                break
-
-            if not has_iter and "IterableWrapper" in e.name:
-                has_iter = True
-            if not has_child and "_ChildDataPipe" in e.name:
-                has_child = True
-        self.assertTrue(has_iter)
-        self.assertTrue(has_child)
-
-
-class TestExecutionTrace(TestCase):
-    def payload(self, use_cuda=False):
-        u = torch.randn(3, 4, 5, requires_grad=True)
-        with record_function("## TEST 1 ##", "1, 2, 3"):
-            inf_val = float("inf")
-            neg_inf_val = float("-inf")
-            nan_val = float("nan")
-            rf_handle = _record_function_with_args_enter(
-                "## TEST 2 ##",
-                1,
-                False,
-                2.5,
-                [u, u],
-                (u, u),
-                "hello",
-                u,
-                inf_val,
-                neg_inf_val,
-                nan_val,
-            )
-            x = torch.randn(10, 10, requires_grad=True)
-            if use_cuda:
-                x = x.cuda()
-            y = torch.randn(10, 10, requires_grad=True)
-            if use_cuda:
-                y = y.cuda()
-            z = x + y + x * y + x * y
-            z.backward(z)
-            gelu = nn.GELU()
-            m = torch.randn(2)
-            _ = gelu(m)
-            if use_cuda:
-                z = z.cpu()
-            _record_function_with_args_exit(rf_handle)
-
-    def get_execution_trace_root(self, output_file_name) -> Json:
-        nodes = []
-        with open(output_file_name) as f:
-            et_graph = json.load(f)
-            assert "nodes" in et_graph
-            nodes = et_graph["nodes"]
-        return nodes
-
-    def get_execution_trace_rf_ids(self, nodes: List[Json]) -> List[int]:
-        """Returns a sorted list of rf_id (record function ids) in execution trace"""
-
-        def get_rf_id(node):
-            attrs = node["attrs"]
-            for a in attrs:
-                if a["name"] == "rf_id":
-                    return a["value"]
-            return None
-
-        rf_ids_ = (
-            get_rf_id(n)
-            for n in nodes
-            if n["name"] != "[pytorch|profiler|execution_trace|process]"
-            and n["name"] != "[pytorch|profiler|execution_trace|thread]"
-        )
-        return sorted(rf_id for rf_id in rf_ids_ if rf_id is not None)
-
-    def get_kineto_rf_ids(self, events: List[Json]) -> List[int]:
-        """Returns a sorted list of Record function IDs for CPU operators and user annotations"""
-        ops_and_annotations = (
-            e for e in events if e.get("cat", "") in ["cpu_op", "user_annotation"]
-        )
-        return sorted(
-            e.get("args", {}).get("Record function id", -1) for e in ops_and_annotations
-        )
-
-    @unittest.skipIf(not kineto_available(), "Kineto is required")
-    def test_execution_trace_with_kineto(self):
-        trace_called_num = 0
-
-        def trace_handler(p):
-            nonlocal trace_called_num
-            trace_called_num += 1
-
-        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
-        # Create a temp file to save execution trace and kineto data.
-        fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
-        fp.close()
-        kt = tempfile.NamedTemporaryFile(
-            mode="w+t", suffix=".kineto.json", delete=False
-        )
-        kt.close()
-
-        with profile(
-            activities=supported_activities(),
-            schedule=torch.profiler.schedule(
-                skip_first=3, wait=1, warmup=1, active=2, repeat=1
-            ),
-            on_trace_ready=trace_handler,
-            execution_trace_observer=(
-                ExecutionTraceObserver().register_callback(fp.name)
-            ),
-        ) as p:
-            for idx in range(10):
-                with record_function(f"## LOOP {idx} ##"):
-                    self.payload(use_cuda=use_cuda)
-                p.step()
-            self.assertEqual(fp.name, p.execution_trace_observer.get_output_file_path())
-
-        # Uncomment for debugging
-        # print("Output kineto = ", kt.name)
-        # print("Output ET = ", fp.name)
-
-        p.export_chrome_trace(kt.name)
-        self.assertEqual(trace_called_num, 1)
-
-        nodes = self.get_execution_trace_root(fp.name)
-        loop_count = 0
-        found_root_node = False
-        for n in nodes:
-            assert "name" in n
-            if "[pytorch|profiler|execution_trace|process]" in n["name"]:
-                found_root_node = True
-            if n["name"].startswith("## LOOP "):
-                loop_count += 1
-        self.assertTrue(found_root_node)
-        # Since profiler trace is active for 2 iterations
-        self.assertEqual(loop_count, 2)
-
-        # Compare the collected Execution Trace and Kineto Trace
-        # in terms of record func ID (rf_id) and External IDs
-        # both of these should match for the same trace window.
-
-        with open(kt.name) as f:
-            kineto = json.load(f)
-            events = kineto["traceEvents"]
-
-        # Look up rf_ids in both Execution and Kineto trace as two lists.
-        rf_ids_et = self.get_execution_trace_rf_ids(nodes)
-        rf_ids_kineto = self.get_kineto_rf_ids(events)
-
-        self.assertCountEqual(rf_ids_et, rf_ids_kineto)
-        self.assertListEqual(
-            rf_ids_et,
-            rf_ids_kineto,
-            msg=f"ET and kineto rf_id should exactly match\n"
-            f"  rf_ids_et = {rf_ids_et}\n"
-            f"  rf_ids_kineto = {rf_ids_kineto}\n",
-        )
-
-    def test_execution_trace_alone(self):
-        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
-        # Create a temp file to save execution trace data.
-        fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
-        fp.close()
-        expected_loop_events = 0
-
-        et = ExecutionTraceObserver().register_callback(fp.name)
-        et.start()
-        for idx in range(5):
-            expected_loop_events += 1
-            with record_function(f"## LOOP {idx} ##"):
-                self.payload(use_cuda=use_cuda)
-        et.stop()
-
-        assert fp.name == et.get_output_file_path()
-        et.unregister_callback()
-        nodes = self.get_execution_trace_root(fp.name)
-        loop_count = 0
-        # Expected tensor object tuple size, in th form of:
-        # [tensor_id, storage_id, offset, numel, itemsize, device_str]
-        tensor_tuple_size = 6
-        found_root_node = False
-        for n in nodes:
-            assert "name" in n
-            if "[pytorch|profiler|execution_trace|process]" in n["name"]:
-                found_root_node = True
-            if n["name"].startswith("## LOOP "):
-                loop_count += 1
-            # Check if tensor tuple representation size is correct.
-            if n["name"] == "## TEST 2 ##":
-                assert len(n["inputs"]["values"][3][0]) == tensor_tuple_size
-        assert found_root_node
-        assert loop_count == expected_loop_events
-
-    @unittest.skipIf(IS_WINDOWS, "torch.compile does not support WINDOWS")
-    def test_execution_trace_with_pt2(self):
-        class ConvAndRelu(nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = nn.Linear(4096, 4096)
-                self.relu = nn.ReLU(inplace=True)
-
-            def forward(self, x: torch.Tensor) -> torch.Tensor:
-                x = self.linear(x)
-                x = self.relu(x)
-                return x
-
-        # Create a temp file to save execution trace data.
-        fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
-        fp.close()
-
-        test_module = torch.compile(ConvAndRelu())
-
-        x = torch.rand(128, 4096)
-        et = ExecutionTraceObserver().register_callback(fp.name)
-        et.start()
-        test_module.forward(x)
-        et.stop()
-
-        assert fp.name == et.get_output_file_path()
-        et.unregister_callback()
-        nodes = self.get_execution_trace_root(fp.name)
-
-        found_root_node = False
-        for n in nodes:
-            assert "name" in n
-            if "[pytorch|profiler|execution_trace|process]" in n["name"]:
-                found_root_node = True
-
-        assert found_root_node
-
-    def test_execution_trace_start_stop(self):
-        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
-        # Create a temp file to save execution trace data.
-        fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
-        fp.close()
-        expected_loop_events = 0
-        et = ExecutionTraceObserver()
-        et.register_callback(fp.name)
-        for idx in range(10):
-            if idx == 3:
-                et.start()
-            elif idx == 5:
-                et.stop()
-            elif idx == 8:
-                et.start()
-            elif idx == 9:
-                et.stop()
-            if et._execution_trace_running:
-                expected_loop_events += 1
-            with record_function(f"## LOOP {idx} ##"):
-                self.payload(use_cuda=use_cuda)
-
-        assert fp.name == et.get_output_file_path()
-        et.unregister_callback()
-        nodes = self.get_execution_trace_root(fp.name)
-        loop_count = 0
-        found_root_node = False
-        for n in nodes:
-            assert "name" in n
-            if "[pytorch|profiler|execution_trace|process]" in n["name"]:
-                found_root_node = True
-            if n["name"].startswith("## LOOP "):
-                loop_count += 1
-        assert found_root_node
-        assert loop_count == expected_loop_events
-
-    def test_execution_trace_repeat_in_loop(self):
-        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
-        iter_list = {3, 4, 6, 8}
-        expected_loop_events = len(iter_list)
-        output_files = []
-        for idx in range(10):
-            if idx in iter_list:
-                # Create a temp file to save execution trace data.
-                fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
-                fp.close()
-                output_files.append(fp.name)
-                et = ExecutionTraceObserver()
-                et.register_callback(fp.name)
-                et.start()
-            with record_function(f"## LOOP {idx} ##"):
-                self.payload(use_cuda=use_cuda)
-            if idx in iter_list:
-                et.stop()
-                et.unregister_callback()
-
-        event_count = 0
-        for et_file in output_files:
-            nodes = self.get_execution_trace_root(et_file)
-            found_root_node = False
-            for n in nodes:
-                assert "name" in n
-                if "[pytorch|profiler|execution_trace|process]" in n["name"]:
-                    assert n["id"] == 1
-                    found_root_node = True
-                if n["name"].startswith("## LOOP "):
-                    event_count += 1
-            assert found_root_node
-        assert event_count == expected_loop_events
-
-    def test_execution_trace_no_capture(self):
-        fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
-        fp.close()
-        et = ExecutionTraceObserver()
-        et.register_callback(fp.name)
-
-        assert fp.name == et.get_output_file_path()
-        et.unregister_callback()
-        nodes = self.get_execution_trace_root(fp.name)
-        for n in nodes:
-            assert "name" in n
-            if "[pytorch|profiler|execution_trace|process]" in n["name"]:
-                found_root_node = True
-        assert found_root_node
-
-    def test_execution_trace_nested_tensor(self):
-        fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
-        fp.close()
-
-        et = ExecutionTraceObserver()
-        observer = et.register_callback(fp.name)
-
-        def fn(nt):
-            return nt.sin().cos()
-
-        with torch.profiler.profile(execution_trace_observer=observer) as prof:
-            for i in range(3):
-                values = torch.rand((8 + i, 4 + i))
-                offsets = torch.tensor([0, 2, 4, 6, 8 + i])
-                nt = torch.nested.nested_tensor_from_jagged(values, offsets)
-                fn(nt)
-
-        nodes = self.get_execution_trace_root(fp.name)
-        found_cos = False
-        for n in nodes:
-            assert "name" in n
-            if "cos" in n["name"]:
-                found_cos = True
-        assert found_cos
-
-
 @instantiate_parametrized_tests
 class TestProfiler(TestCase):
     @unittest.skipIf(
@@ -771,6 +335,7 @@ class TestProfiler(TestCase):
         }.items(),
         name_fn=lambda name, thread_spec: name,
     )
+    @serialTest()
     @parametrize("work_in_main_thread", [True, False])
     def test_source_multithreaded(self, name, thread_spec, work_in_main_thread):
         """Test various threading configurations.
@@ -998,7 +563,9 @@ class TestProfiler(TestCase):
         def run_profiler(tensor_creation_fn):
             # collecting allocs / deallocs
             with _profile(
-                profile_memory=True, record_shapes=True, use_kineto=kineto_available()
+                profile_memory=True,
+                record_shapes=True,
+                use_kineto=kineto_available(),
             ) as prof:
                 x = None
                 with record_function("test_user_scope_alloc"):
@@ -1009,16 +576,22 @@ class TestProfiler(TestCase):
 
         def check_metrics(stats, metric, allocs=None, deallocs=None):
             stat_metrics = {}
+            # print(stats)
             for stat in stats:
                 stat_metrics[stat.key] = getattr(stat, metric)
+            # print(stat_metrics)
             if allocs is not None:
                 for alloc_fn in allocs:
                     self.assertTrue(alloc_fn in stat_metrics)
-                    self.assertTrue(stat_metrics[alloc_fn] > 0)
+                    self.assertGreater(
+                        stat_metrics[alloc_fn], 0, f"alloc_fn = {alloc_fn}"
+                    )
             if deallocs is not None:
                 for dealloc_fn in deallocs:
                     self.assertTrue(dealloc_fn in stat_metrics)
-                    self.assertTrue(stat_metrics[dealloc_fn] < 0)
+                    self.assertLess(
+                        stat_metrics[dealloc_fn], 0, f"alloc_fn = {dealloc_fn}"
+                    )
 
         def create_cpu_tensor():
             return torch.rand(10, 10)
@@ -1077,7 +650,7 @@ class TestProfiler(TestCase):
             stats = run_profiler(create_cuda_tensor)
             check_metrics(
                 stats,
-                "cuda_memory_usage",
+                "device_memory_usage",
                 allocs=[
                     "test_user_scope_alloc",
                     "aten::to",
@@ -1129,7 +702,7 @@ class TestProfiler(TestCase):
             deallocs=["[memory]"],
         )
         if torch.cuda.is_available():
-            check_metrics(stats, "cuda_memory_usage", deallocs=["[memory]"])
+            check_metrics(stats, "device_memory_usage", deallocs=["[memory]"])
 
     @unittest.skipIf(
         IS_JETSON, "Jetson has a guard against OOM since host and gpu memory are shared"
@@ -1648,6 +1221,26 @@ class TestProfiler(TestCase):
                         f"Failed finding record funciont for op = {e}",
                     )
 
+    def test_profiler_strides(self):
+        torch._C._profiler._set_record_concrete_inputs_enabled_val(True)
+        base_tensor = torch.randn(1024, dtype=torch.float32)
+        a = base_tensor.as_strided((16, 16), (17, 1), 0)
+        b = base_tensor.as_strided((16, 16), (25, 2), 272)
+        with _profile(record_shapes=True) as prof:
+            c = torch.add(a, b)
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                j = json.load(f)
+                op_events = [
+                    e for e in j["traceEvents"] if e.get("cat", "") == "cpu_op"
+                ]
+                for e in op_events:
+                    args = e["args"]
+                    if e["name"] == "aten::add":
+                        self.assertEqual(args["Input Strides"], [[17, 1], [25, 2], []])
+
     def test_profiler_fwd_bwd_link(self):
         with _profile(use_kineto=True) as prof:
             t1, t2 = torch.ones(1, requires_grad=True), torch.ones(
@@ -1970,7 +1563,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 try:
                     with cm:
                         x.add(y)
-                        raise ValueError()
+                        raise ValueError
                         x.relu()
                 except ValueError:
                     pass
@@ -2074,17 +1667,157 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
 
         event_list.table()
 
+    def _check_all_gpu_present(self, gpu_dict, max_gpu_count):
+        for i in range(0, max_gpu_count):
+            self.assertEqual(gpu_dict["GPU " + str(i)], 1)
 
-def find_node_with_name(nodes, name):
-    for node in _utils.traverse_dfs(nodes):
-        if node.name == name:
-            return node
+    # Do json sanity testing. Checks that all events are between profiler start and end
+    # also checks to see that GPU values are present in trace if cuda is used
+    def _validate_basic_json(self, traceEvents, cuda_available=False):
+        MAX_GPU_COUNT = 8
+        PROFILER_IDX = -4
+        RECORD_END = -1
+        RECORD_START = -2
+        traceEventProfiler = traceEvents[PROFILER_IDX]
 
+        self.assertTrue(traceEventProfiler["name"] == "PyTorch Profiler (0)")
+        self.assertTrue(traceEvents[RECORD_END]["name"] == "Record Window End")
+        self.assertTrue(
+            traceEvents[RECORD_START]["name"] == "Iteration Start: PyTorch Profiler"
+        )
+        # check that the profiler starts/ends within the record interval
+        self.assertGreaterEqual(
+            traceEventProfiler["ts"],
+            traceEvents[RECORD_START]["ts"],
+            "Profiler starts before record!",
+        )
+        self.assertLessEqual(
+            traceEventProfiler["ts"] + traceEventProfiler["dur"],
+            traceEvents[RECORD_END]["ts"],
+            "Profiler ends after record end!",
+        )
 
-def find_node_with_regex(nodes, pattern):
-    for node in _utils.traverse_dfs(nodes):
-        if re.search(pattern, node.name):
-            return node
+        gpu_dict = collections.defaultdict(int)
+        for i, traceEvent in enumerate(traceEvents):
+            if (
+                i == len(traceEvents) + RECORD_END
+                or i == len(traceEvents) + RECORD_START
+            ):
+                continue
+            # make sure all valid trace events are within the bounds of the profiler
+            if "ts" in traceEvent:
+                self.assertGreaterEqual(
+                    traceEvent["ts"],
+                    traceEventProfiler["ts"],
+                    "Trace event is out of bounds",
+                )
+            # some python events seem to go a little past record end probably because
+            # of some clock inaccuracies so just compare events ending to RECORD_END
+            if "dur" in traceEvent:
+                self.assertLessEqual(
+                    traceEvent["ts"] + traceEvent["dur"],
+                    traceEvents[RECORD_END]["ts"],
+                    "Trace event ends too late!",
+                )
+            gpu_value = traceEvent.get("args", {}).get("labels", None)
+            if gpu_value and "GPU" in gpu_value:
+                gpu_dict[gpu_value] += 1
+                self.assertTrue(
+                    traceEvents[i + 1]["args"]["sort_index"]
+                    == 0x1000000 + int(gpu_value.split()[1])
+                )
+
+        # TODO add checking gpu count if cpuOnly_ is true or not
+
+    def _test_chrome_trace_basic_helper(self, with_cuda=False):
+        if with_cuda:
+            device = "cuda"
+        else:
+            device = "cpu"
+        x, y = (torch.rand(4, 4).to(device) for _ in range(2))
+
+        with profile(with_stack=True) as p:
+            torch.add(x, y)
+        with TemporaryFileName(mode="w+") as fname:
+            p.export_chrome_trace(fname)
+            with open(fname) as f:
+                report = json.load(f)
+                self._validate_basic_json(report["traceEvents"], with_cuda)
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_basic_chrome_trace(self):
+        self._test_chrome_trace_basic_helper()
+        if torch.cuda.is_available():
+            self._test_chrome_trace_basic_helper(with_cuda=True)
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_profiler_time_scale(self):
+        MARGIN_ERROR = 0.5
+        SEC_TO_US = 1000 * 1000
+        WAIT_TIME = 10
+        with profile() as p:
+            with torch.profiler.record_function("test_span"):
+                for i in range(WAIT_TIME):
+                    torch.rand(4, 4)
+                    time.sleep(1)
+        events = p.events()
+
+        # make sure function events are scaled appropriately
+        self.assertTrue(events[0].name == "test_span")
+        test_span = events[0]
+        self.assertGreaterEqual(
+            test_span.cpu_time / SEC_TO_US,
+            WAIT_TIME - MARGIN_ERROR,
+            "event out of range",
+        )
+        self.assertLessEqual(
+            test_span.cpu_time / SEC_TO_US,
+            WAIT_TIME + MARGIN_ERROR,
+            "event out of range",
+        )
+
+        # make sure tracing is scaled appropriately
+        with TemporaryFileName(mode="w+") as fname:
+            p.export_chrome_trace(fname)
+            with open(fname) as f:
+                report = json.load(f)
+            events = report["traceEvents"]
+            for event in events:
+                if event["name"] == "test_span":
+                    self.assertGreaterEqual(
+                        event["dur"] / SEC_TO_US,
+                        WAIT_TIME - MARGIN_ERROR,
+                        "profiling out of range",
+                    )
+                    self.assertLessEqual(
+                        event["dur"] / SEC_TO_US,
+                        WAIT_TIME + MARGIN_ERROR,
+                        "profiling out of range",
+                    )
+
+    def _schedule_helper(self, warmup, active, repeat):
+        with profile(
+            schedule=torch.profiler.schedule(
+                skip_first=0, wait=0, warmup=warmup, active=active, repeat=repeat
+            )
+        ) as prof:
+            for i in range(100):
+                torch.add(1, 2)
+                prof.step()
+        for ev in prof.key_averages():
+            if ev.key == "aten::add":
+                return ev.count
+        return 0
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_schedule_function_count(self):
+        self.assertEqual(self._schedule_helper(warmup=0, active=1, repeat=1), 1)
+        self.assertEqual(self._schedule_helper(warmup=0, active=5, repeat=0), 100)
+        self.assertEqual(self._schedule_helper(warmup=0, active=5, repeat=10), 50)
+        self.assertEqual(self._schedule_helper(warmup=1, active=5, repeat=0), 83)
+        self.assertEqual(self._schedule_helper(warmup=10, active=10, repeat=4), 40)
+        self.assertEqual(self._schedule_helper(warmup=50, active=1, repeat=0), 1)
 
 
 class SimpleNet(nn.Module):
@@ -2095,859 +1828,6 @@ class SimpleNet(nn.Module):
 
     def forward(self, x):
         return self.fc2(self.fc1(x))
-
-
-class TestTorchTidyProfiler(TestCase):
-    def _get_tensor_fields(self, node, index):
-        self.assertIsNotNone(node)
-        self.assertIsInstance(
-            node.extra_fields, torch._C._profiler._ExtraFields_TorchOp
-        )
-        tensor_info = node.extra_fields.inputs[index]
-        self.assertIsInstance(tensor_info, _TensorMetadata)
-        self.assertIsNotNone(tensor_info.impl_ptr)
-        self.assertIsNotNone(tensor_info.storage_data_ptr)
-        self.assertIsNotNone(tensor_info.id)
-        return tensor_info.impl_ptr, tensor_info.storage_data_ptr, tensor_info.id
-
-    def test_pointers_and_ids(self):
-        a = torch.randn(4, 3)
-        a_initial_storage_data = a.storage().data_ptr()
-
-        # Views of tensors can share the same storage, but have different TensorImpls
-        b = a.view((1, 12))
-        c = torch.randn(4, 1)
-        c_initial_storage_data = c.storage().data_ptr()
-        d = torch.randn(4, 3)
-
-        with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
-            _ = a + c
-            _ = b * c
-
-            # Resize should create a new data_ptr but keep the TensorImpl the same.
-            f = a.resize_(128, 129)
-            _ = torch.relu(f)
-
-            # `.set_` points a Tensor at an existing storage.
-            _ = d.sin()
-            c.set_(d.storage())
-            _ = c.cos()
-
-        nodes = p.profiler.kineto_results.experimental_event_tree()
-
-        def get_fields(op_name, index):
-            return self._get_tensor_fields(find_node_with_name(nodes, op_name), index)
-
-        a_impl, a_storage_data, a_id = get_fields("aten::add", 0)
-        b_impl, b_storage_data, b_id = get_fields("aten::mul", 0)
-
-        # Profiler matches ground truth from Python API.
-        self.assertEqual(a_storage_data, a_initial_storage_data)
-
-        # Views are handled correctly.
-        self.assertEqual(a_storage_data, b_storage_data)
-        self.assertNotEqual(a_impl, b_impl)
-
-        # The same Tensor used in multiple calls gives identical results.
-        c_impl, c_storage_data, c_id = get_fields("aten::add", 1)
-        self.assertEqual((c_impl, c_storage_data, c_id), get_fields("aten::mul", 1))
-        self.assertEqual(c_storage_data, c_initial_storage_data)
-
-        # Mutations to the underlying storage are reflected. (But ID is shared.)
-        f_impl, f_storage_data, f_id = get_fields("aten::relu", 0)
-        self.assertEqual(a_impl, f_impl)
-        self.assertNotEqual(a_storage_data, f_storage_data)
-        self.assertEqual(a_id, f_id)
-
-        # Calling `set_` with an existing Tensor makes them share an ID.
-        d_impl, d_storage_data, d_id = get_fields("aten::sin", 0)
-        c_impl_new, c_storage_data_new, c_id_new = get_fields("aten::cos", 0)
-        self.assertNotEqual(d_impl, c_impl_new)
-        self.assertEqual(d_storage_data, c_storage_data_new)
-        self.assertEqual(c_id, c_id_new)
-        self.assertEqual(d_id, c_id_new)
-
-    @staticmethod
-    def _format_allocations(profiled_code):
-        gc.collect()
-        with profile(profile_memory=True, record_shapes=True) as prof:
-            profiled_code()
-            gc.collect()
-
-        root_events = prof.profiler.kineto_results.experimental_event_tree()
-        events = sorted(_utils.traverse_dfs(root_events), key=lambda x: x.start_time_ns)
-        allocations = tuple(
-            event.extra_fields
-            for event in events
-            if isinstance(
-                event.extra_fields, torch._C._profiler._ExtraFields_Allocation
-            )
-        )
-
-        return textwrap.indent(
-            "\n".join(
-                f"{repr(i.id):>5}{' ' * 6}"
-                f"{repr(i.allocation_id):>5}{' ' * 6}"
-                f"{'Allocation' if i.alloc_size > 0 else 'Free'}"
-                for i in allocations
-            ),
-            " " * 12,
-        )
-
-    def test_tensorimpl_invalidation_set(self) -> None:
-        def profiled_code(add_empty_set: bool):
-            x = torch.ones((1,))
-
-            # Determines if new storage is created before or after the old one
-            # is destroyed.
-            if add_empty_set:
-                x.set_()
-
-            x.set_(torch.ones((1,)).storage())
-            x.view_as(x)
-
-        self.assertExpectedInline(
-            self._format_allocations(lambda: profiled_code(add_empty_set=False)),
-            """\
-                0          1      Allocation
-                0          2      Allocation
-                0          1      Free
-                0          2      Free""",
-        )
-
-        self.assertExpectedInline(
-            self._format_allocations(lambda: profiled_code(add_empty_set=True)),
-            """\
-                0          1      Allocation
-                0          1      Free
-                0          2      Allocation
-                0          2      Free""",
-        )
-
-    def test_tensorimpl_invalidation_keep_alive(self) -> None:
-        def profiled_code(add_empty_set: bool):
-            x = torch.ones((1,))
-            x_storages = [x.storage()]
-            for _ in range(3):
-                x.set_()
-                x.set_(torch.ones((1,)).storage())
-
-                # This keeps the StorageImpls alive and preserves the chain.
-                # (Despite the `set_()` call.)
-                x_storages.append(x.storage())
-            x.view_as(x)
-
-            # Free storage in a deterministic fashion.
-            while x_storages:
-                x_storages.pop()
-                gc.collect()
-
-            # Determines if new storage is created before or after the old one
-            # is destroyed.
-            if add_empty_set:
-                x.set_()
-
-            for _ in range(3):
-                x.set_(torch.ones((1,)).storage())
-            x.view_as(x)
-
-            del x
-            gc.collect()
-
-        self.assertExpectedInline(
-            self._format_allocations(lambda: profiled_code(add_empty_set=False)),
-            """\
-                0          1      Allocation
-                0          2      Allocation
-                0          4      Allocation
-                0          5      Allocation
-                0          4      Free
-                0          2      Free
-                0          1      Free
-                0          6      Allocation
-                0          5      Free
-                0          7      Allocation
-                0          6      Free
-                0          8      Allocation
-                0          7      Free
-                0          8      Free""",
-        )
-
-        self.assertExpectedInline(
-            self._format_allocations(lambda: profiled_code(add_empty_set=True)),
-            """\
-                0          1      Allocation
-                0          2      Allocation
-                0          4      Allocation
-                0          5      Allocation
-                0          4      Free
-                0          2      Free
-                0          1      Free
-                0          5      Free
-                0          6      Allocation
-                0          7      Allocation
-                0          6      Free
-                0          8      Allocation
-                0          7      Free
-                0          8      Free""",
-        )
-
-    def test_tensorimpl_invalidation_full(self) -> None:
-        def profiled_code():
-            x = torch.ones((1,))
-            x_storages = [x.storage()]
-            for _ in range(3):
-                x.set_()
-                x.set_(torch.ones((1,)).storage())
-                x_storages.append(x.storage())
-            x.view_as(x)
-
-            # Free storage in a deterministic fashion.
-            while x_storages:
-                x_storages.pop()
-                gc.collect()
-
-            for _ in range(3):
-                x.set_(torch.ones((1,)).storage())
-
-            for _ in range(3):
-                x.set_()
-                x.set_(torch.ones((1,)).storage())
-
-            for i in range(4):
-                x.resize_((1 + i,))
-            x.view_as(x)
-
-        self.assertExpectedInline(
-            self._format_allocations(profiled_code),
-            """\
-                0          1      Allocation
-                0          2      Allocation
-                0          4      Allocation
-                0          5      Allocation
-                0          4      Free
-                0          2      Free
-                0          1      Free
-                0          6      Allocation
-                0          5      Free
-                0          7      Allocation
-                0          6      Free
-                0          8      Allocation
-                0          7      Free
-                0          8      Free
-                0          9      Allocation
-                0          9      Free
-                0         10      Allocation
-                0         10      Free
-                0         11      Allocation
-                0         12      Allocation
-                0         11      Free
-                0         13      Allocation
-                0         12      Free
-                0         14      Allocation
-                0         13      Free
-                0         14      Free""",
-        )
-
-    def test_tensorimpl_invalidation_scalar_args(self) -> None:
-        def profiled_code():
-            with torch.no_grad():
-                x = torch.ones((1,))
-                for _ in range(10):
-                    x.add_(2)
-
-        self.assertExpectedInline(
-            self._format_allocations(profiled_code),
-            """\
-                0          1      Allocation
-                1          2      Allocation
-                2          3      Allocation
-                2          3      Free
-                1          2      Free
-                3          4      Allocation
-                4          5      Allocation
-                4          5      Free
-                3          4      Free
-                5          6      Allocation
-                6          7      Allocation
-                6          7      Free
-                5          6      Free
-                7          8      Allocation
-                8          9      Allocation
-                8          9      Free
-                7          8      Free
-                9         10      Allocation
-               10         11      Allocation
-               10         11      Free
-                9         10      Free
-               11         12      Allocation
-               12         13      Allocation
-               12         13      Free
-               11         12      Free
-               13         14      Allocation
-               14         15      Allocation
-               14         15      Free
-               13         14      Free
-               15         16      Allocation
-               16         17      Allocation
-               16         17      Free
-               15         16      Free
-               17         18      Allocation
-               18         19      Allocation
-               18         19      Free
-               17         18      Free
-               19         20      Allocation
-               20         21      Allocation
-               20         21      Free
-               19         20      Free
-                0          1      Free""",
-        )
-
-    def test_module_and_optimizer_ids(self) -> None:
-        model = torch.nn.Linear(2, 1, bias=True)
-        optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
-
-        def check(cold_start: bool) -> None:
-            with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
-                x = torch.ones((1, 2))
-                _ = x.sin()  # Mark `x`
-                model(x).backward()
-                optimizer.step()
-                _ = optimizer.state[model.weight][
-                    "momentum_buffer"
-                ].cos()  # Mark weight momentum
-                _ = model.weight.grad.tan()  # Mark weight gradient
-
-            nodes = p.profiler.kineto_results.experimental_event_tree()
-
-            def get_fields(op_name, index):
-                return self._get_tensor_fields(
-                    find_node_with_name(nodes, op_name), index
-                )
-
-            # Marked Tensors act as ground truth for python tracer IDs.
-            _, _, x_id = get_fields("aten::sin", 0)
-            _, _, weight_momenumtum_id = get_fields("aten::cos", 0)
-            _, _, weight_grad_id = get_fields("aten::tan", 0)
-            self.assertNotEqual(x_id, weight_momenumtum_id)
-            self.assertNotEqual(x_id, weight_grad_id)
-            self.assertNotEqual(weight_momenumtum_id, weight_grad_id)
-
-            # Use linear op to identify weight ground truth.
-            linear_op_node = find_node_with_name(nodes, "aten::linear")
-            self.assertIsNotNone(linear_op_node)
-            x_metadata, weight_metadata, _ = linear_op_node.extra_fields.inputs
-            self.assertEqual(x_id, x_metadata.id)
-
-            # Module
-            linear_module_node = find_node_with_name(nodes, "nn.Module: Linear_0")
-            self.assertIsNotNone(linear_module_node)
-            self.assertIsNotNone(linear_module_node.extra_fields.module)
-            self.assertIsNone(linear_module_node.extra_fields.optimizer)
-
-            linear_parameters = linear_module_node.extra_fields.module.parameters
-            name, weight, weight_grad = linear_parameters[0]
-            self.assertEqual(name, "weight")
-            self.assertEqual(weight.id, weight_metadata.id)
-
-            self.assertEqual(weight_grad is None, cold_start)
-            if not cold_start:
-                self.assertEqual(weight_grad.id, weight_grad_id)
-
-            # Optimizer
-            step_node = find_node_with_regex(nodes, "_optimizer_step_code")
-            self.assertIsNotNone(step_node)
-            self.assertIsNone(step_node.extra_fields.module)
-            self.assertIsNotNone(step_node.extra_fields.optimizer)
-            optimizer_parameters = step_node.extra_fields.optimizer.parameters
-            self.assertEqual(len(optimizer_parameters), 2)  # Weight and bias
-            weight, weight_grad, state = optimizer_parameters[0]
-            self.assertEqual(weight.id, weight_metadata.id)
-            self.assertEqual(weight_grad.id, weight_grad_id)
-            self.assertEqual(len(state), 1)
-            self.assertEqual(state[0][0], "momentum_buffer")
-            self.assertEqual(state[0][1].id, weight_momenumtum_id)
-
-        # Check that we handle first step (lazy initalization) and steady state.
-        check(cold_start=True)
-        check(cold_start=False)
-
-    def _test_allocation_ids(self, before_fn, after_fn) -> None:
-        with profile(profile_memory=True, record_shapes=True) as p:
-            # Introduce other operations and allocations to check robustness
-            _ = before_fn()
-
-            x = torch.rand(4, 3)
-            x.resize_(4, 4)
-
-            # We need to use `x` post resize for profiler to determine its ID.
-            x.sin()
-
-            # Introduce other operations and allocations to check robustness
-            _ = after_fn()
-
-            # Ensure `x` is the last variable collected to make it easier to
-            # find the deallocation event.
-            gc.collect()
-            del x
-            gc.collect()
-
-        nodes = p.profiler.kineto_results.experimental_event_tree()
-
-        def find_chain(names: List[str]):
-            out = []
-            for name in names:
-                root = [out[-1]] if out else nodes
-                out.append(find_node_with_name(root, name))
-                self.assertIsNotNone(out[-1], name)
-            return out
-
-        allocation = find_chain(["aten::rand", "aten::empty", "[memory]"])[
-            -1
-        ].extra_fields
-        _, uniform_node = find_chain(["aten::rand", "aten::uniform_"])
-        x_impl, x_storage_data, x_id = self._get_tensor_fields(uniform_node, 0)
-
-        # Make sure IDs are consistent between allocations and op inputs
-        self.assertEqual(allocation.ptr, x_storage_data)
-        self.assertEqual(allocation.id, x_id)
-
-        resize_node = find_node_with_name(nodes, "aten::resize_")
-        self.assertIsNotNone(resize_node)
-        self.assertEqual(len(resize_node.children), 2)
-        allocate_new = resize_node.children[0].extra_fields
-        free_old = resize_node.children[1].extra_fields
-
-        # Destruction of the old storage for x.
-        self.assertEqual(free_old.id, allocation.id)
-        self.assertEqual(free_old.ptr, allocation.ptr)
-
-        # Make sure ID is retained through change in storage.
-        self.assertEqual(allocate_new.id, allocation.id)
-        self.assertNotEqual(allocate_new.ptr, allocation.ptr)
-
-        # Deletion when `x` goes out of scope.
-        free_new = [
-            i for i in nodes if i.tag == torch._C._profiler._EventType.Allocation
-        ][-1].extra_fields
-        self.assertIsInstance(free_new, torch._C._profiler._ExtraFields_Allocation)
-        self.assertEqual(free_new.id, allocate_new.id)
-        self.assertEqual(free_new.ptr, allocate_new.ptr)
-
-    def test_allocation_ids(self) -> None:
-        self._test_allocation_ids(lambda: None, lambda: None)
-
-    def test_allocation_ids_with_other_ops(self) -> None:
-        x = torch.ones((1,))
-        self._test_allocation_ids(
-            lambda: (x + 1).relu_(), lambda: torch.zeros((1,)).cos()
-        )
-
-    def test_impl_reuse(self) -> None:
-        repeats = 1_000
-        with profile(profile_memory=True, record_shapes=True) as p:
-            for _ in range(repeats):
-                torch.ones((1,))
-            gc.collect()
-
-        roots = p.profiler.kineto_results.experimental_event_tree()
-        tensor_impls = tuple(
-            e.extra_fields.inputs[0].impl_ptr
-            for e in _utils.traverse_dfs(roots)
-            if e.name == "aten::fill_"
-        )
-
-        self.assertEqual(len(tensor_impls), repeats)
-        self.assertEqual(len(set(tensor_impls)), repeats)
-
-    def test_allocation_id_uniqueness(self) -> None:
-        repeats = 1_000
-        with profile(profile_memory=True, record_shapes=True) as p:
-            for _ in range(repeats):
-                torch.ones((1,))
-            gc.collect()
-
-        roots = p.profiler.kineto_results.experimental_event_tree()
-        id_set = set()
-        for e in _utils.traverse_dfs(roots):
-            fields = e.extra_fields
-            if isinstance(fields, torch._C._profiler._ExtraFields_TorchOp):
-                id_set |= {
-                    t.allocation_id
-                    for t in fields.inputs
-                    if isinstance(t, _TensorMetadata)
-                }
-
-            elif isinstance(fields, torch._C._profiler._ExtraFields_Allocation):
-                id_set.add(fields.allocation_id)
-
-        id_set.difference_update([None])
-        self.assertEqual(repeats, len(id_set))
-
-    def test_extra_fields(self):
-        with profile(with_stack=True, profile_memory=True) as p:
-            _ = torch.ones((1,))
-
-        nodes = p.profiler.kineto_results.experimental_event_tree()
-        node = find_node_with_name(nodes, "aten::ones")
-        self.assertIsNotNone(node)
-
-        self.assertIsInstance(
-            node.extra_fields, torch._C._profiler._ExtraFields_TorchOp
-        )
-
-        self.assertIsInstance(
-            node.parent.extra_fields, torch._C._profiler._ExtraFields_PyCCall
-        )
-
-        self.assertEqual(node.children[0].name, "aten::empty")
-        self.assertEqual(node.children[0].children[0].name, "[memory]")
-        self.assertIsInstance(
-            node.children[0].children[0].extra_fields,
-            torch._C._profiler._ExtraFields_Allocation,
-        )
-
-    def test_tensor_properties(self):
-        x = torch.ones(10, 10).as_strided([4, 4], [12, 3])
-        y = torch.ones(4, 1, requires_grad=True)
-
-        with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
-            _ = x + y
-            _ = x * y
-
-        nodes = p.profiler.kineto_results.experimental_event_tree()
-        node = find_node_with_name(nodes, "aten::add")
-        self.assertIsNotNone(node)
-
-        self.assertIsInstance(
-            node.extra_fields, torch._C._profiler._ExtraFields_TorchOp
-        )
-
-        def getattr_inputs(name, default):
-            return [getattr(i, name, default) for i in node.extra_fields.inputs]
-
-        self.assertEqual(getattr_inputs("sizes", []), [[4, 4], [4, 1], []])
-        self.assertEqual(getattr_inputs("strides", []), [[12, 3], [1, 1], []])
-        self.assertEqual(
-            getattr_inputs("layout", None), [torch.strided, torch.strided, None]
-        )
-        self.assertEqual(
-            getattr_inputs("device", None),
-            [torch.device("cpu"), torch.device("cpu"), None],
-        )
-        self.assertEqual(
-            getattr_inputs("dtype", None), [torch.float32, torch.float32, None]
-        )
-        self.assertEqual(node.extra_fields.scope, torch.profiler.RecordScope.FUNCTION)
-
-        mul_node = find_node_with_name(nodes, "aten::mul")
-        self.assertIsNotNone(mul_node)
-        self.assertEqual(
-            node.extra_fields.sequence_number + 1, mul_node.extra_fields.sequence_number
-        )
-
-    def test_sparse_tensors(self):
-        i = [[0, 1, 1], [2, 0, 2]]
-        v = [3, 4, 5]
-        s = torch.sparse_coo_tensor(i, v, (2, 3))
-
-        with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
-            _ = s + s
-
-        nodes = p.profiler.kineto_results.experimental_event_tree()
-        node = find_node_with_name(nodes, "aten::add")
-        self.assertIsNotNone(node)
-
-        self.assertIsInstance(
-            node.extra_fields, torch._C._profiler._ExtraFields_TorchOp
-        )
-
-        def getattr_inputs(name, default):
-            return [getattr(i, name, default) for i in node.extra_fields.inputs]
-
-        self.assertEqual(getattr_inputs("sizes", []), [[2, 3], [2, 3], []])
-        self.assertEqual(getattr_inputs("strides", []), [[], [], []])
-        self.assertEqual(
-            getattr_inputs("layout", None), [torch.sparse_coo, torch.sparse_coo, None]
-        )
-        self.assertEqual(
-            getattr_inputs("device", None),
-            [torch.device("cpu"), torch.device("cpu"), None],
-        )
-
-    @unittest.skipIf(
-        not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled"
-    )
-    def test_mkldnn_tensors(self):
-        x = torch.ones(4, 3).to_mkldnn()
-
-        with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
-            _ = x + x
-
-        nodes = p.profiler.kineto_results.experimental_event_tree()
-        node = find_node_with_name(nodes, "aten::add")
-        self.assertIsNotNone(node)
-
-        self.assertIsInstance(
-            node.extra_fields, torch._C._profiler._ExtraFields_TorchOp
-        )
-
-        def getattr_inputs(name, default):
-            return [getattr(i, name, default) for i in node.extra_fields.inputs]
-
-        self.assertEqual(getattr_inputs("sizes", []), [[4, 3], [4, 3], []])
-        self.assertEqual(getattr_inputs("strides", []), [[], [], []])
-        self.assertEqual(
-            getattr_inputs("layout", None), [torch._mkldnn, torch._mkldnn, None]
-        )
-        self.assertEqual(
-            getattr_inputs("device", None),
-            [torch.device("cpu"), torch.device("cpu"), None],
-        )
-
-    def test_scalar_ins(self):
-        x = torch.ones(5, 5)
-        alpha = 0.9
-
-        with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
-            _ = torch.add(x, 9.1, alpha=alpha)
-
-        nodes = p.profiler.kineto_results.experimental_event_tree()
-        node = find_node_with_name(nodes, "aten::add")
-        self.assertIsNotNone(node)
-
-        def getattr_inputs(name, default):
-            return [getattr(i, name, default) for i in node.extra_fields.inputs]
-
-        # The second argument to the add gets promotoed to a zerodim Tensor
-        self.assertEqual(
-            getattr_inputs("dtype", None), [torch.float32, torch.float64, None]
-        )
-        self.assertEqual(getattr_inputs("sizes", []), [[5, 5], [], []])
-        self.assertEqual(node.extra_fields.inputs[2], alpha)
-
-    def test_tensor_lists(self):
-        x = torch.ones((1,))
-        y = torch.ones((1,))
-        with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
-            _ = torch.stack((x, y))
-
-        nodes = p.profiler.kineto_results.experimental_event_tree()
-        node = find_node_with_name(nodes, "aten::stack")
-        inputs = node.extra_fields.inputs
-        self.assertEqual(len(inputs), 2)
-        self.assertIsInstance(inputs[0], list)
-        self.assertEqual(len(inputs[0]), 2)
-        self.assertEqual(x.storage().data_ptr(), inputs[0][0].storage_data_ptr)
-        self.assertEqual(y.storage().data_ptr(), inputs[0][1].storage_data_ptr)
-
-    def test_nnmodule_params(self):
-        def flat_out_extrafields(nodes, out=None):
-            if out is None:
-                out = []
-            for node in nodes:
-                if (
-                    isinstance(node.extra_fields, _ExtraFields_PyCall)
-                    and node.extra_fields.module
-                ):
-                    if node.extra_fields.module.parameters:
-                        out.append(node.extra_fields.module)
-                flat_out_extrafields(node.children, out)
-            return out
-
-        inputs = torch.rand(10)
-        net = SimpleNet()
-        out = net(inputs)
-        torch.nn.functional.cross_entropy(out, torch.rand(2)).backward()
-        with torch.profiler.profile(with_stack=True, profile_memory=True) as p:
-            _ = net(inputs)
-
-        modules = flat_out_extrafields(
-            p.profiler.kineto_results.experimental_event_tree()
-        )
-        self.assertEqual(
-            len(modules), 2, f"Expected two parameter list, but got {len(modules)}"
-        )
-
-        params = [
-            (n, p.storage_data_ptr, g.storage_data_ptr)
-            for module in modules
-            for (n, p, g) in module.parameters
-        ]
-        expected = [
-            (name, val.storage().data_ptr(), val.grad.storage().data_ptr())
-            for name, val in net.fc1._parameters.items()
-        ]
-        expected += [
-            (name, val.storage().data_ptr(), val.grad.storage().data_ptr())
-            for name, val in net.fc2._parameters.items()
-        ]
-        self.assertEqual(expected, params, f"{expected} vs. {params}")
-
-    def _flat_out_extrafields(self, nodes, out=None):
-        if out is None:
-            out = []
-        for node in nodes:
-            if (
-                isinstance(node.extra_fields, _ExtraFields_PyCall)
-                and node.extra_fields.optimizer
-                and node.extra_fields.optimizer.parameters
-            ):
-                # avoiding OptInfo duplicates from iterations
-                addr = node.extra_fields.optimizer.parameters[0][0].storage_data_ptr
-                if not [o for o in out if addr == o.parameters[0][0].storage_data_ptr]:
-                    out.append(node.extra_fields.optimizer)
-            self._flat_out_extrafields(node.children, out)
-        return out
-
-    def _check_results(self, opt, opts, check_items=False):
-        self.assertEqual(len(opts), 1, f"Expected 1 optimizer: len(opts): {len(opts)}")
-        self.assertEqual(
-            id(opt),
-            opts[0].self_ptr,
-            f"Optimizer addr ({id(opt)}) vs. profiled addr ({opts[0].self_ptr})",
-        )
-        if check_items:
-            self.assertEqual(len(opt.param_groups), len(opts))
-            for group, opt_ in zip(opt.param_groups, opts):
-                self.assertEqual(
-                    [(v.storage().data_ptr()) for v in group.get("params", [])],
-                    [(o.storage_data_ptr) for (o, _, _) in opt_.parameters],
-                )
-            for opt_ in opts:
-                observed_state = {
-                    p.storage_data_ptr: {name: s.storage_data_ptr for name, s in state}
-                    for (p, _, state) in opt_.parameters
-                }
-
-                # Make sure the profiler collected all optimizer state and check
-                # that the address recorded by the profiler is correct.
-                for parameter, parameter_state in opt.state.items():
-                    self.assertEqual(
-                        {
-                            name: value.storage().data_ptr()
-                            for name, value in parameter_state.items()
-                        },
-                        observed_state.get(parameter.storage().data_ptr(), []),
-                    )
-
-    def test_optimizer(self):
-        inputs = torch.rand(10)
-        with torch.profiler.profile(with_stack=True, profile_memory=True) as p:
-            net = SimpleNet()
-            opt = torch.optim.SGD(net.parameters(), lr=0.01, momentum=0.9)
-
-            opt.zero_grad()
-            out = net(inputs)
-            loss = torch.nn.functional.cross_entropy(out, torch.rand(2))
-            loss.backward()
-            opt.step()
-        self._check_results(
-            opt,
-            self._flat_out_extrafields(
-                p.profiler.kineto_results.experimental_event_tree()
-            ),
-            False,
-        )
-
-    def _test_optimizer_parameters(self, optimizer_factory):
-        inputs = torch.rand(10)
-        with torch.profiler.profile(with_stack=True, profile_memory=True) as p:
-            net = SimpleNet()
-            opt = optimizer_factory(net.parameters())
-            for _ in range(2):
-                opt.zero_grad()
-                out = net(inputs)
-                loss = torch.nn.functional.cross_entropy(out, torch.rand(2))
-                loss.backward()
-                opt.step()
-        self._check_results(
-            opt,
-            self._flat_out_extrafields(
-                p.profiler.kineto_results.experimental_event_tree()
-            ),
-            True,
-        )
-
-    def test_optimizer_parameters_sgd(self):
-        self._test_optimizer_parameters(
-            lambda params: torch.optim.SGD(params, lr=0.01, momentum=0.9)
-        )
-
-    def test_optimizer_parameters_adam(self):
-        self._test_optimizer_parameters(
-            lambda params: torch.optim.Adam(params, foreach=True)
-        )
-
-    def test_allocations(self):
-        gc.collect()
-        with profile(profile_memory=True) as p:
-            x = torch.empty((3, 4))
-
-        nodes = p.profiler.kineto_results.experimental_event_tree()
-        node = find_node_with_name(nodes, "[memory]")
-        self.assertIsNotNone(node)
-
-        alloc_size = 3 * 4 * 4  # fp32 -> 4 bytes
-        ptr = node.extra_fields.ptr
-        self.assertGreater(ptr, 0)
-        self.assertEqual(node.extra_fields.alloc_size, alloc_size)
-        self.assertEqual(node.extra_fields.device, torch.device("cpu"))
-        total_allocated = node.extra_fields.total_allocated
-
-        # total_reserved is only for CUDACachingAllocator
-        self.assertEqual(node.extra_fields.total_reserved, 0)
-
-        with profile(profile_memory=True) as p:
-            del x
-            gc.collect()
-
-        nodes = p.profiler.kineto_results.experimental_event_tree()
-        node = find_node_with_name(nodes, "[memory]")
-        self.assertIsNotNone(node)
-
-        self.assertEqual(node.extra_fields.ptr, ptr)
-        self.assertEqual(node.extra_fields.alloc_size, -alloc_size)
-        self.assertEqual(node.extra_fields.device, torch.device("cpu"))
-        self.assertEqual(
-            node.extra_fields.total_allocated, total_allocated - alloc_size
-        )
-
-    def test_refcounts(self):
-        class Sentinel:
-            pass
-
-        def make():
-            outer_sentinel = Sentinel()
-
-            def outer():
-                # Python will only close over variables used in the function.
-                _ = outer_sentinel
-                inner_sentinel = Sentinel()
-
-                def inner():
-                    _ = inner_sentinel
-
-                with profile(with_stack=True):
-                    inner()
-
-                return weakref.ref(inner_sentinel)
-
-            return outer, weakref.ref(outer_sentinel)
-
-        # Use a factory function to ensure the test scope never sees strong
-        # references. `del` has strange semantics that interact with closures
-        # at an AST level, so this is simpler.
-        outer, outer_sentinel_ref = make()
-        inner_sentinel_ref = outer()
-
-        self.assertIsNone(inner_sentinel_ref())
-
-        # `outer` holds the last reference via closure.
-        self.assertIsNotNone(outer_sentinel_ref())
-
-        del outer
-        self.assertIsNone(outer_sentinel_ref())
 
 
 @dataclass(frozen=True)
@@ -3560,6 +2440,70 @@ aten::mm""",
                 self.assertEqual(expected_fields, actual_fields)
         finally:
             os.remove("torchtidy_report.json")
+
+    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "x86 linux only cpp unwinding")
+    def test_fuzz_symbolize(self):
+        # generate some random addresses in the text section and make sure the
+        # symbolizers do not throw exceptions/crash
+        def get_text_sections():
+            text_sections = []
+            seen = set()
+            for filename in os.listdir("/proc/self/map_files"):
+                library = os.readlink("/proc/self/map_files/" + filename)
+                if ".so" not in library or library in seen:
+                    continue
+                seen.add(library)
+                with open(os.path.join("/proc/self/map_files", library), "rb") as f:
+                    mm = mmap.mmap(f.fileno(), 0, prot=mmap.PROT_READ)
+
+                    def unpack(fmt, offset):
+                        return struct.unpack(
+                            fmt, mm[offset : offset + struct.calcsize(fmt)]
+                        )
+
+                    if mm[:4] != b"\x7fELF":
+                        continue
+                    (section_headers_start,) = unpack("Q", 40)
+                    (section_header_size,) = unpack("H", 58)
+                    (num_section_headers,) = unpack("H", 60)
+                    (shstrndx,) = unpack("H", 62)
+                    (shstrtab_offset,) = unpack(
+                        "Q", section_headers_start + shstrndx * section_header_size + 24
+                    )
+                    for i in range(num_section_headers):
+                        (section_name_offset,) = unpack(
+                            "I", section_headers_start + i * section_header_size
+                        )
+                        name_start = shstrtab_offset + section_name_offset
+                        section_name = mm[name_start : name_start + 6]
+                        if section_name != b".text\0":
+                            continue
+                        (section_offset,) = unpack(
+                            "Q", section_headers_start + i * section_header_size + 24
+                        )
+                        (section_size,) = unpack(
+                            "Q", section_headers_start + i * section_header_size + 32
+                        )
+                        start = int(filename.split("-")[0], 16) + section_offset
+                        text_sections.append((start, section_size))
+                        break
+                    mm.close()
+            return text_sections
+
+        r = random.Random()
+        r.seed(1)
+        text_sections = get_text_sections()
+        addrs = []
+        for i in range(200):
+            s = r.randrange(0, len(text_sections))
+            start, size = text_sections[s]
+            addr = r.randrange(start, start + size)
+            addrs.append(addr)
+        fast = torch._C._profiler.symbolize_addresses(addrs, "fast")
+        dladdr = torch._C._profiler.symbolize_addresses(addrs, "dladdr")
+        addr2line = torch._C._profiler.symbolize_addresses(addrs, "addr2line")
+        self.assertEqual(len(fast), len(addrs))
+        self.assertEqual(len(addr2line), len(fast))
 
 
 if __name__ == "__main__":

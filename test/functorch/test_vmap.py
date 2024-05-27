@@ -18,7 +18,6 @@ from collections import namedtuple
 from typing import OrderedDict
 from unittest.case import skipIf
 
-import functorch
 import torch
 import torch.nn.functional as F
 from common_utils import (
@@ -36,8 +35,6 @@ from common_utils import (
     tol1,
     xfail,
 )
-from functorch import grad, grad_and_value, jacfwd, jvp, vjp, vmap
-from functorch.experimental import chunk_vmap
 from functorch_additional_op_db import additional_op_db
 from torch import Tensor
 from torch._C._functorch import reshape_dim_into, reshape_dim_outof
@@ -59,7 +56,6 @@ from torch.testing._internal.common_utils import (
     markDynamoStrictTest,
     parametrize,
     run_tests,
-    skipIfRocm,
     skipIfTorchDynamo,
     subtest,
     TEST_WITH_TORCHDYNAMO,
@@ -68,6 +64,10 @@ from torch.testing._internal.common_utils import (
     xfailIfTorchDynamo,
 )
 from torch.utils import _pytree as pytree
+
+import functorch
+from functorch import grad, grad_and_value, jacfwd, jvp, vjp, vmap
+from functorch.experimental import chunk_vmap
 
 FALLBACK_REGEX = "There is a performance drop"
 
@@ -4200,8 +4200,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("tril"),  # Exception not raised on error input
                 xfail("triu"),  # Exception not raised on error input
                 xfail("as_strided", "partial_views"),
-                # https://github.com/pytorch/pytorch/issues/96560
-                decorate("nn.functional.batch_norm", decorator=skipIfRocm),
                 # RuntimeError: output with shape [4, 4] doesn't match the broadcast shape [1, 4, 4]
                 xfail("addcdiv"),
                 xfail("addcmul"),
@@ -4357,7 +4355,10 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("sparse.mm", "reduce"),
                 xfail("special.chebyshev_polynomial_u"),
                 xfail("_segment_reduce", "offsets"),
-                xfail("index_reduce", ""),
+                xfail("index_reduce", "prod"),
+                xfail("index_reduce", "mean"),
+                xfail("index_reduce", "amin"),
+                xfail("index_reduce", "amax"),
                 xfail("special.laguerre_polynomial_l"),
                 xfail("special.hermite_polynomial_h"),
                 xfail("jiterator_binary", device_type="cuda"),
@@ -4372,8 +4373,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("linalg.lu", ""),
                 skip("linalg.ldl_solve", ""),
                 skip("_softmax_backward_data"),
-                # https://github.com/pytorch/pytorch/issues/96560
-                decorate("nn.functional.batch_norm", decorator=skipIfRocm),
                 # One or more of the overload doesn't have a Batch rule.
                 xfail("bincount"),
                 # RuntimeError: Expected all tensors to be on the same device,

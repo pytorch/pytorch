@@ -3,11 +3,11 @@
 import unittest
 
 from torch.testing._internal.inductor_utils import HAS_CUDA
-
+from torch.utils._triton import has_triton
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
-if HAS_CUDA:
+if has_triton():
     import triton
     from triton import language as tl
 

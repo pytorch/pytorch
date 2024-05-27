@@ -5,6 +5,7 @@
 #include <ATen/Parallel.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Unroll.h>
 #include <c10/util/complex.h>
 #include <c10/util/irange.h>
 #include <algorithm>
@@ -215,36 +216,95 @@ static inline float16_t reduce(float16x8_t x) {
         return reduce(vadd_f16(vget_low_f16(x), vget_high_f16(x)));
 }
 
+/*
+ * NOTE [ GGML Copyright Notice ]
+ * The below reduce overload and
+ * fp16_gemv_trans_fp16_arith_by_dot_products function is adapted from
+ * llama.cpp's ggml_vec_dot_f16 and surrounding utility functions, so
+ * here is the required copyright notice:
+ *
+ * MIT License
+ *
+ * Copyright (c) 2023-2024 The ggml authors
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+// We need the shift for reduce(), hence the extra constants.
+static constexpr auto kF16ElementsPerIterationShift = 7;
+static constexpr auto kF16ElementsPerIteration = 1 << kF16ElementsPerIterationShift;
+static_assert(kF16ElementsPerIteration == 128);
 
-static void fp16_gemv_trans_fp16_arith(const int m, const int n, const float16_t* a, const int lda, const float16_t *x, float16_t* y, int incy) {
-  parallel_for(0, n / 4, 1, [&](int begin, int end) {
-    for (auto i = begin * 4 ; i < end * 4; i += 4) {
-      float16x8_t sum0Vec = vdupq_n_f16(0);
-      float16x8_t sum1Vec = vdupq_n_f16(0);
-      float16x8_t sum2Vec = vdupq_n_f16(0);
-      float16x8_t sum3Vec = vdupq_n_f16(0);
-      const auto row0 = a + lda * (i + 0);
-      const auto row1 = a + lda * (i + 1);
-      const auto row2 = a + lda * (i + 2);
-      const auto row3 = a + lda * (i + 3);
-      for (auto j = 0; j < m; j += 8) {
-        float16x8_t xVec = vld1q_f16(x + j);
-        float16x8_t a0Vec = vld1q_f16(row0 + j);
-        sum0Vec = vaddq_f16(sum0Vec, vmulq_f16(a0Vec, xVec));
-        float16x8_t a1Vec = vld1q_f16(row1 + j);
-        sum1Vec = vaddq_f16(sum1Vec, vmulq_f16(a1Vec, xVec));
-        float16x8_t a2Vec = vld1q_f16(row2 + j);
-        sum2Vec = vaddq_f16(sum2Vec, vmulq_f16(a2Vec, xVec));
-        float16x8_t a3Vec = vld1q_f16(row3 + j);
-        sum3Vec = vaddq_f16(sum3Vec, vmulq_f16(a3Vec, xVec));
-      }
-      y[(i + 0) * incy] = reduce(sum0Vec);
-      y[(i + 1) * incy] = reduce(sum1Vec);
-      y[(i + 2) * incy] = reduce(sum2Vec);
-      y[(i + 3) * incy] = reduce(sum3Vec);
+static constexpr auto kF16ElementsPerRegisterShift = 3;
+static constexpr auto kF16ElementsPerRegister = 1 << kF16ElementsPerRegisterShift;
+static_assert(kF16ElementsPerRegister == 8);
+
+static constexpr auto kF16RegistersPerIterationShift = kF16ElementsPerIterationShift - kF16ElementsPerRegisterShift;
+static constexpr auto kF16RegistersPerIteration = 1 << kF16RegistersPerIterationShift;
+static_assert(kF16RegistersPerIteration == kF16ElementsPerIteration / kF16ElementsPerRegister);
+
+static inline double reduce(float16x8_t x[kF16RegistersPerIteration]) {
+  int offset = kF16RegistersPerIteration;
+  c10::ForcedUnroll<kF16RegistersPerIterationShift>{}([&offset, &x](auto idx) {
+    offset /= 2;
+    for (int i = 0; i < offset; ++i) {
+      x[i] = vaddq_f16(x[i], x[offset + i]);
     }
   });
+  const float32x4_t t0 = vcvt_f32_f16(vget_low_f16(x[0]));
+  const float32x4_t t1 = vcvt_f32_f16(vget_high_f16(x[0]));
+  return (double)vaddvq_f32(vaddq_f32(t0, t1));
 }
+
+static inline float16x8_t f16_fma(float16x8_t a, float16x8_t b, float16x8_t c) {
+#ifdef __ARM_FEATURE_FMA
+  return vfmaq_f16(a, b, c);
+#else
+  return vaddq_f16(a, vmulq_f16(b, c));
+#endif
+}
+
+// Rather than unrolling to process multiple rows (transposed columns)
+// of matrix A at once as done in fp16_gemv_trans_fp16_arith, unroll
+// along an individual dot product.
+static void fp16_gemv_trans_fp16_arith_by_dot_products(const int m, const int n, const float16_t* a, const int lda, const float16_t *x, float16_t* y, int incy) {
+  parallel_for(0, n, 1, [&](int begin, int end) {
+  for (int i = begin; i < end; ++i) {
+      float16x8_t sum[kF16RegistersPerIteration] = {vdupq_n_f16(0)};
+
+      const auto m_aligned = m & ~(kF16ElementsPerIteration - 1);
+      for (int j = 0; j < m_aligned ; j += kF16ElementsPerIteration) {
+        for (int k = 0; k < kF16RegistersPerIteration; ++k) {
+          const auto temp_x = vld1q_f16(x + j + k * kF16ElementsPerRegister);
+          const auto temp_a = vld1q_f16(a + lda * i + j + k * kF16ElementsPerRegister);
+          sum[k] = f16_fma(sum[k], temp_x, temp_a);
+        }
+      }
+      auto reducedSum = reduce(sum);
+
+      for (int j = m_aligned; j < m; ++j) {
+        reducedSum += x[j] * a[lda * i + j];
+      }
+      y[i * incy] = reducedSum;
+  }
+  });
+}
+
 #endif
 
 static inline float reduce(float32x4_t x) {
@@ -252,33 +312,92 @@ static inline float reduce(float32x4_t x) {
         return vgetq_lane_f32(vpaddq_f32(sum, sum), 0);
 }
 
-static void fp16_gemv_trans_fp32_arith(const int m, const int n, const float16_t* a, const int lda, const float16_t *x, float16_t* y, int incy) {
-  parallel_for(0, n / 4, 1, [&](int begin, int end) {
-    for (auto i =  begin * 4 ; i < end * 4; i += 4) {
-      float32x4_t sum0Vec = vdupq_n_f32(0);
-      float32x4_t sum1Vec = vdupq_n_f32(0);
-      float32x4_t sum2Vec = vdupq_n_f32(0);
-      float32x4_t sum3Vec = vdupq_n_f32(0);
-      const auto row0 = a + lda * (i + 0);
-      const auto row1 = a + lda * (i + 1);
-      const auto row2 = a + lda * (i + 2);
-      const auto row3 = a + lda * (i + 3);
-      for (auto j = 0; j < m; j += 4) {
-        float32x4_t xVec = vcvt_f32_f16(vld1_f16(x + j));
-        float32x4_t a0Vec = vcvt_f32_f16(vld1_f16(row0 + j));
-        sum0Vec = vaddq_f32(sum0Vec, vmulq_f32(a0Vec, xVec));
-        float32x4_t a1Vec = vcvt_f32_f16(vld1_f16(row1 + j));
-        sum1Vec = vaddq_f32(sum1Vec, vmulq_f32(a1Vec, xVec));
-        float32x4_t a2Vec = vcvt_f32_f16(vld1_f16(row2 + j));
-        sum2Vec = vaddq_f32(sum2Vec, vmulq_f32(a2Vec, xVec));
-        float32x4_t a3Vec = vcvt_f32_f16(vld1_f16(row3 + j));
-        sum3Vec = vaddq_f32(sum3Vec, vmulq_f32(a3Vec, xVec));
-      }
-      y[(i + 0) * incy] = reduce(sum0Vec);
-      y[(i + 1) * incy] = reduce(sum1Vec);
-      y[(i + 2) * incy] = reduce(sum2Vec);
-      y[(i + 3) * incy] = reduce(sum3Vec);
+static inline float32x4_t f32_fma(float32x4_t a, float32x4_t b, float32x4_t c) {
+#ifdef __ARM_FEATURE_FMA
+  return vfmaq_f32(a, b, c);
+#else
+  return vaddq_f32(a, vmulq_f32(b, c));
+#endif
+}
+
+static inline float32x4_t f32_fma_low_f16(float32x4_t a, float16x8_t b, float16x8_t c) {
+#ifdef __ARM_FEATURE_FP16_FML
+  // NOTE: this instruction is an optional instruction in ARM v8.2 and
+  // v8.3, but mandatory in v8.4 per
+  // https://developer.arm.com/documentation/ddi0596/2021-03/SIMD-FP-Instructions/FMLAL--FMLAL2--vector---Floating-point-fused-Multiply-Add-Long-to-accumulator--vector--?lang=en
+  // I'm not certain that I have the right feature test macro.
+  return vfmlalq_low_f16(a, b, c);
+#else
+  return f32_fma(a, vcvt_f32_f16(vget_low_f16(b)), vcvt_f32_f16(vget_low_f16(c)));
+#endif
+}
+
+static inline float32x4_t f32_fma_high_f16(float32x4_t a, float16x8_t b, float16x8_t c) {
+#ifdef __ARM_FEATURE_FP16_FML
+  // See above note about this instruction.
+  return vfmlalq_high_f16(a, b, c);
+#else
+  return f32_fma(a, vcvt_f32_f16(vget_high_f16(b)), vcvt_f32_f16(vget_high_f16(c)));
+#endif
+}
+
+// The below reduce overload and
+// fp16_gemv_trans_fp32_arith_by_dot_products are adapted from
+// llama.cpp's ggml_vec_dot_f32 and surrounding utility functions. See
+// NOTE [ GGML Copyright Notice ] above for the required notice.
+
+// We need the shift for reduce(), hence the extra constants.
+static constexpr auto kF32ElementsPerIterationShift = 5;
+static constexpr auto kF32ElementsPerIteration = 1 << kF32ElementsPerIterationShift;
+static_assert(kF32ElementsPerIteration == 32);
+
+static constexpr auto kF32ElementsPerRegisterShift = 2;
+static constexpr auto kF32ElementsPerRegister = 1 << kF32ElementsPerRegisterShift;
+static_assert(kF32ElementsPerRegister == 4);
+
+static constexpr auto kF32RegisterPairsPerIteration = 4;
+static constexpr auto kF32RegistersPerIteration = kF32RegisterPairsPerIteration * 2;
+static constexpr auto kF32RegistersPerIterationShift = 3;
+static_assert(kF32RegistersPerIteration == kF32ElementsPerIteration / kF32ElementsPerRegister);
+static_assert(kF32RegistersPerIteration == 1 << kF32RegistersPerIterationShift);
+
+static inline double reduce(float32x4_t x[kF32RegistersPerIteration]) {
+  int offset = kF32RegistersPerIteration;
+  c10::ForcedUnroll<kF32RegistersPerIterationShift>{}([&offset, &x](auto idx) {
+    offset /= 2;
+    for (int i = 0; i < offset; ++i) {
+      x[i] = vaddq_f32(x[i], x[offset + i]);
     }
+  });
+  return vaddvq_f32(x[0]);
+}
+
+// On my Apple M1 Macbook (which is ARM v8.5 and thus has the
+// instructions f32_fma_{low,high}_f16 is targeting), this kernel has
+// equivalent performance to the fp16-native kernel.
+static void fp16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n, const float16_t* a, const int lda, const float16_t *x, float16_t* y, int incy) {
+  parallel_for(0, n, 1, [&](int begin, int end) {
+  for (int i = begin; i < end; ++i) {
+      float32x4_t sum[kF32RegistersPerIteration] = {vdupq_n_f32(0)};
+
+      const auto m_aligned = m & ~(kF32ElementsPerIteration - 1);
+      for (int j = 0; j < m_aligned ; j += kF32ElementsPerIteration) {
+        c10::ForcedUnroll<kF32RegisterPairsPerIteration>{}([x, a, lda, i, j, &sum](auto k) {
+          // Load a pair of f32 registers at a time.
+          const auto temp_x = vld1q_f16(x + j + k * 2 * kF32ElementsPerRegister);
+          const auto temp_a = vld1q_f16(a + lda * i + j + k * 2 * kF32ElementsPerRegister);
+
+          sum[2 * k] = f32_fma_low_f16(sum[2 * k], temp_x, temp_a);
+          sum[2 * k + 1] = f32_fma_high_f16(sum[2 * k + 1], temp_x, temp_a);
+        });
+      }
+      auto reducedSum = reduce(sum);
+
+      for (int j = m_aligned; j < m; ++j) {
+        reducedSum += x[j] * a[lda * i + j];
+      }
+      y[i * incy] = reducedSum;
+  }
   });
 }
 
@@ -293,13 +412,13 @@ void fp16_gemv_trans(
     const float beta,
     float16_t* y,
     const int incy) {
-  if (incx == 1 && alpha == 1.0 && beta == 0.0 && m % 4 == 0 && n % 4 == 0) {
+  if (incx == 1 && alpha == 1.0 && beta == 0.0) {
 #ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
-    return at::globalContext().allowFP16ReductionCPU() && m % 8 == 0 ? fp16_gemv_trans_fp16_arith(m, n, a, lda, x, y, incy)
-                                                                     : fp16_gemv_trans_fp32_arith(m, n, a, lda, x, y, incy);
-#else
-    return fp16_gemv_trans_fp32_arith(m, n, a, lda, x, y, incy);
+    if (at::globalContext().allowFP16ReductionCPU()) {
+      return fp16_gemv_trans_fp16_arith_by_dot_products(m, n, a, lda, x, y, incy);
+    }
 #endif
+    return fp16_gemv_trans_fp32_arith_by_dot_products(m, n, a, lda, x, y, incy);
   }
   for (const auto i : c10::irange(n)) {
     float sum = 0;

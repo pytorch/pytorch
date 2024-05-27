@@ -11,12 +11,14 @@ import tempfile
 from urllib.request import urlretrieve
 
 import boto3
-import caffe2.python.onnx.backend
-import caffe2.python.onnx.frontend
-import caffe2.python.workspace as c2_workspace
 import numpy as np
 import onnx
 import onnx.backend
+from onnx import numpy_helper
+
+import caffe2.python.onnx.backend
+import caffe2.python.onnx.frontend
+import caffe2.python.workspace as c2_workspace
 from caffe2.proto import caffe2_pb2
 
 from caffe2.python.models.download import (
@@ -24,7 +26,6 @@ from caffe2.python.models.download import (
     downloadFromURLToFile,
     getURLFromName,
 )
-from onnx import numpy_helper
 
 
 """A script converting Caffe2 models to ONNX, and updating ONNX model zoos.
@@ -90,9 +91,7 @@ def download_onnx_model(model_name, zoo_dir, use_cache=True, only_local=False):
     try:
         download_file.close()
         print(
-            "Downloading ONNX model {} from {} and save in {} ...\n".format(
-                model_name, url, download_file.name
-            )
+            f"Downloading ONNX model {model_name} from {url} and save in {download_file.name} ...\n"
         )
         urlretrieve(url, download_file.name)
         with tarfile.open(download_file.name) as t:
@@ -300,9 +299,7 @@ if __name__ == "__main__":
         )
 
         print(f"Deleteing old ONNX {onnx_model_name} model...")
-        for f in glob.glob(
-            os.path.join(onnx_model_dir, "model*".format(onnx_model_name))
-        ):
+        for f in glob.glob(os.path.join(onnx_model_dir, "model*".format())):
             os.remove(f)
 
         print(f"Serializing generated ONNX {onnx_model_name} model ...")
