@@ -5,6 +5,7 @@ Note [ONNX Operators that are added/updated in opset 18]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 https://github.com/onnx/onnx/blob/main/docs/Changelog.md#version-18-of-the-default-onnx-operator-set
 New operators:
+    BitwiseAnd
     CenterCropPad
     Col2Im
     Mish
@@ -22,7 +23,7 @@ from typing import List, Optional, Sequence, Tuple
 
 import torch
 from torch import _C
-from torch.onnx import symbolic_helper, symbolic_opset9 as opset9
+from torch.onnx import _type_utils, symbolic_helper, symbolic_opset9 as opset9
 from torch.onnx._internal import _beartype, jit_utils, registration
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -33,6 +34,24 @@ __all__ = [
 ]
 
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=18)
+
+
+@_onnx_symbolic("aten::__and_")
+@_onnx_symbolic("aten::bitwise_and")
+@_beartype.beartype
+def __and_(g: jit_utils.GraphContext, self, other):
+    # do type promotion (scalars don't seem to apply)
+    args = [self, other]
+    # type promotion doesn't happen with torch.bitwise_and(tensor, scalar)
+    prom_args = [arg for arg in args if symbolic_helper._get_tensor_rank(arg)]
+    if len(prom_args) == 0:
+        prom_args = args
+    promotion_jit_type = symbolic_helper._type_promote_from_values(*prom_args)
+    self = symbolic_helper._maybe_cast_to_type(g, self, promotion_jit_type)
+    other = symbolic_helper._maybe_cast_to_type(g, other, promotion_jit_type)
+    if promotion_jit_type == _type_utils.JitScalarType.BOOL:
+        return g.op("And", self, other)
+    return g.op("BitwiseAnd", self, other)
 
 
 @_onnx_symbolic("aten::col2im")
