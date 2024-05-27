@@ -899,9 +899,9 @@ Either create the tensor outside the compiled region, or do not set the tensor t
             unimplemented(f"Parameter not python_constant: {e}")
 
         from torch.distributed._tensor import DTensor
-        torch_log.warning(f"data: {data}")
-        torch_log.warning(f"data.as_proxy(): {data.as_proxy()}")
-        torch_log.warning(f'data.proxy.node.meta["example_value"]: {data.proxy.node.meta["example_value"]}')
+        # torch_log.warning(f"data: {data}")
+        # torch_log.warning(f"data.as_proxy(): {data.as_proxy()}")
+        # torch_log.warning(f'data.proxy.node.meta["example_value"]: {data.proxy.node.meta["example_value"]}')
         example_value = data.proxy.node.meta["example_value"]
         # placements_info = []
         # for placement in example_value.placements:

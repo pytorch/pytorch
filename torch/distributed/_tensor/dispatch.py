@@ -115,6 +115,7 @@ class OpDispatcher:
             return self._custom_op_handlers[op_call](op_call, args, kwargs)  # type: ignore[operator]
 
         # extract local tensor and sharding infos to a OpInfo
+        # torch_log.warning(f"args: {args}")
         op_info = self.unwrap_to_op_info(op_call, args, kwargs)
 
         self.sharding_propagator.propagate(op_info)
@@ -207,7 +208,7 @@ class OpDispatcher:
                 with rng_context:
                     local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
             else:
-                torch_log.warning(f"local_tensor_args: {local_tensor_args}")
+                # torch_log.warning(f"local_tensor_args: {local_tensor_args}")
                 local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
 
         # communicate the result to all ranks for some operators that return scalar value

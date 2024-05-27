@@ -484,7 +484,7 @@ class OutputGraph:
         call fn(*args) before the graph runs and turn the result into a fake input.
         """
         example_value = fn(*args)
-        torch_log.warning(f"type(example_value): {type(example_value)}")
+        # torch_log.warning(f"type(example_value): {type(example_value)}")
         # torch_log.warning(f"example_value: {example_value}")
         varname = self.new_var()
         cg = PyCodegen(self.root_tx)
@@ -508,8 +508,8 @@ class OutputGraph:
         cg.call_function(len(args), True)
         cg.store(varname)
         insts = cg.get_instructions()
-        for inst in insts:
-            torch_log.warning(f"inst: {inst}")
+        # for inst in insts:
+        #     torch_log.warning(f"inst: {inst}")
         self.pregraph_bytecode.extend(insts)
         source = SyntheticLocalSource(varname)
         result = VariableBuilder(self.root_tx, source)(example_value)

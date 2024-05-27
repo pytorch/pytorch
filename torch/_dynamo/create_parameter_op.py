@@ -18,22 +18,15 @@ class TracableCreateParameter(torch.autograd.Function):
     @staticmethod
     def forward(ctx, tensor, placeholder):
         assert not tensor.requires_grad
-        torch_log.warning(f"before: placeholder: {placeholder}")
-        torch_log.warning(f"before: tensor: {tensor}")
+        # torch_log.warning(f"before: placeholder: {placeholder}")
+        # torch_log.warning(f"before: tensor: {tensor}")
         if isinstance(tensor, torch.distributed._tensor.api.DTensor):
-            # placeholder.__dict__ = tensor.__dict__
-            from torch._functorch._aot_autograd.functional_utils import is_fun
-            # if is_fun(tensor._local_tensor):
-            #     placeholder._local_tensor = tensor._local_tensor.from_functional()
-            # else:
             placeholder._local_tensor = tensor._local_tensor
             placeholder._spec = tensor._spec
-            # placeholder.requires_grad = tensor.requires_grad
-            # ["_local_tensor"], (self._spec, self.requires_grad)
         else:
             placeholder.set_(tensor)
-        torch_log.warning(f"after: placeholder: {placeholder}")
-        torch_log.warning(f"after: tensor: {tensor}")
+        # torch_log.warning(f"after: placeholder: {placeholder}")
+        # torch_log.warning(f"after: tensor: {tensor}")
         return placeholder
 
     @staticmethod
