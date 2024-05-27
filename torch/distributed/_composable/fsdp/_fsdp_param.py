@@ -162,7 +162,6 @@ class FSDPParam:
             self._init_sharded_post_forward_param_metadata(param)
         self._init_extensions()
         self.all_gather_outputs: List[torch.Tensor] = []
-        self.all_gather_output_storage_sizes: List[int] = []
         self.unsharded_accumulated_grad = None
         self._unsharded_param = None
         self._param_fqn: Optional[str] = None  # prefixed from root module
@@ -315,9 +314,6 @@ class FSDPParam:
         self.all_gather_outputs = [
             torch.empty(torch.Size([numel * world_size]), dtype=dtype, device=device)
             for numel, dtype in zip(all_gather_input_numels, all_gather_input_dtypes)
-        ]
-        self.all_gather_output_storage_sizes = [
-            output.numel() * output.itemsize for output in self.all_gather_outputs
         ]
         self.all_gather_input_numels = all_gather_input_numels
         self.all_gather_input_dtypes = all_gather_input_dtypes
@@ -522,8 +518,8 @@ class FSDPParam:
             self.unsharded_param.grad = None
 
     def alloc_all_gather_outputs(self) -> None:
-        for tensor, size in zip(self.all_gather_outputs, self.all_gather_output_storage_sizes):
-            alloc_storage(tensor, size)
+        for tensor in self.all_gather_outputs:
+            alloc_storage(tensor)
 
     def free_unsharded_param(self) -> None:
         for tensor in itertools.chain(
@@ -641,9 +637,10 @@ class FSDPParam:
         self.sharded_param._local_tensor = local_tensor[: self.sharded_size[0]]
 
 
-def alloc_storage(tensor: torch.Tensor, new_size: int) -> None:
-    if (storage := tensor.untyped_storage()).size() != new_size:
-        storage.resize_(new_size)
+def alloc_storage(tensor: torch.Tensor) -> None:
+    size = tensor.numel() * tensor.itemsize
+    if (storage := tensor.untyped_storage()).size() != size:
+        storage.resize_(size)
 
 
 def free_storage(tensor: torch.Tensor) -> None:
