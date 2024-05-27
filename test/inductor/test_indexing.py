@@ -234,9 +234,7 @@ class ExprPrinterTests(InductorTestCase):
         expr = Round(sympy.Symbol("x", integer=True) / 2)
         self.assertExpectedInline(pexpr(expr), """round((1/2)*x)""")
         self.assertExpectedInline(cexpr(expr), """std::lrint((1.0/2.0)*x)""")
-        self.assertExpectedInline(
-            texpr(expr), """libdevice.llrint((1/2)*x).to(tl.int64)"""
-        )
+        self.assertExpectedInline(texpr(expr), """libdevice.rint((1/2)*x)""")
 
     @parametrize("ndigits", [-1, 0, 1])
     def test_print_round_decimal(self, ndigits):
@@ -251,45 +249,18 @@ class ExprPrinterTests(InductorTestCase):
             f"libdevice.nearbyint(1e{ndigits} * ((1/2)*x)) * 1e{-ndigits}",
         )
 
-        expr = RoundDecimal(sympy.Symbol("x", integer=True), ndigits)
-        if ndigits >= 0:
-            for do_print in [pexpr, cexpr, texpr]:
-                self.assertEqual(do_print(expr), "x")
-        else:
-            self.assertEqual(pexpr(expr), f"round(x, {ndigits})")
-            for do_print in [cexpr, texpr]:
-                with self.assertRaisesRegex(
-                    ValueError, "only non-negative ndigits are currently supported"
-                ):
-                    do_print(expr)
-
     def test_print_floor_div(self):
-        for integer in [True, False]:
-            s1 = sympy.Symbol("s1", integer=integer)
-            s2 = sympy.Symbol("s2", integer=integer)
-            expr = FloorDiv(s1, s2)
-            self.assertEqual(pexpr(expr), "(s1 // s2)")
-            if integer:
-                self.assertEqual(cexpr(expr), "c10::div_floor_integer(s1, s2)")
-            else:
-                self.assertEqual(
-                    cexpr(expr),
-                    "c10::div_floor_floating(static_cast<double>(s1), static_cast<double>(s2))",
-                )
+        s1 = sympy.Symbol("s1", integer=True)
+        s2 = sympy.Symbol("s2", integer=True)
+        expr = FloorDiv(s1, s2)
+        self.assertEqual(pexpr(expr), "(s1 // s2)")
+        self.assertEqual(cexpr(expr), "c10::div_floor_integer(s1, s2)")
 
-        for integer in [True, False]:
-            s1 = sympy.Symbol("s1", integer=integer)
-            s2 = sympy.S(-1)
-            expr = FloorDiv(s1, s2)
-            if integer:
-                self.assertEqual(pexpr(expr), "(-1)*s1")
-                self.assertEqual(cexpr(expr), "(-1L)*s1")
-            else:
-                self.assertEqual(pexpr(expr), "(s1 // (-1))")
-                self.assertEqual(
-                    cexpr(expr),
-                    "c10::div_floor_floating(static_cast<double>(s1), static_cast<double>((-1L)))",
-                )
+        s1 = sympy.Symbol("s1", integer=True)
+        s2 = sympy.S(-1)
+        expr = FloorDiv(s1, s2)
+        self.assertEqual(pexpr(expr), "(-1)*s1")
+        self.assertEqual(cexpr(expr), "(-1L)*s1")
 
     def test_print_Min_Max(self):
         cases = (

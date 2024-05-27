@@ -249,17 +249,27 @@ def triton_reshape(value: str, old_shape: List[str], new_shape: List[str]):
     return f"{value}[{', '.join(expand)}]"
 
 
+# NB: Inheriting from PythonPrinter is somewhat dangerous, because there are a
+# number of operators which Triton "implements", but in a way that is
+# inconsistent with Python semantics (and consistent with C semantics).  We
+# must override all of these, or it is potential silent correctness problem
 class TritonPrinter(PythonPrinter):
+    def _print_TruncToInt(self, expr):
+        assert len(expr.args) == 1
+        return (
+            f"libdevice.trunc({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
+        )
+
+    def _print_ToFloat(self, expr):
+        assert len(expr.args) == 1
+        return f"{self.paren(self._print(expr.args[0]))}.to(tl.float64)"
+
+    # NB: sympy.floor/ceiling produce integers, so we have to do the
+    # conversion to index dtype
     def _print_floor(self, expr):
         assert len(expr.args) == 1
         return (
             f"libdevice.floor({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
-        )
-
-    def _print_Trunc(self, expr):
-        assert len(expr.args) == 1
-        return (
-            f"libdevice.trunc({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
         )
 
     def _print_ceiling(self, expr):
@@ -347,9 +357,7 @@ class TritonPrinter(PythonPrinter):
 
     def _print_Round(self, expr):
         assert len(expr.args) == 1
-        return (
-            f"libdevice.llrint({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
-        )
+        return f"libdevice.rint({self._print(expr.args[0])})"
 
     def _print_RoundDecimal(self, expr):
         assert len(expr.args) == 2
