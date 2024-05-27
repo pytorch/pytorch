@@ -1412,10 +1412,14 @@ class CppVecOverrides(CppOverrides):
             else f"{V.kernel._get_vec_type(dtype)}({body_code})"
         )
         other_code = value_to_cpp(other, DTYPE_TO_CPP[dtype])
-        other_code_vec = f"{V.kernel._get_vec_type(dtype)}({other_code})"
+        # loading bool as VecMask<float, N>
+        other_code_vec = (
+            f"{V.kernel._get_mask_type()}::from({other_code})"
+            if dtype == torch.bool
+            else f"{V.kernel._get_vec_type(dtype)}({other_code})"
+        )
         assert isinstance(new_mask, CppCSEVariable), new_mask
         if new_mask.is_vec:
-            type = f"decltype({body_code_vec})"
             code = BracesBuffer()
             code.writeline("[&]")
             with V.kernel.swap_buffers(code), code.indent():
@@ -1424,8 +1428,21 @@ class CppVecOverrides(CppOverrides):
                     code.writeline(f"return {other_code_vec};")
                 code.writeline("else")
                 with code.indent():
+                    # Create cse variable to reuse kernel.overrides.where
+                    body_vec_var = V.kernel.cse.generate(
+                        V.kernel.compute,
+                        body_code_vec,
+                    )
+                    other_vec_var = V.kernel.cse.generate(
+                        V.kernel.compute,
+                        other_code_vec,
+                    )
+                    assert isinstance(body_vec_var, CppCSEVariable), body_vec_var
+                    assert isinstance(other_vec_var, CppCSEVariable), other_vec_var
+                    body_vec_var.dtype = dtype
+                    other_vec_var.dtype = dtype
                     code.writeline(
-                        f"return {type}::blendv({other_code_vec}, {body_code_vec}, {V.kernel._get_mask_cast(new_mask, dtype)});"
+                        f"return {V.kernel.overrides.where(new_mask, body_vec_var, other_vec_var)};"
                     )
             code.writeline("()")
             csevar = V.kernel.cse.generate(
@@ -1686,7 +1703,7 @@ class CppKernel(Kernel):
     def var_ranges(self):
         return dict(zip(self.itervars, self.ranges))
 
-    def check_bounds(
+    def issue_check_bounds(
         self,
         buffer: IndentedBuffer,
         expr: sympy.Expr,
@@ -1694,14 +1711,12 @@ class CppKernel(Kernel):
         lower: bool,
         upper: bool,
     ):
-        # Swap compute with buffer
-        prior = V.kernel.compute
-        try:
-            V.kernel.compute = buffer
-            csevar = ops.index_expr(expr, torch.int32).value
-        finally:
-            V.kernel.compute = prior
+        # See note in CSEProxy.check_bounds
+        # If you need to change this in the future, wrap ops.index_expr in a pattern similar to that
+        # in Kernel.indirect_load
+        assert buffer == V.kernel.compute
 
+        csevar = ops.index_expr(expr, torch.int32).value
         size_str = V.kernel.sexpr(self.rename_indexing(size)) if upper else None
 
         line = self.indirect_assert(csevar, "0" if lower else None, size_str)
@@ -1714,9 +1729,6 @@ class CppKernel(Kernel):
         line = f"{var}[{cexpr_index(index)}]"
         if V.graph.get_dtype(name) in [torch.float16]:
             line = f"static_cast<float>({line})"
-
-        # Issue necessary TORCH_CHECKs for the indirect indexing
-        self.issue_check_bounds(self.loads, original_index)
 
         csevar = self.cse.generate(self.loads, line)
         csevar.update_on_args("load", (name, index), {})
@@ -1740,9 +1752,6 @@ class CppKernel(Kernel):
                 line = f"atomic_add(&{var}[{cexpr_index(index)}], {value});"
         else:
             raise NotImplementedError(f"store mode={mode}")
-
-        # Issue necessary TORCH_CHECKs for the indirect indexing
-        self.issue_check_bounds(self.stores, original_index)
 
         self.stores.writeline(DeferredLine(name, line))
 
@@ -1987,6 +1996,8 @@ class CppKernel(Kernel):
     @property
     def assert_function(self) -> str:
         if V.graph.aot_mode:
+            # TODO: Using AOTI_TORCH_CHECK is causing performance drop for some models
+            # compared with JIT Inductor which uses TORCH_CHECK
             return "AOTI_TORCH_CHECK"
         else:
             return "TORCH_CHECK"
@@ -2214,12 +2225,6 @@ class CppVecKernel(CppKernel):
                     array_var = vec_to_array(indirect_var)
                     replacements[indirect_var] = f"{array_var}[{itervar_inner}]"
 
-            # TODO Refactor. This function does way too many things.
-            # If it's a load or a store
-            if var:
-                # Issue necessary TORCH_CHECKs for the indirect indexing
-                self.issue_check_bounds(buffer, original_index)
-
             index = self.scale_index_with_offset(
                 index, itervar_idx=self.tiling_idx, offset=itervar_inner
             )
@@ -2284,7 +2289,6 @@ class CppVecKernel(CppKernel):
             if stride == 1:
                 # load contiguously
                 line = self._get_vec_load_line(var, index, dtype, self._load_mask)
-                self.issue_check_bounds(self.loads, original_index)
                 csevar = self.cse.generate(self.loads, line)  # type: ignore[assignment]
             else:
                 csevar = self._load_or_store_non_contiguous(var, original_index, dtype)  # type: ignore[assignment]
@@ -2318,8 +2322,6 @@ class CppVecKernel(CppKernel):
         stride = self._try_get_const_stride(index, tiling_var)
         code = IndentedBuffer()
         if stride == 1:
-            # Issue necessary TORCH_CHECKs for the indirect indexing
-            self.issue_check_bounds(code, original_index)
             var_expr = f"{var} + {cexpr_index(index)}"
             if dtype == torch.float:
                 code.writeline(f"{value}.store({var_expr});")
@@ -2457,9 +2459,6 @@ class CppVecKernel(CppKernel):
             code.writeline(
                 f"{var}[{cexpr_index(index)}] = static_cast<{DTYPE_TO_CPP[out_dtype]}>({value});"
             )
-
-            # Issue necessary TORCH_CHECKs for the indirect indexing
-            self.issue_check_bounds(self.reduction_suffix, original_index)
         else:
             # Vertical reduction
             if out_dtype != dtype:
@@ -2843,7 +2842,7 @@ class CppVecKernelChecker(CppVecKernel):
             return tuple([self.simd_vec] * 3)
         return self.simd_vec
 
-    def check_bounds_lazy(
+    def check_bounds(
         self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
     ):
         return self.simd_vec
@@ -2898,10 +2897,10 @@ class CppVecKernelChecker(CppVecKernel):
                 return self.store_reduction(name, index, value)
 
             @staticmethod
-            def check_bounds_lazy(
+            def check_bounds(
                 expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
             ):
-                return self.check_bounds_lazy(expr, size, lower, upper)
+                return self.check_bounds(expr, size, lower, upper)
 
             @staticmethod
             def constant(val, dtype):
@@ -3297,7 +3296,7 @@ class CppKernelProxy(CppKernel):
             for node in nodes:
                 if node.group[1] in [
                     (group, reduction_group),
-                    (group + reduction_group, ()),
+                    (tuple(itertools.chain(group, reduction_group)), ()),
                 ]:
                     assert not in_suffix
                     node.run(vars, reduction_vars)
@@ -3443,7 +3442,7 @@ class CppKernelProxy(CppKernel):
 class OuterLoopFusedKernel(CppKernel):
     def __init__(self, kernel_group):
         super().__init__(kernel_group.args, kernel_group.ws.num_threads)
-        self.inner: List["LoopLevel"] = []
+        self.inner: List[LoopLevel] = []
 
     def decide_parallel_depth(self, max_parallel_depth, threads) -> int:
         kernels_parallel_depth = []
