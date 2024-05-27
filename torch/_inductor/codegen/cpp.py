@@ -1703,24 +1703,24 @@ class CppKernel(Kernel):
     def var_ranges(self):
         return dict(zip(self.itervars, self.ranges))
 
-    def issue_check_bounds(
+    def check_bounds(
         self,
-        buffer: IndentedBuffer,
         expr: sympy.Expr,
         size: sympy.Expr,
         lower: bool,
         upper: bool,
     ):
-        # See note in CSEProxy.check_bounds
-        # If you need to change this in the future, wrap ops.index_expr in a pattern similar to that
-        # in Kernel.indirect_load
-        assert buffer == V.kernel.compute
+        if not (lower or upper):
+            return
 
         csevar = ops.index_expr(expr, torch.int32).value
         size_str = V.kernel.sexpr(self.rename_indexing(size)) if upper else None
 
         line = self.indirect_assert(csevar, "0" if lower else None, size_str)
-        self.cse.generate(buffer, line, assignment=False)
+
+        # If you need to change the buffer in the future, wrap ops.index_expr in a pattern like
+        # the one in Kernel.indirect_load
+        self.cse.generate(V.kernel.compute, line, assignment=False)
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
