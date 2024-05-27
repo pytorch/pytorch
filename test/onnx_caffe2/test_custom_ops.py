@@ -1,6 +1,5 @@
 # Owner(s): ["module: onnx"]
 
-import caffe2.python.onnx.backend as c2
 import numpy as np
 import onnx
 import pytorch_test_common
@@ -8,6 +7,8 @@ import torch
 import torch.utils.cpp_extension
 from test_pytorch_onnx_caffe2 import do_export
 from torch.testing._internal import common_utils
+
+import caffe2.python.onnx.backend as c2
 
 
 class TestCaffe2CustomOps(pytorch_test_common.ExportTestCase):

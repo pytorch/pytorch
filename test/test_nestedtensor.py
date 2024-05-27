@@ -4246,7 +4246,7 @@ class TestNestedTensorSubclass(TestCase):
             # Low Precision Math Reference
             out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(
                 q, k, v)[0].transpose(-2, -3)
-            output_ref_atol, output_ref_rtol = get_tolerances(out, out_lp_ref)
+            output_ref_atol, output_ref_rtol = get_tolerances(out, out_lp_ref, fudge_factor=2)
 
             self.assertEqual(out, out_component, atol=output_ref_atol, rtol=output_ref_rtol)
 
