@@ -2553,6 +2553,20 @@ def addr(
         vec2.ndim == 1,
         lambda: f"addr: Expected 1-D argument vec2, but got {vec2.ndim}-D",
     )
+    if isinstance(beta, bool):
+        torch._check(
+            utils.is_boolean_dtype(self.dtype)
+            and utils.is_boolean_dtype(vec1.dtype)
+            and utils.is_boolean_dtype(vec2.dtype),
+            lambda: "Boolean beta only supported for Boolean results.",
+        )
+    if isinstance(alpha, bool):
+        torch._check(
+            utils.is_boolean_dtype(self.dtype)
+            and utils.is_boolean_dtype(vec1.dtype)
+            and utils.is_boolean_dtype(vec2.dtype),
+            lambda: "Boolean alpha only supported for Boolean results.",
+        )
     self = self.expand(vec1.shape[0], vec2.shape[0])
     if utils.is_boolean_dtype(self.dtype):
         # Integers are accepted for booleans
