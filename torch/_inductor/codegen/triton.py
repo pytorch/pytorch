@@ -1227,7 +1227,7 @@ class TritonKernel(SIMDKernel):
         )
 
         indirect = self.is_indirect_indexing(expr) or any(
-            self.is_indirect_indexing(m) for m in indexing.mask_vars
+            isinstance(m, TritonCSEVariable) for m in indexing.mask_vars
         )
         buffer = self.compute if indirect else self.indexing_code
         self.cse.generate(buffer, line, assignment=False)
