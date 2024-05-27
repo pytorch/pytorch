@@ -2359,6 +2359,7 @@ class CppVecKernel(CppKernel):
             f"{acc_type_vec} {acc_vec} = {self.reduction_init_vec(reduction_type, dtype)};"
         )
         if reduction_type == "welford_reduce":
+            assert self.reduction_depth is not None
             # save the reciprocal of weights for welford reduce if using static shape
             reduction_size = functools.reduce(
                 lambda x, y: x * y, self.ranges[self.reduction_depth :]
