@@ -39,7 +39,6 @@ from torch.testing._internal.common_device_type import tol, toleranceOverride
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_utils import (
     _TestParametrizer,
-    set_single_threaded_if_parallel_tbb,
     skipIfMps,
     skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
@@ -161,7 +160,7 @@ class OptimizerInfo:
         self.supports_fused_on = supports_fused_on
 
     def get_decorators(self, test_class, test_name, device, dtype, param_kwargs):
-        result = [set_single_threaded_if_parallel_tbb]
+        result = []
         for decorator in self.decorators:
             if isinstance(decorator, DecorateInfo):
                 if decorator.is_active(
