@@ -14,6 +14,7 @@ from typing import (
     Set,
     Tuple,
     TYPE_CHECKING,
+    Union,
 )
 
 import torch
@@ -157,28 +158,27 @@ def _get_module_name_filter(module_name: str) -> Callable[[List[Node]], bool]:
     return module_name_filter
 
 
-def _get_operator_type_qconfig_filter(operator_type: Callable):
-    # TODO: Currently, we pass a list of nodes determined by the annotate function, but only one op is the target op.
-    # For example, [relu, conv]
-    # 1) Only pass the anchor node?
-    # 2) If one node is annotated, the rest of the nodes are annotated?
+def _get_operator_type_qconfig_filter(
+    operator_type: Callable,
+) -> Callable[[List[Node]], bool]:
     def operator_type_qconfig_filter(nodes: List[Node]):
-        # Return True, if the first node has the certain operator type
-        has_certain_operator_type = nodes[-1].target == operator_type
-        return has_certain_operator_type
+        num_nodes_with_operator_type = sum(
+            node.target == operator_type for node in nodes
+        )
+        return num_nodes_with_operator_type == 1
 
     return operator_type_qconfig_filter
 
 
-def _get_global_config_filter():
-    def global_config_filter(nodes: List[Node]):
-        # TODO: double-check
-        # Have the same issue as `_get_operator_type_qconfig_filter`
-        # Return True if any node belongs to the `default_quantizable_ops`
-        nodes_is_default = any(node.target in default_quantizable_ops for node in nodes)
-        return nodes_is_default
-
-    return global_config_filter
+def _global_config_filter(nodes: List[Node]) -> bool:
+    num_nodes_in_default_quantizable_ops = sum(
+        node.target in default_quantizable_ops for node in nodes
+    )
+    if num_nodes_in_default_quantizable_ops > 1:
+        raise NotImplementedError(
+            "Multiple nodes in on pattern belong to default quantizable ops."
+        )
+    return num_nodes_in_default_quantizable_ops == 1
 
 
 def _map_module_function_to_aten_operator_type():
@@ -262,14 +262,6 @@ def _is_quantized_op_pt2e(node: torch.fx.Node):
         return False
     quantization_annotation = node.meta.get(QUANT_ANNOTATION_KEY, None)
     assert isinstance(quantization_annotation, _X86InductorQuantizationAnnotation)
-    # TODO:
-    # Conv
-    #  |
-    # Relu  <- is annotated by `None` quantization config, `_is_output_of_quantized_pattern` is marked to False
-    #  |
-    # Maxpool
-    #  |
-    #
     return quantization_annotation._is_output_of_quantized_pattern
 
 
@@ -379,6 +371,15 @@ def get_default_x86_inductor_quantization_config(
 
 def _get_supported_config_and_operators() -> List[OperatorConfig]:
     return _get_supported_x86_inductor_config_and_operators()
+
+
+def _annotate_nodes_not_quantize(nodes: Union[Node, List[Node]]) -> None:
+    if not isinstance(nodes, list):
+        nodes = [nodes]
+    for node in nodes:
+        node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
+            _annotated=True
+        )
 
 
 def config_checker(method: Callable) -> Callable:
@@ -550,6 +551,9 @@ class X86InductorQuantizer(Quantizer):
         quantization_config: QuantizationConfig,
     ) -> None:
         """Helper function to annotate the conv node"""
+        if quantization_config is None:
+            _annotate_nodes_not_quantize(conv_node)
+            return
         input_qspec_map = {}
         input_node = conv_node.args[0]
         assert isinstance(input_node, Node)
@@ -564,7 +568,7 @@ class X86InductorQuantizer(Quantizer):
             conv_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
                 input_qspec_map=input_qspec_map,
                 _annotated=True,
-                _is_output_of_quantized_pattern=quantization_config is not None,
+                _is_output_of_quantized_pattern=True,
             )
         else:
             conv_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
@@ -579,6 +583,9 @@ class X86InductorQuantizer(Quantizer):
         quantization_config: QuantizationConfig,
     ) -> None:
         """Helper function to annotate the linear node"""
+        if quantization_config is None:
+            _annotate_nodes_not_quantize(linear_node)
+            return
         input_qspec_map = {}
         assert linear_node.target in (torch.ops.aten.linear.default,)
         has_bias = len(linear_node.args) == 3
@@ -602,7 +609,7 @@ class X86InductorQuantizer(Quantizer):
             linear_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
                 input_qspec_map=input_qspec_map,
                 _annotated=True,
-                _is_output_of_quantized_pattern=quantization_config is not None,
+                _is_output_of_quantized_pattern=True,
             )
         else:
             linear_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
@@ -680,7 +687,7 @@ class X86InductorQuantizer(Quantizer):
             self._annotate_with_config(
                 model,
                 self.global_config,
-                _get_global_config_filter(),
+                _global_config_filter,
             )
 
         # After annotating the model with quantization configurations, we need to annotate the output of quantizable ops.
@@ -700,7 +707,7 @@ class X86InductorQuantizer(Quantizer):
     ) -> None:
         """Annotate the model with a quantization configuration.
 
-        # TODO update the note
+        # TODO<yi> update the note
         High-level description of quantization recipe for X86 Inductor Backend:
         Step 1: Apply quantization recipe for fusion patterns of conv/linear to enable int8 data type actively.
         Step 2: Propagate quantization annotation for patterns besides conv/linear. Go through the pattern in model
@@ -783,20 +790,27 @@ class X86InductorQuantizer(Quantizer):
 
             self._annotate_conv_node_helper(conv_node, False, quantization_config)
 
-            binary_node_input_qspec_map = {}
-            binary_node_input_qspec_map[extra_input_node] = get_input_act_qspec(
-                quantization_config
-            )
-            binary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
-                input_qspec_map=binary_node_input_qspec_map,
-                _annotated=True,
-            )
-            unary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
-                # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
-                output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
-                _annotated=True,
-                _is_output_of_quantized_pattern=quantization_config is not None,
-            )
+            if quantization_config is not None:
+                binary_node_input_qspec_map = {}
+                binary_node_input_qspec_map[extra_input_node] = get_input_act_qspec(
+                    quantization_config
+                )
+                binary_node.meta[
+                    QUANT_ANNOTATION_KEY
+                ] = _X86InductorQuantizationAnnotation(
+                    input_qspec_map=binary_node_input_qspec_map,
+                    _annotated=True,
+                )
+                unary_node.meta[
+                    QUANT_ANNOTATION_KEY
+                ] = _X86InductorQuantizationAnnotation(
+                    # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
+                    output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
+                    _annotated=True,
+                    _is_output_of_quantized_pattern=True,
+                )
+            else:
+                _annotate_nodes_not_quantize([binary_node, unary_node])
             nodes_to_mark_annotated = list(conv_partition.nodes)
             nodes_to_mark_annotated.extend(list(bn_partition.nodes))
             nodes_to_mark_annotated.extend(list(binary_partition.nodes))
@@ -846,17 +860,22 @@ class X86InductorQuantizer(Quantizer):
 
             self._annotate_conv_node_helper(conv_node, False, quantization_config)
 
-            binary_node_input_qspec_map = {}
-            binary_node_input_qspec_map[extra_input_node] = get_input_act_qspec(
-                quantization_config
-            )
-            binary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
-                input_qspec_map=binary_node_input_qspec_map,
-                # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
-                output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
-                _annotated=True,
-                _is_output_of_quantized_pattern=quantization_config is not None,
-            )
+            if quantization_config is not None:
+                binary_node_input_qspec_map = {}
+                binary_node_input_qspec_map[extra_input_node] = get_input_act_qspec(
+                    quantization_config
+                )
+                binary_node.meta[
+                    QUANT_ANNOTATION_KEY
+                ] = _X86InductorQuantizationAnnotation(
+                    input_qspec_map=binary_node_input_qspec_map,
+                    # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
+                    output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
+                    _annotated=True,
+                    _is_output_of_quantized_pattern=True,
+                )
+            else:
+                _annotate_nodes_not_quantize(binary_node)
             nodes_to_mark_annotated = list(conv_partition.nodes)
             nodes_to_mark_annotated.extend(list(bn_partition.nodes))
             nodes_to_mark_annotated.extend(list(binary_partition.nodes))
@@ -902,12 +921,17 @@ class X86InductorQuantizer(Quantizer):
                 continue
 
             self._annotate_conv_node_helper(conv_node, False, quantization_config)
-            unary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
-                # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
-                output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
-                _annotated=True,
-                _is_output_of_quantized_pattern=quantization_config is not None,
-            )
+            if quantization_config is not None:
+                unary_node.meta[
+                    QUANT_ANNOTATION_KEY
+                ] = _X86InductorQuantizationAnnotation(
+                    # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
+                    output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
+                    _annotated=True,
+                    _is_output_of_quantized_pattern=True,
+                )
+            else:
+                _annotate_nodes_not_quantize(unary_node)
             nodes_to_mark_annotated = list(conv_partition.nodes)
             nodes_to_mark_annotated.extend(list(bn_partition.nodes))
             nodes_to_mark_annotated.extend(list(unary_partition.nodes))
@@ -938,14 +962,17 @@ class X86InductorQuantizer(Quantizer):
                 continue
 
             self._annotate_conv_node_helper(conv_node, False, quantization_config)
-            bn_output_node.meta[
-                QUANT_ANNOTATION_KEY
-            ] = _X86InductorQuantizationAnnotation(
-                # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
-                output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
-                _annotated=True,
-                _is_output_of_quantized_pattern=quantization_config is not None,
-            )
+            if quantization_config is not None:
+                bn_output_node.meta[
+                    QUANT_ANNOTATION_KEY
+                ] = _X86InductorQuantizationAnnotation(
+                    # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
+                    output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
+                    _annotated=True,
+                    _is_output_of_quantized_pattern=True,
+                )
+            else:
+                _annotate_nodes_not_quantize(bn_output_node)
             nodes_to_mark_annotated = list(conv_partition.nodes)
             nodes_to_mark_annotated.extend(list(bn_partition.nodes))
             _mark_nodes_as_annotated(nodes_to_mark_annotated)
@@ -981,6 +1008,11 @@ class X86InductorQuantizer(Quantizer):
                 continue
             if _skip_annotate([node], filter_fn):
                 continue
+
+            if quantization_config is None:
+                _annotate_nodes_not_quantize(node)
+                continue
+
             input_qspec_map = {}
             matmul_node = node
             for input_node in matmul_node.args:
@@ -988,7 +1020,7 @@ class X86InductorQuantizer(Quantizer):
             matmul_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
                 input_qspec_map=input_qspec_map,
                 _annotated=True,
-                _is_output_of_quantized_pattern=quantization_config is not None,
+                _is_output_of_quantized_pattern=True,
             )
 
     def _annotate_conv2d_binary_unary(
@@ -1025,6 +1057,11 @@ class X86InductorQuantizer(Quantizer):
                 continue
             if _skip_annotate([unary_node, binary_node, conv_node], filter_fn):
                 continue
+
+            if quantization_config is None:
+                _annotate_nodes_not_quantize([conv_node, binary_node, unary_node])
+                continue
+
             self._annotate_conv_node_helper(conv_node, False, quantization_config)
             binary_node_input_qspec_map = {}
             binary_node_input_qspec_map[extra_input_node] = get_input_act_qspec(
@@ -1036,7 +1073,7 @@ class X86InductorQuantizer(Quantizer):
             )
             unary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
                 _annotated=True,
-                _is_output_of_quantized_pattern=quantization_config is not None,
+                _is_output_of_quantized_pattern=True,
             )
 
     def _annotate_conv2d_binary(
@@ -1074,6 +1111,11 @@ class X86InductorQuantizer(Quantizer):
                 continue
             if _skip_annotate([binary_node, conv_node], filter_fn):
                 continue
+
+            if quantization_config is None:
+                _annotate_nodes_not_quantize([conv_node, binary_node])
+                continue
+
             self._annotate_conv_node_helper(conv_node, False, quantization_config)
             binary_node_input_qspec_map = {}
             binary_node_input_qspec_map[extra_input_node] = get_input_act_qspec(
@@ -1082,7 +1124,7 @@ class X86InductorQuantizer(Quantizer):
             binary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
                 input_qspec_map=binary_node_input_qspec_map,
                 _annotated=True,
-                _is_output_of_quantized_pattern=quantization_config is not None,
+                _is_output_of_quantized_pattern=True,
             )
 
     def _annotate_conv2d_unary(
@@ -1117,10 +1159,15 @@ class X86InductorQuantizer(Quantizer):
                 continue
             if _skip_annotate([unary_node, conv_node], filter_fn):
                 continue
+
+            if quantization_config is None:
+                _annotate_nodes_not_quantize([conv_node, unary_node])
+                continue
+
             self._annotate_conv_node_helper(conv_node, False, quantization_config)
             unary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
                 _annotated=True,
-                _is_output_of_quantized_pattern=quantization_config is not None,
+                _is_output_of_quantized_pattern=True,
             )
 
     def _annotate_conv2d(
@@ -1154,6 +1201,12 @@ class X86InductorQuantizer(Quantizer):
     ) -> None:
         if node.target is not torch.ops.aten.max_pool2d.default:
             return
+        if quantization_config is None:
+            node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
+                _annotated=True
+            )
+            return
+
         maxpool_node = node
         if _is_any_annotated(
             [
@@ -1169,12 +1222,17 @@ class X86InductorQuantizer(Quantizer):
         maxpool_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
             input_qspec_map=input_qspec_map,
             _annotated=True,
-            _is_output_of_quantized_pattern=quantization_config is not None,
+            _is_output_of_quantized_pattern=True,
         )
 
     def _annotate_cat(
         self, node: Node, quantization_config: QuantizationConfig
     ) -> None:
+        if quantization_config is None:
+            node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
+                _annotated=True
+            )
+            return
         cat_node = node
         input_nodes = cat_node.args[0]
         assert isinstance(input_nodes, Sequence)
@@ -1196,7 +1254,7 @@ class X86InductorQuantizer(Quantizer):
         cat_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
             input_qspec_map=input_qspec_map,
             _annotated=True,
-            _is_output_of_quantized_pattern=quantization_config is not None,
+            _is_output_of_quantized_pattern=True,
         )
 
     def _annotate_propagation_quantizable_pattern_entry(
@@ -1227,21 +1285,23 @@ class X86InductorQuantizer(Quantizer):
             if _skip_annotate([node], filter_fn):
                 return
 
-            if node.target is torch.ops.aten.max_pool2d.default:
-                if quantization_config is None:
-                    # TODO:
-                    # If quantization_config is None, we mark the `_annotated` as True with a empty `input_qspec_map`.
-                    # Handle the `cat` and other propagation patterns as well.
-                    self._annotate_maxpool2d(node, quantization_config)
-                else:
-                    # Recipe of maxpool2d: check input arg[0] of maxpool2d is quantized or not
-                    input_nodes_to_check = [node.all_input_nodes[0]]
-                    if not is_all_inputs_connected_to_quantized_op(
-                        input_nodes_to_check
-                    ):
-                        return
+            # For `global_config` is not None but `max_pool2d` is `None`, we annotate
+            # the `max_pool2d` with `_X86InductorQuantizationAnnotation(_annotated=True)`.
+            if quantization_config is None:
+                _annotate_nodes_not_quantize(node)
+                return
 
-                    self._annotate_maxpool2d(node, quantization_config)
+            if node.target is torch.ops.aten.max_pool2d.default:
+                # Recipe of maxpool2d: check input arg[0] of maxpool2d is quantized or not
+                input_nodes_to_check = [node.all_input_nodes[0]]
+                if not is_all_inputs_connected_to_quantized_op(input_nodes_to_check):
+                    if quantization_config is not None:
+                        warnings.warn(
+                            f"The input of maxpool2d is not quantized, skip annotate maxpool2d with config {quantization_config}."
+                        )
+                    return
+
+                self._annotate_maxpool2d(node, quantization_config)
                 return
             elif node.target is torch.ops.aten.cat.default:
                 input_nodes_to_check = node.all_input_nodes
@@ -1261,7 +1321,7 @@ class X86InductorQuantizer(Quantizer):
                 node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
                     input_qspec_map=input_qspec_map,
                     _annotated=True,
-                    _is_output_of_quantized_pattern=quantization_config is not None,
+                    _is_output_of_quantized_pattern=True,
                 )
         return
 
@@ -1389,10 +1449,15 @@ class X86InductorQuantizer(Quantizer):
                 continue
             if _skip_annotate([unary_node, linear_node], filter_fn):
                 continue
+
+            if quantization_config is None:
+                _annotate_nodes_not_quantize([linear_node, unary_node])
+                continue
+
             self._annotate_linear_node_helper(linear_node, False, quantization_config)
             unary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
                 _annotated=True,
-                _is_output_of_quantized_pattern=quantization_config is not None,
+                _is_output_of_quantized_pattern=True,
             )
 
     def _annotate_linear_binary_unary(
@@ -1459,6 +1524,10 @@ class X86InductorQuantizer(Quantizer):
                 if _skip_annotate(node_list, filter_fn):
                     continue
 
+                if quantization_config is None:
+                    _annotate_nodes_not_quantize(node_list)
+                    continue
+
                 self._annotate_linear_node_helper(
                     linear_node, False, quantization_config
                 )
@@ -1468,15 +1537,14 @@ class X86InductorQuantizer(Quantizer):
                 ] = _X86InductorQuantizationAnnotation(
                     input_qspec_map={},
                     _annotated=True,
-                    _is_output_of_quantized_pattern=quantization_config is not None
-                    and (not has_unary),
+                    _is_output_of_quantized_pattern=(not has_unary),
                 )
                 if unary_node is not None:
                     unary_node.meta[
                         QUANT_ANNOTATION_KEY
                     ] = _X86InductorQuantizationAnnotation(
                         _annotated=True,
-                        _is_output_of_quantized_pattern=quantization_config is not None,
+                        _is_output_of_quantized_pattern=True,
                     )
 
     def validate(self, model: torch.fx.GraphModule) -> None:
