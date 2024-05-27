@@ -3,6 +3,7 @@ import warnings
 from typing import Any, Dict, List, Optional, Union
 
 import torch.nn
+from torch._C._functorch import is_functorch_wrapped_tensor
 
 from . import utils, variables
 from .bytecode_transformation import (
@@ -21,6 +22,7 @@ from .variables.base import (
     MutableLocalSource,
     VariableTracker,
 )
+from .variables.tensor import TensorVariable
 
 
 class MutableSideEffects(MutableLocalBase):
@@ -297,11 +299,27 @@ class SideEffects:
         skip_obj = None
 
         def visit(var: VariableTracker):
+            is_valid_tensor = True
+            # Fix Pytorch issues #126882 and #125078
+            # Don't add var to `live_new_objects` if it is a functorch tensor
+
+            def is_functorch_tensor(var: VariableTracker):
+                nonlocal is_valid_tensor
+                if isinstance(var, TensorVariable):
+                    example_value = var.proxy.node.meta["example_value"]
+                    is_valid_tensor = not is_functorch_wrapped_tensor(example_value)
+
             if (
                 isinstance(var.mutable_local, AttributeMutationNew)
                 and var.mutable_local is not skip_obj
             ):
-                live_new_objects.add(var.mutable_local)
+                is_valid_tensor = True
+                value = self.store_attr_mutations.get(var.mutable_local)
+                if value and bool(value.get("cell_contents")):
+                    content = value["cell_contents"]
+                    VariableTracker.visit(is_functorch_tensor, content)
+                if is_valid_tensor:
+                    live_new_objects.add(var.mutable_local)
 
         def is_live(var: Union[MutableLocalBase, VariableTracker]):
             if isinstance(var, AttributeMutationNew):
