@@ -7,7 +7,6 @@ import re
 import subprocess
 import time
 from threading import Lock
-from timeit import default_timer as timer
 from typing import Any, List, Optional, Sequence
 
 
@@ -50,7 +49,7 @@ def _command_to_string(command: Sequence[str]) -> str:
 
 class StrobelightCLIFunctionProfiler:
     """
-    Note: this is a Meta only tool.
+    Note: this is a meta only tool.
 
     StrobelightCLIFunctionProfiler can be used to profile a python function and
     generate a strobelight link with the results. It works on meta servers but
@@ -87,7 +86,6 @@ class StrobelightCLIFunctionProfiler:
         # Results of the most recent run.
         # Tracks the strobelight run id of the most recent run
         self.current_run_id: Optional[int] = None
-        self.profile_result: Optional[List[str]] = None
         self.sample_tags = sample_tags
 
     def _run_async(self) -> None:
@@ -207,12 +205,10 @@ class StrobelightCLIFunctionProfiler:
                     f"failed to extract profiling results, unexpected response {output}"
                 )
 
-        self.profile_result = []
         for item in re.findall(
             r"(Total samples(.*)|GraphProfiler(.*)|Icicle view \(python stack\)(.*))",
             output,
         ):
-            self.profile_result += item[0]
             logger.info(item[0])
 
     def _stop_strobelight_no_throw(
@@ -252,7 +248,6 @@ class StrobelightCLIFunctionProfiler:
 
     def profile(self, work_function: Any, *args: Any, **kwargs: Any) -> Any:
         self.current_run_id = None
-        self.profile_result = None
 
         if locked := StrobelightCLIFunctionProfiler._lock.acquire(False):
             if not locked:
@@ -275,11 +270,7 @@ class StrobelightCLIFunctionProfiler:
 
             try:
                 logger.debug("collection started")
-                start = timer()
                 result = work_function(*args, **kwargs)
-                end = timer()
-                total_time = end - start  # Time in seconds, e.g. 5.38091952400282
-                logger.info("work function took %s seconds", total_time)
                 self._stop_strobelight_no_throw(collect_results=True)
                 StrobelightCLIFunctionProfiler._lock.release()
                 return result
