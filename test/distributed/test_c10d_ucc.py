@@ -18,15 +18,16 @@ if not c10d.is_available() or not c10d.is_ucc_available():
     sys.exit(0)
 
 import test_c10d_common
-import torch.distributed as dist
-import torch.nn.functional as F
-import torch.testing._internal.common_utils as common
 from test_c10d_common import (
     gpus_for_rank,
     ModuleForDdpCommHook,
     SparseGradientModule,
     Task,
 )
+
+import torch.distributed as dist
+import torch.nn.functional as F
+import torch.testing._internal.common_utils as common
 from torch import nn
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
