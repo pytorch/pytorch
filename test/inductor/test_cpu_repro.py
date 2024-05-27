@@ -1582,13 +1582,13 @@ class CPUReproTests(TestCase):
             self.common(fn, (value,))
 
     @unittest.skipIf(
-        platform.machine() != "s390x" or not codecache.valid_vec_isa_list(),
-        "Does not support vectorization or not s390x machine",
+        not codecache.valid_vec_isa_list()
+        or "avx2" in codecache.valid_vec_isa_list()
     )
     @patch("torch.cuda.is_available", lambda: False)
-    def test_auto_zvec_simd(self):
-        zvec = codecache.valid_vec_isa_list()[0]
-        self.assertTrue(zvec.bit_width() == 256)
+    def test_auto_zvec_neon_simd(self):
+        vec_zvec_neon = codecache.valid_vec_isa_list()[0]
+        self.assertTrue(vec_zvec_neon.bit_width() == 256)
 
         with config.patch({"cpp.simdlen": 0}):
             isa = codecache.pick_vec_isa()
@@ -1604,7 +1604,7 @@ class CPUReproTests(TestCase):
 
         with config.patch({"cpp.simdlen": 256}):
             isa = codecache.pick_vec_isa()
-            self.assertTrue(isa == zvec)
+            self.assertTrue(isa == vec_zvec_neon)
 
         pre_var = os.getenv("ATEN_CPU_CAPABILITY")
         if pre_var:
@@ -1613,17 +1613,17 @@ class CPUReproTests(TestCase):
         try:
             with config.patch({"cpp.simdlen": None}):
                 isa = codecache.pick_vec_isa()
-                self.assertTrue(isa == zvec)
+                self.assertTrue(isa == vec_zvec_neon)
 
             with config.patch({"cpp.simdlen": None}):
                 os.environ["ATEN_CPU_CAPABILITY"] = "avx2"
                 isa = codecache.pick_vec_isa()
-                self.assertTrue(isa == zvec)
+                self.assertTrue(isa == vec_zvec_neon)
 
             with config.patch({"cpp.simdlen": None}):
                 os.environ["ATEN_CPU_CAPABILITY"] = "avx512"
                 isa = codecache.pick_vec_isa()
-                self.assertTrue(isa == zvec)
+                self.assertTrue(isa == vec_zvec_neon)
 
             with config.patch({"cpp.simdlen": None}):
                 os.environ["ATEN_CPU_CAPABILITY"] = "default"
@@ -1633,78 +1633,12 @@ class CPUReproTests(TestCase):
             with config.patch({"cpp.simdlen": None}):
                 os.environ["ATEN_CPU_CAPABILITY"] = "neon"
                 isa = codecache.pick_vec_isa()
-                self.assertTrue(isa == zvec)
+                self.assertTrue(isa == vec_zvec_neon)
 
             with config.patch({"cpp.simdlen": None}):
                 os.environ["ATEN_CPU_CAPABILITY"] = "zvector"
                 isa = codecache.pick_vec_isa()
-                self.assertTrue(isa == zvec)
-        finally:
-            if pre_var:
-                os.environ["ATEN_CPU_CAPABILITY"] = pre_var
-            elif os.getenv("ATEN_CPU_CAPABILITY"):
-                os.environ.pop("ATEN_CPU_CAPABILITY")
-
-    @unittest.skipIf(
-        sys.platform != "darwin"
-        or platform.processor() != "arm"
-        or not codecache.valid_vec_isa_list(),
-        "Does not support vectorization or not neon machine",
-    )
-    @patch("torch.cuda.is_available", lambda: False)
-    def test_auto_neon_simd(self):
-        vec_neon = codecache.valid_vec_isa_list()[0]
-        self.assertTrue(vec_neon.bit_width() == 256)
-
-        with config.patch({"cpp.simdlen": 0}):
-            isa = codecache.pick_vec_isa()
-            self.assertFalse(isa)
-
-        with config.patch({"cpp.simdlen": 1}):
-            isa = codecache.pick_vec_isa()
-            self.assertFalse(isa)
-
-        with config.patch({"cpp.simdlen": 257}):
-            isa = codecache.pick_vec_isa()
-            self.assertFalse(isa)
-
-        with config.patch({"cpp.simdlen": 256}):
-            isa = codecache.pick_vec_isa()
-            self.assertTrue(isa == vec_neon)
-
-        pre_var = os.getenv("ATEN_CPU_CAPABILITY")
-        if pre_var:
-            os.environ.pop("ATEN_CPU_CAPABILITY")
-
-        try:
-            with config.patch({"cpp.simdlen": None}):
-                isa = codecache.pick_vec_isa()
-                self.assertTrue(isa == vec_neon)
-
-            with config.patch({"cpp.simdlen": None}):
-                os.environ["ATEN_CPU_CAPABILITY"] = "avx2"
-                isa = codecache.pick_vec_isa()
-                self.assertTrue(isa == vec_neon)
-
-            with config.patch({"cpp.simdlen": None}):
-                os.environ["ATEN_CPU_CAPABILITY"] = "avx512"
-                isa = codecache.pick_vec_isa()
-                self.assertTrue(isa == vec_neon)
-
-            with config.patch({"cpp.simdlen": None}):
-                os.environ["ATEN_CPU_CAPABILITY"] = "default"
-                isa = codecache.pick_vec_isa()
-                self.assertFalse(isa)
-
-            with config.patch({"cpp.simdlen": None}):
-                os.environ["ATEN_CPU_CAPABILITY"] = "neon"
-                isa = codecache.pick_vec_isa()
-                self.assertTrue(isa == vec_neon)
-
-            with config.patch({"cpp.simdlen": None}):
-                os.environ["ATEN_CPU_CAPABILITY"] = "zvector"
-                isa = codecache.pick_vec_isa()
-                self.assertTrue(isa == vec_neon)
+                self.assertTrue(isa == vec_zvec_neon)
         finally:
             if pre_var:
                 os.environ["ATEN_CPU_CAPABILITY"] = pre_var
@@ -2051,6 +1985,16 @@ class CPUReproTests(TestCase):
         self.assertEqual(input_grad[1, 2, 3, 4], torch.tensor(0.0))
         # For forward and backward kernel
         check_metrics_vec_kernel_count(2)
+
+    @requires_vectorization
+    def test_ops_masked_with_bool_input(self):
+        x = torch.zeros(129, dtype=torch.bool)
+        size = [2, 3]
+        res_aten_eager = torch.constant_pad_nd(x, size)
+        cfn = torch.compile(torch.constant_pad_nd)
+        res = cfn(x, size)
+        self.assertEqual(res_aten_eager, res)
+        check_metrics_vec_kernel_count(1)
 
     @patch("torch.cuda.is_available", lambda: False)
     def test_scatter_using_atomic_add(self):
