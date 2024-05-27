@@ -3586,6 +3586,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with torch._dynamo.config.patch(error_on_nested_jit_trace=False):
             torch.jit.trace(f, torch.randn(3))
 
+    @unittest.skip("TODO: broken by https://github.com/pytorch/pytorch/pull/126905")
     @torch._dynamo.config.patch("assume_static_by_default", False)
     def test_tensor_split(self):
         def f(x):

@@ -16,15 +16,20 @@ from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 import torch
 from .functions import (
     CleanDiv,
+    FloatPow,
+    FloatTrueDiv,
     FloorDiv,
+    IntTrueDiv,
     IsNonOverlappingAndDenseIndicator,
     Mod,
     ModularIndexing,
-    Pow,
-    Round,
+    PowByNatural,
+    PythonMod,
     RoundDecimal,
-    TrueDiv,
-    Trunc,
+    RoundToInt,
+    ToFloat,
+    TruncToFloat,
+    TruncToInt,
     Where,
 )
 
@@ -49,30 +54,41 @@ def handlers():
         sympy.Le: "le",
         sympy.Ge: "ge",
         sympy.Not: "not_",
-        TrueDiv: "truediv",
+        IntTrueDiv: "int_truediv",
+        FloatTrueDiv: "truediv",
         FloorDiv: "floordiv",
-        CleanDiv: "div",
-        Trunc: "trunc",
+        CleanDiv: "floordiv",  # TODO: hmm?
+        TruncToFloat: "trunc",
+        TruncToInt: "trunc_to_int",
+        ToFloat: "to_float",
         Where: "where",
         sympy.Add: "add",
         sympy.Mul: "mul",
-        Pow: "pow",
-        sympy.Pow: "pow",
+        FloatPow: "pow",
+        PowByNatural: "pow_by_natural",
+        # sympy simplifies x * x into Pow(x, 2), so we need to handle this.
+        # Do NOT use builtin Pow for floats
+        # TODO: There is a hazard here, if we have float * float it will
+        # also get turned into Pow(float, 2) but we don't want this because
+        # pow_by_natural is assumed to only be integers.  Probably the fix is
+        # to add a FloatMul to impede this optimization
+        sympy.Pow: "pow_by_natural",
         Mod: "mod",
+        PythonMod: "mod",  # TODO: this is wrong
         sympy.Mod: "mod",
         sympy.Abs: "abs",
         sympy.log: "log",
         sympy.exp: "exp",
-        sympy.floor: "floor",
-        sympy.ceiling: "ceil",
+        sympy.floor: "floor_to_int",
+        sympy.ceiling: "ceil_to_int",
         sympy.Min: "minimum",
         sympy.Max: "maximum",
         ModularIndexing: "modular_indexing",
         sympy.functions.elementary.piecewise.ExprCondPair: "expr_cond_pair",
         sympy.Piecewise: "piecewise",
         IsNonOverlappingAndDenseIndicator: "is_non_overlapping_and_dense_indicator",
-        Round: "round",
-        RoundDecimal: "round",
+        RoundToInt: "round_to_int",
+        RoundDecimal: "round_decimal",
     }
     for name in ["cos", "sin", "tan", "sinh", "cosh", "tanh", "asin", "acos", "atan"]:
         HANDLERS[getattr(sympy, name)] = name
@@ -107,11 +123,11 @@ def sympy_interp(
         return analysis.sqrt(sympy_interp(analysis, env, expr.args[0]))
 
     # Recursive case
-    args = [sympy_interp(analysis, env, arg) for arg in expr.args]  # type: ignore[arg-type]
     if hasattr(expr.func, "_torch_handler_name"):
         handler_name = expr.func._torch_handler_name
     else:
         handler_name = handlers()[expr.func]
+    args = [sympy_interp(analysis, env, arg) for arg in expr.args]  # type: ignore[arg-type]
     handler = getattr(analysis, handler_name)
     if handler_name in ASSOCIATIVE_OPS:
         assert len(args) > 1
