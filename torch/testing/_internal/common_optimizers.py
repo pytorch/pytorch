@@ -694,6 +694,11 @@ def optim_inputs_func_nadam(device, dtype=None):
             },
             desc="decoupled_weight_decay",
         ),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.1, "maximize": True},
+            desc="maximize",
+        ),
     ] + (cuda_supported_configs if "cuda" in str(device) else [])
 
 
