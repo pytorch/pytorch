@@ -519,6 +519,25 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
     @with_comms
     @skip_if_lt_x_gpu(1)
+    def test_extra_state(self) -> None:
+        model = CompositeParamModel(device=torch.device("cuda"))
+
+        def get_extra_state(self):
+            return "MyState"
+
+        def set_extra_state(self, state):
+            return
+
+        UnitModule.get_extra_state = get_extra_state
+        UnitModule.set_extra_state = set_extra_state
+
+        ddp_model = DDP(copy.deepcopy(model))
+        set_model_state_dict(ddp_model, get_model_state_dict(ddp_model))
+        self.assertEqual(model.state_dict()["u1._extra_state"], "MyState")
+        self.assertEqual(model.state_dict(), get_model_state_dict(ddp_model))
+
+    @with_comms
+    @skip_if_lt_x_gpu(1)
     def test_activation_ckpt_fqns_fsdp1(self) -> None:
         self.run_subtests(
             {"use_orig_params": [True, False]},
