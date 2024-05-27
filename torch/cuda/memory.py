@@ -653,7 +653,12 @@ def list_gpu_processes(device: Union[Device, int] = None) -> str:
             mem = p.usedGpuMemory / (1024 * 1024)
             pid = p.pid
         else:
-            proc_info = amdsmi.amdsmi_get_gpu_process_info(handle, p)  # type: ignore[possibly-undefined]
+            try:
+                proc_info = amdsmi.amdsmi_get_gpu_process_info(handle, p)  # type: ignore[possibly-undefined]
+            except AttributeError:
+                # https://github.com/ROCm/amdsmi/commit/c551c3caedbd903ba828e7fdffa5b56d475a15e7
+                # is a BC-breaking change that removes amdsmi_get_gpu_process_info API from amdsmi
+                proc_info = p
             mem = proc_info["memory_usage"]["vram_mem"] / (1024 * 1024)
             pid = proc_info["pid"]
         lines.append(f"process {pid:>10d} uses {mem:>12.3f} MB GPU memory")
