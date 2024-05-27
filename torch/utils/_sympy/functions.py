@@ -27,9 +27,8 @@ def _keep_float(f):
     @functools.wraps(f)
     def inner(*args):
         r = f(*args)
-        if (
-            any(isinstance(a, sympy.Float) for a in args)
-            and not isinstance(r, sympy.Float)
+        if any(isinstance(a, sympy.Float) for a in args) and not isinstance(
+            r, sympy.Float
         ):
             r = sympy.Float(float(r))
         return r

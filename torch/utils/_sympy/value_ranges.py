@@ -744,7 +744,9 @@ class SymPyValueRangeAnalysis:
 
     @classmethod
     def floor(cls, x):
-        return ValueRanges.increasing_map(x, _keep_float(sympy.functions.elementary.integers.floor))
+        return ValueRanges.increasing_map(
+            x, _keep_float(sympy.functions.elementary.integers.floor)
+        )
 
     @classmethod
     def ceil(cls, x):

@@ -361,7 +361,7 @@ try:
         def to_float(self, x: z3.ArithRef) -> z3.ArithRef:
             return z3.ToReal(x)
 
-        def to_int(self, x: z3.ArithRef) -> z3.ArithRef:
+        def trunc_to_int(self, x: z3.ArithRef) -> z3.ArithRef:
             return z3.ToInt(x)
 
         def int_truediv(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
@@ -395,6 +395,8 @@ try:
                 "not_": z3.Not,
                 "floor": self._ops.floor,
                 "ceil": self._ops.ceil,
+                "floor_to_int": self._ops.floor,
+                "ceil_to_int": self._ops.ceil,
                 "minimum": self._ops.min,
                 "maximum": self._ops.max,
             }

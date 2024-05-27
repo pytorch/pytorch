@@ -693,8 +693,6 @@ reflectable_magic_methods = {
 def _floor_ceil_helper(a, fn):
     import sympy
 
-    from torch.utils._sympy.functions import TruncToInt
-
     if isinstance(a, sympy.Mul):
         aa = a.args
         if len(aa) == 2 and isinstance(aa[0], sympy.Float) and aa[1].is_integer:
