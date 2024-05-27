@@ -2110,12 +2110,10 @@ def sample_inputs_singular_matrix_factors(op_info, device, dtype, requires_grad=
     batches = [(), (0, ), (2, ), (1, 1)]
     size = [1, 5, 10]
     for batch, m, n in product(batches, size, size):
-        k = 2
-        a = make_arg((*batch, m, k))
-        b = make_arg((*batch, n, k))
+        for k in range(min(3, m, n)):
+            a = make_arg((*batch, m, k))
+            b = make_arg((*batch, n, k))
         yield a, b
-    yield make_arg((3, 1)), make_arg((2, 1))
-    yield make_arg((1, 3, 2)), make_arg((1, 4, 2))
 
 
 def sample_inputs_svd_lowrank(op_info, device, dtype, requires_grad=False, **kwargs):
