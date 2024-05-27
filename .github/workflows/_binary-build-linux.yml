@@ -79,7 +79,7 @@ on:
         required: false
         type: string
         description: Whether to enable linker script optimization
-        default: 1
+        default: 0
     secrets:
       github-token:
         required: true
@@ -202,9 +202,9 @@ jobs:
       - name: Checkout pytorch/builder to builder dir
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: cache_libs_for_arm
           submodules: recursive
-          repository: pytorch/builder
+          repository: tinglvv/builder
           path: builder
           quiet-checkout: true
 
@@ -253,6 +253,7 @@ jobs:
             -e PYTORCH_ROOT \
             -e SKIP_ALL_TESTS \
             -e PYTORCH_EXTRA_INSTALL_REQUIREMENTS \
+            -e USE_PRIORITIZED_TEXT_FOR_LD \
             --tty \
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
