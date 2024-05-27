@@ -18,7 +18,6 @@ from collections import namedtuple
 from typing import OrderedDict
 from unittest.case import skipIf
 
-import functorch
 import torch
 import torch.nn.functional as F
 from common_utils import (
@@ -36,8 +35,6 @@ from common_utils import (
     tol1,
     xfail,
 )
-from functorch import grad, grad_and_value, jacfwd, jvp, vjp, vmap
-from functorch.experimental import chunk_vmap
 from functorch_additional_op_db import additional_op_db
 from torch import Tensor
 from torch._C._functorch import reshape_dim_into, reshape_dim_outof
@@ -67,6 +64,10 @@ from torch.testing._internal.common_utils import (
     xfailIfTorchDynamo,
 )
 from torch.utils import _pytree as pytree
+
+import functorch
+from functorch import grad, grad_and_value, jacfwd, jvp, vjp, vmap
+from functorch.experimental import chunk_vmap
 
 FALLBACK_REGEX = "There is a performance drop"
 
