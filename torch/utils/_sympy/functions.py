@@ -669,6 +669,9 @@ class ToFloat(sympy.Function):
 
     @classmethod
     def eval(cls, number):
+        if number in [sympy.oo, -sympy.oo]:
+            return number
+
         assert number.is_integer, number
 
         if isinstance(number, sympy.Integer):

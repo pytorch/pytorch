@@ -833,7 +833,9 @@ def _sympy_sym_float(a):
 def _sympy_is_integer(a):
     import sympy
 
-    return sympy.Eq(sympy.floor(a), a)
+    from torch.utils._sympy.functions import ToFloat
+
+    return sympy.Eq(ToFloat(sympy.floor(a)), a)
 
 
 magic_methods = {
