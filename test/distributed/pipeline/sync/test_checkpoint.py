@@ -9,7 +9,6 @@
 from functools import partial
 
 import pytest
-
 import torch
 import torch.cuda
 from torch import nn

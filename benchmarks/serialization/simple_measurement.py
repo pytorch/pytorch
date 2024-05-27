@@ -1,6 +1,5 @@
-from pyarkbench import Benchmark, default_args, Timer
-
 import torch
+from pyarkbench import Benchmark, default_args, Timer
 
 use_new = True
 

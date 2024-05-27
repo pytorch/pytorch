@@ -1,7 +1,6 @@
+import torch
 import yaml
 from torchvision import models
-
-import torch
 
 model = models.mobilenet_v2(weights=models.MobileNet_V2_Weights.IMAGENET1K_V1)
 model.eval()

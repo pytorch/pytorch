@@ -2,7 +2,6 @@ import json
 import time
 
 import benchmark_cpp_extension  # noqa: F401
-
 import torch
 
 
