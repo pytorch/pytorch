@@ -2,10 +2,6 @@
     ignore = dirty
     path = third_party/pybind11
     url = https://github.com/pybind/pybind11.git
-[submodule "third_party/cub"]
-    ignore = dirty
-    path = third_party/cub
-    url = https://github.com/NVlabs/cub.git
 [submodule "third_party/eigen"]
     ignore = dirty
     path = third_party/eigen
@@ -50,10 +46,6 @@
     ignore = dirty
     path = third_party/psimd
     url = https://github.com/Maratyszcza/psimd.git
-[submodule "third_party/zstd"]
-    ignore = dirty
-    path = third_party/zstd
-    url = https://github.com/facebook/zstd.git
 [submodule "third_party/cpuinfo"]
     ignore = dirty
     path = third_party/cpuinfo
@@ -66,10 +58,6 @@
     ignore = dirty
     path = third_party/onnx
     url = https://github.com/onnx/onnx.git
-[submodule "third_party/onnx-tensorrt"]
-    ignore = dirty
-    path = third_party/onnx-tensorrt
-    url = https://github.com/onnx/onnx-tensorrt
 [submodule "third_party/sleef"]
     ignore = dirty
     path = third_party/sleef
@@ -86,14 +74,6 @@
     ignore = dirty
     path = third_party/gemmlowp/gemmlowp
     url = https://github.com/google/gemmlowp.git
-[submodule "third_party/QNNPACK"]
-    ignore = dirty
-    path = third_party/QNNPACK
-    url = https://github.com/pytorch/QNNPACK
-[submodule "third_party/neon2sse"]
-    ignore = dirty
-    path = third_party/neon2sse
-    url = https://github.com/intel/ARM_NEON_2_x86_SSE.git
 [submodule "third_party/fbgemm"]
     ignore = dirty
     path = third_party/fbgemm
@@ -152,3 +132,7 @@
 [submodule "third_party/opentelemetry-cpp"]
 	path = third_party/opentelemetry-cpp
 	url = https://github.com/open-telemetry/opentelemetry-cpp.git
+[submodule "third_party/cpp-httplib"]
+	path = third_party/cpp-httplib
+	url = https://github.com/yhirose/cpp-httplib.git
+	branch = v0.15.3
