@@ -40,8 +40,8 @@ from .functions import (
     OpaqueUnaryFn_sqrt,
     OpaqueUnaryFn_tanh,
     PowByNatural,
-    Round,
     RoundDecimal,
+    RoundToInt,
     safe_pow,
     ToFloat,
     TruncToFloat,
@@ -755,17 +755,20 @@ class SymPyValueRangeAnalysis:
         )
 
     @classmethod
-    def round(cls, number, ndigits=None):
-        if ndigits is None:
-            fn = Round
-        else:
-            assert ndigits.is_singleton()
-            ndigits = ndigits.lower
-            # We can't use functools.partial here since sympy doesn't support keyword arguments, but we have to bind
-            # the second parameter.
-            fn = lambda number: RoundDecimal(number, ndigits)  # type: ignore[misc, assignment]  # noqa: E731
+    def round_decimal(cls, number, ndigits):
+        # TODO: this needs to work even when ndigits is not singleton
+        assert ndigits.is_singleton()
+
+        ndigits = ndigits.lower
+        # We can't use functools.partial here since sympy doesn't support keyword arguments, but we have to bind
+        # the second parameter.
+        fn = lambda number: RoundDecimal(number, ndigits)  # type: ignore[misc, assignment]  # noqa: E731
 
         return ValueRanges.increasing_map(number, fn)
+
+    @classmethod
+    def round_to_int(cls, number, ndigits=None):
+        return ValueRanges.increasing_map(number, RoundToInt)
 
     # It's used in some models on symints
     @staticmethod

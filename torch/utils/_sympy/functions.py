@@ -15,7 +15,7 @@ __all__ = [
     "LShift",
     "RShift",
     "IsNonOverlappingAndDenseIndicator",
-    "Round",
+    "RoundToInt",
     "RoundDecimal",
     "ToFloat",
     "FloatPow",
@@ -615,25 +615,16 @@ class TruncToInt(sympy.Function):
             return sympy.Integer(math.trunc(float(number)))
 
 
-# This is float -> float.  This is inconsistent with Python builtin round,
-# which returns an integer when there are no digits, but consistent with
-# torch.round, which always returns a float.
-#
-# TODO: As currently written, this is redundant with RoundDecimal, but we
-# leave this open because we have codegen for Round but not
-# RoundDecimal (we do have lowering for RoundDecimal, need to use that...)
-class Round(sympy.Function):
-    is_integer = False
-    is_real = True
+# This is float -> int
+class RoundToInt(sympy.Function):
+    is_integer = True
 
     @classmethod
     def eval(cls, number):
         # assert number.is_integer is not True, number
 
         if isinstance(number, sympy.Float):
-            # TODO: Verify that this Python call actually matches PyTorch
-            # semantics
-            return sympy.Float(round(float(number), 0))
+            return sympy.Integer(round(float(number), 0))
 
 
 # To get float -> int, Python style round semantics.

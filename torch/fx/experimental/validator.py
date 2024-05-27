@@ -385,7 +385,7 @@ try:
         def mod(self, p: z3.ArithRef, q: z3.ArithRef) -> z3.ArithRef:
             return self._ops.mod(p, q)
 
-        def round(self, number: z3.ArithRef, ndigits: Optional[z3.ArithRef] = None) -> z3.ArithRef:
+        def round_to_int(self, number: z3.ArithRef, ndigits: Optional[z3.ArithRef] = None) -> z3.ArithRef:
             return self._ops.round(number, ndigits)
 
         def __getattr__(self, name: str) -> Any:

@@ -812,12 +812,10 @@ def _sympy_abs(a):
 
 
 def _sympy_round(number, ndigits=None):
-    from torch.utils._sympy.functions import Round, RoundDecimal, TruncToInt
+    from torch.utils._sympy.functions import RoundDecimal, RoundToInt
 
     if ndigits is None:
-        return TruncToInt(Round(number))
-    elif ndigits == 0:
-        return Round(number)
+        return RoundToInt(number)
     else:
         return RoundDecimal(number, ndigits)
 

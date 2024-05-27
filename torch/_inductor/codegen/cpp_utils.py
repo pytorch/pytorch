@@ -104,10 +104,27 @@ class CppPrinter(ExprPrinter):
         assert len(expr.args) == 1
         return f"static_cast<double>({self._print(expr.args[0])})"
 
+    # TODO: This is wrong if one of the inputs is negative.  This is hard to
+    # tickle though, as the inputs are typically positive (and if we can prove
+    # they are positive, we will have used Mod instead, for which this codegen
+    # is right).
+    def _print_PythonMod(self, expr):
+        return " % ".join(map(self.paren, map(self._print, expr.args)))
+
+    def _print_CMod(self, expr):
+        return " % ".join(map(self.paren, map(self._print, expr.args)))
+
     def _print_IntTrueDiv(self, expr):
         lhs, rhs = expr.args
         # TODO: This is only accurate up to 2**53
         return f"static_cast<double>({self._print(lhs)}) / static_cast<double>({self._print(rhs)})"
+
+    # TODO: PowByNatural: we need to implement our own int-int pow.  Do NOT
+    # use std::pow, that operates on floats
+    def _print_PowByNatural(self, expr):
+        raise NotImplementedError(
+            f"_print_PowByNatural not implemented for {type(self)}"
+        )
 
     def _print_FloatTrueDiv(self, expr):
         lhs, rhs = expr.args
@@ -116,35 +133,6 @@ class CppPrinter(ExprPrinter):
     def _print_FloatPow(self, expr):
         base, exp = expr.args
         return f"std::pow({self._print(base)}, {self._print(exp)})"
-
-    def _print_Pow(self, expr):
-        # Uses float constants to perform FP div
-        base, exp = expr.args
-        base = self._print(base)
-
-        if exp == 0.5 or exp == -0.5:
-            return f"std::sqrt({base})" if exp == 0.5 else f"1.0/std::sqrt({base})"
-        if exp.is_integer:
-            exp = int(exp)
-            if exp > 0:
-                r = "*".join([self.paren(base)] * exp)
-            elif exp < 0:
-                r = "1.0/" + self.paren("*".join([self.paren(base)] * abs(exp)))
-            else:  # exp == 0
-                r = "1.0"
-
-            return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
-        else:
-            # TODO: float vs double
-            return f"std::pow({base}, {float(exp)})"
-
-    def _print_Rational(self, expr):
-        # Uses float constants to perform FP div
-        if expr.q == 1:
-            r = f"{expr.p}"
-        else:
-            r = f"{expr.p}.0/{expr.q}.0"
-        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
     def _print_ceiling(self, expr):
         assert len(expr.args) == 1
@@ -212,8 +200,9 @@ class CppPrinter(ExprPrinter):
     def _print_OpaqueUnaryFn_sqrt(self, expr):
         return f"std::sqrt({self._print(expr.args[0])})"
 
-    def _print_Round(self, expr):
+    def _print_RoundToInt(self, expr):
         assert len(expr.args) == 1
+        # TODO: dispatch to llrint depending on index type
         return f"std::lrint({self._print(expr.args[0])})"
 
     def _print_RoundDecimal(self, expr):

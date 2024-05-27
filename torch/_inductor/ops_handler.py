@@ -673,6 +673,10 @@ class OpsHandler(Protocol[T]):
         """Python-style modulus, take sign from RHS (x1)."""
         ...
 
+    def round_decimal(self, x0: T, x1: T) -> T:
+        """Python-style round with decimal argument"""
+        ...
+
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # In CUDA, optimized implementations of other mathematical operations are
     # offered separately via libdevice for double precision computation (in
