@@ -48,7 +48,6 @@ from typing import (
 )
 
 import torch
-from torch._dynamo.device_interface import get_registered_device_interfaces
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
@@ -104,7 +103,6 @@ else:
 
 
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
-kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
 
 LOCK_TIMEOUT = 600
 
@@ -3147,12 +3145,6 @@ class CUDACodeCache:
             source_code, dst_file_ext
         )
         return (DLLWrapper(dst_file_path), hash_key, source_code_path)
-
-
-def caching_device_properties():
-    for _, device_interface in get_registered_device_interfaces():
-        if device_interface.is_available():
-            device_interface.Worker.get_device_properties()
 
 
 class CodeCacheFuture:

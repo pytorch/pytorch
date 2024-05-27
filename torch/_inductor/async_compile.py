@@ -1,58 +1,28 @@
 from __future__ import annotations
 
-import base64
-import copyreg
-import dataclasses
 import functools
-import hashlib
-import importlib
-import io
-import json
 import logging
 import multiprocessing
 import os
-import pickle
-import pkgutil
-import platform
-import re
-import shlex
-import shutil
-import struct
-import subprocess
 import sys
-import sysconfig
-import tempfile
-import textwrap
-import threading
-import warnings
-from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
-from copy import copy
-from ctypes import c_void_p, cdll, CDLL
 from functools import partial
-from pathlib import Path
-from time import time, time_ns
-from types import ModuleType
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    Generator,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    TYPE_CHECKING,
-    Union,
-)
+from time import time
+from typing import Any, Callable, Dict, List, Optional, Set
 
 import torch
 from torch._dynamo.device_interface import get_registered_device_interfaces
-from torch._dynamo.utils import counters, dynamo_timed
-from torch._inductor import config, exc, metrics
-from torch._inductor.codegen.cuda import cuda_env
+from torch._inductor import config
+from torch._inductor.codecache import (
+    CodeCacheFuture,
+    CppCodeCache,
+    CppPythonBindingsCodeCache,
+    CUDACodeCache,
+    HalideCodeCache,
+    LambdaFuture,
+    TritonCodeCache,
+    TritonFuture,
+)
 from torch._inductor.compile_worker.subproc_pool import (
     _warm_process_pool,
     AnyPool,
@@ -60,33 +30,24 @@ from torch._inductor.compile_worker.subproc_pool import (
 )
 from torch._inductor.compile_worker.watchdog import _async_compile_initializer
 from torch._inductor.runtime.compile_tasks import (
-    _module_to_triton_kernel,
-    _reload_python_module,
-    _reload_python_module_in_subproc,
     _set_triton_ptxas_path,
     _worker_compile_triton,
 )
 from torch._inductor.runtime.hints import HalideMeta
-from torch._inductor.runtime.runtime_utils import cache_dir
-from torch._inductor.utils import clear_on_fresh_inductor_cache, is_linux
-
-from torch._logging import trace_structured
-from torch._subclasses.fake_tensor import (
-    extract_tensor_metadata,
-    FakeTensor,
-    TensorMetadata,
-)
-from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
-
-if TYPE_CHECKING:
-    from torch._inductor.graph import GraphLowering
-    from torch._inductor.ir import ChoiceCaller
 
 from torch.hub import _Faketqdm, tqdm
 
 # timing metrics for time spent in the compilation
 _cumulative_compile_time = 0.0
 _t0: Optional[float] = None
+
+kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
+
+
+def caching_device_properties():
+    for _, device_interface in get_registered_device_interfaces():
+        if device_interface.is_available():
+            device_interface.Worker.get_device_properties()
 
 
 def _compile_start() -> None:
