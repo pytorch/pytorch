@@ -1535,34 +1535,10 @@ class Kernel(CodeGen):
 
         return f'{self.assert_function}({cond}, "index out of bounds: {cond_print}")'
 
-    def issue_check_bounds(
-        self,
-        buffer: IndentedBuffer,
-        expr: sympy.Expr,
-        size: sympy.Expr,
-        lower: bool,
-        upper: bool,
-    ):
-        """
-        - This function is called from either
-            - CSEProxy.check_bounds
-            - CSEProxy.indirect_indexing
-        """
-        raise NotImplementedError
-
     def check_bounds(
         self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
     ):
-        """
-        This function is called when we change an indirect indexing into a direct indexing in
-        IndexPropagation.indirect_indexing. Since we don't know where will the expression be
-        used, but we know whether the load / store that uses it will be hoisted, we put it:
-        - At the top, in the indexing code in triton
-        - In the compute in C++, as C++ does not hoist loads/stores.
-        """
-        if lower or upper:
-            buffer = getattr(self, "indexing_code", self.compute)
-            self.issue_check_bounds(buffer, expr, size, lower, upper)
+        raise NotImplementedError
 
     def index_to_str(self, index: sympy.Expr) -> str:
         raise NotImplementedError
@@ -1677,10 +1653,7 @@ class Kernel(CodeGen):
                     assert_upper = not isinstance(size, sympy.Number) or not (
                         var.bounds.upper < size
                     )
-                    if assert_lower or assert_upper:
-                        self.issue_check_bounds(
-                            self.compute, sympy_var, size, assert_lower, assert_upper
-                        )
+                    self.check_bounds(sympy_var, size, assert_lower, assert_upper)
                 return sympy_var
 
             @staticmethod
