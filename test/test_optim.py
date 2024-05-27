@@ -18,7 +18,7 @@ from optim.test_swa_utils import TestSWAUtils  # noqa: F401
 from torch.nn import Parameter
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_optimizers import (
-    optim_db, optims, OptimizerErrorEnum, _get_optim_inputs_including_global_cliquey_kwargs, TensorTracker)
+    optim_db, optims, OptimizerErrorEnum, _get_device_type, _get_optim_inputs_including_global_cliquey_kwargs, TensorTracker)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, largeTensorTest, onlyCPU, onlyCUDA, skipMPS, TEST_WITH_ROCM, onlyNativeDeviceTypes)
 from torch.testing._internal.common_utils import markDynamoStrictTest, parametrize, run_tests, TestCase, TEST_WITH_TORCHDYNAMO
@@ -890,14 +890,17 @@ class TestOptimRenewed(TestCase):
             self.assertLessEqual(mt_max_mem, expected_max_mem)
 
 
-    @onlyNativeDeviceTypes
+    #@onlyNativeDeviceTypes
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],
         dtypes=floating_types_and(torch.bfloat16, torch.float16, )
     )
     def test_fused_matches_forloop(self, device, dtype, optim_info):
-        if device not in optim_info.supports_fused_on:
+        if _get_device_type(device) not in optim_info.supports_fused_on:
             self.skipTest(f"{device} is not supported for fused on {optim_info.optim_cls.__name__}")
+        if _get_device_type(device) == "mps" and dtype not in (torch.float16, torch.float32):
+            self.skipTest("MPS supports only torch.float16 and torch.float32")
+
         self._test_derived_optimizers(device, dtype, optim_info, "fused")
 
 

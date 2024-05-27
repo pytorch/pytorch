@@ -671,7 +671,15 @@ def _fused_adam(
         if lr_dict is not None and device not in lr_dict:
             lr_dict[device] = lr.to(device=device, non_blocking=True)  # type: ignore[union-attr]
             lr = lr_dict[device]
-        torch._foreach_add_(device_state_steps, 1)
+        
+        if device.type == "mps":
+            assert found_inf is None and grad_scale is None
+            assert not isinstance(lr, Tensor)
+            for device_state_step in device_state_steps:
+                device_state_step += 1
+        else:
+            torch._foreach_add_(device_state_steps, 1)
+
         torch._fused_adam_(
             device_params,
             device_grads,

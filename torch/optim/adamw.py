@@ -674,7 +674,13 @@ def _fused_adamw(
             lr = lr_dict.setdefault(
                 device, lr.to(device=device, non_blocking=True)  # type: ignore[union-attr]
             )
-        torch._foreach_add_(device_state_steps, 1)
+        if device.type == "mps":
+            assert found_inf is None and grad_scale is None
+            assert not isinstance(lr, Tensor)
+            for device_state_step in device_state_steps:
+                device_state_step += 1
+        else:
+            torch._foreach_add_(device_state_steps, 1)
         torch._fused_adamw_(
             device_params,
             device_grads,
