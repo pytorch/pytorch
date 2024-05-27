@@ -9,10 +9,17 @@ import gc
 
 from unittest import skip, skipIf
 
+import torch
+
 from attn_ft import BertSelfAttention as BertSelfAttentionA, Linear
 from attn_positional import BertSelfAttention as BertSelfAttentionB
 
-import torch
+from torch.testing._internal.common_utils import (
+    run_tests,
+    skipIfTorchDynamo,
+    TEST_CUDA,
+    TestCase,
+)
 
 from functorch._C import dim as _C
 from functorch.dim import (
@@ -23,13 +30,6 @@ from functorch.dim import (
     dims,
     stack,
     Tensor,
-)
-
-from torch.testing._internal.common_utils import (
-    run_tests,
-    skipIfTorchDynamo,
-    TEST_CUDA,
-    TestCase,
 )
 
 try:

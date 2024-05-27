@@ -1,5 +1,4 @@
 import operator_benchmark as op_bench
-
 import torch
 
 """Microbenchmarks for element-wise Add operator. Supports both Caffe2/PyTorch."""

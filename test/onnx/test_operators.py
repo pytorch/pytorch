@@ -18,6 +18,11 @@ import tempfile
 # Full diff for expect files
 import unittest
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.onnx
+
 from pytorch_test_common import (
     BATCH_SIZE,
     flatten,
@@ -25,11 +30,6 @@ from pytorch_test_common import (
     RNN_INPUT_SIZE,
     RNN_SEQUENCE_LENGTH,
 )
-
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.onnx
 from torch.autograd import Function, Variable
 from torch.nn import functional, Module
 from torch.onnx._internal import diagnostics

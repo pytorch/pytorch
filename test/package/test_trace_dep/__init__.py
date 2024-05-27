@@ -1,6 +1,5 @@
-import yaml
-
 import torch
+import yaml
 
 
 class SumMod(torch.nn.Module):

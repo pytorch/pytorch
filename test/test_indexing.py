@@ -8,7 +8,6 @@ import warnings
 from functools import reduce
 
 import numpy as np
-
 import torch
 from torch import tensor
 

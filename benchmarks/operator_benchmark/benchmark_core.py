@@ -7,7 +7,6 @@ from collections import namedtuple
 
 import benchmark_utils
 import numpy as np
-
 import torch
 
 # needs to be imported after torch

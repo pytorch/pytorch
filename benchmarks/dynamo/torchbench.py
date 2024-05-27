@@ -10,9 +10,8 @@ import warnings
 from collections import namedtuple
 from os.path import abspath, exists
 
-import yaml
-
 import torch
+import yaml
 
 try:
     from .common import BenchmarkRunner, main

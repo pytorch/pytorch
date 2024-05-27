@@ -1,7 +1,6 @@
-from utils import process_bucket_with_remote_server
-
 import torch
 import torch.distributed as c10d
+from utils import process_bucket_with_remote_server
 
 
 def allreduce_hook(state, bucket):

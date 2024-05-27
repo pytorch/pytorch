@@ -3,9 +3,8 @@ import io
 import os
 
 import onnx
-from beartype import roar
-
 import torch
+from beartype import roar
 from torch.onnx import dynamo_export, ExportOptions, ONNXProgram
 from torch.onnx._internal import exporter, io_adapter
 from torch.onnx._internal.exporter import (

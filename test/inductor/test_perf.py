@@ -2,8 +2,6 @@
 import contextlib
 from unittest.mock import patch
 
-import functorch
-
 import torch
 import torch._inductor.config as config
 import torch.autograd
@@ -29,6 +27,8 @@ from torch.testing._internal.common_utils import skipIfRocm
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
+
+import functorch
 
 if HAS_CUDA:
     from torch.testing._internal.triton_utils import add_kernel

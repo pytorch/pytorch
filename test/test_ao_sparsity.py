@@ -28,7 +28,6 @@ from ao.sparsity.test_structured_sparsifier import (  # noqa: F401  # noqa: F401
     TestFPGMPruner,
     TestSaliencyPruner,
 )
-
 from torch.testing._internal.common_utils import IS_ARM64, run_tests
 
 # Composability

@@ -10,6 +10,8 @@ import functools
 import itertools
 import unittest
 
+import torch
+import torch.autograd.forward_ad as fwAD
 from common_utils import (
     check_vmap_fallback,
     decorate,
@@ -28,11 +30,6 @@ from common_utils import (
     xfail,
 )
 from functorch_additional_op_db import additional_op_db
-
-import torch
-import torch.autograd.forward_ad as fwAD
-
-from functorch import grad, jacfwd, jacrev, vjp, vmap
 from torch import Tensor
 from torch._functorch.eager_transforms import _as_tuple, jvp
 from torch.testing._internal.autograd_function_db import autograd_function_db
@@ -63,6 +60,8 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.opinfo.core import SampleInput
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+
+from functorch import grad, jacfwd, jacrev, vjp, vmap
 
 aten = torch.ops.aten
 

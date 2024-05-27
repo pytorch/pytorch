@@ -240,8 +240,9 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         self.assertTrue(backend_run)
 
     def test_aot_autograd_api(self):
-        from functorch.compile import make_boxed_func
         from torch._dynamo.backends.common import aot_autograd
+
+        from functorch.compile import make_boxed_func
 
         backend_run = False
 

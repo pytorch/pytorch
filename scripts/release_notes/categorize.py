@@ -4,6 +4,7 @@ import textwrap
 from pathlib import Path
 
 import common
+import torch
 
 # Imports for working with classi
 from classifier import (
@@ -16,8 +17,6 @@ from classifier import (
 )
 from commitlist import CommitList
 from common import get_commit_data_cache, topics
-
-import torch
 
 
 class Categorizer:
