@@ -119,6 +119,7 @@ jobs:
       build_name: manywheel-py3_8-cuda-aarch64
       build_environment: linux-aarch64-binary-manywheel
       timeout-minutes: 420
+      USE_PRIORITIZED_TEXT_FOR_LD: 1
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cuda-aarch64-upload:  # Uploading
@@ -227,6 +228,7 @@ jobs:
       build_name: manywheel-py3_9-cuda-aarch64
       build_environment: linux-aarch64-binary-manywheel
       timeout-minutes: 420
+      USE_PRIORITIZED_TEXT_FOR_LD: 1
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda-aarch64-upload:  # Uploading
@@ -335,6 +337,7 @@ jobs:
       build_name: manywheel-py3_10-cuda-aarch64
       build_environment: linux-aarch64-binary-manywheel
       timeout-minutes: 420
+      USE_PRIORITIZED_TEXT_FOR_LD: 1
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda-aarch64-upload:  # Uploading
@@ -443,6 +446,7 @@ jobs:
       build_name: manywheel-py3_11-cuda-aarch64
       build_environment: linux-aarch64-binary-manywheel
       timeout-minutes: 420
+      USE_PRIORITIZED_TEXT_FOR_LD: 1
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda-aarch64-upload:  # Uploading
@@ -551,6 +555,7 @@ jobs:
       build_name: manywheel-py3_12-cuda-aarch64
       build_environment: linux-aarch64-binary-manywheel
       timeout-minutes: 420
+      USE_PRIORITIZED_TEXT_FOR_LD: 1
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda-aarch64-upload:  # Uploading
