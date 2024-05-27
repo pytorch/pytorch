@@ -430,7 +430,7 @@ class WrapperCodeGen(CodeGen):
         # If the generated source code is exactly the same, reuse the
         # pre-existing kernel for it
         self.src_to_kernel: Dict[str, str] = {}
-        self.kernel_numel_expr: Set[Tuple[str, "GraphLowering"]] = set()
+        self.kernel_numel_expr: Set[Tuple[str, GraphLowering]] = set()
         self.lines: List[Union[MemoryPlanningLine, LineContext]] = []
         self.declare = ""
         self.declare_maybe_reference = ""
