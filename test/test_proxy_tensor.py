@@ -1082,8 +1082,7 @@ def forward(self, x_1, y_1):
         batch_size = 4
         src_tokens = torch.randint(1, vocab_size, (batch_size, prompt_size))
         gm = make_fx(f, tracing_mode="symbolic")(src_tokens, torch.randn(5))
-        # TODO: guards here got worse
-        # self.assertEqual(len(gm.shape_env.guards), 0)
+        self.assertEqual(len(gm.shape_env.guards), 0)
 
     def test_non_symint_size_spec(self):
         # this isn't really a proxy tensor test, but it's the most convenient
@@ -1878,15 +1877,14 @@ L['a'].size()[1] <= 18""")
             a = a.view(b.shape[0])
             return a + b.sum()
 
-        # TODO: Symbolic reasoning here got worse
         fx_g = _trace(f, (4, 2), 8)
-        # self._assert_no_guards(fx_g, 2)
+        self._assert_no_guards(fx_g, 2)
 
         fx_g = _trace(f, (4, 2), (8, 5))
-        # self._assert_no_guards(fx_g, 3)
+        self._assert_no_guards(fx_g, 3)
 
         fx_g = _trace(f, (2, 3, 4), 24)
-        # self._assert_no_guards(fx_g, 3)
+        self._assert_no_guards(fx_g, 3)
 
     def test_nonidentity_transitive_guards(self):
         def f(a, b, c, d, e):

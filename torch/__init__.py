@@ -410,15 +410,23 @@ class SymFloat:
         self.node = node
 
     def __truediv__(self, other):
+        if not isinstance(other, (builtins.int, builtins.float, SymInt, SymFloat)):
+            return NotImplemented
         return self.__float_truediv__(sym_float(other))
 
     def __rtruediv__(self, other):
+        if not isinstance(other, (builtins.int, builtins.float, SymInt, SymFloat)):
+            return NotImplemented
         return self.__rfloat_truediv__(sym_float(other))
 
     def __floordiv__(self, other):
+        if not isinstance(other, (builtins.int, builtins.float, SymInt, SymFloat)):
+            return NotImplemented
         return torch.sym_float(math.floor(self / sym_float(other)))
 
     def __rfloordiv__(self, other):
+        if not isinstance(other, (builtins.int, builtins.float, SymInt, SymFloat)):
+            return NotImplemented
         return torch.sym_float(math.floor(sym_float(other) / self))
 
     def __bool__(self):
@@ -427,10 +435,14 @@ class SymFloat:
     # Symbolic power does NOT work with negative base, this is to avoid
     # potential complex outputs
     def __pow__(self, other):
+        if not isinstance(other, (builtins.int, builtins.float, SymInt, SymFloat)):
+            return NotImplemented
         torch._check(self >= 0)
         return self.__float_pow__(other)
 
     def __rpow__(self, other):
+        if not isinstance(other, (builtins.int, builtins.float, SymInt, SymFloat)):
+            return NotImplemented
         torch._check(other >= 0)
         return self.__rfloat_pow__(other)
 
