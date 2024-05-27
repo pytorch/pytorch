@@ -10,6 +10,8 @@ from typing import Any, List
 
 import torch
 import torch._dynamo as torchdynamo
+
+from functorch.experimental.control_flow import cond, map
 from torch import Tensor
 from torch._export.utils import (
     get_buffer,
@@ -50,8 +52,6 @@ from torch.utils._pytree import (
     treespec_dumps,
     treespec_loads,
 )
-
-from functorch.experimental.control_flow import cond, map
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
