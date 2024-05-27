@@ -486,9 +486,14 @@ def _register_quantized_linear_binary_lowering(
         from .mkldnn_fusion import _can_be_inplace
 
         if binary_unary_attr.binary_op_name == "sum":
-            assert _can_be_inplace(
-                x2
-            ), "QLinear Binary Inplace Fusion requires accum is not an alias or mutation."
+            if not _can_be_inplace(x2):
+                # When we enable the GEMM Template, we will view output of QLinear
+                # from 2D back to 3D when input is 3D, which makes _can_be_inplace(x2) as False
+                # change the post op from sum to binary add for this case.
+                # Refer to Case:  
+                #   pytest -s -v inductor/test_mkldnn_pattern_matcher.py
+                #   -k test_qlinear_dequant_promotion_cpu_input_dim_exceeds_2
+                binary_unary_attr.binary_op_name == "add"
 
         # if the binary post op is sum but output dtype is not the same as accum,
         # use accum's dtype as output dtype
