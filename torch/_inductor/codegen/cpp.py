@@ -2397,7 +2397,7 @@ class CppVecKernel(CppKernel):
                     else self.ranges[self.reduction_depth]
                 )
                 # calculate loops size outside the vectorized loop
-                self.reduction_outer_size = reduction_size / reduction_inner_size
+                self.reduction_outer_size = reduction_size // reduction_inner_size
                 # calculate the main loop size
                 self.reduction_main_size = (
                     FloorDiv(reduction_inner_size, self.tiling_factor)
@@ -2566,20 +2566,42 @@ class CppVecKernel(CppKernel):
     def reduction_combine_vec(
         self, reduction_type, var, next_value, use_weight_recps=False
     ):
-        if reduction_type in ["max", "min", "sum", "prod", "xor_sum"]:
+        if reduction_type == "max":
             if self.tail_size:
-                return (
-                    f'reduce({var}, {next_value}, "{reduction_type}", {self.tail_size})'
-                )
+                return f"max_masked_reduce({var}, {next_value}, {self.tail_size})"
             else:
-                return f'reduce({var}, {next_value}, "{reduction_type}")'
+                return f"at::vec::maximum({var}, {next_value})"
+        elif reduction_type == "min":
+            if self.tail_size:
+                return f"min_masked_reduce({var}, {next_value}, {self.tail_size})"
+            else:
+                return f"at::vec::minimum({var}, {next_value})"
+        elif reduction_type == "sum":
+            if self.tail_size:
+                return f"sum_masked_reduce({var}, {next_value}, {self.tail_size})"
+            else:
+                return f"{var} + {next_value}"
+        elif reduction_type == "prod":
+            if self.tail_size:
+                return f"prod_masked_reduce({var}, {next_value}, {self.tail_size})"
+            else:
+                return f"{var} * {next_value}"
+        elif reduction_type == "xor_sum":
+            if self.tail_size:
+                return f"xor_sum_masked_reduce({var}, {next_value}, {self.tail_size})"
+            else:
+                return f"{var} ^ {next_value}"
         elif reduction_type == "welford_reduce":
-            if self.tail_size:
-                return f"welford_combine({var}, {next_value}, {self.tail_size}, &weight_recps)"
-            elif use_weight_recps:
-                return f"welford_combine({var}, {next_value}, &weight_recps)"
+            if use_weight_recps:
+                if self.tail_size:
+                    return f"welford_combine({var}, {next_value}, {self.tail_size}, &weight_recps)"
+                else:
+                    return f"welford_combine({var}, {next_value}, &weight_recps)"
             else:
-                return f"welford_combine({var}, {next_value})"
+                if self.tail_size:
+                    return f"welford_combine({var}, {next_value}, {self.tail_size})"
+                else:
+                    return f"welford_combine({var}, {next_value})"
         elif reduction_type == "welford_combine":
             if isinstance(next_value, tuple):
                 # When reading a value from Inductor IR we have a tuple of variable names
