@@ -110,7 +110,7 @@ class PythonRefInfo(OpInfo):
             torch_opinfo_name, torch_opinfo_variant_name, op_db=op_db
         )
         self.validate_view_consistency = validate_view_consistency
-        assert isinstance(self.torch_opinfo, OpInfo)
+        assert isinstance(self.torch_opinfo, OpInfo), f'{name} {self.torch_opinfo}'
 
         inherited = self.torch_opinfo._original_opinfo_args
         ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
