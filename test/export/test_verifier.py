@@ -2,6 +2,8 @@
 import unittest
 
 import torch
+
+from functorch.experimental import control_flow
 from torch import Tensor
 from torch._dynamo.eval_frame import is_dynamo_supported
 
@@ -9,8 +11,6 @@ from torch._export.verifier import SpecViolationError, Verifier
 from torch.export import export
 from torch.export.exported_program import InputKind, InputSpec, TensorArgument
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
-
-from functorch.experimental import control_flow
 
 
 @unittest.skipIf(not is_dynamo_supported(), "dynamo isn't supported")
