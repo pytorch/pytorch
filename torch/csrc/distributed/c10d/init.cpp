@@ -2031,7 +2031,7 @@ communication mechanism.
                 self->registerOnCompletionHook(
                     [hookWrapper = ::c10d::PythonOnCompletionHook(std::move(
                          hook))](std::shared_ptr<::c10d::WorkInfo> workInfo) {
-                      hookWrapper(std::move(workInfo));
+                      hookWrapper(workInfo);
                     });
               },
               py::arg("hook"),
