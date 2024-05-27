@@ -39,10 +39,10 @@ from typing import (
     Union,
     ValuesView,
 )
+from typing_extensions import Concatenate, ParamSpec
 from unittest import mock
 
 import sympy
-from typing_extensions import Concatenate, ParamSpec
 
 import torch
 import torch._export
@@ -1470,6 +1470,7 @@ def dump_node_schedule(node_schedule):
             is_red = node.is_reduction()
             print(f"{'red' if is_red else 'pw'} scheduler node")
             if is_red:
+                assert node.node is not None
                 print(f"original reduction hint {node.node.data.reduction_hint}")  # type: ignore[attr-defined]
             print("ReadDep:")
             for dep in node.read_writes.reads:

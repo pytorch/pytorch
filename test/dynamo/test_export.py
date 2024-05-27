@@ -17,7 +17,6 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from functorch.experimental.control_flow import cond
 from torch._dynamo import config
 from torch._dynamo.exc import UserError
 from torch._dynamo.testing import normalize_gm
@@ -33,6 +32,8 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import TEST_CUDA
+
+from functorch.experimental.control_flow import cond
 
 
 class ExportTests(torch._dynamo.test_case.TestCase):
