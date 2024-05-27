@@ -134,6 +134,35 @@ class CppPrinter(ExprPrinter):
         base, exp = expr.args
         return f"std::pow({self._print(base)}, {self._print(exp)})"
 
+    def _print_Pow(self, expr):
+        # Uses float constants to perform FP div
+        base, exp = expr.args
+        base = self._print(base)
+
+        if exp == 0.5 or exp == -0.5:
+            return f"std::sqrt({base})" if exp == 0.5 else f"1.0/std::sqrt({base})"
+        if exp.is_integer:
+            exp = int(exp)
+            if exp > 0:
+                r = "*".join([self.paren(base)] * exp)
+            elif exp < 0:
+                r = "1.0/" + self.paren("*".join([self.paren(base)] * abs(exp)))
+            else:  # exp == 0
+                r = "1.0"
+
+            return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+        else:
+            # TODO: float vs double
+            return f"std::pow({base}, {float(exp)})"
+
+    def _print_Rational(self, expr):
+        # Uses float constants to perform FP div
+        if expr.q == 1:
+            r = f"{expr.p}"
+        else:
+            r = f"{expr.p}.0/{expr.q}.0"
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+
     def _print_ceiling(self, expr):
         assert len(expr.args) == 1
         r = f"std::ceil({self._print(expr.args[0])})"

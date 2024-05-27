@@ -11,7 +11,12 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Round, RoundDecimal
+from torch.utils._sympy.functions import (
+    FloorDiv,
+    ModularIndexing,
+    RoundDecimal,
+    RoundToInt,
+)
 
 
 class TestIndexingSimplification(InductorTestCase):
@@ -231,10 +236,10 @@ class ExprPrinterTests(InductorTestCase):
                 self.assertExpectedInline(cexpr(expr), """std::ceil((1.0/2.0)*s1)""")
 
     def test_print_round(self):
-        expr = Round(sympy.Symbol("x", integer=True) / 2)
+        expr = RoundToInt(sympy.Symbol("x", integer=True) / 2)
         self.assertExpectedInline(pexpr(expr), """round((1/2)*x)""")
         self.assertExpectedInline(cexpr(expr), """std::lrint((1.0/2.0)*x)""")
-        self.assertExpectedInline(texpr(expr), """libdevice.rint((1/2)*x)""")
+        self.assertExpectedInline(texpr(expr), """libdevice.llrint((1/2)*x)""")
 
     @parametrize("ndigits", [-1, 0, 1])
     def test_print_round_decimal(self, ndigits):
