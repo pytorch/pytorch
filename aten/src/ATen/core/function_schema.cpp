@@ -53,7 +53,7 @@ FunctionSchema FunctionSchema::cloneWithRealTypes(bool with_symint) const {
     is_varret());
 }
 
-bool FunctionSchema::canAliasTypeSetsAlias(const std::optional<AliasTypeSet> &lhs, const c10::optional<AliasTypeSet> &rhs) const {
+bool FunctionSchema::canAliasTypeSetsAlias(const std::optional<AliasTypeSet> &lhs, const std::optional<AliasTypeSet> &rhs) const {
   if (!lhs || !rhs) {
     return false;
   }
@@ -67,7 +67,7 @@ bool FunctionSchema::canAliasTypeSetsAlias(const std::optional<AliasTypeSet> &lh
   return false;
 }
 
-std::optional<AliasTypeSet> FunctionSchema::getAliasTypeSetContainedTypes(const c10::optional<AliasTypeSet> &aliasTypeSet) const {
+std::optional<AliasTypeSet> FunctionSchema::getAliasTypeSetContainedTypes(const std::optional<AliasTypeSet> &aliasTypeSet) const {
   if (!aliasTypeSet) {
     return c10::nullopt;
   }
