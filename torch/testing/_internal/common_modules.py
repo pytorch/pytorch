@@ -24,8 +24,8 @@ from torch.testing._internal.common_nn import (
     marginrankingloss_reference, multimarginloss_reference, multilabelmarginloss_reference,
     nllloss_reference, nlllossNd_reference, smoothl1loss_reference, softmarginloss_reference, get_reduction)
 from torch.testing._internal.common_utils import (
-    freeze_rng_state, set_single_threaded_if_parallel_tbb, skipIfMps, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS,
-    skipIfTorchDynamo, TEST_WITH_TORCHINDUCTOR)
+    freeze_rng_state, skipIfMps, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS,
+    skipIfTorchDynamo)
 from types import ModuleType
 from typing import List, Tuple, Type, Set, Dict
 import operator
@@ -127,7 +127,7 @@ class modules(_TestParametrizer):
                     def test_wrapper(*args, **kwargs):
                         return test(*args, **kwargs)
 
-                    if self.skip_if_dynamo and not TEST_WITH_TORCHINDUCTOR:
+                    if self.skip_if_dynamo and not torch.testing._internal.common_utils.TEST_WITH_TORCHINDUCTOR:
                         test_wrapper = skipIfTorchDynamo("Policy: we don't run ModuleInfo tests w/ Dynamo")(test_wrapper)
 
                     decorator_fn = partial(module_info.get_decorators, generic_cls.__name__,
@@ -235,7 +235,7 @@ class ModuleInfo:
         self.is_lazy = issubclass(module_cls, torch.nn.modules.lazy.LazyModuleMixin)
 
     def get_decorators(self, test_class, test_name, device, dtype, param_kwargs):
-        result = [set_single_threaded_if_parallel_tbb]
+        result = []
         for decorator in self.decorators:
             if isinstance(decorator, DecorateInfo):
                 if decorator.is_active(test_class, test_name, device, dtype, param_kwargs):
@@ -3469,12 +3469,7 @@ module_db: List[ModuleInfo] = [
                        unittest.expectedFailure, 'TestEagerFusionModuleInfo',
                        'test_aot_autograd_module_exhaustive',
                        active_if=operator.itemgetter('training')
-                   ),
-                   # test fails if run alone in inductor https://github.com/pytorch/pytorch/issues/125967
-                   DecorateInfo(
-                       unittest.skip("Skipped https://github.com/pytorch/pytorch/issues/125967"),
-                       'TestModule', 'test_memory_format', device_type='cuda',
-                       active_if=(TEST_WITH_TORCHINDUCTOR)),)
+                   ),)
                ),
     ModuleInfo(torch.nn.BatchNorm3d,
                train_and_eval_differ=True,

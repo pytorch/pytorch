@@ -5,8 +5,6 @@ import unittest
 
 import torch
 import torch.utils._pytree as pytree
-from functorch.experimental import control_flow
-from functorch.experimental.control_flow import cond, UnsupportedAliasMutationException
 from torch._higher_order_ops.while_loop import while_loop
 from torch._subclasses.functional_tensor import (
     CppFunctionalizeAPI,
@@ -26,6 +24,9 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
+
+from functorch.experimental import control_flow
+from functorch.experimental.control_flow import cond, UnsupportedAliasMutationException
 
 
 # TODO: pull these helpers from AOTAutograd later
@@ -872,6 +873,41 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
             *example_inputs
         )
         self.assertEqual(graph_module(*example_inputs), f(*example_inputs))
+
+    def test_cond_accepts_torch_function_as_inputs(self):
+        a = torch.randn(3, 4)
+        b = torch.randn(3, 4)
+
+        def f(a, b):
+            return cond(a.sum() > 0, torch.add, torch.mul, (a, b))
+
+        gm = self._check_tracing(f, (a, b))["symbolic"]
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, a_1, b_1):
+    sum_1 = torch.ops.aten.sum.default(a_1)
+    gt = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [a_1, b_1]);  gt = true_graph_0 = false_graph_0 = a_1 = b_1 = None
+    getitem = conditional[0];  conditional = None
+    return getitem""",  # noqa: B950
+        )
+        self.assertExpectedInline(
+            gm.true_graph_0.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1):
+    add = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+    return (add,)""",
+        )
+        self.assertExpectedInline(
+            gm.false_graph_0.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1):
+    mul = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+    return (mul,)""",
+        )
 
     def test_cond_retrace_functionalized(self):
         def true_fn(x):

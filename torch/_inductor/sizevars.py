@@ -18,7 +18,7 @@ import sympy
 from sympy import Expr
 
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
-from torch.utils._sympy.functions import Boxed, FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy
 
@@ -158,9 +158,6 @@ class SizeVarAllocator:
                 return FloorDiv(base, divisor)
             return ModularIndexing(base, divisor, modulus)
 
-        def visit_boxed(expr):
-            return Boxed(self._simplify_with_ranges(expr, var_ranges))
-
         if expr.has(ModularIndexing):
             expr = expr.replace(
                 ModularIndexing(
@@ -178,14 +175,6 @@ class SizeVarAllocator:
                     sympy.Wild("divisor"),
                 ),
                 visit_indexing_div,
-            )
-
-        if expr.has(Boxed):
-            expr = expr.replace(
-                Boxed(
-                    sympy.Wild("expr"),
-                ),
-                visit_boxed,
             )
 
         if expr != original_expr:
@@ -296,7 +285,7 @@ class SizeVarAllocator:
 
         return False
 
-    def statically_known_equals(self, left: Expr, right: Expr) -> bool:
+    def statically_known_equals(self, left: Expr, right: Union[Expr, int]) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left and right are equal.
         """
@@ -314,7 +303,7 @@ class SizeVarAllocator:
         return False
 
     # See Note - [On Statically Known]
-    def statically_known_leq(self, left: Expr, right: Expr) -> bool:
+    def statically_known_leq(self, left: Expr, right: Union[Expr, int]) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left is less than or equal to right.
         """
@@ -322,7 +311,7 @@ class SizeVarAllocator:
         return self.is_expr_static_and_true(expr)
 
     # See Note - [On Statically Known]
-    def statically_known_geq(self, left: Expr, right: Expr) -> bool:
+    def statically_known_geq(self, left: Expr, right: Union[Expr, int]) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left is greater than or equal to right.
         """
@@ -330,7 +319,7 @@ class SizeVarAllocator:
         return self.is_expr_static_and_true(expr)
 
     # See Note - [On Statically Known]
-    def statically_known_lt(self, left: Expr, right: Expr) -> bool:
+    def statically_known_lt(self, left: Expr, right: Union[Expr, int]) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left is less than right.
         """
@@ -338,7 +327,7 @@ class SizeVarAllocator:
         return self.is_expr_static_and_true(expr)
 
     # See Note - [On Statically Known]
-    def statically_known_gt(self, left: Expr, right: Expr) -> bool:
+    def statically_known_gt(self, left: Expr, right: Union[Expr, int]) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left is greater than right.
         """
@@ -346,7 +335,9 @@ class SizeVarAllocator:
         return self.is_expr_static_and_true(expr)
 
     # See Note - [On Statically Known]
-    def statically_known_multiple_of(self, numerator: Expr, denominator: Expr) -> bool:
+    def statically_known_multiple_of(
+        self, numerator: Expr, denominator: Union[Expr, int]
+    ) -> bool:
         """
         Return a bool indicating if it is sound to optimize for the numerator being a multiple of the denominator.
         """
