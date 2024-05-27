@@ -24,20 +24,14 @@ static std::vector<std::string> generic_precisions = {"default", "tf32", "bf16"}
 static std::vector<std::string> cuda_precisions = {"default", "tf32"};
 static std::vector<std::string> mkldnn_precisions = {"default", "bf16"};
 
-static void warn_invalid_fp32_precision(const std::string& backend, std::string& precision) {
-  bool invalid_cuda = backend == "cuda" && std::find(cuda_precisions.begin(), cuda_precisions.end(), precision) == cuda_precisions.end();
-  bool invalid_mkldnn = backend == "mkldnn" && std::find(mkldnn_precisions.begin(), mkldnn_precisions.end(), precision) == mkldnn_precisions.end();
-  if (invalid_cuda || invalid_mkldnn){
-    precision = "default";
-    TORCH_WARN("Invalid precision for ", backend, " precision: ", precision, " reset precision to default");
-  }
-}
-
-static void fp32_precision_valid_check(
+// This method first check whether the backend and operators are legal
+// After that, if there is non-empty precision
+// it will futher checks whether the precision is legal
+// and return the the result
+static bool validate_fp32_prec_with_backend_and_op(
     const std::string& backend,
     const std::string& op,
-    std::string& precision,
-    bool rewrite_precision = false) {
+    const std::string& precision = "") {
   static std::vector<std::string> backends = {"generic", "mkldnn", "cuda"};
   static std::vector<std::string> operators = {"conv", "matmul", "rnn", "all"};
 
@@ -46,33 +40,22 @@ static void fp32_precision_valid_check(
   TORCH_CHECK(std::find(operators.begin(), operators.end(), op) != operators.end(), "Invalid operator: ", op);
 
   if (precision.size() != 0) {
-    bool invalid = false;
+    bool valid = false;
     if (backend == "generic") {
       TORCH_CHECK(op == "all", "Invalid operation for generic backend: ", op);
     } else if (backend == "cuda") {
-      invalid =
-          std::find(
-              cuda_precisions.begin(), cuda_precisions.end(), precision) ==
+      valid = std::find(
+                  cuda_precisions.begin(), cuda_precisions.end(), precision) !=
           cuda_precisions.end();
     } else if (backend == "mkldnn") {
-      invalid =
+      valid =
           std::find(
-              mkldnn_precisions.begin(), mkldnn_precisions.end(), precision) ==
+              mkldnn_precisions.begin(), mkldnn_precisions.end(), precision) !=
           mkldnn_precisions.end();
     }
-    if (invalid) {
-      if (rewrite_precision) {
-        precision = "default";
-      } else {
-        TORCH_CHECK(
-            false,
-            "Invalid precision for ",
-            backend,
-            " precision: ",
-            precision);
-      }
-    }
+    return valid;
   }
+  return true;
 }
 
 Context::Context() = default;
@@ -311,16 +294,15 @@ Float32MatmulPrecision Context::float32MatmulPrecision() const {
 }
 
 std::string Context::float32Precision(const std::string& backend, const std::string& op) const {
-  std::string p = "";
-  fp32_precision_valid_check(backend, op, p);
+  validate_fp32_prec_with_backend_and_op(backend, op);
   auto precision = fp32_precision.find(backend)->second.find(op)->second;
   if (precision == "default")
     precision = fp32_precision.find(backend)->second.find("all")->second;
   if (precision == "default")
     precision = fp32_precision.find("generic")->second.find("all")->second;
-  fp32_precision_valid_check(
-      backend, op, precision, /*rewrite_precision=*/true);
-  return precision;
+  bool valid_prec =
+      validate_fp32_prec_with_backend_and_op(backend, op, precision);
+  return valid_prec ? precision : "default";
 }
 
 void Context::setFloat32MatmulPrecision(const std::string &s) {
@@ -354,8 +336,7 @@ void Context::setFloat32MatmulPrecision(const std::string &s) {
 }
 
 void Context::setFloat32Precision(const std::string& p, const std::string& backend, const std::string& op) {
-  std::string precision_non_const = p;
-  fp32_precision_valid_check(backend, op, precision_non_const);
+  validate_fp32_prec_with_backend_and_op(backend, op, p);
   fp32_precision[backend][op] = p;
 }
 
