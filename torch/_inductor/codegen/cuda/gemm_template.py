@@ -290,10 +290,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         self.alpha = alpha
         self.beta = beta
         assert len(input_nodes) == 2 or len(input_nodes) == 3
-        ### FIXME: uncomment this!
-        #assert self._are_inputs_layout_compatible(
+        # FIXME: uncomment this!
+        # assert self._are_inputs_layout_compatible(
         #    [node.get_layout() for node in input_nodes]
-        #)
+        # )
 
     def _are_inputs_layout_compatible(self, layouts: List[Layout]) -> bool:
         """
@@ -1011,11 +1011,11 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
         op = self.fix_op_layout(op, X, W, Bias, Y)
         if op.gemm_kind == cutlass_lib.GemmKind.Sparse:
-            epilogue_template: str = ""
-            argument_template: str = GEMM_ARGS_SPARSE
+            epilogue_template = ""
+            argument_template = GEMM_ARGS_SPARSE
         else:
-            epilogue_template: str = GEMM_ARGS_CUTLASS_3X_EPILOGUE
-            argument_template: str = GEMM_ARGS_CUTLASS_3X
+            epilogue_template = GEMM_ARGS_CUTLASS_3X_EPILOGUE
+            argument_template = GEMM_ARGS_CUTLASS_3X
         should_swap_xw: bool = False
         epilogue_args = f"{{ElementComputeEpilogue({self.alpha}), ElementComputeEpilogue({self.beta})}}"
         if Bias is not None and self.has_tma_epilogue(op):
