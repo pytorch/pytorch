@@ -1072,8 +1072,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # Templates selected with input_gen_fns require specific input data to avoid IMA
         # Passing custom input gen fns to benchmark_fusion NYI, so skip deferred template selection
-        # TODO(jgong5): support multi-template on CPU
-        if input_gen_fns is not None or layout.device.type == "cpu":
+        if input_gen_fns is not None:
             return_multi_template = False
 
         # TODO - assert that we have not mutating kernels here
