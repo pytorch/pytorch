@@ -311,13 +311,10 @@ class FSDPParam:
     ):
         if self.all_gather_outputs:
             return  # already initialized
-        self.all_gather_outputs = [
-            torch.empty(torch.Size([numel * world_size]), dtype=dtype, device=device)
-            for numel, dtype in zip(all_gather_input_numels, all_gather_input_dtypes)
-        ]
         self.all_gather_input_numels = all_gather_input_numels
         self.all_gather_input_dtypes = all_gather_input_dtypes
         self.world_size = world_size
+        self.realloc_all_gather_outputs()
 
     def realloc_all_gather_outputs(self):
         all_gather_input_numels = self.all_gather_input_numels
@@ -331,7 +328,8 @@ class FSDPParam:
 
     def init_unsharded_param(self):
         if (
-            # NOTE(yf225): under compile, we always skip this branch and re-init unsharded param using the slow path
+            # NOTE: under compile, we always skip this branch and re-init unsharded param
+            # using the slow path.
             not torch._dynamo.compiled_autograd.compiled_autograd_enabled
             and getattr(self, "_unsharded_param", None) is not None  # after the 1st all-gather
         ):
@@ -351,7 +349,7 @@ class FSDPParam:
             return
         inner_tensor = self._sharded_local_tensor
         if (
-            # TODO(yf225): compile doesn't support `hasattr(inner_tensor, "fsdp_post_all_gather")` yet
+            # NOTE: compile doesn't support `hasattr(inner_tensor, "fsdp_post_all_gather")` yet
             not torch._dynamo.compiled_autograd.compiled_autograd_enabled
             and hasattr(inner_tensor, "fsdp_post_all_gather")
         ):
@@ -374,7 +372,6 @@ class FSDPParam:
             unsharded_tensor,
             self._orig_size,
             self._contiguous_orig_stride,
-            # make_contiguous_strides_for(self._orig_size),
             storage_offset=0,
         )
         if self.is_dtensor:
