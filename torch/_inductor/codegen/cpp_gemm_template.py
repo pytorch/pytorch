@@ -143,7 +143,11 @@ INT8_GEMM_TEMPLATE = r"""
 {{micro_gemm.codegen_define(kernel)}}
 
 extern "C"
-{{kernel.def_kernel(inputs={"X": X, "x_scale": x_scale, "x_zp": x_zp, "W": W, "w_scale": w_scale, "w_zp": w_zp, "inp": inp,}, outputs={"Y": Y}, aliases=buffer_aliases)}}
+{{kernel.def_kernel(
+    inputs={"X": X, "x_scale": x_scale, "x_zp": x_zp, "W": W, "w_scale": w_scale, "w_zp": w_zp, "inp": inp,},
+    outputs={"Y": Y},
+    aliases=buffer_aliases
+)}}
 {
     {{kernel.maybe_codegen_profile()}}
     constexpr int64_t num_threads = {{num_threads}};
@@ -223,7 +227,9 @@ extern "C"
                     int64_t k_end = std::min((kc + Kc_blocks) * K0, K);
                     {%- set tile_X = kernel.slice_nd(X, [("m_start", "m_end"), ("k_start", "k_end")]) %}
                     {%- set tile_W_3d = kernel.slice_nd(W, [("k_start", "k_end"), ("nc", "nc + 1"), ()]) %}
-                    {%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", "nc + 1 - nc", micro_gemm.register_blocking.block_n]) %}
+                    {%- set tile_W = kernel.view(
+                        tile_W_3d, ["k_end - k_start", "nc + 1 - nc", micro_gemm.register_blocking.block_n]
+                    ) %}
                     {%- if inp is not none and beta != 0 %}
                     // For int8, bias should be added after convert Y to FP32
                     {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=False)|indent(20, false) }}
@@ -352,8 +358,7 @@ class CppPackedGemmTemplate(CppTemplate):
                 isinstance(inputs[0], ir.IRNode)
                 and inputs[0].get_dtype() == torch.uint8
             ) or (
-                isinstance(inputs[0], torch.Tensor)
-                and inputs[0].dtype == torch.uint8
+                isinstance(inputs[0], torch.Tensor) and inputs[0].dtype == torch.uint8
             )
             if int8_gemm:
                 # No need to reorder for int8 gemm
@@ -380,8 +385,7 @@ class CppPackedGemmTemplate(CppTemplate):
                 isinstance(inputs[0], ir.IRNode)
                 and inputs[0].get_dtype() == torch.uint8
             ) or (
-                isinstance(inputs[0], torch.Tensor)
-                and inputs[0].dtype == torch.uint8
+                isinstance(inputs[0], torch.Tensor) and inputs[0].dtype == torch.uint8
             )
             wgt_idx = 3 if int8_gemm else 1
             new_inputs = list(inputs)
@@ -395,8 +399,7 @@ class CppPackedGemmTemplate(CppTemplate):
                 isinstance(inputs[0], ir.IRNode)
                 and inputs[0].get_dtype() == torch.uint8
             ) or (
-                isinstance(inputs[0], torch.Tensor)
-                and inputs[0].dtype == torch.uint8
+                isinstance(inputs[0], torch.Tensor) and inputs[0].dtype == torch.uint8
             )
 
             new_inputs = list(inputs)
@@ -439,7 +442,7 @@ class CppPackedGemmTemplate(CppTemplate):
         new_inputs, _ = normalize_shapes(
             *maybe_to_dense(*reorder_and_filter(input_nodes, layout))
         )
-        int8_gemm = (new_inputs[0].get_dtype() == torch.uint8)
+        int8_gemm = new_inputs[0].get_dtype() == torch.uint8
         m, n, k, *_ = (
             mm_args(new_inputs[0], new_inputs[3])
             if int8_gemm
@@ -464,33 +467,10 @@ class CppPackedGemmTemplate(CppTemplate):
                 isinstance(inputs[0], ir.IRNode)
                 and inputs[0].get_dtype() == torch.uint8
             ) or (
-                isinstance(inputs[0], torch.Tensor)
-                and inputs[0].dtype == torch.uint8
+                isinstance(inputs[0], torch.Tensor) and inputs[0].dtype == torch.uint8
             )
-
             W_idx = 3 if int8_gemm else 1
-
             W = inputs[W_idx]
-
-
-            # BMatricCompo = None
-            # if int8_gemm:
-            #     BMatricCompo = None
-            #     # Calculate the composentation
-            #     if isinstance(W, ir.IRNode):
-            #         if not isinstance(W, ir.TensorBox):
-            #             W = ir.TensorBox(W)
-            #         W_tensor = V.graph.constants[W.get_name()]
-            #         W_tensor = W_tensor.to_dense()
-            #         BMatricCompo_tensor = torch.sum(W_tensor.to(torch.float), dim=0)
-            #         BMatricCompo = V.graph.add_tensor_constant(BMatricCompo_tensor, name="BMatricCompo")
-            #     else:
-            #         if W.is_mkldnn:
-            #             W_tensor = W.to_dense()
-            #         else:
-            #             W_tensor = W
-            #         BMatricCompo = torch.sum(W_tensor.to(torch.float), dim=0)
-
             new_inputs = list(inputs)
             if isinstance(W, ir.IRNode):
                 if not isinstance(W, ir.TensorBox):
@@ -522,9 +502,7 @@ class CppPackedGemmTemplate(CppTemplate):
                 k, n = list(W.shape)
                 blocked_w = W.reshape(k, n // block_n, block_n)
                 if not int8_gemm:
-                    blocked_w = (
-                        blocked_w.transpose(0, 1).contiguous()
-                    )
+                    blocked_w = blocked_w.transpose(0, 1).contiguous()
                 # normalize stride to be "contiguous_strides" per size
                 # this avoids the problems in L.view during template codegen
                 new_stride = [1]
@@ -534,7 +512,9 @@ class CppPackedGemmTemplate(CppTemplate):
             new_inputs[W_idx] = blocked_w
             if int8_gemm:
                 BMatricCompo = (
-                    V.graph.add_tensor_constant(V.graph.constants["BMatricCompo"], "BMatricCompo")
+                    V.graph.add_tensor_constant(
+                        V.graph.constants["BMatricCompo"], "BMatricCompo"
+                    )
                     if isinstance(W, ir.IRNode)
                     else V.graph.constants["BMatricCompo"]
                 )
@@ -554,7 +534,7 @@ class CppPackedGemmTemplate(CppTemplate):
                 template_buffer = ir.InputsKernel.unwrap_storage_for_input(output)
                 assert isinstance(template_buffer, ir.CppTemplateBuffer)
                 new_input_nodes, _ = reorder_and_filter(input_nodes, layout)
-                int8_gemm = (new_input_nodes[0].get_dtype() == torch.uint8)
+                int8_gemm = new_input_nodes[0].get_dtype() == torch.uint8
                 W_idx = 3 if int8_gemm else 1
                 W_node = new_input_nodes[W_idx]
                 assert W_node.get_name() in V.graph.constants
@@ -565,9 +545,9 @@ class CppPackedGemmTemplate(CppTemplate):
                 )
                 W_packed = new_input_nodes[W_idx]
                 W_packed_constant = V.graph.add_tensor_constant(W_packed)
-                template_buffer.inputs[W_idx] = ir.InputsKernel.unwrap_storage_for_input(
-                    W_packed_constant
-                )
+                template_buffer.inputs[
+                    W_idx
+                ] = ir.InputsKernel.unwrap_storage_for_input(W_packed_constant)
             return output
 
         template = DataProcessorTemplateWrapper(
@@ -595,7 +575,7 @@ class CppPackedGemmTemplate(CppTemplate):
     ) -> str:
         assert len(self.input_nodes) >= 2
 
-        int8_gemm = (self.input_nodes[0].get_dtype() == torch.uint8)
+        int8_gemm = self.input_nodes[0].get_dtype() == torch.uint8
         x_scale = None
         x_zp = None
         w_scale = None
@@ -617,7 +597,11 @@ class CppPackedGemmTemplate(CppTemplate):
 
         if template_buffer_node is not None:
             # Use the updated prepacked weight buffer
-            W = template_buffer_node.inputs[3] if int8_gemm else template_buffer_node.inputs[1]
+            W = (
+                template_buffer_node.inputs[3]
+                if int8_gemm
+                else template_buffer_node.inputs[1]
+            )
             Y = template_buffer_node
 
         template_buffer = Y
@@ -636,7 +620,7 @@ class CppPackedGemmTemplate(CppTemplate):
             )
 
         Y_is_transposed = False
-        use_local_acc = (self.layout.dtype != torch.float or int8_gemm)
+        use_local_acc = self.layout.dtype != torch.float or int8_gemm
         acc_buf_name = "local_acc_buf"
         if epilogue_nodes:
             epilogues.extend(epilogue_nodes)
@@ -684,6 +668,7 @@ class CppPackedGemmTemplate(CppTemplate):
             x_zp=x_zp,
             w_scale=w_scale,
             w_zp=w_zp,
-            # BMatricCompo=BMatricCompo,
         )
-        return self._template_from_string(INT8_GEMM_TEMPLATE if int8_gemm else GEMM_TEMPLATE).render(**options)
+        return self._template_from_string(
+            INT8_GEMM_TEMPLATE if int8_gemm else GEMM_TEMPLATE
+        ).render(**options)

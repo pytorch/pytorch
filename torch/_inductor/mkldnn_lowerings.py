@@ -622,14 +622,29 @@ def register_onednn_fusion_ops():
                 x = view(x, [-1, x_size[-1]])
             if not isinstance(x_scale, ir.TensorBox):
                 assert type(x_scale) == float
-                x_scale = V.graph.add_tensor_constant(torch.tensor(x_scale, dtype=torch.float32), name="x_scale")
+                x_scale = V.graph.add_tensor_constant(
+                    torch.tensor(x_scale, dtype=torch.float32), name="x_scale"
+                )
             if not isinstance(x_zp, ir.TensorBox):
                 assert type(x_zp) == int
-                x_zp = V.graph.add_tensor_constant(torch.tensor(x_zp, dtype=torch.int32), name="x_zp")
-            if w_zp.get_dtype() != torch.int32:
+                x_zp = V.graph.add_tensor_constant(
+                    torch.tensor(x_zp, dtype=torch.int32), name="x_zp"
+                )
+
+            # When channels less than 8, w_scale/w_zp is Pointwise instead of ConstantBuffer
+            # Refer to https://github.com/pytorch/pytorch/blob
+            # /f353d17755ed23b02924c962a86ff99a3405fe10/torch/_inductor/graph.py#L570-L577
+            w_scale.realize()
+            w_zp.realize()
+            if w_zp.get_dtype() != torch.int32 and isinstance(
+                ir.InputsKernel.unwrap_storage_for_input(w_zp),
+                ir.ConstantBuffer,
+            ):
                 w_zp_tensor = V.graph.constants[w_zp.get_name()].to(torch.int32)
-                w_zp = V.graph.add_tensor_constant(torch.tensor(w_zp_tensor, dtype=torch.int32), name=w_zp.get_name())
-                
+                w_zp = V.graph.add_tensor_constant(
+                    torch.tensor(w_zp_tensor, dtype=torch.int32), name=w_zp.get_name()
+                )
+
             choices: List[ChoiceCaller] = []
             if len(choices) == 0 or use_aten_gemm_kernels():
                 choices.append(
@@ -657,21 +672,29 @@ def register_onednn_fusion_ops():
                     )
                 )
             if use_max_autotune():
-                *_, layout, x, packed_weight = mm_args(x, packed_weight, layout=layout, out_dtype=output_dtype)
+                *_, layout, x, packed_weight = mm_args(
+                    x, packed_weight, layout=layout, out_dtype=output_dtype
+                )
                 if (
                     use_cpp_packed_gemm_template(layout, x, packed_weight)
                     and attr == "none"
-                    and output_dtype == torch.float32 # Only support u8s8f32 for now
-                    and len(x_zp.get_layout().size) == 0 # Per tensor quant for activation
+                    and output_dtype == torch.float32  # Only support u8s8f32 for now
+                    and len(x_zp.get_layout().size) == 0  # Per tensor quant of act
+                    and isinstance(
+                        ir.InputsKernel.unwrap_storage_for_input(w_zp),
+                        ir.ConstantBuffer,
+                    )
                     and torch.equal(
-                        torch.zeros_like(V.graph.constants[w_zp.get_name()]), V.graph.constants[w_zp.get_name()]
+                        torch.zeros_like(V.graph.constants[w_zp.get_name()]),
+                        V.graph.constants[w_zp.get_name()],
                     )  # We only composentate MatrixB and assume B_zp is 0 to avoid the composantation of MatrixA
                 ):
-
                     W_tensor = V.graph.constants[packed_weight.get_name()]
                     W_tensor = W_tensor.to_dense()
                     weight_compo_tensor = torch.sum(W_tensor.to(torch.float), dim=0)
-                    weight_compo = V.graph.add_tensor_constant(weight_compo_tensor, name="BMatricCompo")
+                    weight_compo = V.graph.add_tensor_constant(
+                        weight_compo_tensor, name="BMatricCompo"
+                    )
 
                     def cvt_fp32_epilogue_creator(input_buffer):
                         # Epilogue to convert from s32 to f32 for u8s8f32
@@ -685,6 +708,7 @@ def register_onednn_fusion_ops():
                         bias_loader = None
                         if bias is not None:
                             bias_loader = bias.make_loader()
+
                         def inner_fn(index):
                             nonlocal bias
                             input = input_loader(index)
@@ -717,6 +741,7 @@ def register_onednn_fusion_ops():
                                 _bias = bias_loader(weight_compo_index)
                                 temp = ops.add(temp, _bias)
                             return temp
+
                         return ir.Pointwise(
                             device=input_buffer.get_device(),
                             dtype=torch.float32,  # Hardcode to FP32 for u8s8f32
@@ -745,12 +770,14 @@ def register_onednn_fusion_ops():
                 3: lambda x: V.graph.constants[x.get_name()],
                 4: lambda x: V.graph.constants[x.get_name()],
                 5: lambda x: V.graph.constants[x.get_name()],
-                6: lambda x: V.graph.constants[x.get_name()], # For bias
+                6: lambda x: V.graph.constants[x.get_name()],  # For bias
             }
             result = autotune_select_algorithm(
                 "qlinear_unary",
                 choices,
-                [x, x_scale, x_zp, packed_weight, w_scale, w_zp] if bias is None else [x, x_scale, x_zp, packed_weight, w_scale, w_zp, bias],
+                [x, x_scale, x_zp, packed_weight, w_scale, w_zp]
+                if bias is None
+                else [x, x_scale, x_zp, packed_weight, w_scale, w_zp, bias],
                 layout,
                 input_gen_fns=input_gen_fns,
             )

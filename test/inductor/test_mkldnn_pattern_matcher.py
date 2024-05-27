@@ -9,17 +9,16 @@ import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
 
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.utils import counters
-from torch._export import capture_pre_autograd_graph
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
 from torch.nn import functional as F
 from torch.testing._internal.common_quantization import (
+    _generate_qdq_quantized_model,
     skipIfNoDynamoSupport,
     skipIfNoONEDNN,
     skipIfNoONEDNNBF16,
-    _generate_qdq_quantized_model,
 )
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm, TEST_MKL
 from torch.testing._internal.inductor_utils import _check_has_dynamic_shape, HAS_CPU

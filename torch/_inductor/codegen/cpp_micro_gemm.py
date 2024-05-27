@@ -195,6 +195,7 @@ class CppMicroGemmRef(CppMicroGemm):
         }
         return KernelTemplate._template_from_string(self.TEMPLATE_ENTRY).render(options)
 
+
 @register_micro_gemm(
     *generate_gemm_config(
         VecAVX512, [(8, 48, 1), (8, 32, 1), (16, 16, 1)], input_dtype=torch.float
@@ -364,6 +365,7 @@ inline void {{kernel_name}}_kernel(
         )
         return result
 
+
 class CppMicroInt8Gemm(CppMicroGemm):
     def get_common_options(self):
         return {
@@ -373,11 +375,14 @@ class CppMicroInt8Gemm(CppMicroGemm):
             "output_dtype": self.output_dtype,
             "compute_dtype": self.compute_dtype,
             "input_t": DTYPE_TO_CPP[self.input_dtype],
-            "input2_t": DTYPE_TO_CPP[torch.int8],  # TODO: support dtype other than s8 for weight
+            "input2_t": DTYPE_TO_CPP[
+                torch.int8
+            ],  # TODO: support dtype other than s8 for weight
             "output_t": DTYPE_TO_CPP[self.output_dtype],
             "compute_t": DTYPE_TO_CPP[self.compute_dtype],
             "alpha": self.alpha,
         }
+
 
 class CppMicroInt8GemmRef(CppMicroInt8Gemm):
     """
