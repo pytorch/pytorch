@@ -3,6 +3,7 @@ import functools
 import json
 import os
 import pathlib
+
 from collections import defaultdict, namedtuple, OrderedDict
 from dataclasses import dataclass, field
 from typing import (
@@ -27,6 +28,7 @@ import torchgen.api.native as native
 import torchgen.api.structured as structured
 import torchgen.dest as dest
 
+from torchgen.aoti.fallback_ops import inductor_fallback_ops
 from torchgen.api import cpp
 from torchgen.api.translate import translate
 from torchgen.api.types import (
@@ -47,7 +49,8 @@ from torchgen.context import (
 from torchgen.gen_aoti_c_shim import (
     gen_aoti_c_shim,
     gen_static_dispatch_backend_call_signature,
-    get_backend_index_for_aoti,
+    get_fallback_op_name,
+    get_header_for_aoti,
 )
 from torchgen.gen_functionalization_type import (
     gen_functionalization_definition,
@@ -1406,7 +1409,9 @@ def get_grouped_by_view_native_functions(
             assert kind not in grouped_by_views[schema]
             grouped_by_views[schema][kind] = f
         else:
-            assert view_kind not in grouped_by_views[schema]
+            assert (
+                view_kind not in grouped_by_views[schema]
+            ), f"{view_kind} already in {grouped_by_views[schema].keys()}"
             grouped_by_views[schema][view_kind] = f
 
     return list(concatMap(maybe_create_view_group, grouped_by_views.values()))
@@ -2210,6 +2215,7 @@ def gen_source_files(
     force_schema_registration: bool,
     per_operator_headers: bool,
     skip_dispatcher_op_registration: bool,
+    update_aoti_c_shim: bool,
 ) -> None:
     extra_cuda_headers = """\
 #include <c10/cuda/CUDAGuard.h>
@@ -2377,7 +2383,63 @@ def gen_source_files(
             else:
                 raise AssertionError(f"unrecognized {dispatch_key} for ufunc")
 
+        structured_func_group_dict = dict()
+        for func_group in structured_native_functions:
+            for func in func_group.functions():
+                if func.structured_delegate is not None:
+                    structured_func_group_dict[func.structured_delegate] = func_group
+                    break
+
         if dispatch_key in (DispatchKey.CPU, DispatchKey.CUDA):
+            fallbacks = dict()
+            for func in native_functions:
+                op_name = get_fallback_op_name(func)
+                if op_name in inductor_fallback_ops:
+                    fallbacks[op_name] = func
+            fallback_native_functions = tuple(
+                value for _, value in sorted(fallbacks.items())
+            )
+
+            # header files were checked in for ABI-compatiblilty checking
+            header_file_name = f"c_shim_{dispatch_key.lower()}.h"
+            new_header = gen_aoti_c_shim(
+                fallback_native_functions,
+                structured_func_group_dict,
+                dispatch_key,
+                backend_indices,
+                header=True,
+                includes="",
+            )
+            if update_aoti_c_shim:
+                aoti_fm.write(
+                    header_file_name,
+                    lambda: new_header,
+                )
+            else:
+                try:
+                    with open(
+                        os.path.join(aoti_fm.install_dir, header_file_name)
+                    ) as old_file:
+                        old_header = old_file.read()
+                        assert (
+                            old_header == new_header
+                        ), """
+WARNING: The generated AOTInductor C shim header files have unexpectedly changed. This
+indicates an AOTInductor fallback operator ABI backward compatibility breakage!!!
+Only in a limited number of situations, this is allowed:
+1. You added a fallback op to the inductor_fallback_ops list in torchgen/aoti/fallback_ops.py.
+If that's the case, run `python torchgen/gen.py --update-aoti-c-shim` to update the existing
+C shim header files.
+2. You added a new default argument to an existing fallback op. This is clearly a BC breaking
+change in the AOTInductor land. In this case, you need to keep a manual copy of that existing
+fallback op in a file, e.g. torch/csrc/inductor/aoti_torch/c/shim.h, bump up the version
+number of that fallback op in the newly generated C shim files, and update the cpp wrapper
+codegen to generate the correct cpp call for this op. Contact AOTInductor team for assistance.
+                        """
+                except FileNotFoundError:
+                    print(
+                        f"{os.path.join(aoti_fm.install_dir, header_file_name)} not found"
+                    )
 
             def get_header(
                 f: NativeFunction,
@@ -2391,39 +2453,27 @@ def gen_source_files(
                     else f"#include <ATen/ops/{f.root_name}_{backend_index.dispatch_key.lower()}_dispatch.h>"
                 )
 
+            # cpp files are always generated on-the-fly
             def headers_for_aoti() -> str:
                 headers = []
-                for g in grouped_native_functions:
-                    if isinstance(g, NativeFunctionsGroup):
-                        for f in g.functions():
-                            # some variants are registered in the backend, but some are registered as CompositeExplicitAutograd
-                            header = get_header(f)
-                            if header is not None:
-                                headers.append(header)
-                    else:
-                        header = get_header(g)
-                        if header is not None:
-                            headers.append(header)
+                for func in fallback_native_functions:
+                    header = get_header_for_aoti(
+                        func, structured_func_group_dict, dispatch_key, backend_indices
+                    )
+                    if header is not None:
+                        headers.append(header)
                 return "\n".join(sorted(set(headers)))
 
             extra_headers = (
                 extra_cuda_headers if is_cuda_dispatch_key(dispatch_key) else ""
             )
 
-            aoti_fm.write(
-                f"c_shim_{dispatch_key.lower()}.h",
-                lambda: gen_aoti_c_shim(
-                    native_functions,
-                    dispatch_key,
-                    backend_indices,
-                    header=True,
-                    includes="",
-                ),
-            )
+
             aoti_fm.write(
                 f"c_shim_{dispatch_key.lower()}.cpp",
                 lambda: gen_aoti_c_shim(
-                    native_functions,
+                    fallback_native_functions,
+                    structured_func_group_dict,
                     dispatch_key,
                     backend_indices,
                     header=False,
@@ -2433,263 +2483,263 @@ def gen_source_files(
 
         del fm
 
-    if len(whitelist_keys) == 0:  # Only generate backend required source files
-        # BackendSelect is generated specially
-        def gen_backend_select() -> Dict[str, List[str]]:
-            relevant_fns = [
-                fn for fn in native_functions if needs_backend_select(fn, selector)
-            ]
-            return {
-                "ops_headers": [
-                    f"#include <ATen/ops/{fn.root_name}_ops.h>" for fn in relevant_fns
-                ],
-                "backend_select_method_definitions": list(
-                    mapMaybe(
-                        ComputeBackendSelect(Target.DEFINITION, selector), relevant_fns
-                    )
-                ),
-                "backend_select_function_registrations": list(
-                    mapMaybe(
-                        ComputeBackendSelect(Target.REGISTRATION, selector), relevant_fns
-                    )
-                ),
-            }
+    # if len(whitelist_keys) == 0:  # Only generate backend required source files
+    #     # BackendSelect is generated specially
+    def gen_backend_select() -> Dict[str, List[str]]:
+        relevant_fns = [
+            fn for fn in native_functions if needs_backend_select(fn, selector)
+        ]
+        return {
+            "ops_headers": [
+                f"#include <ATen/ops/{fn.root_name}_ops.h>" for fn in relevant_fns
+            ],
+            "backend_select_method_definitions": list(
+                mapMaybe(
+                    ComputeBackendSelect(Target.DEFINITION, selector), relevant_fns
+                )
+            ),
+            "backend_select_function_registrations": list(
+                mapMaybe(
+                    ComputeBackendSelect(Target.REGISTRATION, selector), relevant_fns
+                )
+            ),
+        }
 
-        cpu_fm.write("RegisterBackendSelect.cpp", gen_backend_select)
+    cpu_fm.write("RegisterBackendSelect.cpp", gen_backend_select)
 
-        schema_selector = selector
-        if force_schema_registration:
-            schema_selector = SelectiveBuilder.get_nop_selector()
+    schema_selector = selector
+    if force_schema_registration:
+        schema_selector = SelectiveBuilder.get_nop_selector()
 
-        (
-            aten_schema_registrations,
-            schema_registrations,
-        ) = get_native_function_schema_registrations(
-            native_functions=native_functions, schema_selector=schema_selector
-        )
-        cpu_fm.write(
-            "RegisterSchema.cpp",
-            lambda: {
-                "aten_schema_registrations": []
-                if skip_dispatcher_op_registration
-                else aten_schema_registrations,
-                "schema_registrations": []
-                if skip_dispatcher_op_registration
-                else schema_registrations,
-            },
-        )
+    (
+        aten_schema_registrations,
+        schema_registrations,
+    ) = get_native_function_schema_registrations(
+        native_functions=native_functions, schema_selector=schema_selector
+    )
+    cpu_fm.write(
+        "RegisterSchema.cpp",
+        lambda: {
+            "aten_schema_registrations": []
+            if skip_dispatcher_op_registration
+            else aten_schema_registrations,
+            "schema_registrations": []
+            if skip_dispatcher_op_registration
+            else schema_registrations,
+        },
+    )
 
-        def key_func(
-            fn: Union[NativeFunction, NativeFunctionsGroup, NativeFunctionsViewGroup]
-        ) -> str:
-            return fn.root_name
+    def key_func(
+        fn: Union[NativeFunction, NativeFunctionsGroup, NativeFunctionsViewGroup]
+    ) -> str:
+        return fn.root_name
 
-        cpu_fm.write_sharded(
-            "Operators.cpp",
-            native_functions,
-            key_fn=key_func,
-            env_callable=lambda fn: {
-                "operator_headers": [f"#include <ATen/ops/{fn.root_name}.h>"],
-                "definitions": [
-                    ComputeOperators(
-                        Target.DEFINITION,
-                        static_dispatch_backend_indices=static_dispatch_idx,
-                    )(fn)
-                ],
-            },
-            base_env={
-                "static_dispatch_extra_headers": static_dispatch_extra_headers(
-                    static_dispatch_idx
-                ),
-            },
-            num_shards=5,
-            sharded_keys={
-                "operator_headers",
-                "definitions",
-                "static_dispatch_extra_headers",
-            },
-        )
+    cpu_fm.write_sharded(
+        "Operators.cpp",
+        native_functions,
+        key_fn=key_func,
+        env_callable=lambda fn: {
+            "operator_headers": [f"#include <ATen/ops/{fn.root_name}.h>"],
+            "definitions": [
+                ComputeOperators(
+                    Target.DEFINITION,
+                    static_dispatch_backend_indices=static_dispatch_idx,
+                )(fn)
+            ],
+        },
+        base_env={
+            "static_dispatch_extra_headers": static_dispatch_extra_headers(
+                static_dispatch_idx
+            ),
+        },
+        num_shards=5,
+        sharded_keys={
+            "operator_headers",
+            "definitions",
+            "static_dispatch_extra_headers",
+        },
+    )
 
-        cpu_fm.write("Functions.cpp", dict)
+    cpu_fm.write("Functions.cpp", dict)
 
-        core_fm.write("TensorMethods.cpp", dict)
+    core_fm.write("TensorMethods.cpp", dict)
 
-        core_fm.write(
-            "ATenOpList.cpp",
-            lambda: {
-                "aten_ops": list(mapMaybe(compute_aten_op, native_functions)),
-            },
-        )
+    core_fm.write(
+        "ATenOpList.cpp",
+        lambda: {
+            "aten_ops": list(mapMaybe(compute_aten_op, native_functions)),
+        },
+    )
 
-        def functionalization_env_callable(
+    def functionalization_env_callable(
+        g: Union[NativeFunction, NativeFunctionsGroup, NativeFunctionsViewGroup]
+    ) -> Dict[str, List[str]]:
+        def gen_op_headers(
             g: Union[NativeFunction, NativeFunctionsGroup, NativeFunctionsViewGroup]
-        ) -> Dict[str, List[str]]:
-            def gen_op_headers(
-                g: Union[NativeFunction, NativeFunctionsGroup, NativeFunctionsViewGroup]
-            ) -> List[str]:
-                if isinstance(g, NativeFunctionsViewGroup):
-                    # view ops always get a functionalization kernel
-                    headers = [
-                        f"#include <ATen/ops/{g.view.root_name}_native.h>",
-                        f"#include <ATen/ops/{g.view.root_name}_ops.h>",
+        ) -> List[str]:
+            if isinstance(g, NativeFunctionsViewGroup):
+                # view ops always get a functionalization kernel
+                headers = [
+                    f"#include <ATen/ops/{g.view.root_name}_native.h>",
+                    f"#include <ATen/ops/{g.view.root_name}_ops.h>",
+                ]
+                if g.view_copy is not None:
+                    headers += [
+                        f"#include <ATen/ops/{g.view_copy.root_name}_native.h>",
+                        f"#include <ATen/ops/{g.view_copy.root_name}_ops.h>",
                     ]
-                    if g.view_copy is not None:
-                        headers += [
-                            f"#include <ATen/ops/{g.view_copy.root_name}_native.h>",
-                            f"#include <ATen/ops/{g.view_copy.root_name}_ops.h>",
-                        ]
-                    return headers
-                elif isinstance(g, NativeFunctionsGroup):
-                    headers = [
-                        f"#include <ATen/ops/{g.functional.root_name}_native.h>",
-                        f"#include <ATen/ops/{g.functional.root_name}_ops.h>",
-                        f"#include <ATen/ops/{g.out.root_name}_native.h>",
-                        f"#include <ATen/ops/{g.out.root_name}_ops.h>",
+                return headers
+            elif isinstance(g, NativeFunctionsGroup):
+                headers = [
+                    f"#include <ATen/ops/{g.functional.root_name}_native.h>",
+                    f"#include <ATen/ops/{g.functional.root_name}_ops.h>",
+                    f"#include <ATen/ops/{g.out.root_name}_native.h>",
+                    f"#include <ATen/ops/{g.out.root_name}_ops.h>",
+                ]
+                if g.inplace is not None:
+                    headers += [
+                        f"#include <ATen/ops/{g.inplace.root_name}_native.h>",
+                        f"#include <ATen/ops/{g.inplace.root_name}_ops.h>",
                     ]
-                    if g.inplace is not None:
-                        headers += [
-                            f"#include <ATen/ops/{g.inplace.root_name}_native.h>",
-                            f"#include <ATen/ops/{g.inplace.root_name}_ops.h>",
-                        ]
-                    if g.mutable is not None:
-                        headers += [
-                            f"#include <ATen/ops/{g.mutable.root_name}_native.h>",
-                            f"#include <ATen/ops/{g.mutable.root_name}_ops.h>",
-                        ]
-                    return headers
-                else:
-                    return [
-                        f"#include <ATen/ops/{g.root_name}_native.h>",
-                        f"#include <ATen/ops/{g.root_name}_ops.h>",
+                if g.mutable is not None:
+                    headers += [
+                        f"#include <ATen/ops/{g.mutable.root_name}_native.h>",
+                        f"#include <ATen/ops/{g.mutable.root_name}_ops.h>",
                     ]
+                return headers
+            else:
+                return [
+                    f"#include <ATen/ops/{g.root_name}_native.h>",
+                    f"#include <ATen/ops/{g.root_name}_ops.h>",
+                ]
 
-            return {
-                "ops_headers": gen_op_headers(g),
-                "func_definitions": gen_functionalization_definition(
-                    selector,
-                    g,
-                ),
-                "func_registrations": gen_functionalization_registration(
-                    selector,
-                    g,
-                    backend_indices[DispatchKey.CompositeImplicitAutograd],
-                ),
-            }
-
-        all_groups: List[
-            Union[NativeFunction, NativeFunctionsGroup, NativeFunctionsViewGroup]
-        ] = list(structured_native_functions) + list(
-            view_groups  # type: ignore[assignment, arg-type, operator]
-        )
-        # Note: all operators that functionalization needs to handle (mutable and aliasing ops) should be grouped properly.
-        # The only reason we really need to deal with direct NativeFunctions here (instead of the groups) is because:
-        # (1) We can provide better error checking (error out if someone introduces a mutable op that doesn't obey the grouping logic)
-        # (2) functionalization needs to manually register CompositeImplicitAutograd kernels, which might not be grouped.
-        #     Although this could go away long-term if we add a dedicated dispatch key for decompositions.
-        structured_map: Dict[OperatorName, NativeFunction] = {
-            f.func.name: f
-            for f in concatMap(lambda g: list(g.functions()), structured_native_functions)
+        return {
+            "ops_headers": gen_op_headers(g),
+            "func_definitions": gen_functionalization_definition(
+                selector,
+                g,
+            ),
+            "func_registrations": gen_functionalization_registration(
+                selector,
+                g,
+                backend_indices[DispatchKey.CompositeImplicitAutograd],
+            ),
         }
-        view_map: Dict[OperatorName, NativeFunction] = {
-            f.func.name: f for f in concatMap(lambda g: list(g.functions()), view_groups)
-        }
-        for f in native_functions:
-            if f.func.name not in structured_map and f.func.name not in view_map:
-                all_groups.append(f)
 
-        cpu_fm.write_sharded(
-            "RegisterFunctionalization.cpp",
-            all_groups,
-            key_fn=key_func,
-            env_callable=functionalization_env_callable,
-            num_shards=4,
-            sharded_keys={
-                "ops_headers",
-                "func_definitions",
-                "func_registrations",
-                "func_add_back_views_definitions",
-                "func_add_back_views_registrations",
-            },
-        )
+    all_groups: List[
+        Union[NativeFunction, NativeFunctionsGroup, NativeFunctionsViewGroup]
+    ] = list(structured_native_functions) + list(
+        view_groups  # type: ignore[assignment, arg-type, operator]
+    )
+    # Note: all operators that functionalization needs to handle (mutable and aliasing ops) should be grouped properly.
+    # The only reason we really need to deal with direct NativeFunctions here (instead of the groups) is because:
+    # (1) We can provide better error checking (error out if someone introduces a mutable op that doesn't obey the grouping logic)
+    # (2) functionalization needs to manually register CompositeImplicitAutograd kernels, which might not be grouped.
+    #     Although this could go away long-term if we add a dedicated dispatch key for decompositions.
+    structured_map: Dict[OperatorName, NativeFunction] = {
+        f.func.name: f
+        for f in concatMap(lambda g: list(g.functions()), structured_native_functions)
+    }
+    view_map: Dict[OperatorName, NativeFunction] = {
+        f.func.name: f for f in concatMap(lambda g: list(g.functions()), view_groups)
+    }
+    for f in native_functions:
+        if f.func.name not in structured_map and f.func.name not in view_map:
+            all_groups.append(f)
 
-        cpu_fm.write(
-            "FunctionalInverses.h",
-            lambda: {
-                "view_inverse_declarations": list(
-                    mapMaybe(
-                        lambda g: gen_functionalization_view_inverse_declaration(
-                            selector, g
-                        ),
-                        view_groups,
+    cpu_fm.write_sharded(
+        "RegisterFunctionalization.cpp",
+        all_groups,
+        key_fn=key_func,
+        env_callable=functionalization_env_callable,
+        num_shards=4,
+        sharded_keys={
+            "ops_headers",
+            "func_definitions",
+            "func_registrations",
+            "func_add_back_views_definitions",
+            "func_add_back_views_registrations",
+        },
+    )
+
+    cpu_fm.write(
+        "FunctionalInverses.h",
+        lambda: {
+            "view_inverse_declarations": list(
+                mapMaybe(
+                    lambda g: gen_functionalization_view_inverse_declaration(
+                        selector, g
+                    ),
+                    view_groups,
+                )
+            )
+        },
+    )
+
+    # Note [view_copy NativeFunctions]
+    # Every view operator in native_functions.yaml that is not CompositeImplicitAutograd
+    # needs to have a corresponding non-aliasing {view}_copy variant.
+    # Backends that use functionalization and don't know how to handle aliasing ops
+    # are expected to implement kernels for these {view}_copy kernels instead.
+    # The code for {view}_copy operators in core is pretty boilerplate-heavy however,
+    # so we codegen the following:
+    # (1) A CompositeExplicitAutogradNonFunctional kernel for every {view}_copy operator.
+    #     These are never explicitly invoked by the functionalization pass,
+    #     but they could theoretically be called from user code (I added these kernels for completeness,
+    #     since the ops are part of the public API).
+    # (2) A derivative formula for every {view}_copy operator
+    #     {view}_copy operators can re-use the same derivative formulas as their {view} op counterparts,
+    #     so rather than stamping all of the entries out in derivatives.yaml,
+    #     we codegen them in.
+    #     This is similar to how autograd codegen doesn't require inplace ops to have a derivatives.yaml entry.
+    cpu_fm.write(
+        "CompositeViewCopyKernels.cpp",
+        lambda: {
+            "ops_headers": [
+                "\n".join(
+                    f"#include <ATen/ops/{f.root_name}_ops.h>\n"
+                    # NB: this include is important as it ensures we
+                    # set the visibility on generated view_copy kernels
+                    # correctly
+                    f"#include <ATen/ops/{f.root_name}_native.h>"
+                    for f in (
+                        [g.view] if g.view_copy is None else [g.view, g.view_copy]
                     )
                 )
-            },
-        )
-
-        # Note [view_copy NativeFunctions]
-        # Every view operator in native_functions.yaml that is not CompositeImplicitAutograd
-        # needs to have a corresponding non-aliasing {view}_copy variant.
-        # Backends that use functionalization and don't know how to handle aliasing ops
-        # are expected to implement kernels for these {view}_copy kernels instead.
-        # The code for {view}_copy operators in core is pretty boilerplate-heavy however,
-        # so we codegen the following:
-        # (1) A CompositeExplicitAutogradNonFunctional kernel for every {view}_copy operator.
-        #     These are never explicitly invoked by the functionalization pass,
-        #     but they could theoretically be called from user code (I added these kernels for completeness,
-        #     since the ops are part of the public API).
-        # (2) A derivative formula for every {view}_copy operator
-        #     {view}_copy operators can re-use the same derivative formulas as their {view} op counterparts,
-        #     so rather than stamping all of the entries out in derivatives.yaml,
-        #     we codegen them in.
-        #     This is similar to how autograd codegen doesn't require inplace ops to have a derivatives.yaml entry.
-        cpu_fm.write(
-            "CompositeViewCopyKernels.cpp",
-            lambda: {
-                "ops_headers": [
-                    "\n".join(
-                        f"#include <ATen/ops/{f.root_name}_ops.h>\n"
-                        # NB: this include is important as it ensures we
-                        # set the visibility on generated view_copy kernels
-                        # correctly
-                        f"#include <ATen/ops/{f.root_name}_native.h>"
-                        for f in (
-                            [g.view] if g.view_copy is None else [g.view, g.view_copy]
-                        )
-                    )
-                    for g in view_groups
-                ]
-                + [
-                    "\n".join(
-                        f"#include <ATen/ops/{f.root_name}_ops.h>"
-                        for f in [g.inplace, g.mutable, g.functional]
-                        if f is not None and "generated" not in f.tags
-                    )
-                    for g in structured_native_functions
-                ],
-                "CompositeViewCopyKernel_Definitions": list(
-                    mapMaybe(
-                        GenCompositeViewCopyKernel(
-                            backend_indices[
-                                DispatchKey.CompositeExplicitAutogradNonFunctional
-                            ]
-                        ),
-                        view_groups,
-                    )
-                ),
-                "GeneratedCompositeFunctional_Definitions": list(
-                    mapMaybe(
-                        gen_composite_functional_kernel,
-                        structured_native_functions,
-                    )
-                ),
-                "GeneratedCompositeOut_Definitions": list(
-                    mapMaybe(
-                        gen_composite_out_kernel,
-                        structured_native_functions,
-                    )
-                ),
-            },
-        )
+                for g in view_groups
+            ]
+            + [
+                "\n".join(
+                    f"#include <ATen/ops/{f.root_name}_ops.h>"
+                    for f in [g.inplace, g.mutable, g.functional]
+                    if f is not None and "generated" not in f.tags
+                )
+                for g in structured_native_functions
+            ],
+            "CompositeViewCopyKernel_Definitions": list(
+                mapMaybe(
+                    GenCompositeViewCopyKernel(
+                        backend_indices[
+                            DispatchKey.CompositeExplicitAutogradNonFunctional
+                        ]
+                    ),
+                    view_groups,
+                )
+            ),
+            "GeneratedCompositeFunctional_Definitions": list(
+                mapMaybe(
+                    gen_composite_functional_kernel,
+                    structured_native_functions,
+                )
+            ),
+            "GeneratedCompositeOut_Definitions": list(
+                mapMaybe(
+                    gen_composite_out_kernel,
+                    structured_native_functions,
+                )
+            ),
+        },
+    )
 
 
 def gen_declarations_yaml(
@@ -2807,6 +2857,12 @@ def main() -> None:
         "--only_backend",
         action="store_true",
         help="Mode that no general dispatchkey code generation"
+    )
+    parser.add_argument(
+        "--update-aoti-c-shim",
+        action="store_true",
+        help="Update AOTInductor C shim after adding an entry to inductor_fallback_ops in torchgen/aoti/fallback_ops.py. "
+        "WARNING: Do not use this unless you are sure what you are doing!!!",
     )
     
     options = parser.parse_args()
@@ -2944,6 +3000,7 @@ def main() -> None:
             force_schema_registration=options.force_schema_registration,
             per_operator_headers=options.per_operator_headers,
             skip_dispatcher_op_registration=options.skip_dispatcher_op_registration,
+            update_aoti_c_shim=options.update_aoti_c_shim,
         )
 
     if "headers" in options.generate:
