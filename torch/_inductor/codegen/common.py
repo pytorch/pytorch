@@ -1392,10 +1392,6 @@ class Kernel(CodeGen):
         # set in set_current_node
         self.current_node = None
         self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges[Any]]] = None
-        # map from expressionss to sizes and whether to check the lower and/or upper bound
-        self.pending_indirect_asserts: Dict[
-            sympy.Expr, Tuple[sympy.Expr, bool, bool]
-        ] = {}
 
         self.removed_buffers = set()
         self.inplaced_to_remove = set()
