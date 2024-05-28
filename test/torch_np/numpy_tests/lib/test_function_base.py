@@ -3260,8 +3260,8 @@ class TestPercentile(TestCase):
                 [1, 7],
                 decorators=[
                     skip(reason="Keepdims wrapper incorrect for multiple q"),
-                ]
-            )
+                ],
+            ),
         ],
     )
     @parametrize(
