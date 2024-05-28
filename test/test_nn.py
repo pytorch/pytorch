@@ -1604,7 +1604,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             out = m(inp)
             m.half()
             self.assertTrue(all(p.dtype == torch.float16 for p in m.parameters()))
-            # (1a) backward cannot be run after _apply
+            # (1a) backward cannot be run after apply
             with self.assertRaisesRegex(RuntimeError, "Trying to execute AccumulateGrad node that was poisoned by swap_tensors"):
                 out.sum().backward()
             # (2) _apply can be run after backward()
