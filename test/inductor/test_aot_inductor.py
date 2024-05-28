@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import copy
+import itertools
 import os
 import sys
 import tempfile
@@ -41,6 +42,7 @@ from torch.utils import _pytree as pytree
 
 if HAS_CUDA:
     import triton
+
     from torch.testing._internal.triton_utils import (
         add_kernel,
         add_kernel_2d_autotuned,
@@ -89,6 +91,8 @@ def check_model(
     options=None,
     dynamic_shapes=None,
     disable_constraint_solver=False,
+    atol=None,
+    rtol=None,
 ):
     with torch.no_grad(), config.patch(
         {
@@ -114,7 +118,7 @@ def check_model(
             disable_constraint_solver,
         )
 
-    self.assertTrue(same(actual, expected))
+    self.assertEqual(actual, expected, atol=atol, rtol=rtol)
 
 
 def check_model_with_multiple_inputs(
@@ -312,6 +316,10 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(self.device), example_inputs)
 
+    @unittest.skipIf(
+        IS_FBCODE,
+        "Not yet runnable in fbcode when the model.so is newly generated while older PyTorch is used",
+    )
     def test_freezing(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
@@ -330,6 +338,80 @@ class AOTInductorTestsTemplate:
 
         with config.patch({"freezing": True}):
             self.check_model(Model(self.device), example_inputs)
+
+    @unittest.skipIf(
+        IS_FBCODE,
+        "Not yet runnable in fbcode when the model.so is newly generated while older PyTorch is used",
+    )
+    def test_conv_freezing(self):
+        for dtype, groups in itertools.product([torch.bfloat16, torch.float], [1, 2]):
+            iC = 2
+            oC = 3
+
+            class Model(torch.nn.Module):
+                def __init__(self, device):
+                    super().__init__()
+                    self.weight = torch.randn(oC * groups, iC, 3, 3, device=device).to(
+                        dtype
+                    )
+
+                def forward(self, y):
+                    return torch.nn.functional.conv2d(y, self.weight, groups=groups)
+
+            example_inputs = (
+                torch.randn(2, iC * groups, 10, 10, device=self.device).to(dtype),
+            )
+
+            with config.patch({"freezing": True}):
+                self.check_model(Model(self.device), example_inputs)
+
+    @unittest.skipIf(
+        IS_FBCODE,
+        "Not yet runnable in fbcode when the model.so is newly generated while older PyTorch is used",
+    )
+    def test_deconv_freezing(self):
+        dtypes = [torch.float]
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        for dtype, groups in itertools.product(dtypes, [2, 1]):
+            iC = 4
+            oC = 2
+
+            class Model(torch.nn.Module):
+                def __init__(self, device):
+                    super().__init__()
+                    self.weight = torch.randn(iC, oC * groups, 2, 2, device=device).to(
+                        dtype
+                    )
+
+                def forward(self, y):
+                    return torch.nn.functional.conv_transpose2d(
+                        y, self.weight, groups=groups
+                    )
+
+            example_inputs = (torch.randn(1, iC, 3, 3, device=self.device).to(dtype),)
+            with config.patch({"freezing": True}):
+                self.check_model(Model(self.device), example_inputs)
+
+    @unittest.skipIf(
+        IS_FBCODE,
+        "Not yet runnable in fbcode when the model.so is newly generated while older PyTorch is used",
+    )
+    def test_linear_freezing(self):
+        for dtype in [torch.float32, torch.bfloat16]:
+
+            class LinearModel(torch.nn.Module):
+                def __init__(self, device):
+                    super().__init__()
+                    self.weight = torch.randn(10, 10, device=device).to(dtype)
+
+                def forward(self, y):
+                    return torch.nn.functional.linear(y, self.weight)
+
+            example_inputs = (torch.randn(10, 10, device=self.device).to(dtype),)
+
+            with config.patch({"freezing": True}):
+                self.check_model(LinearModel(self.device), example_inputs)
 
     @torch._inductor.config.patch(
         pre_grad_fusion_options={
@@ -1390,7 +1472,9 @@ class AOTInductorTestsTemplate:
             torch.randn(87, 87, device=self.device),
             torch.randn(87, 87, device=self.device),
         )
-        self.check_model(Model(), example_inputs)
+        self.check_model(
+            Model(), example_inputs, atol=1e-4, rtol=1e-4
+        )  # 1e-4 is the tol value used in pytorch/torch/_dynamo/utils.py
 
         if self.device == "cuda":
             so_path = torch._export.aot_compile(Model(), example_inputs)
@@ -2872,6 +2956,12 @@ def fail_non_abi_compatible_cuda(is_skip=False):
 # test_failures, xfail by default, set is_skip=True to skip
 CPU_TEST_FAILURES = {
     "test_add_complex": fail_stack_allocation(is_skip=True),
+    # TODO: test_conv_freezing_abi_compatible_cpu fails,
+    #   AssertionError: None, i.e. optional output is not supported
+    "test_conv_freezing": fail_with_and_without_stack_allocation(is_skip=True),
+    # TODO: test_deconv_freezing_abi_compatible_cpu fails,
+    #   AssertionError: None, i.e. optional output is not supported
+    "test_deconv_freezing": fail_with_and_without_stack_allocation(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_duplicate_constant_folding": fail_with_and_without_stack_allocation(
         is_skip=True
@@ -2885,15 +2975,18 @@ CPU_TEST_FAILURES = {
     "test_dynamic_scalar": fail_stack_allocation(is_skip=True),
     # https://github.com/pytorch/pytorch/issues/122980
     "test_fft_c2c": fail_stack_allocation(is_skip=True),
-    # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
-    #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
+    # TODO: test_freezing_abi_compatible_cpu fails,
+    #   AssertionError: None, i.e. optional output is not supported
     "test_freezing": fail_with_and_without_stack_allocation(is_skip=True),
+    # TODO: test_linear_freezing_abi_compatible_cpu fails,
+    #   AssertionError: None, i.e. optional output is not supported
+    "test_linear_freezing": fail_with_and_without_stack_allocation(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_missing_cubin": fail_with_and_without_stack_allocation(is_skip=True),
     # minimal arrayref interface only works with CPU; test crashes.
     # https://github.com/pytorch/pytorch/issues/122983
     "test_multi_device": fail_minimal_arrayref_interface(is_skip=True),
-    "test_normal_functional": fail_with_and_without_stack_allocation(),
+    "test_normal_functional": fail_with_and_without_stack_allocation(is_skip=True),
     # undefined symbol: _Z16aoti_torch_dtypeIN3c104HalfEEiv
     "test_non_contiguous_output_alias": fail_with_and_without_stack_allocation(
         is_skip=True
@@ -2957,10 +3050,7 @@ CPU_TEST_FAILURES = {
 CUDA_TEST_FAILURES = {
     # test_failures, xfail by default, set is_skip=True to skip
     "test_large_grid": fail_cuda(),
-    "test_normal_functional": fail_abi_compatible_cuda(),
-    # There is a double-free issue which will be fixed in another PR
-    # no ABI shim fn for torch.sort; remove this when adding one
-    "test_triton_kernel_multi_output_arg": fail_abi_compatible_cuda(is_skip=True),
+    "test_normal_functional": fail_abi_compatible_cuda(is_skip=True),
     # no runtime checks for non_abi_compatible mode
     "test_runtime_checks": fail_non_abi_compatible_cuda(is_skip=True),
     "test_runtime_checks_complex": fail_non_abi_compatible_cuda(is_skip=True),
@@ -3024,6 +3114,7 @@ if not IS_FBCODE:
             "test_empty_graph": fail_minimal_arrayref_interface(is_skip=True),
             "test_large_weight": fail_minimal_arrayref_interface(is_skip=True),
             "test_large_mmaped_weights": fail_minimal_arrayref_interface(is_skip=True),
+            "test_normal_functional": fail_minimal_arrayref_interface(is_skip=True),
             "test_misc_1": fail_minimal_arrayref_interface(is_skip=True),
             "test_missing_output": fail_minimal_arrayref_interface(is_skip=True),
             "test_model_modified_weights": fail_minimal_arrayref_interface(
@@ -3129,9 +3220,6 @@ copy_tests(
         "test_duplicate_constant_folding": TestFailure(
             ("non_abi_compatible_cpu",), is_skip=True
         ),
-        # TODO: test_freezing_non_abi_compatible_cpu somehow fails on CI but not locally,
-        #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
-        "test_freezing": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
         # no runtime checks for non_abi_compatible mode
         "test_runtime_checks": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
         "test_runtime_checks_dtype_failed": TestFailure(
