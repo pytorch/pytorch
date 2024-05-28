@@ -46,6 +46,27 @@ def swap_tensors(t1, t2):
         setattr(t1, name, (getattr(t2, name)))
         setattr(t2, name, tmp)
 
+    def error_pre_hook(grad_outputs):
+        raise RuntimeError("Trying to execute AccumulateGrad node that was poisoned by swap_tensors")
+
+    def check_use_count(t, name='t1'):
+        use_count = t._use_count()
+        if use_count > 1:
+            if use_count == 2 and t.is_leaf:
+                accum_grad_node = torch.autograd.graph.get_gradient_edge(t).node
+                # Make sure that the accumulate_grad node was not lazy_init-ed by get_gradient_edge
+                if t._use_count() == 2:
+                    accum_grad_node.register_prehook(error_pre_hook)
+                else:
+                    raise RuntimeError(f"Expected use_count of {name} to be 1 or 2 with "
+                                       f"an AccumulateGrad node but got {use_count}")
+            else:
+                raise RuntimeError(f"Expected use_count of {name} to be 1 or 2 with "
+                                   f"an AccumulateGrad node but got {use_count}")
+
+    check_use_count(t1, name='t1')
+    check_use_count(t2, name='t2')
+
     # Swap the types
     # Note that this will fail if there are mismatched slots
     swap_attr("__class__")
