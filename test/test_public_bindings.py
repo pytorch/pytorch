@@ -408,7 +408,6 @@ class TestPublicBindings(TestCase):
             "torch.distributed.nn.api.remote_module",
             "torch.distributed.optim",
             "torch.distributed.optim.optimizer",
-            "torch.distributed.pipeline.sync",
             "torch.distributed.rendezvous",
             "torch.distributed.rpc.api",
             "torch.distributed.rpc.backend_registry",
