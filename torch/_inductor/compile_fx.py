@@ -1340,6 +1340,10 @@ def compile_fx(
             # partition_fn won't be called
             _recursive_joint_graph_passes(model)
 
+        print(f"fw_compiler_base, found num_params_buffers={num_params_buffers}")
+        # num_params_buffers = torch._inductor.utils.num_fw_fixed_arguments(
+        #     num_example_inputs, len(example_inputs)
+        # )
         user_visible_outputs = {}
 
         if config.keep_output_stride:

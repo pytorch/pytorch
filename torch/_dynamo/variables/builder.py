@@ -1027,6 +1027,7 @@ class VariableBuilder:
             )
 
             guards = []
+            # breakpoint()
             for i, tensor_variable in enumerate(list_variable.items):
                 source_i = GetItemSource(base=source, index=i, index_is_slice=False)
                 # access unpacked tensor from this list instead of from a lifted arg
