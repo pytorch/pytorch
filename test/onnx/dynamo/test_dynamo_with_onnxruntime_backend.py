@@ -10,10 +10,10 @@ import unittest
 from typing import Tuple
 
 import onnxruntime
+from parameterized import parameterized
 
 import torch
 import torch._dynamo.backends.registry
-from parameterized import parameterized
 from torch import nn
 from torch.onnx import (
     _OrtBackend as OrtBackend,
