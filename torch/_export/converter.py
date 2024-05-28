@@ -236,11 +236,26 @@ class TS2EPConverter:
 
     def convert_prim_ListConstruct(self, node: torch._C.Node):
         output_list = []
-        for input in node.inputs():
-            output_list.append(self.get_fx_value(input))
+        for inp in node.inputs():
+            output_list.append(self.get_fx_value(inp))
 
         output_name = node.output().debugName()
         self.name_to_node[output_name] = output_list
+
+    def convert_prim_DictConstruct(self, node: torch._C.Node):
+        output_dict = {}
+        k, v = None, None
+        for i, inp in enumerate(node.inputs()):
+            if i % 2 == 0:
+                k = self.get_fx_value(inp)
+            else:
+                v = self.get_fx_value(inp)
+                assert k is not None
+                assert v is not None
+                output_dict[k] = v
+
+        output_name = node.output().debugName()
+        self.name_to_node[output_name] = output_dict
 
     def convert_aten_Int(self, node: torch._C.Node):
         # converts aten::Int as aten._to_copy + aten::_local_scalar_dense
@@ -324,8 +339,11 @@ class TS2EPConverter:
             self.convert_prim_GetAttr(node)
         elif node_kind == "prim::NumToTensor":
             self.convert_prim_NumToTensor(node)
-        elif node_kind == "prim::ListConstruct":
+        elif node_kind == "prim::ListConstruct" or node_kind == "prim::TupleConstruct":
+            # Tuple is just a non-mutable List, so we can handle them together.
             self.convert_prim_ListConstruct(node)
+        elif node_kind == "prim::DictConstruct":
+            self.convert_prim_DictConstruct(node)
         # elif node_kind == "aten::Int":
         #     convert_aten_Int(node)
         elif node_kind == "aten::_convolution":
