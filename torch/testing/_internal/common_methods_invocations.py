@@ -2109,6 +2109,7 @@ def sample_inputs_singular_matrix_factors(op_info, device, dtype, requires_grad=
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     batches = [(), (0, ), (2, ), (1, 1)]
     size = [1, 5, 10]
+
     for batch, m, n in product(batches, size, size):
         for k in range(min(3, m, n)):
             a = make_arg((*batch, m, k))
@@ -17661,8 +17662,10 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_svd_lowrank,
            decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack, with_tf32_off,
-                       DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03),
-                                                       torch.complex64: tol(atol=1e-02, rtol=1e-02)}),
+                       DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03)}),
+                                    'TestCommon', 'test_noncontiguous_samples',
+                                    device_type="cuda"),
+                       DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-02, rtol=1e-02)}),
                                     'TestCommon', 'test_noncontiguous_samples'),
                        # FIXME This should be the following, but the toleranceOverride does not seem to do anything!
                        # DecorateInfo(toleranceOverride({torch.complex128: tol(atol=1e-04, rtol=1e-04)}),
