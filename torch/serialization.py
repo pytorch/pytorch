@@ -1453,7 +1453,11 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', overall
 
     unpickler = UnpicklerWrapper(data_file, **pickle_load_args)
     unpickler.persistent_load = persistent_load
+    # Needed for tensors where storage device and rebuild tensor device are
+    # not connected (wrapper subclasses and tensors rebuilt using numpy)
+    torch._utils._thread_local_state.map_location = map_location
     result = unpickler.load()
+    del torch._utils._thread_local_state.map_location
 
     torch._utils._validate_loaded_sparse_tensors()
     torch._C._log_api_usage_metadata(

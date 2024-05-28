@@ -7,8 +7,9 @@ import subprocess
 import sys
 import warnings
 
-import torch
 from common import BenchmarkRunner, download_retry_decorator, main
+
+import torch
 
 from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
 from torch._dynamo.utils import clone_inputs
