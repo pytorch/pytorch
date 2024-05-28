@@ -39,7 +39,6 @@ from torch._export.utils import placeholder_naming_pass, placeholder_prefixes
 from torch._export.verifier import SpecViolationError
 from torch._export.wrappers import _wrap_submodules
 from torch._functorch.aot_autograd import aot_export_module
-from torch._guards import detect_fake_mode
 
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -51,7 +50,6 @@ from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     free_unbacked_symbols,
     GuardOnDataDependentSymNode,
-    ShapeEnv,
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
@@ -192,10 +190,7 @@ def _convert_input_to_fake(gm, args, kwargs):
             if fake_val is not None and isinstance(fake_val, torch.Tensor):
                 fake_inps.append(fake_val)
 
-    if detected_fake_mode := detect_fake_mode(fake_inps):
-        fake_mode = detected_fake_mode
-    else:
-        fake_mode = FakeTensorMode(shape_env=ShapeEnv(), export=True)
+    fake_mode = gm.meta.pop("ambient_fake_mode")
 
     if len(args) == 0 and len(kwargs) == 0:
         return (), {}, params_buffers, fake_mode
@@ -541,6 +536,7 @@ def _export_to_aten_ir(
     fake_args,
     fake_kwargs,
     fake_params_buffers,
+    fake_mode,
     constant_attrs: ConstantAttrMap,
     *,
     transform=lambda x: x,  # TODO(zhxchen17) Revisit if this is needed later.
@@ -573,7 +569,7 @@ def _export_to_aten_ir(
         tie_weights=True,
         strict=True,
         stack_weights=True,
-    ), grad_safe_guard, _ignore_backend_decomps(), _compiling_state_context():  # type: ignore[attr-defined]
+    ), fake_mode, grad_safe_guard, _ignore_backend_decomps(), _compiling_state_context():  # type: ignore[attr-defined]
         gm, graph_signature = transform(aot_export_module)(
             mod,
             fake_args,
@@ -661,10 +657,6 @@ def _export_to_aten_ir(
     export_graph_signature = ExportGraphSignature(
         input_specs=input_specs, output_specs=output_specs
     )
-
-    from torch._guards import detect_fake_mode
-
-    fake_mode = detect_fake_mode(flat_args)
 
     stack_trace = (
         'File "torch/fx/passes/runtime_assert.py", line 24, '
@@ -1142,15 +1134,15 @@ def _strict_export(
 
     # NOTE: graph module expects only positional args
     constant_attrs = _gather_constant_attrs(mod)
-    with dynamo_fake_mode:
-        aten_export_artifact = _export_to_aten_ir(
-            gm_torch_level,
-            _convert_to_positional_args(orig_arg_names, fake_args, fake_kwargs),
-            {},
-            fake_params_buffers,
-            constant_attrs,
-            pre_dispatch=pre_dispatch,
-        )
+    aten_export_artifact = _export_to_aten_ir(
+        gm_torch_level,
+        _convert_to_positional_args(orig_arg_names, fake_args, fake_kwargs),
+        {},
+        fake_params_buffers,
+        dynamo_fake_mode,
+        constant_attrs,
+        pre_dispatch=pre_dispatch,
+    )
 
     # Decompose for readability.
     gm = aten_export_artifact.gm
@@ -1288,29 +1280,29 @@ def _non_strict_export(
 
     fake_params_buffers = make_fake_params_buffers(fake_mode, _get_params_buffers(mod))
 
-    with fake_mode:
-        with _fakify_script_objects(mod, fake_args, fake_kwargs, fake_mode) as (
+    with _fakify_script_objects(mod, fake_args, fake_kwargs, fake_mode) as (
+        patched_mod,
+        new_fake_args,
+        new_fake_kwargs,
+        new_fake_constant_attrs,
+        map_fake_to_real,
+    ):
+        aten_export_artifact = _export_to_aten_ir(
             patched_mod,
             new_fake_args,
             new_fake_kwargs,
+            fake_params_buffers,
+            fake_mode,
             new_fake_constant_attrs,
-            map_fake_to_real,
-        ):
-            aten_export_artifact = _export_to_aten_ir(
-                patched_mod,
-                new_fake_args,
-                new_fake_kwargs,
-                fake_params_buffers,
-                new_fake_constant_attrs,
-                pre_dispatch=pre_dispatch,
-                transform=_tuplify_outputs,
-                _is_torch_jit_trace=_is_torch_jit_trace,
-            )
-            # aten_export_artifact.constants contains only fake script objects, we need to map them back
-            aten_export_artifact.constants = {
-                fqn: map_fake_to_real[obj] if isinstance(obj, FakeScriptObject) else obj
-                for fqn, obj in aten_export_artifact.constants.items()
-            }
+            pre_dispatch=pre_dispatch,
+            transform=_tuplify_outputs,
+            _is_torch_jit_trace=_is_torch_jit_trace,
+        )
+        # aten_export_artifact.constants contains only fake script objects, we need to map them back
+        aten_export_artifact.constants = {
+            fqn: map_fake_to_real[obj] if isinstance(obj, FakeScriptObject) else obj
+            for fqn, obj in aten_export_artifact.constants.items()
+        }
 
     try:
         produce_guards_and_solve_constraints(

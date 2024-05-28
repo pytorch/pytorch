@@ -1211,6 +1211,7 @@ def export(
         graph_captured_input = None
         graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
         fake_mode = None
+        ambient_fake_mode = None
 
         def guard_export_print(guards: _guards.GuardsSet):
             nonlocal out_guards
@@ -1242,6 +1243,7 @@ def export(
             def result_capturing_wrapper(*graph_inputs):
                 nonlocal graph_captured_result
                 nonlocal graph_captured_input
+                nonlocal ambient_fake_mode
 
                 graph_captured_input = graph_inputs
                 assert graph is not None
@@ -1436,6 +1438,7 @@ def export(
             if constraints
             else []
         )
+        graph.meta["ambient_fake_mode"] = ambient_fake_mode
 
         return ExportResult(graph, out_guards)
 

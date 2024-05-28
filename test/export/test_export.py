@@ -3665,6 +3665,19 @@ graph():
 
         check_device_and_fake_mode()
 
+    @testing.expectedFailureSerDer
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_empty_input(self):
+        class M(torch.nn.Module):
+            def forward(self):
+                x = torch.ones(1)
+                y = x.item()
+                return x + y
+
+        ep = export(M(), ())
+        res = ep.module()()
+        self.assertEqual(res, 2)
+
     def test_run_decomposition_supports_user_input_mutation(self):
         class SingleOp(torch.nn.Module):
             def __init__(self):

@@ -442,22 +442,23 @@ def _fakify_script_objects(
         return cur_mod, last_attr
 
     try:
-        for obj, fqns in constant_attrs.items():
-            if isinstance(obj, torch.ScriptObject):
-                fake_script_obj = _maybe_fakify_obj(obj)
-                for fqn in fqns:
-                    cur_mod, attr = _leaf_mod_and_attr(mod, fqn)
-                    assert obj is getattr(cur_mod, attr)
-                    setattr(cur_mod, attr, fake_script_obj)
-                    fake_constant_attrs.add(fake_script_obj, fqn)
-                    patched_attr[fqn] = obj
-            else:
-                for fqn in fqns:
-                    fake_constant_attrs.add(obj, fqn)
+        with fake_mode:
+            for obj, fqns in constant_attrs.items():
+                if isinstance(obj, torch.ScriptObject):
+                    fake_script_obj = _maybe_fakify_obj(obj)
+                    for fqn in fqns:
+                        cur_mod, attr = _leaf_mod_and_attr(mod, fqn)
+                        assert obj is getattr(cur_mod, attr)
+                        setattr(cur_mod, attr, fake_script_obj)
+                        fake_constant_attrs.add(fake_script_obj, fqn)
+                        patched_attr[fqn] = obj
+                else:
+                    for fqn in fqns:
+                        fake_constant_attrs.add(obj, fqn)
 
-        fake_args, fake_kwargs = pytree.tree_map_only(
-            torch.ScriptObject, _maybe_fakify_obj, (args, kwargs)
-        )
+            fake_args, fake_kwargs = pytree.tree_map_only(
+                torch.ScriptObject, _maybe_fakify_obj, (args, kwargs)
+            )
         yield (mod, fake_args, fake_kwargs, fake_constant_attrs, fake_to_real)
     finally:
         for fqn, orig_obj in patched_attr.items():
