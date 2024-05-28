@@ -74,7 +74,9 @@ class TS2EPConverter:
         self.input_specs: List[InputSpec] = []
         self.output_specs: List[OutputSpec] = []
 
-        self.name_to_node: Dict[str, Union[torch.fx.Node, List[torch.fx.Node]]] = {}
+        self.name_to_node: Dict[
+            str, Union[torch.fx.Node, List[torch.fx.Node], Dict[Any, torch.fx.Node]]
+        ] = {}
         self.constant_map: Dict[str, Any] = {}
         self.attribute_map: Dict[str, Any] = {}
         self.tensor_constants: Dict[str, torch.Tensor] = {}
@@ -250,11 +252,15 @@ class TS2EPConverter:
                 k = self.get_fx_value(inp)
             else:
                 v = self.get_fx_value(inp)
-                assert k is not None and v is not None, "DictConstruct has an empty key value pair."
+                assert (
+                    k is not None and v is not None
+                ), "DictConstruct has an empty key value pair."
                 output_dict[k] = v
                 k, v = None, None
 
-        assert k is None and v is None, "DictConstruct has an odd number of elements (violating our assumption)."
+        assert (
+            k is None and v is None
+        ), "DictConstruct has an odd number of elements (violating our assumption)."
 
         output_name = node.output().debugName()
         self.name_to_node[output_name] = output_dict
