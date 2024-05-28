@@ -28,3 +28,12 @@ add_library(torch::xpurt INTERFACE IMPORTED)
 set_property(
     TARGET torch::xpurt PROPERTY INTERFACE_LINK_LIBRARIES
     torch::sycl)
+
+# Find PTI-sdk library.
+set(Pti_DIR $ENV{Pti_DIR} CACHE PATH "Installed PTI-sdk's cmake directory for find package.")
+find_package(Pti REQUIRED)
+if(NOT TARGET Pti::pti_view)
+  set(PYTORCH_FOUND_XPU_PTI FALSE)
+  return()
+endif()
+set(PYTORCH_FOUND_XPU_PTI TRUE)

@@ -4,11 +4,26 @@
 
 include(../../cmake/public/xpu.cmake)
 
+if(USE_KINETO AND PYTORCH_FOUND_XPU_PTI)
+    set(C10_XPU_PROFILER_SRCS
+        profiler/XPUActivityProfiler.cpp
+        profiler/XPUActivityApi.cpp
+        profiler/XPUActivity.cpp
+    )
+    set(C10_XPU_PROFILER_HEADERS
+        profiler/XPUActivityProfiler.h
+        profiler/XPUActivityApi.h
+        profiler/XPUActivity.h
+        profiler/XPUActivityBuffer.h
+    )
+endif()
+
 set(C10_XPU_SRCS
     XPUCachingAllocator.cpp
     XPUFunctions.cpp
     XPUStream.cpp
     impl/XPUGuardImpl.cpp
+    ${C10_XPU_PROFILER_SRCS}
 )
 set(C10_XPU_HEADERS
     XPUCachingAllocator.h
@@ -18,6 +33,7 @@ set(C10_XPU_HEADERS
     XPUMacros.h
     XPUStream.h
     impl/XPUGuardImpl.h
+    ${C10_XPU_PROFILER_HEADERS}
 )
 
 add_library(c10_xpu ${C10_XPU_SRCS} ${C10_XPU_HEADERS})
@@ -35,6 +51,14 @@ target_include_directories(
     $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
     $<INSTALL_INTERFACE:include>
     )
+if(USE_KINETO AND PYTORCH_FOUND_XPU_PTI)
+    target_link_libraries(c10_xpu PUBLIC Pti::pti_view kineto fmt::fmt-header-only)
+    target_include_directories(
+        c10_xpu PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/kineto/libkineto/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/fmt/include>
+        )
+endif()
 
 add_subdirectory(test)
 
