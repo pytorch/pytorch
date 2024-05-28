@@ -244,7 +244,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         group = fsdp_param_group.mesh_info.shard_process_group
         self.assertEqual(group.size(), self.world_size)
         all_reduce_stream = torch.cuda.Stream()
-        post_reduce_event, _ = foreach_reduce(
+        view_out_event = foreach_reduce(
             fsdp_params,
             unsharded_grads,
             group,
@@ -254,10 +254,8 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             device=self.device,
             all_reduce_group=None,
             all_reduce_stream=all_reduce_stream,
-            all_reduce_grads=True,
-            partial_reduce_output=None,
         )
-        torch.cuda.current_stream().wait_event(post_reduce_event)
+        torch.cuda.current_stream().wait_event(view_out_event)
 
         # Check reduce-scatter correctness
         predivide_factor, postdivide_factor = _get_gradient_divide_factors(

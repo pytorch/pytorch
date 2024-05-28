@@ -1,6 +1,7 @@
 import torch
+from torch.amp.grad_scaler import OptState
 
-__all__ = ["GradScaler"]
+__all__ = ["GradScaler", "OptState"]
 
 
 class GradScaler(torch.amp.GradScaler):

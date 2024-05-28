@@ -110,9 +110,7 @@ def make_fake_params_buffers(
     return faked_params_buffers  # type: ignore[return-value]
 
 
-def make_fake_inputs(
-    nn_module, args, kwargs, dynamic_shapes, _is_torch_jit_trace=False
-):
+def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes):
     """
     Given an nn module, example inputs, and constraints, return a new fake mode,
     fake inputs created in that mode whose dynamic shape dimensions are constrained
@@ -129,7 +127,7 @@ def make_fake_inputs(
     #   - [post-tracing] guards.py processes input shape equalities.
 
     constraints = torch.export.dynamic_shapes._process_dynamic_shapes(
-        nn_module, args, kwargs, dynamic_shapes, _is_torch_jit_trace=_is_torch_jit_trace
+        nn_module, args, kwargs, dynamic_shapes
     )
     constraints = constraints or []
     t_constraints: Dict[int, Dict[int, Constraint]] = defaultdict(dict)
@@ -137,6 +135,13 @@ def make_fake_inputs(
         t_constraints[constraint.t_id][constraint.dim] = constraint
         if constraint.shared is not None:
             t_constraints[constraint.shared.t_id][constraint.shared.dim] = constraint
+
+    code = nn_module.forward.__code__
+    co_fields = {
+        "co_name": code.co_name,
+        "co_filename": code.co_filename,
+        "co_firstlineno": code.co_firstlineno,
+    }
 
     context = torch._guards.TracingContext.try_get()
     if context is not None:
@@ -148,20 +153,9 @@ def make_fake_inputs(
             len(constraints) == 0
         ), "Found constraints when tracing with a toplevel tracing context."
         fake_mode = context.fake_mode
-    elif not _is_torch_jit_trace:
-        code = nn_module.forward.__code__
-        co_fields = {
-            "co_name": code.co_name,
-            "co_filename": code.co_filename,
-            "co_firstlineno": code.co_firstlineno,
-        }
-        fake_mode = FakeTensorMode(
-            shape_env=ShapeEnv(tracked_fakes=[], co_fields=co_fields),
-            allow_non_fake_inputs=True,
-        )
     else:
         fake_mode = FakeTensorMode(
-            shape_env=ShapeEnv(tracked_fakes=[]),
+            shape_env=ShapeEnv(tracked_fakes=[], co_fields=co_fields),
             allow_non_fake_inputs=True,
         )
     if fake_mode.shape_env is None or fake_mode.shape_env.tracked_fakes is None:
@@ -172,11 +166,7 @@ def make_fake_inputs(
         )
 
     with fake_mode:
-        # FIXME(ycao) ScriptMethod doesn't have signature, I am using an empty one to unblock
-        if not _is_torch_jit_trace:
-            original_signature = inspect.signature(nn_module.forward)
-        else:
-            original_signature = None
+        original_signature = inspect.signature(nn_module.forward)
         sources: Dict[Tuple[int, int], List[Source]] = defaultdict(list)
         fake_args, fake_kwargs = tree_map_with_path(
             lambda kp, val: fakify(fake_mode, kp, val, t_constraints, sources),
@@ -225,7 +215,6 @@ def produce_guards_and_solve_constraints(
     equalities_inputs: EqualityConstraint,
     original_signature: inspect.Signature,
     _disable_forced_specializations: Optional[bool] = False,
-    _is_torch_jit_trace=False,
 ):
     """
     Given a fake mode, sources pairs corresponding to equal dynamic shape dimensions,
@@ -270,13 +259,9 @@ def produce_guards_and_solve_constraints(
     )
     dim_constraints.remove_redundant_dynamic_results()
     forced_specializations = dim_constraints.forced_specializations()
-    if not _is_torch_jit_trace:
-        msg = dim_constraints.prettify_results(
-            original_signature, constraint_violation_error, forced_specializations
-        )
-    else:
-        # FIXME(ycao): This is a hack to get around missing signature from ScriptMethod
-        msg = "dummy constraint violation message"
+    msg = dim_constraints.prettify_results(
+        original_signature, constraint_violation_error, forced_specializations
+    )
     if constraint_violation_error:
         constraint_violation_error.args = (constraint_violation_error.args[0] + msg,)
     elif forced_specializations:

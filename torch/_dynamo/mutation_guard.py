@@ -103,11 +103,7 @@ def is_dynamic_nn_module(obj, is_export):
     # 1) Input signature problem because params are lifted as inputs
     # 2) nn module stack info changes
     # 3) adjust failing tests
-    if (
-        isinstance(obj, torch.nn.Module)
-        and config.inline_inbuilt_nn_modules
-        and not is_export
-    ):
+    if config.inline_inbuilt_nn_modules and not is_export:
         return True
     dyn = GenerationTracker.dynamic_classes.get(type(obj)) or GenerationTracker.check(
         obj

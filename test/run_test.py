@@ -181,7 +181,6 @@ ROCM_BLOCKLIST = [
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
-    "distributed/_tensor/test_attention",
 ]
 
 XPU_BLOCKLIST = [
@@ -240,8 +239,7 @@ CI_SERIAL_LIST = [
     "test_native_mha",  # OOM
     "test_module_hooks",  # OOM
     "inductor/test_max_autotune",
-    "inductor/test_cutlass_backend",  # slow due to many nvcc compilation steps,
-    "inductor/test_flex_attention",  # OOM
+    "inductor/test_cutlass_backend",  # slow due to many nvcc compilation steps
 ]
 # A subset of onnx tests that cannot run in parallel due to high memory usage.
 ONNX_SERIAL_LIST = [
@@ -408,7 +406,7 @@ def run_test(
         stepcurrent_key = f"{test_file}_{test_module.shard}_{os.urandom(8).hex()}"
 
     if options.verbose:
-        unittest_args.append(f'-{"v" * options.verbose}')  # in case of pytest
+        unittest_args.append(f'-{"v"*options.verbose}')  # in case of pytest
 
     if test_file in RUN_PARALLEL_BLOCKLIST:
         unittest_args = [

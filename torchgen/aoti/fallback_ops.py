@@ -25,8 +25,6 @@ inductor_fallback_ops = {
     "aten.avg_pool2d.default",
     "aten.avg_pool3d_backward.default",
     "aten.avg_pool3d.default",
-    "aten.bernoulli_.float",
-    "aten.bernoulli_.Tensor",
     "aten.bmm.out",
     "aten.bucketize.Tensor",
     "aten.cat.default",

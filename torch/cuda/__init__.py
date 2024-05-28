@@ -1344,6 +1344,7 @@ __all__ = [
     "DeferredCudaCallError",
     "Event",
     "ExternalStream",
+    "OutOfMemoryError",
     "Stream",
     "StreamContext",
     "amp",
