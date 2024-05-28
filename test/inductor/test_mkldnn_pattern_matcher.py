@@ -498,13 +498,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 # view + linear + view(joint_graph+freeze pass)
                 match_count = match_count + 5 if is_inplace else match_count + 3
                 match_nodes = match_nodes + 7 if is_inplace else match_nodes + 5
-            mod = M(binary_fn, input_shape[-1], out_feature, bias).to(dtype).eval()
-            v = torch.randn(input_shape).to(dtype)
+            mod = M(binary_fn, input_shape[-1], out_feature, bias).eval()
+            v = torch.randn(input_shape)
             other = torch.randn(input_shape[:-1] + [out_feature]).to(dtype)
-            mod_c = torch.compile(mod)
-            out, code = run_and_get_code(mod_c, v, other)
-            self.assertEqual(out, mod(v, other), rtol=1e-2, atol=1e-2)
-            # TODO - assert fusions work code
+            self._test_common(
+                mod, (v, other, ), match_count, match_nodes, check_autocast=dtype
+            )
 
     def test_multi_linear_share_same_input(self):
         # llama pattern.
