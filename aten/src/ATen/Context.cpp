@@ -25,7 +25,7 @@ static std::vector<std::string> cuda_precisions = {"default", "tf32"};
 static std::vector<std::string> mkldnn_precisions = {"default", "bf16"};
 
 // Check whether the backend and op are legal
-static void validate_fp32_prec_backend_and_op(
+static void check_fp32_prec_backend_and_op(
     const std::string& backend,
     const std::string& op) {
   static std::vector<std::string> backends = {"generic", "mkldnn", "cuda"};
@@ -297,7 +297,7 @@ Float32MatmulPrecision Context::float32MatmulPrecision() const {
 }
 
 std::string Context::float32Precision(const std::string& backend, const std::string& op) const {
-  validate_fp32_prec_backend_and_op(backend, op);
+  check_fp32_prec_backend_and_op(backend, op);
   auto precision = fp32_precision.find(backend)->second.find(op)->second;
   if (precision == "default")
     precision = fp32_precision.find(backend)->second.find("all")->second;
@@ -338,7 +338,7 @@ void Context::setFloat32MatmulPrecision(const std::string &s) {
 }
 
 void Context::setFloat32Precision(const std::string& p, const std::string& backend, const std::string& op) {
-  validate_fp32_prec_backend_and_op(backend, op);
+  check_fp32_prec_backend_and_op(backend, op);
   fp32_precision[backend][op] = validate_fp32_prec(backend, p) ? p : "default";
 }
 
