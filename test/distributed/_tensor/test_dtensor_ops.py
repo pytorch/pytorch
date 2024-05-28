@@ -100,7 +100,6 @@ dtensor_fails = {
     xfail("addbmm"),
     xfail("addmv"),
     xfail("addr"),
-    xfail("alias_copy"),
     xfail("all"),
     xfail("allclose"),
     xfail("amax"),
