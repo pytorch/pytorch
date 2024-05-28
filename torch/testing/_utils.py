@@ -19,7 +19,7 @@ def wrapper_set_seed(op, *args, **kwargs):
         if isinstance(output, torch.Tensor) and output.device.type == "lazy":
             # We need to call mark step inside freeze_rng_state so that numerics
             # match eager execution
-            torch._lazy.mark_step()
+            torch._lazy.mark_step()  # type: ignore[attr-defined]
 
         return output
 
@@ -50,5 +50,5 @@ def freeze_rng_state():
         # NB: Mode disable is to avoid running cross-ref tests on thes seeding
         with no_dispatch(), disable_functorch():
             if torch.cuda.is_available():
-                torch.cuda.set_rng_state(cuda_rng_state)
+                torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
             torch.set_rng_state(rng_state)
