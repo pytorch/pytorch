@@ -30,7 +30,6 @@ from ..utils import proxy_args_kwargs
 from .dicts import ConstDictVariable
 from .lazy import LazyVariableTracker
 from .lists import ListVariable, TupleVariable
-from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
@@ -129,6 +128,14 @@ def _assert_tensors_nonaliasing(inputs, outputs):
     assert input_tensor_ids.isdisjoint(
         output_tensor_ids
     ), "inputs to function body cannot alias outputs"
+
+
+def _check_supported_callable_arg(tx, func_var: VariableTracker, arg_name):
+    is_callable = (
+        BuiltinVariable(callable).call_function(tx, [func_var], {}).as_python_constant()
+    )
+    if not is_callable:
+        unimplemented(f"{arg_name} is of unsupported callable type {str(func_var)}.")
 
 
 def validate_args_and_maybe_create_graph_inputs(
@@ -567,12 +574,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import (
-            ListVariable,
-            NestedUserFunctionVariable,
-            TensorVariable,
-            UserFunctionVariable,
-        )
+        from . import ListVariable, TensorVariable
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
@@ -613,29 +615,8 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
 
         # branches
-        assert isinstance(
-            args[1],
-            (
-                UserFunctionVariable,
-                NestedUserFunctionVariable,
-                NNModuleVariable,
-                UnspecializedNNModuleVariable,
-            ),
-        ), str(
-            type(args[1])
-        )  # true_fn
-
-        assert isinstance(
-            args[2],
-            (
-                UserFunctionVariable,
-                NestedUserFunctionVariable,
-                NNModuleVariable,
-                UnspecializedNNModuleVariable,
-            ),
-        ), str(
-            type(args[2])
-        )  # false_fn
+        _check_supported_callable_arg(tx, args[1], "true_fn")
+        _check_supported_callable_arg(tx, args[2], "false_fn")
 
         # Our strategy for tracing the true/false branches of cond
         # are to checkpoint our graphstate, run the true branch,
@@ -806,7 +787,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
-        from . import NestedUserFunctionVariable, TensorVariable, UserFunctionVariable
+        from . import TensorVariable
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
@@ -828,19 +809,8 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"Usage: while_loop(cond_fn, body_fn, operands)",
             )
 
-        def _check_supported_callable(fn_var):
-            assert isinstance(
-                fn_var,
-                (
-                    UserFunctionVariable,
-                    NestedUserFunctionVariable,
-                    NNModuleVariable,
-                    UnspecializedNNModuleVariable,
-                ),
-            ), str(type(fn_var))
-
-        _check_supported_callable(args[0])
-        _check_supported_callable(args[1])
+        _check_supported_callable_arg(tx, args[0], "cond_fn")
+        _check_supported_callable_arg(tx, args[1], "body_fn")
 
         # operands
         if not isinstance(args[2], (ListVariable, TupleVariable)):
@@ -1074,7 +1044,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
-        from . import NestedUserFunctionVariable, TensorVariable, UserFunctionVariable
+        from . import TensorVariable
         from .builder import wrap_fx_proxy_cls
 
         if len(kwargs) > 0:
@@ -1082,10 +1052,8 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 "torch.ops.higher_order.map: kwargs are not supported in the map operator."
             )
 
-        assert type(args[0].realize()) in (
-            UserFunctionVariable,
-            NestedUserFunctionVariable,
-        )
+        _check_supported_callable_arg(tx, args[0].realize(), "map_fn")
+
         assert type(args[1].realize()) is TensorVariable
 
         sample_shape = get_fake_value(args[1].as_proxy().node, tx).size()
