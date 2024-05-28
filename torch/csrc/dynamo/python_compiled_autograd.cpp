@@ -597,11 +597,11 @@ CacheNode* _compiled_autograd_impl(
     TORCH_CHECK(
         PyTuple_Size(res) == 2,
         "Expected end_capture to return tuple of size 2");
-    cache->runtime_wrapper = PyTuple_GetItem(res, 0);
+    cache->runtime_wrapper = Py_NewRef(PyTuple_GetItem(res, 0));
     TORCH_CHECK(
         PyCallable_Check(cache->runtime_wrapper),
         "Expected end_capture to return runtime_wrapper");
-    cache->compiled_fn = PyTuple_GetItem(res, 1);
+    cache->compiled_fn = Py_NewRef(PyTuple_GetItem(res, 1));
     TORCH_CHECK(
         PyCallable_Check(cache->compiled_fn),
         "Expected end_capture to return compiled_fn");

@@ -1,7 +1,7 @@
 # Owner(s): ["module: inductor"]
 import functools
-import logging
 import io
+import logging
 import re
 import sys
 import unittest
@@ -327,7 +327,9 @@ main()
         torch._dynamo.reset()
         handle = torch._dynamo.convert_frame.register_bytecode_hook(bytecode_hook)
         try:
-            runtime_wrapper(compiled_fn=compiled_fn, inputs=[param, activ], sizes=(), hooks=())
+            runtime_wrapper(
+                compiled_fn=compiled_fn, inputs=[param, activ], sizes=(), hooks=()
+            )
         finally:
             handle.remove()
 
