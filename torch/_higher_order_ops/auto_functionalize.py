@@ -92,6 +92,11 @@ def can_auto_functionalize(op: torch._ops.OperatorBase) -> bool:
             and type(arg.type.getElementType()) is torch.TensorType
         ):
             continue
+        if (
+            type(arg.type) is torch.ListType
+            and type(arg.type.getElementType()) is torch.TensorType
+        ):
+            continue
         # Not yet supported: other Tensor types. This includes things like
         # Tensor[], Tensor?[], Tensor[]?.
         return False
@@ -123,7 +128,9 @@ def auto_functionalized_dense(
             new_kwargs[name] = kwargs[name]
         else:
             new_kwargs[name] = (
-                clone_preserve_strides(kwargs[name])
+                [clone_preserve_strides(x) for x in kwargs[name]]
+                if kwargs[name] is not None and isinstance(kwargs[name], list)
+                else clone_preserve_strides(kwargs[name])
                 if kwargs[name] is not None
                 else None
             )
@@ -244,11 +251,26 @@ def do_auto_functionalize(
         # Can be None if input was `Tensor(a!)?`
         if unwrapped_out is None:
             continue
-        assert isinstance(unwrapped_out, torch.Tensor)
-        orig_arg = normalized_kwargs[name]
-        ctx.replace(orig_arg, unwrapped_out)
-        ctx.commit_update(orig_arg)
-        ctx.sync(orig_arg)
+        # We only handle Tensor or List[Tensor] here for now.
+
+        if isinstance(unwrapped_out, torch.Tensor):
+            orig_arg = normalized_kwargs[name]
+            ctx.replace(orig_arg, unwrapped_out)
+            ctx.commit_update(orig_arg)
+            ctx.sync(orig_arg)
+        elif isinstance(unwrapped_out, list) and all(
+            isinstance(o, torch.Tensor) for o in unwrapped_out
+        ):
+            orig_args = normalized_kwargs[name]
+            assert len(orig_args) == len(unwrapped_out)
+            for orig_arg, o in zip(orig_args, unwrapped_out):
+                ctx.replace(orig_arg, o)
+                ctx.commit_update(orig_arg)
+                ctx.sync(orig_arg)
+        else:
+            raise RuntimeError(
+                f"unsupported type for auto-functionalization: {unwrapped_out}"
+            )
 
     return ctx.wrap_tensors(unwrapped_actual_out)  # type: ignore[arg-type]
 
