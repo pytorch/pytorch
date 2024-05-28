@@ -180,8 +180,7 @@ void gemm_transa_(
 }
 
 template <typename scalar_t, typename opmath_t>
-typename std::enable_if<std::is_same<scalar_t, opmath_t>::value, void>::type
-gemm_transb_(
+void gemm_transb_impl(
     TransposeType transb,
     int64_t m,
     int64_t n,
@@ -192,7 +191,7 @@ gemm_transb_(
     const scalar_t* b,
     int64_t ldb,
     opmath_t beta,
-    scalar_t* c,
+    opmath_t* c,
     int64_t ldc) {
   // c *= beta
   scale_(m, n, beta, c, ldc);
@@ -215,6 +214,24 @@ gemm_transb_(
   }
 }
 
+template <typename scalar_t, typename opmath_t>
+typename std::enable_if<std::is_same<scalar_t, opmath_t>::value, void>::type
+gemm_transb_(
+    TransposeType transb,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    opmath_t alpha,
+    const scalar_t* a,
+    int64_t lda,
+    const scalar_t* b,
+    int64_t ldb,
+    opmath_t beta,
+    scalar_t* c,
+    int64_t ldc) {
+  gemm_transb_impl(transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+}
+
 // std::is_same<scalar_t, at::BFloat16> || std::is_same<scalar_t, at::Half>
 template <typename scalar_t, typename opmath_t>
 typename std::enable_if<!std::is_same<scalar_t, opmath_t>::value, void>::type
@@ -231,20 +248,24 @@ gemm_transb_(
     opmath_t beta,
     scalar_t* c,
     int64_t ldc) {
-  // c += alpha * (a @ b.T)
-  for (const auto i : c10::irange(m)) {
-    for (const auto j : c10::irange(n)) {
-      const auto dot = sum(k, [&](int64_t l) -> opmath_t {
-        return static_cast<opmath_t>(a[l * lda + i]) *
-            static_cast<opmath_t>(transb == TransposeType::ConjTranspose ? conj_impl(b[l * ldb + j]) : b[l * ldb + j]);
-      });
-      if (beta == opmath_t(0)) {
-        c[j * ldc + i] = alpha * dot;
-      } else {
-        c[j * ldc + i] = beta * c[j * ldc + i] + alpha * dot;
-      }
-    }
-  }
+  // We need to calculate full-precision dot products for correctness;
+  // users notice error accumulation with reduced-width types (e.g.,
+  // https://github.com/pytorch/pytorch/issues/95125 and
+  // https://github.com/pytorch/pytorch/issues/83863, which were filed
+  // when we used gemm_transb_impl naively, accumulating into
+  // float16/bfloat16). The straightforward way to do this is to use
+  // the vector dot column algorithm anyway, but this gives terrible
+  // performance because of the non-contiguous matrix
+  // access. Therefore, we instead elect to allocate temporary space
+  // to hold the output at higher-precision so that we can accumulate
+  // into it using the above cache-friendly "load one vector element,
+  // FMA it with an entire matrix row into the entire result vector"
+  // algorithm instead.
+  const auto c_size = m * n;
+  std::unique_ptr<opmath_t[]> c_accum = std::make_unique<opmath_t[]>(m * n);
+  std::copy(c, c + c_size, c_accum.get());
+  gemm_transb_impl(transb, m, n, k, alpha, a, lda, b, ldb, beta, c_accum.get(), ldc);
+  std::copy(c_accum.get(), c_accum.get() + c_size, c);
 }
 
 template <typename scalar_t, typename opmath_t>
