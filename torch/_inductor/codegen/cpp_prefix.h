@@ -469,4 +469,9 @@ class AMXState {
     }
     loadconfig(tilecfg_);
   }
+
+  inline void release(void (*tile_release)()) {
+    tilecfg_.palette_id = 0;
+    tile_release();
+  }
 };

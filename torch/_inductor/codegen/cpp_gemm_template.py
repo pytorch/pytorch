@@ -83,6 +83,7 @@ extern "C"
         int64_t k_block_start = 0;
         int64_t k_block_end = K0_blocks;
     {%- endif %}
+        {{ micro_gemm.codegen_init(kernel) }}
         for (int64_t mc = m_block_start; mc < m_block_end; mc += Mc_blocks) {
             const int64_t m_start = mc * M0;
             const int64_t m_end = std::min((mc + Mc_blocks) * M0, M);
@@ -132,7 +133,8 @@ extern "C"
                 }}
             }
         }
-        {{ micro_gemm.codegen_release(kernel) }}
+        // TODO: should sync with thread local state?
+        {{ micro_gemm.codegen_finalize(kernel) }}
     }
 }
 """
@@ -337,9 +339,9 @@ class CppPackedGemmTemplate(CppTemplate):
                 blocked_w = (
                     W.reshape(k, n // block_n, block_n).transpose(0, 1).contiguous()
                 )
-                if micro_gemm.get_layout_b() != LayoutType.NORMAL:
+                if micro_gemm.get_b_layout() != LayoutType.NORMAL:
                     assert (
-                        micro_gemm.get_layout_b() == LayoutType.VNNI2
+                        micro_gemm.get_b_layout() == LayoutType.VNNI2
                     ), "We only support VNNI2 for now"
                     assert k % 2 == 0, "k should be even for VNNI2 layout"
                     blocked_w = (
