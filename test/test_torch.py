@@ -6152,7 +6152,7 @@ else:
     @onlyNativeDeviceTypes
     def test_grad_scaler_pass_itself(self, device):
         device = torch.device(device)
-        GradScaler = torch.cuda.amp.GradScaler if "cuda" == device.type else torch.cpu.amp.GradScaler
+        GradScaler = partial(torch.amp.GradScaler, device=device.type)
 
         class _PlaceHolderOptimizer(torch.optim.Optimizer):
             tester = self
@@ -6165,7 +6165,7 @@ else:
 
         class Optimizer1(_PlaceHolderOptimizer):
             def step(self, closure=None, *, grad_scaler=None):
-                self.tester.assertTrue(isinstance(grad_scaler, GradScaler))
+                self.tester.assertTrue(isinstance(grad_scaler, torch.amp.GradScaler))
                 self.tester.assertFalse(hasattr(self, "grad_scale"))
                 self.tester.assertFalse(hasattr(self, "found_inf"))
 
@@ -6188,6 +6188,17 @@ else:
             scaler.step(o1)
         scaler.step(o2)
         scaler.update()
+
+    @onlyNativeDeviceTypes
+    def test_grad_scaler_deprecated_warning(self, device):
+        device = torch.device(device)
+        GradScaler = torch.cuda.amp.GradScaler if "cuda" == device.type else torch.cpu.amp.GradScaler
+
+        with self.assertWarnsRegex(
+            UserWarning,
+            rf"torch.{device.type}.amp.GradScaler\(args...\) is deprecated.",
+        ):
+            _ = GradScaler(init_scale=2.0)
 
     @dtypesIfCUDA(torch.float, torch.double, torch.half)
     @dtypesIfCPU(torch.float, torch.double, torch.bfloat16, torch.half)
