@@ -3034,10 +3034,6 @@ def _unsafe_index_put_(self, indices, values, accumulate=False):
 
 
 def index_put_impl_(self, indices, values, accumulate, check):
-    if self.is_module_buffer():
-        # Mark buffer_mutation for AOTInductor
-        V.graph.buffer_mutation = True
-
     # Dispatch to masked fill for single boolean index with single value
     if (
         values.get_numel() == 1
@@ -3212,11 +3208,6 @@ def scatter_fallback(
 @register_lowering(aten.scatter_, type_promotion_kind=None)
 def scatter_(self, dim: int, index, src, *, reduce: Optional[str] = None):
     assert reduce in {None, "add", "multiply"}
-
-    if self.is_module_buffer():
-        # Mark buffer_mutation for AOTInductor
-        V.graph.buffer_mutation = True
-
     if reduce is None:
         op_overload = getattr(aten.scatter_, V.graph.current_node.target._overloadname)  # type: ignore[union-attr]
         fallback_result = scatter_fallback(
@@ -3250,16 +3241,10 @@ def scatter_reduce(x, dim: int, index, src, reduction_type, **kwargs):
 @register_lowering(aten.scatter_reduce_, type_promotion_kind=None)
 def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = True):
     assert reduce in {None, "sum", "prod", "mean", "amax", "amin"}
-
     assert (
         len(aten.scatter_reduce_.overloads()) == 1
         and "two" in aten.scatter_reduce_.overloads()
     ), "aten.scatter_reduce_.two is not the unique overload of aten.scatter_reduce_"
-
-    if self.is_module_buffer():
-        # Mark buffer_mutation for AOTInductor
-        V.graph.buffer_mutation = True
-
     fallback_result = scatter_fallback(
         aten.scatter_reduce_.two,
         self,
@@ -5096,7 +5081,6 @@ def mutate_to(changed, val, unsafe_alias=False):
         changed_data.data = val.data
         return changed
 
-    V.graph.buffer_mutation = True
     ir.MutationLayoutSHOULDREMOVE.realize_into(
         val, changed_data, unsafe_alias=unsafe_alias
     )
