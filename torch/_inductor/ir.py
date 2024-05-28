@@ -2747,8 +2747,6 @@ class FixedLayout(Layout):
             assert len(index) == len(self.stride) == len(self.size)
             result = self.offset
             for idx, stride, sz in zip(index, self.stride, self.size):
-                # If there is indirect indexing we have to perform the
-                # idx wrapping and check that 0 <= idx < 1 checks
                 if sz != 1:
                     result = result + idx * stride
             return result
