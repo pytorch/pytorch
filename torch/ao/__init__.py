@@ -1,6 +1,11 @@
 # torch.ao is a package with a lot of interdependencies.
 # We will use lazy import to avoid cyclic dependencies here.
 
+import typing
+
+if typing.TYPE_CHECKING:
+    # Import the following modules during type checking to enable code intelligence features.
+    from . import nn, ns, quantization, pruning
 
 __all__ = [
     "nn",
