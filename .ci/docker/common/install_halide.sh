@@ -40,9 +40,6 @@ cmake --build build
 test -e ${CONDA_PREFIX}/lib/python3 || ln -s python${ANACONDA_PYTHON_VERSION} ${CONDA_PREFIX}/lib/python3
 cmake --install build --prefix ${CONDA_PREFIX}
 chown -R jenkins ${CONDA_PREFIX}
-# as_jenkins cp -r install/lib/python3/site-packages/halide ${CONDA_PREFIX}/lib/python${ANACONDA_PYTHON_VERSION}/site-packages/
-# as_jenkins cp install/lib/lib* ${CONDA_PREFIX}/lib/
-# as_jenkins cp install/include/*.h ${CONDA_PREFIX}/include/
 popd
 rm -rf Halide llvm-build llvm-project llvm-install
 

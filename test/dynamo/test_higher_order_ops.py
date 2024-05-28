@@ -7,6 +7,8 @@ import sys
 import unittest
 import warnings
 
+import functorch.experimental.control_flow as control_flow
+
 import torch
 import torch._dynamo.config as config
 
@@ -31,8 +33,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
-
-import functorch.experimental.control_flow as control_flow
 
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
