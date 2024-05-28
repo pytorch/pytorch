@@ -9216,7 +9216,7 @@ class CommonTemplate:
             _, code = run_and_get_cpp_code(opt_fn, *args)
             print(code)
             FileCheck().check_count(
-                "static_cast<int>(256)",
+                "static_cast<int32_t>(256)",
                 1,
                 exactly=True,
             ).run(code)

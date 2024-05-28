@@ -22,10 +22,9 @@ SymPy expressions yet, despite sympy.Min and sympy.Max existing.
 import itertools
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Literal, Optional, overload, Tuple, Union
+from typing_extensions import TypeAlias
 
 import sympy
-
-from typing_extensions import TypeAlias
 
 import torch
 from torch._prims_common import dtype_to_type, is_integer_dtype

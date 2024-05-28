@@ -16,10 +16,10 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import TypeGuard
 
 import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
-from typing_extensions import TypeGuard
 
 import torch
 
