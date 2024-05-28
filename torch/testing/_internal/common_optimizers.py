@@ -641,7 +641,6 @@ def optim_error_inputs_func_lbfgs(device, dtype):
     return error_inputs
 
 
-# Weird story bro, NAdam and RAdam do not have maximize.
 def optim_inputs_func_nadam(device, dtype=None):
     cuda_supported_configs = [
         OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
