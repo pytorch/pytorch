@@ -406,7 +406,6 @@ class OutputGraph:
 
         # Track compiled autograd final callbacks that must be called at the end of this graph.
         # Only applicable if this graph is created from Dynamo tracing in Compiled Autograd.
-        self.ca_final_callbacks: List[Callable] = []
         self.ca_final_callbacks_var = None
 
     def install_builtins_dict_in_fglobals(self):
@@ -449,7 +448,7 @@ class OutputGraph:
     def get_ca_final_callbacks_var(self):
         if self.ca_final_callbacks_var is None:
             self.ca_final_callbacks_var = variables.ListVariable(
-                self.ca_final_callbacks, mutable_local=MutableLocal()
+                [], mutable_local=MutableLocal()
             )
         return self.ca_final_callbacks_var
 
