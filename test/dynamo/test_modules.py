@@ -3,6 +3,8 @@
 import collections
 import copy
 import itertools
+import os
+import tempfile
 import traceback
 import types
 import unittest
@@ -15,6 +17,7 @@ import torch
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._dynamo.debug_utils import same_two_models
 import torch.nn.functional as F
 from torch._dynamo.eval_frame import unsupported
 from torch._dynamo.mutation_guard import GenerationTracker
@@ -2738,6 +2741,34 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         # other file.
         self.assertEqual(test_functions._variable, 1)
         self.assertEqual(res, 3 * torch.ones(10))
+
+
+    def test_save_and_load1(self):
+        mod = MockModule()
+        opt_mod = torch.compile(mod)
+        inp = torch.randn(10, 10)
+        opt_mod(inp)
+
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            torch.save(opt_mod, os.path.join(tmpdirname, "model.pt"))
+            loaded_model = torch.load(os.path.join(tmpdirname, "model.pt"))
+            loaded_model(inp)
+            self.assertTrue(same_two_models(loaded_model, mod, [inp]))
+            self.assertTrue(same_two_models(loaded_model, opt_mod, [inp]))
+
+    def test_save_and_load2(self):
+        mod = MockModule()
+        opt_mod = torch.compile(mod, backend='inductor')
+        inp = torch.randn(10, 10)
+        opt_mod(inp)
+
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            torch.save(opt_mod, os.path.join(tmpdirname, "model.pt"))
+            loaded_model = torch.load(os.path.join(tmpdirname, "model.pt"))
+            loaded_model(inp)
+            self.assertTrue(same_two_models(loaded_model, mod, [inp]))
+            self.assertTrue(same_two_models(loaded_model, opt_mod, [inp]))
+
 
     def test_monkeypatching_forward(self):
         class FakeModule(torch.nn.Module):
