@@ -2840,6 +2840,7 @@ class CppVecKernelChecker(CppVecKernel):
         self.supported_dtypes_for_masked_vec: List[torch.dtype] = [
             torch.float,
             torch.bfloat16,
+            torch.float16,
         ]
 
     def disable_vec(self, msg=None):
