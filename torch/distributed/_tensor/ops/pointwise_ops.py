@@ -447,7 +447,7 @@ def common_pointwise_strategy(
 ) -> OpStrategy:
     # handle broadcasting
     common_shape = torch.broadcast_shapes(
-        *[arg.output_shape for arg in args_schema if isinstance(arg, OpStrategy)]
+        *[arg.shape for arg in args_schema if isinstance(arg, OpStrategy)]
     )
     pointwise_strategy = OpStrategy([])
 
@@ -644,8 +644,12 @@ for op in for_each_linearity_ops:
 fused_ops = [
     aten._fused_adam_.default,
     aten._fused_adam.default,
+    aten._fused_adam.tensor_lr,
+    aten._fused_adam_.tensor_lr,
     aten._fused_adamw_.default,
     aten._fused_adamw.default,
+    aten._fused_adamw.tensor_lr,
+    aten._fused_adamw_.tensor_lr,
 ]
 
 for op in fused_ops:

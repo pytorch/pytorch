@@ -19,6 +19,7 @@ from torch._prims_common import (
     corresponding_real_dtype,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
+    FloatLike,
     IntLike,
     make_contiguous_strides_for,
     Number,
@@ -3176,7 +3177,6 @@ def register_meta_foreach(ops):
         aten._foreach_log1p,
         aten._foreach_log2,
         aten._foreach_neg,
-        aten._foreach_norm,
         aten._foreach_reciprocal,
         aten._foreach_round,
         aten._foreach_sigmoid,
@@ -3286,6 +3286,15 @@ def _meta_foreach_inplace(*args, _scalar_op=None, **kwargs):
     return
 
 
+@register_meta([aten._foreach_pow_.Scalar])
+def meta__foreach_pow__scalar(self, exponent):
+    torch._check(
+        isinstance(exponent, FloatLike),
+        lambda: f"exponent must be a float but got {type(exponent)}",
+    )
+    return
+
+
 @register_meta([aten._foreach_pow.ScalarAndTensor])
 def meta__foreach_pow_scalar_and_tensor(self, exponent):
     # Only foreach_pow has a ScalarAndTensor method and needs special
@@ -3295,6 +3304,30 @@ def meta__foreach_pow_scalar_and_tensor(self, exponent):
         lambda: f"exponent must be a tensor list but got {type(exponent)}",
     )
     return [torch.empty_like(e) for e in exponent]
+
+
+@register_meta([aten._foreach_norm])
+def meta__foreach_norm(self, ord=2, dtype=None):
+    torch._check(
+        isinstance(self, list),
+        lambda: f"self must be a tensor list but got {type(self)}",
+    )
+    torch._check(
+        isinstance(ord, Number),
+        lambda: f"ord must be an integer but got {type(ord)}",
+    )
+    torch._check(
+        dtype is None or isinstance(dtype, torch.dtype),
+        lambda: f"dtype must be either None or torch.dtype but got {type(dtype)}",
+    )
+    return [
+        torch.empty(
+            (),
+            device=t.device,
+            dtype=t.dtype.to_real() if dtype is None else dtype.to_real(),
+        )
+        for t in self
+    ]
 
 
 def _check_foreach_binop_tensor_lists(self, other):
@@ -5485,6 +5518,8 @@ def meta__flash_attention_backward(
     philox_seed: Tensor,
     philox_offset: Tensor,
     scale: Optional[float] = None,
+    window_size_left: Optional[int] = None,
+    window_size_right: Optional[int] = None,
 ):
     grad_query = torch.empty_like(query)
     grad_key = torch.empty_like(key)
