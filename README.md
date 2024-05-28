@@ -209,7 +209,7 @@ pip install -r requirements.txt
 ```bash
 conda install intel::mkl-static intel::mkl-include
 # CUDA only: Add LAPACK support for the GPU if needed
-conda install -c pytorch magma-cuda110  # or the magma-cuda* that matches your CUDA version from https://anaconda.org/pytorch/repo
+conda install -c pytorch magma-cuda121  # or the magma-cuda* that matches your CUDA version from https://anaconda.org/pytorch/repo
 
 # (optional) If using torch.compile with inductor/triton, install the matching version of triton
 # Run from the pytorch directory after cloning
