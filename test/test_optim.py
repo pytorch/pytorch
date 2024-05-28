@@ -889,11 +889,9 @@ class TestOptimRenewed(TestCase):
 
             self.assertLessEqual(mt_max_mem, expected_max_mem)
 
-
-    #@onlyNativeDeviceTypes
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],
-        dtypes=floating_types_and(torch.bfloat16, torch.float16, )
+        dtypes=floating_types_and(torch.bfloat16, torch.float16,)
     )
     def test_fused_matches_forloop(self, device, dtype, optim_info):
         if _get_device_type(device) not in optim_info.supports_fused_on:
