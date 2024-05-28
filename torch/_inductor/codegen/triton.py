@@ -18,7 +18,7 @@ from torch._dynamo.utils import preserve_rng_state
 from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
 from torch._prims_common import is_integer_dtype
 from torch.utils._triton import has_triton_package
-from ...utils._sympy.symbol import symbol_is_type, SymT
+from ...utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from ...utils._sympy.value_ranges import ValueRanges
 
 from .. import config, ir
@@ -108,6 +108,9 @@ class IndexingOptions:
 
     def has_mask(self):
         return bool(self.mask_vars)
+
+    def has_indirect(self):
+        return free_symbol_is_type(self.index, SymT.TMP)
 
     def has_rindex(self):
         return self._has_rindex
@@ -231,6 +234,9 @@ class BlockPtrOptions:
         advance = ["0"] * len(self.shape)
         advance[self.offsets.index("roffset")] = "RBLOCK"
         return V.kernel.index_to_str(advance)
+
+    def has_indirect(self):
+        return False  # block_ptr can't do indirect indexing
 
     def has_rindex(self):
         return "RBLOCK" in self.block_shape
@@ -1229,8 +1235,23 @@ class TritonKernel(SIMDKernel):
         indirect = self.is_indirect_indexing(expr) or any(
             isinstance(m, TritonCSEVariable) for m in indexing.mask_vars
         )
-        buffer = self.compute if indirect else self.indexing_code
+        buffer = self.get_load_buffer(indexing)
         self.cse.generate(buffer, line, assignment=False)
+
+    def get_load_buffer(self, indexing):
+        if indexing.has_indirect() or indexing.has_tmpmask():
+            # Masked loads must come after the mask is computed
+            return self.compute
+        elif (
+            self.inside_reduction
+            and self.range_trees[-1].is_loop
+            and not indexing.has_rindex()
+        ):
+            # can lift a common load outside of reduction loop
+            # One exception is when this is an indirect_load.
+            return self.body
+        else:
+            return self.loads
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
@@ -1311,21 +1332,7 @@ class TritonKernel(SIMDKernel):
                 # NOTE: Currently causes hangs on bool UTs for ROCm
                 line += ".to(tl.int1)"
 
-        if has_tmpmask:
-            # Masked loads must come after the mask is computed
-            load_buffer = self.compute
-        elif (
-            self.inside_reduction
-            and self.range_trees[-1].is_loop
-            and not indirect_indexing
-            and not has_rindex
-        ):
-            # can lift a common load outside of reduction loop
-            # One exception is when this is an indirect_load.
-            load_buffer = self.body
-        else:
-            load_buffer = self.loads
-
+        load_buffer = self.get_load_buffer(indexing)
         result_var = self.cse.generate(load_buffer, line)
         assert isinstance(result_var, TritonCSEVariable)
         result_var.mask_vars = indexing.mask_vars  # type: ignore[assignment]
