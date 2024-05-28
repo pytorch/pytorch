@@ -59,9 +59,6 @@ from tools.testing.discover_tests import (
 )
 from tools.testing.do_target_determination_for_s3 import import_results
 from tools.testing.target_determination.gen_artifact import gen_ci_artifact
-from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
-    gen_additional_test_failures_file,
-)
 from tools.testing.target_determination.heuristics.utils import get_pr_number
 
 from tools.testing.test_run import TestRun
@@ -243,8 +240,7 @@ CI_SERIAL_LIST = [
     "test_native_mha",  # OOM
     "test_module_hooks",  # OOM
     "inductor/test_max_autotune",
-    "inductor/test_cutlass_backend",  # slow due to many nvcc compilation steps,
-    "inductor/test_flex_attention",  # OOM
+    "inductor/test_cutlass_backend",  # slow due to many nvcc compilation steps
 ]
 # A subset of onnx tests that cannot run in parallel due to high memory usage.
 ONNX_SERIAL_LIST = [
@@ -411,7 +407,7 @@ def run_test(
         stepcurrent_key = f"{test_file}_{test_module.shard}_{os.urandom(8).hex()}"
 
     if options.verbose:
-        unittest_args.append(f'-{"v" * options.verbose}')  # in case of pytest
+        unittest_args.append(f'-{"v"*options.verbose}')  # in case of pytest
 
     if test_file in RUN_PARALLEL_BLOCKLIST:
         unittest_args = [
@@ -1798,9 +1794,6 @@ def main():
                         **test_stats,
                     },
                 )
-            gen_additional_test_failures_file(
-                [test.test_file for test, _ in all_failures]
-            )
 
     if len(all_failures):
         for _, err in all_failures:

@@ -29,7 +29,6 @@ from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
 import logging
 from torch._library.fake_class_registry import FakeScriptObject
-import warnings
 
 from torch.overrides import TorchFunctionMode
 
@@ -922,10 +921,6 @@ def disable_autocast_cache():
         torch.set_autocast_cache_enabled(old_value)
 
 
-class _ModuleNotInstalledAsSubmoduleError(NameError):
-    pass
-
-
 class _ModuleStackTracer(PythonKeyTracer):
     r"""Customized version of PythonKeyTracer that retains module stack
     information in node.meta["nn_module_stack"].
@@ -1003,10 +998,7 @@ class _ModuleStackTracer(PythonKeyTracer):
         if isinstance(mod, self.proxy_type):
             return self.proxy_paths[mod]
 
-        try:
-            return Tracer.path_of_module(self, mod)
-        except NameError as e:
-            raise _ModuleNotInstalledAsSubmoduleError from e
+        return Tracer.path_of_module(self, mod)
 
     def getattr(self, attr, attr_val, parameter_proxy_cache):
         if not isinstance(attr_val, torch.nn.Module) or isinstance(attr_val, torch.fx.GraphModule):
@@ -1078,17 +1070,7 @@ class _ModuleStackTracer(PythonKeyTracer):
         # use cases don't need to work with HOO.
         if isinstance(m, (OptimizedModule, GraphModule)):
             return forward(*args, **kwargs)
-
-        try:
-            return Tracer.call_module(self, m, forward, args, kwargs)
-        except _ModuleNotInstalledAsSubmoduleError as e:
-            warnings.warn(
-                f"Unable to find the path of the module {m}. "
-                "This might be because the module was not properly registered "
-                "as a submodule, which is not good practice. We will trace "
-                "through the module without recording stack information."
-            )
-            return forward(*args, **kwargs)
+        return Tracer.call_module(self, m, forward, args, kwargs)
 
 
     def is_leaf_module(self, m, module_qualified_name):

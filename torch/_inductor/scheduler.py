@@ -28,7 +28,6 @@ import sympy
 import torch
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._sympy.symbol import free_symbol_is_type, SymT
 from torch.utils._triton import has_triton
 
@@ -337,7 +336,7 @@ class BaseSchedulerNode:
             isinstance(self, (SchedulerNode,))
             and config.inplace_buffers
             and (
-                not isinstance(V.kernel, torch._inductor.codegen.simd.SIMDKernel)
+                not isinstance(V.kernel, torch._inductor.codegen.triton.TritonKernel)
                 or getattr(V.kernel, "mutations", None) is not None
             )
         ):
@@ -391,7 +390,7 @@ class BaseSchedulerNode:
                             )
                             # mutations not tracked in cpp kernels
                             if isinstance(
-                                V.kernel, torch._inductor.codegen.simd.SIMDKernel
+                                V.kernel, torch._inductor.codegen.triton.TritonKernel
                             ):
                                 V.kernel.mutations.add(input_node.get_name())
                                 V.kernel.mutations.add(self.get_name())
@@ -506,16 +505,12 @@ class BaseSchedulerNode:
         if isinstance(self, ExternKernelSchedulerNode) and isinstance(
             self.node, MultiOutput
         ):
-            # todo: Calculate this - it's kinda annoying.
             return 0
 
-        def try_size_hint(s):
-            return V.graph.sizevars.size_hint(s, fallback=0)
-
         if isinstance(self, SchedulerNode):
-            node_numel = try_size_hint(
+            node_numel = V.graph.sizevars.size_hint(
                 sympy_product(self.get_ranges()[0])
-                * sympy_product(self.get_ranges()[1]),
+                * sympy_product(self.get_ranges()[1])
             )
         else:
             node_numel = int(1e9)
@@ -550,24 +545,16 @@ class BaseSchedulerNode:
                 continue
 
             def get_buf_elems(buf):
-                # Kind of a lazy way to get the MultiOutput nodes corresponding to
-                # a MultiOutputLayout
-                if isinstance(buf.layout, MultiOutputLayout):
-                    users = self.scheduler.name_to_node[buf.get_name()].users
-                    tot = 0
-                    for user in users:
-                        if isinstance(user.node.node, MultiOutput):
-                            tot += get_buf_elems(user.node.node)
-                        else:
-                            # Buf is a MultiOutputLayout but not all of its
-                            # users are MultiOutputs...
-                            # TODO: Figure out what's going on
-                            return 0
-                    return tot
-                else:
-                    return try_size_hint(sympy_product(buf.get_size()))
+                return V.graph.sizevars.size_hint(sympy_product(buf.get_size()))
 
-            buf_elems = get_buf_elems(buf)
+            # Kind of a lazy way to get the MultiOutput nodes corresponding to
+            # a MultiOutputLayout
+            if isinstance(buf.layout, MultiOutputLayout):
+                users = self.scheduler.name_to_node[buf.get_name()].users
+                buf_elems = sum(get_buf_elems(user.node.node) for user in users)
+            else:
+                buf_elems = get_buf_elems(buf)
+
             node_bytes += min(buf_elems, buf_accessed_elems) * get_dtype_size(
                 buf.get_dtype()
             )
@@ -593,20 +580,13 @@ class BaseSchedulerNode:
             layout = self.node.get_layout()
             dtype = self.node.get_dtype()
 
-        if layout.device is not None and not is_gpu(layout.device.type):
+        if not is_gpu(layout.device.type):
             # default to no reordering based on runtime
             return 0
 
         # Collective kernels
         if is_collective(self.node):
-            try:
-                return estimate_nccl_collective_runtime(self.node)
-            except ValueError as e:
-                # We don't know how to estimate runtime for this collective,
-                # falling back to 0
-                log.info(e)
-                return 0
-
+            return estimate_nccl_collective_runtime(self.node)
         elif is_wait(self.node):
             # ir.Wait is only used for collective ops.
             # The time needed for the collective op is already estimated and considered
@@ -631,14 +611,7 @@ class BaseSchedulerNode:
                 from torch._subclasses.fake_tensor import FakeTensorMode
                 from torch.utils.flop_counter import FlopCounterMode
 
-                if any(
-                    len(free_unbacked_symbols(n.get_numel())) > 0
-                    for n in self.node.inputs
-                ):
-                    # Tensor has unbacked symints, we don't know how to estimate
-                    # runtime for that today
-                    return 0
-
+                assert self.node.fx_node is not None
                 with FakeTensorMode() as fake_mode, FlopCounterMode(
                     display=False
                 ) as flop_counter_mode, V.set_current_node(
@@ -646,6 +619,7 @@ class BaseSchedulerNode:
                 ), V.set_fake_mode(
                     fake_mode
                 ):
+                    assert V.current_node is not None
                     from .ir import ir_node_to_tensor
 
                     fake_inputs = [
@@ -974,7 +948,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def get_template_node(self):
         for node in self.snodes:
             if node.is_template():
-                return node.get_template_node()
+                return node
         return None
 
     def get_device(self):
@@ -1189,7 +1163,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         self.node.get_store_function()(self.node.make_loader()())
 
     def can_free(self):
-        raise NotImplementedError
+        return NotImplementedError
 
     def is_foreach(self):
         return True
@@ -1778,9 +1752,7 @@ class Scheduler:
             del V.graph.name_to_buffer[replaced_name]
             new_node.name = orig_name
 
-            orig = V.graph.buffers.index(orig_node)
-            V.graph.buffers.remove(new_node)
-            V.graph.buffers[orig] = new_node
+            V.graph.buffers.remove(orig_node)
             V.graph.name_to_buffer[orig_name] = new_node
 
         for i, node in enumerate(self.nodes):

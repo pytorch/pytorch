@@ -18,16 +18,10 @@ from ._debug import map_debug_info
 from ._IR import Pipe
 from ._utils import flatten_args, modify_graph_op_device
 
-
-__all__ = [
-    "PipelineStage",
-    "ManualPipelineStage",
-]
-
 logger = logging.getLogger(__name__)
 
 
-class _RootArgPlaceholder:
+class RootArgPlaceholder:
     """
     Placeholder for model-level inputs.
     """
@@ -35,7 +29,7 @@ class _RootArgPlaceholder:
     pass
 
 
-class _RecvInfo:
+class RecvInfo:
     """
     Represents a stage input.
     """
@@ -54,11 +48,11 @@ class _RecvInfo:
         self.buffer = buffer
 
     def __repr__(self):
-        return f"_RecvInfo(input={self.input_name}, source={self.source}, shape={self.buffer.size()})"
+        return f"RecvInfo(input={self.input_name}, source={self.source}, shape={self.buffer.size()})"
 
 
 # An input can be either a received activation or a model input
-InputInfo = Union[_RecvInfo, _RootArgPlaceholder]
+InputInfo = Union[RecvInfo, RootArgPlaceholder]
 
 
 def _make_tensor_from_meta(
@@ -76,7 +70,7 @@ def _make_tensor_from_meta(
     )
 
 
-class _PipelineStageBase(ABC):
+class PipelineStageBase(ABC):
     """
     Base class for pipeline stages.
     Implements common methods used by both the `PipelineStage` used by the tracing frontend and `ManualPipelineStage`.
@@ -195,7 +189,7 @@ class _PipelineStageBase(ABC):
             # Note: we send gradients back to previous stage as long as in
             # forward it is a received input, regardless of whether it requires
             # grad. It is up to the previous stage to disgard this gradient.
-            if isinstance(a, _RecvInfo):
+            if isinstance(a, RecvInfo):
                 grad_send_info.append(a.source)
                 return a.source
             else:
@@ -213,7 +207,7 @@ class _PipelineStageBase(ABC):
     def _create_grad_recv_info(
         self,
         act_send_info: Dict,
-    ) -> Tuple[_RecvInfo, ...]:
+    ) -> Tuple[RecvInfo, ...]:
         raise NotImplementedError
 
     def _get_recv_ops(
@@ -226,7 +220,7 @@ class _PipelineStageBase(ABC):
         """
         ops: List[dist.P2POp] = []
         for info in recv_infos:
-            if not isinstance(info, _RecvInfo):
+            if not isinstance(info, RecvInfo):
                 continue
 
             peer_rank = self.stage_index_to_group_rank[info.source]
@@ -252,7 +246,7 @@ class _PipelineStageBase(ABC):
         # before first forward
         if self.has_backward and not self.set_requires_grad[self.fwd_chunk_id]:
             for a in recv_infos:
-                if isinstance(a, _RecvInfo):
+                if isinstance(a, RecvInfo):
                     a.buffer.requires_grad_(True)
 
         return self._get_recv_ops(recv_infos)
@@ -360,7 +354,7 @@ class _PipelineStageBase(ABC):
         # don't want such accumulation.
         for recv_tuple in self.args_recv_info.values():  # iterate over all chunks
             for a in recv_tuple:  # iterate over all input args
-                if isinstance(a, _RecvInfo):
+                if isinstance(a, RecvInfo):
                     # Set to None is the newer and recommended way to clear grads, compared to `zero_()`.
                     # See https://github.com/pytorch/pytorch/pull/92731
                     a.buffer.grad = None
@@ -374,10 +368,10 @@ class _PipelineStageBase(ABC):
         """
 
         def get_recv_tensor(info):
-            if isinstance(info, _RecvInfo):
+            if isinstance(info, RecvInfo):
                 return info.buffer
             else:
-                raise AssertionError(f"Expected _RecvInfo but got {type(info)}")
+                raise AssertionError(f"Expected RecvInfo but got {type(info)}")
 
         tensors = map_aggregate(
             recv_infos,
@@ -550,7 +544,7 @@ class _PipelineStageBase(ABC):
         self.bwd_chunk_id += 1
 
 
-class _PipelineStage(_PipelineStageBase):
+class _PipelineStage(PipelineStageBase):
     def __init__(
         self,
         stage_module: torch.nn.Module,
@@ -563,7 +557,7 @@ class _PipelineStage(_PipelineStageBase):
         Create a pipeline stage given a stage_module to be wrapped by this stage
         and a `pipe_info` describing the stage relationship of the pipeline.
         """
-        _PipelineStageBase.__init__(
+        PipelineStageBase.__init__(
             self,
             stage_module,
             stage_index,
@@ -655,7 +649,7 @@ class _PipelineStage(_PipelineStageBase):
         self,
     ):
         """
-        Create a tuple of `_RecvInfo` for inputs to the stage.
+        Create a tuple of `RecvInfo` for inputs to the stage.
         """
 
         def create_recv_tensor(placeholder, arg_node):
@@ -665,7 +659,7 @@ class _PipelineStage(_PipelineStageBase):
             if arg_node.op == "placeholder":
                 # This is a root level placeholder, thus an input argument to the entire model.
                 # We are likely at stage 0, hence no need to create a receive buffer.
-                return _RootArgPlaceholder()
+                return RootArgPlaceholder()
 
             # Figure out the source stage of this input
             while arg_node.target is operator.getitem:
@@ -686,7 +680,7 @@ class _PipelineStage(_PipelineStageBase):
             )
             buffer = _make_tensor_from_meta(example_value, self.device)
 
-            return _RecvInfo(
+            return RecvInfo(
                 arg_node.name,
                 src_stage,
                 buffer,
@@ -769,12 +763,12 @@ class _PipelineStage(_PipelineStageBase):
     def _create_grad_recv_info(
         self,
         act_send_info: Dict,
-    ) -> Tuple[_RecvInfo, ...]:
+    ) -> Tuple[RecvInfo, ...]:
         """
-        Create a tuple of `_RecvInfo` for gradients.
+        Create a tuple of `RecvInfo` for gradients.
         """
-        # Dict[output_index, _RecvInfo]
-        grad_recv_info: Dict[int, _RecvInfo] = {}
+        # Dict[output_index, RecvInfo]
+        grad_recv_info: Dict[int, RecvInfo] = {}
         output_nodes = [node for node in self.submod.graph.nodes if node.op == "output"]
         assert len(output_nodes) == 1
         output_node = output_nodes[0]
@@ -796,7 +790,7 @@ class _PipelineStage(_PipelineStageBase):
             # TODO: otherwise needs grad accumulation
             assert len(dst_list) == 1, "Backward of skip connections not supported yet"
             grad_src = dst_list[0]
-            grad_recv_info[out_idx] = _RecvInfo(
+            grad_recv_info[out_idx] = RecvInfo(
                 f"{grad_src}",  # noqa: G004
                 grad_src,
                 _make_tensor_from_meta(example_value, self.device),
@@ -834,7 +828,7 @@ METADATA_TENSOR_LEN = 100
 PLACEHOLDER_VAL = -1
 
 
-def _create_empty_tensors(
+def create_empty_tensors(
     tensor: Union[torch.Tensor, List[torch.Tensor]], device: torch.device
 ) -> List[torch.Tensor]:
     """
@@ -853,7 +847,7 @@ def _create_empty_tensors(
     raise TypeError(f"Unsupported type {type(tensor)} cannot create empty tensors")
 
 
-def _create_metadata_tensor(
+def create_metadata_tensor(
     tensors: Optional[List[torch.Tensor]] = None,
     device: Optional[torch.device] = torch.device("cpu"),
 ) -> torch.Tensor:
@@ -899,7 +893,7 @@ def _create_metadata_tensor(
     return metadata_tensor
 
 
-def _extract_metadata_from_tensor(tensor: torch.Tensor) -> List[torch.Size]:
+def extract_metadata_from_tensor(tensor: torch.Tensor) -> List[torch.Size]:
     """
     Extract the number of dimensions and the shape of each tensor from a metadata tensor.
     """
@@ -913,7 +907,7 @@ def _extract_metadata_from_tensor(tensor: torch.Tensor) -> List[torch.Size]:
     return metadata
 
 
-def _get_stage_shapes(
+def get_stage_shapes(
     stage_modules: List[nn.Module],
     stage_ids: List[int],
     num_stages: int,
@@ -927,7 +921,7 @@ def _get_stage_shapes(
     virtual pipelining) and returns the shape of the inputs and outputs of the module.
     Only the first stage must pass in a microbatch.
 
-    Each rank must call _get_stage_shapes or the program will hang.
+    Each rank must call get_stage_shapes or the program will hang.
 
     Args:
         stage_modules: The chunks assigned to this rank. Rhe length should be 1 for any
@@ -945,7 +939,7 @@ def _get_stage_shapes(
 
     stage_id_to_shapes: Dict[int, Dict[str, list[torch.Size]]] = {}
     for stage_id, model in zip(stage_ids, stage_modules):
-        input_shape_metadata_tensor = _create_metadata_tensor(device=device)
+        input_shape_metadata_tensor = create_metadata_tensor(device=device)
         # TODO: Assumes prev_stage == rank - 1 and next_stage == rank + 1
         prev_rank = (rank - 1) % world_size
         next_rank = (rank + 1) % world_size
@@ -962,7 +956,7 @@ def _get_stage_shapes(
             # other stages must receive shape information
             # TODO: send/recv should take a group, rather than use the default group
             dist.recv(input_shape_metadata_tensor, prev_rank)
-            metadata = _extract_metadata_from_tensor(input_shape_metadata_tensor)
+            metadata = extract_metadata_from_tensor(input_shape_metadata_tensor)
             example_fwd_inputs = [
                 torch.empty(shape_list, device=device) for shape_list in metadata
             ]
@@ -971,12 +965,12 @@ def _get_stage_shapes(
         # perform forward
         # TODO: if forward fails raise a more descriptive error explaining which stage failed
         fwd_outputs = model(*example_fwd_inputs)
-        fwd_outputs = _create_empty_tensors(fwd_outputs, device)
+        fwd_outputs = create_empty_tensors(fwd_outputs, device)
         shapes["outputs"] = [fwd_output.shape for fwd_output in fwd_outputs]
 
         # send shape dims
         if stage_id != num_stages - 1:
-            output_shape_metadata_tensor = _create_metadata_tensor(
+            output_shape_metadata_tensor = create_metadata_tensor(
                 fwd_outputs, device=device
             )
             dist.send(output_shape_metadata_tensor, next_rank)
@@ -985,12 +979,12 @@ def _get_stage_shapes(
     return stage_id_to_shapes
 
 
-class ManualPipelineStage(_PipelineStageBase):
+class ManualPipelineStage(PipelineStageBase):
     """
     A class representing a pipeline stage in a pipeline parallelism setup.
     This class is created manually by providing a example input (and optionally output)
     as opposed to the PipelineStage class that is outputed from pipeline().
-    This class extends the `_PipelineStageBase` class and can similarly be used
+    This class extends the `PipelineStageBase` class and can similarly be used
     in `PipelineScheule`.
     Args:
         submodule (nn.Module): The PyTorch module wrapped by this stage.
@@ -1023,16 +1017,16 @@ class ManualPipelineStage(_PipelineStageBase):
         self.inputs: List[torch.Tensor] = []
         self.outputs: List[torch.Tensor] = []
 
-        self.inputs = _create_empty_tensors(input_args, device)
+        self.inputs = create_empty_tensors(input_args, device)
 
         if output_args is None:
             logger.info("output_args not provided, performing forward using input_args")
             self.outputs = self.submod(*self.inputs)
             # create buffers for the output so that the data is in the correct
             # shape in order to use in p2p op (send)
-            self.outputs = _create_empty_tensors(self.outputs, device)
+            self.outputs = create_empty_tensors(self.outputs, device)
         else:
-            self.outputs = _create_empty_tensors(output_args, device)
+            self.outputs = create_empty_tensors(output_args, device)
 
         # these are the buffers used in backwards send/recv, they are allocated later
         self.outputs_grad: List[torch.Tensor] = []
@@ -1055,7 +1049,7 @@ class ManualPipelineStage(_PipelineStageBase):
                 # We assume that we always receive from stage - 1
                 recv_infos = tuple(
                     [
-                        _RecvInfo(
+                        RecvInfo(
                             f"recv_for_{self.stage_index}_from_{self.stage_index - 1}",
                             self.stage_index - 1,
                             _make_tensor_from_meta(inp, self.device),
@@ -1067,7 +1061,7 @@ class ManualPipelineStage(_PipelineStageBase):
                 self.args_recv_info[chunk_id] = recv_infos
             else:
                 self.args_recv_info[chunk_id] = tuple(
-                    [_RootArgPlaceholder() for _ in self.inputs]
+                    [RootArgPlaceholder() for _ in self.inputs]
                 )
 
         # Send info during forward for each activation
@@ -1090,14 +1084,14 @@ class ManualPipelineStage(_PipelineStageBase):
     def _create_grad_recv_info(
         self,
         act_send_info: Dict,
-    ) -> Tuple[_RecvInfo, ...]:
-        grad_recv_info: Tuple[_RecvInfo, ...] = ()
+    ) -> Tuple[RecvInfo, ...]:
+        grad_recv_info: Tuple[RecvInfo, ...] = ()
         if not self.is_last:
             # Receiving gradients from multiple sources is not supported
             # hence we only take the first destination
             grad_recv_info = tuple(
                 [
-                    _RecvInfo(
+                    RecvInfo(
                         f"recv_grad_for_{self.stage_index}_from_{dst_list[0]}",
                         dst_list[0],
                         _make_tensor_from_meta(self.outputs[idx], self.device),
@@ -1107,7 +1101,7 @@ class ManualPipelineStage(_PipelineStageBase):
             )
         return grad_recv_info
 
-    def _init_p2p_neighbors(self):
+    def init_p2p_neighbors(self):
         """
         Set up p2p communitors between previous and next stages
         by sending a dummy tensor.
@@ -1132,7 +1126,7 @@ class ManualPipelineStage(_PipelineStageBase):
         return True
 
 
-def _validate_stage_shapes(pipeline_stages: List[ManualPipelineStage]):
+def validate_stage_shapes(pipeline_stages: List[ManualPipelineStage]):
     """
     Check that the buffer shapes match between stages was expected by performing an all_gather between
     all stages.
@@ -1176,26 +1170,24 @@ def _validate_stage_shapes(pipeline_stages: List[ManualPipelineStage]):
 
         # all gather each ranks inputs
         tensor_list = [
-            _create_metadata_tensor(device=stage.device)
-            for _ in range(stage.group_size)
+            create_metadata_tensor(device=stage.device) for _ in range(stage.group_size)
         ]
         expected_inputs = stage.inputs
-        stage_input = _create_metadata_tensor(expected_inputs, device=stage.device)
+        stage_input = create_metadata_tensor(expected_inputs, device=stage.device)
         dist.all_gather(tensor_list, stage_input)
         stage_input_shapes = [
-            _extract_metadata_from_tensor(tensor) for tensor in tensor_list
+            extract_metadata_from_tensor(tensor) for tensor in tensor_list
         ]
 
         # all gather each ranks outputs
         tensor_list = [
-            _create_metadata_tensor(device=stage.device)
-            for _ in range(stage.group_size)
+            create_metadata_tensor(device=stage.device) for _ in range(stage.group_size)
         ]
         expected_outputs = stage.outputs
-        stage_output = _create_metadata_tensor(expected_outputs, device=stage.device)
+        stage_output = create_metadata_tensor(expected_outputs, device=stage.device)
         dist.all_gather(tensor_list, stage_output)
         stage_output_shapes = [
-            _extract_metadata_from_tensor(tensor) for tensor in tensor_list
+            extract_metadata_from_tensor(tensor) for tensor in tensor_list
         ]
 
         logger.debug(

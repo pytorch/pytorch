@@ -1358,21 +1358,6 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         self.assertRaises(torch._dynamo.exc.UserError, lambda: f(torch.tensor([3])))
 
-    def test_assert(self):
-        @torch.compile
-        def fn1(x):
-            assert x.shape != x.shape
-
-        with self.assertRaises(AssertionError):
-            a = torch.randn(10)
-            fn1(a)
-
-        def fn2(x):
-            assert x.shape == x.shape
-            return x.abs()
-
-        torch._dynamo.testing.standard_test(self, fn=fn2, nargs=1, expected_ops=1)
-
     def test_config_obj(self):
         class Cfg:
             def __init__(self):
@@ -5396,9 +5381,14 @@ def fn():
                 return map(body, xs)
 
         mod = Module()
-        with self.assertRaisesRegex(
-            Unsupported, "Can't inplace modify module params/buffers"
-        ):
+
+        error_message = ""
+        if torch._dynamo.config.inline_inbuilt_nn_modules:
+            error_message = r"HigherOrderOperator: Mutating a variable not in the current scope \(SideEffects\)"
+        else:
+            error_message = "Can't inplace modify module params/buffers"
+
+        with self.assertRaisesRegex(Unsupported, error_message):
             opt_fn = torch._dynamo.optimize("eager", nopython=True)(mod)
             opt_fn(torch.randn(3, 2))
 

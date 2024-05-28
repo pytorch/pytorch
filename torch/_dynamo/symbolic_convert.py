@@ -343,11 +343,9 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         ):
             error_msg: VariableTracker = self.pop()
             # Skip over things like `assert True`
-            if value.is_python_constant():
-                if bool(value.as_python_constant()):
-                    return self.jump(inst)
-                else:
-                    jump_graph_break(self, inst, value)
+            if value.is_python_constant() and bool(value.as_python_constant()):
+                self.jump(inst)
+                return
 
             # TODO maybe should respect DtoH sync intention of users later??
             # Manually insert torch._assert_async instead of python assert and jump over
@@ -1506,14 +1504,6 @@ class InstructionTranslatorBase(
         assert obj.mutable_local
         return obj.call_method(self, "add", [v], {})
 
-    def SET_UPDATE(self, inst):
-        v = self.pop()
-        assert inst.argval > 0
-        obj = self.stack[-inst.arg]
-        assert isinstance(obj, SetVariable)
-        assert obj.mutable_local
-        obj.call_method(self, "update", [v], {})
-
     def LIST_APPEND(self, inst):
         v = self.pop()
         assert inst.argval > 0
@@ -2504,7 +2494,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
         except TypeError as e:
             # Wrap the general TypeError during bind_args() to the internal ArgsMismatchError with detailed info
-            raise ArgsMismatchError(  # noqa: B904
+            raise ArgsMismatchError(  # noqa: TRY200
                 "{reason}.\n  func = {func}, args = {args}, kwargs = {kwargs}".format(
                     reason=str(e),
                     func=f"'{func.get_name()}' {func.get_filename()}:{func.get_code().co_firstlineno}",

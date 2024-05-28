@@ -69,10 +69,7 @@ using slow_conv_transpose3d_backward_fn = std::tuple<at::Tensor,at::Tensor,at::T
 DECLARE_DISPATCH(slow_conv_transpose3d_backward_fn, slow_conv_transpose3d_backward_stub);
 
 namespace {
-  bool is_cudnnv8_heuristic_mode_b() {
-    static const bool is_cudnnv8_heuristic_mode_b = c10::utils::check_env("TORCH_CUDNN_USE_HEURISTIC_MODE_B") == true;
-    return is_cudnnv8_heuristic_mode_b;
-  }
+  static bool cudnnv8_heuristic_mode_b = c10::utils::check_env("TORCH_CUDNN_USE_HEURISTIC_MODE_B") == true;
 }
 
 static inline bool cudnnv8_enabled_check_debug() {
@@ -80,14 +77,14 @@ static inline bool cudnnv8_enabled_check_debug() {
   static bool cudnnv8_debug = c10::utils::check_env("TORCH_CUDNN_V8_API_DEBUG") == true;
   static uint8_t cudnnv8_debugcount = 0;
   if (cudnnv8_debug == 1 && cudnnv8_debugcount < 10) {
-    TORCH_WARN("TORCH_CUDNN_V8_DEBUG ON, V8 ON: ", cudnnv8_flag, " TORCH_CUDNN_USE_HEURISTIC_MODE B: ", is_cudnnv8_heuristic_mode_b());
+    TORCH_WARN("TORCH_CUDNN_V8_DEBUG ON, V8 ON: ", cudnnv8_flag, " TORCH_CUDNN_USE_HEURISTIC_MODE B: ", cudnnv8_heuristic_mode_b);
     cudnnv8_debugcount++;
   }
   return cudnnv8_flag == 1;
 }
 
 static inline bool cudnnv8_use_heur_mode_b() {
-  return is_cudnnv8_heuristic_mode_b();
+  return cudnnv8_heuristic_mode_b;
 }
 
 // Keep in sync with py::enum_ in Module.cpp

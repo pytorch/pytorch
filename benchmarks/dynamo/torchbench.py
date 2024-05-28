@@ -423,19 +423,13 @@ class TorchBenchmarkRunner(BenchmarkRunner):
 
     def forward_pass(self, mod, inputs, collect_outputs=True):
         with self.autocast(**self.autocast_arg):
-            if isinstance(inputs, dict):
-                return mod(**inputs)
-            else:
-                return mod(*inputs)
+            return mod(*inputs)
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
         self.optimizer_zero_grad(mod)
         with self.autocast(**self.autocast_arg):
-            if isinstance(clone_inputs, dict):
-                pred = mod(**cloned_inputs)
-            else:
-                pred = mod(*cloned_inputs)
+            pred = mod(*cloned_inputs)
             loss = self.compute_loss(pred)
         self.grad_scaler.scale(loss).backward()
         self.optimizer_step()

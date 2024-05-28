@@ -334,22 +334,25 @@ std::vector<std::string> inputTypes(const at::RecordFunction& fn) {
 // ----------------------------------------------------------------------------
 // -- NCCL Metadata -----------------------------------------------------------
 // ----------------------------------------------------------------------------
+#ifdef USE_DISTRIBUTED
+static constexpr auto kCommsName = "Collective name";
+static constexpr auto kDtype = "dtype";
+static constexpr auto kInMsgNelems = "In msg nelems";
+static constexpr auto kOutMsgNelems = "Out msg nelems";
+static constexpr auto kInSplit = "In split size";
+static constexpr auto kOutSplit = "Out split size";
+static constexpr auto kGlobalRankStart = "Global rank start";
+static constexpr auto kGlobalRankStride = "Global rank stride";
+static constexpr auto kGroupSize = "Group size";
+static constexpr auto kProcessGroupName = "Process Group Name";
+static constexpr auto kProcessGroupDesc = "Process Group Description";
+static constexpr auto kGroupRanks = "Process Group Ranks";
 
 static constexpr int32_t kTruncatLength = 30;
-
-template <typename ListLikeType>
-inline std::string format_list(ListLikeType list, bool truncate) {
-  if (truncate && list.size() > kTruncatLength) {
-    return fmt::format(
-        "\"[{}, ...]\"",
-        fmt::join(list.begin(), list.begin() + kTruncatLength, ", "));
-  }
-  return fmt::format("\"[{}]\"", fmt::join(list.begin(), list.end(), ", "));
-}
+#endif // USE_DISTRIBUTED
 
 std::unordered_map<std::string, std::string> saveNcclMeta(
-    const at::RecordFunction& fn,
-    bool truncate) {
+    const at::RecordFunction& fn) {
   std::unordered_map<std::string, std::string> map;
 #ifdef USE_DISTRIBUTED
   auto debugInfo = dynamic_cast<ParamCommsDebugInfo*>(
@@ -366,13 +369,34 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
       kDtype, fmt::format("\"{}\"", c10::toString(debugInfo->getDType())));
   map.emplace(kInMsgNelems, std::to_string(debugInfo->getInMessageNelems()));
   map.emplace(kOutMsgNelems, std::to_string(debugInfo->getOutMessageNelems()));
-
   auto& inSplitSizes = debugInfo->getInputSplitSizes();
-  map.emplace(kInSplit, format_list(inSplitSizes, truncate));
-
+  if (!inSplitSizes.empty() && inSplitSizes.size() <= kTruncatLength) {
+    map.emplace(
+        kInSplit, fmt::format("\"[{}]\"", fmt::join(inSplitSizes, ", ")));
+  } else if (inSplitSizes.size() > kTruncatLength) {
+    map.emplace(
+        kInSplit,
+        fmt::format(
+            "\"[{}, ...]\"",
+            fmt::join(
+                inSplitSizes.begin(),
+                inSplitSizes.begin() + kTruncatLength,
+                ", ")));
+  }
   auto& outSplitSizes = debugInfo->getOutputSplitSizes();
-  map.emplace(kOutSplit, format_list(outSplitSizes, truncate));
-
+  if (!outSplitSizes.empty() && outSplitSizes.size() <= kTruncatLength) {
+    map.emplace(
+        kOutSplit, fmt::format("\"[{}]\"", fmt::join(outSplitSizes, ", ")));
+  } else if (outSplitSizes.size() > kTruncatLength) {
+    map.emplace(
+        kOutSplit,
+        fmt::format(
+            "\"[{}, ...]\"",
+            fmt::join(
+                outSplitSizes.begin(),
+                outSplitSizes.begin() + kTruncatLength,
+                ", ")));
+  }
   auto globalRankStart = debugInfo->getGlobalRankStart();
   if (globalRankStart >= 0) {
     map.emplace(kGlobalRankStart, std::to_string(globalRankStart));
@@ -391,7 +415,20 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
     map.emplace(kProcessGroupDesc, fmt::format("\"{}\"", group_desc));
   }
   auto& groupRanks = debugInfo->getGroupRanks();
-  map.emplace(kGroupRanks, format_list(groupRanks, truncate));
+  if (!groupRanks.empty() && groupRanks.size() <= kTruncatLength) {
+    map.emplace(
+        kGroupRanks, fmt::format("\"[{}]\"", fmt::join(groupRanks, ", ")));
+  } else if (groupRanks.size() > kTruncatLength) {
+    map.emplace(
+        kGroupRanks,
+        fmt::format(
+            "\"[{}, ..., {}]\"",
+            fmt::join(
+                groupRanks.begin(),
+                groupRanks.begin() + kTruncatLength - 1,
+                ", "),
+            groupRanks.back()));
+  }
 #endif // USE_DISTRIBUTED
   return map;
 }

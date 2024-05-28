@@ -16,6 +16,7 @@ Registry
    :members:
 
 .. autoclass:: RendezvousHandlerRegistry
+   :members:
 
 .. automodule:: torch.distributed.elastic.rendezvous.registry
 
@@ -26,16 +27,6 @@ Handler
 
 .. autoclass:: RendezvousHandler
    :members:
-
-Dataclasses
------------
-.. autoclass:: RendezvousInfo
-
-.. currentmodule:: torch.distributed.elastic.rendezvous.api
-
-.. autoclass:: RendezvousStoreInfo
-
-   .. automethod:: build(rank, store)
 
 Exceptions
 ----------

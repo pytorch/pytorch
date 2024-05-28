@@ -11,7 +11,6 @@ from torch.utils.weak import WeakTensorKeyDictionary
 import functools
 from torch._C._profiler import gather_traceback, symbolize_tracebacks
 
-logger = logging.getLogger("LoggingTensor")
 
 _dtype_abbrs = {
     torch.bfloat16: "bf16",
@@ -136,8 +135,8 @@ class LoggingTensorHandler(logging.Handler):
         if self.tracebacks_list is not None:
             self.tracebacks_list.append(record.traceback)
 
-def log_input(name: str, var: object) -> None:
-    logger.info("input", (name,), {}, var)  # noqa: PLE1205
+def log_input(name: str, var: object):
+    logging.getLogger("LoggingTensor").info("input", (name,), {}, var)  # noqa: PLE1205
 
 class GatherTraceback(logging.Filter):
     def __init__(self, python=True, script=True, cpp=False):
@@ -152,6 +151,7 @@ class GatherTraceback(logging.Filter):
 @contextlib.contextmanager
 def capture_logs(is_mode=False, python_tb=False, script_tb=False, cpp_tb=False) -> Iterator[List[str]]:
     collect_traceback = python_tb or script_tb or cpp_tb
+    logger = logging.getLogger("LoggingTensor")
     log_list: List[str] = []
     tracebacks_list: List[str] = []
     handler = LoggingTensorHandler(
