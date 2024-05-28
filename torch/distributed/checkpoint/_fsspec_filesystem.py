@@ -119,4 +119,4 @@ class FsspecReader(FileSystemReader):
 
     @classmethod
     def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
-        return FileSystem.check(checkpoint_id)
+        return FileSystem.validate_checkpoint_id(checkpoint_id)

@@ -397,7 +397,7 @@ class TestTryMerge(TestCase):
     def test_gql_retrieve_checksuites(self, *args: Any) -> None:
         "Fetch comments and conclusions for PR with 60 commits"
         pr = GitHubPR("pytorch", "pytorch", 94787)
-        self.assertEqual(len(pr.get_checkrun_conclusions()), 183)
+        self.assertEqual(len(pr.get_checkrun_conclusions()), 182)
 
     def test_team_members(self, *args: Any) -> None:
         "Test fetching team members works"
@@ -741,6 +741,30 @@ class TestBypassFailures(TestCase):
         self.assertTrue(len(failed) == 0)
         self.assertTrue(len(ignorable["UNSTABLE"]) == 1)
 
+        # Add another test case where there is no unstable keyword in the job name, but
+        # the job has already been marked as unstable
+        pr = GitHubPR("pytorch", "executorch", 3318)
+        checks = pr.get_checkrun_conclusions()
+        checks = get_classifications(
+            pr.pr_num,
+            pr.project,
+            checks,
+            [],
+        )
+        print(checks)
+        workflow_name = "test-llama-app"
+        job_name = "mobile-job (android)"
+        self.assertTrue(
+            checks[f"Android / {workflow_name} / {job_name}"].classification
+            == "UNSTABLE"
+        )
+        pending, failed, ignorable = categorize_checks(
+            checks, list(checks.keys()), ok_failed_checks_threshold=1
+        )
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
+        self.assertTrue(len(ignorable["UNSTABLE"]) == 1)
+
     def test_get_classifications_broken_trunk(self, *args: Any) -> None:
         # The mock merge base is the actual value returned by gh_fetch_merge_base
         test_cases = [
@@ -831,6 +855,41 @@ class TestBypassFailures(TestCase):
         self.assertTrue(len(ignorable["IGNORE_CURRENT_CHECK"]) == 0)
         self.assertTrue(len(ignorable["FLAKY"]) == 4)
         self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 2)
+
+    def test_get_classifications_wrong_workflow_name(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 123104)
+        checks = pr.get_checkrun_conclusions()
+
+        check_name = "linux-binary-conda / conda-py3_8-cuda11_8-build / build"
+        check_name_workflow_path = ".github/workflows/generated-linux-binary-conda-nightly.yml / conda-py3_8-cuda11_8-build / build"
+
+        # Mock a check where the workflow name uses the full path
+        checks[check_name_workflow_path] = JobCheckState(
+            check_name_workflow_path,
+            checks[check_name].url,
+            checks[check_name].status,
+            checks[check_name].classification,
+            checks[check_name].job_id,
+            checks[check_name].title,
+            checks[check_name].summary,
+        )
+        del checks[check_name]
+
+        checks = get_classifications(
+            pr.pr_num,
+            pr.project,
+            checks,
+            [],
+        )
+        pending, failed, ignorable = categorize_checks(
+            checks,
+            list(checks.keys()),
+        )
+
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
+        self.assertTrue(len(ignorable["FLAKY"]) == 1)
+        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 0)
 
     @mock.patch("trymerge.read_merge_rules", side_effect=xla_merge_rules)
     def test_dont_ignore_flaky_failures(self, *args: Any) -> None:

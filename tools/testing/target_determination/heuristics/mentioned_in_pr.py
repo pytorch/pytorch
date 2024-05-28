@@ -1,4 +1,3 @@
-import os
 import re
 from typing import Any, List
 
@@ -9,6 +8,7 @@ from tools.testing.target_determination.heuristics.interface import (
 from tools.testing.target_determination.heuristics.utils import (
     get_git_commit_info,
     get_issue_or_pr_body,
+    get_pr_number,
 )
 from tools.testing.test_run import TestRun
 
@@ -32,14 +32,11 @@ class MentionedInPR(HeuristicInterface):
             print(f"Can't get commit info due to {e}")
             commit_messages = ""
         try:
-            pr_number = os.environ.get("PR_NUMBER", "")
-            if pr_number == "":
-                re_match = re.match(
-                    r"^refs/tags/.*/(\d+)$", os.environ.get("GITHUB_REF", "")
-                )
-                if re_match is not None:
-                    pr_number = re_match.group(1)
-            pr_body = get_issue_or_pr_body(int(pr_number))
+            pr_number = get_pr_number()
+            if pr_number is not None:
+                pr_body = get_issue_or_pr_body(pr_number)
+            else:
+                pr_body = ""
         except Exception as e:
             print(f"Can't get PR body due to {e}")
             pr_body = ""

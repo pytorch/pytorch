@@ -91,7 +91,6 @@ def valuetype_type(
     t: Type,
     *,
     binds: ArgName,
-    mutable: bool = True,
     remove_non_owning_ref_types: bool = False,
     symint: bool = False,
 ) -> Optional[NamedCType]:
@@ -111,12 +110,9 @@ def valuetype_type(
         # All other BaseType currently map directly to BaseCppTypes.
         return NamedCType(binds, BaseCType(BaseTypeToCppMapping[t.name]))
     elif isinstance(t, OptionalType):
-        elem = valuetype_type(t.elem, binds=binds, mutable=mutable, symint=symint)
+        elem = valuetype_type(t.elem, binds=binds, symint=symint)
         if elem is None:
             return None
-        if not mutable:
-            if str(t.elem) == "Generator":
-                return NamedCType(binds, ConstRefCType(OptionalCType(elem.type)))
         return NamedCType(binds, OptionalCType(elem.type))
     elif isinstance(t, ListType):
         if str(t.elem) == "bool":
@@ -144,14 +140,10 @@ def argumenttype_type(
     r = valuetype_type(
         t,
         binds=binds,
-        mutable=mutable,
         symint=symint,
         remove_non_owning_ref_types=remove_non_owning_ref_types,
     )
     if r is not None:
-        if isinstance(t, OptionalType) and not mutable:
-            if str(t.elem) == "Generator":
-                return NamedCType(binds, ConstRefCType(r.type))
         return r
 
     if isinstance(t, BaseType):
@@ -236,7 +228,7 @@ def returntype_type(t: Type, *, mutable: bool, symint: bool = False) -> CType:
     # placeholder is ignored
     # NB: symint is ALWAYS respected for return types.  So symint argument
     # here is IGNORED
-    r = valuetype_type(t, binds="__placeholder__", mutable=mutable, symint=True)
+    r = valuetype_type(t, binds="__placeholder__", symint=True)
     if r is not None:
         return r.type
 
@@ -320,7 +312,7 @@ def return_names(f: NativeFunction, *, fallback_name: str = "result") -> Sequenc
 JIT_TO_CPP_DEFAULT = {
     "False": "false",
     "True": "true",
-    "None": "c10::nullopt",  # UGH this one is type directed
+    "None": "::std::nullopt",  # UGH this one is type directed
     "Mean": "at::Reduction::Mean",
     "[]": "{}",
     "contiguous_format": "MemoryFormat::Contiguous",
@@ -355,7 +347,7 @@ def default_expr(d: str, t: Type, *, symint: bool) -> str:
 
     if isinstance(t, OptionalType):
         if d == "None":
-            return "c10::nullopt"
+            return "::std::nullopt"
 
         return default_expr(d, t.elem, symint=symint)
 

@@ -16,7 +16,8 @@ from typing import (
 )
 
 import torch
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import counters, optimus_scuba_log
+from torch._utils_internal import upload_graph
 
 from .. import config
 from ..pattern_matcher import (
@@ -193,7 +194,7 @@ class PostGradBatchLinearFusion(BatchFusion):
             return None
         m, k = input_m.meta["tensor_meta"].shape  # type: ignore[union-attr]
         n = weight_m.meta["tensor_meta"].shape[1]  # type: ignore[union-attr]
-        batch_key = ("batch_linear", m, k, n, bias_m is not None)
+        batch_key = ("batch_linear_post_grad", m, k, n, bias_m is not None)
         return batch_key
 
     def fuse(self, graph: torch.fx.GraphModule, subset: List[torch.fx.Node]):
@@ -301,7 +302,6 @@ class GroupLinearFusion(GroupFusion):
 
         if all(bias is None for bias in group_biases):
             group_biases = None  # type: ignore[assignment]
-        group_biases: Optional[List[Any]]
 
         with graph.inserting_before(subset[0]):
             fused_mm = graph.call_function(
@@ -353,7 +353,7 @@ class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
             input, other = node.args
             shape = list(input.meta["tensor_meta"].shape)  # type: ignore[union-attr]
             group_key = (
-                "batch_" + self.op.__name__.lower().split(".")[0] + "_post_grad",
+                "batch_aten_" + self.op.__name__.lower().split(".")[0],
                 str(shape),
                 str(input.meta["tensor_meta"].dtype),  # type: ignore[union-attr]
                 str(other.meta["tensor_meta"].dtype),  # type: ignore[union-attr]
@@ -514,7 +514,7 @@ class PreGradBatchLinearFusion(BatchFusion):
             weight = get_arg_value(node, 1, "weight")
             bias = get_arg_value(node, 2, "bias")
             group_key = (
-                "batch_linear_pre_grad",
+                "batch_linear",
                 self._getitem_args(input),
                 str(input.meta["example_value"].shape),
                 str(weight.meta["example_value"].shape),
@@ -648,10 +648,8 @@ class BatchLayernormFusion(BatchFusion):
 
         if all(bias is None for bias in group_biases):
             group_biases = None  # type: ignore[assignment]
-        group_biases: Optional[List[Any]]
         if all(weight is None for weight in group_weights):
             group_weights = None  # type: ignore[assignment]
-        group_weights: Optional[List[Any]]
         assert all(
             eps == group_epss[0] for eps in group_epss
         ), "all epsilon values must be equal"
@@ -752,7 +750,7 @@ class BatchLayernormFusion(BatchFusion):
 
 class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
     """
-    Batch poinwise ops (e.g., sigmoid, relu, tanh) fusion in pre grad pass.
+    Batch pointwise ops (e.g., sigmoid, relu, tanh) fusion in pre grad pass.
     We fuse it in random place, and the introduced stack node may be merged in split cat.
     """
 
@@ -765,7 +763,7 @@ class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
         if CallFunctionVarArgs(self.op).match(node) and is_node_meta_valid(node):
             # for relu op, we also use the inplace to construct the key
             group_key = (
-                "batch_" + self.op.__name__.lower().split(".")[0] + "_pre_grad",
+                "batch_" + self.op.__name__.lower().split(".")[0],
                 str(input.meta["example_value"].shape),
                 str(node.kwargs.get("inplace", False)),
             )
@@ -857,7 +855,7 @@ class BatchMulPostGradFusion(BatchPointwiseOpsPostGradFusion):
 class _OrderedSet:
     def __init__(self, param=None):
         if param:
-            self.rep = OrderedDict({k: None for k in param})
+            self.rep = OrderedDict(dict.fromkeys(param))
         else:
             self.rep = OrderedDict()
 
@@ -1002,6 +1000,7 @@ def get_fusion_candidates(
 def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusionBase):
     stable_topological_sort(graph)  # type: ignore[arg-type]
     fused_set: Set[torch.fx.Node] = set()
+    log_to_scuba = False
 
     for node in reversed(graph.nodes):
         candidates = get_fusion_candidates(rule, node, fused_set)
@@ -1018,11 +1017,17 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
                 log.debug(
                     f"{rule.__class__.__name__}: key = {key}; subset size = {len(list(subset))}"  # noqa: G004
                 )
+                log_to_scuba = True
+    if log_to_scuba:
+        optimus_scuba_log[rule.__class__.__name__] = upload_graph(graph)
 
 
 def generate_fusion_from_config(config_options: Dict[str, Any], pre_grad=True):
     fusions: List[GroupBatchFusionBase] = []
     for name, options in config_options.items():
+        # we skip all patterns from pattern_matcher passes (e.g., split_cat)
+        if name not in PRE_GRAD_FUSIONS and name not in POST_GRAD_FUSIONS:
+            continue
         fusion_cls = PRE_GRAD_FUSIONS[name] if pre_grad else POST_GRAD_FUSIONS[name]
         _options = graph_search_options.copy()
         _options.update(options)

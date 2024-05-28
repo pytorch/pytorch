@@ -25,7 +25,7 @@ from torch._guards import detect_fake_mode
 from torch._prims_common import CUDARngStateHelper
 from torch.fx.experimental.symbolic_shapes import (
     definitely_false,
-    rename_unbacked_to,
+    PropagateUnbackedSymInts,
     sym_eq,
 )
 from torch.nn.utils import stateless
@@ -376,8 +376,8 @@ def create_functionalized_fn(
 
             # Populate the current FunctionalTensorMode with the tokens per
             # operator. See Note [FunctionalTensorMode is Stateful]
-            functional_tensor_mode = (
-                torch.utils._python_dispatch._detect_functional_mode()
+            functional_tensor_mode = torch.utils._python_dispatch._detect_infra_mode(
+                torch._C._TorchDispatchModeKey.FUNCTIONAL
             )
             assert functional_tensor_mode is not None
             for i, k in enumerate(meta.tokens.keys()):
@@ -420,7 +420,11 @@ def create_functionalized_fn(
                     ), "Found a graph input that had its metadata mutated in the backward. This is not supported"
                 # Allow data mutations on fw inputs during the bw, but only if they do not require grad
                 # So we can guarantee that we can keep the mutations in the graph
-                if has_data_mutation(f_inpt) and not inpt_info.mutates_data:
+                if (
+                    has_data_mutation(f_inpt)
+                    and not inpt_info.mutates_data
+                    and not inpt_info.mutates_storage_metadata
+                ):
                     assert (
                         not inpt_info.requires_grad
                     ), "Found a graph input that requires_grad and was mutated in the backward. This is not supported"
@@ -473,22 +477,89 @@ def create_functionalized_fn(
                 assert is_fun(inpt_f)
                 inpt_new = from_fun(inpt_f)
                 if meta.input_info[i].mutation_type == MutationType.MUTATED_IN_GRAPH:
+                    # See Note [set_() Input Mutations in AOTAutograd]
+                    # all mutations on the input must be under no_grad, so it is safe to put in the graph
+                    # Here, we're saying that if an input experienced a set call, inp.set_(other),
+                    # then we can effectively not have to worry about whether its data was mutated.
+                    # There are 3 cases:
+                    # (1) We mutate inp *after* the set_() call. other is a graph intermediate.
+                    #     In this case, we're not really mutating the input storage of "inp";
+                    #     we're mutating the storage of an intermdiate value (other),
+                    #     and slamming that storage into the input tensor. So no data mutation is necessary.
+                    # (2) We mutate inp *after* the set_() call. other is a graph *input*.
+                    #     In this case, the data mutation will be properly handled in the runtime
+                    #     epilogue during the processing of "other"
+                    # (3) We mutate inp *before* the set_() call.
+                    #     This case is *not* currently handled.
+                    if meta.input_info[i].mutates_storage_metadata:
+                        with torch.no_grad():
+                            inpt_old.set_(inpt_new)
+
+                    # Note [Ordering of resize_() and set_()]
+                    # Importantly: the common usage in FSDP is that we have a dummy parameter
+                    # that sees a set_() and **Then** a resize_().
+                    # We must put those mutations into the graph in the same order,
+                    # Since running them in the opposite order will have different behavior.
+                    # We fully ban resize_() followed by set_() for now, although in principal
+                    # we could support this
+                    if meta.input_info[i].mutation_inductor_storage_resize:
+                        # resizing is not supported on subclasses (we error earlier if this happens)
+                        from torch._subclasses.functional_tensor import FunctionalTensor
+
+                        assert isinstance(inpt_f, FunctionalTensor)
+                        old_storage_size = torch._functionalize_get_storage_size(  # type: ignore[attr-defined]
+                            inpt_f.elem, before=True
+                        )
+                        new_storage_size = torch._functionalize_get_storage_size(  # type: ignore[attr-defined]
+                            inpt_f.elem, before=False
+                        )
+                        if old_storage_size != new_storage_size:
+                            assert (
+                                old_storage_size == 0 or new_storage_size == 0
+                            ), f"""\
+Encountered a storage resize during tracing on input {i}. Old nbytes={old_storage_size}, new nbytes={new_storage_size}
+We only support storage resizing on graph inputs as long as the input either starts or ends with a storage size of 0
+(the case for FSDP)"""
+                            torch.ops.inductor.resize_storage_bytes_(
+                                inpt_old, new_storage_size
+                            )
+                        if new_storage_size == 0:
+                            # Even if we marked the input as having a data mutation (thus needing a copy_()),
+                            # We should **ignore** it if our input has no storage
+                            # (this can happen if, e.g. we temporarily resize our input, copy data into it,
+                            #  and resize it back down to zero)
+                            continue
+                    # Optimization: if the copy_() is a no-op then don't include it in the graph.
+                    # In theory inductor could optimize this away, however in fsdp, we end up with
+                    # param.copy_(param), where param is a zero-storage-size tensor,
+                    # and running this op in eager mode (using the aot_eager backend) will result in a segfault.
+                    # So we may as well optimize it away here.
+                    if inpt_old is inpt_new:
+                        # (This check needs to be done after putting resize_() in the graph,
+                        # since a resize_(0) doesn't actually change the FunctionalTensor's inner tensor)
+                        continue
                     # We found an input that had a (data-only) mutation.
                     # Since keep_input_mutations is set, we need to faithfully apply a copy_()
                     # so the compiler will see the input mutation in the graph.
-                    if meta.input_info[i].mutations_hidden_from_autograd:
+                    if (
+                        meta.input_info[i].mutates_data
+                        and meta.input_info[i].mutations_hidden_from_autograd
+                    ):
                         # Hidden from autograd = run under no_grad, **and** don't bump VC
                         with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
                             inpt_old
                         ):
                             inpt_old.copy_(inpt_new)
-                    elif meta.input_info[i].mutations_under_no_grad_or_inference_mode:
+                    elif (
+                        meta.input_info[i].mutates_data
+                        and meta.input_info[i].mutations_under_no_grad_or_inference_mode
+                    ):
                         # Under no_grad = run under no_grad (we still bump the VC though)
                         # (inference_mode will also bump the VC, as long as the tensor in question
                         # was created outside of inference_mode)
                         with torch.no_grad():
                             inpt_old.copy_(inpt_new)
-                    else:
+                    elif meta.input_info[i].mutates_data:
                         inpt_old.copy_(inpt_new)
 
             # When an output tensor is a functionalized mutated input, and we
@@ -509,7 +580,8 @@ def create_functionalized_fn(
                     meta.input_info[info.base_idx].mutation_type
                     == MutationType.MUTATED_IN_GRAPH
                 ):
-                    flat_outs[i] = args[info.base_idx]
+                    fw_args = args[0] if trace_joint else args
+                    flat_outs[i] = fw_args[info.base_idx]
             return pytree.tree_unflatten(flat_outs, outs_spec)
 
         return pytree.tree_map(from_fun, f_outs)
@@ -648,21 +720,6 @@ def aot_dispatch_subclass(
     )
 
 
-class PropagateUnbackedSymInts(torch.fx.Interpreter):
-    def run_node(self, n: torch.fx.Node):
-        import sympy
-
-        result = super().run_node(n)
-        # TODO: handle Tensor returns
-        if "example_value" in n.meta:
-            if isinstance(result, torch.SymInt) and isinstance(
-                result.node.expr, sympy.Symbol
-            ):
-                rename_unbacked_to(n.meta["example_value"], result)
-
-        return result
-
-
 def create_functional_call(mod, params_spec, params_len, store_orig_mod=False):
     # Redundant with dynamo, but worth having in case this gets invoked elsewhere.
     # https://github.com/pytorch/pytorch/issues/103569
@@ -677,6 +734,7 @@ def create_functional_call(mod, params_spec, params_len, store_orig_mod=False):
                         "ignore", "Anomaly Detection has been enabled."
                     )
                     with torch.autograd.detect_anomaly(check_nan=False):
+                        detect_fake_mode().epoch += 1
                         out = PropagateUnbackedSymInts(mod).run(
                             *args[params_len:], **kwargs
                         )

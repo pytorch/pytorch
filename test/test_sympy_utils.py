@@ -255,7 +255,7 @@ class TestSympyInterp(TestCase):
     @parametrize("fn", UNARY_OPS + BINARY_OPS + UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS)
     def test_interp(self, fn):
         # SymPy does not implement truncation for Expressions
-        if fn in ("div", "truncdiv", "minimum", "maximum"):
+        if fn in ("div", "truncdiv", "minimum", "maximum", "mod"):
             return
 
         from sympy.abc import x, y
@@ -286,6 +286,10 @@ class TestSympyInterp(TestCase):
     def test_python_interp_fx(self, fn):
         # These never show up from symbolic_shapes
         if fn in ("log", "exp"):
+            return
+
+        # Sympy does not support truncation on symbolic shapes
+        if fn in ("truncdiv", "mod"):
             return
 
         vals = CONSTANTS

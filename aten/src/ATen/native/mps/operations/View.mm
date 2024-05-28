@@ -770,57 +770,16 @@ static std::string genScatterGatherCvtFunc(const std::string& dtypeSrc, const st
   return "(x)";
 }
 
-static id<MTLLibrary> compileGatherScatterOpsLibrary(id<MTLDevice> device,
-                                                     const std::string& dtypeSrc,
-                                                     const std::string& dtypeDst,
-                                                     bool needsScatter,
-                                                     bool needsConj) {
-  auto key = std::to_string(needsScatter) + std::to_string(needsConj) + dtypeSrc + dtypeDst;
-  static std::unordered_map<std::string, id<MTLLibrary>> _libCache;
-  auto it = _libCache.find(key);
-  if (it != _libCache.end()) {
-    return it->second;
-  }
-  NSError* error = nil;
-  MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
-  [options setLanguageVersion:is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) ? MTLLanguageVersion3_1
-                                                                                      : MTLLanguageVersion2_3];
-  const auto shaderStr = fmt::format(needsScatter ? SCATTER_OPS_TEMPLATE : GATHER_OPS_TEMPLATE,
-                                     dtypeSrc,
-                                     dtypeDst,
-                                     genScatterGatherCvtFunc(dtypeSrc, dtypeDst, needsConj));
-  auto gatherScatterLib = [device newLibraryWithSource:[NSString stringWithUTF8String:shaderStr.c_str()]
-                                               options:options
-                                                 error:&error];
-  TORCH_CHECK(gatherScatterLib != nil && error == nil,
-              "Failed to compile gather-scatter library, error: ",
-              [[error description] UTF8String]);
-  _libCache[key] = gatherScatterLib;
-  return gatherScatterLib;
-}
+static MetalShaderLibrary scatterLib(SCATTER_OPS_TEMPLATE, 3);
+static MetalShaderLibrary gatherLib(GATHER_OPS_TEMPLATE, 3);
 
-static id<MTLComputePipelineState> getPipelineState(id<MTLDevice> device,
-                                                    const std::string& kernel,
+static id<MTLComputePipelineState> getPipelineState(const std::string& kernel,
                                                     const std::string& dtypeSrc,
                                                     const std::string& dtypeDst,
                                                     bool needsScatter,
                                                     bool needsConj) {
-  auto key = kernel + dtypeSrc + dtypeDst + std::to_string(needsConj);
-  static std::unordered_map<std::string, id<MTLComputePipelineState>> _mtlPipelineCache;
-  auto it = _mtlPipelineCache.find(key);
-  if (it != _mtlPipelineCache.end()) {
-    return it->second;
-  }
-
-  NSError* error = nil;
-  id<MTLLibrary> library = compileGatherScatterOpsLibrary(device, dtypeSrc, dtypeDst, needsScatter, needsConj);
-  id<MTLFunction> func = [library newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]];
-  TORCH_CHECK(func, "Failed to load the Metal Shader function: ", kernel);
-  id<MTLComputePipelineState> pso = [device newComputePipelineStateWithFunction:func error:&error];
-  TORCH_CHECK(
-      pso != nil && error == nil, "Failed to construct pipeline state: ", [[error localizedDescription] UTF8String]);
-  _mtlPipelineCache[key] = pso;
-  return pso;
+  auto cvtFunc = genScatterGatherCvtFunc(dtypeSrc, dtypeDst, needsConj);
+  return (needsScatter ? scatterLib : gatherLib).getPipelineStateForFunc(kernel, {dtypeSrc, dtypeDst, cvtFunc});
 }
 
 Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
@@ -845,8 +804,7 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
     std::string functionName = getGatherScatterFunctionName(output.scalar_type(), output.dim(), /*needsScatter=*/false);
-    id<MTLComputePipelineState> gatherPSO = getPipelineState(MPSDevice::getInstance()->device(),
-                                                             functionName,
+    id<MTLComputePipelineState> gatherPSO = getPipelineState(functionName,
                                                              getGatherScatterScalarType(src),
                                                              getGatherScatterScalarType(output),
                                                              /*needsScatter=*/false,
@@ -903,8 +861,7 @@ Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output) {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       std::string functionName =
           getGatherScatterFunctionName(output.scalar_type(), output.dim(), /*needsScatter=*/true);
-      id<MTLComputePipelineState> scatterPSO = getPipelineState(MPSDevice::getInstance()->device(),
-                                                                functionName,
+      id<MTLComputePipelineState> scatterPSO = getPipelineState(functionName,
                                                                 getGatherScatterScalarType(src),
                                                                 getGatherScatterScalarType(output),
                                                                 /*needsScatter=*/true,

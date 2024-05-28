@@ -294,7 +294,7 @@ class TestGroupBatchFusion(TestCase):
                 counters["inductor"]["batch_aten_add"],
                 3,
             )
-            self.assertIn("group_batch_fusion_post_grad", optimus_scuba_log)
+            self.assertIn("GroupLinearFusion", optimus_scuba_log)
             counters.clear()
 
     @unittest.skipIf(not has_fbgemm, "requires fbgemm")
@@ -435,8 +435,7 @@ class TestPostGradBatchLinearFusion(TestCase):
             counters["inductor"]["batch_linear_post_grad"],
             2,
         )
-        self.assertNotIn("group_batch_fusion_pre_grad", optimus_scuba_log)
-        self.assertIn("group_batch_fusion_post_grad", optimus_scuba_log)
+        self.assertIn("PostGradBatchLinearFusion", optimus_scuba_log)
 
 
 class TestFindIndependentSubsetGreedy(TestCase):
