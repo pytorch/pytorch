@@ -545,7 +545,6 @@ def _export_to_aten_ir(
     *,
     transform=lambda x: x,  # TODO(zhxchen17) Revisit if this is needed later.
     pre_dispatch=False,
-    should_insert_runtime_assertion=False,
     _is_torch_jit_trace=False,
 ):
     # [NOTE] If the user is exporting under training mode, we want to detect if there is any
@@ -667,20 +666,19 @@ def _export_to_aten_ir(
 
     fake_mode = detect_fake_mode(flat_args)
 
-    if should_insert_runtime_assertion:
-        stack_trace = (
-            'File "torch/fx/passes/runtime_assert.py", line 24, '
-            "in insert_deferred_runtime_asserts"
+    stack_trace = (
+        'File "torch/fx/passes/runtime_assert.py", line 24, '
+        "in insert_deferred_runtime_asserts"
+    )
+    with _set_node_metadata_hook(
+        gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+    ):
+        insert_deferred_runtime_asserts(
+            gm,
+            fake_mode.shape_env,
+            f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
+            export=True,
         )
-        with _set_node_metadata_hook(
-            gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
-        ):
-            insert_deferred_runtime_asserts(
-                gm,
-                fake_mode.shape_env,
-                f"non strict exported program: {first_call_function_nn_module_stack(gm.graph)}",
-                export=True,
-            )
 
     if pre_dispatch:
         from torch._export.passes.replace_set_grad_with_hop_pass import (
@@ -1097,15 +1095,15 @@ def _strict_export(
 
     # NOTE: graph module expects only positional args
     constant_attrs = _gather_constant_attrs(mod)
-    aten_export_artifact = _export_to_aten_ir(
-        gm_torch_level,
-        _convert_to_positional_args(orig_arg_names, fake_args, fake_kwargs),
-        {},
-        fake_params_buffers,
-        constant_attrs,
-        pre_dispatch=pre_dispatch,
-        should_insert_runtime_assertion=False,
-    )
+    with dynamo_fake_mode:
+        aten_export_artifact = _export_to_aten_ir(
+            gm_torch_level,
+            _convert_to_positional_args(orig_arg_names, fake_args, fake_kwargs),
+            {},
+            fake_params_buffers,
+            constant_attrs,
+            pre_dispatch=pre_dispatch,
+        )
 
     # Decompose for readability.
     gm = aten_export_artifact.gm
@@ -1259,7 +1257,6 @@ def _non_strict_export(
                 new_fake_constant_attrs,
                 pre_dispatch=pre_dispatch,
                 transform=_tuplify_outputs,
-                should_insert_runtime_assertion=True,
                 _is_torch_jit_trace=_is_torch_jit_trace,
             )
             # aten_export_artifact.constants contains only fake script objects, we need to map them back
