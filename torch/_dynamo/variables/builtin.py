@@ -1217,9 +1217,15 @@ class BuiltinVariable(VariableTracker):
 
     def call_callable(self, tx, arg):
         from .functions import BaseUserFunctionVariable
+        from .nn_module import NNModuleVariable
 
         if isinstance(
-            arg, (variables.UserDefinedClassVariable, BaseUserFunctionVariable)
+            arg,
+            (
+                variables.UserDefinedClassVariable,
+                BaseUserFunctionVariable,
+                NNModuleVariable,
+            ),
         ):
             return variables.ConstantVariable.create(True)
         elif isinstance(arg, UserDefinedVariable):
