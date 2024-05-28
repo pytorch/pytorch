@@ -1370,8 +1370,9 @@ if(DEFINED USE_CUSTOM_DEBINFO)
     # We have to specify the scope here. We do this by specifying the targets we
     # care about and caffe2/ for all test targets defined there
     if(BUILD_LIBTORCHLESS)
-      set(ALL_PT_TARGETS "torch_python;${C10_LIB};torch_cpu;torch")
+      set(ALL_PT_TARGETS "torch_python;${C10_LIB};${TORCH_CPU_LIB};${TORCH_LIB}")
     else()
+      # @todo test if we can remove this
       set(ALL_PT_TARGETS "torch_python;c10;torch_cpu;torch")
     endif()
     set_source_files_properties(
