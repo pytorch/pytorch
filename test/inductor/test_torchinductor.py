@@ -36,6 +36,7 @@ from torch._dynamo.testing import (
     expectedFailureCodegenDynamic,
     rand_strided,
     same,
+    skipIfPy312,
 )
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
 from torch._inductor.fx_passes import pad_mm
@@ -46,6 +47,7 @@ from torch._inductor.utils import (
     aoti_eager_cache_dir,
     load_aoti_eager_cache,
     run_and_get_code,
+    run_and_get_cpp_code,
     run_and_get_triton_code,
 )
 from torch._inductor.virtualized import V
@@ -86,7 +88,6 @@ from torch.testing._internal.common_utils import (
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_unflatten
-from torch.utils._triton import has_triton
 from torch.utils.weak import WeakTensorKeyDictionary
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
@@ -341,29 +342,6 @@ def clone_preserve_strides(x, device=None):
         buffer = buffer.to(device, copy=True)
     out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
     return out
-
-
-def run_and_get_cpp_code(fn, *args, **kwargs):
-    # We use the patch context manager instead of using it as a decorator.
-    # In this way, we can ensure that the attribute is patched and unpatched correctly
-    # even if this run_and_get_cpp_code function is called multiple times.
-    with patch.object(config, "debug", True):
-        torch._dynamo.reset()
-        import io
-        import logging
-
-        log_capture_string = io.StringIO()
-        ch = logging.StreamHandler(log_capture_string)
-        from torch._inductor.graph import output_code_log
-
-        output_code_log.addHandler(ch)
-        prev_level = output_code_log.level
-        output_code_log.setLevel(logging.DEBUG)
-        result = fn(*args, **kwargs)
-        s = log_capture_string.getvalue()
-        output_code_log.setLevel(prev_level)
-        output_code_log.removeHandler(ch)
-    return result, s
 
 
 def check_model(
@@ -863,6 +841,86 @@ class CommonTemplate:
         self.assertTrue(kernel_lib_path in kernel_libs_abs_path)
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    def test_eager_aoti_with_scalar(self):
+        namespace_name = "aten"
+        op_name = "add"
+        op_overload_name = "Tensor"
+        op_name_with_overload = f"{op_name}.{op_overload_name}"
+
+        dispatch_key = "CPU"
+        device = torch.device("cpu")
+        if self.device.lower() == "cuda":
+            dispatch_key = "CUDA"
+            device = torch.device("cuda")
+
+        # Test the difference between scalar tensor and scalar
+        a = torch.scalar_tensor(1.0, device=device)
+        b = torch.scalar_tensor(2.0, device=device)
+
+        kernel_lib_path = aoti_compile_with_persistent_cache(
+            namespace_name,
+            op_name_with_overload,
+            a.device.type,
+            False,
+            torch.ops.aten.add,
+            args=(a, b),
+            kwargs={"alpha": 3.0},
+        )
+        self.assertTrue(Path(kernel_lib_path).exists())
+        device_kernel_cache = aoti_eager_cache_dir(namespace_name, device.type)
+        kernel_conf = device_kernel_cache / f"{op_name_with_overload}.json"
+        self.assertTrue(kernel_conf.exists())
+        json_data = load_aoti_eager_cache(
+            namespace_name, op_name_with_overload, a.device.type
+        )
+        op_info = json_data[0]
+        self.assertTrue(isinstance(op_info, dict))
+        self.assertTrue("meta_info" in op_info)
+        self.assertTrue(len(op_info["meta_info"]) == 3)
+        self.assertTrue(op_info["meta_info"][0]["sizes"] == [])
+        self.assertTrue(op_info["meta_info"][0]["strides"] == [])
+        # Scalar Tensor
+        self.assertTrue("scalar_value" not in op_info["meta_info"][0])
+        self.assertTrue(op_info["meta_info"][1]["sizes"] == [])
+        self.assertTrue(op_info["meta_info"][1]["strides"] == [])
+        # Scalar Tensor
+        self.assertTrue("scalar_value" not in op_info["meta_info"][1])
+        self.assertTrue(op_info["meta_info"][2]["sizes"] == [])
+        self.assertTrue(op_info["meta_info"][2]["strides"] == [])
+        # Scalar
+        self.assertTrue("scalar_value" in op_info["meta_info"][2])
+
+        with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
+            a = torch.randn(128, device=device)
+            b = torch.randn(128, device=device)
+
+            scalar_values = [1.0, 2.0, 3.0]
+            ref_values = []
+            for scalar_value in scalar_values:
+                ref_values.append(torch.add(a, b, alpha=scalar_value))
+
+            qualified_op_name = f"{namespace_name}::{op_name}"
+            _, overload_names = torch._C._jit_get_operation(qualified_op_name)
+            for overload_name in overload_names:
+                try:
+                    reg_op_name = qualified_op_name
+                    schema = torch._C._get_schema(reg_op_name, overload_name)
+                    if schema.overload_name:
+                        reg_op_name = f"{reg_op_name}.{schema.overload_name}"
+                    torch_compile_op_lib_impl._impl_with_aoti_compile(  # noqa: F821
+                        reg_op_name, dispatch_key
+                    )
+                except Exception as e:
+                    continue
+
+            res_values = []
+            for scalar_value in scalar_values:
+                res_values.append(torch.add(a, b, alpha=scalar_value))
+
+            self.assertEqual(len(ref_values), len(res_values))
+            self.assertEqual(ref_values, res_values)
+
+    @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_torch_compile_override_registration(self):
         dynamic = False
         namespace_name = "aten"
@@ -1205,6 +1263,22 @@ class CommonTemplate:
         expect = x.repeat(3)
         self.assertEqual(expect, actual)
         self.assertEqual(actual, repeat(x, 3))
+
+    def test_index_propagation_abs(self):
+        def reflection_pad_left(x, n):
+            # e.g. x=[1, 2, 3], n=2 => returns [3, 2, 1, 2, 3]
+            i = torch.arange(x.shape[0] + n, device=x.device)
+            return x[(i - n).abs()]
+
+        x = torch.randn(8, device=self.device)
+        opt_fn = torch._dynamo.optimize("inductor")(reflection_pad_left)
+
+        # this should be collapsed to direct indexing
+        actual = _run_and_assert_no_indirect_indexing(
+            self, opt_fn, x, 3, has_wrapping=False
+        )
+        expect = reflection_pad_left(x, 3)
+        self.assertEqual(expect, actual)
 
     @skipIfRocm
     @config.patch(debug_index_asserts=False)
@@ -2323,14 +2397,74 @@ class CommonTemplate:
     def test_div_precision(self):
         # Reproducer for https://github.com/pytorch/pytorch/issues/101039
 
-        def forward(y):
-            z = y.div(1e-06)
+        def forward(x, y):
+            z = x.div(y)
             return F.softmax(z, dim=-1)
 
         query = torch.randn(1, 10, 40)
         key = torch.randn(1, 2, 40)
-        y = torch.matmul(query, key.transpose(-2, -1))
-        self.common(forward, (y,))
+        x = torch.matmul(query, key.transpose(-2, -1))
+        self.common(forward, (x, 1e-6))
+
+        x = torch.tensor(
+            [
+                [
+                    [
+                        [-16.1649, 5.6846, -5.1022, -9.1134],
+                        [-11.5552, -2.2615, -12.8913, 10.6538],
+                        [-7.1666, -5.3333, 2.0776, -9.7984],
+                        [7.4469, -2.3948, 2.7371, 0.9201],
+                    ],
+                    [
+                        [-8.0361, -16.3771, 22.7741, 4.4685],
+                        [20.8047, -0.7771, -2.4355, -2.2299],
+                        [3.8343, -2.0914, -2.4077, 2.2740],
+                        [-15.8663, -2.7015, -12.5241, -3.0040],
+                    ],
+                    [
+                        [-2.5139, 14.4393, -3.7186, 1.2255],
+                        [5.6742, 14.1842, -8.5976, 16.8366],
+                        [-9.7358, -3.0279, 11.8164, -4.0787],
+                        [-9.0621, 8.2580, 29.9486, -2.4107],
+                    ],
+                    [
+                        [7.3622, 12.5640, -20.5592, 13.6237],
+                        [-11.5640, 0.8832, 16.7275, -2.5009],
+                        [-2.0953, -12.2276, -26.2633, 4.5268],
+                        [15.3329, -11.7492, 6.5650, -9.2483],
+                    ],
+                ],
+                [
+                    [
+                        [7.9980, -4.9369, 3.1508, 5.2994],
+                        [3.8052, 3.9514, 8.4987, -10.5045],
+                        [-2.6827, -4.0010, -4.0611, 6.4091],
+                        [-19.0318, 6.4073, 2.8923, 8.0250],
+                    ],
+                    [
+                        [7.1650, -3.4585, 5.7720, -5.0305],
+                        [-0.9765, -3.0086, 11.7114, 8.0555],
+                        [-3.1027, -3.5514, 9.6182, -8.8526],
+                        [-9.2348, -6.0239, 6.2528, -6.7221],
+                    ],
+                    [
+                        [11.5936, 22.4139, -0.4089, -4.9889],
+                        [14.8217, -2.3426, -17.6189, 3.7427],
+                        [1.9546, -13.0902, 8.6293, -7.2457],
+                        [-7.6900, -4.5796, 9.6332, -10.2631],
+                    ],
+                    [
+                        [0.8027, -1.0955, 14.8404, -0.2673],
+                        [3.2143, -1.8640, -2.9678, 6.5165],
+                        [-3.9865, 6.5230, 6.3019, -0.4247],
+                        [8.3185, -13.5076, 27.0986, -1.6792],
+                    ],
+                ],
+            ]
+        )
+        x = torch.matmul(x, x)
+        y = torch.tensor([[[0.6331]], [[1.6358]], [[-0.3459]], [[1.0196]]])
+        self.common(forward, (x, y))
 
     def test_div_by_zero(self):
         def fn(x, runtime_zero, runtime_neg_zero):
@@ -2668,6 +2802,7 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    @skipIfPy312  # segfaults
     @config.patch(force_mixed_mm=True)
     def test_mixed_mm(self):
         def fn(a, b):
@@ -2682,6 +2817,7 @@ class CommonTemplate:
             check_lowp=True,
         )
 
+    @skipIfPy312  # segfaults
     @config.patch(force_mixed_mm=True)
     def test_mixed_mm2(self):
         def fn(a, b, scale, bias):
@@ -3651,9 +3787,9 @@ class CommonTemplate:
                 x = self.avgpool(x)
                 return x
 
-        mod = Model()
+        mod = Model().to(self.device)
         for dtype in [torch.half, torch.bfloat16]:
-            x = torch.randn(4, 3, 7, 7).to(dtype=dtype)
+            x = torch.randn(4, 3, 7, 7, device=self.device).to(dtype=dtype)
             opt_mod = torch.compile(mod)
             res = opt_mod(x)
             expected = mod(x)
@@ -3671,7 +3807,7 @@ class CommonTemplate:
                 self.buf.add_(1)
                 return (self.w1 * x * self.w2).sum() + self.buf.sum()
 
-        model_for_eager = MyModel()
+        model_for_eager = MyModel().to(self.device)
         model_for_compile = copy.deepcopy(model_for_eager)
 
         eager_version_counters = [
@@ -3683,8 +3819,8 @@ class CommonTemplate:
 
         compiled_f = torch.compile(model_for_compile, backend="inductor")
 
-        inp_ref = torch.ones(1, requires_grad=True)
-        inp_test = torch.ones(1, requires_grad=True)
+        inp_ref = torch.ones(1, requires_grad=True, device=self.device)
+        inp_test = torch.ones(1, requires_grad=True, device=self.device)
 
         out_ref = model_for_eager(inp_ref.clone())
         out_test = compiled_f(inp_test.clone())
@@ -3718,7 +3854,7 @@ class CommonTemplate:
                 self.buf.add_(1)
                 return (self.w @ x).sum() + self.buf.sum()
 
-        model_for_eager = MyModel()
+        model_for_eager = MyModel().to(self.device)
         model_for_compile = copy.deepcopy(model_for_eager)
 
         eager_version_counters = [
@@ -3730,8 +3866,8 @@ class CommonTemplate:
 
         compiled_f = torch.compile(model_for_compile, backend="inductor")
 
-        inp_ref = torch.ones(2, 4, requires_grad=True)
-        inp_test = torch.ones(2, 4, requires_grad=True)
+        inp_ref = torch.ones(2, 4, requires_grad=True, device=self.device)
+        inp_test = torch.ones(2, 4, requires_grad=True, device=self.device)
 
         out_ref = model_for_eager(inp_ref.clone())
         out_test = compiled_f(inp_test.clone())
@@ -3761,7 +3897,7 @@ class CommonTemplate:
             def forward(self, x):
                 return self.m(x)
 
-        model_for_eager = MyModel()
+        model_for_eager = MyModel().to(self.device)
         model_for_compile = copy.deepcopy(model_for_eager)
 
         eager_version_counters = [
@@ -3773,8 +3909,8 @@ class CommonTemplate:
 
         compiled_f = torch.compile(model_for_compile, backend="inductor")
 
-        inp_ref = torch.ones(20, 100, requires_grad=True)
-        inp_test = torch.ones(20, 100, requires_grad=True)
+        inp_ref = torch.ones(20, 100, requires_grad=True, device=self.device)
+        inp_test = torch.ones(20, 100, requires_grad=True, device=self.device)
 
         out_ref = model_for_eager(inp_ref.clone())
         out_test = compiled_f(inp_test.clone())
@@ -6050,6 +6186,7 @@ class CommonTemplate:
                 (a, b),
             )
 
+    @skipIfXpu
     def test_nll_loss_backward(self):
         def fn(a, b, c):
             return aten.nll_loss_backward(
@@ -9079,7 +9216,7 @@ class CommonTemplate:
             _, code = run_and_get_cpp_code(opt_fn, *args)
             print(code)
             FileCheck().check_count(
-                "static_cast<int>(256)",
+                "static_cast<int32_t>(256)",
                 1,
                 exactly=True,
             ).run(code)
@@ -9594,7 +9731,6 @@ class CommonTemplate:
             bar_cuda,
             bar_xpu,
             bar_meta,
-            tags=[torch._C.Tag.needs_fixed_stride_order],
         )
 
         def fn(x):
@@ -9657,12 +9793,68 @@ class CommonTemplate:
             baz_cuda,
             baz_xpu,
             baz_meta,
-            tags=[torch._C.Tag.needs_fixed_stride_order],
         )
 
         with torch.no_grad():
             net = torch.compile(model)
             out = net(input_t)
+
+    @requires_gpu()
+    @config.patch(implicit_fallbacks=True)
+    def test_needs_fixed_stride_order(self):
+        with torch.library._scoped_library("prims", "FRAGMENT") as prims_lib:
+            with torch.library._scoped_library("custom", "FRAGMENT") as custom_lib:
+                strides = []
+
+                def foo_impl(x):
+                    strides.append(x.stride())
+                    return x.clone()
+
+                def foo_meta(x):
+                    return x.clone()
+
+                all_ops = []
+                for (
+                    needs_fixed_stride_order,
+                    does_not_need_fixed_stride_order,
+                ) in itertools.product([True, False], [True, False]):
+                    tags = []
+                    if needs_fixed_stride_order:
+                        tags.append(torch.Tag.needs_fixed_stride_order)
+                    if does_not_need_fixed_stride_order:
+                        tags.append(torch.Tag.does_not_need_fixed_stride_order)
+                    name = f"foo_{int(needs_fixed_stride_order)}{int(does_not_need_fixed_stride_order)}"
+                    for ns, lib in {"custom": custom_lib, "prims": prims_lib}.items():
+                        all_ops.append(ns + "::" + name)
+                        lib.define(f"{name}(Tensor x) -> Tensor", tags=tags)
+                        lib.impl(name, foo_impl, "CompositeExplicitAutograd")
+                        lib.impl(name, foo_meta, "Meta")
+
+                assert len(all_ops) == 8
+                expect_contig_strides = {
+                    "custom::foo_01",
+                    "prims::foo_00",
+                    "prims::foo_01",
+                }
+                print(all_ops)
+
+                for qualname in all_ops:
+                    ns, name = qualname.split("::")
+                    op = getattr(getattr(torch.ops, ns), name)
+
+                    @torch.compile(fullgraph=True)
+                    def f(x):
+                        y = x.t().contiguous().t()
+                        y = y.sin()
+                        return op(y)
+
+                    x = torch.randn(24, 24, device=self.device)
+                    f(x)
+                    stride = strides[-1]
+                    if qualname in expect_contig_strides:
+                        self.assertEqual(stride, (24, 1))
+                    else:
+                        self.assertEqual(stride, (1, 24))
 
     def test_buffer_use_after_remove(self):
         # https://github.com/pytorch/pytorch/issues/102857
@@ -9887,6 +10079,7 @@ class CommonTemplate:
         res = torch.compile(fn)(20)
         self.assertTrue(torch.all((0 <= res) & (res < 10)).item())
 
+    @torch._inductor.config.patch(force_shape_pad=True)
     def test_should_pad_bench_for_bmm(self):
         B = 2
         M = 1024
@@ -9896,25 +10089,9 @@ class CommonTemplate:
         mat1 = torch.rand(B, M, K, device=self.device)
         mat2 = torch.rand(B, K, N, device=self.device)
 
-        def return_true(*args, **kwargs):
-            return True
+        should_pad = pad_mm.should_pad_bench(None, mat1, mat2, torch.ops.aten.bmm)
 
-        # return value of is_mm_compute_bound depends on flops and membw of
-        # the GPU. Mock it so the test does not becomes flaky when running
-        # on different GPUs.
-        patch1 = patch.object(pad_mm, "is_mm_compute_bound", return_true)
-        # mock get_cached_should_pad so the test does not rely on benchmarking
-        # result.
-        patch2 = patch.object(pad_mm, "get_cached_should_pad", return_true)
-
-        with patch1, patch2:
-            should_pad = pad_mm.should_pad_bench(mat1, mat2, torch.ops.aten.bmm)
-
-        if has_triton():
-            self.assertTrue(should_pad)
-        else:
-            # should_pad_bench always returns False if has_triton returns False
-            self.assertFalse(should_pad)
+        self.assertTrue(should_pad)
 
     @parametrize(
         "name, op",

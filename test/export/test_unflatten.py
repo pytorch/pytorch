@@ -10,6 +10,7 @@ from typing import Any, List
 
 import torch
 import torch._dynamo as torchdynamo
+
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
 from torch._export.utils import (
@@ -707,6 +708,44 @@ class TestUnflatten(TestCase):
         ep_non_strict = export(copy.deepcopy(mod), (input_,), strict=False)
         umod = unflatten(ep_non_strict)
         self.assertTrue(torch.allclose(umod(input_), mod(input_)))
+
+    def test_simple_alias(self):
+        # handle weight sharing, check tensor ids after unflattening
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # alias param
+                self.bias = torch.nn.Parameter(torch.randn(4))
+                self.m = torch.nn.Linear(4, 4)
+                self.m.bias = self.bias
+
+            def forward(self, x):
+                return self.m(x) + self.bias
+
+        m = Foo()
+        inps = (torch.randn(4, 4),)
+        ep = export(m, inps)
+        unep = unflatten(ep)
+        self.assertTrue(id(unep.m.bias) == id(unep.bias))
+
+        # handle aliasing where one alias is unused
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bias = torch.nn.Parameter(torch.randn(4))
+                self.m = torch.nn.Linear(4, 4)
+                self.m.bias = (
+                    self.bias
+                )  # self.bias is unused, aliasing should be handled
+
+            def forward(self, x):
+                return self.m(x)
+
+        m = Foo()
+        inps = (torch.randn(4, 4),)
+        ep = export(m, inps)
+        unep = unflatten(ep)
+        self.assertTrue(torch.allclose(unep(*inps), m(*inps)))
 
 
 if __name__ == "__main__":
