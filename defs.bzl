@@ -64,8 +64,6 @@ def get_cpu_parallel_backend_flags():
     defs = []
     if parallel_backend == "openmp":
         defs.append("-DAT_PARALLEL_OPENMP_FBCODE=1")
-    elif parallel_backend == "tbb":
-        defs.append("-DAT_PARALLEL_NATIVE_TBB_FBCODE=1")
     elif parallel_backend == "native":
         defs.append("-DAT_PARALLEL_NATIVE_FBCODE=1")
     else:
