@@ -414,6 +414,33 @@ def foreach_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> TupleStrateg
     return TupleStrategy(output_tuple_strategy_childs)
 
 
+@register_op_strategy([aten._linalg_svd.default], schema_info=RuntimeSchemaInfo(1))
+def linalg_svd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+    # Since we do not have a simple way to compute a sharded SVD, always fall
+    # back to replicate
+    args_schema = op_schema.args_schema
+    input_strategy = args_schema[0]
+    assert isinstance(input_strategy, OpStrategy), f"{input_strategy}"
+    output_strategies: List[PlacementStrategy] = []
+    for placement_strategy in input_strategy.strategies:
+        replicate_placements = tuple(Replicate() for _ in range(mesh.ndim))
+        replicate_spec = DTensorSpec(
+            mesh=mesh,
+            placements=replicate_placements,
+            tensor_meta=placement_strategy.output_spec.tensor_meta,
+        )
+        redistribute_cost = [
+            generate_redistribute_costs(input_strategy, replicate_spec)
+        ]
+        replicate_strategy = PlacementStrategy(
+            output_specs=replicate_spec,
+            input_specs=(replicate_spec,),
+            redistribute_cost=redistribute_cost,
+        )
+        output_strategies.append(replicate_strategy)
+    return OpStrategy(output_strategies)
+
+
 @register_op_strategy(
     [aten._log_softmax.default, aten._softmax.default], schema_info=RuntimeSchemaInfo(1)
 )

@@ -5,11 +5,11 @@ import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Literal, Set
+from typing_extensions import TypedDict  # Python 3.11+
 
 import generate_binary_build_matrix  # type: ignore[import]
 
 import jinja2
-from typing_extensions import TypedDict  # Python 3.11+
 
 Arch = Literal["windows", "linux", "macos"]
 
@@ -157,7 +157,7 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
         package_type="manywheel",
         build_configs=generate_binary_build_matrix.generate_wheels_matrix(
             OperatingSystem.LINUX,
-            arches=["11.8", "12.1"],
+            arches=["11.8", "12.1", "12.4"],
             python_versions=["3.8"],
         ),
         branches="main",
