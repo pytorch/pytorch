@@ -1,3 +1,4 @@
+#include <ATen/core/TensorBody.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/TensorOperators.h>
@@ -608,6 +609,12 @@ int64_t handle_private_use(const Tensor& query_, const Tensor& key, const Tensor
   return choice_int;
 }
 
+bool should_compute_logsumexp(const Tensor& query, const Tensor& key, const Tensor& value) {
+  const bool any_inputs_require_grad = query.requires_grad() || key.requires_grad() || value.requires_grad();
+  const bool gradmode_enabled = at::GradMode::is_enabled();
+  return any_inputs_require_grad && gradmode_enabled;
+}
+
 } // namespace
 
 // Computes scaled dot product attention on query, key and value tensors, using
@@ -649,25 +656,15 @@ Tensor scaled_dot_product_attention(
     std::optional<double> scale) {
   validate_sdpa_input(query_, key, value, attn_mask_, dropout_p, is_causal, scale);
   int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
-  if (query_.device().type() == DeviceType::CUDA
-      || query_.device().type() == DeviceType::CPU
-      || query_.device().type() == DeviceType::HIP
-      || query_.device().type() == DeviceType::PrivateUse1){
-    if (query_.device().type() == DeviceType::PrivateUse1){
-      choice_int = handle_private_use(
+  if (_fused_sdp_choice_stub.is_device_supported(query_.device().type())) {
+    choice_int = _fused_sdp_choice_stub(query_.device().type(),
           query_, key, value, attn_mask_, dropout_p, is_causal, scale);
-    } else {
-      choice_int = _fused_sdp_choice_stub(query_.device().type(),
-          query_, key, value, attn_mask_, dropout_p, is_causal, scale);
-    }
   }
   sdp::SDPBackend backend = static_cast<sdp::SDPBackend>(choice_int);
   std::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
   switch (backend) {
     case sdp::SDPBackend::cudnn_attention: {
-      bool compute_logsumexp =
-          (query_.requires_grad() || key.requires_grad() ||
-           value.requires_grad());
+      bool compute_logsumexp = should_compute_logsumexp(query_, key, value);
       auto out_lse_softmax = at::_scaled_dot_product_cudnn_attention(
           query_, key, value, dropout_p, is_causal, compute_logsumexp, scale);
       return std::get<0>(out_lse_softmax);
@@ -689,9 +686,7 @@ Tensor scaled_dot_product_attention(
           query_, key, value, dropout_p, is_causal, attn_mask, scale));
     }
     case sdp::SDPBackend::efficient_attention: {
-      bool compute_logsumexp =
-          (query_.requires_grad() || key.requires_grad() ||
-           value.requires_grad());
+      bool compute_logsumexp = should_compute_logsumexp(query_, key, value);
       if (attn_mask.has_value()) {
         attn_mask.value() = preprocess_mask(attn_mask.value(), query_, key, value);;
       }
