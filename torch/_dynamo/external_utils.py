@@ -104,8 +104,11 @@ class FakeCompiledAutogradEngine:
 
     @staticmethod
     def exec_final_callbacks(final_callbacks):
-        for cb in final_callbacks:
+        i = 0
+        while i < len(final_callbacks):
+            cb = final_callbacks[i]
             cb()
+            i += 1
         final_callbacks.clear()
 
     def _exec_final_callbacks_stub(self):
