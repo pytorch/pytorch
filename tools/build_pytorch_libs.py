@@ -78,11 +78,13 @@ def build_caffe2(
     rerun_cmake: bool,
     cmake_only: bool,
     cmake: CMake,
+    build_libtorchless: bool = False,
+    libtorch_path: Optional[str] = None
 ) -> None:
     my_env = _create_build_env()
     build_test = not check_negative_env_flag("BUILD_TEST")
     cmake.generate(
-        version, cmake_python_library, build_python, build_test, my_env, rerun_cmake
+        version, cmake_python_library, build_python, build_test, my_env, rerun_cmake, build_libtorchless, libtorch_path
     )
     if cmake_only:
         return

@@ -125,7 +125,7 @@ class CMake:
         my_env: Dict[str, str],
         rerun: bool,
         build_libtorchless: bool = False,
-        libtorch_path: string = None
+        libtorch_path: Optional[str] = None
     ) -> None:
         "Runs cmake to generate native build files."
 
