@@ -103,6 +103,10 @@ except ImportError:
     has_pytest = False
 
 
+def freeze_rng_state(*args, **kwargs):
+    return torch.testing._utils.freeze_rng_state(*args, **kwargs)
+
+
 # Class to keep track of test flags configurable by environment variables.
 # Flags set here are intended to be read-only and should not be modified after
 # definition.
