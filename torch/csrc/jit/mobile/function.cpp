@@ -47,7 +47,7 @@ void Function::append_instruction(OpCode op, int X, int N) {
 void Function::append_operator(
     const std::string& name,
     const std::string& overload_name,
-    const c10::optional<int>& num_specified_args) {
+    const std::optional<int>& num_specified_args) {
   // Keep the original opname in code_
   code_.op_names_.emplace_back(name, overload_name);
   code_.operator_input_sizes_.emplace_back(num_specified_args.value_or(-1));
@@ -71,8 +71,8 @@ bool Function::initialize_operators(bool should_check_operators) {
   for (unsigned i = 0; i < code_.op_names_.size(); i++) {
     const auto& opname = code_.op_names_[i];
     int num_args = code_.operator_input_sizes_[i];
-    c10::optional<int> num_specified_args =
-        num_args < 0 ? c10::nullopt : c10::optional<int>(num_args);
+    std::optional<int> num_specified_args =
+        num_args < 0 ? c10::nullopt : std::optional<int>(num_args);
     auto func = makeOperatorFunction(opname, num_specified_args);
     if (!func.has_value()) {
       unsupported_op_names.insert(operator_str(opname));
@@ -165,9 +165,9 @@ const std::vector<int64_t>& Function::getExceptionDebugHandles() const {
   return getInterpretersExceptionDebugHandles();
 }
 
-c10::optional<std::function<void(Stack&)>> makeOperatorFunction(
+std::optional<std::function<void(Stack&)>> makeOperatorFunction(
     c10::OperatorName opname,
-    c10::optional<int> num_specified_args) {
+    std::optional<int> num_specified_args) {
   std::function<void(Stack&)> fn;
   const auto full_name = c10::toString(opname);
   const std::vector<c10::Argument>* pArgs = nullptr;

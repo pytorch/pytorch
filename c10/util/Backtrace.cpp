@@ -134,7 +134,7 @@ bool is_python_frame(const FrameInformation& frame) {
       (frame.object_file.find("libpython") != std::string::npos);
 }
 
-c10::optional<FrameInformation> parse_frame_information(
+std::optional<FrameInformation> parse_frame_information(
     const std::string& frame_string) {
   FrameInformation frame;
 

@@ -21,7 +21,7 @@
 #include <c10/util/TypeSafeSignMath.h>
 #include <c10/util/floating_point_utils.h>
 
-#if defined(__cplusplus) && (__cplusplus >= 201103L)
+#if defined(__cplusplus)
 #include <cstdint>
 #elif !defined(__OPENCL_VERSION__)
 #include <math.h>

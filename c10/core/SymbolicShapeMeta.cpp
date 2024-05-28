@@ -28,7 +28,7 @@ SymbolicShapeMeta::SymbolicShapeMeta(const SymbolicShapeMeta& other)
 }
 
 // base, sizes, strides
-static c10::optional<
+static std::optional<
     std::tuple<SymNode, std::vector<SymNode>, std::vector<SymNode>>>
 normalize_sym_sizes_strides(SymIntArrayRef sizes, SymIntArrayRef strides) {
   // Look for a SymNode to dispatch on

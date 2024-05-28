@@ -151,8 +151,8 @@ void cpu_flash_attention(
     const at::Tensor& v,
     double dropout_p,
     bool is_causal,
-    c10::optional<Tensor> attn_mask,
-    c10::optional<double> scale) {
+    std::optional<Tensor> attn_mask,
+    std::optional<double> scale) {
   // Query (Batch x Num_heads  x Q_seq_len  x Dim_per_head)
   //    -> (Batch x Q_seq_len  x Num_heads  x Dim_per_head)
   // Key   (Batch x Num_heads  x KV_seq_len x Dim_per_head)
@@ -400,8 +400,8 @@ void cpu_flash_attention_backward(
     const at::Tensor& logsumexp,
     double dropout_p,
     bool is_causal,
-    c10::optional<Tensor> attn_mask,
-    c10::optional<double> scale) {
+    std::optional<Tensor> attn_mask,
+    std::optional<double> scale) {
   constexpr bool is_reduced_type = is_reduced_floating_point_v<scalar_t>;
   using accum_t = at::opmath_type<scalar_t>;
   using Vec = vec::Vectorized<accum_t>;
@@ -694,8 +694,8 @@ void flash_attention_kernel_impl(
     const at::Tensor& value,
     double dropout_p,
     bool is_causal,
-    c10::optional<Tensor> attn_mask,
-    c10::optional<double> scale) {
+    std::optional<Tensor> attn_mask,
+    std::optional<double> scale) {
   auto q_seq_len = query.size(2);
 
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, query.scalar_type(), "flash_attention", [&] {
@@ -727,8 +727,8 @@ void flash_attention_backward_kernel_impl(
     const at::Tensor& logsumexp,
     double dropout_p,
     bool is_causal,
-    c10::optional<Tensor> attn_mask,
-    c10::optional<double> scale) {
+    std::optional<Tensor> attn_mask,
+    std::optional<double> scale) {
   // make sure grad_out has no zero strides (broadcasted dimensions)
   // since we are going to call gemm next
   // zero stride in leading dimension would lead to slow impl for gemm

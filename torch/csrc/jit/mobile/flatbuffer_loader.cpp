@@ -359,7 +359,7 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
       (operator_version < caffe2::serialize::kProducedFileFormatVersion);
 
   for (const auto* op : *method->operators()) {
-    c10::optional<int> num_args = c10::nullopt;
+    std::optional<int> num_args = c10::nullopt;
     if (op->num_args_serialized() > -1) {
       num_args = op->num_args_serialized();
     }
@@ -752,7 +752,7 @@ void FlatbufferLoader::extractJitSourceAndConstants(
 mobile::Module parse_and_initialize_mobile_module(
     void* data,
     size_t size,
-    c10::optional<at::Device>,
+    std::optional<at::Device>,
     ExtraFilesMap* extra_files,
     bool should_copy_tensor_memory) {
   // TODO(T128189662): If not copying, enforce that data is aligned to
@@ -781,7 +781,7 @@ mobile::Module parse_and_initialize_mobile_module(
 mobile::Module parse_and_initialize_mobile_module(
     std::shared_ptr<char> data,
     size_t size,
-    c10::optional<at::Device> device,
+    std::optional<at::Device> device,
     ExtraFilesMap* extra_files) {
   mobile::Module m = parse_and_initialize_mobile_module(
       data.get(),
@@ -798,7 +798,7 @@ mobile::Module parse_and_initialize_mobile_module_for_jit(
     size_t size,
     ExtraFilesMap& jit_sources,
     std::vector<IValue>& jit_constants,
-    c10::optional<at::Device>,
+    std::optional<at::Device>,
     ExtraFilesMap* extra_files) {
   TORCH_CHECK(
       mobile::serialization::ModuleBufferHasIdentifier(data), "Format error");
@@ -825,7 +825,7 @@ mobile::Module parse_and_initialize_mobile_module_for_jit(
 
 mobile::Module load_mobile_module_from_file(
     const std::string& filename,
-    c10::optional<c10::Device> device,
+    std::optional<c10::Device> device,
     ExtraFilesMap* extra_files) {
   auto [data, size] = get_file_content(filename.c_str());
   return parse_and_initialize_mobile_module(
@@ -885,7 +885,7 @@ mobile::ModuleInfo get_module_info_from_flatbuffer(char* flatbuffer_content) {
 
 mobile::Module load_mobile_module_from_stream_with_copy(
     std::istream& in,
-    c10::optional<at::Device> device,
+    std::optional<at::Device> device,
     ExtraFilesMap* extra_files) {
   auto [data, size] = get_stream_content(in);
   return parse_and_initialize_mobile_module(
@@ -895,7 +895,7 @@ mobile::Module load_mobile_module_from_stream_with_copy(
 mobile::Module parse_flatbuffer_no_object(
     std::shared_ptr<char> data,
     size_t size,
-    c10::optional<at::Device> device) {
+    std::optional<at::Device> device) {
   (void)device;
   (void)size;
 
