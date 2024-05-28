@@ -27,7 +27,7 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
 #define FAIL_MTIAHOOKS_FUNC(func) \
   TORCH_CHECK(false, "Cannot execute ", func, "() without MTIA backend.");
 
-  virtual ~MTIAHooksInterface() override = default;
+  ~MTIAHooksInterface() override = default;
 
   virtual void initMTIA() const {
     // Avoid logging here, since MTIA needs init devices first then it will know
@@ -40,7 +40,7 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     return false;
   }
 
-  virtual DeviceIndex deviceCount() const override {
+  DeviceIndex deviceCount() const override {
     return 0;
   }
 
@@ -52,25 +52,25 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
 
-  virtual bool hasPrimaryContext(DeviceIndex device_index) const override {
+  bool hasPrimaryContext(DeviceIndex device_index) const override {
     return false;
   }
 
-  virtual void setCurrentDevice(DeviceIndex device) const override {
+  void setCurrentDevice(DeviceIndex device) const override {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
 
-  virtual DeviceIndex getCurrentDevice() const override {
-    FAIL_MTIAHOOKS_FUNC(__func__);
-    return -1;
-  }
-
-  virtual DeviceIndex exchangeDevice(DeviceIndex device) const override {
+  DeviceIndex getCurrentDevice() const override {
     FAIL_MTIAHOOKS_FUNC(__func__);
     return -1;
   }
 
-  virtual DeviceIndex maybeExchangeDevice(DeviceIndex device) const override {
+  DeviceIndex exchangeDevice(DeviceIndex device) const override {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    return -1;
+  }
+
+  DeviceIndex maybeExchangeDevice(DeviceIndex device) const override {
     FAIL_MTIAHOOKS_FUNC(__func__);
     return -1;
   }
