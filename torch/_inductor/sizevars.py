@@ -444,9 +444,10 @@ class SizeVarAllocator:
             }
             if all(vr is not None for vr in unbacked_sym_vrs.values()):
                 hint_vr = bound_sympy(out, unbacked_sym_vrs)  # type: ignore[arg-type]
-                lower = int(hint_vr.lower)  # type: ignore[arg-type]
-                upper = int(hint_vr.upper)  # type: ignore[arg-type]
-                fallback = min(max(fallback, lower), upper)
+                if isinstance(hint_vr.lower, (int, sympy.Integer)):
+                    fallback = max(fallback, int(hint_vr.lower))
+                if isinstance(hint_vr.upper, (int, sympy.Integer)):
+                    fallback = min(fallback, int(hint_vr.upper))
             return fallback
 
         try:
