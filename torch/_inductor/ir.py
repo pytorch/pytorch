@@ -428,14 +428,12 @@ class Loops(IRNode):
 
     @cache_on_self
     def inner_fn_opcount(self):
-        from .ir import FlexibleLayout
-
         opcounter = OpCounterCSE(V.MockHandler())
 
         with V.set_ops_handler(opcounter), patch.object(
             FlexibleLayout, "allow_indexing", True
         ):
-            result = self.inner_fn(*self.inner_fn_args())
+            self.inner_fn(*self.inner_fn_args())
             return opcounter.op_count
 
     def inner_fn_args(self):
@@ -4652,20 +4650,26 @@ class UserDefinedTritonKernel(ExternKernel):
         )
 
         args = self.codegen_kwargs()
+        arg_types = []
         if V.graph.cpp_wrapper:
             # in C++ wrapper, we don't pass constexpr args, as they don't
             # get added as parameters to the PTX code compiled from the
             # user-defined Triton kernel (only non-constexpr args do)
             args = [arg for i, arg in enumerate(args) if i not in kernel.constexprs]
+            # cpp wrapper needs arg type info for codegen
+            for arg_name in self.ordered_kwargs_for_cpp_kernel:
+                val = self.get_kwargs_value(arg_name)
+                arg_types.append(
+                    val.get_dtype() if hasattr(val, "get_dtype") else type(val)
+                )
+            arg_types = [
+                t for i, t in enumerate(arg_types) if i not in kernel.constexprs
+            ]
 
         # Call to kernel
         self.codegen_comment(wrapper)
         wrapper.generate_user_defined_triton_kernel(
-            new_name,
-            self.grid,
-            configs,
-            args,
-            triton_meta,
+            new_name, self.grid, configs, args, triton_meta, arg_types
         )
 
     def should_allocate(self):
@@ -4738,27 +4742,35 @@ class UserDefinedTritonKernel(ExternKernel):
         return [i.get_name() for i in self.mutable_args]
 
 
-def mark_node_as_mutating(cur_buffer, *mutated_ops: IRNode):
+def mark_node_as_mutating(cur_buffer, *mutated_nodes: IRNode):
     """
-    Allows ops in mutated_ops to be marked as being mutated as well as
+    Allows ops in mutated_nodes to be marked as being mutated as well as
     indicates to the scheduler that these ops depend on cur_buffer.
+
+    NB: Use this instead of directly constructing MutationOutput
     """
-    for op in mutated_ops:
+    for node in mutated_nodes:
         assert isinstance(
-            op, IRNode
-        ), f"{op} op is type {type(op)} and is not an IRNode"
-        V.graph.mark_buffer_mutated(op.get_name())
-        assert hasattr(op, "layout")
-        MutationOutput(op.layout, op, cur_buffer)
+            node, IRNode
+        ), f"{node} node is type {type(node)} and is not an IRNode"
+        V.graph.mark_buffer_mutated(node.get_name())
+        MutationOutput(node.get_layout(), node, cur_buffer)
 
 
 class MutationOutput(ExternKernel):
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
 
-    def __init__(self, layout, input, parent):
-        super().__init__(None, layout, [input, parent], ())
+    def __init__(self, layout, mutated_node, node_doing_mutating):
+        # NB: Do not directly construct this - use `mark_node_as_mutating`
+        super().__init__(None, layout, [mutated_node], ())
+        self.node_doing_mutating = node_doing_mutating
         self.name = V.graph.register_buffer(self)
+
+    def get_read_writes(self):
+        read_writes = super().get_read_writes()
+        read_writes.reads.add(dependencies.WeakDep(self.node_doing_mutating.get_name()))
+        return read_writes
 
     def should_allocate(self):
         return False
@@ -6374,7 +6386,7 @@ class LinearBinary(ExternKernelAlloc):
         )
 
     @classmethod
-    def create(cls, x, y, w, b, attr):
+    def create(cls, x, y, w, B, attr):
         x = cls.require_contiguous(cls.realize_input(x))
         y = cls.require_contiguous(cls.realize_input(y))
         w = cls.require_contiguous(cls.realize_input(w))
@@ -6384,11 +6396,11 @@ class LinearBinary(ExternKernelAlloc):
 
         inputs = [x, y, w]
         constant_args = [attr]
-        if b is not None:
-            b = cls.require_contiguous(cls.realize_input(b))
-            inputs.append(b)
+        if B is not None:
+            B = cls.require_contiguous(cls.realize_input(B))
+            inputs.append(B)
         else:
-            constant_args.insert(0, b)
+            constant_args.insert(0, B)
 
         return LinearBinary(
             layout=FlexibleLayout(
@@ -7409,7 +7421,7 @@ class MutableBox(IRNode):
 
     @property
     def layout(self):
-        return self.data.layout  # type: ignore[attr-defined]
+        return self.data.get_layout()
 
     def get_layout(self):
         return self.layout
@@ -8230,12 +8242,7 @@ class _CollectiveKernel(FallbackKernel):
         packed.cpp_kernel_name = cpp_kernel_name
         packed.python_kernel_name = python_kernel_name
 
-        def mark_mutation(x):
-            if isinstance(x.data, BaseView):
-                x = x.data.unwrap_view()
-            MutationOutput(x.layout, x, packed)
-
-        pytree.tree_map(lambda inp: mark_mutation(inp), inputs)
+        mark_node_as_mutating(packed, *pytree.tree_leaves(inputs))
 
     # NOTE: [Out-of-Place Collective Safety]
     # Between the initiation and completion of an out-of-place collective:
@@ -8351,9 +8358,8 @@ class _WaitKernel(_CollectiveKernel):
             non_tensor_args,
             unflatten_args,
         )
-        if isinstance(inp.data, BaseView):
-            inp = inp.data.unwrap_view()
-        MutationOutput(inp.layout, inp, packed)
+
+        mark_node_as_mutating(packed, inp)
 
     def get_read_writes(self):
         read_writes = super().get_read_writes()
