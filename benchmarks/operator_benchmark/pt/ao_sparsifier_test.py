@@ -1,9 +1,8 @@
+import operator_benchmark as op_bench
 import torch
 from torch import nn
 
 from torch.ao import pruning
-
-import operator_benchmark as op_bench
 
 
 """Microbenchmarks for sparsifier."""

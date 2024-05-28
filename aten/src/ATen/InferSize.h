@@ -23,7 +23,7 @@ inline void infer_size_impl(
     ResultVec& res) {
   NumelType newsize = 1;
   // N.B. this is an index, not a sym dim!
-  auto infer_dim = c10::optional<int64_t>();
+  auto infer_dim = std::optional<int64_t>();
   for (int64_t dim = 0, ndim = shape.size(); dim != ndim; dim++) {
     if (shape[dim] == -1) {
       if (infer_dim) {

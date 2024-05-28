@@ -7,9 +7,8 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from functools import partial
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
-from warnings import warn
-
 from typing_extensions import Self
+from warnings import warn
 
 import torch
 import torch.autograd.profiler as prof
@@ -148,7 +147,6 @@ class _KinetoProfile:
     def prepare_trace(self):
         if self.profiler is None:
             self.profiler = prof.profile(
-                use_cuda=(ProfilerActivity.CUDA in self.activities),
                 use_cpu=(ProfilerActivity.CPU in self.activities),
                 use_mtia=(ProfilerActivity.MTIA in self.activities),
                 use_device=self.use_device,
