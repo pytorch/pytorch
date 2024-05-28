@@ -416,7 +416,7 @@ class SymPyValueRangeAnalysis:
         return r
 
     @staticmethod
-    def trunc_to_int(a):
+    def trunc_to_int(a, dtype):
         return ValueRanges.increasing_map(a, TruncToInt)
 
     @staticmethod
@@ -709,11 +709,11 @@ class SymPyValueRangeAnalysis:
         return ValueRanges.coordinatewise_increasing_map(a, b, fn)
 
     @classmethod
-    def floor_to_int(cls, x):
+    def floor_to_int(cls, x, dtype):
         return ValueRanges.increasing_map(x, sympy.functions.elementary.integers.floor)
 
     @classmethod
-    def ceil_to_int(cls, x):
+    def ceil_to_int(cls, x, dtype):
         return ValueRanges.increasing_map(
             x, sympy.functions.elementary.integers.ceiling
         )
@@ -761,7 +761,7 @@ class SymPyValueRangeAnalysis:
         return ValueRanges.increasing_map(number, fn)
 
     @classmethod
-    def round_to_int(cls, number, ndigits=None):
+    def round_to_int(cls, number, dtype):
         return ValueRanges.increasing_map(number, RoundToInt)
 
     # It's used in some models on symints

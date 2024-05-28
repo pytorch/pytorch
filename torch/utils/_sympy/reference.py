@@ -82,15 +82,15 @@ class ReferenceAnalysis:
         return PowByNatural(x, 2)
 
     @staticmethod
-    def trunc_to_int(x):
+    def trunc_to_int(x, dtype):
         return TruncToInt(x)
 
     @staticmethod
-    def ceil_to_int(x):
+    def ceil_to_int(x, dtype):
         return sympy.ceiling(x)
 
     @staticmethod
-    def floor_to_int(x):
+    def floor_to_int(x, dtype):
         return sympy.floor(x)
 
     @staticmethod
@@ -174,7 +174,7 @@ class ReferenceAnalysis:
         return sympy.Max(a, b)
 
     @staticmethod
-    def round_to_int(a):
+    def round_to_int(a, dtype):
         return RoundToInt(a)
 
     @staticmethod
