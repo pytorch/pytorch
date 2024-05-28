@@ -281,7 +281,7 @@ try:
             operator.truediv: lift(ops.div),
             operator.mod: lift(ops.mod),
             operator.abs: lift(ops.abs),
-            builtins.round: lift(ops.round),
+            builtins.round: lift(ops.round_to_int),
 
             # Math module.
             math.ceil: lift(ops.ceil),
@@ -363,7 +363,7 @@ try:
             return z3.ToInt(x)
 
         def round_to_int(self, x: z3.ArithRef, dtype: torch.dtype) -> z3.ArithRef:
-            return self._ops.round_to_int(x)
+            return self._ops.round_to_int(x, dtype)
 
         def int_truediv(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
             return self._ops.div(numerator, denominator)
