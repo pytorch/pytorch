@@ -3212,6 +3212,7 @@ def forward(self, x):
         f = Foo()
 
         ep = export(f, (torch.tensor([3]),))
+
         FileCheck().check_count(
             "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
         ).run(ep.graph_module.code)
@@ -3530,7 +3531,6 @@ graph():
         test_inp = torch.ones(8, 4)
         self.assertTrue(torch.allclose(ep.module()(test_inp), Foo().forward(test_inp)))
 
-    @testing.expectedFailureRetraceability
     def test_runtime_assert_with_size(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
