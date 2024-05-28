@@ -1,0 +1,71 @@
+name: Upload torch dynamo performance stats
+
+on:
+  workflow_run:
+    workflows: [inductor-A100-perf-nightly]
+    types:
+      - completed
+
+jobs:
+  get-conclusion:
+    runs-on: ubuntu-latest
+    outputs:
+      conclusion: ${{ fromJson(steps.get-conclusion.outputs.data).conclusion }}
+    steps:
+      - name: Get workflow run conclusion
+        uses: octokit/request-action@v2.1.0
+        id: get-conclusion
+        with:
+          route: GET /repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}/attempts/${{ github.event.workflow_run.run_attempt }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  upload-perf-stats:
+    needs: get-conclusion
+    if: github.event.workflow_run.conclusion == 'success' || needs.get-conclusion.outputs.conclusion == 'success' ||
+        github.event.workflow_run.conclusion == 'failure' || needs.get-conclusion.outputs.conclusion == 'failure'
+    runs-on: ubuntu-22.04
+    environment: upload-stats
+    name: Upload dynamo performance stats for ${{ github.event.workflow_run.id }}, attempt ${{ github.event.workflow_run.run_attempt }}
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - run: |
+          pip3 install requests==2.32.2 rockset==1.0.3 boto3==1.19.12
+
+      - name: Upload torch dynamo performance stats to S3
+        id: upload-s3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKFLOW_ARTIFACTS_URL: ${{ github.event.workflow_run.artifacts_url }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          WORKFLOW_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          REPO_FULLNAME: ${{ github.event.workflow_run.repository.full_name }}
+        run: |
+          # Upload perf test reports from GHA to S3, which can now be downloaded
+          # on HUD
+          python3 -m tools.stats.upload_artifacts --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --repo "${REPO_FULLNAME}"
+
+      - name: Upload torch dynamo performance stats to Rockset
+        if: steps.upload-s3.outcome && steps.upload-s3.outcome == 'success'
+        env:
+          ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          WORKFLOW_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          REPO_FULLNAME: ${{ github.event.workflow_run.repository.full_name }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          python3 -m tools.stats.upload_dynamo_perf_stats --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --repo "${REPO_FULLNAME}" --head-branch "${HEAD_BRANCH}" --rockset-collection torch_dynamo_perf_stats --rockset-workspace inductor --match-filename "^inductor_"
