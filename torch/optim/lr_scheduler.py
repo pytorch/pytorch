@@ -78,7 +78,10 @@ class LRScheduler:
         # Initialize epoch and base learning rates
         if last_epoch == -1:
             for group in optimizer.param_groups:
-                group.setdefault("initial_lr", copy.deepcopy(group["lr"]))
+                initial_lr = group["lr"]
+                if isinstance(initial_lr, Tensor):
+                    initial_lr = initial_lr.clone().detach()
+                group.setdefault("initial_lr", initial_lr)
         else:
             for i, group in enumerate(optimizer.param_groups):
                 if "initial_lr" not in group:
