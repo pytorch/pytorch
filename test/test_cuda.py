@@ -44,8 +44,10 @@ from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
     instantiate_parametrized_tests,
     IS_ARM64,
+    IS_FBCODE,
     IS_JETSON,
     IS_LINUX,
+    IS_SANDCASTLE,
     IS_WINDOWS,
     load_tests,
     NO_MULTIPROCESSING_SPAWN,
@@ -274,6 +276,7 @@ class TestCuda(TestCase):
         tensor.fill_(1)
         self.assertTrue((tensor == 1).all())
 
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "uuid attribute not yet available")
     def test_uuid(self):
         uuid = torch.cuda.get_device_properties(0).uuid
         self.assertEqual(len(str(uuid)), 36)  # xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx

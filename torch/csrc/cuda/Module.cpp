@@ -909,6 +909,8 @@ PyObject* THCPModule_cudaGetSyncDebugMode(PyObject* self, PyObject* noargs) {
 static void registerCudaDeviceProperties(PyObject* module) {
   // Add _cudaDevicePropertires class to torch._C
   auto m = py::handle(module).cast<py::module>();
+  // until internal build is using a rocm version with uuid attr
+#ifndef FBCODE_CAFFE2
   // CUuuid is defined in either cuda.h or driver_types.h
   // hipified to hipUUID which is defined in hip_runtime_api.h
   py::class_<CUuuid>(m, "_CUuuid")
@@ -950,6 +952,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
             (uint8_t)uuid.bytes[15]);
         return std::string(device_path_str);
       });
+#endif
   py::class_<cudaDeviceProp>(m, "_CudaDeviceProperties")
       .def_readonly("name", &cudaDeviceProp::name)
       .def_readonly("major", &cudaDeviceProp::major)
@@ -976,7 +979,9 @@ static void registerCudaDeviceProperties(PyObject* module) {
           &cudaDeviceProp::name
 #endif // USE_ROCM
           )
+#ifndef FBCODE_CAFFE2
       .def_readonly("uuid", &cudaDeviceProp::uuid)
+#endif
       .def("__repr__", [](const cudaDeviceProp& prop) {
         std::ostringstream stream;
         stream << "_CudaDeviceProperties(name='" << prop.name
@@ -986,7 +991,10 @@ static void registerCudaDeviceProperties(PyObject* module) {
 #endif // USE_ROCM
                << ", total_memory=" << prop.totalGlobalMem / (1024ull * 1024)
                << "MB, multi_processor_count=" << prop.multiProcessorCount
-               << ", uuid=" << std::string(prop.uuid.bytes, 16) << ")";
+#ifndef FBCODE_CAFFE2
+               << ", uuid=" << std::string(prop.uuid.bytes, 16)
+#endif
+               << ")";
         return stream.str();
       });
 
