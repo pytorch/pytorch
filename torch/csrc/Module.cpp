@@ -815,6 +815,25 @@ PyObject* THPModule_deterministicCuDNN(PyObject* _unused, PyObject* noargs) {
     Py_RETURN_FALSE;
 }
 
+PyObject* THPModule_setDeterministicOneDNN(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_deterministic_onednn expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setDeterministicOneDNN(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_deterministicOneDNN(PyObject* _unused, PyObject* noargs) {
+  if (at::globalContext().deterministicOneDNN())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
+
 PyObject* THPModule_setDeterministicAlgorithms(
     PyObject* _unused,
     PyObject* args,
@@ -1345,6 +1364,14 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      nullptr},
     {"_set_cudnn_deterministic",
      THPModule_setDeterministicCuDNN,
+     METH_O,
+     nullptr},
+    {"_get_onednn_deterministic",
+     THPModule_deterministicOneDNN,
+     METH_NOARGS,
+     nullptr},
+    {"_set_onednn_deterministic",
+     THPModule_setDeterministicOneDNN,
      METH_O,
      nullptr},
     {"_get_deterministic_algorithms",

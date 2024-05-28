@@ -56,6 +56,14 @@ void Context::setDeterministicCuDNN(bool b) {
   deterministic_cudnn = b;
 }
 
+bool Context::deterministicOneDNN() const {
+  return deterministic_onednn;
+}
+
+void Context::setDeterministicOneDNN(bool b) {
+  deterministic_onednn = b;
+}
+
 bool Context::deterministicAlgorithms() const {
   return _deterministic_algorithms;
 }

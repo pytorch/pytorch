@@ -60,6 +60,7 @@ from torch.backends import (
     cpu as cpu,
     cuda as cuda,
     cudnn as cudnn,
+    onednn as onednn,
     mha as mha,
     mkl as mkl,
     mkldnn as mkldnn,
