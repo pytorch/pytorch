@@ -23,14 +23,14 @@ namespace torch::jit {
 
 namespace {
 struct SchemaParser {
-  explicit SchemaParser(const std::string& str)
+  explicit SchemaParser(const std::string& str, bool allow_typevars)
       : L(std::make_shared<Source>(
             c10::string_view(str),
             c10::nullopt,
             0,
             nullptr,
             Source::DONT_COPY)),
-        type_parser(L, /*parse_complete_tensor_types*/ false) {}
+        type_parser(L, /*parse_complete_tensor_types*/ false, allow_typevars) {}
 
   std::variant<OperatorName, FunctionSchema> parseDeclaration() {
     OperatorName name = parseName();
@@ -361,16 +361,24 @@ struct SchemaParser {
   }
   Lexer L;
   SchemaTypeParser type_parser;
+  bool allow_typevars_;
 };
 } // namespace
 
 std::variant<OperatorName, FunctionSchema> parseSchemaOrName(
-    const std::string& schemaOrName) {
-  return SchemaParser(schemaOrName).parseExactlyOneDeclaration();
+    const std::string& schemaOrName,
+    bool allow_typevars) {
+  // We're ignoring aten and prim for BC reasons
+  if (schemaOrName.rfind("aten::", 0) == 0 ||
+      schemaOrName.rfind("prim::", 0) == 0) {
+    allow_typevars = true;
+  }
+  return SchemaParser(schemaOrName, allow_typevars)
+      .parseExactlyOneDeclaration();
 }
 
-FunctionSchema parseSchema(const std::string& schema) {
-  auto parsed = parseSchemaOrName(schema);
+FunctionSchema parseSchema(const std::string& schema, bool allow_typevars) {
+  auto parsed = parseSchemaOrName(schema, allow_typevars);
   TORCH_CHECK(
       std::holds_alternative<FunctionSchema>(parsed),
       "Tried to parse a function schema but only the operator name was given");
