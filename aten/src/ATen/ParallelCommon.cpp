@@ -115,8 +115,9 @@ int intraop_default_num_threads() {
     size_t num_cores_len = sizeof(num_cores);
     if (sysctlbyname("hw.perflevel0.physicalcpu", &num_cores, &num_cores_len, nullptr, 0) == 0) {
       if (num_cores > 1) {
-        nthreads = num_cores;
-        return num_cores;
+        // Experiments on M1 mac suggest num_cores-1 works better than num_cores
+        nthreads = num_cores-1;
+        return nthreads;
       }
     }
 #endif
