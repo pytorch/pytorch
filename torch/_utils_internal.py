@@ -1,4 +1,3 @@
-import distutils.spawn
 import functools
 import logging
 import os
@@ -12,7 +11,9 @@ from torch._strobelight.compile_time_profiler import StrobelightCompileTimeProfi
 log = logging.getLogger(__name__)
 
 if os.environ.get("TORCH_COMPILE_STROBELIGHT", False):
-    if not distutils.spawn.find_executable("strobeclient"):
+    import shutil
+
+    if not shutil.which("strobeclient"):
         log.info(
             "TORCH_COMPILE_STROBELIGHT is true, but seems like you are not on a FB machine."
         )
