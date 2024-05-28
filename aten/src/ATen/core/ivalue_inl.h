@@ -1066,7 +1066,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     addCallback([childFut,
                  cb = std::move(callback)](Future& parentFut) mutable {
       try {
-        if constexpr (::std::is_convertible_v<typename c10::invoke_result_t<T &&, Future&>, IValueWithStorages>) {
+        if constexpr (::std::is_convertible_v<typename std::invoke_result_t<T &&, Future&>, IValueWithStorages>) {
           auto [ivalue, storages] = cb(parentFut);
           childFut->markCompleted(::std::move(ivalue), ::std::move(storages));
         } else {
@@ -1589,7 +1589,7 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
       std::optional<at::Device> device = c10::nullopt) const;
 
   c10::intrusive_ptr<Object> deepcopy(
-      IValue::HashAliasedIValueMap& memo,
+      IValue::HashIdentityIValueMap& memo,
       std::optional<at::Device> device = c10::nullopt) const;
 
   bool is_weak_compilation_ref() const {
@@ -1909,7 +1909,7 @@ std::unordered_map<K, V> generic_to(
 }
 
 template <typename T>
-std::optional<T> generic_to(IValue ivalue, _fake_type<c10::optional<T>>) {
+std::optional<T> generic_to(IValue ivalue, _fake_type<std::optional<T>>) {
   if (ivalue.isNone()) {
     return c10::nullopt;
   }

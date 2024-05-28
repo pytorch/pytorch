@@ -363,7 +363,7 @@ def convolution(
         and not transposed
         and is_zeros(output_padding)
         and groups == 1
-        and sympy_product(x.get_size()) > 0
+        and V.graph.sizevars.statically_known_gt(sympy_product(x.get_size()), 0)
     ):
         return convert_1x1_conv_to_mm(x, weight, bias)
 
