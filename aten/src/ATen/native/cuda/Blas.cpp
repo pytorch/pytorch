@@ -1,4 +1,7 @@
 #include <cstdint>
+#include <c10/util/Exception.h>
+#include <c10/core/Scalar.h>
+#include <c10/core/ScalarType.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/core/NamedTensor.h>
@@ -823,52 +826,76 @@ static bool _scaled_mm_allowed_device() {
 
 namespace{
 
+enum class ScalingType {
+  TensorWise,
+  RowWise,
+  Error
+};
+
 // Validates the scale tensors to scaled_mm
-void validate_scales(
+// And returns the type of scaling/which kernel to use
+ScalingType get_scaling_type(
     const c10::optional<at::Tensor>& scale_a,
     const c10::optional<at::Tensor>& scale_b,
     int64_t dim_m,
     int64_t dim_n) {
   TORCH_CHECK(
       scale_a.has_value() == scale_b.has_value(),
-      "Both scale_a and scale_b must be present or absent");
+      "Both scale_a and scale_b must be present or absent.");
 
   if (scale_a.has_value()) {
-    TORCH_CHECK(scale_b.has_value(), "scale_b must be present if scale_a is!");
+    TORCH_CHECK(
+        scale_b.has_value(),
+        "Both scale_a and scale_b must be passed as arguments to _scale_mm.");
 
     // Both Per-Tensor and Row-wise scaling expect fp32 tensors
     TORCH_CHECK(
         scale_a->scalar_type() == kFloat && scale_b->scalar_type() == kFloat,
-        "Both scale_a and scale_b must be float tensors");
+        "Both scale_a and scale_b must be float (fp32) tensors.");
 
     // Check the singluar scale case for per-tensor scaling
-    if (scale_a->numel() == 1) {
-      TORCH_CHECK(
-          scale_b->numel() == 1,
-          "Per-tensor scaling is only supported for k >= 1");
-      return;
-    } else if (scale_a->numel() == dim_m) {
-      // Check the per-row scaling case
-      #if !defined(USE_ROCM) && !defined(_MSC_VER) || (defined(USE_ROCM) && ROCM_VERSION >= 60000)
-      TORCH_CHECK(
-          scale_b->numel() == dim_n,
-          "Per-row scaling only supported for both matrices");
-      TORCH_CHECK(
-          scale_a->is_contiguous() && scale_b->is_contiguous(),
-          "scale_a and scale_b must be contiguous");
+    if (scale_a->numel() == 1 && scale_b->numel() == 1) {
+      return ScalingType::TensorWise;
+    } else if (scale_a->dim() == 1 && scale_a->size(0) == dim_m) {
+// Check the per-row scaling case
+#if !defined(USE_ROCM) && !defined(_MSC_VER) || \
+    (defined(USE_ROCM) && ROCM_VERSION >= 60000)
       TORCH_CHECK(
           scale_a->dim() == 1 && scale_b->dim() == 1,
-          "scale tensors must be scalars");
-      #else
-        TORCH_CHECK(false, "Per-row scaling is not supported for this platform!");
-        return;
-      #endif // !defined(USE_ROCM) && !defined(_MSC_VER) || (defined(USE_ROCM) && ROCM_VERSION >= 60000)
-
+          "Both scale_a and scale_b must be 1-dimensional tensors");
+      TORCH_CHECK(
+          scale_b->size(0) == dim_n,
+          "For row-wise scaling, scale_b must have size ",
+          dim_n,
+          " but got ",
+          scale_b->size(0),
+          ".");
+      TORCH_CHECK(
+          scale_a->is_contiguous() && scale_b->is_contiguous(),
+          "Both scale_a and scale_b must be contiguous.");
+       return ScalingType::RowWise;
+#else
+      TORCH_CHECK(false, "Per-row scaling is not supported for this platform!");
+      return ScalingType::Error;
+#endif // !defined(USE_ROCM) && !defined(_MSC_VER) || (defined(USE_ROCM) &&
+       // ROCM_VERSION >= 60000)
     } else {
       TORCH_CHECK(
-          false, "scale_a must be size ", dim_m, "but got ", scale_a->numel(), "and scale_b must be size ", dim_n, "but got ", scale_b->numel());
+          false,
+          "For row-wise scaling, scale_a must be size ",
+          dim_m,
+          " but got ",
+          scale_a->numel(),
+          " and scale_b must be size ",
+          dim_n,
+          " but got ",
+          scale_b->numel(),
+          ".");
+      // Unreachable
+      return ScalingType::RowWise;
     }
   }
+  return ScalingType::Error;
 }
 
 } // namespace
@@ -879,14 +906,15 @@ void validate_scales(
 // Known limitations:
 //  - Only works if mat1 is row-major and mat2 is column-major
 //  - Only works if matrices sizes are divisible by 32
-//
+//  - If 1-dimensional tensors are used then scale_a should be size = mat1.size(0)
+//    and scale_b should have size = to mat2.size(1)
 //  Arguments:
 //    - `mat1`: the first operand of the matrix multiply, can be type `torch.float8_e4m3fn` or `torch.float8_e5m2`
 //    - `mat2`: the second operand of the matrix multiply, can be type `torch.float8_e4m3fn` or `torch.float8_e5m2`
 //    - `bias`: the bias, can be type `torch.float16` or `torch.bfloat16`
 //    - `out_dtype`: the output dtype, can either be a float8 or a higher precision floating point type
-//    - `scale_a`: a scalar tensor with the inverse scale of `mat1`, only needed if `mat1` is a float8 type
-//    - `scale_b`: a scalar tensor with the inverse scale of `mat2`, only needed if `mat2` is a float8 type
+//    - `scale_a`: a scalar or 1-dimensional tensor with the inverse scale of `mat1`, only needed if `mat1` is a float8 type
+//    - `scale_b`: a scalar or 1-dimensional tensor with the inverse scale of `mat2`, only needed if `mat2` is a float8 type
 //    - `scale_result`: a scalar tensor with the scale of the output, only utilized if the output is a float8 type
 //    - `use_fast_accum`: if true, enables fast float8 accumulation
 //    - `out`: a reference to the output tensor
@@ -909,7 +937,11 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   TORCH_CHECK(
       mat1.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
       mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
-  validate_scales(scale_a, scale_b, mat1.size(0), mat2.size(1));
+
+  // Check what type of scaling we are doing based on inputs
+  ScalingType scaling_choice = get_scaling_type(scale_a, scale_b, mat1.size(0), mat2.size(1));
+  TORCH_INTERNAL_ASSERT(scaling_choice != ScalingType::Error, "Scaling type not supported");
+
   TORCH_CHECK(!scale_result || (scale_result->numel() == 1 && scale_result->scalar_type() == kFloat),
        "scale_result must be a float scalar");
   TORCH_CHECK(!bias || bias->numel() == mat2.sizes()[1], "Bias must be size ", mat2.sizes()[1],
@@ -956,7 +988,8 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   at::native::resize_output(out, {mat1_sizes[0], mat2_sizes[1]});
 
   // We are doing row-wise scaling
-  if (scale_a.has_value() && scale_a->numel() != 1) {
+  if (scaling_choice == ScalingType::RowWise) {
+    TORCH_CHECK(out.dtype() == kBFloat16, "Only bf16 high precsion output types are supported for row-wise scaling.");
     at::cuda::detail::f8f8bf16_rowwise(
         mat1,
         mat2,
