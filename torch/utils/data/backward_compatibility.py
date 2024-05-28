@@ -1,7 +1,7 @@
-from typing_extensions import deprecated
+from typing_extensions import deprecated as _deprecated
 
 
-@deprecated(
+@_deprecated(
     "Usage of `backward_compatibility.worker_init_fn` is deprecated "
     "as `DataLoader` automatically applies sharding in every worker",
     category=FutureWarning,

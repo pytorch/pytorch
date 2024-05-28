@@ -159,7 +159,7 @@ will not pass ``--local-rank`` when you specify this flag.
 
 """
 
-from typing_extensions import deprecated
+from typing_extensions import deprecated as _deprecated
 
 from torch.distributed.run import get_args_parser, run
 
@@ -188,7 +188,7 @@ def launch(args):
     run(args)
 
 
-@deprecated(
+@_deprecated(
     "The module torch.distributed.launch is deprecated\n"
     "and will be removed in future. Use torchrun.\n"
     "Note that --use-env is set by default in torchrun.\n"
