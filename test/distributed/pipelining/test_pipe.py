@@ -1,8 +1,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
-import torch
-
 from model_registry import MLPModule
+
+import torch
 from torch.distributed.pipelining import pipe_split, pipeline
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,

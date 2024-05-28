@@ -80,8 +80,6 @@ std::string get_parallel_info() {
   ss << "OpenMP";
   #elif AT_PARALLEL_NATIVE
   ss << "native thread pool";
-  #elif AT_PARALLEL_NATIVE_TBB
-  ss << "native thread pool and TBB";
   #endif
   #ifdef C10_MOBILE
   ss << " [mobile]";
