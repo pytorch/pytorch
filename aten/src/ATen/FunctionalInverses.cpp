@@ -220,7 +220,7 @@ Tensor FunctionalInverses::lift_fresh_inverse(const Tensor& base, const Tensor& 
     return mutated_view;
 }
 
-Tensor FunctionalInverses::slice_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t dim, std::optional<c10::SymInt> start, c10::optional<c10::SymInt> end, c10::SymInt step) {
+Tensor FunctionalInverses::slice_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t dim, std::optional<c10::SymInt> start, std::optional<c10::SymInt> end, c10::SymInt step) {
     if (inverse_return_mode == InverseReturnMode::AlwaysView) {
       // NB: assumes mutated_view is a narrowed view of base.
       // We should NOT do this for functionalization
