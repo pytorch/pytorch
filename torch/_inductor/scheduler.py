@@ -1372,9 +1372,12 @@ _post_grad_graph_counter = itertools.count()
 
 
 class Scheduler:
+    __dep_size_hint_cache: Dict[Dep, int]
+
     @dynamo_timed
     def __init__(self, nodes: List[ir.Buffer]) -> None:
         super().__init__()
+        self.__dep_size_hint_cache = {}
         V.graph.scheduler = self
         self.backends: Dict[torch.device, BaseScheduling] = {}
         self.post_grad_graph_id = next(_post_grad_graph_counter)
@@ -2483,17 +2486,21 @@ class Scheduler:
             proximity_score,
         )
 
-    @functools.cache
     def dep_size_hint(self, dep: Dep) -> int:
-        try:
-            if dep.has_unbacked_symbols():
-                return 0
-            return dep.numbytes_hint()
-        except KeyError:
-            # In at least one test (test/inductor/test_torchbind.py) we
-            # create a StarDep that doesn't exist in the graph and calling
-            # `has_unbacked_symbols()` throws an error.
-            return 0
+        res = 0
+        if dep not in self.__dep_size_hint_cache:
+            try:
+                if not dep.has_unbacked_symbols():
+                    res = dep.numbytes_hint()
+            except KeyError:
+                # In at least one test (test/inductor/test_torchbind.py) we
+                # create a StarDep that doesn't exist in the graph and calling
+                # `has_unbacked_symbols()` throws an error.
+                pass
+            self.__dep_size_hint_cache[dep] = res
+        else:
+            res = self.__dep_size_hint_cache[dep]
+        return res
 
     def score_fusion_memory(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
