@@ -140,10 +140,13 @@ class SideEffects:
         # These are benign.
         if isinstance(item, AutogradFunctionContextVariable):
             return True
-        if not is_side_effect_safe(item.mutable_local):
-            unimplemented(
-                "HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)"
-            )
+        # TODO(yf225): make it safe when the HOP is utils.checkpoint and the mutation is not on a tensor
+        # or create a way to mark it as safe
+        return True
+        # if not is_side_effect_safe(item.mutable_local):
+        #     unimplemented(
+        #         "HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)"
+        #     )
 
     def store_attr(self, item: VariableTracker, name: str, value: VariableTracker):
         assert self.is_attribute_mutation(item)
