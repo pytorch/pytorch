@@ -421,6 +421,22 @@ class DistMathOpsTest(DTensorTestBase):
             # global_topk.values.sum().backward()
             # out_full_values.sum().backward()
 
+    @with_comms
+    def test_shard0_svd(self):
+        device_mesh = self.build_device_mesh()
+        torch.manual_seed(42)
+        replicated_x = torch.randn((8, 8), device=self.device_type)
+        sharded_x = distribute_tensor(replicated_x, device_mesh, (Shard(0),))
+        with CommDebugMode() as comm_mode:
+            U, S, V = torch.linalg.svd(sharded_x, full_matrices=False)
+        ref_U, ref_S, ref_V = torch.linalg.svd(replicated_x, full_matrices=False)
+        self.assertEqual(U.to_local(), ref_U)
+        self.assertEqual(S.to_local(), ref_S)
+        self.assertEqual(V.to_local(), ref_V)
+        comm_counts = comm_mode.get_comm_counts()
+        self.assertEqual(len(comm_counts), 1)
+        self.assertEqual(comm_counts[funcol.all_gather_into_tensor], 1)
+
 
 if __name__ == "__main__":
     run_tests()

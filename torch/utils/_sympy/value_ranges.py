@@ -16,10 +16,10 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import TypeGuard
 
 import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
-from typing_extensions import TypeGuard
 
 import torch
 
@@ -247,6 +247,8 @@ class ValueRanges(Generic[_T]):
     def wrap(arg: Union[AllIn, AllVR]) -> AllVR:
         if isinstance(arg, ValueRanges):
             return arg
+        if isinstance(arg, float) and math.isnan(arg):
+            return ValueRanges.unknown()
         # arg is either ExprIn or BoolIn, but we don't know it here
         return ValueRanges(arg, arg)  # type: ignore[arg-type]
 

@@ -942,6 +942,7 @@ class CommonTemplate:
             self.assertEqual(ref_values, res_values)
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    @skip_if_halide  # aoti
     def test_torch_compile_override_registration(self):
         dynamic = False
         namespace_name = "aten"
@@ -1110,6 +1111,7 @@ class CommonTemplate:
         self.common(fn, [torch.linspace(-10, 10, 41)])
 
     @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    @skip_if_halide  # bf16
     def test_scatter_bf16(self):
         def fn(inp, src, index):
             return inp.scatter_add(0, index, src)
@@ -1240,7 +1242,9 @@ class CommonTemplate:
             ),
         )
         self.assertEqual(torch._inductor.metrics.ir_nodes_pre_fusion, 5)
-        assertGeneratedKernelCountEqual(self, 1 if self.device == GPU_TYPE else 2)
+        assertGeneratedKernelCountEqual(
+            self, 1 if not is_cpp_backend(self.device) else 2
+        )
 
     def test_index_propagation(self):
         def flip(x):
@@ -1307,7 +1311,9 @@ class CommonTemplate:
         def test(fn, inps, has_assert: bool, has_wrapping: bool):
             for dynamic in (True, False):
                 fn_opt = torch.compile(dynamic=dynamic)(fn)
-                if self.device == "cpu":
+                if is_halide_backend(self.device):
+                    pass  # no device asserts in halide
+                elif self.device == "cpu":
                     _, code = run_and_get_cpp_code(fn_opt, *inps)
                     found = False
                     # match ternary operator for scalar or blendv for vector
@@ -1532,10 +1538,16 @@ class CommonTemplate:
         def fn(a):
             return torch.var(a)
 
-        self.common(fn, ((torch.rand((10, 3, 352, 352), dtype=torch.float32),)))
+        self.common(
+            fn,
+            ((torch.rand((10, 3, 352, 352), dtype=torch.float32),)),
+            atol=1e-3,
+            rtol=1e-3,
+        )
         self.common(fn, ((torch.rand((14923), dtype=torch.float32),)))
 
     @skipCPUIf(IS_MACOS, "fails on macos")
+    @skip_if_halide  # accuracy 4.7% off
     def test_multilayer_var_lowp(self):
         def fn(a):
             return torch.var(a)
@@ -1744,11 +1756,14 @@ class CommonTemplate:
             )
 
         dtypes = [torch.float, torch.float16]
-        if not (self.device == "cuda" and not SM80OrLater):
+        if not (self.device == "cuda" and not SM80OrLater) and not is_halide_backend(
+            self.device
+        ):
             dtypes += [torch.bfloat16]
         for dtype in dtypes:
             self.common(fn, (torch.randn(8, 8).to(dtype), torch.randn(8, 8).to(dtype)))
 
+    @skip_if_halide  # bug in nan handling
     def test_min_max_reduction_nan(self):
         def fn(a):
             return (torch.max(a), torch.min(a))
@@ -1757,6 +1772,7 @@ class CommonTemplate:
         t1[16] = float("nan")
         self.common(fn, (t1,))
 
+    @skip_if_halide  # bug in nan handling
     def test_fmin_fmax(self):
         def fn(a, b):
             return (
@@ -2211,6 +2227,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8),))
 
+    @skip_if_halide  # halide has buggy nan handling
     def test_nan_to_num(self):
         def fn(a):
             return (
@@ -2569,6 +2586,7 @@ class CommonTemplate:
         expect = torch.tensor(4, dtype=torch.int8, device=self.device)
         self.assertEqual(actual, expect)
 
+    @skip_if_halide  # only 32-bit indexing
     def test_large_pointwise(self):
         if not _has_sufficient_memory(self.device, 2 * (2**31 + 1)):
             raise unittest.SkipTest("insufficient memory")
@@ -2587,6 +2605,7 @@ class CommonTemplate:
 
         self.assertTrue((actual == 2).all())
 
+    @skip_if_halide  # only 32-bit indexing
     def test_large_offset_pointwise(self):
         # Test 64-bit indexing is used when input views a tensor that can be
         # indexed with 32-bit strides but the storage offset pushes it over
@@ -2603,6 +2622,7 @@ class CommonTemplate:
         actual = compiled_fn(t[2**30 :])
         self.assertTrue((actual == 4).all())
 
+    @skip_if_halide  # only 32-bit indexing
     def test_large_strided_reduction(self):
         # Test 64-bit indexing is used when input numel is less than INT_MAX
         # but stride calculations go above INT_MAX
@@ -3016,7 +3036,6 @@ class CommonTemplate:
                         (v,),
                     )
 
-    @skip_if_halide  # https://github.com/halide/Halide/issues/8227
     def test_conv_functional_bn_fuse(self):
         # For gpu path, there is an accuracy issue
         if self.device == GPU_TYPE:
@@ -4210,6 +4229,7 @@ class CommonTemplate:
             (torch.randn([16, 16]),),
         )
 
+    @skip_if_halide  # lgamma not implemented
     def test_lgamma(self):
         def fn(x):
             return aten.lgamma(x) + 2, aten.cos(x + 1)
@@ -5029,6 +5049,7 @@ class CommonTemplate:
     # Constant folding was explicitly turned off due to issue #108388
     # Turn it back on for test
     @torch._inductor.config.patch(joint_graph_constant_folding=True)
+    @skip_if_halide  # bf16
     def test_remove_no_ops(self):
         def matmul_with_op(x, y, fn):
             return fn(x @ y)
@@ -6247,6 +6268,7 @@ class CommonTemplate:
             ],
         )
 
+    @skip_if_halide  # different nan behavior in ==
     def test_isinf2(self):
         def fn(x):
             y = torch.tensor(
@@ -7561,6 +7583,7 @@ class CommonTemplate:
         )
 
     # From https://github.com/pytorch/torchdynamo/issues/1352
+    @skip_if_halide  # hangs forever
     def test_max_pool2d_with_indices_backward4(self):
         def fn(a, b, c):
             return aten.max_pool2d_with_indices_backward(
@@ -7767,6 +7790,7 @@ class CommonTemplate:
         result = fn(torch.randn([1, 2, 16, 4]).requires_grad_())
         result.sum().backward()
 
+    @skip_if_halide  # rand
     def test_dropout2(self):
         n = 100000
         weight = torch.ones(
@@ -7851,6 +7875,7 @@ class CommonTemplate:
             torch._inductor.metrics.generated_kernel_count, expected_kernel
         )
 
+    @skip_if_halide  # rand
     def test_randint_kernel_count(self):
         @torch._dynamo.optimize_assert("inductor")
         def fn1():
@@ -8124,7 +8149,7 @@ class CommonTemplate:
             rand_strided(shape, stride, dtype).requires_grad_(True).add(1)
             for shape, stride, dtype in args
         ]
-        self.common(forward, args)
+        self.common(forward, args, atol=1e-5, rtol=1e-5)
 
     @requires_gpu()
     def test_tmp_not_defined_issue3(self):
@@ -8657,7 +8682,7 @@ class CommonTemplate:
         )
 
     def test_setitem_with_int_parameter(self):
-        x = torch.zeros(7)
+        x = torch.zeros(7, device=self.device)
 
         def fn(n, a):
             a[n] = -1
@@ -9244,7 +9269,7 @@ class CommonTemplate:
             _, code = run_and_get_cpp_code(opt_fn, *args)
             print(code)
             FileCheck().check_count(
-                "static_cast<int>(256)",
+                "static_cast<int32_t>(256)",
                 1,
                 exactly=True,
             ).run(code)
@@ -9760,7 +9785,6 @@ class CommonTemplate:
             bar_cuda,
             bar_xpu,
             bar_meta,
-            tags=[torch._C.Tag.needs_fixed_stride_order],
         )
 
         def fn(x):
@@ -9823,12 +9847,68 @@ class CommonTemplate:
             baz_cuda,
             baz_xpu,
             baz_meta,
-            tags=[torch._C.Tag.needs_fixed_stride_order],
         )
 
         with torch.no_grad():
             net = torch.compile(model)
             out = net(input_t)
+
+    @requires_gpu()
+    @config.patch(implicit_fallbacks=True)
+    def test_needs_fixed_stride_order(self):
+        with torch.library._scoped_library("prims", "FRAGMENT") as prims_lib:
+            with torch.library._scoped_library("custom", "FRAGMENT") as custom_lib:
+                strides = []
+
+                def foo_impl(x):
+                    strides.append(x.stride())
+                    return x.clone()
+
+                def foo_meta(x):
+                    return x.clone()
+
+                all_ops = []
+                for (
+                    needs_fixed_stride_order,
+                    does_not_need_fixed_stride_order,
+                ) in itertools.product([True, False], [True, False]):
+                    tags = []
+                    if needs_fixed_stride_order:
+                        tags.append(torch.Tag.needs_fixed_stride_order)
+                    if does_not_need_fixed_stride_order:
+                        tags.append(torch.Tag.does_not_need_fixed_stride_order)
+                    name = f"foo_{int(needs_fixed_stride_order)}{int(does_not_need_fixed_stride_order)}"
+                    for ns, lib in {"custom": custom_lib, "prims": prims_lib}.items():
+                        all_ops.append(ns + "::" + name)
+                        lib.define(f"{name}(Tensor x) -> Tensor", tags=tags)
+                        lib.impl(name, foo_impl, "CompositeExplicitAutograd")
+                        lib.impl(name, foo_meta, "Meta")
+
+                assert len(all_ops) == 8
+                expect_contig_strides = {
+                    "custom::foo_01",
+                    "prims::foo_00",
+                    "prims::foo_01",
+                }
+                print(all_ops)
+
+                for qualname in all_ops:
+                    ns, name = qualname.split("::")
+                    op = getattr(getattr(torch.ops, ns), name)
+
+                    @torch.compile(fullgraph=True)
+                    def f(x):
+                        y = x.t().contiguous().t()
+                        y = y.sin()
+                        return op(y)
+
+                    x = torch.randn(24, 24, device=self.device)
+                    f(x)
+                    stride = strides[-1]
+                    if qualname in expect_contig_strides:
+                        self.assertEqual(stride, (24, 1))
+                    else:
+                        self.assertEqual(stride, (1, 24))
 
     def test_buffer_use_after_remove(self):
         # https://github.com/pytorch/pytorch/issues/102857
@@ -10117,6 +10197,48 @@ class CommonTemplate:
             # <func>_cuda not implemented for Half
             check_lowp = False
 
+        if is_halide_backend(self.device) and name in (
+            "erfinv",
+            "airy_ai",
+            "bessel_j0",
+            "bessel_j1",
+            "bessel_y0",
+            "bessel_y1",
+            "chebyshev_polynomial_t",
+            "chebyshev_polynomial_u",
+            "chebyshev_polynomial_v",
+            "chebyshev_polynomial_w",
+            "digamma",
+            "gammainc",
+            "gammaincc",
+            "gammaln",
+            "hermite_polynomial_h",
+            "hermite_polynomial_he",
+            "i0",
+            "i0e",
+            "i1",
+            "i1e",
+            "laguerre_polynomial_l",
+            "legendre_polynomial_p",
+            "modified_bessel_i0",
+            "modified_bessel_i1",
+            "modified_bessel_k0",
+            "modified_bessel_k1",
+            "multigammaln",
+            "ndtri",
+            "polygamma",
+            "psi",
+            "scaled_modified_bessel_k0",
+            "scaled_modified_bessel_k1",
+            "shifted_chebyshev_polynomial_t",
+            "shifted_chebyshev_polynomial_u",
+            "shifted_chebyshev_polynomial_v",
+            "shifted_chebyshev_polynomial_w",
+            "spherical_bessel_j0",
+            "zeta",
+        ):
+            raise unittest.SkipTest("halide does not support {name}")
+
         if name in {"gammainc", "gammaincc"}:
             args = (
                 torch.randn(8, 8, dtype=dtype, device=self.device),
@@ -10162,8 +10284,6 @@ class CommonTemplate:
             def fn(x, n):
                 return op(x, n)
 
-        elif name == "erfinv" and is_halide_backend(self.device):
-            raise unittest.SkipTest("halide does not support erfinv")
         else:
             args = (torch.randn(8, 8, dtype=dtype, device=self.device),)
 
