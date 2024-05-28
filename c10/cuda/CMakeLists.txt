@@ -14,6 +14,8 @@ configure_file(
 
 if(BUILD_LIBTORCHLESS)
   find_library(C10_CUDA_LIB c10_cuda PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
+else()
+  set(C10_CUDA_LIB c10_cuda)
 endif()
 
 # Note: if you want to add ANY dependency to the c10 library, make sure you
@@ -75,7 +77,6 @@ if(NOT BUILD_LIBTORCHLESS)
       $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>
       $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
       $<INSTALL_INTERFACE:include>)
-  set(C10_CUDA_LIB c10_cuda)
 
 # ---[ Installation
 # Note: for now, we will put all export path into one single Caffe2Targets group

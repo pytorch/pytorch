@@ -14,6 +14,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(BUILD_LIBTORCHLESS)
   find_library(C10_LIB c10 PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
+else()
+  set(C10_LIB c10)
 endif()
 
   # ---[ Configure macro file.
@@ -131,7 +133,6 @@ if(NOT BUILD_LIBTORCHLESS)
       $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../>
       $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
       $<INSTALL_INTERFACE:include>)
-  set(C10_LIB c10)
 endif()
 
 add_subdirectory(test)

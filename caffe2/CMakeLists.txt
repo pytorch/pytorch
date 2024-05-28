@@ -805,8 +805,14 @@ if(BUILD_LIBTORCHLESS)
     find_library(TORCH_XPU_LIB torch_xpu PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
   endif()
   add_subdirectory(../torch torch)
-
+else()
+  set(TORCH_LIB torch)
+  set(TORCH_CPU_LIB torch_cpu)
+  set(TORCH_CUDA_LIB torch_cuda)
+  set(TORCH_HIP_LIB torch_hip)
+  set(TORCH_XPU_LIB torch_xpu)
 endif()
+
 
 if(NOT BUILD_LIBTORCHLESS)
 add_library(torch_cpu ${Caffe2_CPU_SRCS})
