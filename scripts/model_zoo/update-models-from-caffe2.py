@@ -11,12 +11,14 @@ import tempfile
 from urllib.request import urlretrieve
 
 import boto3
-import caffe2.python.onnx.backend
-import caffe2.python.onnx.frontend
-import caffe2.python.workspace as c2_workspace
 import numpy as np
 import onnx
 import onnx.backend
+from onnx import numpy_helper
+
+import caffe2.python.onnx.backend
+import caffe2.python.onnx.frontend
+import caffe2.python.workspace as c2_workspace
 from caffe2.proto import caffe2_pb2
 
 from caffe2.python.models.download import (
@@ -24,7 +26,6 @@ from caffe2.python.models.download import (
     downloadFromURLToFile,
     getURLFromName,
 )
-from onnx import numpy_helper
 
 
 """A script converting Caffe2 models to ONNX, and updating ONNX model zoos.
