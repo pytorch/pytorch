@@ -320,7 +320,7 @@ class VariableBuilder:
             TensorWithTFOverrideVariable,
             UserDefinedObjectVariable,
             NumpyNdarrayVariable,
-            FSDPManagedNNModuleVariable
+            FSDPManagedNNModuleVariable,
         ]:
             return True
         return False
