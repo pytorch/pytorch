@@ -4,9 +4,11 @@ if(NOT __AOTRITON_INCLUDED)
   set(__AOTRITON_SOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}/aotriton/src")
   set(__AOTRITON_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/aotriton/build")
   set(__AOTRITON_INSTALL_DIR "${PROJECT_SOURCE_DIR}/torch")
+  add_library(__caffe2_aotriton INTERFACE)
   # Note it is INSTALL"ED"
   if(DEFINED ENV{AOTRITON_INSTALLED_PREFIX})
     set(__AOTRITON_INSTALL_DIR "$ENV{AOTRITON_INSTALLED_PREFIX}")
+    message(STATUS "Using Preinstalled AOTriton at ${__AOTRITON_INSTALL_DIR}")
   else()
     ExternalProject_Add(aotriton_external
       GIT_REPOSITORY https://github.com/ROCm/aotriton.git
@@ -28,10 +30,10 @@ if(NOT __AOTRITON_INCLUDED)
       USES_TERMINAL_INSTALL TRUE
       # INSTALL_COMMAND ${MAKE_COMMAND} install
       )
+    add_dependencies(__caffe2_aotriton aotriton_external)
+    message(STATUS "Using AOTriton compiled from source directory ${__AOTRITON_SOURCE_DIR}")
   endif()
-  set(AOTRITON_FOUND TRUE)
-  add_library(__caffe2_aotriton INTERFACE)
-  add_dependencies(__caffe2_aotriton aotriton_external)
   target_link_libraries(__caffe2_aotriton INTERFACE ${__AOTRITON_INSTALL_DIR}/lib/libaotriton_v2.a)
   target_include_directories(__caffe2_aotriton INTERFACE ${__AOTRITON_INSTALL_DIR}/include)
+  set(AOTRITON_FOUND TRUE)
 endif() # __AOTRITON_INCLUDED
