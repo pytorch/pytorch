@@ -13,7 +13,6 @@ __all__ = [
     "Metadata",
     "MetadataIndex",
     "TensorProperties",
-    "StorageMeta",
 ]
 
 

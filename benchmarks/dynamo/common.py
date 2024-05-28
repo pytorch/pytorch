@@ -354,24 +354,6 @@ def patch_torch_manual_seed():
     torch.manual_seed = deterministic_torch_manual_seed
 
 
-def empty_gpu_cache(device):
-    """
-    Explicitly empty gpu cache to avoid OOM in subsequent run.
-    """
-
-    if device not in ["cuda", "xpu"]:
-        log.warning(
-            "Trying to call the empty_gpu_cache for device: %s, which is not in list [cuda, xpu]",
-            device,
-        )
-        return
-
-    if device == "cuda":
-        torch.cuda.empty_cache()
-    elif device == "xpu":
-        torch.xpu.empty_cache()
-
-
 def synchronize():
     pass
 
@@ -1252,7 +1234,7 @@ def download_retry_decorator(download_fn):
                     )
                     time.sleep(wait)
                 else:
-                    raise RuntimeError(  # noqa: B904
+                    raise RuntimeError(  # noqa: TRY200
                         f"Failed to load model '{args}' with following error(s): {str(e)}."
                     )
 
@@ -2296,7 +2278,7 @@ class BenchmarkRunner:
     def batch_size_finder(self, device, model_name, initial_batch_size=1024):
         batch_size = initial_batch_size
         while batch_size >= 1:
-            empty_gpu_cache(current_device)
+            torch.cuda.empty_cache()
             try:
                 device, name, model, example_inputs, _ = self.load_model(
                     device,
@@ -2486,7 +2468,7 @@ class BenchmarkRunner:
                 fp64_outputs = None
             finally:
                 del model_fp64, inputs_fp64
-                empty_gpu_cache(current_device)
+                torch.cuda.empty_cache()
 
             tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
                 self.args.training, current_device, name
@@ -2515,7 +2497,7 @@ class BenchmarkRunner:
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
-                empty_gpu_cache(current_device)
+                torch.cuda.empty_cache()
 
             # Rerun native pytorch
             reset_rng_state()
@@ -2536,7 +2518,7 @@ class BenchmarkRunner:
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
-                empty_gpu_cache(current_device)
+                torch.cuda.empty_cache()
 
             # Two eager runs should have exactly same result
             is_same = True
@@ -2737,7 +2719,7 @@ class BenchmarkRunner:
             try:
                 if current_device == "cuda":
                     torch.cuda.reset_peak_memory_stats()
-                    empty_gpu_cache(current_device)
+                    torch.cuda.empty_cache()
                 t0 = time.perf_counter()
                 for _ in range(niters):
                     fn(model, example_inputs)
@@ -2967,7 +2949,7 @@ class BenchmarkRunner:
                 name, model, example_inputs, optimize_ctx, experiment, tag
             )
             print(status)
-        empty_gpu_cache(current_device)
+        torch.cuda.empty_cache()
 
         self.maybe_preserve_compile_debug(name, status)
 

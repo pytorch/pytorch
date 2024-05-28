@@ -6,7 +6,6 @@ import logging
 
 import math
 import operator
-import os
 import sys
 import textwrap
 import time
@@ -104,7 +103,7 @@ class TritonTemplateKernel(TritonKernel):
         prefix_args=0,
         suffix_args=0,
         epilogue_fn=identity,
-        subgraphs: Optional[List[ir.ComputedBuffer]] = None,
+        subgraphs=None,
         *,
         index_dtype,
     ):
@@ -115,7 +114,7 @@ class TritonTemplateKernel(TritonKernel):
         )
         self.input_nodes = input_nodes
         self.output_node = output_node
-        self.named_input_nodes = {}  # type: ignore[var-annotated]
+        self.named_input_nodes = {}
         self.defines = defines
         self.kernel_name = kernel_name
         self.template_mask = None
@@ -129,10 +128,10 @@ class TritonTemplateKernel(TritonKernel):
         self.prefix_args = prefix_args
         self.suffix_args = suffix_args
         self.epilogue_fn = epilogue_fn
-        self.render_hooks = dict()  # type: ignore[var-annotated]
+        self.render_hooks = dict()
         self.triton_meta: Optional[Dict[str, object]] = None
-        # For Templated Attention this can be a list of ir.Subgraph
-        self.subgraphs: Optional[List[ir.ComputedBuffer]] = subgraphs
+        # For Templated Attention
+        self.subgraphs = subgraphs
 
     def need_numel_args(self):
         return False
@@ -272,28 +271,19 @@ class TritonTemplateKernel(TritonKernel):
             val = self.named_input_nodes[name].get_stride()[index]
         return texpr(self.rename_indexing(val))
 
-    def modification(self, subgraph_number: int, **fixed_inputs) -> str:
-        """This creates a modification function for a subgraph.
-        To use this inside a template, the first argument should specify which subgraph to codegen for
+    def modification(self, **fixed_inputs) -> str:
+        """This function generates the code body to populate
+        a 'modification' placeholder within a template
 
-        Args:
-            subgraph_number (int): The index of the subgraph in self.subgraphs
+        TODO come up with standardized way to modify templates, with
+        potential multiple modifications
         """
-        assert isinstance(subgraph_number, int)
-        assert isinstance(self.subgraphs, list)
-        assert subgraph_number < len(
-            self.subgraphs
-        ), f"Invalid subgraph number provided to create_modification, {subgraph_number} must be < {len(self.subgraphs)}"
-
-        subgraph = self.subgraphs[subgraph_number]
 
         def add_input(name):
             return self.args.input(name)
 
-        name = f"PlaceholderSubstitution_{subgraph_number}"
-
         class PlaceholderSubstitution(V.WrapperHandler):  # type: ignore[name-defined]
-            self.name = name
+            self.name = "PlaceholderSubstitution"
 
             def load(self, name: str, index: sympy.Expr):
                 if name not in fixed_inputs:
@@ -307,14 +297,15 @@ class TritonTemplateKernel(TritonKernel):
             def indirect_indexing(self, index_var, size, check):
                 return sympy_index_symbol(str(index_var))
 
+        # if self.modification_cache is None:
         with V.set_ops_handler(PlaceholderSubstitution(V.ops)):
             assert isinstance(
-                subgraph, ir.ComputedBuffer
-            ), f"Expected the subgraph to be a ComputedBuffer, got {type(subgraph)}"
-            if isinstance(subgraph.data, ir.InputBuffer):
-                out = subgraph.data.make_loader()((1,))
+                self.subgraphs, ir.ComputedBuffer
+            ), "Expected the subgraph to be a ComputedBuffer"
+            if isinstance(self.subgraphs.data, ir.InputBuffer):
+                out = self.subgraphs.data.make_loader()((1,))
             else:
-                out = subgraph.data.inner_fn((1,))
+                out = self.subgraphs.data.inner_fn((1,))
 
         self.codegen_body()
         self.body.writeline(f"{fixed_inputs['out']} = {out.value}")
@@ -329,18 +320,11 @@ class TritonTemplateKernel(TritonKernel):
         indices: Union[List[Any], Tuple[Any]],
         val: str,
         mask: Optional[str] = None,
-        indent_width: int = 4,
     ):
-        """Stores the final output and appends any epilogue fusions if the buffer hasn't been optimized away.
-
-        Args:
-            indices (Union[List, Tuple]): The index for each dimension of the output. The dot product of
-                these indices and output strides must match `val`.
-            val (str): The value to store.
-            mask (Optional[str]): An optional mask to use for the store operation. If provided, this mask
-                will be applied to the store.
-            indent_width (int): The number of spaces to use for indentation. This is used when the call to
-                store_output is indented in the kernel definition.
+        """
+        Hook called from template code to store the final output
+        (if the buffer hasn't been optimized away), then append any
+        epilogue fusions.
         """
         assert isinstance(indices, (list, tuple))
         assert isinstance(val, str)
@@ -364,7 +348,7 @@ class TritonTemplateKernel(TritonKernel):
         self.range_trees[0].lookup(sympy.Integer(1), sympy_product(lengths)).set_name(
             "xindex"
         )
-        self.template_mask = mask  # type: ignore[assignment]
+        self.template_mask = mask
         self.template_indices = indices
         output_index = self.output_node.get_layout().make_indexer()(index_symbols)
         output_index = self.rename_indexing(output_index)
@@ -389,7 +373,7 @@ class TritonTemplateKernel(TritonKernel):
         def hook():
             # more stuff might have been added since the codegen_body above
             self.codegen_body()
-            return textwrap.indent(self.body.getvalue(), " " * indent_width).strip()
+            return textwrap.indent(self.body.getvalue(), "    ").strip()
 
         assert "<STORE_OUTPUT>" not in self.render_hooks
         self.render_hooks["<STORE_OUTPUT>"] = hook
@@ -454,8 +438,11 @@ class TritonTemplateKernel(TritonKernel):
             block_ptr=block_ptr,
         )
 
-    def codegen_range_tree(self):
-        pass  # ignore default codegen
+    def initialize_range_tree(self, pid_cache):
+        super().initialize_range_tree(pid_cache)
+        # ignore default codegen
+        self.body.clear()
+        self.indexing_code.clear()
 
     def call_kernel(self, name: str, node: Optional[ir.IRNode] = None):
         wrapper = V.graph.wrapper_code
@@ -709,17 +696,19 @@ class ExternKernelChoice:
         has_out_variant=True,
         op_overload=None,
         use_fallback_kernel=False,
+        kernel_creator=None,
     ):
         super().__init__()
         name = name or kernel.__name__
         assert callable(kernel)
-        assert not hasattr(extern_kernels, name), "duplicate extern kernel"
+        assert not hasattr(extern_kernels, name), f"duplicate extern kernel: {name}"
         self.name = name
         self.cpp_kernel_name = cpp_kernel
         self.has_out_variant = has_out_variant
         setattr(extern_kernels, name, kernel)
         self.op_overload = op_overload
         self.use_fallback_kernel = use_fallback_kernel
+        self.kernel_creator = kernel_creator
 
     def to_callable(self):
         return getattr(extern_kernels, self.name)
@@ -886,6 +875,8 @@ class ExternKernelCaller(ChoiceCaller):
             inner = ir.FallbackKernel.create(
                 self.choice.op_overload, *self.input_nodes, **self.kwargs
             )
+        elif self.choice.kernel_creator is not None:
+            inner = self.choice.kernel_creator(*self.input_nodes, **self.kwargs)
         else:
             cls = ir.ExternKernelOut if self.has_out_variant else ir.ExternKernelAlloc
             inner = cls(
@@ -908,6 +899,86 @@ class ExternKernelCaller(ChoiceCaller):
         }
 
 
+class DataProcessorChoiceCallerWrapper:
+    def __init__(self, wrapped, preprocessor, postprocessor):
+        self._wrapped = wrapped
+        if preprocessor is not None:
+            self._preprocessor = preprocessor
+        else:
+            self._preprocessor = lambda x, y: (x, y)
+        if postprocessor is not None:
+            self._postprocessor = postprocessor
+        else:
+            self._postprocessor = lambda x: x
+
+    def __getattr__(self, name):
+        return getattr(self._wrapped, name)
+
+    def benchmark(self, *args, out) -> float:
+        new_args, new_out = self._preprocessor(args, out)
+        result = self._wrapped.benchmark(*new_args, out=new_out)
+        new_out = self._postprocessor(new_out)
+        if out is not new_out:
+            out.copy_(new_out)
+        return result
+
+    def output_node(self) -> ir.TensorBox:
+        result = self._wrapped.output_node()
+        return self._postprocessor(result)
+
+    def __repr__(self) -> str:
+        return f"DataProcessorChoiceCallerWrapper({self._wrapped})"
+
+
+class DataProcessorTemplateWrapper:
+    """
+    A wrapper class for a kernel template.
+
+    This class together with `DataProcessorChoiceCallerWrapper` provides a convenient way to
+    preprocess and postprocess data before and after using the wrapped template. A typical
+    usage is to reorder or filter the input nodes in order to match the expected input of other
+    kernel choices like a ATen kernel. A more complicated usage is to prepack the weights.
+    See the example from :mod:`cpp_gemm_template` for more details.
+    """
+
+    def __init__(
+        self,
+        wrapped_template_cls,
+        preprocessor,
+        postprocessor,
+        **kwargs,
+    ):
+        if preprocessor is not None:
+            self._preprocessor = preprocessor
+        else:
+            self._preprocessor = lambda x, y: (x, y)
+        if postprocessor is not None:
+            self._postprocessor = postprocessor
+        else:
+            self._postprocessor = lambda x: x
+        assert "input_nodes" in kwargs
+        assert "layout" in kwargs
+        kwargs["input_nodes"], kwargs["layout"] = preprocessor(
+            kwargs["input_nodes"], kwargs["layout"]
+        )
+        self._wrapped = wrapped_template_cls(**kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._wrapped, name)
+
+    def maybe_append_choice(self, choices, **kwargs):
+        return type(self._wrapped).maybe_append_choice(self, choices, **kwargs)
+
+    def generate(self, **kwargs):
+        choice_caller = self._wrapped.generate(**kwargs)
+        return DataProcessorChoiceCallerWrapper(
+            choice_caller, self._preprocessor, self._postprocessor
+        )
+
+    def __repr__(self) -> str:
+        return f"DataProcessorTemplateWrapper({self._wrapped})"
+
+
 class ErrorFromChoice(RuntimeError):
     def __init__(self, msg, choice: ChoiceCaller, inputs_str):
         msg += f"\nFrom choice {choice}\n{inputs_str}"
@@ -917,13 +988,6 @@ class ErrorFromChoice(RuntimeError):
 
 class NoValidChoicesError(RuntimeError):
     pass
-
-
-@functools.lru_cache(None)
-def get_env_num_workers() -> Optional[int]:
-    if "TORCHINDUCTOR_COMPILE_THREADS" in os.environ:
-        return int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
-    return None
 
 
 class AlgorithmSelectorCache(PersistentCache):
@@ -990,10 +1054,11 @@ class AlgorithmSelectorCache(PersistentCache):
                 or precompilation_timeout_seconds <= 0
             ):
                 return no_op
-
-            env_workers = get_env_num_workers()
-            num_workers = env_workers if env_workers is not None else (len(choices))
-
+            num_workers = min(
+                config.compile_threads,
+                torch.get_num_threads(),
+                len(choices),
+            )
             if num_workers <= 0:
                 return no_op
 
@@ -1085,7 +1150,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         else:
                             raise e
                     except ImportError:
-                        raise e from None
+                        raise e
 
                 executor.shutdown(wait=True)
 
@@ -1192,7 +1257,9 @@ class AlgorithmSelectorCache(PersistentCache):
             }
             example_inputs = list(unique_example_inputs.values())
             example_inputs_extern = [
-                torch.as_strided(
+                unique_example_inputs[input_node.get_name()]
+                if unique_example_inputs[input_node.get_name()].is_mkldnn
+                else torch.as_strided(
                     unique_example_inputs[input_node.get_name()],
                     V.graph.sizevars.size_hints(
                         input_node.get_size(),
@@ -1281,7 +1348,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
                     timing = float("inf")
                 except AssertionError as e:
-                    raise AssertionError(  # noqa: B904
+                    raise AssertionError(  # noqa: TRY200
                         f"Incorrect result from choice {choice}\n\n{e}"
                     )
                 except Exception as e:
@@ -1294,7 +1361,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         else:
                             raise e
                     except ImportError:
-                        raise e from None
+                        raise e
 
                 timings[choice] = timing
 
@@ -1353,7 +1420,7 @@ class AlgorithmSelectorCache(PersistentCache):
             result = timings[choice]
             if result:
                 sys.stderr.write(
-                    f"  {choice.name} {result:.4f} ms {best_time / result:.1%}\n"
+                    f"  {choice.name} {result:.4f} ms {best_time/result:.1%}\n"
                 )
             else:
                 sys.stderr.write(

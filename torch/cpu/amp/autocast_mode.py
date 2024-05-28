@@ -1,4 +1,3 @@
-import warnings
 from typing import Any
 
 import torch
@@ -9,7 +8,7 @@ __all__ = ["autocast"]
 class autocast(torch.amp.autocast_mode.autocast):
     r"""
     See :class:`torch.autocast`.
-    ``torch.cpu.amp.autocast(args...)`` is deprecated. Please use ``torch.amp.autocast("cpu", args...)`` instead.
+    ``torch.cpu.amp.autocast(args...)`` is equivalent to ``torch.autocast("cpu", args...)``
     """
 
     def __init__(
@@ -23,10 +22,6 @@ class autocast(torch.amp.autocast_mode.autocast):
             self.device = "cpu"
             self.fast_dtype = dtype
             return
-        warnings.warn(
-            "torch.cpu.amp.autocast(args...) is deprecated. Please use torch.amp.autocast('cpu', args...) instead.",
-            DeprecationWarning,
-        )
         super().__init__(
             "cpu", enabled=enabled, dtype=dtype, cache_enabled=cache_enabled
         )

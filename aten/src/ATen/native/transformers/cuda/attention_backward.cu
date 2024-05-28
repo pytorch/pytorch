@@ -66,17 +66,12 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
     bool is_causal,
     const Tensor& philox_seed,
     const Tensor& philox_offset,
-    std::optional<double> scale,
-    std::optional<int64_t> window_size_left,
-    std::optional<int64_t> window_size_right) {
+    std::optional<double> scale) {
 #if defined(USE_FLASH_ATTENTION)
   const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
   //  CUDA code assumes that dout is contiguous
   auto contiguous_grad_out = grad_out.contiguous();
   auto contiguous_out = out.contiguous();
-
-  const int non_null_window_left = window_size_left.has_value() ? window_size_left.value() : -1;
-  const int non_null_window_right = window_size_right.has_value() ? window_size_right.value() : -1;
 
   std::optional<at::Tensor> dq{c10::nullopt};
   std::optional<at::Tensor> dk{c10::nullopt};
@@ -123,8 +118,8 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         softmax_scale,
         false /*zero_tensors*/,
         is_causal,
-        non_null_window_left,
-        non_null_window_right,
+        -1, /*window_size_left*/
+        -1, /*window_size_right*/
         determinisitic,
         philox_seed,
         philox_offset);
@@ -145,8 +140,8 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         dropout_p,
         softmax_scale,
         is_causal,
-        non_null_window_left,
-        non_null_window_right,
+        -1, /*window_size_left*/
+        -1, /*window_size_right*/
         determinisitic,
         philox_seed,
         philox_offset);

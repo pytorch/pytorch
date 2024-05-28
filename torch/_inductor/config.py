@@ -232,21 +232,14 @@ max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 force_same_precision = (
     True if is_fbcode() else os.environ.get("TORCHINDUCTOR_FORCE_SAME_PRECISION") == "1"
 )
-
 # Specify candidate backends for gemm autotune.
-# Possible choices are combinations of: ATen, Triton, CUTLASS.
+# Possible choices are combinations of: ATen, Triton, CUTLASS, CPP.
 # ATen: default Pytorch ATen kernels.
 # Triton: Triton templates defined in torch inductor.
 # CUTLASS: Cutlass templates and kernels.
+# CPP: CPP templates and kernels for CPU.
 max_autotune_gemm_backends = os.environ.get(
-    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON"
-).upper()
-
-# Specify the size of the search space for GEMM autotuning.
-# DEFAULT     - balance between compile time overhead and performance
-# EXHAUSTIVE  - maximize performance
-max_autotune_gemm_search_space = os.environ.get(
-    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_SEARCH_SPACE", "DEFAULT"
+    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP"
 ).upper()
 
 # the value used as a fallback for the unbacked SymInts
@@ -463,9 +456,6 @@ pad_channels_last = False
 # Whether to treat output of the backward graph as user visible.
 # For user visible outputs, inductor will make sure the stride matches with eager.
 bw_outputs_user_visible = True
-
-# Whether to always use shape padding if it is enabled and possible
-force_shape_pad: bool = False
 
 # Fx-based linear/matmul/bmm + permute/transpose vertical fusion
 permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
@@ -726,10 +716,6 @@ class aot_inductor:
     output_path = ""
 
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
-
-    debug_dump_consts_bin: bool = (
-        os.environ.get("AOT_INDUCTOR_DEBUG_DUMP_CONSTS_BIN", "0") == "1"
-    )
 
     # Serialized tree spec for flattening inputs
     serialized_in_spec = ""

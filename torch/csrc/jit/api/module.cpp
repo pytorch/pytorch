@@ -323,7 +323,7 @@ Module Module::deepcopy(std::optional<at::Device> device) const {
 
 Module Module::clone(bool inplace) const {
   std::unordered_map<TypePtr, TypePtr> type_remap;
-  IValue::HashIdentityIValueMap memo;
+  IValue::HashAliasedIValueMap memo;
   const std::unordered_set<std::string> ignored_methods;
   const std::unordered_set<std::string> ignored_attributes;
   return clone_impl(
@@ -335,7 +335,7 @@ Module Module::clone(
     const std::unordered_set<std::string>& ignored_methods,
     const std::unordered_set<std::string>& ignored_attributes) const {
   std::unordered_map<TypePtr, TypePtr> type_remap;
-  IValue::HashIdentityIValueMap memo;
+  IValue::HashAliasedIValueMap memo;
   return clone_impl(
       type_remap, inplace, memo, ignored_methods, ignored_attributes);
 }
@@ -343,7 +343,7 @@ Module Module::clone(
 Module Module::clone_impl(
     std::unordered_map<TypePtr, TypePtr>& type_remap,
     bool inplace,
-    IValue::HashIdentityIValueMap memo,
+    IValue::HashAliasedIValueMap memo,
     const std::unordered_set<std::string>& ignored_methods,
     const std::unordered_set<std::string>& ignored_attributes) const {
   // Create a new _ivalue in the same compilation unit.

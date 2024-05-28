@@ -37,10 +37,6 @@ def snapshot_verbose_logging_enabled():
     )
 
 
-def cpp_verbose_log_fn(msg: str) -> None:
-    verbose_log.debug(msg)
-
-
 def maybe_clone(x):
     if x is not None:
         return clone_preserve_strides(x)
@@ -296,8 +292,9 @@ def enable(compiler_fn):
     prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
         functools.partial(AutogradCompilerInstance, compiler_fn)
     )
-    if snapshot_verbose_logging_enabled():
-        torch._C._dynamo.compiled_autograd.set_verbose_logger(cpp_verbose_log_fn)
+    torch._C._dynamo.compiled_autograd.set_verbose_logging(
+        snapshot_verbose_logging_enabled()
+    )
     global compiled_autograd_enabled, compiled_autograd_enabled_count
     compiled_autograd_enabled = True
     compiled_autograd_enabled_count += 1
@@ -322,11 +319,3 @@ def disable():
         if prior:
             compiled_autograd_enabled = True
         torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
-
-
-# return to starting state of a new process
-def reset() -> None:
-    compiled_autograd_enable = False
-    assert compiled_autograd_enabled_count == 0
-    torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
-    torch._C._dynamo.compiled_autograd.set_verbose_logger(None)

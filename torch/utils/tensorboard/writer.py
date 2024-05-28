@@ -916,7 +916,7 @@ class SummaryWriter:
                     "warning: Embedding dir exists, did you set global_step for add_embedding()?"
                 )
             else:
-                raise NotADirectoryError(
+                raise FileExistsError(
                     f"Path: `{save_path}` exists, but is a file. Cannot proceed."
                 )
         else:

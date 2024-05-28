@@ -60,12 +60,6 @@ def _replace_with_hop(node: torch.fx.Node):
                 set_grad_node.meta.get("nn_module_stack", {})
             )
             output_node = next(iter(reversed(sub_gm.graph.nodes)), None)
-            # Split_module pass intentially doesn't add output node
-            # if the graph doesn't return anything.
-            # TODO (tmanlaibaatar) Figure out if this is right behaviour
-            # for split_module
-            if isinstance(output_node, torch.fx.Node) and output_node.op != "output":
-                output_node = None
             if output_node is not None:
                 assert len(output_node.args) == 1
                 output_args = output_node.args[0]
@@ -112,7 +106,9 @@ def _replace_with_hop(node: torch.fx.Node):
                         f"repalce_set_grad_with_hop_pass doesnt' support output type {type(output_args)}"
                     )
             else:
-                node.graph.erase_node(node)
+                raise NotImplementedError(
+                    "Cannot replace a call_module with a hop if it has no output. This module will gets DCEed."
+                )
         sub_graph.erase_node(set_grad_node)
 
 
@@ -168,7 +164,6 @@ def _sequential_split_and_maybe_inline_subgraphs(
                     else node
                 ),
             )
-        new_gm.recompile()
         return new_gm
 
     return gm

@@ -35,6 +35,7 @@ from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
 DEVICE_TYPE = (
     "cuda" if torch.cuda.is_available() and torch.cuda.device_count() > 1 else "cpu"
 )
+PG_BACKEND = "nccl" if DEVICE_TYPE == "cuda" else "gloo"
 
 NUM_DEVICES = 4
 
@@ -297,11 +298,10 @@ class DTensorTestBase(MultiProcessTestCase):
 
     @property
     def backend(self) -> str:
-        backend = "nccl" if self.device_type == "cuda" else "gloo"
-        return backend
+        return PG_BACKEND
 
     def build_device_mesh(self) -> DeviceMesh:
-        return DeviceMesh(self.device_type, list(range(self.world_size)))
+        return DeviceMesh(DEVICE_TYPE, list(range(self.world_size)))
 
     def init_pg(self) -> None:
         if "nccl" in self.backend and torch.cuda.device_count() < self.world_size:
@@ -359,11 +359,11 @@ def with_comms(func: TestFunc) -> TestFunc:
     def wrapper(
         self, *args: Tuple[object], **kwargs: Dict[str, Any]  # type: ignore[misc]
     ) -> None:
-        # if enough GPU we can use GPU, otherwise we fallback to CPU
-        if not torch.cuda.is_available() or torch.cuda.device_count() < self.world_size:
-            self.device_type = "cpu"
+        # if backend not specified, and cuda available, then use nccl, else gloo
+        if torch.cuda.is_available() and torch.cuda.device_count() >= self.world_size:
+            self.device_type = "cuda"
         else:
-            self.device_type = DEVICE_TYPE
+            self.device_type = "cpu"
 
         self.init_pg()
         func(self, *args, **kwargs)  # type: ignore[misc]

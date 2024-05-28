@@ -15,6 +15,7 @@ __all__ = [
     "preferred_blas_library",
     "cufft_plan_cache",
     "matmul",
+    "SDPBackend",
     "SDPAParams",
     "enable_cudnn_sdp",
     "cudnn_sdp_enabled",
@@ -398,7 +399,7 @@ def sdp_kernel(
         ),
         FutureWarning,
     )
-    from torch.nn.attention import sdpa_kernel
+    from torch.nn.attention import sdpa_kernel, SDPBackend
 
     backend_list = []
     if enable_flash:

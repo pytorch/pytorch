@@ -2612,7 +2612,7 @@ class TestAutograd(TestCase):
 
                 except UnrecoverableException:
                     self.assertFalse(torch.is_grad_enabled())
-                    raise SecondaryException from None
+                    raise SecondaryException
 
         @torch.enable_grad()
         def coro_enable_grad(n=10):
@@ -2624,7 +2624,7 @@ class TestAutograd(TestCase):
 
                 except UnrecoverableException:
                     self.assertTrue(torch.is_grad_enabled())
-                    raise SecondaryException from None
+                    raise SecondaryException
 
         with torch.enable_grad():
             coro = coro_no_grad()

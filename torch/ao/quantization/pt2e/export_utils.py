@@ -8,6 +8,7 @@ from torch.ao.quantization.utils import _assert_and_get_unique_device
 
 __all__ = [
     "model_is_exported",
+    "_WrapperModule",
 ]
 
 
