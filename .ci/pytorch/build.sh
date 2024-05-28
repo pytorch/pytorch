@@ -285,7 +285,7 @@ else
         # Which should be backward compatible with Numpy-1.X
         python -mpip install --pre numpy==2.0.0rc1
       fi
-      if [[ "$USE_SPLIT_BUILD" == true ]]; then
+      if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
         WERROR=1 BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py bdist_wheel
         LIBTORCH_WHL=$(ls dist/*.whl)
         pip_install_whl "$LIBTORCH_WHL"
@@ -301,7 +301,7 @@ else
       if [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
         source .ci/pytorch/install_cache_xla.sh
       fi
-      if [[ "$USE_SPLIT_BUILD" == true ]]; then
+      if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
         BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py bdist_wheel
         LIBTORCH_WHL=$(ls dist/*.whl)
         pip_install_whl "$LIBTORCH_WHL"
@@ -342,7 +342,7 @@ else
       popd
     fi
     SPLIT_PKG_PREFIX=""
-    if [[ "$USE_SPLIT_BUILD" == true ]]; then
+    if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
       SPLIT_PKG_PREFIX="$SITE_PACKAGES/libtorchsplit;"
     fi
 
