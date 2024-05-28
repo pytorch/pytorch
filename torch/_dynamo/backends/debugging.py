@@ -5,9 +5,9 @@ import functools
 from importlib import import_module
 from typing import Any, List, Optional
 
-from functorch.compile import min_cut_rematerialization_partition
-
 import torch
+
+from functorch.compile import min_cut_rematerialization_partition
 from torch import _guards
 from torch._functorch import config as functorch_config
 from torch._functorch.compilers import ts_compile
