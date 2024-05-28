@@ -9371,7 +9371,7 @@ class foreach_max_sample_func(foreach_inputs_sample_func):
         return []
 
     def _should_disable_fastpath(self, opinfo, rightmost_arg, rightmost_arg_type, dtype):
-        return dtype in (torch.int8, torch.int16, torch.bool)
+        return False
 
 
 class foreach_norm_sample_func(foreach_inputs_sample_func):
@@ -11116,6 +11116,7 @@ foreach_reduce_op_db: List[ForeachFuncInfo] = [
         supports_inplace_autograd=True,
         supports_forward_ad=True,
         decorators=(
+            # no complex support for ordering ops like max
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestForeach",
