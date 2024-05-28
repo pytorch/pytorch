@@ -1018,6 +1018,31 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
                 self.assertNotEqual(run_once, run_twice)
 
+        def test_remove_hooks_on_cached_tensors(self):
+            @torch.compile()
+            def foo(x):
+                return x * x
+
+            inp = torch.rand([4], device="cuda", requires_grad=True)
+
+            for _ in range(5):
+                out = foo(inp)
+                self.assertIsNone(out._backward_hooks)
+                out.register_hook(lambda: None)
+
+            # today, torch.compile never outputs a leaf tensor which is the only
+            # tensor that can register _post_accumulate_grad_hooks
+            # add this as a preventative test
+
+            @torch.compile()
+            def foo(x):
+                return torch.rand([4], device="cuda", requires_grad=True)
+
+            for _ in range(5):
+                out = foo(inp)
+                self.assertIsNone(out._post_accumulate_grad_hooks)
+                out.register_post_accumulate_grad_hook(lambda: None)
+
         def test_multiple_insert_removal_caching(self):
             torch._C._set_cached_tensors_enabled(True)
             try:
