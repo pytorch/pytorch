@@ -60,6 +60,18 @@ class ImplDetailTest(TestCase):
         super().tearDownClass()
         cls._exit_stack.close()
 
+    @staticmethod
+    def _get_snode_body_sym_prefix(snode):
+        body = snode._body
+        prefix = ""
+
+        for var in body.var_ranges:
+            prefix = str(var)[0]
+            break
+
+        assert prefix
+        return prefix
+
     def test_reorder_twice(self):
         """
         This may happen in practice if we pick a order when fusing A and B.
@@ -69,13 +81,13 @@ class ImplDetailTest(TestCase):
         """
         buf = self._create_computed_buffer()
         snode = SchedulerNode(V.graph.scheduler, buf)
+        prefix0 = self._get_snode_body_sym_prefix(snode)
         snode.apply_new_loop_order([1, 0])
+        prefix1 = self._get_snode_body_sym_prefix(snode)
+        self.assertEqual(prefix0, prefix1, f"{prefix0} v.s. {prefix1}")
         snode.apply_new_loop_order([1, 0])
-
-        print(snode)
-        # breakpoint()
-        # TODO: this test fail so far.
-        # Add some assertions
+        prefix2 = self._get_snode_body_sym_prefix(snode)
+        self.assertEqual(prefix0, prefix2, f"{prefix0} v.s. {prefix2}")
 
 
 @inductor_config.patch(
