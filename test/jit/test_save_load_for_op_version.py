@@ -7,9 +7,9 @@ from itertools import product as product
 from typing import Union
 
 import hypothesis.strategies as st
+from hypothesis import example, given, settings
 
 import torch
-from hypothesis import example, given, settings
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
