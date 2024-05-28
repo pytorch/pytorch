@@ -160,6 +160,34 @@ class TestCommMode(TestCase):
         comm_counts = comm_mode.get_comm_counts()
         self.assertEqual(comm_counts[c10d_ops.scatter_], 1)
 
+        # tests c10d all_gather tracing
+        output_list = []
+
+        with comm_mode:
+            dist.all_gather(output_list, inp, None)
+
+        comm_counts = comm_mode.get_comm_counts()
+        self.assertEqual(comm_counts[c10d_ops.allgather_], 1)
+
+        # tests c10d allgather_coalesced_ tracing
+        output_list = []
+
+        with comm_mode:
+            dist.all_gather_coalesced(output_list, [inp], None)
+
+        comm_counts = comm_mode.get_comm_counts()
+        self.assertEqual(comm_counts[c10d_ops.allgather_coalesced_], 1)
+
+        # tests c10d allgather_into_tensor_coalesced_ tracing
+        comm_mode = CommDebugMode()
+        with comm_mode as A, dist._coalescing_manager() as B:
+            # dist.all_reduce_coalesced(inp)
+            dist.all_gather_into_tensor(all_gather_out, inp)
+
+        comm_counts = comm_mode.get_comm_counts()
+        self.assertEqual(comm_mode.get_total_counts(), 1)
+        self.assertEqual(comm_counts[c10d_ops.allgather_into_tensor_coalesced_], 1)
+
     @requires_nccl()
     def test_comm_mode_with_c10d_allreduce_coalesced(self):
         world_pg = self.world_pg
