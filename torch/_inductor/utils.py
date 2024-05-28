@@ -39,10 +39,10 @@ from typing import (
     Union,
     ValuesView,
 )
+from typing_extensions import Concatenate, ParamSpec
 from unittest import mock
 
 import sympy
-from typing_extensions import Concatenate, ParamSpec
 
 import torch
 import torch._export
@@ -873,6 +873,21 @@ class IndentedBuffer:
         res.writelines(self._lines)
         res.writelines(other._lines)
         return res
+
+
+class FakeIndentedBuffer(IndentedBuffer):
+    def __init__(self):
+        super().__init__()
+
+    def __getattribute__(self, name):
+        if name == "__class__":  # Allow access to the class attribute
+            return object.__getattribute__(self, name)
+        raise RuntimeError(
+            f"Tried to call self.{name} on FakeIndentedBuffer. This buffer"
+            "is currently used on TritonTemplateKernel to prevent actual"
+            "writes to the body without explicitly specifying the body with"
+            "`TritonTemplateKernel.set_subgraph_body(name)`"
+        )
 
 
 @contextlib.contextmanager

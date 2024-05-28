@@ -16,14 +16,11 @@ endif()
 # ATen parallelism settings
 #  OMP - OpenMP for intra-op, native thread pool for inter-op parallelism
 #  NATIVE - using native thread pool for intra- and inter-op parallelism
-#  TBB - using TBB for intra- and native thread pool for inter-op parallelism
 if(INTERN_BUILD_MOBILE)
   set(ATEN_THREADING "NATIVE" CACHE STRING "ATen parallel backend")
 else()
   if(USE_OPENMP)
     set(ATEN_THREADING "OMP" CACHE STRING "ATen parallel backend")
-  elseif(USE_TBB)
-    set(ATEN_THREADING "TBB" CACHE STRING "ATen parallel backend")
   else()
     set(ATEN_THREADING "NATIVE" CACHE STRING "ATen parallel backend")
   endif()
@@ -31,19 +28,12 @@ endif()
 
 set(AT_PARALLEL_OPENMP 0)
 set(AT_PARALLEL_NATIVE 0)
-set(AT_PARALLEL_NATIVE_TBB 0)
 
 message(STATUS "Using ATen parallel backend: ${ATEN_THREADING}")
 if("${ATEN_THREADING}" STREQUAL "OMP")
   set(AT_PARALLEL_OPENMP 1)
 elseif("${ATEN_THREADING}" STREQUAL "NATIVE")
   set(AT_PARALLEL_NATIVE 1)
-elseif("${ATEN_THREADING}" STREQUAL "TBB")
-  if(NOT USE_TBB)
-    message(FATAL_ERROR "Using TBB backend but USE_TBB is off")
-  endif()
-  message(WARNING "ATEN TBB Threading is deprectated.")
-  set(AT_PARALLEL_NATIVE_TBB 1)
 else()
   message(FATAL_ERROR "Unknown ATen parallel backend: ${ATEN_THREADING}")
 endif()
@@ -578,10 +568,6 @@ if(NOT INTERN_BUILD_MOBILE AND NOT BUILD_LITE_INTERPRETER)
     ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
   )
 
-  set_source_files_properties(
-    ${TORCH_SRC_DIR}/csrc/jit/serialization/import.cpp
-    PROPERTIES COMPILE_FLAGS "-DC10_DISABLE_LEGACY_IMPORT"
-  )
   if(USE_DISTRIBUTED)
     append_filelist("libtorch_distributed_base_sources" TORCH_SRCS)
     if(NOT WIN32)
@@ -1057,6 +1043,14 @@ elseif(USE_CUDA)
     target_precompile_headers(torch_cuda PRIVATE
         "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")
   endif()
+
+  # Apply suggestion from comment https://github.com/pytorch/pytorch/issues/113053#issuecomment-2115375714
+  if(LINUX)
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/CUDASparseDescriptors.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/CUDASparseBlas.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/sparse/cuda/SparseCUDABlas.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/sparse/cuda/SparseBlasImpl.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+  endif()
 endif()
 
 if(USE_XPU)
@@ -1217,11 +1211,6 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
   set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/RNN.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
   set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/quantized/cpu/qlinear_prepack.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
   set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/quantized/qlinear_unpack.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
-endif()
-
-if(USE_TBB)
-  list(APPEND ATen_CPU_INCLUDE ${TBB_INCLUDE_DIR})
-  target_link_libraries(torch_cpu PUBLIC TBB::tbb)
 endif()
 
 target_include_directories(torch_cpu PRIVATE ${ATen_CPU_INCLUDE})
@@ -1673,6 +1662,37 @@ endif()
 
 target_link_libraries(torch_cpu PRIVATE flatbuffers)
 
+# Note [Global dependencies]
+# Some libraries (e.g. OpenMPI) like to dlopen plugins after they're initialized,
+# and they assume that all of their symbols will be available in the global namespace.
+# On the other hand we try to be good citizens and avoid polluting the symbol
+# namespaces, so libtorch is loaded with all its dependencies in a local scope.
+# That usually leads to missing symbol errors at run-time, so to avoid a situation like
+# this we have to preload those libs in a global namespace.
+if(BUILD_SHARED_LIBS)
+  add_library(torch_global_deps SHARED ${TORCH_SRC_DIR}/csrc/empty.c)
+  if(HAVE_SOVERSION)
+    set_target_properties(torch_global_deps PROPERTIES
+        VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+  endif()
+  set_target_properties(torch_global_deps PROPERTIES LINKER_LANGUAGE C)
+  if(USE_MPI)
+    target_link_libraries(torch_global_deps MPI::MPI_CXX)
+  endif()
+  if(CAFFE2_USE_MKL)
+    target_link_libraries(torch_global_deps caffe2::mkl)
+  endif()
+  # The CUDA libraries are linked here for a different reason: in some
+  # cases we load these libraries with ctypes, and if they weren't opened
+  # with RTLD_GLOBAL, we'll do the "normal" search process again (and
+  # not find them, because they're usually in non-standard locations)
+  if(USE_CUDA)
+    target_link_libraries(torch_global_deps ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+    target_link_libraries(torch_global_deps torch::cudart torch::nvtoolsext)
+  endif()
+  install(TARGETS torch_global_deps DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+endif()
+
 # ---[ Caffe2 HIP sources.
 if(USE_ROCM)
   # Call again since Caffe2_HIP_INCLUDE is extended with ATen include dirs.
@@ -1791,9 +1811,6 @@ if(BUILD_TEST)
     target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
     target_include_directories(${test_name} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
     target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
-    if(NOT MSVC)
-      target_compile_options(${test_name} PRIVATE -Wno-unused-variable)
-    endif()
     add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
     if(INSTALL_TEST)
       install(TARGETS ${test_name} DESTINATION test)
