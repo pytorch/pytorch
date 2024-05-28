@@ -4,14 +4,15 @@ from functools import partial
 from typing import Callable, List, Union
 
 import numpy as np
+from tabulate import tabulate
+from tqdm import tqdm
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.benchmark as benchmark
-from tabulate import tabulate
 from torch.nn.attention.bias import CausalBias, CausalVariant
 from torch.nn.parameter import Parameter
-from tqdm import tqdm
 
 
 def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) -> float:

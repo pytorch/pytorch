@@ -35,9 +35,10 @@ from collections import namedtuple
 from itertools import product
 from random import shuffle
 
+from packaging import version
+
 import torch
 import torch.autograd.forward_ad as fwAD
-from packaging import version
 
 from torch import inf, nan
 from torch.autograd import grad
