@@ -69,6 +69,9 @@ def swap_tensors(t1, t2):
             else:
                 raise RuntimeError(error_str)
 
+    check_use_count(t1, 't1')
+    check_use_count(t2, 't2')
+
     # Swap the types
     # Note that this will fail if there are mismatched slots
     swap_attr("__class__")
