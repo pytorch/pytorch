@@ -257,7 +257,7 @@ def tuned_fp8_mm(
         choices = []  # TODO add rowwise scaling Cutlass kernel
     else:
         choices = (
-            [aten__fp8_mm.bind(input_nodes, layout)] if use_aten_gemm_kernels() else []
+            [aten__fp8_mm.bind(input_nodes, layout, out_dtype=out_dtype, use_fast_accum=use_fast_accum)] if use_aten_gemm_kernels() else []
         )
 
     static_shape, is_nonzero = _is_static_problem([mat_a, mat_b], layout)
