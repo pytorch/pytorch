@@ -5081,7 +5081,7 @@ def forward(self, x, y):
         self.assertEqual(out2.shape, torch.ones(11, 4, 3).shape)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Eq\(Mod\(s0\*s1, 4\*s0 \- 4\), 0\) on node 'eq'",
+            r"Runtime assertion failed for expression Eq\(Mod\(s0\*s1, 4\*s0 \- 4\), 0\) on node 'eq.*'",
         ):
             ep.module()(torch.randn(8, 8))  # fail
 
@@ -5130,11 +5130,9 @@ def forward(self, x, y):
         self.assertEqual(out2.shape, torch.ones(40).shape)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Eq\(s0\*s1 \- s2\*s3, 0\) on node 'eq'",
+            r"Runtime assertion failed for expression Eq\(s0\*s1 \- s2\*s3, 0\) on node 'eq.*'",
         ):  # fail only at runtime
-            ep.module()(
-                torch.randn(5, 8), torch.randn(4, 5), torch.randn(30)
-            )  # fail
+            ep.module()(torch.randn(5, 8), torch.randn(4, 5), torch.randn(30))  # fail
 
         # case 3: 3d reshape (previously failing with different issue)
         class Reshape3d(torch.nn.Module):
@@ -5181,7 +5179,7 @@ def forward(self, x, y):
         self.assertEqual(out1.shape, torch.ones(126).shape)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Eq\(s0\*s1\*s2 \- s3, 0\) on node 'eq'",
+            r"Runtime assertion failed for expression Eq\(s0\*s1\*s2 \- s3, 0\) on node 'eq.*'",
         ):  # fail only at runtime
             ep.module()(torch.randn(4, 3, 2), torch.randn(10))  # fail
 
@@ -5246,11 +5244,13 @@ def forward(self, x, y):
                 # Ne(Mod(s0, 20), 0), so that reshape needs to first flatten [s0, 20, 16] -> [s0*20, 16]
                 # then split_dim -> [20, s0, 16]
                 # check that these show up in graph
-                return torch.nn.functional.softmax(x, dim=0)  # don't think softmax actually creates any issues
+                return torch.nn.functional.softmax(
+                    x, dim=0
+                )  # don't think softmax actually creates any issues, just part of original test
 
         model = Model()
         x = torch.rand(1024, 20, 16)
-        dynamic_shapes={'x': {0: Dim("batch")}}
+        dynamic_shapes = {"x": {0: Dim("batch")}}
         ep = torch.export._trace._export(
             model,
             (x,),
@@ -5301,12 +5301,12 @@ def forward(self, x, y):
         with self.assertRaisesRegex(
             RuntimeError,
             r"Runtime assertion failed for expression Ne\(s0 \- s1\**3, 0\)",
-        ):  # fail only at runtime
+        ):
             ep.module()(torch.randn(64), torch.randn(4))  # fail
         with self.assertRaisesRegex(
             RuntimeError,
             r"Runtime assertion failed for expression Eq\(s0\**2 \- 3\*s1, 0\)",
-        ):  # fail only at runtime
+        ):
             ep.module()(torch.randn(10), torch.randn(9))  # fail
 
     def test_constant_aliasing(self):

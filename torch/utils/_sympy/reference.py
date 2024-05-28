@@ -71,6 +71,8 @@ class ReferenceAnalysis:
     @staticmethod
     def mod(x, y):
         ret = abs(x) % abs(y)
+        # without check:
+        # tracing will fail trying to go through control-flow if x is Proxy()
         if isinstance(x, (int, sympy.Number)) and x < 0:
             ret *= -1
         return ret
