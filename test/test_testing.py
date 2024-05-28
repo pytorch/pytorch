@@ -18,7 +18,7 @@ import torch
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
-    (IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
+    (IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_SPLIT_BUILD, IS_WINDOWS, TestCase, run_tests, slowTest,
      parametrize, subtest, instantiate_parametrized_tests, dtype_name, TEST_WITH_ROCM, decorateIf)
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
@@ -2272,6 +2272,7 @@ class TestImports(TestCase):
                 self.assertTrue(inspect.ismodule(mod))
 
     @unittest.skipIf(IS_WINDOWS, "TODO enable on Windows")
+    @unittest.skipIf(IS_SPLIT_BUILD, "TODO Create a similar unittest for the split build")
     def test_lazy_imports_are_lazy(self) -> None:
         out = self._check_python_output("import sys;import torch;print(all(x not in sys.modules for x in torch._lazy_modules))")
         self.assertEqual(out.strip(), "True")
