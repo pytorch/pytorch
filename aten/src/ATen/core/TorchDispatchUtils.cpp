@@ -1,7 +1,7 @@
 #include <ATen/core/TorchDispatchUtils.h>
 
-namespace at {
-namespace impl {
+
+namespace at::impl {
 
 bool tensor_has_dispatch(const at::Tensor& t) {
   DispatchKeySet key_set({DispatchKey::Python, DispatchKey::PythonTLSSnapshot});
@@ -17,7 +17,7 @@ bool tensorlist_has_dispatch(at::ITensorListRef li) {
   return false;
 }
 
-bool tensorlist_has_dispatch(const c10::List<c10::optional<at::Tensor>>& li) {
+bool tensorlist_has_dispatch(const c10::List<std::optional<at::Tensor>>& li) {
   for (auto i : c10::irange(li.size())) {
     auto t = li.get(i);
     if (t && tensor_has_dispatch(*t)) {
@@ -27,5 +27,4 @@ bool tensorlist_has_dispatch(const c10::List<c10::optional<at::Tensor>>& li) {
   return false;
 }
 
-} // namespace impl
-} // namespace at
+} // namespace at::impl

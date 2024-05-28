@@ -31,6 +31,7 @@ from ..utils import (
     nnmodule_has_hooks,
     object_has_getattribute,
     proxy_args_kwargs,
+    set_example_value,
 )
 from .base import MutableLocal, typestr, VariableTracker
 from .functions import invoke_and_store_as_constant
@@ -70,7 +71,7 @@ def initialize_lazy_module(tx, mod, args, kwargs):
 def record_nn_module_stack(module_key: str, source, tx, mod: torch.nn.Module):
     fully_qualified_name = source.name()
     try:
-        tx.nn_module_stack[module_key] = (fully_qualified_name, type(mod))
+        tx.nn_module_stack[module_key] = (fully_qualified_name, mod.__class__)
         yield
     finally:
         del tx.nn_module_stack[module_key]
@@ -153,7 +154,7 @@ class NNModuleVariable(VariableTracker):
         # Mark the class dynamic unless its module initialization
         if tx.f_code.co_name != "__init__":
             GenerationTracker.mark_class_dynamic(type(mod))
-        raise UnspecializeRestartAnalysis()
+        raise UnspecializeRestartAnalysis
 
     def _custom_getattr_fallback(self, base, tx, name, options):
         """Check for a __getattr__ and handle it specially if it is implemented"""
@@ -222,6 +223,11 @@ class NNModuleVariable(VariableTracker):
             return VariableBuilder(tx, NNModuleSource(source))(subobj)
         else:
             if istype(subobj, property):
+                if self.source:
+                    # Read the class attribute to reach the property
+                    source = AttrSource(AttrSource(self.source, "__class__"), name)
+                    # Get the getter function
+                    source = AttrSource(source, "fget")
                 return variables.UserFunctionVariable(
                     subobj.fget,
                     source=source,
@@ -242,7 +248,9 @@ class NNModuleVariable(VariableTracker):
                 # Support possibly common cases of class members
                 return VariableBuilder(tx, NNModuleSource(source))(subobj)
             else:
-                unimplemented(f"class property {typestr(base)} {typestr(subobj)}")
+                unimplemented(
+                    f"class property {name} - {typestr(base)} {typestr(subobj)}"
+                )
 
         return variables.GetAttrVariable(self, name, source=source)
 
@@ -300,8 +308,14 @@ class NNModuleVariable(VariableTracker):
             # If we are tracing the higher order op, we want Dynamo to step
             # inside the module call so that Dynamo can see the underlying
             # parameters and buffers and raise them as inputs to the graph.
-            if tx.output.is_root_tracer() and mod.__module__.startswith(
-                ("torch.nn.", "torch.ao.")
+            #
+            # NB: torch.nn.utils.parametrize changes the class type of a
+            # parametrized module such that its __module__ points to
+            # "torch.nn.utils.parametrize".
+            if (
+                tx.output.is_root_tracer()
+                and mod.__module__.startswith(("torch.nn.", "torch.ao."))
+                and mod.__module__ != "torch.nn.utils.parametrize"
             ):
                 if nnmodule_has_hooks(
                     mod, check_forward_hooks=True, check_backward_hooks=True
@@ -329,9 +343,10 @@ class NNModuleVariable(VariableTracker):
                     # If so at least some changes are needed, we don't allow inlining
                     # the call_wrapped currently, and maybe other issues too
                     fn = mod.forward
+                    fn_source = AttrSource(self.source, "forward")
                 else:
                     fn = mod._call_impl
-                fn_source = AttrSource(self.source, "__call__")
+                    fn_source = AttrSource(self.source, "_call_impl")
                 if istype(fn, types.MethodType):
                     fn = fn.__func__
                     fn_source = AttrSource(fn_source, "__func__")
@@ -366,7 +381,7 @@ class NNModuleVariable(VariableTracker):
                 tuple(),
                 {},
             )
-            mod_proxy.node.meta["example_value"] = module
+            set_example_value(mod_proxy.node, module)
 
             proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
 
@@ -472,12 +487,16 @@ class NNModuleVariable(VariableTracker):
             return source
 
         if name == "named_children":
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules").name())
             assert not (args or kwargs)
             result = []
             for name, submod in module.named_children():
                 result.append(named_embed(name, submod))
             return ListIteratorVariable(result, mutable_local=MutableLocal())
         elif name == "named_parameters":
+            tx.output.guard_on_key_order.add(
+                AttrSource(self.source, "_parameters").name()
+            )
             result = []
             for name, param in module.named_parameters(
                 **get_kwargs("prefix", "recurse")
@@ -485,6 +504,7 @@ class NNModuleVariable(VariableTracker):
                 result.append(named_embed(name, param))
             return ListIteratorVariable(result, mutable_local=MutableLocal())
         elif name == "named_buffers":
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_buffers").name())
             result = []
             for name, buffer in module.named_buffers(
                 **get_kwargs("prefix", "recurse", "remove_duplicate")
@@ -492,6 +512,7 @@ class NNModuleVariable(VariableTracker):
                 result.append(named_embed(name, buffer))
             return ListIteratorVariable(result, mutable_local=MutableLocal())
         elif name == "named_modules":
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules").name())
             result = []
             for name, submod in module.named_modules(
                 **get_kwargs("memo", "prefix", "remove_duplicate")
@@ -499,13 +520,19 @@ class NNModuleVariable(VariableTracker):
                 result.append(named_embed(name, submod))
             return ListIteratorVariable(result, mutable_local=MutableLocal())
         elif name == "children":
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules").name())
             assert not (args or kwargs)
             return wrap_values(module.named_children())
         elif name == "modules":
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules").name())
             return wrap_values(module.named_modules())
         elif name == "parameters":
+            tx.output.guard_on_key_order.add(
+                AttrSource(self.source, "_parameters").name()
+            )
             return wrap_values(module.named_parameters(**get_kwargs("recurse")))
         elif name == "buffers":
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_buffers").name())
             return wrap_values(module.named_buffers(**get_kwargs("recurse")))
         elif name == "keys":
             assert not (args or kwargs)
@@ -639,7 +666,11 @@ class NNModuleVariable(VariableTracker):
 
 
 class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
-    _nonvar_fields = {"value_type", *UserDefinedObjectVariable._nonvar_fields}
+    _nonvar_fields = {
+        "value_type",
+        "is_state_mutated",
+        *UserDefinedObjectVariable._nonvar_fields,
+    }
 
     """
     The above class will specialize on the id() of a module and place
@@ -665,14 +696,17 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 kwargs["value_type"] = type(value)
 
         super().__init__(value=value, **kwargs)
+        self.is_state_mutated = False
 
     @staticmethod
     @functools.lru_cache(None)
     def _nn_module_method_ids():
+        # Allow __setattr__ to fall through to base class handler
+        supported = {torch.nn.Module.__setattr__}
         return {
             id(x.__code__)
             for x in torch.nn.Module.__dict__.values()
-            if hasattr(x, "__code__")
+            if hasattr(x, "__code__") and x not in supported
         }
 
     def unpack_var_sequence(self, tx):
@@ -773,8 +807,49 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     kwargs,
                 )
 
-            if id(method.__code__) in self._nn_module_method_ids():
+            if (
+                hasattr(method, "__code__")
+                and id(method.__code__) in self._nn_module_method_ids()
+            ):
                 unimplemented(f"UnspecializedNNModuleVariable missing {name}")
+
+            # "_parameters" in self.value.__dict__ checks that module is initialized
+            if name == "__setattr__" and "_parameters" in self.value.__dict__:
+                # Record if mutations happens on parameters/buffers/modules. The
+                # mutations on these are not tracked by base class
+                # UserDefinedObject vt. This will be used later to graph break
+                # on seeing a paramters() and family calls.
+                # TODO(anijain2305) - This might not be needed if we let Dynamo
+                # inline both getattr and setattr. In that case, it should see
+                # the lowest level dicts - _parameters and family and
+                # automatically track mutations on those. Investigate if that
+                # can be done.
+                attr_name = args[0].as_python_constant()
+                value = args[1]
+
+                # This is reverse engineered by looking at nn module __setattr__
+                # logic.
+                if (
+                    isinstance(value, variables.TensorVariable)
+                    and value.python_type() is torch.nn.Parameter
+                ) or attr_name in self.value.__dict__["_parameters"]:
+                    # Handle parameters
+                    self.is_state_mutated = True
+                elif attr_name in self.value.__dict__["_buffers"]:
+                    # Handle buffers
+                    self.is_state_mutated = True
+                elif (
+                    isinstance(
+                        value,
+                        (
+                            variables.NNModuleVariable,
+                            variables.UnspecializedNNModuleVariable,
+                        ),
+                    )
+                    or attr_name in self.value.__dict__["_modules"]
+                ):
+                    # Handle submodules
+                    self.is_state_mutated = True
 
         return super().call_method(tx, name, args, kwargs)
 

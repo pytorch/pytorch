@@ -301,7 +301,7 @@ class BaseStructuredSparsifier(BaseSparsifier):
 
         for module in self.traced.modules():
             if module_contains_param(module, FakeStructuredSparsity):
-                raise Exception(
+                raise Exception(  # noqa: TRY002
                     f"Error: {module} still contains FakeStructuredSparsity parametrizations!"
                 )
 

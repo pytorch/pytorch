@@ -65,7 +65,7 @@ namespace jit {
 
 struct ShapeArg
     : public std::
-          pair<c10::optional<c10::ShapeSymbol>, c10::optional<int64_t>> {
+          pair<std::optional<c10::ShapeSymbol>, c10::optional<int64_t>> {
   using pair::pair;
 
   static ShapeArg unknownInteger() {
@@ -87,11 +87,11 @@ struct ShapeArg
     }
   }
 
-  c10::optional<int64_t> asConstantInt() const {
+  std::optional<int64_t> asConstantInt() const {
     return this->second;
   }
 
-  c10::optional<c10::ShapeSymbol> asShapeSymbol() const {
+  std::optional<c10::ShapeSymbol> asShapeSymbol() const {
     return this->first;
   }
 
@@ -208,7 +208,7 @@ bool isListOfTensors(const TypePtr& type) {
       type->cast<ListType>()->getElementType()->cast<TensorType>();
 }
 
-c10::optional<size_t> normIndex(int64_t index, size_t len) {
+std::optional<size_t> normIndex(int64_t index, size_t len) {
   if (index < 0) {
     index = index + len;
   }
@@ -255,7 +255,7 @@ c10::SymbolicShape extractListShape(
     return c10::SymbolicShape();
   }
   Node* list_construct = list->node();
-  std::vector<c10::optional<int64_t>> output_shape;
+  std::vector<std::optional<int64_t>> output_shape;
   for (Value* input : list_construct->inputs()) {
     if (symbolic_shape_values.count(input)) {
       output_shape.emplace_back(symbolic_shape_values[input]);
@@ -605,7 +605,7 @@ struct SymbolicShapeOpAnalyzer {
     shape_compute_graph_ = graph->copy();
   }
 
-  c10::optional<std::vector<c10::SymbolicShape>> run(
+  std::optional<std::vector<c10::SymbolicShape>> run(
       std::vector<SSArgument>& inputs) {
     if (!shape_compute_graph_) {
       return c10::nullopt;
@@ -813,7 +813,7 @@ struct SymbolicShapeGraphAnalyzer {
         beg_->owningBlock() == end_->owningBlock() && end_->isAfter(beg_));
   }
 
-  c10::optional<ShapeComputeGraphMapping> run() {
+  std::optional<ShapeComputeGraphMapping> run() {
     AliasDb db(graph_);
     std::unordered_map<Node*, std::shared_ptr<Graph>> partial_evaluated_graphs =
         propagateShapesAndGatherPartialEvalShapeGraphs(db);
@@ -1120,7 +1120,7 @@ void PropagateShapesOnGraph(std::shared_ptr<Graph>& graph) {
   PropagateShapesOnBlock(graph->block(), db);
 }
 
-c10::optional<ShapeComputeGraphMapping>
+std::optional<ShapeComputeGraphMapping>
 PropagateShapesAndBuildLargeShapeComputeGraph(
     std::shared_ptr<Graph>& graph,
     Node* beg,
@@ -1128,7 +1128,7 @@ PropagateShapesAndBuildLargeShapeComputeGraph(
   return SymbolicShapeGraphAnalyzer(graph, beg, end).run();
 }
 
-TORCH_API c10::optional<std::vector<c10::SymbolicShape>>
+TORCH_API std::optional<std::vector<c10::SymbolicShape>>
 calculateSymbolicShapesOnOp(
     const FunctionSchema* schema,
     const std::vector<SSAInput>& inputs) {

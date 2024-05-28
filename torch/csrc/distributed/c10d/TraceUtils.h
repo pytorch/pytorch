@@ -15,6 +15,34 @@
 #include <vector>
 namespace c10d {
 
+static c10::IValue entries_key = "entries";
+static c10::IValue nccl_comm_key = "nccl_comm_state";
+static c10::IValue version_key = "version";
+// Update whenever changing contents or formatting of the dump
+// (minor when adding fields, major when changing existing fields)
+static c10::IValue version_val = "1.5";
+static c10::IValue pg_config_key = "pg_config";
+static c10::IValue record_id_key = "record_id";
+static c10::IValue pg_id_key = "pg_id";
+static c10::IValue pg_name_key = "process_group";
+static c10::IValue seq_id_key = "seq_id";
+static c10::IValue op_id_key = "op_id";
+static c10::IValue profiling_name_key = "profiling_name";
+static c10::IValue input_sizes_key = "input_sizes";
+static c10::IValue output_sizes_key = "output_sizes";
+static c10::IValue time_created_key = "time_created_ns";
+static c10::IValue duration_key = "duration_ms";
+
+static c10::IValue frames_key = "frames";
+static c10::IValue state_key = "state";
+static c10::IValue line_key = "line";
+static c10::IValue name_key = "name";
+static c10::IValue filename_key = "filename";
+static c10::IValue retired_key = "retired";
+static c10::IValue time_discovered_started_key = "time_discovered_started_ns";
+static c10::IValue time_discovered_completed_key =
+    "time_discovered_completed_ns";
+
 /* Trace Utils Related to TORCH_NCCL_DESYNC_DEBUG */
 
 inline std::string getTraceStartKey(const std::string& pgName, int rank) {
@@ -367,6 +395,18 @@ inline c10::List<c10::IValue> new_list() {
   return c10::List<c10::IValue>(c10::AnyType::get());
 }
 
+inline std::string ranks_str(const std::vector<uint64_t>& ranks) {
+  std::string str;
+  for (const auto& rank : ranks) {
+    if (str.empty()) {
+      str = std::to_string(rank);
+    } else {
+      str += ", " + std::to_string(rank);
+    }
+  }
+  return c10::str("[", str, "]");
+}
+
 struct NCCLTraceBuffer {
   static NCCLTraceBuffer* get() {
     // intentionally leak on exit
@@ -378,7 +418,6 @@ struct NCCLTraceBuffer {
     max_entries_ = getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0);
     capture_cpp_stack_ = getCvarBool({"TORCH_NCCL_TRACE_CPP_STACK"}, false);
     enabled_ = max_entries_ > 0;
-    pg_id_to_ranks_ = {};
   }
   using Event = at::cuda::CUDAEvent;
   struct Entry {
@@ -387,6 +426,7 @@ struct NCCLTraceBuffer {
                 // buffer this entry will be located to
                 // update state information
     size_t pg_id_;
+    std::tuple<std::string, std::string> pg_name_; // <group_name, group_desc>
 
     // Both seq_id_ and op_id_ are per_pg incrementing counters
     // seq_id refers to actual kernel launches (e.g. 1 per coalesced group)
@@ -405,18 +445,18 @@ struct NCCLTraceBuffer {
     // timestamp when the entry was created, likely close to the time the work
     // was 'enqueued'- not necessarily started
     c10::time_t time_created_;
-    c10::optional<float> duration_;
+    std::optional<float> duration_;
 
     // timestamp when our CPU threads discovered that the kernel started.
     // will always be _after_ it actually started, and can be very late
     // if the watchdog thread got stuck on CUDA APIs.
-    c10::optional<c10::time_t> time_discovered_started_;
+    std::optional<c10::time_t> time_discovered_started_;
 
     // timestamp when our CPU threads discovered that the kernel completed.
     // will always be _after_ it actually complated, and can be the same time
     // as the discovery of the start if the watchdog thread is stuck on CUDA
     // APIs
-    c10::optional<c10::time_t> time_discovered_completed_;
+    std::optional<c10::time_t> time_discovered_completed_;
 
     // size information for input/output tensors
     c10::SmallVector<int, 4> input_dims_;
@@ -433,10 +473,12 @@ struct NCCLTraceBuffer {
   size_t max_entries_ = 0;
   size_t next_ = 0;
   size_t id_ = 0;
-  std::map<size_t, std::vector<uint64_t>> pg_id_to_ranks_;
+  std::map<std::tuple<std::string, std::string>, std::vector<uint64_t>>
+      pg_name_to_ranks_ = {};
 
-  c10::optional<size_t> record(
+  std::optional<size_t> record(
       size_t pg_id,
+      const std::tuple<std::string, std::string>& pg_name,
       size_t seq_id,
       size_t op_id,
       std::string profiling_name,
@@ -454,6 +496,7 @@ struct NCCLTraceBuffer {
     auto te = Entry{
         id_,
         pg_id,
+        pg_name,
         seq_id,
         op_id,
         std::move(profiling_name),
@@ -485,12 +528,14 @@ struct NCCLTraceBuffer {
     return id_++;
   }
 
-  void record_pg_ranks(size_t pg_id, std::vector<uint64_t> ranks) {
+  void record_pg_ranks(
+      const std::tuple<std::string, std::string>& pg_name,
+      std::vector<uint64_t> ranks) {
     if (!enabled_) {
       return;
     }
     std::lock_guard<std::mutex> guard(mutex_);
-    pg_id_to_ranks_[pg_id] = ranks;
+    pg_name_to_ranks_[pg_name] = ranks;
   }
 
   void update_state(Entry& r) {
@@ -528,12 +573,13 @@ struct NCCLTraceBuffer {
   This is called by the watchdog thread, and is asynchronous from the
   perspective of the main thread.
 
-  compute_duration defaults to false since it requires calling the cuda APIs in
-  getDurationFromEvent which might increase the peak memory usage. Also
-  enableTiming_ automatically enabled if compute_duration is true for
-  computation to work correctly - see TORCH_NCCL_ENABLE_TIMING.
+  compute_duration defaults to true since retire_id is only called in the
+  watchdog thread, which is currently a place we call cuda APIs which may hang,
+  but care should be taken to avoid computing duration in any function that must
+  never hang. (timing must also be enabled for compute_duration - see
+  TORCH_NCCL_ENABLE_TIMING).
   */
-  void retire_id(c10::optional<size_t> id, bool compute_duration = false) {
+  void retire_id(std::optional<size_t> id, bool compute_duration = true) {
     if (!enabled_ || !id) {
       return;
     }
@@ -541,7 +587,7 @@ struct NCCLTraceBuffer {
     bool can_compute_duration = false;
     Event* startEvent = nullptr;
     Event* endEvent = nullptr;
-    c10::optional<float> duration = c10::nullopt;
+    std::optional<float> duration = c10::nullopt;
 
     std::unique_lock<std::mutex> guard(mutex_);
 
@@ -583,36 +629,11 @@ struct NCCLTraceBuffer {
   }
 
   std::string dump(
-      const c10::optional<std::unordered_map<
+      const std::optional<std::unordered_map<
           std::string,
           std::unordered_map<std::string, std::string>>>& ncclDumpMap) {
     auto result = dump_entries();
     auto entries = new_list();
-    c10::IValue entries_key = "entries";
-    c10::IValue nccl_comm_key = "nccl_comm_state";
-    c10::IValue version_key = "version";
-    // Update whenever changing contents or formatting of the dump
-    // (minor when adding fields, major when changing existing fields)
-    c10::IValue version_val = "1.4";
-    c10::IValue pg_config_key = "pg_config";
-    c10::IValue record_id_key = "record_id";
-    c10::IValue pg_id_key = "pg_id";
-    c10::IValue seq_id_key = "seq_id";
-    c10::IValue op_id_key = "op_id";
-    c10::IValue profiling_name_key = "profiling_name";
-    c10::IValue input_sizes_key = "input_sizes";
-    c10::IValue output_sizes_key = "output_sizes";
-    c10::IValue time_created_key = "time_created_ns";
-    c10::IValue duration_key = "duration_ms";
-
-    c10::IValue frames_key = "frames";
-    c10::IValue state_key = "state";
-    c10::IValue line_key = "line";
-    c10::IValue name_key = "name";
-    c10::IValue filename_key = "filename";
-    c10::IValue retired_key = "retired";
-    c10::IValue time_discovered_started_key = "time_discovered_started_ns";
-    c10::IValue time_discovered_completed_key = "time_discovered_completed_ns";
 
     std::vector<torch::CapturedTraceback*> tracebacks;
     for (auto& e : result) {
@@ -634,6 +655,7 @@ struct NCCLTraceBuffer {
       auto dict = new_dict();
       dict.insert(record_id_key, int64_t(e.id_));
       dict.insert(pg_id_key, int64_t(e.pg_id_));
+      dict.insert(pg_name_key, e.pg_name_);
       dict.insert(seq_id_key, int64_t(e.seq_id_));
       dict.insert(op_id_key, int64_t(e.op_id_));
       dict.insert(profiling_name_key, e.profiling_name_);
@@ -686,12 +708,12 @@ struct NCCLTraceBuffer {
       entries.push_back(dict);
     }
     auto pg_config = new_dict();
-    for (const auto& [pg_id, ranks] : pg_id_to_ranks_) {
-      auto pg_ranks = new_list();
-      for (const auto& rank : ranks) {
-        pg_ranks.push_back(static_cast<int>(rank));
-      }
-      pg_config.insert(static_cast<int>(pg_id), pg_ranks);
+    for (const auto& [pg_name, ranks] : pg_name_to_ranks_) {
+      auto pg_info = new_dict();
+      pg_info.insert("name", std::get<0>(pg_name));
+      pg_info.insert("desc", std::get<1>(pg_name));
+      pg_info.insert("ranks", ranks_str(ranks));
+      pg_config.insert(std::get<0>(pg_name), pg_info);
     }
 
     // convert ncclDumpMap into a dictionary

@@ -154,6 +154,14 @@ def _sleep(cycles):
     torch._C._cuda_sleep(cycles)
 
 
+def _extract_arch_version(arch_string: str):
+    """Extracts the architecture string from a CUDA version"""
+    base = arch_string.split("_")[1]
+    if base.endswith("a"):
+        base = base[:-1]
+    return int(base)
+
+
 def _check_capability():
     incorrect_binary_warn = """
     Found GPU%d %s which requires CUDA_VERSION >= %d to
@@ -177,7 +185,7 @@ def _check_capability():
             name = get_device_name(d)
             current_arch = major * 10 + minor
             min_arch = min(
-                (int(arch.split("_")[1]) for arch in torch.cuda.get_arch_list()),
+                (_extract_arch_version(arch) for arch in torch.cuda.get_arch_list()),
                 default=35,
             )
             if current_arch < min_arch:
@@ -198,7 +206,7 @@ If you want to use the {} GPU with PyTorch, please check the instructions at htt
     arch_list = get_arch_list()
     if len(arch_list) == 0:
         return
-    supported_sm = [int(arch.split("_")[1]) for arch in arch_list if "sm_" in arch]
+    supported_sm = [_extract_arch_version(arch) for arch in arch_list if "sm_" in arch]
     for idx in range(device_count()):
         cap_major, cap_minor = get_device_capability(idx)
         # NVIDIA GPU compute architectures are backward compatible within major version
@@ -243,7 +251,7 @@ class DeferredCudaCallError(Exception):
     pass
 
 
-OutOfMemoryError = torch._C._OutOfMemoryError
+OutOfMemoryError = torch._C.OutOfMemoryError
 
 
 def init():
@@ -739,14 +747,25 @@ def _get_nvml_device_index(device: Optional[Union[int, Device]]) -> int:
     return visible_devices[idx]
 
 
-@lru_cache(maxsize=1)
+_cached_device_count: Optional[int] = None
+
+
 def device_count() -> int:
     r"""Return the number of GPUs available."""
+    global _cached_device_count
     if not _is_compiled():
         return 0
+    if _cached_device_count is not None:
+        return _cached_device_count
     # bypass _device_count_nvml() if rocm (not supported)
     nvml_count = -1 if torch.version.hip else _device_count_nvml()
-    return torch._C._cuda_getDeviceCount() if nvml_count < 0 else nvml_count
+    r = torch._C._cuda_getDeviceCount() if nvml_count < 0 else nvml_count
+    # NB: Do not cache the device count prior to CUDA initialization, because
+    # the number of devices can change due to changes to CUDA_VISIBLE_DEVICES
+    # setting prior to CUDA initialization.
+    if _initialized:
+        _cached_device_count = r
+    return r
 
 
 def get_arch_list() -> List[str]:

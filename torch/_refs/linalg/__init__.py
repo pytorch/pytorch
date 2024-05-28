@@ -63,6 +63,8 @@ def _check_norm_dtype(dtype: Optional[torch.dtype], x_dtype: torch.dtype, fn_nam
         )
 
 
+import operator
+
 # Utilities should come BEFORE this import
 from torch._decomp import register_decomposition
 from torch._decomp.decompositions import pw_cast_for_opmath
@@ -165,7 +167,7 @@ def _backshift_permutation(dim0, dim1, ndim):
 
 def _inverse_permutation(perm):
     # Given a permutation, returns its inverse. It's equivalent to argsort on an array
-    return [i for i, j in sorted(enumerate(perm), key=lambda i_j: i_j[1])]
+    return [i for i, j in sorted(enumerate(perm), key=operator.itemgetter(1))]
 
 
 # CompositeImplicitAutograd
