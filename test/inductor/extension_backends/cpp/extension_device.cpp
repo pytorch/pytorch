@@ -134,7 +134,7 @@ at::Tensor custom_empty_memory_format(at::IntArrayRef size,
                                    memory_format);
 }
 
-at::Tensor custom_empty_strided(c10::IntArrayRef size, c10::IntArrayRef stride, std::optional<at::ScalarType> dtype_opt, c10::optional<at::Layout> layout_opt, c10::optional<at::Device> device_opt, c10::optional<bool> pin_memory_opt) {
+at::Tensor custom_empty_strided(c10::IntArrayRef size, c10::IntArrayRef stride, std::optional<at::ScalarType> dtype_opt, std::optional<at::Layout> layout_opt, std::optional<at::Device> device_opt, std::optional<bool> pin_memory_opt) {
   op_counter += 1;
 
   constexpr c10::DispatchKeySet private_use_ks(c10::DispatchKey::PrivateUse1);

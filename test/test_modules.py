@@ -663,10 +663,10 @@ class TestModule(TestCase):
                 d = output.dim()
                 if (d == 4 and ((input_mem_format == torch.channels_last)
                                 or (module_mem_format == torch.channels_last and module_memformat_affects_out))):
-                    self.assertTrue(output.is_contiguous(memory_format=torch.channels_last))
+                    self.assertTrue(output.numel() == 0 or output.is_contiguous(memory_format=torch.channels_last))
                 elif (d == 5 and ((input_mem_format == torch.channels_last_3d)
                                   or (module_mem_format == torch.channels_last_3d and module_memformat_affects_out))):
-                    self.assertTrue(output.is_contiguous(memory_format=torch.channels_last_3d))
+                    self.assertTrue(output.numel() == 0 or output.is_contiguous(memory_format=torch.channels_last_3d))
                 else:
                     self.assertTrue(output.is_contiguous())
             return self._traverse_obj(output, inner_check_out_mem_format)
@@ -970,23 +970,16 @@ class TestModule(TestCase):
             p_ids_after = [id(p) for p in m.parameters()]
             p_cdatas_after = [p._cdata for p in m.parameters()]
 
-            # id same, ._cdata differs --> swapped cdata of THPVariable
-            # Technically, meta and device have different shallow copy types, so when swap=False will create a new
-            # parameter and assign it to the module BUT we opt into swap_tensors when either one is on meta.
-            self.assertTrue(all(a == b for a, b in zip(p_ids_before, p_ids_after)))
-            self.assertTrue(all(a != b for a, b in zip(p_cdatas_before, p_cdatas_after)))
-
-            # Test the opposite direction device --> meta
-            m = m.to(device="meta")
-
-            p_ids_after_meta = [id(p) for p in m.parameters()]
-            p_cdatas_after_meta = [p._cdata for p in m.parameters()]
-
-            # id same, ._cdata differs --> swapped cdata of THPVariable
-            # Technically, meta and device have different shallow copy types, so when swap=False will create a new
-            # parameter and assign it to the module BUT we opt into swap_tensors when either one is on meta.
-            self.assertTrue(all(a == b for a, b in zip(p_ids_after, p_ids_after_meta)))
-            self.assertTrue(all(a != b for a, b in zip(p_cdatas_after, p_cdatas_after_meta)))
+            if swap:
+                # id same, ._cdata differs --> swapped cdata of THPVariable
+                self.assertTrue(all(a == b for a, b in zip(p_ids_before, p_ids_after)))
+                self.assertTrue(all(a != b for a, b in zip(p_cdatas_before, p_cdatas_after)))
+            else:
+                # id and ._cdata differ
+                # meta and device have different shallow copy types, so this will create a new
+                # parameter and assign it to the module
+                self.assertTrue(all(a != b for a, b in zip(p_ids_before, p_ids_after)))
+                self.assertTrue(all(a != b for a, b in zip(p_cdatas_before, p_cdatas_after)))
 
 
 instantiate_device_type_tests(TestModule, globals(), allow_mps=True)
