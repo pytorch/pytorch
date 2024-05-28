@@ -60,7 +60,6 @@ class TestCommMode(TestCase):
         with comm_mode:
             model(torch.randn(20, 10, device=self.device_type))
 
-        # self.test_comm_mode_checks_asserts(comm_mode)
         comm_counts = comm_mode.get_comm_counts()
         self.assertEqual(comm_mode.get_total_counts(), 3)
         self.assertEqual(comm_counts[c10d_functional.all_reduce], 1)
