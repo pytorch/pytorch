@@ -7,13 +7,14 @@ import pathlib
 from typing import Sequence
 from unittest import skip
 
+import yaml
+
 import torch
 import torch._lazy
 import torch._lazy.config
 import torch._lazy.ir_cache
 import torch._lazy.metrics
 import torch._lazy.ts_backend
-import yaml
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
