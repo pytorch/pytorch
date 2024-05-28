@@ -7,10 +7,11 @@ from copy import deepcopy
 from typing import Any, Dict, Tuple
 from unittest.mock import patch
 
-import torch
 from optim.test_lrscheduler import TestLRScheduler  # noqa: F401
 from optim.test_optim import TestDifferentiableOptimizer  # noqa: F401
 from optim.test_swa_utils import TestSWAUtils  # noqa: F401
+
+import torch
 from torch.nn import Parameter
 from torch.optim import Optimizer, SGD
 
