@@ -88,29 +88,14 @@
 #     disables use of system-wide nccl (we will use our submoduled
 #     copy in third_party/nccl)
 #
-#   USE_IBVERBS
-#     toggle features related to distributed support
-#
-#   USE_OPENCV
-#     enables use of OpenCV for additional operators
-#
 #   USE_OPENMP=0
 #     disables use of OpenMP for parallelization
-#
-#   USE_FFMPEG
-#     enables use of ffmpeg for additional operators
 #
 #   USE_FLASH_ATTENTION=0
 #     disables building flash attention for scaled dot product attention
 #
 #   USE_MEM_EFF_ATTENTION=0
 #    disables building memory efficient attention for scaled dot product attention
-#
-#   USE_LEVELDB
-#     enables use of LevelDB for storage
-#
-#   USE_LMDB
-#     enables use of LMDB for storage
 #
 #   BUILD_BINARY
 #     enables the additional binaries/ build
@@ -147,12 +132,6 @@
 #
 #   MKL_THREADING
 #     MKL threading mode: SEQ, TBB or OMP (default)
-#
-#   USE_REDIS
-#     Whether to use Redis for distributed workflows (Linux only)
-#
-#   USE_ZSTD
-#     Enables use of ZSTD, if the libraries are found
 #
 #   USE_ROCM_KERNEL_ASSERT=1
 #     Enable kernel assert in ROCm platform
@@ -201,13 +180,6 @@
 #     possible values:
 #       OMP - use OpenMP for intra-op and native backend for inter-op tasks
 #       NATIVE - use native thread pool for both intra- and inter-op tasks
-#       TBB - using TBB for intra- and native thread pool for inter-op parallelism
-#
-#   USE_TBB
-#      enable TBB support
-#
-#   USE_SYSTEM_TBB
-#      Use system-provided Intel TBB.
 #
 #   USE_SYSTEM_LIBS (work in progress)
 #      Use system-provided libraries to satisfy the build dependencies.
@@ -350,7 +322,6 @@ def get_submodule_folders():
         for name in [
             "gloo",
             "cpuinfo",
-            "tbb",
             "onnx",
             "foxi",
             "QNNPACK",
