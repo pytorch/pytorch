@@ -5,10 +5,10 @@ import unittest
 from typing import cast
 
 import expecttest
+import yaml
 
 import torchgen.dest as dest
 import torchgen.gen as gen
-import yaml
 from torchgen.gen import LineLoader, parse_native_yaml_struct
 from torchgen.model import (
     Annotation,

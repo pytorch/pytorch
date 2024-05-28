@@ -274,7 +274,9 @@ class TritonTemplateKernel(TritonKernel):
             val = self.named_input_nodes[name].get_stride()[index]
         return texpr(self.rename_indexing(val))
 
-    def modification(self, subgraph_number: int, **fixed_inputs) -> str:
+    def modification(
+        self, subgraph_number: int, output_name: str, **fixed_inputs
+    ) -> str:
         """This creates a modification function for a subgraph.
         To use this inside a template, the first argument should specify which subgraph to codegen for
 
@@ -319,7 +321,7 @@ class TritonTemplateKernel(TritonKernel):
                 out = subgraph.data.inner_fn((1,))
 
         self.codegen_body()
-        self.body.writeline(f"{fixed_inputs['out']} = {out.value}")
+        self.body.writeline(f"{output_name} = {out.value}")
 
         body_val = self.body.getvalue()
         self.body.clear()
@@ -470,6 +472,8 @@ class TritonTemplateKernel(TritonKernel):
             if isinstance(call_args[i], sympy.Symbol):
                 call_args[i] = texpr(call_args[i])
 
+        current_device = V.graph.scheduler.get_current_device_or_throw()
+
         if V.graph.cpp_wrapper:
             # In the cpp_wrapper case, we have to compute CUDA launch grid at runtime
             # if any dynamic dimension is involved. We rely on the Python version
@@ -484,15 +488,13 @@ class TritonTemplateKernel(TritonKernel):
             wrapper.generate_kernel_call(
                 name,
                 call_args,
-                device_index=V.graph.scheduler.current_device.index,
+                device_index=current_device.index,
                 arg_types=arg_types,
                 grid=grid,
                 triton_meta=self.triton_meta,
             )
         else:
-            stream_name = wrapper.write_get_raw_stream(
-                V.graph.scheduler.current_device.index
-            )
+            stream_name = wrapper.write_get_raw_stream(current_device.index)
 
             wrapper.add_import_once(f"import {self.grid_fn.__module__}")
             meta = wrapper.add_meta_once(self.meta)
