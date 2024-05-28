@@ -526,7 +526,6 @@ class GuardsSet:
 class GuardsContext(Checkpointable[GuardsCheckpointState]):
     def __init__(self):
         self.dynamo_guards: GuardsSet = GuardsSet()
-        self.aotautograd_guards: List[GuardEnvExpr] = []
 
     def copy_graphstate(self):
         return GuardsCheckpointState(set(self.dynamo_guards.inner))

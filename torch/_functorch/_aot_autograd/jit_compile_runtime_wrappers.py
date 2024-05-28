@@ -30,7 +30,6 @@ from .dispatch_and_compile_graph import (
 from .logging_utils import track_graph_compiling
 
 from .runtime_wrappers import (
-    AOTDedupeWrapper,
     AOTDispatchAutograd,
     AOTDispatchSubclassWrapper,
     AOTSyntheticBaseWrapper,
@@ -65,7 +64,7 @@ def _create_wrappers_for_dispatch(needs_autograd: bool) -> List[CompilerWrapper]
     """
     Wrappers that run on every dispatch function
     """
-    return [AOTDedupeWrapper(), AOTSyntheticBaseWrapper(trace_joint=needs_autograd)]
+    return [AOTSyntheticBaseWrapper(trace_joint=needs_autograd)]
 
 
 # Export's dispatching logic is unique in a few ways: it only needs the "graph"

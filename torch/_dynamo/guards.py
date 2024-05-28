@@ -47,14 +47,7 @@ from torch._dynamo.source import (
     TensorProperty,
     TensorPropertySource,
 )
-from torch._guards import (
-    DuplicateInputs,
-    Guard,
-    GuardBuilderBase,
-    GuardEnvExpr,
-    GuardSource,
-    Source,
-)
+from torch._guards import Guard, GuardBuilderBase, GuardSource, Source
 
 from torch._logging import structured
 from torch.fx.experimental.symbolic_shapes import (
@@ -2267,30 +2260,6 @@ class CheckFunctionManager:
                 tensor_check_names,
                 ["check_no_aliasing(" + ", ".join(tensor_check_names) + ")"],
             )
-
-        aotautograd_guards: List[GuardEnvExpr] = (
-            self.output_graph.tracing_context.guards_context.aotautograd_guards
-            if self.output_graph
-            else []
-        )
-
-        # TODO(anijain2305) - There is a duplicate logic in Dynamo to find
-        # aliased input tensors. So most probably we don't need this here.
-        # Revisit.
-        for guard in aotautograd_guards:
-            if isinstance(guard, DuplicateInputs):
-                source_a = guard.input_source_a
-                source_b = guard.input_source_b
-                code_part = f"{source_a.name()} is {source_b.name()}"
-                if config.enable_cpp_guard_manager:
-                    install_tensor_aliasing_guard(
-                        builder.get_guard_manager_from_source(source_a),
-                        builder.get_guard_manager_from_source(source_b),
-                        [code_part],
-                    )
-                add_code_part(code_part, None, config.enable_cpp_guard_manager)
-            else:
-                raise RuntimeError(f"Unknown GuardEnvExpr: {guard}")
 
         # TODO: the "guard" here is actually just the top level SHAPE_ENV
         # which is useless.  Get ShapeEnv to pass in more provenance.

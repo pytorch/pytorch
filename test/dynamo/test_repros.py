@@ -4389,19 +4389,15 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         # Before, this was (9702, 0)
         num_shape_guards = None
-        num_aot_guards = None
         num_compiles = 0
 
         def guard_count_backend(gm, *args):
             nonlocal num_shape_guards
-            nonlocal num_aot_guards
             nonlocal num_compiles
             num_shape_guards = len(
                 torch._guards.TracingContext.try_get().fake_mode.shape_env.guards
             )
-            num_aot_guards = len(
-                torch._guards.TracingContext.try_get().guards_context.aotautograd_guards
-            )
+
             num_compiles += 1
             return gm
 
@@ -4417,9 +4413,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         with torch.no_grad():
             f(*args)
-        # In this example, there were 4950 guards (roughly (# tensors) ^ 2 // 2),
-        # because every pair of aliased inputs needs a guard.
-        self.assertTrue(num_aot_guards < 5000)
         # But there are no dynamic shape guards.
         self.assertEqual(num_shape_guards, 0)
         # don't recompile

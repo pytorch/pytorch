@@ -16,7 +16,10 @@ from torch._functorch.aot_autograd import _aot_export_function, create_functiona
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.profiler import profile
-from torch.testing._internal.common_utils import compare_equal_outs_and_grads
+from torch.testing._internal.common_utils import (
+    compare_equal_outs_and_grads,
+    outs_and_grads,
+)
 
 
 def maybe_dupe_op(x):
@@ -1189,6 +1192,43 @@ SeqNr|OrigAten|SrcFn
             fn(x)
         with self.assertRaises(Exception):
             opt_fn(x_opt)
+
+    def test_aot_autograd_dupe_args(self):
+        def fn(x, y):
+            return x + y
+
+        x = torch.randn(3, 3, requires_grad=True)
+        compiled_fn = torch.compile(fn, backend="aot_eager")
+        compare_equal_outs_and_grads(self, compiled_fn, fn, [x, x])
+
+    def test_aot_autograd_dupe_args_torture(self):
+        def fn(x, y):
+            x.t_()
+            y.unsqueeze_(0)
+            return x + y
+
+        x = torch.randn(3, 3, requires_grad=True).clone()
+        compiled_fn = torch.compile(fn, backend="aot_eager")
+
+        # Like compare_equal_outs_and_grads, except we make a copy
+        # before starting, since fn modifies its input in place
+        inps = [x, x]
+        y = x.clone()
+        inps_copy = [y, y]
+        r1, g1 = outs_and_grads(fn, inps, inps)
+        r2, g2 = outs_and_grads(compiled_fn, inps_copy, inps_copy)
+        self.assertEqual(r1, r2)
+        self.assertEqual(g1, g2)
+
+    def test_aot_autograd_dupe_args_returned_as_output(self):
+        def fn(a, b, a_):
+            a[0].add_(1)
+            return a_
+
+        a = torch.ones(2)
+        b = torch.ones(2)
+        compiled_fn = torch.compile(fn, backend="aot_eager")
+        compare_equal_outs_and_grads(self, compiled_fn, fn, [a, b, a])
 
 
 if __name__ == "__main__":
