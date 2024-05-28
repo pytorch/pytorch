@@ -20,3 +20,5 @@ cmake .. -G Ninja -DCMAKE_INSTALL_PREFIX=./install_dir -DCMAKE_BUILD_TYPE=Releas
 ninja install
 mkdir -p "${AOTRITON_INSTALL_PREFIX}"
 cp -r install_dir/* "${AOTRITON_INSTALL_PREFIX}"
+find /tmp/ -mindepth 1 -delete
+rm -rf ~/.triton
