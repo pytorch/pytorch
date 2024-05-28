@@ -762,12 +762,7 @@ def jacrev(
             return output_input, aux
         return output_input
 
-    # Dynamo does not support HOP composition if their inner function is
-    # annotated with @functools.wraps(...). We circumvent this issue by applying
-    # wraps only if we're not tracing with dynamo.
-    if not torch._dynamo.is_compiling():
-        wrapper_fn = wraps(func)(wrapper_fn)
-
+    wrapper_fn = wraps(func)(wrapper_fn)
     return wrapper_fn
 
 
@@ -1343,12 +1338,7 @@ def jacfwd(
             return tree_unflatten(jac_outs_ins, spec), aux
         return tree_unflatten(jac_outs_ins, spec)
 
-    # Dynamo does not support HOP composition if their inner function is
-    # annotated with @functools.wraps(...). We circumvent this issue by applying
-    # wraps only if we're not tracing with dynamo.
-    if not torch._dynamo.is_compiling():
-        wrapper_fn = wraps(func)(wrapper_fn)
-
+    wrapper_fn = wraps(func)(wrapper_fn)
     return wrapper_fn
 
 
