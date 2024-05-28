@@ -4312,7 +4312,7 @@ def fn():
 
     def test_id_guarded_object(self):
         class UDO:
-            @torch.compile
+            @torch.compile(backend="eager")
             def call(self, x, ref_id):
                 self_id = id(self)
                 if self_id == ref_id:
