@@ -773,3 +773,8 @@ def distribute_module(
             )
 
     return module
+
+
+# wait_tensor is only available when we initialize distributed.
+# Make sure it cannot be DCE'd.
+torch.fx.node._side_effectful_functions.add(torch.ops._c10d_functional.wait_tensor)
