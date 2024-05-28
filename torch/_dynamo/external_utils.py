@@ -97,7 +97,7 @@ def untyped_storage_size(x: torch.Tensor):
     return x.untyped_storage().size()
 
 
-class CompiledAutogradEngine:
+class FakeCompiledAutogradEngine:
     @staticmethod
     def queue_callback(final_callbacks, cb):
         final_callbacks.append(cb)
