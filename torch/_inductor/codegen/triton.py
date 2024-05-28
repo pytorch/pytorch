@@ -1263,10 +1263,7 @@ class TritonKernel(SIMDKernel):
                 ep = ", eviction_policy='evict_first'"
         else:
             ep = ""
-        if (
-            (has_tmpmask or has_rindex)
-            and indexing.has_mask()
-        ):
+        if (has_tmpmask or has_rindex) and indexing.has_mask():
             other = ", other=0.0"
         else:
             other = ""
