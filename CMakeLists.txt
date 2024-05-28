@@ -285,7 +285,6 @@ option(USE_PRECOMPILED_HEADERS "Use pre-compiled headers to accelerate build."
        OFF)
 
 option(USE_PROF "Use profiling" OFF)
-option(USE_QNNPACK "Use QNNPACK (quantized 8-bit operators)" ON)
 option(USE_PYTORCH_QNNPACK "Use ATen/QNNPACK (quantized 8-bit operators)" ON)
 option(USE_SNPE "Use Qualcomm's SNPE library" OFF)
 option(USE_SYSTEM_EIGEN_INSTALL
@@ -349,11 +348,20 @@ cmake_dependent_option(USE_C10D_NCCL "USE C10D NCCL" ON
 cmake_dependent_option(USE_C10D_MPI "USE C10D MPI" ON "USE_DISTRIBUTED;USE_MPI"
                        OFF)
 cmake_dependent_option(
-  USE_TENSORPIPE "Use TensorPipe. Only available if USE_DISTRIBUTED is on." ON
-  "USE_DISTRIBUTED" OFF)
-option(USE_TBB "Use TBB (Deprecated)" OFF)
-cmake_dependent_option(USE_SYSTEM_TBB "Use system-provided Intel TBB." OFF
-                       "USE_TBB" OFF)
+    USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
+    "USE_DISTRIBUTED" OFF)
+cmake_dependent_option(
+  USE_GLOO_WITH_OPENSSL "Use Gloo with OpenSSL. Only available if USE_GLOO is on." OFF
+    "USE_GLOO AND LINUX AND NOT INTERN_BUILD_MOBILE" OFF)
+cmake_dependent_option(
+    USE_C10D_GLOO "USE C10D GLOO" ON "USE_DISTRIBUTED;USE_GLOO" OFF)
+cmake_dependent_option(
+    USE_C10D_NCCL "USE C10D NCCL" ON "USE_DISTRIBUTED;USE_NCCL" OFF)
+cmake_dependent_option(
+    USE_C10D_MPI "USE C10D MPI" ON "USE_DISTRIBUTED;USE_MPI" OFF)
+cmake_dependent_option(
+    USE_TENSORPIPE "Use TensorPipe. Only available if USE_DISTRIBUTED is on." ON
+    "USE_DISTRIBUTED" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
 option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 option(BUILD_LIBTORCH_CPU_WITH_DEBUG
@@ -471,9 +479,6 @@ if(USE_SYSTEM_LIBS)
   set(USE_SYSTEM_PYBIND11 ON)
   if(USE_NCCL)
     set(USE_SYSTEM_NCCL ON)
-  endif()
-  if(USE_TBB)
-    set(USE_SYSTEM_TBB ON)
   endif()
 endif()
 
@@ -708,7 +713,6 @@ if(INTERN_BUILD_MOBILE)
   set(USE_DISTRIBUTED OFF)
   set(NO_API ON)
   set(USE_FBGEMM OFF)
-  set(USE_QNNPACK OFF)
   set(INTERN_DISABLE_ONNX ON)
   if(USE_BLAS)
     set(INTERN_USE_EIGEN_BLAS ON)
@@ -880,10 +884,6 @@ endif(DEBUG_CUDA)
 
 if(USE_FBGEMM)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_FBGEMM")
-endif()
-
-if(USE_QNNPACK)
-  string(APPEND CMAKE_CXX_FLAGS " -DUSE_QNNPACK")
 endif()
 
 if(USE_PYTORCH_QNNPACK)
