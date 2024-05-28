@@ -178,8 +178,8 @@ def embedding_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     weight_strategy = cast(OpStrategy, op_schema.args_schema[0])
     indices_strategy = cast(OpStrategy, op_schema.args_schema[1])
 
-    weight_shape = weight_strategy.output_shape
-    indices_shape = indices_strategy.output_shape
+    weight_shape = weight_strategy.shape
+    indices_shape = indices_strategy.shape
     output_emd_dim = len(indices_shape)
 
     all_mesh_dim_strategies = []
@@ -253,8 +253,8 @@ def embedding_dense_backward_strategy(
     grad_out_strategy = cast(OpStrategy, op_schema.args_schema[0])
     indices_strategy = cast(OpStrategy, op_schema.args_schema[1])
 
-    grad_out_shape = grad_out_strategy.output_shape
-    indices_shape = indices_strategy.output_shape
+    grad_out_shape = grad_out_strategy.shape
+    indices_shape = indices_strategy.shape
     grad_out_ndim = len(grad_out_shape)
 
     all_mesh_dim_strategies = []

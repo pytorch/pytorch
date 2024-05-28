@@ -221,7 +221,9 @@ capture_scalar_outputs = os.environ.get("TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS") ==
 # break instead of capturing.  This requires dynamic_shapes to be True.
 # If you set this to True, you probably also want capture_scalar_outputs
 # (these are separated for historical reasons).
-capture_dynamic_output_shape_ops = False
+capture_dynamic_output_shape_ops = (
+    os.environ.get("TORCHDYNAMO_CAPTURE_DYNAMIC_OUTPUT_SHAPE_OPS", "0") == "1"
+)
 
 # By default, dynamo will treat all ints as backed SymInts, which means (1) it
 # will wait to see the int change over multiple runs before generalizing and
@@ -442,6 +444,14 @@ fake_tensor_cache_crosscheck_enabled = (
 # support `context_fn` in torch.utils.checkpoint.checkpoint API under torch.compile().
 # WARNING: this is an experimental flag and is subject to change.
 _experimental_support_context_fn_in_torch_utils_checkpoint = False
+
+# This is set to true inside of a torch.compile context.
+# Note: this is slightly different from torch.compiler.is_compiling(),
+# which will return False on frames that dynamo has returned control back to cpython for
+# (due to graph breaks).
+# This config will always be set to true inside of a compiled region
+# (even in the regions that run in eager due to graph breaks)
+_is_compiling = False
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403

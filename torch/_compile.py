@@ -21,7 +21,7 @@ def _disable_dynamo(fn=None, recursive=True):
         def inner(*args, **kwargs):
             import torch._dynamo
 
-            if not torch.compiler.is_compiling():
+            if not torch._dynamo.config._is_compiling:
                 return fn(*args, **kwargs)
             return torch._dynamo.disable(fn, recursive)(*args, **kwargs)
 
