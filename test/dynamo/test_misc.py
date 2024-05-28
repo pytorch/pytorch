@@ -33,6 +33,7 @@ import torch._inductor.test_case
 import torch.onnx.operators
 
 import torch.utils._pytree as pytree
+import torch.utils.cpp_extension
 from torch import Tensor
 from torch._C import FileCheck
 from torch._dynamo import allow_in_graph, bytecode_analysis, bytecode_transformation
@@ -222,6 +223,35 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
         with self.assertRaises(TypeError):
             fn(torch.randn(16))
+
+    def test_cpp_extension_recommends_custom_ops(self):
+        cpp_source = """
+        #include <torch/extension.h>
+        at::Tensor foobar(const at::Tensor& x) {
+            return x.clone();
+        }
+        """
+        module = torch.utils.cpp_extension.load_inline(
+            name="mylib",
+            cpp_sources=cpp_source,
+            functions="foobar",
+            verbose=True,
+        )
+
+        x = torch.ones(2, 2, requires_grad=True)
+        counters.clear()
+
+        @torch.compile(backend="eager")
+        def f(x):
+            return module.foobar(x)
+
+        f(x)
+        self.assertTrue(len(counters["graph_break"]), 1)
+        first_graph_break = list(counters["graph_break"].keys())[0]
+        self.assertExpectedInline(
+            first_graph_break,
+            """Unsupported builtin PyCapsule.foobar. This function is either a Python builtin (e.g. functools.partial) or a third-party C/C++ Python extension (perhaps created with pybind). If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround. If it is a third-party C/C++ Python extension, please wrap it into a PyTorch-understood custom operator (see https://docs.google.com/document/d/1_W62p8WJOQQUzPsJYa7s701JXt0qf2OfLub2sbkHOaU for more details)""",
+        )
 
     def test_callpacked(self):
         def call_packed(args):
