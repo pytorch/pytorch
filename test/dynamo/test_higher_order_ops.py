@@ -2898,7 +2898,7 @@ class GraphModule(torch.nn.Module):
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
         self.assertExpectedInline(
-            "\n".join(actual.split("\n")[:-2]),
+            "\n".join(actual.split("\n")),
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[4, 3]", L_y_: "f32[3, 4]"):
@@ -3017,20 +3017,10 @@ class GraphModule(torch.nn.Module):
         split_2 = movedim.split((12,), dim = -1);  movedim = None
         jac_out_in: "f32[4, 3, 3, 4, 12]" = split_2[0];  split_2 = None
 
-        unflatten: "f32[4, 3, 3, 4, 3, 4]" = jac_out_in.unflatten(-1, (3, 4));  jac_out_in = None""",
+        unflatten: "f32[4, 3, 3, 4, 3, 4]" = jac_out_in.unflatten(-1, (3, 4));  jac_out_in = None
+        return (unflatten,)
+""",
         )
-
-        # Python 3.10 and 3.11 produces slightly different graphs
-        if sys.version_info[:2] > (3, 10):
-            self.assertExpectedInline(
-                actual.split("\n")[-2],
-                """        return (unflatten, child_2, _wrap_for_grad_1, child_3, child_4, o)""",
-            )
-        else:
-            self.assertExpectedInline(
-                actual.split("\n")[-2],
-                """        return (unflatten,)""",
-            )
 
     def test_hessian_disable_capture(self):
         counters.clear()
