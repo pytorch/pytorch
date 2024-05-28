@@ -1252,7 +1252,6 @@ SeqNr|OrigAten|SrcFn
         self.assertEqual(r1, r2)
         self.assertEqual(g1, g2)
 
-
         z = torch.randn(3, 3, requires_grad=True)
 
         # This used to fail in aot_autograd, but no longer will raise an assertion failure

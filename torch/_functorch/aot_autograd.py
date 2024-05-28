@@ -63,9 +63,6 @@ from ._aot_autograd.logging_utils import (  # noqa: F401
     setup_stacktrace_preservation_hooks,
     track_graph_compiling,
 )
-from ._aot_autograd.runtime_wrappers import (
-    AOTSyntheticBaseWrapper,
-)
 from ._aot_autograd.schemas import (  # noqa: F401
     AOTConfig,
     BackwardSignature,
