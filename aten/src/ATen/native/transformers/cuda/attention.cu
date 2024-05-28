@@ -817,7 +817,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
 }
 
 int64_t _fused_sdp_choice_cuda(const Tensor& query_, const Tensor& key, const Tensor& value,
-        const std::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, c10::optional<double> scale){
+        const std::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, std::optional<double> scale){
   sdp::sdp_params kernel_params{query_, key, value, attn_mask_, dropout_p, is_causal};
   auto backend = select_sdp_backend(kernel_params);
   if (backend == sdp::SDPBackend::error) {
@@ -841,7 +841,9 @@ _flash_attention_forward(
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
-    std::optional<double> scale) {
+    std::optional<double> scale,
+    std::optional<int64_t> window_size_left,
+    std::optional<int64_t> window_size_right) {
 #if defined(USE_FLASH_ATTENTION)
   const auto softmax_scale =
       sdp::calculate_scale(query, scale).as_float_unchecked();
@@ -851,6 +853,9 @@ _flash_attention_forward(
   // we will not support in this PR.
   std::optional<Tensor> seqused_k = c10::nullopt;
   std::optional<Tensor> alibi_slopes = c10::nullopt;
+
+  const int non_null_window_left = window_size_left.has_value() ? window_size_left.value() : -1;
+  const int non_null_window_right = window_size_right.has_value() ? window_size_right.value() : -1;
 
   // We are going to have two paths:
   // 1. The standard MHA path for dense tensors
@@ -886,8 +891,8 @@ _flash_attention_forward(
             softmax_scale,
             false /*zero_tensors*/,
             is_causal,
-            -1, /*window_size_left*/
-            -1, /*window_size_right*/
+            non_null_window_left,
+            non_null_window_right,
             return_debug_mask,
             c10::nullopt /*gen_*/);
   } else {
@@ -909,8 +914,8 @@ _flash_attention_forward(
             dropout_p,
             softmax_scale,
             is_causal,
-            -1, /*window_size_left*/
-            -1, /*window_size_right*/
+            non_null_window_left,
+            non_null_window_right,
             return_debug_mask, /*return_softmax (this is used for testing)*/
             c10::nullopt);
   }

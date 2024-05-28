@@ -326,6 +326,7 @@ test_inductor_distributed() {
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_frozen.py --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_mixed_precision.py -k test_compute_dtype --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_mixed_precision.py -k test_reduce_dtype --verbose
+  python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_clip_grad_norm_.py -k test_clip_grad_norm_2d --verbose
   python test/run_test.py -i distributed/fsdp/test_fsdp_tp_integration.py -k test_fsdp_tp_integration --verbose
 
   # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
@@ -350,10 +351,20 @@ test_inductor() {
 
 test_inductor_cpp_wrapper_abi_compatible() {
   export TORCHINDUCTOR_ABI_COMPATIBLE=1
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+
   echo "Testing Inductor cpp wrapper mode with TORCHINDUCTOR_ABI_COMPATIBLE=1"
   # cpu stack allocation causes segfault and needs more investigation
-  TORCHINDUCTOR_STACK_ALLOCATION=0 python test/run_test.py --include inductor/test_cpu_cpp_wrapper
+  python test/run_test.py --include inductor/test_cpu_cpp_wrapper
   python test/run_test.py --include inductor/test_cuda_cpp_wrapper
+
+  TORCHINDUCTOR_CPP_WRAPPER=1 python benchmarks/dynamo/timm_models.py --device cuda --accuracy --amp \
+    --training --inductor --disable-cudagraphs --only vit_base_patch16_224 \
+    --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_training.csv"
+  python benchmarks/dynamo/check_accuracy.py \
+    --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_training.csv" \
+    --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_timm_training.csv"
 }
 
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
@@ -556,12 +567,14 @@ test_inductor_torchbench_smoketest_perf() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
-  # smoke test the cpp_wrapper mode
-  TORCHINDUCTOR_CPP_WRAPPER=1 python benchmarks/dynamo/torchbench.py --device cuda --accuracy --bfloat16 \
-    --inference --inductor --only hf_T5 --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_smoketest.csv"
+  # Test some models in the cpp wrapper mode
+  TORCHINDUCTOR_ABI_COMPATIBLE=1 TORCHINDUCTOR_CPP_WRAPPER=1 python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
+    --bfloat16 --inference --inductor --only hf_T5 --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
+  TORCHINDUCTOR_ABI_COMPATIBLE=1 TORCHINDUCTOR_CPP_WRAPPER=1 python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
+    --bfloat16 --inference --inductor --only llama --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
   python benchmarks/dynamo/check_accuracy.py \
-      --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_smoketest.csv" \
-      --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_torchbench_inference.csv"
+    --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv" \
+    --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_torchbench_inference.csv"
 
   python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --float16 --training \
     --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" --only hf_Bert \
@@ -680,7 +693,6 @@ test_aten() {
   ${SUDO} ln -sf "$TORCH_LIB_DIR"/libmkldnn* "$TEST_BASE_DIR"
   ${SUDO} ln -sf "$TORCH_LIB_DIR"/libnccl* "$TEST_BASE_DIR"
   ${SUDO} ln -sf "$TORCH_LIB_DIR"/libtorch* "$TEST_BASE_DIR"
-  ${SUDO} ln -sf "$TORCH_LIB_DIR"/libtbb* "$TEST_BASE_DIR"
 
   ls "$TEST_BASE_DIR"
   aten/tools/run_tests.sh "$TEST_BASE_DIR"
@@ -705,21 +717,6 @@ test_without_numpy() {
   popd
 }
 
-# pytorch extensions require including torch/extension.h which includes all.h
-# which includes utils.h which includes Parallel.h.
-# So you can call for instance parallel_for() from your extension,
-# but the compilation will fail because of Parallel.h has only declarations
-# and definitions are conditionally included Parallel.h(see last lines of Parallel.h).
-# I tried to solve it #39612 and #39881 by including Config.h into Parallel.h
-# But if Pytorch is built with TBB it provides Config.h
-# that has AT_PARALLEL_NATIVE_TBB=1(see #3961 or #39881) and it means that if you include
-# torch/extension.h which transitively includes Parallel.h
-# which transitively includes tbb.h which is not available!
-if [[ "${BUILD_ENVIRONMENT}" == *tbb* ]]; then
-  sudo mkdir -p /usr/include/tbb
-  sudo cp -r "$PWD"/third_party/tbb/include/tbb/* /usr/include/tbb
-fi
-
 test_libtorch() {
   local SHARD="$1"
 
@@ -733,7 +730,6 @@ test_libtorch() {
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libshm* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
-    ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libnvfuser* "$TORCH_BIN_DIR"
 
     export CPP_TESTS_DIR="${TORCH_BIN_DIR}"
@@ -870,7 +866,6 @@ test_rpc() {
   # test reporting process to function as expected.
   ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
   ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
-  ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_BIN_DIR"
 
   CPP_TESTS_DIR="${TORCH_BIN_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_cpp_rpc
 }
@@ -1278,6 +1273,10 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHAR
 elif [[ "${TEST_CONFIG}" == *dynamo* && $SHARD_NUMBER -gt 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   test_dynamo_shard "${SHARD_NUMBER}"
+elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
+  install_torchvision
+  test_python_shard "$SHARD_NUMBER"
+  test_aten
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
@@ -1307,10 +1306,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
   test_libtorch
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
-elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
-  install_torchvision
-  test_python
-  test_aten
 elif [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
   install_torchvision
   test_python

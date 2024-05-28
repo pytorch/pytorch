@@ -8,7 +8,7 @@ import re
 import sys
 from copy import copy, deepcopy
 from enum import Enum
-from typing import Any, cast, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 
@@ -17,10 +17,9 @@ import torch.fx
 from torch._inductor import dependencies
 from torch._prims_common import is_float_dtype
 from torch.utils import _pytree as pytree
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
-from ..._dynamo.utils import counters
 
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
@@ -1413,10 +1412,14 @@ class CppVecOverrides(CppOverrides):
             else f"{V.kernel._get_vec_type(dtype)}({body_code})"
         )
         other_code = value_to_cpp(other, DTYPE_TO_CPP[dtype])
-        other_code_vec = f"{V.kernel._get_vec_type(dtype)}({other_code})"
+        # loading bool as VecMask<float, N>
+        other_code_vec = (
+            f"{V.kernel._get_mask_type()}::from({other_code})"
+            if dtype == torch.bool
+            else f"{V.kernel._get_vec_type(dtype)}({other_code})"
+        )
         assert isinstance(new_mask, CppCSEVariable), new_mask
         if new_mask.is_vec:
-            type = f"decltype({body_code_vec})"
             code = BracesBuffer()
             code.writeline("[&]")
             with V.kernel.swap_buffers(code), code.indent():
@@ -1425,8 +1428,21 @@ class CppVecOverrides(CppOverrides):
                     code.writeline(f"return {other_code_vec};")
                 code.writeline("else")
                 with code.indent():
+                    # Create cse variable to reuse kernel.overrides.where
+                    body_vec_var = V.kernel.cse.generate(
+                        V.kernel.compute,
+                        body_code_vec,
+                    )
+                    other_vec_var = V.kernel.cse.generate(
+                        V.kernel.compute,
+                        other_code_vec,
+                    )
+                    assert isinstance(body_vec_var, CppCSEVariable), body_vec_var
+                    assert isinstance(other_vec_var, CppCSEVariable), other_vec_var
+                    body_vec_var.dtype = dtype
+                    other_vec_var.dtype = dtype
                     code.writeline(
-                        f"return {type}::blendv({other_code_vec}, {body_code_vec}, {V.kernel._get_mask_cast(new_mask, dtype)});"
+                        f"return {V.kernel.overrides.where(new_mask, body_vec_var, other_vec_var)};"
                     )
             code.writeline("()")
             csevar = V.kernel.cse.generate(
@@ -1503,6 +1519,7 @@ class CppKernel(Kernel):
         self.local_reduction_init = IndentedBuffer()
         self.local_reduction_stores = IndentedBuffer()
         self.is_reduction = False
+        self.non_parallel_reduction_prefix = IndentedBuffer()
         self.reduction_cse = CSE(self.newvar_prefix, self.suffix, name_prefix="tmp_acc")
         self.preloads = IndentedBuffer()
         self.poststores = IndentedBuffer()
@@ -1517,6 +1534,7 @@ class CppKernel(Kernel):
         dtype,
         reduction_combine_fn=reduction_combine,
         reduction_init_fn=reduction_init,
+        welford_weight_reciprocal_vec_fn=None,
     ):
         if config.cpp.dynamic_threads and not self.parallel_reduction_prefix:
             self.parallel_reduction_prefix.writeline(
@@ -1553,6 +1571,15 @@ class CppKernel(Kernel):
                 "}",
             ],
         )
+        if (
+            reduction_type == "welford_reduce"
+            and welford_weight_reciprocal_vec_fn
+            and hasattr(self, "weight_recp_vec_range")
+            and "vec" in f"{acc_type}"
+        ):
+            self.local_reduction_init.writeline(
+                welford_weight_reciprocal_vec_fn(dtype, num_threads)
+            )
 
     def get_reduction_var_pattern(self, line: str):
         return re.search("tmp_acc[0-9]+", line)
@@ -1881,6 +1908,8 @@ class CppKernel(Kernel):
                             prefix = kernel.reduction_prefix
                             if loop.parallel:
                                 prefix = prefix + kernel.parallel_reduction_prefix
+                            else:
+                                prefix = prefix + kernel.non_parallel_reduction_prefix
                             return prefix
 
             def gen_loops(loops: List[LoopLevel], in_reduction=False):
@@ -1941,6 +1970,8 @@ class CppKernel(Kernel):
     @property
     def assert_function(self) -> str:
         if V.graph.aot_mode:
+            # TODO: Using AOTI_TORCH_CHECK is causing performance drop for some models
+            # compared with JIT Inductor which uses TORCH_CHECK
             return "AOTI_TORCH_CHECK"
         else:
             return "TORCH_CHECK"
@@ -2319,9 +2350,25 @@ class CppVecKernel(CppKernel):
         self.reduction_prefix.writeline(
             f"{acc_type_vec} {acc_vec} = {self.reduction_init_vec(reduction_type, dtype)};"
         )
-        self.stores.writeline(
-            f"{acc_vec} = {self.reduction_combine_vec(reduction_type, acc_vec, value)};"
+        # save the reciprocal of weights for welford reduce if using static shape
+        reduction_size = functools.reduce(
+            lambda x, y: x * y, self.ranges[self.reduction_depth :]
         )
+        if reduction_type == "welford_reduce":
+            reduction_factor = (
+                self.tiling_factor if self.tiling_idx >= self.reduction_depth else 1
+            )
+            self.weight_recp_vec_range = FloorDiv(reduction_size, reduction_factor)
+            self.non_parallel_reduction_prefix.writeline(
+                self.welford_weight_reciprocal_vec(dtype, None)
+            )
+            self.stores.writeline(
+                f"{acc_vec} = {self.reduction_combine_vec(reduction_type, acc_vec, value, True)};"
+            )
+        else:
+            self.stores.writeline(
+                f"{acc_vec} = {self.reduction_combine_vec(reduction_type, acc_vec, value)};"
+            )
         self._gen_parallel_reduction_buffers(
             acc,
             acc_type,
@@ -2335,6 +2382,7 @@ class CppVecKernel(CppKernel):
             dtype,
             reduction_combine_fn=self.reduction_combine_vec,
             reduction_init_fn=self.reduction_init_vec,
+            welford_weight_reciprocal_vec_fn=self.welford_weight_reciprocal_vec,
         )
         tmpvar: Union[str, CSEVariable]
         if self.tiling_idx >= self.reduction_depth:
@@ -2436,7 +2484,18 @@ class CppVecKernel(CppKernel):
 
         return vec_type
 
-    def reduction_combine_vec(self, reduction_type, var, next_value):
+    def welford_weight_reciprocal_vec(self, dtype, num_threads=None):
+        vec_num_range_thread = (
+            CeilDiv(self.weight_recp_vec_range, num_threads)
+            if num_threads
+            else self.weight_recp_vec_range
+        )
+        vec_num_range_thread_expr = cexpr_index(vec_num_range_thread)
+        return f"static WeightRecp<{self._get_vec_type(dtype)}> weight_recps({vec_num_range_thread_expr});"
+
+    def reduction_combine_vec(
+        self, reduction_type, var, next_value, use_weight_recps=False
+    ):
         if reduction_type == "max":
             return f"at::vec::maximum({var}, {next_value})"
         elif reduction_type == "min":
@@ -2448,7 +2507,10 @@ class CppVecKernel(CppKernel):
         elif reduction_type == "xor_sum":
             return f"{var} ^ {next_value}"
         elif reduction_type == "welford_reduce":
-            return f"welford_combine({var}, {next_value})"
+            if use_weight_recps:
+                return f"welford_combine({var}, {next_value}, &weight_recps)"
+            else:
+                return f"welford_combine({var}, {next_value})"
         elif reduction_type == "welford_combine":
             if isinstance(next_value, tuple):
                 # When reading a value from Inductor IR we have a tuple of variable names
@@ -3187,7 +3249,7 @@ class CppKernelProxy(CppKernel):
             for node in nodes:
                 if node.group[1] in [
                     (group, reduction_group),
-                    (group + reduction_group, ()),
+                    (tuple(itertools.chain(group, reduction_group)), ()),
                 ]:
                     assert not in_suffix
                     node.run(vars, reduction_vars)
@@ -3333,7 +3395,7 @@ class CppKernelProxy(CppKernel):
 class OuterLoopFusedKernel(CppKernel):
     def __init__(self, kernel_group):
         super().__init__(kernel_group.args, kernel_group.ws.num_threads)
-        self.inner: List["LoopLevel"] = []
+        self.inner: List[LoopLevel] = []
 
     def decide_parallel_depth(self, max_parallel_depth, threads) -> int:
         kernels_parallel_depth = []
@@ -3522,8 +3584,6 @@ class CppScheduling(BaseScheduling):
         return self._why_fuse_nodes(node1, node2) is not None
 
     def can_fuse_horizontal(self, node1, node2):
-        if node1.is_template() or node2.is_template():
-            return False
         if (
             len(node1.get_nodes()) + len(node2.get_nodes())
             > config.cpp.max_horizontal_fusion_size
@@ -3604,9 +3664,6 @@ class CppScheduling(BaseScheduling):
             return 0
 
     def can_fuse_vertical(self, node1, node2):
-        # TODO(jgong5): support vertical fusion for template nodes
-        if node1.is_template() or node2.is_template():
-            return False
         return (
             self._can_fuse_horizontal_impl(node1, node2) and not node1.is_reduction()
         ) or self.can_fuse_vertical_outer_loop(node1, node2)
@@ -3663,42 +3720,6 @@ class CppScheduling(BaseScheduling):
         if args_num > CppScheduling.MAX_FUSED_KERNEL_ARGS_NUM:
             self._set_flush_status(True)
 
-    def is_cpp_template(self, node: BaseSchedulerNode) -> bool:
-        return isinstance(node, SchedulerNode) and isinstance(
-            node.node, ir.CppTemplateBuffer
-        )
-
-    def codegen_template(
-        self, template_node: BaseSchedulerNode, epilogue_nodes: List[SchedulerNode]
-    ):
-        """
-        Codegen a CPP template, possibly with fused epilogues
-        """
-        counters["inductor"]["cpp_epilogue_fusion_counter"] += len(epilogue_nodes)
-        assert self.is_cpp_template(
-            template_node
-        ), "Template node passed to CppScheduler.codegen_template must be a SchedulerNode that wraps a CppTemplateBuffer"
-        template_node = cast(SchedulerNode, template_node)
-        _, (_, rnumel) = template_node.group
-        assert rnumel == ()
-        ctb: ir.CppTemplateBuffer = cast(ir.CppTemplateBuffer, template_node.node)
-        epilogue_ir_nodes: List[ir.Buffer] = [n.node for n in epilogue_nodes]
-        assert all(
-            isinstance(n, ir.ComputedBuffer) for n in epilogue_ir_nodes
-        ), "Epilogue nodes must all be instances of ir.ComputedBuffer"
-        kernel, render = ctb.make_kernel_render(ctb, epilogue_nodes=epilogue_ir_nodes)
-        with kernel:
-            for node in [template_node, *epilogue_nodes]:
-                node.mark_run()
-            src_code = render()
-
-        with V.set_kernel_handler(kernel):
-            node_schedule = [template_node, *epilogue_nodes]
-            kernel_name = self.define_kernel(src_code, node_schedule, kernel.args)
-        kernel.call_kernel(kernel_name, ctb)
-        V.graph.removed_buffers |= kernel.removed_buffers
-        self.scheduler.free_buffers()
-
     def _get_scheduled_num_args(self):
         return self.kernel_group.get_num_args()
 
@@ -3708,7 +3729,7 @@ class CppScheduling(BaseScheduling):
     def codegen_sync(self):
         pass
 
-    def define_kernel(self, src_code, nodes, kernel_args=None):
+    def define_kernel(self, src_code, nodes):
         wrapper = V.graph.wrapper_code
         fused_name = (
             get_fused_kernel_name(nodes, config.cpp.descriptive_names)
@@ -3724,8 +3745,7 @@ class CppScheduling(BaseScheduling):
         src_code = src_code.replace("#pragma CMT", "//")
 
         compile_wrapper = IndentedBuffer()
-        args = self.kernel_group.args if kernel_args is None else kernel_args
-        _, _, arg_types = args.cpp_argdefs()
+        _, _, arg_types = self.kernel_group.args.cpp_argdefs()
         if not V.graph.cpp_wrapper:
             compile_wrapper.writeline(f"async_compile.cpp_pybinding({arg_types!r}, '''")
         compile_wrapper.splice(src_code, strip=True)
