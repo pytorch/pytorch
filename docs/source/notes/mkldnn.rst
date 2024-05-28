@@ -59,7 +59,7 @@ To get an idea of the precision and speed, see the example code and benchmark da
 
   # Do matmul at BF16 mode.
   torch.backends.mkldnn.matmul.fp32_precision = 'bf16'
-  ab_bf16 = a @ b  # ~2.545x speed up on SPR
+  ab_bf16 = a @ b  # expected speedup with BF16 dot-product acceleration
   error = (ab_bf16 - ab_full).abs().max()  # 1.3704
   relative_error = error / mean  # 0.0170
   print(error, relative_error)
