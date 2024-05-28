@@ -133,6 +133,44 @@ To toggle the TF32 flags off in C++, you can do
   at::globalContext().setAllowTF32CuBLAS(false);
   at::globalContext().setAllowTF32CuDNN(false);
 
+After Pytorch 2.4, we provide a new sets of APIs to control the TF32 behavior in a more fine-grained way.
+We can set float32 precision per device and per operators. We can also override the global setting for a specific operator.
+
+.. code:: python
+
+  torch.backends.fp32_precision = "default"
+  torch.backends.cuda.matmul.fp32_precision = "default"
+  torch.backends.cudnn.fp32_precision = "default"
+  torch.backends.cudnn.conv.fp32_precision = "tf32"
+  torch.backends.cudnn.rnn.fp32_precision = "tf32"
+
+The fp32_precision can be set to `default` or `tf32` for `cuda/cudnn`.
+`default` fp32_precision indicate that we will use `FP32` as intenral computation precision.
+`tf32` fp32_precision indicate that we will allow to use `TF32` as intenral computation precision.
+
+We can override a generic setting for a specific operator if the fp32_precision is set to `default`.
+
+.. code:: python
+
+  torch.backends.cudnn.fp32_precision = "tf32"
+  torch.backends.cudnn.conv.fp32_precision = "default"
+  torch.backends.cudnn.rnn.fp32_precision = "default"
+
+We can also override a generic setting for a specific backend if the fp32_precision is set to `default`.
+
+.. code:: python
+
+  torch.backends.fp32_precision = "tf32"
+  torch.backends.cudnn.fp32_precision = "default"
+  torch.backends.cudnn.conv.fp32_precision = "default"
+  torch.backends.cudnn.rnn.fp32_precision = "default"
+
+For above 2 cases, both `torch.backends.cudnn.conv.fp32_precision` and `torch.backends.cudnn.rnn.fp32_precision`
+is overrided to `tf32`.
+
+Old settings are still supported. But we suggest to use the new settings for better control. And we do not support
+to use mix of old and new settings.
+
 For more information about TF32, see:
 
 - `TensorFloat-32`_
