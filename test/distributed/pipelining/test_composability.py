@@ -5,10 +5,11 @@ import os
 import sys
 import tempfile
 
+from model_registry import MLPModule
+
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from model_registry import MLPModule
 from torch.distributed._composable.fsdp.fully_shard import (
     fully_shard,
     MixedPrecisionPolicy,

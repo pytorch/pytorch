@@ -107,14 +107,13 @@ class KernelTests(torch._inductor.test_case.TestCase):
     @requires_cuda
     @skipIfRocm
     def test_triton_kernel_functionalize(self):
+        from functorch import make_fx
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
         from torch._subclasses.functional_tensor import (
             CppFunctionalizeAPI,
             FunctionalTensorMode,
             PythonFunctionalizeAPI,
         )
-
-        from functorch import make_fx
 
         kernel_side_table.reset_table()
 
