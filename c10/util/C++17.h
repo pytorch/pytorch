@@ -63,9 +63,6 @@ using bool_constant = std::bool_constant<B>;
 template <class B>
 using negation = std::negation<B>;
 
-template <class T>
-using void_t = std::void_t<T>;
-
 #if defined(__cpp_lib_apply) && !defined(__CUDA_ARCH__) && !defined(__HIP__)
 
 template <class F, class Tuple>
