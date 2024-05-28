@@ -140,6 +140,8 @@ from .lists import (
     TupleVariable,
 )
 from .misc import (
+    AutogradEngineVariable,
+    CompiledAutogradEngineVariable,
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     ComptimeVariable,
@@ -684,6 +686,19 @@ class VariableBuilder:
                     value.__self__, source=AttrSource(self.source, member="__self__")
                 ),
                 "apply",
+            )
+        elif isinstance(value, torch._C._ImperativeEngine):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return AutogradEngineVariable(value, source=self.source)
+        elif isinstance(value, types.MethodType) and isinstance(
+            getattr(value, "__self__", None), torch._dynamo.external_utils.CompiledAutogradEngine
+        ):
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return GetAttrVariable(
+                CompiledAutogradEngineVariable(
+                    value.__self__, source=AttrSource(self.source, member="__self__")
+                ),
+                value.__name__,
             )
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if is_callable_allowed(value):
@@ -2370,6 +2385,8 @@ class SourcelessBuilder:
             return PlacementVariable(value)
         elif DeviceMeshVariable.is_device_mesh(value):
             return DeviceMeshVariable(value)
+        elif isinstance(value, torch._ops.HigherOrderOperator):
+            return TorchHigherOrderOperatorVariable.make(value)
         elif isinstance(value, re.Pattern):
             return RegexPatternVariable(value)
         unimplemented(
