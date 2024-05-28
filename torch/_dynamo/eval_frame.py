@@ -493,6 +493,9 @@ class OptimizeContext(_TorchDynamoContext):
         export=False,
         dynamic=None,
         compiler_config=None,
+        rebuild_ctx: Optional[
+            Callable[[], Union[OptimizeContext, _NullDecorator]]
+        ] = None,
     ):
         def on_enter():
             install_generation_tagging_init()
@@ -507,6 +510,17 @@ class OptimizeContext(_TorchDynamoContext):
             dynamic=dynamic,
             compiler_config=compiler_config,
         )
+
+        if config.compiled_autograd:
+            assert rebuild_ctx is not None
+
+            def call_compiled_autograd():
+                compiler_fn = rebuild_ctx()
+                ctx = torch._dynamo.compiled_autograd.enable(compiler_fn)
+                ctx.__enter__()
+                return functools.partial(ctx.__exit__, None, None, None)
+
+            self.enter_exit_hooks.append(call_compiled_autograd)
 
 
 class RunOnlyContext(_TorchDynamoContext):
@@ -577,6 +591,7 @@ def _optimize_catch_errors(
     export=False,
     dynamic=None,
     compiler_config=None,
+    rebuild_ctx=None,
 ):
     return OptimizeContext(
         convert_frame.catch_errors_wrapper(compile_fn, hooks),
@@ -585,6 +600,7 @@ def _optimize_catch_errors(
         export=export,
         dynamic=dynamic,
         compiler_config=compiler_config,
+        rebuild_ctx=rebuild_ctx,
     )
 
 
@@ -635,7 +651,15 @@ def is_inductor_supported():
         return False
 
 
-def optimize(
+def optimize(*args, **kwargs):
+    def rebuild_ctx():
+        return optimize(*args, **kwargs)
+
+    return _optimize(rebuild_ctx, *args, **kwargs)
+
+
+def _optimize(
+    rebuild_ctx: Callable[[], Union[OptimizeContext, _NullDecorator]],
     backend="inductor",
     *,
     nopython=False,
@@ -643,7 +667,7 @@ def optimize(
     guard_fail_fn=None,
     disable=False,
     dynamic=None,
-):
+) -> Union[OptimizeContext, _NullDecorator]:
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
     backend() to optimize extracted graphs.
@@ -691,6 +715,7 @@ def optimize(
             backend,
             dynamic=dynamic,
             hooks=hooks,
+            rebuild_ctx=rebuild_ctx,
         )
     # The backend function is stashed in the callable returned by
     # _optimize_catch_errors in the field _torchdynamo_orig_callable. This can
@@ -703,6 +728,7 @@ def optimize(
         compiler_config=backend.get_compiler_config()
         if hasattr(backend, "get_compiler_config")
         else None,
+        rebuild_ctx=rebuild_ctx,
     )
 
 
@@ -1466,6 +1492,7 @@ def optimize_assert(
     export=False,
     export_constraints=None,
     dynamic=None,
+    rebuild_ctx=None,
 ):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
@@ -1483,6 +1510,7 @@ def optimize_assert(
         backend_ctx_ctor,
         export=export,
         dynamic=dynamic,
+        rebuild_ctx=rebuild_ctx,
     )
 
 
