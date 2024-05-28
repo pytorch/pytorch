@@ -39,10 +39,10 @@ from typing import (
     Union,
     ValuesView,
 )
+from typing_extensions import Concatenate, ParamSpec
 from unittest import mock
 
 import sympy
-from typing_extensions import Concatenate, ParamSpec
 
 import torch
 import torch._export
@@ -875,6 +875,21 @@ class IndentedBuffer:
         return res
 
 
+class FakeIndentedBuffer(IndentedBuffer):
+    def __init__(self):
+        super().__init__()
+
+    def __getattribute__(self, name):
+        if name == "__class__":  # Allow access to the class attribute
+            return object.__getattribute__(self, name)
+        raise RuntimeError(
+            f"Tried to call self.{name} on FakeIndentedBuffer. This buffer"
+            "is currently used on TritonTemplateKernel to prevent actual"
+            "writes to the body without explicitly specifying the body with"
+            "`TritonTemplateKernel.set_subgraph_body(name)`"
+        )
+
+
 @contextlib.contextmanager
 def restore_stdout_stderr(initial_stdout, initial_stderr):
     try:
@@ -1470,6 +1485,7 @@ def dump_node_schedule(node_schedule):
             is_red = node.is_reduction()
             print(f"{'red' if is_red else 'pw'} scheduler node")
             if is_red:
+                assert node.node is not None
                 print(f"original reduction hint {node.node.data.reduction_hint}")  # type: ignore[attr-defined]
             print("ReadDep:")
             for dep in node.read_writes.reads:
