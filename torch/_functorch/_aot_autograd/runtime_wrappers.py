@@ -573,7 +573,10 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
         @wraps(compiled_fn)
         def inner_fn(args: List[Any]):
             unwrapped_args = unwrap_tensor_subclasses(
-                args, is_joint_structure=self.trace_joint
+                args,
+                subclass_metas=runtime_metadata.subclass_inp_meta,
+                is_joint_structure=self.trace_joint,
+                is_runtime=True,
             )
             args.clear()
             # expectation: runtime_fn is a boxed fn

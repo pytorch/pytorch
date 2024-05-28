@@ -76,10 +76,19 @@ def create_subclass_meta(
 # a list of tensors that we would then need to concat together.
 # Instead, we specialize the logic for the inference vs. joint graph case.
 # NOTE: this function is hot, since we unwrap tensor subclass inputs at runtime
-def unwrap_tensor_subclasses(wrapped_args, *, is_joint_structure: bool):
+def unwrap_tensor_subclasses(
+    wrapped_args,
+    *,
+    subclass_metas: Optional[List[Union[int, SubclassCreationMeta]]],
+    is_joint_structure: bool,
+    is_runtime: bool,
+):
+    if is_runtime:
+        assert subclass_metas is not None
+
     def concat_inner_tensors_from_subclasses(xs):
         xs_inner = []
-        has_symint = any(not isinstance(x, Tensor) for x in xs)
+        has_symint = any(isinstance(x, SymInt) for x in xs)
 
         for x in xs:
             if isinstance(x, Tensor) and is_traceable_wrapper_subclass(x):
@@ -88,9 +97,32 @@ def unwrap_tensor_subclasses(wrapped_args, *, is_joint_structure: bool):
             else:
                 xs_inner += [x]
 
-        for x in xs:
-            if isinstance(x, Tensor) and is_traceable_wrapper_subclass(x) and has_symint:
-                xs_inner += [*x.size()]
+        # While tracing, unwrap_tensor_subclasses may add extra SymInts corresponding
+        # to subclass tensor sizes (See PyTorch issue #124619 for the motivation).
+        # When the traced function is actually called with runtime values, aot_autograd
+        # need to make to append those extra arguments before calling the traced
+        # function
+        if is_runtime:
+            for x, subclass_meta in zip(xs, subclass_metas):
+                if isinstance(subclass_meta, SubclassCreationMeta):
+                    assert isinstance(subclass_meta, SubclassCreationMeta)
+                    runtime_size = x.size()
+                    maybe_sym_size = subclass_meta.original_subclass.size()
+                    assert len(runtime_size) == len(maybe_sym_size)
+                    xs_inner += [
+                        r
+                        for (r, s) in zip(runtime_size, maybe_sym_size)
+                        if isinstance(s, SymInt)
+                    ]
+        else:
+            for x in xs:
+                if (
+                    isinstance(x, Tensor)
+                    and is_traceable_wrapper_subclass(x)
+                    and has_symint
+                ):
+                    # x.size() can have both ints ans SymInts: `Size([3, sz1, 5])`
+                    xs_inner += [sz for sz in x.size() if isinstance(sz, SymInt)]
 
         return xs_inner
 

@@ -664,7 +664,10 @@ def aot_dispatch_subclass(
 
         # Step 3: Unwrap any subclass outputs back into dense tensors
         unwrapped_outs = unwrap_tensor_subclasses(
-            wrapped_outs, is_joint_structure=use_trace_joint
+            wrapped_outs,
+            subclass_metas=None,
+            is_joint_structure=use_trace_joint,
+            is_runtime=False,
         )
         return unwrapped_outs
 
@@ -678,7 +681,10 @@ def aot_dispatch_subclass(
         return inner_fn(fw_only, primals, use_trace_joint=False)
 
     args_unwrapped = unwrap_tensor_subclasses(
-        args, is_joint_structure=is_joint_structure
+        args,
+        subclass_metas=None,
+        is_joint_structure=is_joint_structure,
+        is_runtime=False,
     )
 
     if is_joint_structure:

@@ -851,7 +851,9 @@ Got grad_output types: {str(grad_output_types)}"""
                 len_tangents = len(
                     unwrap_tensor_subclasses(
                         all_args[tangents_start_idx:tangents_end_idx],
+                        subclass_metas=None,
                         is_joint_structure=False,
+                        is_runtime=False,
                     )
                 )
                 all_args = [
@@ -865,7 +867,12 @@ Got grad_output types: {str(grad_output_types)}"""
                     else t
                     for i, t in enumerate(all_args)
                 ]
-                all_args = unwrap_tensor_subclasses(all_args, is_joint_structure=False)
+                all_args = unwrap_tensor_subclasses(
+                    all_args,
+                    subclass_metas=None,
+                    is_joint_structure=False,
+                    is_runtime=False,
+                )
                 tangents_start_idx = len(all_args) - len_tangents - len(rng_args)
                 tangents_end_idx = tangents_start_idx + len_tangents
 
