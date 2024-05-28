@@ -4,7 +4,7 @@ Numerical accuracy
 ==================
 
 In modern computers, floating point numbers are represented using IEEE 754 standard.
-For more details on floating point arithmetics and IEEE 754 standard, please see
+For more details on floating point arithmetic and IEEE 754 standard, please see
 `Floating point arithmetic <https://en.wikipedia.org/wiki/Floating-point_arithmetic>`_
 In particular, note that floating point provides limited accuracy (about 7 decimal digits
 for single precision floating point numbers, about 16 decimal digits for double precision
