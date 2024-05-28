@@ -948,6 +948,7 @@ class TestFullyShard2DTraining(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
+    @skipIfRocm
     def test_tp_with_fsdp_offloading(self):
         global_mesh = init_device_mesh(
             "cuda", (1, self.world_size), mesh_dim_names=("dp", "tp")
