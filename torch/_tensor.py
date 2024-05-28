@@ -79,36 +79,6 @@ def _rebuild_from_type_v2(func, new_type, args, state):
 # torch/_C/__init__.pyi.in to add a type annotation for your method;
 # otherwise, it will not show up in autocomplete.
 class Tensor(torch._C.TensorBase):
-    def __init__(self, *args, **kwargs):
-        r"""
-        This constructor is deprecated, we recommend using :func:`torch.tensor` instead.
-        What this constructor does depends on the type of ``data``.
-
-        * If ``data`` is a Tensor, returns an alias to the original Tensor.  Unlike
-          :func:`torch.tensor`, this tracks autograd and will propagate gradients to
-          the original Tensor.  ``device`` kwarg is not supported for this ``data`` type.
-
-        * If ``data`` is a sequence or nested sequence, create a tensor of the default
-          dtype (typically ``torch.float32``) whose data is the values in the
-          sequences, performing coercions if necessary.  Notably, this differs from
-          :func:`torch.tensor` in that this constructor will always construct a float
-          tensor, even if the inputs are all integers.
-
-        * If ``data`` is a :class:`torch.Size`, returns an empty tensor of that size.
-
-        This constructor does not support explicitly specifying ``dtype`` or ``device`` of
-        the returned tensor.  We recommend using :func:`torch.tensor` which provides this
-        functionality.
-
-        Args:
-            data (array_like): The tensor to construct from.
-
-        Keyword args:
-            device (:class:`torch.device`, optional): the desired device of returned tensor.
-                Default: if None, same :class:`torch.device` as this tensor.
-        """
-        return super().__init__(*args, **kwargs)
-
     def __deepcopy__(self, memo):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__deepcopy__, (self,), self, memo)
