@@ -36,6 +36,8 @@ c10d_collective_ops = {
     c10d_ops.gather_,
     c10d_ops.scatter_,
     c10d_ops.reduce_,
+    c10d_ops.reduce_scatter_,
+    c10d_ops.reduce_scatter_tensor_coalesced_,
 }
 
 
