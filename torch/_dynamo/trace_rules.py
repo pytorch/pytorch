@@ -3545,6 +3545,25 @@ def lookup_inner(
                 reasons.add("func name is __torch_function__")
             return UserFunctionVariable
 
+    if not is_direct_call:
+        if name == "__getattr__":
+            # is_direct_call = False indicates that this is the top-level frame
+            # being traced (i.e., it is not inlined and not called from
+            # InliningInstructionTranslator).  Tracing __getattr__ at the top
+            # level is unlikely because we inline it for
+            # UserDefinedObjectVariable. This scenario occurs only for
+            # UnspecializedNNModuleVariable, where Dynamo directly calls
+            # __getattr__ during trace time, generating LOAD_ATTR bytecode
+            # without going through the underlying __getattr__ data structures.
+            # When this optimized bytecode is executed, Dynamo is triggered
+            # again on the __getattr__ call. Therefore, we skip Dynamo tracing
+            # in this case.
+            if reasons is not None:
+                reasons.add(
+                    "Tracing __getattr__ as the top level frame, unsuitable for tracing."
+                )
+            return SkipFunctionVariable
+
     # Step 3: lookup obj's tracing rule by filename.
     if filename is None:
         filename = getfile(obj)
