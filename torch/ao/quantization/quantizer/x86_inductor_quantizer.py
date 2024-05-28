@@ -38,7 +38,7 @@ from torch.ao.quantization.quantizer.quantizer import (
     SharedQuantizationSpec,
 )
 
-# from torch.ao.quantization.quantizer.utils import _get_module_name_filter
+from torch.ao.quantization.quantizer.utils import _get_module_name_filter
 from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
     get_bias_qspec,
     get_input_act_qspec,
@@ -107,76 +107,82 @@ QUANT_ANNOTATION_KEY = "quantization_annotation"
 def _skip_annotate(
     nodes: List[Node], filter_fn: Optional[Callable[[List[Node]], bool]] = None
 ):
+    """Determines whether to skip annotation for a list of nodes."""
+
     # 1) Skip annotate if any node is already annotated
     if _is_any_annotated(nodes):
         return True
 
-    # 2) Not skip annotate if a) filter_fn is provided and b) any node passed the filter
+    # 2) Proceed with annotation if a) a filter function is provided
+    # and b) the given nodes list passes the filter function check.
     if filter_fn and filter_fn(nodes):
         return False
 
     return True
 
 
-def _get_module_name_filter(module_name: str) -> Callable[[List[Node]], bool]:
-    """Get a filter function for a given module name.
+def _create_module_name_filter(module_name: str) -> Callable[[List[Node]], bool]:
+    """Create a filter function for a given module name.
 
-    The filter function that takes a list of nodes (as determined by the annotate function)
-    and returns True if **all** nodes come from the specified module name, and False otherwise.
+    The filter function takes a list of nodes (as determined by the annotate function)
+    and return True if *all* nodes come from the specified module name, False otherwise.
 
     For example:
         linear_1: "f32[3, 10]" = torch.ops.aten.linear.default(...) # comes from a module with name `sub.linear1`
         relu: "f32[3, 10]" = torch.ops.aten.relu.default(linear_1); # comes from a module with name `sub.relu1`
 
-    >> module_name_filter = _get_module_name_filter("sub")
+    >> module_name_filter = _create_module_name_filter_inner("sub")
     >> print(module_name_filter([relu, linear_1]))
     # True  # These two nodes are from "sub" and determined by `_annotate_linear_unary` function.
     """
 
-    def _node_filter(n: Node) -> bool:
-        # example: {
-        #    'L__self___sub': ("L['self'].sub", <class '....Sub'>),
-        #    'L__self___sub_linear': ("L['self'].sub.linear", <class 'torch.nn.modules.linear.Linear'>)
-        # }
-        # get_attr nodes doesn't have nn_module_stack?
-        nn_module_stack = n.meta.get("nn_module_stack", {})
+    filter_fn = _get_module_name_filter(module_name)
 
-        def _normalize_path(n):
-            prefix = 0
-            # TODO This is non standard behavior and should be removed when we migrate off capture_pre_autograd_graph.
-            if n.startswith("L['self']."):
-                prefix = len("L['self'].")
-            return n[prefix:]
-
-        names = [_normalize_path(n) for n, _ in nn_module_stack.values()]
-        return module_name in names
-
-    def module_name_filter(nodes: List[Node]) -> bool:
-        all_nodes_from_module_name: bool = all(_node_filter(n) for n in nodes)
+    def check_all_nodes_from_module(nodes: List[Node]) -> bool:
+        all_nodes_from_module_name: bool = all(filter_fn(n) for n in nodes)
         return all_nodes_from_module_name
 
-    return module_name_filter
+    return check_all_nodes_from_module
 
 
-def _get_operator_type_qconfig_filter(
+def _create_operator_type_filter(
     operator_type: Callable,
 ) -> Callable[[List[Node]], bool]:
-    def operator_type_qconfig_filter(nodes: List[Node]):
+    """Create a filter function for a given operator type.
+
+    The filter function takes a list of nodes and returns True if it contains
+    exactly one node with the specified operator type, False otherwise.
+
+    For example:
+        linear_1: "f32[3, 10]" = torch.ops.aten.linear.default(...) # comes from a module with name `sub.linear1`
+        relu: "f32[3, 10]" = torch.ops.aten.relu.default(linear_1); # comes from a module with name `sub.relu1`
+
+    >> operator_type_filter = _create_operator_type_filter(torch.ops.aten.linear.default)
+    >> print(operator_type_filter([relu, linear_1]))
+    # True  # These two nodes are determined by `_annotate_linear_unary` function and the second node is `linear`.
+    """
+
+    def operator_type_filter(nodes: List[Node]):
         num_nodes_with_operator_type = sum(
             node.target == operator_type for node in nodes
         )
         return num_nodes_with_operator_type == 1
 
-    return operator_type_qconfig_filter
+    return operator_type_filter
 
 
 def _global_config_filter(nodes: List[Node]) -> bool:
+    """Filter function for global configuration.
+
+    This filter function takes a list of nodes and returns True if there is exactly one node
+    in the list that is a default quantizable operation, False otherwise.
+    """
     num_nodes_in_default_quantizable_ops = sum(
         node.target in default_quantizable_ops for node in nodes
     )
     if num_nodes_in_default_quantizable_ops > 1:
         raise NotImplementedError(
-            "Multiple nodes in on pattern belong to default quantizable ops."
+            "Several nodes within a single pattern are default quantizable operations."
         )
     return num_nodes_in_default_quantizable_ops == 1
 
@@ -438,10 +444,10 @@ class X86InductorQuantizer(Quantizer):
     def _need_skip_config(
         self, quantization_config: Optional[QuantizationConfig]
     ) -> bool:
-        """Check if the given quantization config is valid for X86InductorQuantizer.
+        """Check if the provided quantization config is valid for X86InductorQuantizer.
 
         Note: Mixed static/dynamic configurations or mixed QAT/non-QAT configurations are not supported.
-        If such a mix is detected, the configuration will be skipped.
+        If such a mix is detected, the configuration will be marked for skipping..
         """
         need_skip = False
         if quantization_config is None:
@@ -659,28 +665,27 @@ class X86InductorQuantizer(Quantizer):
         return conv_gemm_node_idx, extra_input_node_idx
 
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
-        """Annotate the model with quantization configurations.
+        """Annotate the given model with quantization configurations.
 
-        Note:
-        1. Annotate each node according to the users's qconfig in the following order:
+        Annotation contracts:
+        1. Annotate each node according to the user's qconfig in the following order:
         `module_name_qconfig`, `operator_type_qconfig`, and `global_config`.
-        2. Skip nodes that have already been annotated by an earlier stage. For example,
-        if `linear1` has been annotated during in the `module_name_config` stage, it will
-        not be re-annotated in the `operator_type_qconfig` or `global_config` stages.
-        3. For the config is `None`, the annotation will be skipped.
+        2. Skip nodes that have already been annotated in earlier stage. For example,
+        if `linear1` has been annotated during in the `module_name_config` stage,
+        it won't be re-annotated in the 'operator_type_qconfig' or 'global_config' stages.
+        3. For config is `None`, the node will be annotated with `_X86InductorQuantizationAnnotation(_annotated=True)`.
 
         For each pair of (module_name_or_operator_type_or_global, qconfig), a filter function is created.
-        This filter function checks if the node is marked by current stage and not marked by previous stage.
+        This filter function checks if the node is marked by current stage and not annotated by the previous stage.
         """
-
         for module_name, qconfig in self.module_name_qconfig.items():
             self._annotate_with_config(
-                model, qconfig, _get_module_name_filter(module_name)
+                model, qconfig, _create_module_name_filter(module_name)
             )
 
         for operator_type, qconfig in self.operator_type_qconfig.items():
             self._annotate_with_config(
-                model, qconfig, _get_operator_type_qconfig_filter(operator_type)
+                model, qconfig, _create_operator_type_filter(operator_type)
             )
 
         if self.global_config:
@@ -690,11 +695,12 @@ class X86InductorQuantizer(Quantizer):
                 _global_config_filter,
             )
 
-        # After annotating the model with quantization configurations, we need to annotate the output of quantizable ops.
-        # For example, if we annotated maxpool2d to quantize its inputs, we need to quantize its output as well.
-        # So, we can fuse dq-operator-q into a quantized op.
+        # Once we've annotated the model with quantization configurations, we also need to annotate
+        # the output of quantizable operations. For example, if we annotated `maxpool2d` to quantize its inputs,
+        # we will quantize its output accordingly. This enables us to fuse the dq-operator-q into a quantized op.
         # Refer to https://github.com/intel/intel-extension-for-pytorch/blob/
         # 90d19323d96afc53fcc22ba5a7bb3fb07fdd6c1c/intel_extension_for_pytorch/quantization/_recipe.py#L487
+
         self._annotate_output_for_int8_in_int8_out_pattern_entry(model)
 
         return model
@@ -705,17 +711,13 @@ class X86InductorQuantizer(Quantizer):
         config: Optional[QuantizationConfig],
         filter_fn: Callable,
     ) -> None:
-        """Annotate the model with a quantization configuration.
+        """Annotate the model with the given quantization configuration.
 
-        # TODO<yi> update the note
         High-level description of quantization recipe for X86 Inductor Backend:
         Step 1: Apply quantization recipe for fusion patterns of conv/linear to enable int8 data type actively.
         Step 2: Propagate quantization annotation for patterns besides conv/linear. Go through the pattern in model
         from start to the end. If a pattern supports computation with int8 data type and inputs connected to
         quantized patterns, annotate its inputs as quantized pattern.
-        Step 3: Since in step 2, we only annotate the inputs of quantized pattern. For some quantized patterns,
-        such as maxpool2d, which only supports output with int8 data type when the input is with int8 data type,
-        we need to annotate the output of this pattern.
         """
 
         # Step1: Recipe of fusion patterns like conv/linear.
@@ -1202,9 +1204,7 @@ class X86InductorQuantizer(Quantizer):
         if node.target is not torch.ops.aten.max_pool2d.default:
             return
         if quantization_config is None:
-            node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
-                _annotated=True
-            )
+            _annotate_nodes_not_quantize(node)
             return
 
         maxpool_node = node
@@ -1229,9 +1229,7 @@ class X86InductorQuantizer(Quantizer):
         self, node: Node, quantization_config: QuantizationConfig
     ) -> None:
         if quantization_config is None:
-            node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
-                _annotated=True
-            )
+            _annotate_nodes_not_quantize(node)
             return
         cat_node = node
         input_nodes = cat_node.args[0]
@@ -1285,8 +1283,6 @@ class X86InductorQuantizer(Quantizer):
             if _skip_annotate([node], filter_fn):
                 return
 
-            # For `global_config` is not None but `max_pool2d` is `None`, we annotate
-            # the `max_pool2d` with `_X86InductorQuantizationAnnotation(_annotated=True)`.
             if quantization_config is None:
                 _annotate_nodes_not_quantize(node)
                 return
