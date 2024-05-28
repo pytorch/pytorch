@@ -539,21 +539,9 @@ class GraphModuleSerializer(metaclass=Final):
                 path, ty = val
 
                 assert isinstance(path, str)
+                assert isinstance(ty, str)
 
-                # node.meta["nn_module_stack"] could have two forms:
-                # 1. (path: str, module_type: 'type'), e.g.
-                #    ('', <class 'sigmoid.inference.MySimpleModel'>)
-                # 2. (path: str, module_type: str), e.g.
-                #    ('', 'sigmoid.inference.MySimpleModel')
-                # ExportedProgram directly produced by torch.export() has form 1
-                # ExportedProgram deserialized from disk has form 2
-                # TODO: This is not ideal, we should fix this.
-                if isinstance(ty, str):
-                    normalized_ty = ty
-                else:
-                    normalized_ty = ty.__module__ + "." + ty.__qualname__
-
-                return path + "," + normalized_ty
+                return path + "," + ty
 
             # Serialize to "key,orig_path,type_str"
             nn_module_list = [
@@ -1655,7 +1643,7 @@ class GraphModuleDeserializer(metaclass=Final):
             self.deserialize_outputs(serialized_node, fx_node)
         else:
             raise SerializeError(
-                f"Unsupported target type for node {serialized_node}: {target}"
+                f"Unsupported target type for node {serialized_node}: {type(target)}"
             )
 
         fx_node.meta.update(self.deserialize_metadata(serialized_node.metadata))
