@@ -680,13 +680,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         metrics.reset()
         f(q, k, v)
         accessed_bytes = 1 * 8 * 1024 * 64 * torch.float32.itemsize
+        logsumexp_bytes = 1 * 8 * 1024 * torch.float32.itemsize
         num_accesses = 4  # q, k, v reads, one output.
-        # TODO: Get rid of this fudge factor
-        # We need this fudge factor for now, since
-        # 1. For some reason we materialize the output of the attention unnecessarily (it's related to the mutation somehow)
-        # 2. We also write the extraneous logsumexp
-        num_accesses += 2
-        self.assertLess(metrics.num_bytes_accessed, accessed_bytes * num_accesses)
+        self.assertEqual(
+            metrics.num_bytes_accessed, accessed_bytes * num_accesses + logsumexp_bytes
+        )
 
     @supported_platform
     @skip("Triton bug ")  # https://github.com/pytorch/pytorch/issues/124571
@@ -738,7 +736,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test(score_mod)
 
     @supported_platform
-    @skip("TODO: Figure out why this is erroring")
     @patch.object(torch._inductor.config, "max_autotune", True)
     def test_max_autotune_with_captured(self):
         head_scale = torch.randn(H, device="cuda")

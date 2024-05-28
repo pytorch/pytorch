@@ -13,10 +13,6 @@
 #include <ATen/core/ivalue_inl.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/jit/serialization/import_export_helpers.h>
-#if !defined(C10_MOBILE) && !defined(C10_DISABLE_LEGACY_IMPORT)
-#include <torch/csrc/jit/serialization/import_legacy.h>
-#endif
 #include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/ir/graph_utils.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -25,6 +21,7 @@
 #include <torch/csrc/jit/operator_upgraders/upgraders_entry.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
+#include <torch/csrc/jit/serialization/import_export_helpers.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
@@ -266,11 +263,7 @@ Module ScriptModuleDeserializer::deserialize(
     }
   }
   if (reader_->hasRecord("model.json") && code_prefix_ == "code/") {
-#if !defined(C10_MOBILE) && !defined(C10_DISABLE_LEGACY_IMPORT)
-    return torch::jit::LEGACY_deserialize(compilation_unit_, reader_, device_);
-#else
     AT_ERROR("Legacy model format is not supported on mobile.");
-#endif
   }
   auto tuple = readArchive("constants").toTuple();
   for (auto constant : tuple->elements()) {
