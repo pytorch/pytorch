@@ -2502,7 +2502,9 @@ class Scheduler:
         The first term in our fusion score that estimates number of saved
         memory operations.
         """
-        common_memory_deps = (node1.read_writes.reads | node1.read_writes.writes) & (node2.read_writes.reads | node2.read_writes.writes)
+        common_memory_deps = (node1.read_writes.reads | node1.read_writes.writes) & (
+            node2.read_writes.reads | node2.read_writes.writes
+        )
         return sum(self.dep_size_hint(dep) for dep in common_memory_deps)
 
     def get_possible_fusions_with_highest_priority(
