@@ -699,18 +699,16 @@ def _export_to_aten_ir(
     constants = rewrite_script_object_meta(gm)
     constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
 
-    # FIXME: Skipping this because traced modules do not have signature yet
-    if not _is_torch_jit_trace:
-        # prettify names for placeholder nodes
-        placeholder_naming_pass(
-            gm,
-            export_graph_signature,
-            mod,
-            fake_args,
-            fake_kwargs,
-            fake_params_buffers,
-            constants,
-        )
+    # Prettify names for placeholder nodes.
+    placeholder_naming_pass(
+        gm,
+        export_graph_signature,
+        mod,
+        fake_args,
+        fake_kwargs,
+        fake_params_buffers,
+        constants,
+    )
 
     return ExportedArtifact(
         gm,
