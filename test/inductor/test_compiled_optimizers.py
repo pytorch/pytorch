@@ -767,6 +767,25 @@ class CompiledOptimizerTests(TestCase):
 
         self.assertEqual(ret_val, x)
 
+    # compile a large foreach op and verify
+    # that the time taken is within an expected range
+    @requires_cuda
+    def test_compile_time_smoketest(self):
+        import time
+
+        xs = [torch.ones(2, 2, device="cuda") for _ in range(100)]
+        ys = [torch.ones(2, 2, device="cuda") for _ in range(100)]
+
+        @torch.compile
+        def fn(xs, ys):
+            return torch._foreach_add(xs, ys)
+
+        start = time.perf_counter()
+        fn(xs, ys)
+        end = time.perf_counter()
+
+        self.assertLess(end - start, 90)
+
 
 for optim_cls, name, kwargs, scheduler_cls in COMPILED_OPT_KWARG_DB:
     setattr(

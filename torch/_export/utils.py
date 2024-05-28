@@ -74,7 +74,7 @@ def _check_input_constraints_for_graph(
     # NOTE: export already guarantees that the same symbol is used in metadata
     # for all InputDims related by equality constraints, so we can just unify
     # symbols with given input dimension values to check equality constraints.
-    unification_map: "Dict[sympy.Symbol, Any]" = {}
+    unification_map: Dict[sympy.Symbol, Any] = {}
     for (key_path, arg), node in zip(flat_args_with_path, input_placeholders):
         node_val = node.meta.get("val")
         if isinstance(node_val, FakeTensor):
@@ -118,7 +118,7 @@ def _check_input_constraints_for_graph(
                                 sympy.Eq(node_dim.node.expr, arg_dim), symbol
                             )
                             if solution is None:
-                                raise RuntimeError(  # noqa: TRY200
+                                raise RuntimeError(  # noqa: B904
                                     f"Expected input {node.name}.shape[{j}] = {arg_dim} to be "
                                     f"of the form {node_dim.node.expr}, where {symbol} is an integer"
                                 )

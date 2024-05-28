@@ -433,11 +433,11 @@ class TestNumPyInterop(TestCase):
     @onlyCPU
     @skipIfTorchDynamo()
     def test_parse_numpy_int_overflow(self, device):
-        # assertRaises uses a try-except which dynamo has issues with 
+        # assertRaises uses a try-except which dynamo has issues with
         # Only concrete class can be given where "Type[number[_64Bit]]" is expected
         self.assertRaisesRegex(RuntimeError, "(Overflow|an integer is required)",
                                lambda: torch.mean(torch.randn(1, 1), np.uint64(-1)))  # type: ignore[call-overload]
-    
+
     @onlyCPU
     def test_parse_numpy_int(self, device):
         # https://github.com/pytorch/pytorch/issues/29252

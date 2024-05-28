@@ -35,3 +35,5 @@ if hasattr(torch._C, "_rpc_init"):
 
 from .post_localSGD_optimizer import PostLocalSGDOptimizer
 from .zero_redundancy_optimizer import ZeroRedundancyOptimizer
+
+__all__ = ["as_functional_optim", "DistributedOptimizer", "PostLocalSGDOptimizer", "ZeroRedundancyOptimizer"]

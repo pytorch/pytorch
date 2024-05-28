@@ -105,6 +105,7 @@ if HAS_PYDOT:
             Visualize a torch.fx.Graph with graphviz
             Example:
                 >>> # xdoctest: +REQUIRES(module:pydot)
+                >>> # xdoctest: +REQUIRES(module:ubelt)
                 >>> # define module
                 >>> class MyModule(torch.nn.Module):
                 >>>     def __init__(self):
