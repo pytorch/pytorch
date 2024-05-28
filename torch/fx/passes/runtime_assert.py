@@ -48,6 +48,22 @@ def insert_deferred_runtime_asserts(
     when they occur.  Instead, we accumulate them in the ShapeEnv, and in this
     pass insert them into the graph as proper tests.
     """
+
+    # We hash (node_name, min_val, max_val)
+    nodes_that_already_have_sym_constraint_range = set()
+    # TODO this only works for top-level nodes today, also
+    # we should potentially use it not create duplicate
+    # assert_async nodes
+    for node in gm.graph.nodes:
+        if (
+            node.op == "call_function"
+            and node.target == torch.ops.aten.sym_constrain_range.default
+        ):
+            assert len(node.args) == 1
+            nodes_that_already_have_sym_constraint_range.add(
+                (node.args[0], node.kwargs["min"], node.kwargs["max"])
+            )
+
     # Import sympy locally
     import sympy
 
@@ -194,6 +210,22 @@ def insert_deferred_runtime_asserts(
                             and isinstance(keypath[0], CallMethodKey)
                             and isinstance(keypath[1], pytree.SequenceKey)
                         ):
+                            if keypath[0].name == "size":
+                                return go(
+                                    graph.call_function(
+                                        torch.ops.aten.sym_size.int,
+                                        (node, keypath[1].idx),
+                                    ),
+                                    keypath[2:],
+                                )
+                            if keypath[0].name == "stride":
+                                return go(
+                                    graph.call_function(
+                                        torch.ops.aten.stride.int,
+                                        (node, keypath[1].idx),
+                                    ),
+                                    keypath[2:],
+                                )
                             return go(
                                 graph.call_method(
                                     keypath[0].name, (node, keypath[1].idx)
@@ -304,13 +336,21 @@ def insert_deferred_runtime_asserts(
                         except TypeError:
                             return None
 
-                    graph.call_function(
-                        torch.ops.aten.sym_constrain_range.default,
-                        (symbol_to_proxy[i0].node,),
-                        {
-                            "min": convert(vr.lower),
-                            "max": convert(vr.upper),
-                        },
-                    )
+                    min_val = convert(vr.lower)
+                    max_val = convert(vr.upper)
+
+                    if (
+                        symbol_to_proxy[i0].node,
+                        min_val,
+                        max_val,
+                    ) not in nodes_that_already_have_sym_constraint_range:
+                        graph.call_function(
+                            torch.ops.aten.sym_constrain_range.default,
+                            (symbol_to_proxy[i0].node,),
+                            {
+                                "min": convert(vr.lower),
+                                "max": convert(vr.upper),
+                            },
+                        )
 
                 add_runtime_asserts(ras)
