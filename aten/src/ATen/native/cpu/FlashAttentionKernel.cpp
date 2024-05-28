@@ -22,53 +22,25 @@ namespace at::native {
 namespace {
 
 // out = val * a + b
-template <typename T1, typename T2,
-          typename std::enable_if_t<std::is_same_v<T1, float> && is_reduced_floating_point<T2>::value, int> = 0>
+template <typename T1, typename T2>
 inline void _scale_attn_mask_fusion_kernel(
     T1* a,
     T2* b,
     const int& size,
     T1* out,
     T1& val) {
-  auto vec_size1 = at::vec::Vectorized<T1>::size();
-  auto vec_size2 = at::vec::Vectorized<T2>::size();
-  auto vec_scale = at::vec::Vectorized<T1>(val);
+  const auto vec_size1 = at::vec::Vectorized<T1>::size();
+  const auto vec_size2 = at::vec::Vectorized<T2>::size();
+  constexpr int64_t T1_n = (vec_size2 == vec_size1 * 2 && is_reduced_floating_point_v<T2>) ? 2 : 1;
+  constexpr int64_t T2_n = 1;
+  auto vec_scale = at::vec::VectorizedN<T1, T1_n>(val);
   int64_t i = 0;
   for (; i < size - (size % vec_size2); i += vec_size2) {
-    auto a0 = at::vec::Vectorized<T1>::loadu(a + i);
-    auto a1 = at::vec::Vectorized<T1>::loadu(a + i + vec_size1);
-    auto b_tmp = at::vec::Vectorized<T2>::loadu(b + i);
-    auto [b0, b1] = convert_to_float<T2>(b_tmp);
-    auto res0 = a0 * vec_scale + b0;
-    auto res1 = a1 * vec_scale + b1;
-    res0.store(out + i);
-    res1.store(out + i + vec_size1);
-  }
-  for (; i < size; i++) {
-    auto tmp0 = a[i];
-    auto tmp1 = (T1) b[i];
-    out[i] = tmp0 * val + tmp1;
-  }
-}
-
-// out = val * a + b
-template <typename T1, typename T2,
-          typename std::enable_if_t<!(std::is_same_v<T1, float> && is_reduced_floating_point<T2>::value), int > = 0>
-inline void _scale_attn_mask_fusion_kernel(
-    T1* a,
-    T2* b,
-    const int& size,
-    T1* out,
-    T1& val) {
-  auto vec_size = at::vec::Vectorized<T1>::size();
-  auto vec_scale = at::vec::Vectorized<T1>(val);
-  int64_t i = 0;
-  for (; i < size - (size % vec_size); i += vec_size) {
-    auto tmp0 = at::vec::Vectorized<T1>::loadu(a + i);
-    auto tmp1 = at::vec::Vectorized<T2>::loadu(b + i);
-    auto tmp2 = at::vec::convert<T1>(tmp1);
-    auto tmp3 = tmp0 * vec_scale + tmp2;
-    _store(out + i, tmp3);
+    auto a_n = at::vec::VectorizedN<T1, T1_n>::loadu(a + i);
+    auto b_n = at::vec::VectorizedN<T2, T2_n>::loadu(b + i);
+    auto b_n_convert = at::vec::convert<T1, T1_n, T2, T2_n, true>(b_n);
+    auto res = a_n * vec_scale + b_n_convert;
+    res.store(out + i);
   }
   for (; i < size; i++) {
     auto tmp0 = a[i];
