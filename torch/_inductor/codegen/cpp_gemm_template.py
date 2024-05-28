@@ -132,6 +132,7 @@ extern "C"
                 }}
             }
         }
+        {{ micro_gemm.codegen_release(kernel) }}
     }
 }
 """

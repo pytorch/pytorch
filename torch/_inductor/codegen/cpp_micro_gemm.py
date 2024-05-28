@@ -15,7 +15,6 @@ from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import DTYPE_TO_CPP, GemmBlocking, value_to_cpp
 
 
-# enum LayoutType
 class LayoutType(Enum):
     NORMAL = 0
     VNNI2 = 1
@@ -119,6 +118,12 @@ inline void {{kernel_name}}(
             res.writeline(f"{ldc}")
         res.writeline(");")
         return res.getvalue()
+
+    def codegen_release(
+        self,
+        kernel: CppTemplateKernel,
+    ) -> str:
+        return ""
 
     def get_layout_b(self) -> LayoutType:
         return LayoutType.NORMAL
@@ -565,6 +570,12 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
             options
         )
         return result
+
+    def codegen_release(
+        self,
+        kernel: CppTemplateKernel,
+    ) -> str:
+        return "_tile_release();"
 
     def get_layout_b(self):
         return LayoutType.VNNI2
