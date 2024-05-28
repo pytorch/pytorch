@@ -1258,7 +1258,7 @@ optim_db: List[OptimizerInfo] = [
                 # Tracking through #127000
                 toleranceOverride(
                     {
-                        torch.float32: tol(rtol=2.1e-0, atol=0e-0),
+                        torch.float32: tol(atol=3e-5, rtol=1.3e-06),
                     }
                 ),
                 "TestCudaOptims",
@@ -1386,8 +1386,8 @@ optim_db: List[OptimizerInfo] = [
                 toleranceOverride(
                     {
                         torch.float32: tol(
-                            rtol=0.1e-0,
-                            atol=0e-0,
+                            atol=3e-5,
+                            rtol=1.3e-06,
                         )
                     }
                 ),
