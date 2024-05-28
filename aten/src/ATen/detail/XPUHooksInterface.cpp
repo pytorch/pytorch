@@ -2,8 +2,6 @@
 
 #include <c10/util/CallOnce.h>
 
-#include <memory>
-
 namespace at {
 namespace detail {
 

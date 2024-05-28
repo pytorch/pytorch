@@ -6,14 +6,15 @@ import os
 import time
 from typing import Optional, Tuple
 
-import torch
-import torch._inductor.config
 from mixtral_moe_model import Transformer as MixtralMoE
 from mixtral_moe_quantize import (
     WeightOnlyInt8QuantHandler as MixtralMoEWeightOnlyInt8QuantHandler,
 )
 from model import Transformer as LLaMA
 from quantize import WeightOnlyInt8QuantHandler as LLaMAWeightOnlyInt8QuantHandler
+
+import torch
+import torch._inductor.config
 
 torch._inductor.config.coordinate_descent_tuning = True
 torch._inductor.config.triton.unique_kernel_names = True
