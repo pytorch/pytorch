@@ -1230,6 +1230,42 @@ SeqNr|OrigAten|SrcFn
         compiled_fn = torch.compile(fn, backend="aot_eager")
         compare_equal_outs_and_grads(self, compiled_fn, fn, [a, b, a])
 
+    def test_aot_autograd_dupe_args_left_bias(self):
+        # This test checks that, just because only the first
+        # argument did a metadata mutation, we still correctly
+        # dedup.
+        # See: https://github.com/pytorch/pytorch/pull/89896#discussion_r1036224447
+        def fn(x, y):
+            x.t_()
+            return (x + y,)
+
+        x = torch.randn(3, 3, requires_grad=True).clone()
+        compiled_fn = torch.compile(fn, backend="aot_eager")
+
+        # Like compare_equal_outs_and_grads, except we make a copy
+        # before starting, since fn modifies its input in place
+        inps = [x, x]
+        y = x.clone()
+        inps_copy = [y, y]
+        r1, g1 = outs_and_grads(fn, inps, inps)
+        r2, g2 = outs_and_grads(compiled_fn, inps_copy, inps_copy)
+        self.assertEqual(r1, r2)
+        self.assertEqual(g1, g2)
+
+
+        z = torch.randn(3, 3, requires_grad=True)
+
+        # This used to fail in aot_autograd, but no longer will raise an assertion failure
+        # because dynamo will recompile instead with a guards failure. See test_arg_dupe_via_dynamo_recompiles
+        inps = [x, z]
+        x2 = x.clone()
+        z2 = z.detach().clone().requires_grad_(True)
+        inps_copy = [x2, z2]
+        r1, g1 = outs_and_grads(fn, inps, inps)
+        r2, g2 = outs_and_grads(compiled_fn, inps_copy, inps_copy)
+        self.assertEqual(r1, r2)
+        self.assertEqual(g1, g2)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
