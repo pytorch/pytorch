@@ -1594,19 +1594,26 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         finally:
             torch.__future__.set_overwrite_module_params_on_conversion(False)
 
-    def test_swap_module_params_fails_after_forward(self):
+    def test_swap_module_params_poisons_acc_grad(self):
         try:
             torch.__future__.set_swap_module_params_on_conversion(True)
+            # (1) _apply can be run after forward
             m = torch.nn.Linear(2, 3)
             inp = torch.randn(2, 2)
             # forward will init AccumulateGrad nodes, which bumps use_count of parameters' at::Tensors
             out = m(inp)
-            with self.assertRaisesRegex(RuntimeError, re.escape("_apply(): Couldn't swap Linear.weight")):
-                m.half()
-            del out
-            # works as expected now
             m.half()
             self.assertTrue(all(p.dtype == torch.float16 for p in m.parameters()))
+            # (1a) backward cannot be run after _apply
+            with self.assertRaisesRegex(RuntimeError, "Trying to execute AccumulateGrad node that was poisoned by swap_tensors"):
+                out.sum().backward()
+            # (2) _apply can be run after backward()
+            inp2 = torch.randn(2, 2, dtype=torch.half)
+            out2 = m(inp2)
+            out2.sum().backward()
+            m.float()
+            self.assertTrue(all(p.dtype == torch.float32 for p in m.parameters()))
+            out3 = m(inp)
         finally:
             torch.__future__.set_swap_module_params_on_conversion(False)
 
