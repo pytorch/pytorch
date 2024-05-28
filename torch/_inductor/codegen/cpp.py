@@ -2191,7 +2191,7 @@ class CppVecKernel(CppKernel):
                 code.writeline(
                     f"__at_align__ std::array<{DTYPE_TO_CPP[vec_dtype]}, {result_size}> tmpbuf;"
                 )
-                line = f"{vec_var}.store(tmpbuf.data());"
+                line = f"{vec_var}.store(tmpbuf.data(), {result_size});"
                 code.writeline(line)
                 code.writeline("return tmpbuf;")
             code.writeline("()")
@@ -2210,7 +2210,7 @@ class CppVecKernel(CppKernel):
             )
             code.writeline(result_declare)
             if store_value:
-                code.writeline(f"{store_value}.store(tmpbuf.data());")
+                code.writeline(f"{store_value}.store(tmpbuf.data(), {result_size});")
             itervar_inner = sympy_index_symbol(
                 f"{self.itervars[self.tiling_idx]}_inner"
             )
@@ -2840,6 +2840,7 @@ class CppVecKernelChecker(CppVecKernel):
         self.supported_dtypes_for_masked_vec: List[torch.dtype] = [
             torch.float,
             torch.bfloat16,
+            torch.float16,
         ]
 
     def disable_vec(self, msg=None):
