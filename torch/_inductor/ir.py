@@ -58,7 +58,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SymTypes,
 )
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
-from torch.utils._sympy.symbol import symbol_is_type, SymT
+from torch.utils._sympy.symbol import SymT
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
