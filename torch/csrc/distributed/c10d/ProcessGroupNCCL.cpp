@@ -746,6 +746,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       getCvarInt(TORCH_NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
   desyncDebug_ = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
+  rethrowCUDAErrors_ = getCvarBool(TORCH_NCCL_RETHROW_CUDA_ERRORS, true);
   // TODO, we should either deprecate TORCH_NCCL_DUMP_ON_TIMEOUT
   // or change its name to reflect that dump happens on exception including
   // both timeout and other errors.
@@ -1470,11 +1471,14 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
           "Process group watchdog thread terminated with exception: ",
           e.what());
       LOG(ERROR) << exitMsg;
-      // TODO(whc) clean up the rethrow - why is it stored in a class var and
-      // rethrown?
-      watchDogException_ =
-          std::make_exception_ptr(C10_BUILD_ERROR(DistBackendError, exitMsg));
-      std::rethrow_exception(watchDogException_);
+      if (C10_LIKELY(rethrowCUDAErrors_) ||
+          !(std::string(e.what()).find("CUDA Error"))) {
+        // TODO(whc) clean up the rethrow - why is it stored in a class var and
+        // rethrown?
+        watchDogException_ =
+            std::make_exception_ptr(C10_BUILD_ERROR(DistBackendError, exitMsg));
+        std::rethrow_exception(watchDogException_);
+      }
     }
   } catch (...) {
     const auto exitMsg = c10::str(

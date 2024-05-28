@@ -85,6 +85,10 @@ static std::vector<std::string> TORCH_NCCL_ENABLE_MONITORING = {
 static std::vector<std::string> TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC = {
     "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"};
 
+// Whether to rethrow CUDA Errors in the watchdog (default true)
+static std::vector<std::string> TORCH_NCCL_RETHROW_CUDA_ERRORS = {
+    "TORCH_NCCL_RETHROW_CUDA_ERRORS"};
+
 // The maximum number of events we store in the flight recorder's ring buffer.
 // (One event could be the start or end of a collective, for example).
 static std::vector<std::string> TORCH_NCCL_TRACE_BUFFER_SIZE = {
@@ -1040,6 +1044,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Whether or not TORCH_NCCL_AVOID_RECORD_STREAMS was set
   bool avoidRecordStreams_ = false;
+
+  // Whether the NCCL watchdog should rethrow CUDA errors.
+  bool rethrowCUDAErrors_ = false;
 
   // Set of communicators that this process group has aborted and their
   // ncclUniqueId has been written to the store. We don't need a lock
