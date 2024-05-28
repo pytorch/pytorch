@@ -491,7 +491,7 @@ class Tensor(torch._C.TensorBase):
             See https://github.com/pytorch/pytorch/pull/60521#issuecomment-867061780 for more details.
 
         Args:
-            gradient (Tensor or None, optional): The gradient of the function
+            gradient (Tensor, optional): The gradient of the function
                 being differentiated w.r.t. ``self``.
                 If it is a tensor, it will be automatically converted
                 to a Tensor that does not require grad unless ``create_graph`` is True.
