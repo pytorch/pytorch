@@ -1288,16 +1288,9 @@ cdll.LoadLibrary("__lib_path__")
     def __hash__(self) -> int:
         return hash(str(self))
 
-    @functools.lru_cache(None)
-    def __bool__(self) -> bool:
-        if config.cpp.vec_isa_ok is not None:
-            return config.cpp.vec_isa_ok
-
-        if config.is_fbcode():
-            return True
-
+    def check_build(self, code) -> bool:
         key, input_path = write(
-            VecISA._avx_code,
+            code,
             "cpp",
             extra=_get_isa_dry_compile_fingerprint(self._arch_flags),
         )
@@ -1331,6 +1324,16 @@ cdll.LoadLibrary("__lib_path__")
                 return False
 
             return True
+
+    @functools.lru_cache(None)
+    def __bool__(self) -> bool:
+        if config.cpp.vec_isa_ok is not None:
+            return config.cpp.vec_isa_ok
+
+        if config.is_fbcode():
+            return True
+
+        return self.check_build(VecISA._avx_code)
 
 
 @dataclasses.dataclass
@@ -1368,11 +1371,30 @@ class VecAMX(VecAVX512):
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
 
+    _amx_code = """
+struct amx_tilecfg {
+  uint8_t palette_id;
+  uint8_t start_row;
+  uint8_t reserved_0[14];
+  uint16_t colsb[16];
+  uint8_t rows[16];
+};
+
+extern "C" void __amx_chk_kernel() {
+  amx_tilecfg cfg = {0};
+  _tile_loadconfig(&cfg);
+  _tile_zero(0);
+  _tile_dpbf16ps(0, 1, 2);
+  _tile_dpbusd(0, 1, 2);
+}
+"""
+
     @functools.lru_cache(None)
     def __bool__(self) -> bool:
         if super().__bool__():
-            # TODO: check AMX validity
-            if torch._C._cpu._init_amx():
+            if config.is_fbcode():
+                return False
+            if self.check_build(VecAMX._amx_code) and torch._C._cpu._init_amx():
                 return True
         return False
 

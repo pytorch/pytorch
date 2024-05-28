@@ -34,7 +34,10 @@ class CppMicroGemm:
     # TODO(jgong5): support constant shapes and lds as template args.
     DECLARE_KERNEL = r"""
 template <bool accum>
-inline void {{kernel_name}}({{kernel_extra_args_declare}}
+inline void {{kernel_name}}(
+{%- if kernel_extra_args_declare %}
+    {{kernel_extra_args_declare}}
+{%- endif %}
     const {{input_t}}* __restrict__ A,
     const {{input_t}}* __restrict__ B,
     {{output_t}}* __restrict__ C,
@@ -435,7 +438,6 @@ class CppMicroGemmAMX(CppMicroGemm):
     TODO(jgong5): support int8 data type.
     """
 
-    # TODO: add extra condition in CppMicroGemmConfig to guard K % 2 == 0
     TEMPLATE_ENTRY = r"""
 {{declare_kernel}} {
     TORCH_CHECK(N % {{block_n}} == 0, "N dimension must be multiple of {{block_n}}");

@@ -133,7 +133,6 @@ extern "C"
                 }}
             }
         }
-        // TODO: should sync with thread local state?
         {{ micro_gemm.codegen_finalize(kernel) }}
     }
 }

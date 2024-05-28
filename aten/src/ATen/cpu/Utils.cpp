@@ -18,6 +18,14 @@ bool is_cpu_support_vnni() {
 }
 
 bool init_amx() {
+#if !defined(__s390x__) && !defined(__powerpc__)
+  if (!cpuinfo_initialize() || !cpuinfo_has_x86_amx_tile()) {
+    return false;
+  }
+#else
+  return false;
+#endif
+
 #if defined(__linux__)
 #define XFEATURE_XTILECFG 17
 #define XFEATURE_XTILEDATA 18
