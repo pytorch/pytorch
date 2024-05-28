@@ -167,8 +167,9 @@ private:
   void set(cudnnDataType_t dataType, IntArrayRef sizes, IntArrayRef strides, size_t pad, bool nhwc);
 
   void set(cudnnDataType_t dataType, int dim, int* size, int* stride, bool nhwc) {
-    fixSizeOneDimStride<int>(dim, size, stride, nhwc);
-    AT_CUDNN_CHECK(cudnnSetTensorNdDescriptor(mut_desc(), dataType, dim, size, stride));
+    std::vector<int> strides_copy(stride, stride + dim);
+    fixSizeOneDimStride<int>(dim, size, strides_copy.data(), nhwc);
+    AT_CUDNN_CHECK(cudnnSetTensorNdDescriptor(mut_desc(), dataType, dim, size, strides_copy.data()));
   }
 };
 
