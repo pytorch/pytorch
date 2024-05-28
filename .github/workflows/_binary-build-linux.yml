@@ -75,11 +75,6 @@ on:
         type: string
         description: Extra install requirements
         default: ""
-      USE_PRIORITIZED_TEXT_FOR_LD:
-        required: false
-        type: string
-        description: Whether to enable linker script optimization
-        default: 0
     secrets:
       github-token:
         required: true
@@ -115,7 +110,6 @@ jobs:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       PYTORCH_FINAL_PACKAGE_DIR: /artifacts
       SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-      USE_PRIORITIZED_TEXT_FOR_LD: ${{ inputs.USE_PRIORITIZED_TEXT_FOR_LD }}
     steps:
       - name: Make the env permanent during this workflow (but not the secrets)
         shell: bash
@@ -143,7 +137,6 @@ jobs:
             echo "PR_NUMBER=${{ env.PR_NUMBER }}"
             echo "PYTORCH_FINAL_PACKAGE_DIR=${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
             echo "SHA1=${{ env.SHA1 }}"
-            echo "USE_PRIORITIZED_TEXT_FOR_LD=${{ env.USE_PRIORITIZED_TEXT_FOR_LD }}"
           } >> "${GITHUB_ENV} }}"
 
       - name: List the env
@@ -202,9 +195,9 @@ jobs:
       - name: Checkout pytorch/builder to builder dir
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: linker_script_enable
           submodules: recursive
-          repository: pytorch/builder
+          repository: tinglvv/builder
           path: builder
           quiet-checkout: true
 
@@ -253,7 +246,6 @@ jobs:
             -e PYTORCH_ROOT \
             -e SKIP_ALL_TESTS \
             -e PYTORCH_EXTRA_INSTALL_REQUIREMENTS \
-            -e USE_PRIORITIZED_TEXT_FOR_LD \
             --tty \
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
