@@ -205,6 +205,18 @@ class TestCommMode(TestCase):
 
         self.checksAssert(comm_mode, c10d_ops.reduce_scatter_tensor_coalesced_, 1, 1)
 
+        # tests c10d alltoall_
+        with comm_mode:
+            dist.all_to_all([inp], [inp])
+
+        self.checksAssert(comm_mode, c10d_ops.alltoall_, 1, 1)
+
+        # tests c10d alltoall_base_
+        with comm_mode:
+            dist.all_to_all_single(inp, inp)
+
+        self.checksAssert(comm_mode, c10d_ops.alltoall_base_, 1, 1)
+
 
 if __name__ == "__main__":
     run_tests()
