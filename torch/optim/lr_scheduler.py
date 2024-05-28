@@ -1,4 +1,3 @@
-import copy
 import math
 import types
 import warnings
@@ -64,6 +63,24 @@ def _check_verbose_deprecated_warning(verbose):
         )
         return verbose
     return False
+
+
+def _format_param(name: str, optimizer: Optimizer, param):
+    """Return correctly formatted lr/momentum for each param group."""
+
+    def _copy(_param):
+        return _param.clone().detach() if isinstance(_param, Tensor) else _param
+
+    if isinstance(param, (list, tuple)):
+        if len(param) != len(optimizer.param_groups):
+            raise ValueError(
+                f"{name} must have the same length as optimizer.param_groups. "
+                f"{name} has {len(param)} values, param_groups has {len(optimizer.param_groups)}."
+            )
+    else:
+        param = [param] * len(optimizer.param_groups)
+
+    return list(map(_copy, param))
 
 
 class LRScheduler:
@@ -1495,7 +1512,7 @@ class CyclicLR(LRScheduler):
             raise TypeError(f"{type(optimizer).__name__} is not an Optimizer")
         self.optimizer = optimizer
 
-        base_lrs = self._format_param("base_lr", optimizer, base_lr)
+        base_lrs = _format_param("base_lr", optimizer, base_lr)
         if last_epoch == -1:
             for lr, group in zip(base_lrs, optimizer.param_groups):
                 if isinstance(group["lr"], Tensor):
@@ -1504,7 +1521,7 @@ class CyclicLR(LRScheduler):
                 else:
                     group["lr"] = lr
 
-        self.max_lrs = self._format_param("max_lr", optimizer, max_lr)
+        self.max_lrs = _format_param("max_lr", optimizer, max_lr)
 
         step_size_up = float(step_size_up)
         step_size_down = (
@@ -1535,12 +1552,10 @@ class CyclicLR(LRScheduler):
                 )
 
             self.use_beta1 = "betas" in self.optimizer.defaults
-            self.base_momentums = self._format_param(
+            self.base_momentums = _format_param(
                 "base_momentum", optimizer, base_momentum
             )
-            self.max_momentums = self._format_param(
-                "max_momentum", optimizer, max_momentum
-            )
+            self.max_momentums = _format_param("max_momentum", optimizer, max_momentum)
             if last_epoch == -1:
                 for m_momentum, b_momentum, group in zip(
                     self.max_momentums, self.base_momentums, optimizer.param_groups
@@ -1567,18 +1582,6 @@ class CyclicLR(LRScheduler):
         elif self.mode == "exp_range":
             self._scale_fn_ref = partial(self._exp_range_scale_fn, self.gamma)
             self.scale_mode = "iterations"
-
-    def _format_param(self, name, optimizer, param, deep_copy: bool = True):
-        """Return correctly formatted lr/momentum for each param group."""
-        if isinstance(param, (list, tuple)):
-            if len(param) != len(optimizer.param_groups):
-                raise ValueError(
-                    f"expected {len(optimizer.param_groups)} values for {name}, got {len(param)}"
-                )
-        else:
-            param = [param] * len(optimizer.param_groups)
-
-        return copy.deepcopy(param) if deep_copy else param
 
     def scale_fn(self, x) -> float:
         if self._scale_fn_custom is not None:
@@ -2017,7 +2020,7 @@ class OneCycleLR(LRScheduler):
             self._anneal_func_type = anneal_strategy
 
         # Initialize learning rate variables
-        max_lrs = self._format_param("max_lr", self.optimizer, max_lr)
+        max_lrs = _format_param("max_lr", self.optimizer, max_lr)
         if last_epoch == -1:
             for idx, group in enumerate(self.optimizer.param_groups):
                 group["initial_lr"] = max_lrs[idx] / div_factor
@@ -2035,10 +2038,8 @@ class OneCycleLR(LRScheduler):
                     "optimizer must support momentum or beta1 with `cycle_momentum` option enabled"
                 )
             self.use_beta1 = "betas" in self.optimizer.defaults
-            max_momentums = self._format_param("max_momentum", optimizer, max_momentum)
-            base_momentums = self._format_param(
-                "base_momentum", optimizer, base_momentum
-            )
+            max_momentums = _format_param("max_momentum", optimizer, max_momentum)
+            base_momentums = _format_param("base_momentum", optimizer, base_momentum)
             if last_epoch == -1:
                 for m_momentum, b_momentum, group in zip(
                     max_momentums, base_momentums, optimizer.param_groups
@@ -2051,18 +2052,6 @@ class OneCycleLR(LRScheduler):
                     group["base_momentum"] = b_momentum
 
         super().__init__(optimizer, last_epoch, verbose)
-
-    def _format_param(self, name, optimizer, param, deep_copy: bool = True):
-        """Return correctly formatted lr/momentum for each param group."""
-        if isinstance(param, (list, tuple)):
-            if len(param) != len(optimizer.param_groups):
-                raise ValueError(
-                    f"expected {len(optimizer.param_groups)} values for {name}, got {len(param)}"
-                )
-        else:
-            param = [param] * len(optimizer.param_groups)
-
-        return copy.deepcopy(param) if deep_copy else param
 
     def _anneal_func(self, *args, **kwargs):
         if hasattr(self, "_anneal_func_type"):
