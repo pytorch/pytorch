@@ -3,7 +3,7 @@ import logging
 import os
 import sys
 import tempfile
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import torch
 
@@ -63,10 +63,14 @@ def throw_abstract_impl_not_imported_error(opname, module, context):
 
 
 # Meta only, act as nop otherwise.
+#
+# NB!  This treats "skip" kwarg specially!!
 def compile_time_strobelight_meta(phase_name):
     def compile_time_strobelight_meta_inner(function):
         @functools.wraps(function)
         def wrapper_function(*args, **kwargs):
+            if "skip" in kwargs:
+                kwargs["skip"] = kwargs["skip"] + 1
             return function(*args, **kwargs)
 
         return wrapper_function
@@ -191,6 +195,6 @@ USE_RTLD_GLOBAL_WITH_LIBTORCH = False
 REQUIRES_SET_PYTHON_MODULE = False
 
 
-def maybe_upload_prof_stats_to_manifold(profile_path: str) -> None:
+def maybe_upload_prof_stats_to_manifold(profile_path: str) -> Optional[str]:
     print("Uploading profile stats (fb-only otherwise no-op)")
-    pass
+    return None
