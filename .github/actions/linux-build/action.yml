@@ -58,7 +58,7 @@ inputs:
       are built from the libtorch wheel.
     required: false
     type: string
-    default: false
+    default: "false"
 outputs:
   docker-image:
     value: ${{ steps.calculate-docker-image.outputs.docker-image }}
