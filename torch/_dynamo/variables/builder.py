@@ -320,6 +320,7 @@ class VariableBuilder:
             TensorWithTFOverrideVariable,
             UserDefinedObjectVariable,
             NumpyNdarrayVariable,
+            FSDPManagedNNModuleVariable
         ]:
             return True
         return False
@@ -1122,7 +1123,9 @@ class VariableBuilder:
             and not config.allow_rnn
         ):
             unimplemented("TorchDynamo purposely graph breaks on RNN, GRU, LSTMs")
-        if mutation_guard.is_dynamic_nn_module(value, self.tx.export):
+        if mutation_guard.is_dynamic_nn_module(value, self.tx.export) and not getattr(
+            value, "_is_fsdp_managed_module", False
+        ):
             # created dynamically, don't specialize on it
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = UnspecializedNNModuleVariable(value, source=self.source)
@@ -1161,8 +1164,19 @@ class VariableBuilder:
             #
             # ID_MATCH is required to disambiguate cases as simple as a unit test that constructs 2 models and wraps
             # them differently with different FSDP configs.  (test_dynamo_distributed.py -k test_fsdp_aot_eager)
+            base = self.name
+            name = self.name
+            for i in itertools.count():
+                if name not in self.tx.output.nn_modules:
+                    self.tx.output.nn_modules[name] = value
+                    break
+                name = f"{base}_{i}"
             self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.ID_MATCH)
-            return FSDPManagedNNModuleVariable(value, source=self.get_source())
+            return FSDPManagedNNModuleVariable(
+                value,
+                name,
+                source=self.get_source(),
+            )
         else:
             return self.tx.output.register_attr_or_module(
                 value,
