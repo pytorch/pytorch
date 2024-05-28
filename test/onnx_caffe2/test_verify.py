@@ -1,11 +1,12 @@
 # Owner(s): ["module: onnx"]
 
+from verify import verify
+
 import caffe2.python.onnx.backend as backend
 import torch
 from torch.autograd import Function
 from torch.nn import Module, Parameter
 from torch.testing._internal import common_utils
-from verify import verify
 
 
 class TestVerify(common_utils.TestCase):

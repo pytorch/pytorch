@@ -134,7 +134,7 @@ std::vector<size_t> get_tensor_parameter_index(
       }
     } else if (
         *arguments[idx].real_type() ==
-        *c10::getTypePtr<c10::optional<at::Tensor>>()) {
+        *c10::getTypePtr<std::optional<at::Tensor>>()) {
       // optional tensor
       if (stack[idx].toOptional<at::Tensor>().has_value()) {
         tensor_parameter_index.push_back(idx);
