@@ -133,7 +133,8 @@ class Verifier(metaclass=_VerifierMeta):
         ]
 
     def allowed_op_types(self) -> Tuple[Type[Any], ...]:
-        return (OpOverload, HigherOrderOperator, *torch._export.serde.serialize.allowed_registered_op_types())
+        from torch._export.serde.serialize import allowed_registered_op_types  # Avoid circular import.
+        return (OpOverload, HigherOrderOperator, *allowed_registered_op_types())
 
     def allowed_getattr_types(self) -> Tuple[Type[Any], ...]:
         return (torch.fx.GraphModule,)
