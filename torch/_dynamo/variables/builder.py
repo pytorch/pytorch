@@ -250,7 +250,13 @@ class GraphArg:
         self.example_strong_ref = None
 
     def __eq__(self, other):
-        return self.source.name() == other.source.name()
+        # Not all GraphArgs have .source (e.g. BackwardStateGraphArg doesn't have it),
+        # so we check hasattr before comparing source name.
+        return (
+            hasattr(self.source, "name")
+            and hasattr(other.source, "name")
+            and self.source.name() == other.source.name()
+        )
 
 
 class BackwardStateGraphArg(GraphArg):
