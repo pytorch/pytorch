@@ -1,0 +1,12 @@
+value {
+  tag: "test_scalar"
+  tensor {
+    dtype: DT_FLOAT
+    float_val: 1.0
+  }
+  metadata {
+    plugin_data {
+      plugin_name: "scalars"
+    }
+  }
+}
