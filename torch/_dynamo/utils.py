@@ -2591,7 +2591,8 @@ def nn_module_proxy(mod):
         return mod
     from torch.distributed._composable.fsdp.fully_shard import FSDPModule
     if isinstance(mod, FSDPModule):
-        return mod  # TODO(yf225): this is a hacky workaround and is not the right thing to do. Need to think about how to work around FSDP.__new__()
+        # TODO(yf225): this is a hacky workaround and is not the right thing to do. Need to think about how to work around FSDP.__new__()
+        return mod
     else:
         proxy = mod.__class__.__new__(mod.__class__)
         proxy.__dict__ = mod.__dict__

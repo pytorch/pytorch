@@ -824,7 +824,7 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                     if name in tx.symbolic_locals:
                         tx.symbolic_locals[name] = tensor_variable
                 elif isinstance(tensor_variable, ConstantVariable) and tensor_variable.value is None:
-                    # NOTE(yf225): return value of custom op like torch.ops.fsdp.XYZ can also be None, so need this branch to handle it.
+                    # Handle out-variant custom ops that return None.
                     if isinstance(kwargs["out"], TensorVariable):
                         assert "example_value" in kwargs["out"].proxy.node.meta
                         fake_out = kwargs["out"].proxy.node.meta["example_value"]

@@ -8238,7 +8238,7 @@ class _CollectiveKernel(FallbackKernel):
                 unflatten_args,
                 unbacked_bindings,
             ) = cls.process_kernel(kernel, mutated_inputs, *args, **kwargs)
-            assert not unbacked_bindings, f"{kernel} {unbacked_bindings}"
+        assert not unbacked_bindings, f"{kernel} {unbacked_bindings}"
         for tensor_arg in tensor_args:
             tensor_arg.realize()
 
