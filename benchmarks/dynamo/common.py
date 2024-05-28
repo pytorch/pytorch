@@ -2414,9 +2414,6 @@ class BenchmarkRunner:
                 limit_all_gathers=True,
                 auto_wrap_policy=self.get_fsdp_auto_wrap_policy(self.args.only),
             )
-            if torch._inductor.config.triton.cudagraphs:
-                log.warning("Disabling cudagraphs for FSDP compatibility")
-                torch._inductor.config.triton.cudagraphs = False
         return model
 
     def check_accuracy(
@@ -3169,7 +3166,7 @@ def parse_args(args=None):
     parser.add_argument(
         "--fsdp",
         action="store_true",
-        help="""Wraps model in FSDP before running it. Disables cudagraphs by default.
+        help="""Wraps model in FSDP before running it.
         Doesn't recursively wrap, mainly useful for checking dynamo UnspecNNModule compatibility
     """,
     )
