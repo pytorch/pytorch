@@ -1254,13 +1254,14 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
     )
     @pytorch_test_common.xfail_dynamic_fx_test(
-        error_message="NOT_IMPLEMENTED : Could not find an implementation for Trilu(14) node",
-        reason="Need to check Trilu node in the ONNX graph",
+        error_message="scaled_dot_product_attention(): argument 'is_causal' must be bool, not SymBool",
+        reason="Dynamo error: scaled_dot_product_attention(): argument 'is_causal' must be bool, not SymBool",
         model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
     )
-    @pytorch_test_common.xfail_if_model_type_is_not_exportedprogram(
-        error_message="NOT_IMPLEMENTED : Could not find an implementation for Trilu(14) node",
-        reason="Need to check Trilu node in the ONNX graph",
+    @pytorch_test_common.xfail_op_level_debug_test(
+        error_message="Could not find an implementation for Trilu(14) node",
+        reason="ORT error during op level dubug",
+        model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
     )
     @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
         error_message="aot_autograd expected to have an entirely functional graph",
