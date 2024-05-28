@@ -1,9 +1,10 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
+from numpy.testing import assert_array_equal
+
 import torch
 import torch.nn.functional as F
-from numpy.testing import assert_array_equal
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 
 from torch.distributed._tensor import (

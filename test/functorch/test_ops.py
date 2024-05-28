@@ -10,8 +10,6 @@ import functools
 import itertools
 import unittest
 
-import torch
-import torch.autograd.forward_ad as fwAD
 from common_utils import (
     check_vmap_fallback,
     decorate,
@@ -29,8 +27,12 @@ from common_utils import (
     tol2,
     xfail,
 )
-from functorch import grad, jacfwd, jacrev, vjp, vmap
 from functorch_additional_op_db import additional_op_db
+
+import torch
+import torch.autograd.forward_ad as fwAD
+
+from functorch import grad, jacfwd, jacrev, vjp, vmap
 from torch import Tensor
 from torch._functorch.eager_transforms import _as_tuple, jvp
 from torch.testing._internal.autograd_function_db import autograd_function_db
