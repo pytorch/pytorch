@@ -285,8 +285,8 @@ class MarkStepBox:
 
 # We need to register this as an object that will be copied over as TLS when new
 # threads are created in autograd
-torch._C._stash_obj_in_tls("tree_manager_containers", local.tree_manager_containers)
-torch._C._stash_obj_in_tls("tree_manager_locks", local.tree_manager_locks)
+# torch._C._stash_obj_in_tls("tree_manager_containers", local.tree_manager_containers)
+# torch._C._stash_obj_in_tls("tree_manager_locks", local.tree_manager_locks)
 
 
 def mark_step_begin():
