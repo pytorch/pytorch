@@ -16,14 +16,14 @@ from typing import (
 import torch
 
 from torch import Tensor
-from torch.distributed._tensor.api import Shard
-from torch.distributed._tensor.op_schema import (
+from torch.distributed._tensor._op_schema import (
     OpSchema,
     OpStrategy,
     PlacementStrategy,
     RuntimeSchemaInfo,
     StrategyType,
 )
+from torch.distributed._tensor.api import Shard
 from torch.distributed._tensor.ops.utils import (
     generate_redistribute_costs,
     normalize_dim,

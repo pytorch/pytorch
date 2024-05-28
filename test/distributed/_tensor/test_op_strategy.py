@@ -5,7 +5,7 @@ from itertools import chain
 import torch
 from torch.distributed._tensor import DeviceMesh, DTensor
 from torch.distributed._tensor._collective_utils import redistribute_cost
-from torch.distributed._tensor.op_schema import OpSchema, OpStrategy, PlacementStrategy
+from torch.distributed._tensor._op_schema import OpSchema, OpStrategy, PlacementStrategy
 from torch.distributed._tensor.ops.basic_strategy import (
     EinsumDims,
     gen_einsum_strategies,

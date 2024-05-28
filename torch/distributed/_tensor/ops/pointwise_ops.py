@@ -3,7 +3,7 @@ from typing import List, Sequence, Tuple
 
 import torch
 
-from torch.distributed._tensor.op_schema import (
+from torch.distributed._tensor._op_schema import (
     _is_inplace_op,
     _is_out_variant_op,
     OpSchema,

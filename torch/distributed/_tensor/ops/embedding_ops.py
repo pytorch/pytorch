@@ -6,7 +6,7 @@ from typing import cast, List, Optional
 
 import torch
 import torch.distributed._functional_collectives as funcol
-from torch.distributed._tensor.op_schema import (
+from torch.distributed._tensor._op_schema import (
     OpSchema,
     OpStrategy,
     PlacementStrategy,
