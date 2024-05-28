@@ -2410,7 +2410,12 @@ class Scheduler:
         numel, lhs_dep, rhs_dep = sorted(candidates, reverse=True, key=lambda x: x[0])[
             0
         ]
-        node1.reorder_loops_by_dep_pair(lhs_dep, rhs_dep)
+
+        # Reorder loops for pointwise if the other node is reduction
+        if node1.is_reduction() and not node2.is_reduction():
+            node2.reorder_loops_by_dep_pair(rhs_dep, lhs_dep)
+        else:
+            node1.reorder_loops_by_dep_pair(lhs_dep, rhs_dep)
 
         return self.score_fusion_memory(node1, node2) > 0
 

@@ -2,6 +2,7 @@
 import contextlib
 
 import torch
+from torch._dynamo.utils import same
 from torch._inductor import config as inductor_config, ir, metrics
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.graph import GraphLowering
@@ -97,6 +98,11 @@ class ImplDetailTest(TestCase):
     }
 )
 class LoopOrderingTest(TestCase):
+    def do_acc_test(self, f, *args):
+        expect = f(*args)
+        actual = torch.compile(f)(*args)
+        self.assertTrue(same(expect, actual, tol=1e-3))
+
     def test_apbt_realize(self):
         M = 1024
         N = 2048
@@ -113,9 +119,17 @@ class LoopOrderingTest(TestCase):
         x = torch.randn(M, N)
         y = torch.randn(N, M).t()
 
-        expect = f(x, y)
-        actual = torch.compile(f)(x, y)
-        self.assertTrue(torch.allclose(expect, actual, atol=1e-3, rtol=1e-3))
+        self.do_acc_test(f, x, y)
+        self.assertEqual(1, metrics.generated_kernel_count)
+
+    def test_sum_and_t(self):
+        N = 1024
+
+        def f(x):
+            return x.sum(dim=-1), x.t().contiguous()
+
+        x = torch.randn(N, N)
+        self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 
 
