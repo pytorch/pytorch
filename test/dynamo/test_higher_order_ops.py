@@ -3,7 +3,6 @@ import enum
 import functools
 import pprint
 import re
-import sys
 import unittest
 import warnings
 
