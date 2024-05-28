@@ -191,26 +191,20 @@ def _load_global_deps() -> None:
         # Determine the file extension based on the platform
         if platform.system() == 'Darwin':
             lib_ext = '.dylib'
-        elif platform.system() == 'Windows':
-            lib_ext = '.dll'
         else:
             lib_ext = '.so'
 
         # Find all shared library files with the appropriate extension
-        so_files = [f for f in os.listdir(lib_dir) if f.endswith(lib_ext)]
-        if not so_files:
+        library_files = [f for f in os.listdir(lib_dir) if f.endswith(lib_ext)]
+        if not library_files:
             return
 
-        for so_file in so_files:
-            so_path = os.path.join(lib_dir, so_file)
+        for lib_file in library_files:
+            lib_path = os.path.join(lib_dir, lib_file)
             try:
-                # Use RTLD_GLOBAL only if not on Windows
-                if platform.system() == 'Windows':
-                    ctypes.CDLL(so_path)
-                else:
-                    ctypes.CDLL(so_path, mode=ctypes.RTLD_GLOBAL)
+                ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
             except OSError as err:
-                print(f"Failed to load {so_path}: {err}")
+                print(f"Failed to load {lib_path}: {err}")
 
     if _running_with_deploy() or platform.system() == 'Windows':
         return
