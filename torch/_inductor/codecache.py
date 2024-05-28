@@ -690,11 +690,19 @@ def compiled_fx_graph_hash(
     # The prefix distinguishes among the other kinds of objects we
     # cache in this module.
     key = "f" + FxGraphCachePickler.get_hash(details)
-    log.debug(
-        "FX graph cache hash details for key %s:\n%s",
-        key,
-        details.debug_str(),
+    debug_str = details.debug_str()
+    log.debug(f"FX graph cache hash details for key {key}:\n{debug_str}")  # noqa: G004
+    torch._logging.trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "fx_graph_cache_hash",
+            "encoding": "json",
+        },
+        payload_fn=lambda: json.dumps(
+            {"key": key, "components": debug_str.split("\n")}
+        ),
     )
+
     return key
 
 
