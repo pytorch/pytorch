@@ -1,4 +1,5 @@
 import functools
+import itertools
 import logging
 from typing import cast, List, Tuple
 
@@ -113,39 +114,40 @@ def filtered_configs(
 
 
 # List of dictionaries to store the kernel configs. Configs that evaluate to true
-# will be utilised on the target platform
-mm_kernel_configs = [
-    # "BLOCK_M", "BLOCK_N", "BLOCK_K", "num_stages", "num_warps"
-    {"config": (16, 32, 16, 3, 2), "cond": True},
-    {"config": (16, 32, 32, 4, 2), "cond": True},
-    {"config": (16, 32, 32, 5, 2), "cond": True},
-    {"config": (32, 32, 16, 1, 2), "cond": True},
-    {"config": (32, 32, 128, 2, 4), "cond": torch.version.hip is None},
-    {"config": (32, 64, 32, 5, 8), "cond": True},
-    {"config": (64, 32, 32, 5, 8), "cond": True},
-    {"config": (64, 32, 128, 5, 4), "cond": True},
-    {"config": (64, 64, 16, 2, 4), "cond": True},
-    {"config": (64, 64, 32, 2, 4), "cond": True},
-    {"config": (64, 64, 64, 3, 8), "cond": True},
-    {"config": (64, 64, 128, 3, 4), "cond": True},
-    {"config": (64, 64, 128, 5, 4), "cond": True},
-    {"config": (64, 128, 32, 3, 4), "cond": True},
-    {"config": (64, 128, 32, 4, 8), "cond": True},
-    {"config": (64, 128, 64, 4, 4), "cond": True},
-    {"config": (64, 128, 128, 4, 4), "cond": True},
-    {"config": (128, 64, 32, 2, 2), "cond": True},
-    {"config": (128, 64, 32, 3, 4), "cond": True},
-    {"config": (128, 64, 32, 4, 8), "cond": True},
-    {"config": (128, 64, 64, 3, 8), "cond": True},
-    {"config": (128, 64, 128, 4, 8), "cond": True},
-    {"config": (128, 128, 32, 2, 8), "cond": True},
-    {"config": (128, 128, 32, 3, 4), "cond": True},
-    {"config": (128, 128, 32, 4, 4), "cond": True},
-    {"config": (128, 128, 64, 3, 4), "cond": True},
-    {"config": (128, 128, 64, 3, 8), "cond": True},
-    {"config": (128, 128, 64, 5, 4), "cond": True},
-    {"config": (128, 128, 64, 5, 8), "cond": True},
-]
+# will be utilised on the target platform. The configs are as follows:
+# (BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps)
+mm_kernel_configs = (
+    [
+        {"config": (32, 32, 16, 1, 2), "cond": True},
+        {"config": (32, 32, 128, 2, 4), "cond": torch.version.hip is None},
+        {"config": (32, 64, 32, 5, 8), "cond": True},
+        {"config": (64, 32, 32, 5, 8), "cond": True},
+        {"config": (64, 32, 128, 5, 4), "cond": True},
+        {"config": (64, 64, 16, 2, 4), "cond": True},
+        {"config": (64, 64, 32, 2, 4), "cond": True},
+        {"config": (64, 64, 64, 3, 8), "cond": True},
+        {"config": (64, 64, 128, 5, 4), "cond": True},
+        {"config": (64, 128, 32, 3, 4), "cond": True},
+        {"config": (64, 128, 32, 4, 8), "cond": True},
+        {"config": (64, 128, 64, 3, 4), "cond": True},
+        {"config": (64, 128, 128, 4, 4), "cond": True},
+        {"config": (128, 64, 32, 3, 4), "cond": True},
+        {"config": (128, 64, 32, 4, 8), "cond": True},
+        {"config": (128, 128, 32, 2, 8), "cond": True},
+        {"config": (128, 128, 32, 3, 4), "cond": True},
+        {"config": (128, 128, 64, 3, 4), "cond": True},
+        {"config": (128, 128, 64, 5, 8), "cond": True},
+    ]
+    if inductor_config.max_autotune_gemm_search_space != "EXHAUSTIVE"
+    else [
+        {"config": (BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps), "cond": True}
+        for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
+            [16, 32, 64, 128, 256], repeat=3
+        )
+        for num_stages in [1, 2, 3, 4, 5]
+        for num_warps in [2, 4, 8]
+    ]
+)
 
 int8_mm_kernel_configs = [
     {"config": (64, 64, 32, 2, 4), "cond": True},

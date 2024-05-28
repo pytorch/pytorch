@@ -28,7 +28,7 @@ namespace torch::autograd {
 static void _process_forward_mode_AD(
     const variable_list& inputs,
     std::unordered_map<at::TensorImpl*, size_t> inputs_mapping,
-    const at::ArrayRef<c10::optional<Variable>> raw_outputs,
+    const at::ArrayRef<std::optional<Variable>> raw_outputs,
     const optional_variable_list& outputs,
     const std::unordered_set<at::TensorImpl*>& non_differentiable,
     const std::unordered_set<at::TensorImpl*>& dirty_inputs,
@@ -258,7 +258,7 @@ static optional_variable_list _process_backward_mode_ad(
     const std::unordered_map<at::TensorImpl*, size_t>& inputs_mapping,
     const std::unordered_set<at::TensorImpl*>& non_differentiable,
     const std::unordered_set<at::TensorImpl*>& dirty_inputs,
-    const at::ArrayRef<c10::optional<Variable>> raw_outputs,
+    const at::ArrayRef<std::optional<Variable>> raw_outputs,
     const std::shared_ptr<Node>& cdata,
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
     const _view_as_self_fn_t& view_as_self_fn) {
@@ -438,7 +438,7 @@ optional_variable_list _wrap_outputs(
     const variable_list& input_vars,
     const std::unordered_set<at::TensorImpl*>& non_differentiable,
     const std::unordered_set<at::TensorImpl*>& dirty_inputs,
-    const at::ArrayRef<c10::optional<Variable>> raw_outputs,
+    const at::ArrayRef<std::optional<Variable>> raw_outputs,
     const std::shared_ptr<Node>& cdata,
     const _jvp_fn_t& jvp_user_function,
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,

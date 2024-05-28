@@ -6,7 +6,7 @@ import unittest
 from typing import Callable, List, Optional
 
 import torch
-from torch import multiprocessing as mp
+from torch import multiprocessing as mp, nn
 from torch._dynamo import reset
 from torch._dynamo.testing import reset_rng_state
 from torch._inductor import config
@@ -463,6 +463,27 @@ class TestMaxAutotune(TestCase):
         self.assertEqual(fn(*inputs), fn_c(*inputs), atol=1e-2, rtol=1e-2)
         self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
 
+    @skipIfRocm
+    @fresh_inductor_cache()
+    @config.patch(max_autotune=True, max_fusion_size=2)
+    def test_jit_fusion_matches_aot_fusion(self):
+        # In this example, AOTInductor's JIT-compile will fuse(buf1, buf2) due
+        # to proximity, we want to make sure AOT-compile pass does the same.
+        # AOT could do fuse(buf2, buf4) instead if buf3 was pushed to the end
+        # of the V.graph.buffers list because fuse(buf2, buf4) would have a
+        # better proximity score than fuse(buf1, buf2). This scenario is possible
+        # since finalizing MultiTemplateBuffers needs to replace buffers.
+        def fn(x, number):
+            buf0 = x + x
+            buf1 = number.item()
+            buf2 = x * x
+            buf3 = x @ x  # MultiTemplateBuffer
+            buf4 = x**2
+            return buf0, buf1, buf2, buf3, buf4
+
+        inputs = (torch.rand([256, 256], device="cuda"), torch.tensor(3, device="cuda"))
+        torch._export.aot_compile(fn, args=inputs)
+
     @config.patch(autotune_local_cache=False, autotune_remote_cache=False)
     def test_precompilations(self):
         def fn(a, b, c):
@@ -621,6 +642,31 @@ class TestMaxAutotune(TestCase):
     @config.patch(max_autotune=True)
     def test_empty_conv_input_with_1x1_kernel(self):
         self.test_empty_conv_input(kernel_size=1)
+
+    @config.patch(max_autotune=True)
+    def test_conv1x1_with_free_symbols(self):
+        """
+        Make sure there is no exception due to free symbols.
+        """
+        conv = nn.Conv2d(
+            3, 64, kernel_size=(1, 1), stride=(1, 1), padding=(0, 0), bias=False
+        ).to(device="cuda")
+
+        @torch.compile
+        def f(x, y, z):
+            h = y.nonzero().size(0)
+            w = z.nonzero().size(0)
+            x = x[:, :, :h, :w]
+            x = conv(x)
+            return x
+
+        x = torch.randn(4, 3, 224, 224).to(
+            memory_format=torch.channels_last, device="cuda"
+        )
+        for _ in range(2):
+            y = torch.randint(0, 10, (224,)).to(device="cuda")
+            z = torch.randint(0, 10, (224,)).to(device="cuda")
+            f(x, y, z)
 
     def test_non_contiguous_input_mm(self):
         """

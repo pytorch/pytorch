@@ -364,7 +364,7 @@ static void emitCheckFor(
 std::string generateKernel(
     const std::string& name,
     const Graph& graph,
-    const std::vector<std::pair<const Value*, const c10::optional<TensorDesc>>>&
+    const std::vector<std::pair<const Value*, const std::optional<TensorDesc>>>&
         inputs,
     const std::vector<std::pair<const Value*, const TensorDesc>>& outputs,
     const bool use_cuda) {

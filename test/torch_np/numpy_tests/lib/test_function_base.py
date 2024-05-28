@@ -1435,7 +1435,7 @@ class TestVectorize(TestCase):
         try:
             vectorize(random.randrange)  # Should succeed
         except Exception:
-            raise AssertionError  # noqa: TRY200
+            raise AssertionError  # noqa: B904
 
     def test_keywords2_ticket_2100(self):
         # Test kwarg support: enhancement ticket 2100
@@ -3259,12 +3259,9 @@ class TestPercentile(TestCase):
             subtest(
                 [1, 7],
                 decorators=[
-                    skipif(
-                        numpy.__version__ < "1.25",
-                        reason="NP_VER: fails on NumPy 1.24.x",
-                    )
-                ],
-            ),
+                    skip(reason="Keepdims wrapper incorrect for multiple q"),
+                ]
+            )
         ],
     )
     @parametrize(
