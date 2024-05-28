@@ -182,7 +182,7 @@ class TestCommMode(TestCase):
         self.checksAssert(comm_mode, c10d_ops.allgather_coalesced_, 1, 1)
 
         # tests c10d allgather_into_tensor_coalesced_ tracing
-        with comm_mode as A, dist._coalescing_manager() as B:
+        with comm_mode, dist._coalescing_manager():
             dist.all_gather_into_tensor(all_gather_out, inp)
 
         self.checksAssert(comm_mode, c10d_ops.allgather_into_tensor_coalesced_, 1, 1)
