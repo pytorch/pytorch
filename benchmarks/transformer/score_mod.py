@@ -6,11 +6,12 @@ from functools import partial
 from typing import Callable, List, Optional, Tuple
 
 import numpy as np
+from tabulate import tabulate
+from tqdm import tqdm
+
 import torch
 import torch.nn.functional as F
-from tabulate import tabulate
 from torch.nn.attention._flex_attention import _flex_attention
-from tqdm import tqdm
 
 torch._dynamo.config.automatic_dynamic_shapes = False
 # Needed since changing args to function causes recompiles
