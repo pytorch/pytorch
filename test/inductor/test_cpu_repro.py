@@ -1582,8 +1582,8 @@ class CPUReproTests(TestCase):
             self.common(fn, (value,))
 
     @unittest.skipIf(
-        not codecache.valid_vec_isa_list()
-        or "avx2" in codecache.valid_vec_isa_list()
+        not codecache.valid_vec_isa_list() or "avx2" in codecache.valid_vec_isa_list(),
+        "Does not support vectorization or not s390x/neon machine",
     )
     @patch("torch.cuda.is_available", lambda: False)
     def test_auto_zvec_neon_simd(self):
