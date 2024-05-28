@@ -106,14 +106,14 @@ QUANT_ANNOTATION_KEY = "quantization_annotation"
 
 def _skip_annotate(
     nodes: List[Node], filter_fn: Optional[Callable[[List[Node]], bool]] = None
-):
-    """Determines whether to skip annotation for a list of nodes."""
+) -> bool:
+    """Determine whether to skip annotation for a list of nodes."""
 
     # 1) Skip annotate if any node is already annotated
     if _is_any_annotated(nodes):
         return True
 
-    # 2) Proceed with annotation if a) a filter function is provided
+    # 2) Proceed annotate if a) a filter function is provided
     # and b) the given nodes list passes the filter function check.
     if filter_fn and filter_fn(nodes):
         return False
@@ -133,7 +133,7 @@ def _create_module_name_filter(module_name: str) -> Callable[[List[Node]], bool]
 
     >> module_name_filter = _create_module_name_filter_inner("sub")
     >> print(module_name_filter([relu, linear_1]))
-    # True  # These two nodes are from "sub" and determined by `_annotate_linear_unary` function.
+    # True  # These two nodes are determined by `_annotate_linear_unary` function and from "sub".
     """
 
     filter_fn = _get_module_name_filter(module_name)
@@ -380,6 +380,7 @@ def _get_supported_config_and_operators() -> List[OperatorConfig]:
 
 
 def _annotate_nodes_not_quantize(nodes: Union[Node, List[Node]]) -> None:
+    """Annotate nodes to exclude them from quantization (their `quantization_config` is `None`)."""
     if not isinstance(nodes, list):
         nodes = [nodes]
     for node in nodes:
@@ -391,16 +392,16 @@ def _annotate_nodes_not_quantize(nodes: Union[Node, List[Node]]) -> None:
 def config_checker(method: Callable) -> Callable:
     @functools.wraps(method)
     def wrapper(
-        self: "X86InductorQuantizer",
+        quantizer: "X86InductorQuantizer",
         name: Any,
         quantization_config: Optional["QuantizationConfig"],
     ) -> "X86InductorQuantizer":
-        if self._need_skip_config(quantization_config):
+        if quantizer._need_skip_config(quantization_config):
             warnings.warn(
                 f"Skip the quantization config for {name}.",
             )
-            return self
-        return method(self, name, quantization_config)
+            return quantizer
+        return method(quantizer, name, quantization_config)
 
     return wrapper
 
@@ -411,7 +412,7 @@ class X86InductorQuantizer(Quantizer):
 
     def __init__(self):
         super().__init__()
-        self.global_config: Optional[QuantizationConfig] = None  # type: ignore[assignment]
+        self.global_config: Optional[QuantizationConfig] = None
         self.operator_type_qconfig: Dict[
             torch._ops.OpOverloadPacket, Optional[QuantizationConfig]
         ] = {}
@@ -446,7 +447,7 @@ class X86InductorQuantizer(Quantizer):
     ) -> bool:
         """Check if the provided quantization config is valid for X86InductorQuantizer.
 
-        Note: Mixed static/dynamic configurations or mixed QAT/non-QAT configurations are not supported.
+        Mixed static/dynamic configurations or mixed QAT/non-QAT configurations are not supported.
         If such a mix is detected, the configuration will be marked for skipping..
         """
         need_skip = False
@@ -670,9 +671,9 @@ class X86InductorQuantizer(Quantizer):
         Annotation contracts:
         1. Annotate each node according to the user's qconfig in the following order:
         `module_name_qconfig`, `operator_type_qconfig`, and `global_config`.
-        2. Skip nodes that have already been annotated in earlier stage. For example,
-        if `linear1` has been annotated during in the `module_name_config` stage,
-        it won't be re-annotated in the 'operator_type_qconfig' or 'global_config' stages.
+        2. Avoid re-annotating nodes already annotated in prior stages. For example,
+        if `linear1` has been annotated by `module_name_qconfig`, it won't be annotated again
+        during the processing of the 'operator_type_qconfig' or 'global_config'.
         3. For config is `None`, the node will be annotated with `_X86InductorQuantizationAnnotation(_annotated=True)`.
 
         For each pair of (module_name_or_operator_type_or_global, qconfig), a filter function is created.
@@ -1365,8 +1366,7 @@ class X86InductorQuantizer(Quantizer):
                     ]
                 ):
                     return
-                # Don't check the `filter_fn` here, as we want to annotate
-                # the output of the node that's being annotated.
+
                 # Get the quantization_annotation from getitem_node
                 maxpool_node_quantization_annotation = (
                     maxpool_node.meta[QUANT_ANNOTATION_KEY]
