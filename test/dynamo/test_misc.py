@@ -246,7 +246,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
             return module.foobar(x)
 
         f(x)
-        self.assertTrue(len(counters["graph_break"]), 1)
+        self.assertEqual(len(counters["graph_break"]), 1)
         first_graph_break = list(counters["graph_break"].keys())[0]
         self.assertExpectedInline(
             first_graph_break,
