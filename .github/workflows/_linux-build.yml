@@ -69,8 +69,8 @@ on:
           [Experimental] Build a libtorch only wheel and build pytorch such that
           are built from the libtorch wheel.
         required: false
-        type: boolean
-        default: false
+        type: string
+        default: "false"
 
     secrets:
       HUGGING_FACE_HUB_TOKEN:
