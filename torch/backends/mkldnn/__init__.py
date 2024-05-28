@@ -4,7 +4,14 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 import torch
-from torch.backends import __allow_nonbracketed_mutation, ContextProp, PropModule
+from torch.backends import (
+    __allow_nonbracketed_mutation,
+    _get_fp32_precision,
+    _set_fp32_precision,
+    ContextProp,
+    FP32Precision,
+    PropModule,
+)
 
 
 def is_available():
@@ -64,21 +71,27 @@ class verbose:
         return False
 
 
-def set_flags(_enabled):
-    orig_flags = (torch._C._get_mkldnn_enabled(),)
-    torch._C._set_mkldnn_enabled(_enabled)
+def set_flags(_enabled=None, _fp32_precision=None):
+    orig_flags = (
+        torch._C._get_mkldnn_enabled(),
+        torch._C._get_fp32_precision("mkldnn", "all"),
+    )
+    if _enabled is not None:
+        torch._C._set_mkldnn_enabled(_enabled)
+    if _fp32_precision is not None:
+        torch._C._set_fp32_precision(_fp32_precision, "mkldnn", "all")
     return orig_flags
 
 
 @contextmanager
-def flags(enabled=False):
+def flags(enabled=False, fp32_precision="default"):
     with __allow_nonbracketed_mutation():
-        orig_flags = set_flags(enabled)
+        orig_flags = set_flags(enabled, fp32_precision)
     try:
         yield
     finally:
         with __allow_nonbracketed_mutation():
-            set_flags(orig_flags[0])
+            set_flags(*orig_flags)
 
 
 class MkldnnModule(PropModule):
@@ -86,6 +99,12 @@ class MkldnnModule(PropModule):
         super().__init__(m, name)
 
     enabled = ContextProp(torch._C._get_mkldnn_enabled, torch._C._set_mkldnn_enabled)
+    matmul = FP32Precision("mkldnn", "matmul")
+    conv = FP32Precision("mkldnn", "conv")
+    rnn = FP32Precision("mkldnn", "rnn")
+    fp32_precision = ContextProp(
+        _get_fp32_precision("mkldnn", "all"), _set_fp32_precision("generic", "all")
+    )
 
 
 if TYPE_CHECKING:

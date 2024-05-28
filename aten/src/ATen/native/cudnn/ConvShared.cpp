@@ -725,7 +725,7 @@ Tensor cudnn_convolution_relu(
 
   auto& ctx = at::globalContext();
   bool benchmark = ctx.benchmarkCuDNN();
-  bool allow_tf32 = ctx.allowTF32CuDNN();
+  bool allow_tf32 = ctx.allowTF32CuDNN("conv");
   auto _bias = bias_t.has_value()
       ? bias_t.value()
       : at::zeros(
@@ -783,7 +783,7 @@ Tensor cudnn_convolution_add_relu(
   }
 
   auto& ctx = at::globalContext();
-  bool allow_tf32 = ctx.allowTF32CuDNN();
+  bool allow_tf32 = ctx.allowTF32CuDNN("conv");
   bool benchmark = ctx.benchmarkCuDNN();
   auto _alpha = alpha.has_value() ? alpha.value().to<float>() : 1.0;
   auto _bias = bias_t.has_value()
