@@ -12,7 +12,7 @@ __all__ = ["dedup_save_plans"]
 
 
 def dedup_save_plans(
-    all_plans: List[SavePlan], 
+    all_plans: List[SavePlan],
     save_to_lowest_rank: bool = False,
 ) -> List[SavePlan]:
     """
@@ -35,7 +35,9 @@ def dedup_save_plans(
         if save_to_lowest_rank:
             select_plan_idx = min(plan_indices)
         else:
-            select_plan_idx = min(plan_indices, key=lambda plan_idx: plan_to_size[plan_idx])
+            select_plan_idx = min(
+                plan_indices, key=lambda plan_idx: plan_to_size[plan_idx]
+            )
 
         write_item = write_item_idx_to_write_item[write_item_idx]
         # essentially ignores the storage size of anything that is not a tensor, since
