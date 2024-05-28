@@ -5,8 +5,9 @@ import itertools
 
 from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 
-import torch._numpy as np
 from pytest import raises as assert_raises
+
+import torch._numpy as np
 from torch._numpy.testing import (
     assert_,
     assert_allclose,
