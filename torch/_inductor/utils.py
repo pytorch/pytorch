@@ -575,6 +575,10 @@ def sympy_index_symbol_with_prefix(prefix: SymT, idx: int) -> sympy.Symbol:
     return make_symbol(prefix, idx, integer=True, nonnegative=True)
 
 
+def generate_assert(check):
+    return (check or config.debug_index_asserts) and config.assert_indirect_indexing
+
+
 def sympy_index_symbol(name: str) -> sympy.Symbol:
     """
     Used to generate an integer-nonnegative symbol.

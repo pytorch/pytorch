@@ -4341,7 +4341,8 @@ class ShapeEnv:
     @_lru_cache
     def _maybe_evaluate_static(
         self, expr: "sympy.Expr", *, unbacked_only: bool = False, compute_hint: bool = False,
-        expect_rational=True, size_oblivious: bool = False, axioms: Optional[Tuple[sympy.Expr]] = None
+        expect_rational=True, size_oblivious: bool = False, axioms: Optional[Tuple[sympy.Expr]] = None,
+        var_to_range: Optional[Tuple[Tuple[sympy.Symbol, ValueRanges]]] = None
     ) -> "Optional[sympy.Expr]":
         """
         Tries to evaluate expr without introducing guards
@@ -4355,8 +4356,14 @@ class ShapeEnv:
         hint for the particular hint values of backed SymInts, e.g., if
         s0 happens to be 3 this run, compute_hint will subsitute s0 with 3.
         """
+
         # axioms with compute hint NYE
         assert not compute_hint or not axioms
+
+        if var_to_range is None:
+            var_ranges = self.var_to_range
+        else:
+            var_ranges = dict(var_to_range)
 
         expr = self.simplify(expr)
 
@@ -4380,10 +4387,10 @@ class ShapeEnv:
         new_range_env = {}
         for idx, k in enumerate(symbols):
             if isinstance(self.var_to_val.get(k, None), SingletonInt):
-                # Skip var_to_range logic for SingletonInt which is only used
+                # Skip var_ranges logic for SingletonInt which is only used
                 # for jagged layout NestedTensors today
                 continue
-            vr = self.var_to_range[k]
+            vr = var_ranges[k]
             if size_oblivious and k in self.size_like:
                 lower = max(2, vr.lower)
             else:
