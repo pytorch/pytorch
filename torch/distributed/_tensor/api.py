@@ -5,10 +5,14 @@ from typing import Any, Callable, cast, Optional, Sequence, Tuple
 
 import torch
 
-import torch.distributed._tensor.dispatch as op_dispatch
+import torch.distributed._tensor._dispatch as op_dispatch
 import torch.distributed._tensor.random as random
 import torch.nn as nn
 from torch.distributed._tensor._collective_utils import mesh_broadcast
+from torch.distributed._tensor._redistribute import (
+    Redistribute,
+    redistribute_local_tensor,
+)
 from torch.distributed._tensor._utils import compute_global_tensor_info
 from torch.distributed._tensor.placement_types import (
     _Partial,
@@ -21,10 +25,6 @@ from torch.distributed._tensor.placement_types import (
 from torch.distributed._tensor.random import (
     is_rng_supported_mesh,
     OffsetBasedRNGTracker,
-)
-from torch.distributed._tensor.redistribute import (
-    Redistribute,
-    redistribute_local_tensor,
 )
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 
