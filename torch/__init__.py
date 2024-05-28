@@ -18,7 +18,7 @@ import ctypes
 import inspect
 import threading
 import pdb
-import pkgutil
+import importlib
 
 # multipy/deploy is setting this import before importing torch, this is the most
 # reliable way we have to detect if we're running within deploy.
@@ -173,12 +173,14 @@ def _load_global_deps() -> None:
     LIBTORCH_PKG_NAME = "libtorchsplit"
 
     def find_package_path(package_name):
-        loader = pkgutil.find_loader(package_name)
-        if loader:
+        spec = importlib.util.find_spec(package_name)
+        if spec:
             # The package might be a namespace package, so get_data may fail
             try:
-                file_path = loader.get_filename()  # type: ignore[attr-defined]
-                return os.path.dirname(file_path)
+                loader = spec.loader
+                if loader is not None:
+                    file_path = loader.get_filename()  # type: ignore[attr-defined]
+                    return os.path.dirname(file_path)
             except AttributeError:
                 pass
         return None
