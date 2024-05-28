@@ -367,7 +367,7 @@ class Replicate(Placement):
 
 
 @dataclass(frozen=True)
-class _Partial(Placement):
+class Partial(Placement):
     # This is a default _Partial placement with element-wise reduce op
     # _Partial define three contracts:
     # 1. _reduce_value: reduce the value of the tensor on the mesh dimension
@@ -426,6 +426,10 @@ class _Partial(Placement):
         human readable representation of the Partial placement
         """
         return "P"
+
+
+# We keep the old _Partial name for a while for BC reason
+_Partial = Partial
 
 
 class TensorMeta(NamedTuple):
