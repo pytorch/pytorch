@@ -1163,7 +1163,10 @@ class TestFullyShardNDTraining(FSDPTest):
         replicate(ref_model, device_ids=[self.rank], process_group=dp_pg)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=foreach)
         model.parallelize(
-            tp_mesh, dp_mesh, use_activation_checkpointing, reshard_after_forward
+            tp_mesh,
+            dp_mesh,
+            use_activation_checkpointing,
+            reshard_after_forward=reshard_after_forward,
         )
         optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=foreach)
 

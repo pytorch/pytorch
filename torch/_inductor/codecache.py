@@ -522,7 +522,13 @@ class FxGraphCachePickler(pickle.Pickler):
         """
         with io.BytesIO() as stream:
             pickler = cls(stream)
-            pickler.dump(obj)
+            try:
+                pickler.dump(obj)
+            except (TypeError, AttributeError) as e:
+                # Some configs options are callables, e.g., post_grad_custom_pre_pass,
+                # and may not pickle.
+                log.warning("Can't pickle", exc_info=True)
+                raise BypassFxGraphCache from e
             return stream.getvalue()
 
     @classmethod
@@ -566,6 +572,19 @@ class FxGraphCachePickler(pickle.Pickler):
         return "\n".join(lines)
 
 
+def get_code_hash(roots):
+    contents: Dict[str, bytes] = {torch.__version__: b""}
+    for lib in pkgutil.iter_modules(roots):
+        spec = lib.module_finder.find_spec(lib.name, None)
+        assert spec is not None
+        module = spec.origin
+        assert module is not None
+        with open(module, "rb") as f:
+            contents[module] = f.read()
+
+    return hashlib.sha256(pickle.dumps(contents)).digest()
+
+
 @functools.lru_cache(None)
 def torch_key():
     """
@@ -573,21 +592,15 @@ def torch_key():
     """
     if not config.is_fbcode():
         inductor_root = os.path.dirname(__file__)
-
-        contents: Dict[str, bytes] = {torch.__version__: b""}
-        for lib in pkgutil.iter_modules([inductor_root]):
-            spec = lib.module_finder.find_spec(lib.name, None)
-            assert spec is not None
-            module = spec.origin
-            assert module is not None
-            with open(module, "rb") as f:
-                contents[module] = f.read()
-
-        return hashlib.sha256(pickle.dumps(contents)).digest()
+        return get_code_hash([inductor_root])
 
     from libfb.py import parutil
 
     return parutil.get_file_contents("torch/src_hash.txt").rstrip()
+
+
+def get_inductor_root():
+    return os.path.dirname(__file__)
 
 
 @dataclasses.dataclass
@@ -654,14 +667,7 @@ class FxGraphHashDetails:
         # Also hash on various system info (including the triton compiler version).
         self.torch_version = torch_key()
         self.system_info = CacheBase.get_system()
-
-        try:
-            self.inductor_config = config.save_config()
-        except (TypeError, AttributeError) as e:
-            # Some configs options are callables, e.g., post_grad_custom_pre_pass,
-            # and may not pickle.
-            log.debug("Can't pickle inductor config: %s", e)
-            raise BypassFxGraphCache from e
+        self.inductor_config = config.save_config_portable()
 
     def debug_str(self) -> str:
         """
@@ -684,11 +690,19 @@ def compiled_fx_graph_hash(
     # The prefix distinguishes among the other kinds of objects we
     # cache in this module.
     key = "f" + FxGraphCachePickler.get_hash(details)
-    log.debug(
-        "FX graph cache hash details for key %s:\n%s",
-        key,
-        details.debug_str(),
+    debug_str = details.debug_str()
+    log.debug(f"FX graph cache hash details for key {key}:\n{debug_str}")  # noqa: G004
+    torch._logging.trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "fx_graph_cache_hash",
+            "encoding": "json",
+        },
+        payload_fn=lambda: json.dumps(
+            {"key": key, "components": debug_str.split("\n")}
+        ),
     )
+
     return key
 
 
@@ -1515,6 +1529,10 @@ def use_custom_generated_macros() -> str:
 
 def use_fb_internal_macros() -> str:
     if config.is_fbcode():
+        # TODO: this is to avoid FC breakage for fbcode. When using newly
+        # generated model.so on an older verion of PyTorch, need to use
+        # the v1 version for aoti_torch_create_tensor_from_blob
+        create_tensor_from_blob_v1 = "-D AOTI_USE_CREATE_TENSOR_FROM_BLOB_V1"
         openmp_lib = build_paths.openmp_lib()
         preprocessor_flags = " ".join(
             (
@@ -1523,7 +1541,7 @@ def use_fb_internal_macros() -> str:
                 "-D C10_DISABLE_TENSORIMPL_EXTENSIBILITY",
             )
         )
-        return f"-Wp,-fopenmp {openmp_lib} {preprocessor_flags}"
+        return f"-Wp,-fopenmp {openmp_lib} {preprocessor_flags} {create_tensor_from_blob_v1}"
     else:
         return ""
 
@@ -2069,7 +2087,9 @@ class AotCodeCompiler:
 
             output_o = os.path.splitext(input_path)[0] + ".o"
             consts_size = sum(
-                tensor.untyped_storage().nbytes()
+                torch.ops.mkldnn._nbytes(tensor)
+                if tensor.is_mkldnn
+                else tensor.untyped_storage().nbytes()
                 for (name, tensor) in graph.constants.items()
                 if name not in graph.folded_constants
             )
@@ -2101,6 +2121,13 @@ class AotCodeCompiler:
 
                 if t.numel() == 0:
                     return b""
+
+                if t.is_mkldnn:
+                    raw_array = ctypes.cast(
+                        torch.ops.mkldnn.data_ptr(t),
+                        ctypes.POINTER(ctypes.c_ubyte * torch.ops.mkldnn._nbytes(t)),
+                    )
+                    return bytes(raw_array.contents)
 
                 t_cpu = t.untyped_storage().cpu()
                 raw_array = ctypes.cast(
