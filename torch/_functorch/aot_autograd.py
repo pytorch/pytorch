@@ -110,6 +110,7 @@ from ._aot_autograd.utils import (  # noqa: F401
     root_module_when_exporting_non_strict,
     strict_zip,
 )
+from ._aot_autograd.runtime_wrappers import check_dupe_args
 from .partitioners import default_partition
 
 zip = strict_zip
@@ -657,6 +658,10 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
                 return aot_dispatch_autograd
             else:
                 return aot_dispatch_base
+
+        fake_flat_args = check_dupe_args(
+            fake_flat_args, aot_config, fw_metadata=fw_metadata
+        )
 
         compiler_fn = choose_dispatcher(needs_autograd, aot_config)
 

@@ -605,11 +605,136 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
         return inner_fn
 
 
+# MOTIVATION:
+#
+# When tracing functions for future execution, one must be careful not to pass
+# in the same input tensor multiple times (e.g., f(x, x), as this can result
+# in graphs that are ONLY valid if you later pass a new tensor in exactly the
+# same way (e.g., f(y, y)).  (NB: we really mean duplicate; two distinct
+# tensors that alias each other is a different situation). Here are two examples:
+#
+# (1) Suppose you have a function:
+#
+#   def f(x, y):
+#       return x + y
+#
+# If you make_fx(f)(x, x), you will trace out:
+#
+#   def f(x, y):
+#       return y + y
+#
+# Oops!
+#
+# (2) For most tensors x and y, you can compute f's gradient with respect to
+# these to inputs by saying torch.autograd.grad(f(x, y), (x, y)).  However,
+# if x is y, you will trace out a program that gets incorrect gradients:
+#
+#   >>> x = torch.randn(1, requires_grad=True)
+#   >>> torch.autograd.grad(x + x, (x, x))
+#   (tensor([2.]), tensor([2.]))
+#
+# In other words, the gradient is double-counted.  Deduplicating the arguments
+# gives you an appropriate gradient:
+#
+#   >>> y = torch.randn(1, requires_grad=True)
+#   >>> torch.autograd.grad(x + y, (x, y))
+#   (tensor([1.]), tensor([1.]))
+#
+# HOW TO DEDUPLICATE:
+# Dynamo already properly guards and deduplicates on inputs, so any usage of AOTAutograd
+# with a Dynamo frontend will already be deduplicated.
+# For cases that don't involve dynamo, we attempt a very simple deduplication strategy:
+# For every duplicate argument to the function, detach it into a separate leaf tensor,
+# so that it is no longer duplicated.
+#       PRO: The resulting compiled graph works for any configuration
+#       of duplicated arguments.
+#
+#       CON: It does not (naively) work if you mutate the metadata of inputs:
+#
+#           def f(x, y):
+#               x.transpose_(0, 1)
+#               y.transpose_(0, 2)
+#
+#           x = torch.randn(2, 3, 4)
+#           f(x, x)
+#
+#       The ordering of the transposes inside f dictates whether or not
+#       you get [4, 2, 3] or [3, 4, 2].  This means that you cannot precompute
+#       what metadata mutations should get applied to each input; you need to
+#       assume they aren't duplicates (what we do today) or preserve
+#       the original metadata mutations exactly in order, so that they work
+#       for any duplicate configuration.
+#
+#       CON: It does not (naively) work if you mutate the data of inputs.
+#       In particular, leaf tensors that require grad cannot be mutated,
+#       this makes it impossible to differentiate with respect to the original
+#       base.
+
+
+def check_dupe_args(
+    flat_args: List[Tensor],
+    aot_config: AOTConfig,
+    *,
+    fw_metadata: ViewAndMutationMeta,
+) -> List[Tensor]:
+    # Use information about whether or not flat_fn mutates its arguments
+    # or not to handle dupe args
+
+    # For any input that is not mutated, we can leafify it if we
+    # need to remove a duplicate.
+    leaf_flat_args = []
+    args_set = set()
+    ok = True
+
+    for i, a in enumerate(flat_args):
+        if not isinstance(a, torch.Tensor):
+            leaf_flat_args.append(a)
+        elif a not in args_set:
+            args_set.add(a)
+            leaf_flat_args.append(a)
+        elif (
+            not fw_metadata.input_info[i].mutates_data
+            and not fw_metadata.input_info[i].mutates_metadata
+        ):
+            leaf_flat_args.append(a.detach().requires_grad_(a.requires_grad))
+        else:
+            ok = False
+            break
+
+    if ok:
+        return leaf_flat_args
+
+    if requires_subclass_dispatch(leaf_flat_args, fw_metadata):
+        raise RuntimeError(
+            """\
+    Encountered duplicate inputs that are mutated in the graph, but at least one input/output
+    to the graph is a tensor subclass. This is not supported today. You can try to
+    remove the aliasing yourself as a workaround, or otherwise file an issue on github."""
+        )
+
+    # export path: ban duplicate inputs for now, add later if requested.
+    if aot_config.is_export:
+        raise RuntimeError(
+            f"""\
+    Encountered duplicated inputs that are mutated in the graph you are trying to export.
+    This functionality is currently not supported. If needed, please file a github issue.
+
+    fw_metadata={str(fw_metadata)}
+        """
+        )
+
+    raise RuntimeError(
+        """\
+    Encountered duplicated inputs that are mutated, but dynamo should have already deduplicated our input.
+    If you're not using dynamo and need your use case supported, please file a github issue.
+    """
+    )
+
+
 # This layer handles the situation where you have two inputs that alias each other,
 # and one of the inputs is mutated.
 # We need to take special care to ensure that the mutation is applied to the other aliases in the graph.
 #
-# pre-condition: AOTDedupWrapper has already run.
 # (This function will in theory work if there are duplicate args.
 # However, the synthetic base code path is a bit sub-optimal, and running with dupe'd inputs
 # would cause us to hit that path more frequently).
