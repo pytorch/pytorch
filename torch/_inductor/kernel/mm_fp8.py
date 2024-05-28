@@ -4,19 +4,15 @@ import sympy
 
 import torch
 from .. import config as inductor_config
-from ..lowering import (
-    add_layout_constraint,
-    constrain_to_fx_strides,
-    register_lowering,
-)
+from ..lowering import add_layout_constraint, constrain_to_fx_strides, register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
     TritonTemplate,
 )
-from ..utils import use_triton_template, use_aten_gemm_kernels  # use_max_autotune,
+from ..utils import use_aten_gemm_kernels, use_triton_template  # use_max_autotune,
 from .mm import _is_static_problem  # TODO(yangsiyu) move to mm_common
-from .mm_common import mm_args, mm_grid, fp8_mm_configs
+from .mm_common import fp8_mm_configs, mm_args, mm_grid
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -224,7 +220,7 @@ def fp8_mm_options(
         FP8_FAST_ACCUM=use_fast_accum,
         num_stages=config.num_stages,
         num_warps=config.num_warps,
-        SCALING=is_scaling,
+        SCALING=is_scaling,  # for testing purpose
         SCALING_ROWWISE=is_scaling
         and len(scale_a.get_size()) != 0,  # tensor-wise scaling if scalar scale
         **config.kwargs,
