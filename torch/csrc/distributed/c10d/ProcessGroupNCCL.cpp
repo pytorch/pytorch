@@ -746,6 +746,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       getCvarInt(TORCH_NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
   desyncDebug_ = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
+  rethrowCUDAErrors_ = getCvarBool(TORCH_NCCL_RETHROW_CUDA_ERRORS, true);
   // TODO, we should either deprecate TORCH_NCCL_DUMP_ON_TIMEOUT
   // or change its name to reflect that dump happens on exception including
   // both timeout and other errors.
@@ -1261,7 +1262,21 @@ void ProcessGroupNCCL::heartbeatMonitor() {
           computeDeltaMS(lastTimePollStore, currentTime) >=
               coordCheckIntervalMilSec_) {
         lastTimePollStore = currentTime;
-        if (globalStore_->check({std::string(EXCEPTION_DUMP)})) {
+        // Wrap globalStore_->check() in a try-catch block to avoid crashing if
+        // the store is not available.
+        bool checkExceptionDump = false;
+        try {
+          checkExceptionDump =
+              globalStore_->check({std::string(EXCEPTION_DUMP)});
+        } catch (const std::exception& e) {
+          LOG(ERROR)
+              << logPrefix()
+              << "Failed to get exception dump flag from the global store."
+              << e.what();
+          break;
+        }
+
+        if (checkExceptionDump) {
           int timeOutRank = -1;
           if (!shouldDump_.load()) {
             LOG(ERROR)
@@ -1277,8 +1292,9 @@ void ProcessGroupNCCL::heartbeatMonitor() {
                 "Invalid size for the timeout rank ID");
             std::memcpy(&timeOutRank, vec.data(), vec.size());
           } catch (const std::exception& e) {
-            LOG(ERROR)
-                << "Failed to get timeout rank ID from the global store.";
+            LOG(ERROR) << logPrefix()
+                       << "Failed to get timeout rank ID from the global store."
+                       << e.what();
           }
           errorMsg = c10::str(
               logPrefix(),
@@ -1455,11 +1471,14 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
           "Process group watchdog thread terminated with exception: ",
           e.what());
       LOG(ERROR) << exitMsg;
-      // TODO(whc) clean up the rethrow - why is it stored in a class var and
-      // rethrown?
-      watchDogException_ =
-          std::make_exception_ptr(C10_BUILD_ERROR(DistBackendError, exitMsg));
-      std::rethrow_exception(watchDogException_);
+      if (C10_LIKELY(rethrowCUDAErrors_) ||
+          !(std::string(e.what()).find("CUDA Error"))) {
+        // TODO(whc) clean up the rethrow - why is it stored in a class var and
+        // rethrown?
+        watchDogException_ =
+            std::make_exception_ptr(C10_BUILD_ERROR(DistBackendError, exitMsg));
+        std::rethrow_exception(watchDogException_);
+      }
     }
   } catch (...) {
     const auto exitMsg = c10::str(
@@ -1504,9 +1523,8 @@ std::string ProcessGroupNCCL::getNCCLWatchdogDebugInfo() {
 std::string ProcessGroupNCCL::createLogPrefix() const {
   if (!pg_desc_.empty() && pg_desc_ != "undefined") {
     return c10::str("[PG ", pg_name_, " (", pg_desc_, ") Rank ", rank_, "] ");
-  } else {
-    return c10::str("[PG ", pg_name_, " Rank ", rank_, "] ");
   }
+  return c10::str("[PG ", pg_name_, " Rank ", rank_, "] ");
 }
 
 const std::string& ProcessGroupNCCL::logPrefix() const {

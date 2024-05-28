@@ -39,7 +39,6 @@ from torch.testing._internal.common_device_type import tol, toleranceOverride
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_utils import (
     _TestParametrizer,
-    set_single_threaded_if_parallel_tbb,
     skipIfMps,
     skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
@@ -161,7 +160,7 @@ class OptimizerInfo:
         self.supports_fused_on = supports_fused_on
 
     def get_decorators(self, test_class, test_name, device, dtype, param_kwargs):
-        result = [set_single_threaded_if_parallel_tbb]
+        result = []
         for decorator in self.decorators:
             if isinstance(decorator, DecorateInfo):
                 if decorator.is_active(
@@ -768,6 +767,11 @@ def optim_inputs_func_radam(device=None, dtype=None):
             kwargs={"weight_decay": 0.1, "decoupled_weight_decay": True},
             desc="decoupled_weight_decay",
         ),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.1, "maximize": True},
+            desc="maximize",
+        ),
     ] + (cuda_supported_configs if "cuda" in str(device) else [])
 
 
@@ -962,13 +966,6 @@ def optim_error_inputs_func_sparseadam(device, dtype):
     error_inputs = get_error_inputs_for_all_optims(device, dtype)
 
     if str(device) == "cpu":
-        # SparseAdam raises a warning and not an error for the first entry. We
-        # update it here:
-        error_inputs[0].error_type = FutureWarning
-        error_inputs[
-            0
-        ].error_regex = "Passing in a raw Tensor as ``params`` to SparseAdam"
-
         error_inputs += [
             ErrorOptimizerInput(
                 OptimizerInput(
