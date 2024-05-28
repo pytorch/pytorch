@@ -183,7 +183,6 @@ def parse_native_yaml_struct(
             index={},
         )
     )
-    # breakpoint()
     if not skip_native_fns_gen:
         add_generated_native_functions(rs, bs)
     for k, v in bs.items():
@@ -1446,25 +1445,12 @@ def get_ns_grouped_kernels(
 ) -> Dict[str, List[str]]:
     ns_grouped_kernels: Dict[str, List[str]] = defaultdict(list)
     for f in grouped_native_functions:
-        # if isinstance(f, NativeFunction):
-        #     # print(f'Operator name: {f.func.name.name.base}')
-        #     if("addmm" in f.func.name.name.base):
-        #         breakpoint()
-        # else:
-        #     # print(f'Operator name: {f.functional.func.name.name.base}')
-        #     if("addmm" in f.functional.func.name.name.base):
-        #         breakpoint()
-
         native_function_namespaces = set()
         dispatch_keys = set()
-
-        strip_default = (whitelist_keys is not None) and len(whitelist_keys) > 0
-
         for dispatch_key, backend_idx in backend_indices.items():
             if whitelist_keys and len(whitelist_keys) > 0 and (dispatch_key not in whitelist_keys):
                 continue
             backend_metadata = backend_idx.get_kernel(f)
-
             if backend_metadata:
                 namespace = backend_metadata.cpp_namespace
                 dispatch_keys.add(dispatch_key)
@@ -1475,7 +1461,7 @@ def get_ns_grouped_kernels(
                 len(native_function_namespaces) <= 1
             ), f"Codegen only supports one namespace per operator, got {native_function_namespaces} from {dispatch_keys}"
             ns_grouped_kernels[namespace].extend(
-                native_function_decl_gen(f, backend_idx, strip_default=strip_default)
+                native_function_decl_gen(f, backend_idx)
             )
     return ns_grouped_kernels
 
@@ -1495,9 +1481,6 @@ def get_native_function_declarations_from_ns_grouped_kernels(
         # Convert to a set first to remove duplicate kernel names. Backends are
         # allowed to repeat kernel names; only generate the declaration once!
         ordered_kernels = list(OrderedDict.fromkeys(kernels))
-        # print(f"kernel: {kernels}")
-        # print(f"ns_helper.prologue: {ns_helper.prologue}")
-        # print(f"ordered_kernsl: {ordered_kernels}")
         declarations.extend(
             f"""
 {ns_helper.prologue}
@@ -1507,7 +1490,6 @@ def get_native_function_declarations_from_ns_grouped_kernels(
                 newline
             )
         )
-    # print(f"declarations: {declarations}")
     return declarations
 
 
@@ -1976,12 +1958,17 @@ def gen_per_operator_headers(
         ("NativeMetaFunctions", "_meta"),
         ("NativeFunctions", "_native"),
     ]:
+        if (whitelist_keys is not None) and (len(whitelist_keys) == 1):            
+            dispatch_namespace = list(whitelist_keys)[0].lower()
+        #     includes = f"#include <ATen/{dispatch_namespace}/ops/{name}{suffix}.h>"
+        # else:
+        #     includes = f"#include <ATen/ops/{name}{suffix}.h>"
         cpu_fm.write(
             f"{category}.h",
             lambda: {
                 f"{category}_includes": [
-                    f"#include <ATen/ops/{name}{suffix}.h>"
-                    for name in sorted(functions_by_root_name.keys())
+                    f"#include <ATen/{dispatch_namespace}/ops/{name}{suffix}.h>"
+                    if (whitelist_keys is not None) and (len(whitelist_keys) == 1) and (category == "NativeFunctions") else f"#include <ATen/ops/{name}{suffix}.h>" for name in sorted(functions_by_root_name.keys()) 
                 ],
                 f"{category}_declarations": [],
             },
@@ -2268,10 +2255,6 @@ def gen_source_files(
                     if not is_registered:
                         continue
 
-                    # headers.append(f"#include <ATen/ops/{g.root_name}_native.h>")
-                    # if g.num_dispatch_keys > 0:
-                    #     if dispatch_key in whitelist_keys:
-                    #         headers.append(f"#include <ATen/{dispatch_namespace}/ops/{g.root_name}_native.h>")
                     if (dispatch_key not in whitelist_keys):
                         headers.append(f"#include <ATen/ops/{g.root_name}_native.h>")
                     else:
@@ -2341,7 +2324,7 @@ def gen_source_files(
                 else "",
                 "external_backend_headers": "",
                 "dispatch_headers": dest.gen_registration_headers(
-                    backend_index, per_operator_headers, rocm
+                    backend_index, per_operator_headers, rocm, backend_only = dispatch_key in whitelist_keys
                 ),
                 "ops_headers": operator_headers(),
                 "dispatch_helpers": "",

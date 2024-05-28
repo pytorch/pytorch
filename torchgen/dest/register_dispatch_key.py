@@ -43,7 +43,15 @@ def gen_registration_headers(
     backend_index: BackendIndex,
     per_operator_headers: bool,
     rocm: bool,
+    backend_only: bool = False,
 ) -> List[str]:
+    if backend_only and backend_index.dispatch_key == DispatchKey.XPU:
+        return [
+                "#include <ATen/ops/empty.h>",
+                "#include <ATen/ops/empty_strided.h>",
+                "#include <ATen/ops/_copy_from_and_resize.h>",
+                "#include <ATen/ops/_copy_from.h>"
+            ]
     if per_operator_headers:
         headers = ["#include <ATen/ops/as_strided_native.h>"]
     else:

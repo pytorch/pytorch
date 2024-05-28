@@ -231,9 +231,9 @@ class Binding:
             argument=self.argument,
         )
 
-    def decl(self, *, strip_default: bool = False, func_ptr_cast: bool = False) -> str:
+    def decl(self, *, func_ptr_cast: bool = False) -> str:
         mb_default = ""
-        if self.default is not None and (not strip_default):
+        if self.default is not None:
             mb_default = f"={self.default}"
 
         # casting only needs to know the type

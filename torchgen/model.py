@@ -563,9 +563,6 @@ class NativeFunction:
     # That aren't easily inferrable directly from the operator's schema.
     tags: Set[str]
 
-    # The number of dispachkeys declared
-    num_dispatch_keys: int
-
     # NB: The benefit of defining a dataclass is that we automatically get
     # a constructor defined for all the fields we specify.  No need
     # to explicitly write it out.
@@ -928,7 +925,6 @@ class NativeFunction:
                 has_composite_explicit_autograd_kernel=has_composite_explicit_autograd_kernel,
                 has_composite_explicit_autograd_non_functional_kernel=has_composite_explicit_autograd_non_functional_kernel,
                 tags=tags,
-                num_dispatch_keys=num_dispatch_keys,
                 namespace=namespace,
             ),
             backend_metadata,
@@ -1084,7 +1080,6 @@ class NativeFunctionsGroup:
     inplace: Optional[NativeFunction]
     mutable: Optional[NativeFunction]
     out: NativeFunction
-    num_dispatch_keys: int
 
     @property
     def structured(self) -> bool:
@@ -1183,7 +1178,6 @@ class NativeFunctionsGroup:
         inplace = d.pop(SchemaKind.inplace, None)
         mutable = d.pop(SchemaKind.mutable, None)
         out = d.pop(SchemaKind.out, None)
-        num_dispatcy_keys = functional.num_dispatch_keys
         assert not d
         assert functional is not None
         # There are a few operators which only have functional/inplace variants;
@@ -1196,7 +1190,6 @@ class NativeFunctionsGroup:
             inplace=inplace,
             mutable=mutable,
             out=out,
-            num_dispatch_keys=num_dispatcy_keys
         )
 
 

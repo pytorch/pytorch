@@ -109,9 +109,9 @@ def with_native_function_and_index(
     func: Callable[[F, BackendIndex, bool], T]
 ) -> Callable[[F, BackendIndex, bool], T]:
     @functools.wraps(func)
-    def wrapper(f: F, backend_index: BackendIndex, strip_default: bool = False) -> T:
+    def wrapper(f: F, backend_index: BackendIndex) -> T:
         with native_function_manager(f):
-            return func(f, backend_index, strip_default)
+            return func(f, backend_index)
 
     return wrapper
 
