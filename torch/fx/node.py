@@ -56,9 +56,6 @@ _side_effectful_functions: Set[Callable] = {
     _ops.profiler._record_function_exit,
     _ops.inductor.accumulate_grad_.default,
     _ops.inductor.resize_storage_bytes_.default,
-    # wait_tensor advertises as being functional,
-    # but it has a side effect (synchronizing)
-    _ops._c10d_functional.wait_tensor.default,
 } | _side_effectful_need_to_be_preserved_pre_dispatch
 
 
