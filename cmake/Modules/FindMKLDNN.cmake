@@ -24,12 +24,12 @@ IF(NOT MKLDNN_FOUND)
       # Linux
       # g++ is soft linked to /usr/bin/cxx, oneDNN would not treat it as an absolute path
       set(DNNL_HOST_COMPILER "g++")
-      SET(DPCPP_CXX_DRIVER "icpx")
+      SET(SYCL_CXX_DRIVER "icpx")
       set(DNNL_LIB_NAME "libdnnl.a")
     else()
       # Windows
       set(DNNL_HOST_COMPILER "DEFAULT")
-      SET(DPCPP_CXX_DRIVER "icx")
+      SET(SYCL_CXX_DRIVER "icx")
       set(DNNL_LIB_NAME "dnnl.lib")
     endif()
     set(DNNL_MAKE_COMMAND "cmake" "--build" ".")
@@ -38,7 +38,7 @@ IF(NOT MKLDNN_FOUND)
       PREFIX ${XPU_MKLDNN_DIR_PREFIX}
       BUILD_IN_SOURCE 0
       CMAKE_ARGS  -DCMAKE_C_COMPILER=icx
-      -DCMAKE_CXX_COMPILER=${DPCPP_CXX_DRIVER}
+      -DCMAKE_CXX_COMPILER=${SYCL_CXX_DRIVER}
       -DDNNL_GPU_RUNTIME=SYCL
       -DDNNL_CPU_RUNTIME=THREADPOOL
       -DDNNL_BUILD_TESTS=OFF
