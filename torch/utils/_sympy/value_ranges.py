@@ -247,6 +247,8 @@ class ValueRanges(Generic[_T]):
     def wrap(arg: Union[AllIn, AllVR]) -> AllVR:
         if isinstance(arg, ValueRanges):
             return arg
+        if isinstance(arg, float) and math.isnan(arg):
+            return ValueRanges.unknown()
         # arg is either ExprIn or BoolIn, but we don't know it here
         return ValueRanges(arg, arg)  # type: ignore[arg-type]
 
