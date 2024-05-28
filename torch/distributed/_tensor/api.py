@@ -523,13 +523,15 @@ def distribute_tensor(
     placements: Optional[Sequence[Placement]] = None,
 ) -> DTensor:
     """
-    Distribute a torch.Tensor to the `device_mesh` according to the `placements`
-    specified. The rank of `device_mesh` and `placements` must be the same.
+    Distribute a leaf torch.Tensor (i.e. nn.Parameter) to the ``device_mesh`` according
+    to the ``placements`` specified. The rank of ``device_mesh`` and ``placements`` must be
+    the same. If you want to construct a DTensor in the middle of the Autograd computation,
+    please use ``DTensor.from_local`` instead.
 
     Args:
         tensor (torch.Tensor): torch.Tensor to be distributed. Note that if you
             want to shard a tensor on a dimension that is not evenly divisible by
-            the number of devices in that mesh dimension, we use `torch.chunk`
+            the number of devices in that mesh dimension, we use ``torch.chunk``
             semantic to shard the tensor and scatter the shards.
         device_mesh (:class:`DeviceMesh`, optional): DeviceMesh to distribute the
             tensor, if not specified, must be called under a DeviceMesh context
@@ -655,10 +657,14 @@ def distribute_module(
     output_fn: Optional[Callable[[nn.Module, Any, DeviceMesh], None]] = None,
 ) -> nn.Module:
     """
-    This function converts all module parameters to :class:`DTensor` parameters
-    according to the `partition_fn` specified. It could also control the input or
-    output of the module by specifying the `input_fn` and `output_fn`. (i.e. convert
-    the input to :class:`DTensor`, convert the output back to torch.Tensor)
+    This function expose three functions to control the Tensors inside the module:
+    1. To perform sharding on the module before runtime execution by specifying the
+        ``partition_fn`` (i.e. allow user to convert Module parameters to :class:`DTensor`
+        parameters according to the `partition_fn` specified).
+    2. To control the inputs or outputs of the module during runtime execution by
+        specifying the ``input_fn`` and ``output_fn``. (i.e. convert the input to
+        :class:`DTensor`, convert the output back to torch.Tensor)
+
     Args:
         module (:class:`nn.Module`): user module to be partitioned.
         device_mesh (:class:`DeviceMesh`): the device mesh to place the module.
