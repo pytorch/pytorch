@@ -15,9 +15,8 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_modules import module_db, modules, ModuleErrorEnum, TrainEvalMode
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck,
-    gradgradcheck, parametrize, wrapSwapTensorsTest, TEST_WITH_TORCHINDUCTOR)
+    gradgradcheck, parametrize, wrapSwapTensorsTest)
 from unittest.mock import patch, call
-import unittest
 
 
 class TestModule(TestCase):
@@ -540,16 +539,6 @@ class TestModule(TestCase):
 
         # Test cpu and gpu results are the same
         module_cls = module_info.module_cls
-
-        if module_cls in [
-            torch.nn.modules.loss.CTCLoss,
-        ] and TEST_WITH_TORCHINDUCTOR:
-            raise unittest.SkipTest(
-                "PR https://github.com/pytorch/pytorch/pull/126586 clears dynamo"
-                " cache before each test and expose these test failures. Skip"
-                " for now"
-            )
-
         module_inputs_cpu = module_info.module_inputs_func(module_info, device="cpu", dtype=dtype,
                                                            requires_grad=True, training=training)
 
