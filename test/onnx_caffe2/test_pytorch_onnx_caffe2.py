@@ -6,21 +6,12 @@ import sys
 import unittest
 from typing import Tuple
 
-import caffe2.python.onnx.backend as c2
-
 import model_defs.dcgan as dcgan
 import model_defs.word_language_model as word_language_model
 import numpy as np
 import onnx
 import pytorch_test_common
-import torch.onnx
-import torch.onnx.operators
-import torch.utils.model_zoo as model_zoo
 import verify
-from caffe2.python.operator_test.torch_integration_test import (
-    create_bbox_transform_inputs,
-    generate_rois_rotated,
-)
 from debug_embed_params import run_embed_params
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.mnist import MNIST
@@ -39,12 +30,6 @@ from pytorch_test_common import (
     skipIfUnsupportedMinOpsetVersion,
     skipIfUnsupportedOpsetVersion,
 )
-from torch import nn
-from torch.autograd import function, Variable
-from torch.nn.utils import rnn as rnn_utils
-from torch.onnx import ExportTypes
-from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import skipIfNoLapack
 
 # Import various models for testing
 from torchvision.models.alexnet import alexnet
@@ -52,6 +37,21 @@ from torchvision.models.densenet import densenet121
 from torchvision.models.inception import inception_v3
 from torchvision.models.resnet import resnet50
 from torchvision.models.vgg import vgg16, vgg16_bn, vgg19, vgg19_bn
+
+import caffe2.python.onnx.backend as c2
+import torch.onnx
+import torch.onnx.operators
+import torch.utils.model_zoo as model_zoo
+from caffe2.python.operator_test.torch_integration_test import (
+    create_bbox_transform_inputs,
+    generate_rois_rotated,
+)
+from torch import nn
+from torch.autograd import function, Variable
+from torch.nn.utils import rnn as rnn_utils
+from torch.onnx import ExportTypes
+from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import skipIfNoLapack
 
 skip = unittest.skip
 

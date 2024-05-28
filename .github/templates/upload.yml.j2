@@ -57,7 +57,11 @@
       id-token: write
       contents: read
 {%- if has_test %}
+    {%- if config["gpu_arch_type"] == "cuda-aarch64" %}
+    needs: !{{ config["build_name"] }}-build
+    {%- else %}
     needs: !{{ config["build_name"] }}-test
+    {%- endif %}
 {%- else %}
     needs: !{{ config["build_name"] }}-build
 {%- endif %}

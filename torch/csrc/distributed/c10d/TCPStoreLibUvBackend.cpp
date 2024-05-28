@@ -186,7 +186,7 @@ class UvTcpServer : public UvTcpSocket {
       int uv_res = uv_tcp_open((uv_tcp_t*)res->unsafeGetStream(), socket);
       TORCH_CHECK(
           uv_res == 0,
-          "Failed to open existing socket. socket:%d code:{} name:{} message:{}",
+          "Failed to open existing socket. socket:{} code:{} name:{} message:{}",
           socket,
           uv_res,
           uv_err_name(uv_res),
@@ -264,6 +264,7 @@ class UvTcpServer : public UvTcpSocket {
     int res =
         uv_accept(unsafeGetStream(), (uv_stream_t*)socket->unsafeGetHandle());
     TORCH_CHECK(
+        res == 0,
         "Failed to accept socket. code:{} name:{} desc:{}.",
         res,
         uv_err_name(res),
@@ -1061,7 +1062,9 @@ void LibUVStoreDaemon::run() {
         uv_err_name(res),
         uv_strerror(res));
     res = uv_run(&loop, UV_RUN_NOWAIT);
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    if (res != 0) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    }
   }
   C10D_INFO("uv_loop cleanup finished.");
 }
