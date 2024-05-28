@@ -15,6 +15,7 @@ from typing import Dict, List
 import torch
 import torch._dynamo as torchdynamo
 import torch.nn.functional as F
+
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
 from torch._dynamo.test_case import TestCase
@@ -307,6 +308,17 @@ class TestExport(TestCase):
         self.assertEqual(exported_program.module()(*args), m(*args))
         args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
         self.assertEqual(exported_program.module()(*args), m(*args))
+
+        from torch._export import capture_pre_autograd_graph
+
+        gm: torch.fx.GraphModule = capture_pre_autograd_graph(
+            m, args=example_args, dynamic_shapes=dynamic_shapes
+        )
+
+        args = (torch.randn(17, 3, 256, 256), torch.ones(17, 32, 256, 256))
+        self.assertEqual(gm(*args), m(*args))
+        args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
+        self.assertEqual(gm(*args), m(*args))
 
     def test_basic_non_strict_real_tensor(self):
         class Basic(torch.nn.Module):
@@ -1495,6 +1507,50 @@ class TestExport(TestCase):
         ep = torch.export.export(M(), inputs)
         orig_res = M()(*inputs)
         ep_res = ep.module()(*inputs)
+        self.assertTrue(torch.allclose(orig_res[0], ep_res[0]))
+        self.assertTrue(torch.allclose(orig_res[1], ep_res[1]))
+        self.assertTrue(torch.allclose(orig_res[2], ep_res[2]))
+
+    def test_unflatten_asserts(self):
+        # TODO: strict-export fails
+        class M1(torch.nn.Module):
+            def forward(self, x, y):
+                b = x.item()
+
+                torch._check_is_size(b)
+                torch._check(b < y.size(0))
+                return y[:b]
+
+        class M3(torch.nn.Module):
+            def forward(self, x, y):
+                b = x.item()
+
+                torch._check_is_size(b)
+                torch._check(b < y.size(0) * 2)
+                return y[:b]
+
+        class M2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m1 = M1()
+                self.m3 = M3()
+
+            def forward(self, x, y):
+                return self.m1(x, y) + self.m3(x, y)
+
+        inputs = (torch.tensor(3), torch.randn(10))
+
+        ep = torch.export.export(
+            M2(), inputs, dynamic_shapes={"x": None, "y": (Dim("moo"),)}, strict=False
+        )
+        orig_res = M2()(*inputs)
+        ep_res = ep.module()(*inputs)
+        self.assertTrue(torch.allclose(orig_res[0], ep_res[0]))
+        self.assertTrue(torch.allclose(orig_res[1], ep_res[1]))
+        self.assertTrue(torch.allclose(orig_res[2], ep_res[2]))
+
+        unflattened = torch.export.unflatten(ep)
+        ep_res = unflattened(*inputs)
         self.assertTrue(torch.allclose(orig_res[0], ep_res[0]))
         self.assertTrue(torch.allclose(orig_res[1], ep_res[1]))
         self.assertTrue(torch.allclose(orig_res[2], ep_res[2]))
@@ -3167,6 +3223,7 @@ def forward(self, x):
         f = Foo()
 
         ep = export(f, (torch.tensor([3]),))
+
         FileCheck().check_count(
             "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
         ).run(ep.graph_module.code)
@@ -3485,7 +3542,6 @@ graph():
         test_inp = torch.ones(8, 4)
         self.assertTrue(torch.allclose(ep.module()(test_inp), Foo().forward(test_inp)))
 
-    @testing.expectedFailureRetraceability
     def test_runtime_assert_with_size(self):
         class M(torch.nn.Module):
             def forward(self, x, y):

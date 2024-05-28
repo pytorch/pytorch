@@ -15,8 +15,8 @@ static void metaFallback(
       ": attempted to run this operator with Meta tensors, but there was no ",
       "fake impl or Meta kernel registered. You may have run into this message "
       "while using an operator with PT2 compilation APIs (torch.compile/torch.export); "
-      "in order to use this operator with those APIs you'll need to add a fake impl."
-      "Please see the following doc for next steps: "
+      "in order to use this operator with those APIs you'll need to add a fake impl. "
+      "Please see the following doc for next steps:  "
       "https://docs.google.com/document/d/1_W62p8WJOQQUzPsJYa7s701JXt0qf2OfLub2sbkHOaU/edit");
 }
 
