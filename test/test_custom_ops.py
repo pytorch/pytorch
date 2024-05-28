@@ -3153,6 +3153,21 @@ opcheck(op, args, kwargs, test_utils="test_schema")
             },
         )
 
+    def test_opcheck_does_not_require_extra_deps(self):
+        # torch.testing._internal.common_utils comes with a lot of additional
+        # test-time dependencies. Since opcheck is public API, it should be
+        # usable only with pytorch install-time dependencies.
+        cmd = [
+            sys.executable,
+            "-c",
+            "import torch; import sys; \
+               x = torch.randn(3, requires_grad=True); \
+               torch.library.opcheck(torch.ops.aten.sin.default, (x,)); \
+               assert 'expecttest' not in sys.modules; \
+               assert 'torch.testing._internal.common_utils' not in sys.modules",
+        ]
+        subprocess.check_output(cmd, shell=False)
+
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestCustomOpTesting, globals(), only_for=only_for)
