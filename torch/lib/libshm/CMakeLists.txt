@@ -22,11 +22,7 @@ set_target_properties(shm PROPERTIES
   PREFIX "lib"
   IMPORT_PREFIX "lib"
   CXX_STANDARD 17)
-if(BUILD_LIBTORCHLESS)
-  target_link_libraries(shm PRIVATE ${TORCH_CPU_LIB})
-else()
-  target_link_libraries(shm PRIVATE torch_cpu)
-endif()
+target_link_libraries(shm PRIVATE ${TORCH_CPU_LIB})
 
 if(UNIX AND NOT APPLE)
   include(CheckLibraryExists)
@@ -67,7 +63,7 @@ add_executable(torch_shm_manager manager.cpp)
 if(BUILD_LIBTORCHLESS)
   target_link_libraries(torch_shm_manager PRIVATE shm ${C10_LIB})
 else()
-  # we need to link directly to c10 here
+  # we need to link directly to c10 here otherwise we miss symbols
   target_link_libraries(torch_shm_manager PRIVATE shm c10)
 endif()
 set_target_properties(torch_shm_manager PROPERTIES
