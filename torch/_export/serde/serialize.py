@@ -1436,10 +1436,15 @@ class GraphModuleDeserializer(metaclass=Final):
                 # Here we force symbols corresponding to SymInts to be at least integers.
                 # Otherwise some expressions that the shape env would otherwise evaluate to False,
                 # e.g., 2*s = 9, can have rational solutions, e.g., 9/2.
+                # TODO: This is HIGHLY SUSPICIOUS ezyang(May 2024)
                 sym = sym.subs(
                     {s: sympy.Symbol(s.name, integer=True) for s in sym.free_symbols}
                 )
-                if isinstance(sym, sympy.Symbol):
+                # We need to check if the symbol has already been allocated,
+                # self.symbol_name_to_symbol is not enough because the
+                # integer-ification of symbols can induce simplification;
+                # e.g., (2**s0 + 1) // 2  -->  s0 when we know s0 is integral
+                if isinstance(sym, sympy.Symbol) and sym not in self.shape_env.var_to_val:
                     self.symbol_name_to_symbol[val.expr_str] = sym
                     if hint is not None:
                         self.shape_env.add_var_to_val(sym, hint)
@@ -1458,7 +1463,7 @@ class GraphModuleDeserializer(metaclass=Final):
                     free_symbols = sym.free_symbols
                     for s in free_symbols:
                         if s.name not in self.symbol_name_to_symbol:
-                            self.symbol_name_to_symbol[s.name] = s
+                            self.symbol_name_to_symbol[s.name] = s  # type: ignore[assignment]
                         if vr := self.symbol_name_to_range.get(s.name):
                             self.shape_env.constrain_symbol_range(
                                 s,
