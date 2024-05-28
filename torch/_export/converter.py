@@ -33,8 +33,6 @@ def inplace_optimize_sym_size_div(gm: torch.fx.GraphModule):
 
     replaced_patterns = subgraph_rewriter.replace_pattern(gm, pattern, replacement)
 
-    print(replaced_patterns)
-
 
 def normalize_name(name: str) -> str:
     return name.replace(".", "_")
@@ -246,13 +244,17 @@ class TS2EPConverter:
         output_dict = {}
         k, v = None, None
         for i, inp in enumerate(node.inputs()):
+            # We assume key value are stored in pair in the DictConstruct.
+            # The first element is the key and the following is the value.
             if i % 2 == 0:
                 k = self.get_fx_value(inp)
             else:
                 v = self.get_fx_value(inp)
-                assert k is not None
-                assert v is not None
+                assert k is not None and v is not None, "DictConstruct has an empty key value pair."
                 output_dict[k] = v
+                k, v = None, None
+
+        assert k is None and v is None, "DictConstruct has an odd number of elements (violating our assumption)."
 
         output_name = node.output().debugName()
         self.name_to_node[output_name] = output_dict
