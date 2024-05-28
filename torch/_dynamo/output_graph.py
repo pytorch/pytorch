@@ -83,7 +83,7 @@ from .utils import (
     same,
     set_example_value,
 )
-from .variables.base import VariableTracker
+from .variables.base import MutableLocal, VariableTracker
 from .variables.builder import (
     BackwardStateGraphArg,
     GraphArg,
@@ -405,6 +405,11 @@ class OutputGraph:
 
         self.guard_on_key_order: Set[str] = set()
 
+        # Track compiled autograd final callbacks that must be called at the end of this graph.
+        # Only applicable if this graph is created from Dynamo tracing in Compiled Autograd.
+        self.ca_final_callbacks: List[Callable] = []
+        self.ca_final_callbacks_var = None
+
     def install_builtins_dict_in_fglobals(self):
         # f_globals["__builtins__"] can be a dict or a module. This is an
         # implemenation detail -
@@ -441,6 +446,13 @@ class OutputGraph:
             set_example_value(self.backward_state_proxy.node, BackwardState())
             self.backward_state_var = self.new_var()
         return self.backward_state_proxy
+
+    def get_ca_final_callbacks_var(self):
+        if self.ca_final_callbacks_var is None:
+            self.ca_final_callbacks_var = variables.ListVariable(
+                self.ca_final_callbacks, mutable_local=MutableLocal()
+            )
+        return self.ca_final_callbacks_var
 
     # This gets its own helper function so guards DEBUG logs are more informative
     def init_ambient_guards(self):
