@@ -493,10 +493,7 @@ class Tensor(torch._C.TensorBase):
         Args:
             gradient (Tensor, optional): The gradient of the function
                 being differentiated w.r.t. ``self``.
-                If it is a tensor, it will be automatically converted
-                to a Tensor that does not require grad unless ``create_graph`` is True.
-                None values can be specified for scalar tensors or tensors that
-                don't require grad.
+                This argument can be omitted if ``self`` is a scalar.
             retain_graph (bool, optional): If ``False``, the graph used to compute
                 the grads will be freed. Note that in nearly all cases setting
                 this option to True is not needed and often can be worked around
