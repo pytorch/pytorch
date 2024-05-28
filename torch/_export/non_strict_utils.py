@@ -116,7 +116,7 @@ def make_fake_inputs(
     kwargs,
     dynamic_shapes,
     _is_torch_jit_trace=False,
-    allow_complex_guards_as_runtime_asserts=False,
+    _allow_complex_guards_as_runtime_asserts=False,
 ):
     """
     Given an nn module, example inputs, and constraints, return a new fake mode,
@@ -164,8 +164,8 @@ def make_fake_inputs(
             shape_env=ShapeEnv(
                 tracked_fakes=[],
                 co_fields=co_fields,
-                prefer_deferred_runtime_asserts_over_guards=allow_complex_guards_as_runtime_asserts,
-                allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+                prefer_deferred_runtime_asserts_over_guards=_allow_complex_guards_as_runtime_asserts,
+                _allow_complex_guards_as_runtime_asserts=_allow_complex_guards_as_runtime_asserts,
             ),
             allow_non_fake_inputs=True,
             export=True,
@@ -174,8 +174,8 @@ def make_fake_inputs(
         fake_mode = FakeTensorMode(
             shape_env=ShapeEnv(
                 tracked_fakes=[],
-                prefer_deferred_runtime_asserts_over_guards=allow_complex_guards_as_runtime_asserts,
-                allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+                prefer_deferred_runtime_asserts_over_guards=_allow_complex_guards_as_runtime_asserts,
+                _allow_complex_guards_as_runtime_asserts=_allow_complex_guards_as_runtime_asserts,
             ),
             allow_non_fake_inputs=True,
         )
