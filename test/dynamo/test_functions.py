@@ -643,6 +643,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return x.type(dtype)
 
     @make_test
+    def test_is_any_autocast_enabled(x):
+        if torch._C._is_any_autocast_enabled():
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
     def test_list_compare_polyfill(x):
         for a, b, c in [
             [(1, 2, 3), (1, 2, 3), 7.77],
@@ -1157,6 +1164,32 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return a + b
         return a - b
 
+    @unittest.skipIf(
+        sys.version_info < (3, 9),
+        "SET_UPDATE was added at Python 3.9",
+    )
+    @make_test
+    def test_set_update_bytecode(x):
+        # This produces bytecode SET_UPDATE since python 3.9
+        var = {"apple", "banana", "cherry"}
+        if isinstance(var, set):
+            return x + 1
+        else:
+            return x - 1
+
+    @unittest.skipIf(
+        sys.version_info < (3, 9),
+        "SET_UPDATE was added at Python 3.9",
+    )
+    @make_test
+    def test_set_update_list_with_duplicated_items(x):
+        list1 = ["apple", "banana", "apple"]
+        list2 = ["orange", "banana"]
+        if len({*list1, *list2}) == 3:
+            return x + 1
+        else:
+            return x - 1
+
     @make_test
     def test_set_contains(a, b):
         vals = set(["a", "b", "c"])
@@ -1329,6 +1362,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return a + b
         else:
             return a - b
+
+    @make_test
+    def test_torch_size_hasattr(x):
+        if hasattr(x.shape, "_fields"):
+            return x + 1
+        else:
+            return x - 1
 
     @make_test
     def test_is_quantized(a, b):

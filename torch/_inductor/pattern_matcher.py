@@ -26,7 +26,6 @@ from typing import (
     Tuple,
     Union,
 )
-
 from typing_extensions import Self, TypeGuard
 
 import torch
