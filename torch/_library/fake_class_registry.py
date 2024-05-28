@@ -134,10 +134,8 @@ def register_fake_class(qualname, fake_class: Optional[HasStaticMethodFromReal] 
     returns an instance of the fake class. All tensors in the fake object should also
     be properly fakified with to_fake_tensor() in from_real.
 
-
     Examples:
         # For a custom class Foo defined in test_custom_class_registration.cpp:
-
         TORCH_LIBRARY(_TorchScriptTesting, m) {
           m.class_<TensorQueue>("_TensorQueue")
             .def(torch::init<at::Tensor>())
@@ -146,7 +144,6 @@ def register_fake_class(qualname, fake_class: Optional[HasStaticMethodFromReal] 
             .def("top", &TensorQueue::top)
             .def("size", &TensorQueue::size)
             .def("clone_queue", &TensorQueue::clone_queue)
-            .def("__obj_flatten__", &TensorQueue::__obj_flatten__)
             .def_pickle(
                 // __getstate__
                 [](const c10::intrusive_ptr<TensorQueue>& self)
@@ -169,7 +166,8 @@ def register_fake_class(qualname, fake_class: Optional[HasStaticMethodFromReal] 
 
             @classmethod
             def __obj_unflatten__(cls, flattened_ctx):
-                return cls(**dict(ctx))
+                ctx = {flattened_ctx[0]: flattened_ctx[1]}
+                return cls(**ctx)
 
             def push(self, x):
                 self.queue.append(x)
@@ -180,11 +178,6 @@ def register_fake_class(qualname, fake_class: Optional[HasStaticMethodFromReal] 
             def size(self):
                 return len(self.queue)
 
-    In this example, the original TensorQeue need to addd a __obj_flatten__ method
-    to the class TensorQueue and the flattend result is passed into FakeTensorQueue's
-    __obj_unflatten__ as inputs to create a fake class. This protocol allows pytorch to look
-    at the contents of the script object and properly handle them in the subsystems
-    like dynamo, aot_aotugrad or more.
     """
 
     def inner(fake_class: HasStaticMethodFromReal):

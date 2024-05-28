@@ -1,5 +1,4 @@
 import functools
-import itertools
 import operator
 from typing import List, Optional, Union
 
@@ -94,11 +93,6 @@ def get_padded_length(x: Union[int, torch.SymInt], alignment_size) -> int:
     # we don't pad x if it is symbolic
     if isinstance(x, torch.SymInt) or alignment_size == 0 or x % alignment_size == 0:
         return 0
-
-    # ignore dim that can be squeezed away
-    if x == 1:
-        return 0
-
     return int((x // alignment_size + 1) * alignment_size) - x
 
 
@@ -331,17 +325,6 @@ def should_pad_bench(
         if m_padded_length == k_padded_length == n_padded_length == 0:
             return False
 
-        def realize_symbols(ds):
-            return [d if isinstance(d, int) else d.node.hint for d in ds]
-
-        if any(
-            dim == 0
-            for dim in itertools.chain(
-                realize_symbols(mat1.shape), realize_symbols(mat2.shape)
-            )
-        ):
-            return False
-
         if torch._inductor.config.force_shape_pad:
             return True
 
@@ -358,6 +341,9 @@ def should_pad_bench(
         cached_pad = get_cached_should_pad(key)
         if cached_pad is not None:
             return cached_pad
+
+        def realize_symbols(ds):
+            return [d if isinstance(d, int) else d.node.hint for d in ds]
 
         def realize_tensor(t):
             if isinstance(t, FakeTensor):
@@ -399,8 +385,7 @@ def should_pad_bench(
 
         is_bmm = op is torch.ops.aten.bmm
         mat1_pre_padded = should_exclude_padding_time(match, "mat1")
-        fns = []
-        if mat1_pre_padded and (m_padded_length or k_padded_length):
+        if mat1_pre_padded:
             mat1_pad = pad_mat1(
                 mat1_pad,
                 m_padded_length=m_padded_length,
@@ -408,16 +393,8 @@ def should_pad_bench(
                 is_bmm=is_bmm,
             )
 
-            def write_pad():
-                if is_bmm:
-                    mat1_pad[:, -m_padded_length:, -k_padded_length:].fill_(0)
-                else:
-                    mat1_pad[-m_padded_length:, -k_padded_length:].fill_(0)
-
-            fns.append(write_pad)
-
         mat2_pre_padded = should_exclude_padding_time(match, "mat2")
-        if mat2_pre_padded and (k_padded_length or n_padded_length):
+        if mat2_pre_padded:
             mat2_pad = pad_mat2(
                 mat2_pad,
                 k_padded_length=k_padded_length,
@@ -425,19 +402,11 @@ def should_pad_bench(
                 is_bmm=is_bmm,
             )
 
-            def write_pad():
-                if is_bmm:
-                    mat2_pad[:, -k_padded_length:, -n_padded_length:].fill_(0)
-                else:
-                    mat2_pad[-k_padded_length:, -n_padded_length:].fill_(0)
-
-            fns.append(write_pad)
-
         if op is torch.ops.aten.addmm:
             input_pad = None
             if input is not None and input.is_cuda:
                 input_pad = torch.randn_like(input)
-            fns.append(
+            pad_time = do_bench(
                 lambda: pad_addmm(
                     input_pad,
                     mat1_pad,
@@ -447,10 +416,10 @@ def should_pad_bench(
                     n_padded_length,
                     mat1_pre_padded=mat1_pre_padded,
                     mat2_pre_padded=mat2_pre_padded,
-                )
+                ),
             )
         elif op is torch.ops.aten.mm:
-            fns.append(
+            pad_time = do_bench(
                 lambda: pad_mm(
                     mat1_pad,
                     mat2_pad,
@@ -459,10 +428,10 @@ def should_pad_bench(
                     n_padded_length,
                     mat1_pre_padded=mat1_pre_padded,
                     mat2_pre_padded=mat2_pre_padded,
-                )
+                ),
             )
         else:
-            fns.append(
+            pad_time = do_bench(
                 lambda: pad_bmm(
                     mat1_pad,
                     mat2_pad,
@@ -471,16 +440,15 @@ def should_pad_bench(
                     n_padded_length,
                     mat1_pre_padded=mat1_pre_padded,
                     mat2_pre_padded=mat2_pre_padded,
-                )
+                ),
             )
-
-        pad_time = do_bench(lambda: [fn() for fn in fns])
 
         # Shape padding introduces additional memory ops. Based on microbenchmarks, 1.1x represents a reasonable
         # tradeoff between performance improvement from shape padding and overhead from additional memory ops
         # TODO: Build a learned model which would be better than this heuristic
         should_pad = _skip_do_bench_times or ori_time > pad_time * 1.1
         set_cached_should_pad(key, should_pad)
+
         return should_pad
 
 

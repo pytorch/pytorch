@@ -4,7 +4,7 @@ import logging
 import os
 import sys
 import tempfile
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 import torch
 from torch._strobelight.compile_time_profiler import StrobelightCompileTimeProfiler
@@ -205,6 +205,6 @@ USE_RTLD_GLOBAL_WITH_LIBTORCH = False
 REQUIRES_SET_PYTHON_MODULE = False
 
 
-def maybe_upload_prof_stats_to_manifold(profile_path: str) -> Optional[str]:
+def maybe_upload_prof_stats_to_manifold(profile_path: str) -> None:
     print("Uploading profile stats (fb-only otherwise no-op)")
-    return None
+    pass
