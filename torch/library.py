@@ -71,7 +71,7 @@ class Library:
         self.ns = ns
         self._op_defs: Set[str] = set()
         self._op_impls: Set[str] = set()
-        self._registration_handles: List["torch._library.utils.RegistrationHandle"] = []
+        self._registration_handles: List[torch._library.utils.RegistrationHandle] = []
         self.kind = kind
         self.dispatch_key = dispatch_key
         # Use a finalizer to setup the "destructor" instead of __del__.
@@ -109,8 +109,22 @@ class Library:
         assert self.m is not None
         if isinstance(tags, torch.Tag):
             tags = (tags,)
+
+        name = schema.split("(")[0]
+        packet_name = name.split(".")[0] if "." in name else name
+        has_preexisting_packet = hasattr(torch.ops, self.ns) and hasattr(getattr(torch.ops, self.ns), packet_name)
+
         result = self.m.define(schema, alias_analysis, tuple(tags))
-        qualname = self.ns + "::" + schema.split("(")[0]
+        name = schema.split("(")[0]
+        qualname = self.ns + "::" + name
+
+        # If the OpOverloadPacket exists already, then this means we're adding a
+        # new OpOverload for it. Refresh the packet to include the new OpOverload.
+        if has_preexisting_packet:
+            ns = getattr(torch.ops, self.ns)
+            packet = getattr(ns, packet_name)
+            torch._ops._refresh_packet(packet)
+
         self._op_defs.add(qualname)
         _defs.add(qualname)
         return result
@@ -138,6 +152,48 @@ class Library:
 
         handle = entry.abstract_impl.register(func_to_register, source)
         self._registration_handles.append(handle)
+
+    def _impl_with_aoti_compile(self, op_name, dispatch_key=''):
+        r'''Register the operator to use the AOTI-compiled implementation.
+
+        Args:
+            op_name: operator name (along with the overload) or OpOverload object.
+            dispatch_key: dispatch key that the input function should be registered for. By default, it uses
+                          the dispatch key that the library was created with.
+
+        Example::
+            >>> my_lib = Library("aten", "IMPL")
+            >>> my_lib._impl_with_aoti_compile("div.Tensor", "CPU")
+        '''
+        if dispatch_key == '':
+            dispatch_key = self.dispatch_key
+        assert torch.DispatchKeySet(dispatch_key).has(torch._C.DispatchKey.Dense)
+
+        if isinstance(op_name, str):
+            name = op_name
+        elif isinstance(op_name, OpOverload):
+            name = op_name._schema.name
+            overload_name = op_name._schema.overload_name
+            if overload_name != '':
+                name = name + '.' + overload_name
+        else:
+            raise RuntimeError("_impl_with_aoti_compile should be passed either a name or an OpOverload object "
+                               "as the first argument")
+
+        key = self.ns + "/" + name.split("::")[-1] + "/" + dispatch_key
+        if key in _impls:
+            # TODO: in future, add more info about where the existing function is registered (this info is
+            # today already returned by the C++ warning when _impl_with_aoti_compile is called but we error out before that)
+            raise RuntimeError("This is not allowed since there's already a kernel registered from python overriding {}"
+                               "'s behavior for {} dispatch key and {} namespace.".
+                               format(name.split("::")[-1], dispatch_key, self.ns))
+
+        assert self.m is not None
+        impl_fn: Callable = self.m.impl_with_aoti_compile
+        impl_fn(self.ns, name.split("::")[-1], dispatch_key)
+
+        _impls.add(key)
+        self._op_impls.add(key)
 
     def impl(self, op_name, fn, dispatch_key='', *, with_keyset=False):
         r'''Registers the function implementation for an operator defined in the library.

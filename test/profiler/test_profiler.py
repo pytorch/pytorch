@@ -16,18 +16,23 @@ except ImportError:
 import collections
 import gc
 import json
+import mmap
 import os
 import pickle
+import random
 import re
+import struct
 import subprocess
 import sys
 import threading
+import time
 import unittest
 from dataclasses import dataclass, field
 from typing import List, Optional
 from unittest.mock import patch
 
 import expecttest
+
 import torch
 import torch.nn as nn
 import torch.optim
@@ -63,7 +68,9 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_ARM64,
     IS_JETSON,
+    IS_LINUX,
     IS_WINDOWS,
     parametrize,
     run_tests,
@@ -1215,6 +1222,26 @@ class TestProfiler(TestCase):
                         f"Failed finding record funciont for op = {e}",
                     )
 
+    def test_profiler_strides(self):
+        torch._C._profiler._set_record_concrete_inputs_enabled_val(True)
+        base_tensor = torch.randn(1024, dtype=torch.float32)
+        a = base_tensor.as_strided((16, 16), (17, 1), 0)
+        b = base_tensor.as_strided((16, 16), (25, 2), 272)
+        with _profile(record_shapes=True) as prof:
+            c = torch.add(a, b)
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                j = json.load(f)
+                op_events = [
+                    e for e in j["traceEvents"] if e.get("cat", "") == "cpu_op"
+                ]
+                for e in op_events:
+                    args = e["args"]
+                    if e["name"] == "aten::add":
+                        self.assertEqual(args["Input Strides"], [[17, 1], [25, 2], []])
+
     def test_profiler_fwd_bwd_link(self):
         with _profile(use_kineto=True) as prof:
             t1, t2 = torch.ones(1, requires_grad=True), torch.ones(
@@ -1640,6 +1667,158 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 json.load(f)
 
         event_list.table()
+
+    def _check_all_gpu_present(self, gpu_dict, max_gpu_count):
+        for i in range(0, max_gpu_count):
+            self.assertEqual(gpu_dict["GPU " + str(i)], 1)
+
+    # Do json sanity testing. Checks that all events are between profiler start and end
+    # also checks to see that GPU values are present in trace if cuda is used
+    def _validate_basic_json(self, traceEvents, cuda_available=False):
+        MAX_GPU_COUNT = 8
+        PROFILER_IDX = -4
+        RECORD_END = -1
+        RECORD_START = -2
+        traceEventProfiler = traceEvents[PROFILER_IDX]
+
+        self.assertTrue(traceEventProfiler["name"] == "PyTorch Profiler (0)")
+        self.assertTrue(traceEvents[RECORD_END]["name"] == "Record Window End")
+        self.assertTrue(
+            traceEvents[RECORD_START]["name"] == "Iteration Start: PyTorch Profiler"
+        )
+        # check that the profiler starts/ends within the record interval
+        self.assertGreaterEqual(
+            traceEventProfiler["ts"],
+            traceEvents[RECORD_START]["ts"],
+            "Profiler starts before record!",
+        )
+        self.assertLessEqual(
+            traceEventProfiler["ts"] + traceEventProfiler["dur"],
+            traceEvents[RECORD_END]["ts"],
+            "Profiler ends after record end!",
+        )
+
+        gpu_dict = collections.defaultdict(int)
+        for i, traceEvent in enumerate(traceEvents):
+            if (
+                i == len(traceEvents) + RECORD_END
+                or i == len(traceEvents) + RECORD_START
+            ):
+                continue
+            # make sure all valid trace events are within the bounds of the profiler
+            if "ts" in traceEvent:
+                self.assertGreaterEqual(
+                    traceEvent["ts"],
+                    traceEventProfiler["ts"],
+                    "Trace event is out of bounds",
+                )
+            # some python events seem to go a little past record end probably because
+            # of some clock inaccuracies so just compare events ending to RECORD_END
+            if "dur" in traceEvent:
+                self.assertLessEqual(
+                    traceEvent["ts"] + traceEvent["dur"],
+                    traceEvents[RECORD_END]["ts"],
+                    "Trace event ends too late!",
+                )
+            gpu_value = traceEvent.get("args", {}).get("labels", None)
+            if gpu_value and "GPU" in gpu_value:
+                gpu_dict[gpu_value] += 1
+                self.assertTrue(
+                    traceEvents[i + 1]["args"]["sort_index"]
+                    == 0x1000000 + int(gpu_value.split()[1])
+                )
+
+        # TODO add checking gpu count if cpuOnly_ is true or not
+
+    def _test_chrome_trace_basic_helper(self, with_cuda=False):
+        if with_cuda:
+            device = "cuda"
+        else:
+            device = "cpu"
+        x, y = (torch.rand(4, 4).to(device) for _ in range(2))
+
+        with profile(with_stack=True) as p:
+            torch.add(x, y)
+        with TemporaryFileName(mode="w+") as fname:
+            p.export_chrome_trace(fname)
+            with open(fname) as f:
+                report = json.load(f)
+                self._validate_basic_json(report["traceEvents"], with_cuda)
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_basic_chrome_trace(self):
+        self._test_chrome_trace_basic_helper()
+        if torch.cuda.is_available():
+            self._test_chrome_trace_basic_helper(with_cuda=True)
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_profiler_time_scale(self):
+        MARGIN_ERROR = 0.5
+        SEC_TO_US = 1000 * 1000
+        WAIT_TIME = 10
+        with profile() as p:
+            with torch.profiler.record_function("test_span"):
+                for i in range(WAIT_TIME):
+                    torch.rand(4, 4)
+                    time.sleep(1)
+        events = p.events()
+
+        # make sure function events are scaled appropriately
+        self.assertTrue(events[0].name == "test_span")
+        test_span = events[0]
+        self.assertGreaterEqual(
+            test_span.cpu_time / SEC_TO_US,
+            WAIT_TIME - MARGIN_ERROR,
+            "event out of range",
+        )
+        self.assertLessEqual(
+            test_span.cpu_time / SEC_TO_US,
+            WAIT_TIME + MARGIN_ERROR,
+            "event out of range",
+        )
+
+        # make sure tracing is scaled appropriately
+        with TemporaryFileName(mode="w+") as fname:
+            p.export_chrome_trace(fname)
+            with open(fname) as f:
+                report = json.load(f)
+            events = report["traceEvents"]
+            for event in events:
+                if event["name"] == "test_span":
+                    self.assertGreaterEqual(
+                        event["dur"] / SEC_TO_US,
+                        WAIT_TIME - MARGIN_ERROR,
+                        "profiling out of range",
+                    )
+                    self.assertLessEqual(
+                        event["dur"] / SEC_TO_US,
+                        WAIT_TIME + MARGIN_ERROR,
+                        "profiling out of range",
+                    )
+
+    def _schedule_helper(self, warmup, active, repeat):
+        with profile(
+            schedule=torch.profiler.schedule(
+                skip_first=0, wait=0, warmup=warmup, active=active, repeat=repeat
+            )
+        ) as prof:
+            for i in range(100):
+                torch.add(1, 2)
+                prof.step()
+        for ev in prof.key_averages():
+            if ev.key == "aten::add":
+                return ev.count
+        return 0
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_schedule_function_count(self):
+        self.assertEqual(self._schedule_helper(warmup=0, active=1, repeat=1), 1)
+        self.assertEqual(self._schedule_helper(warmup=0, active=5, repeat=0), 100)
+        self.assertEqual(self._schedule_helper(warmup=0, active=5, repeat=10), 50)
+        self.assertEqual(self._schedule_helper(warmup=1, active=5, repeat=0), 83)
+        self.assertEqual(self._schedule_helper(warmup=10, active=10, repeat=4), 40)
+        self.assertEqual(self._schedule_helper(warmup=50, active=1, repeat=0), 1)
 
 
 class SimpleNet(nn.Module):
@@ -2262,6 +2441,70 @@ aten::mm""",
                 self.assertEqual(expected_fields, actual_fields)
         finally:
             os.remove("torchtidy_report.json")
+
+    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "x86 linux only cpp unwinding")
+    def test_fuzz_symbolize(self):
+        # generate some random addresses in the text section and make sure the
+        # symbolizers do not throw exceptions/crash
+        def get_text_sections():
+            text_sections = []
+            seen = set()
+            for filename in os.listdir("/proc/self/map_files"):
+                library = os.readlink("/proc/self/map_files/" + filename)
+                if ".so" not in library or library in seen:
+                    continue
+                seen.add(library)
+                with open(os.path.join("/proc/self/map_files", library), "rb") as f:
+                    mm = mmap.mmap(f.fileno(), 0, prot=mmap.PROT_READ)
+
+                    def unpack(fmt, offset):
+                        return struct.unpack(
+                            fmt, mm[offset : offset + struct.calcsize(fmt)]
+                        )
+
+                    if mm[:4] != b"\x7fELF":
+                        continue
+                    (section_headers_start,) = unpack("Q", 40)
+                    (section_header_size,) = unpack("H", 58)
+                    (num_section_headers,) = unpack("H", 60)
+                    (shstrndx,) = unpack("H", 62)
+                    (shstrtab_offset,) = unpack(
+                        "Q", section_headers_start + shstrndx * section_header_size + 24
+                    )
+                    for i in range(num_section_headers):
+                        (section_name_offset,) = unpack(
+                            "I", section_headers_start + i * section_header_size
+                        )
+                        name_start = shstrtab_offset + section_name_offset
+                        section_name = mm[name_start : name_start + 6]
+                        if section_name != b".text\0":
+                            continue
+                        (section_offset,) = unpack(
+                            "Q", section_headers_start + i * section_header_size + 24
+                        )
+                        (section_size,) = unpack(
+                            "Q", section_headers_start + i * section_header_size + 32
+                        )
+                        start = int(filename.split("-")[0], 16) + section_offset
+                        text_sections.append((start, section_size))
+                        break
+                    mm.close()
+            return text_sections
+
+        r = random.Random()
+        r.seed(1)
+        text_sections = get_text_sections()
+        addrs = []
+        for i in range(200):
+            s = r.randrange(0, len(text_sections))
+            start, size = text_sections[s]
+            addr = r.randrange(start, start + size)
+            addrs.append(addr)
+        fast = torch._C._profiler.symbolize_addresses(addrs, "fast")
+        dladdr = torch._C._profiler.symbolize_addresses(addrs, "dladdr")
+        addr2line = torch._C._profiler.symbolize_addresses(addrs, "addr2line")
+        self.assertEqual(len(fast), len(addrs))
+        self.assertEqual(len(addr2line), len(fast))
 
 
 if __name__ == "__main__":

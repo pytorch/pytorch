@@ -117,12 +117,14 @@ def get_issue_or_pr_body(number: int) -> str:
 
 
 def normalize_ratings(
-    ratings: Dict[TestRun, float], max_value: float
+    ratings: Dict[TestRun, float], max_value: float, min_value: float = 0
 ) -> Dict[TestRun, float]:
     # Takse the ratings, makes the max value into max_value, and proportionally
     # distributes the rest of the ratings.
     # Ex [1,2,3,4] and max_value 8 gets converted to [2,4,6,8]
     # Assumes all rankings are >= 0
+    # min_value is what 0 gets mapped to and shifts the values accordingly.  Ex
+    # [1,2,3,4], min_value 1, max_value 5 gets converted to [2,3,4,5]
     # Don't modify in place
     if len(ratings) == 0:
         return ratings
@@ -132,7 +134,7 @@ def normalize_ratings(
     assert max_rating > 0
     normalized_ratings = {}
     for tf, rank in ratings.items():
-        normalized_ratings[tf] = rank / max_rating * max_value
+        normalized_ratings[tf] = rank / max_rating * (max_value - min_value) + min_value
     return normalized_ratings
 
 

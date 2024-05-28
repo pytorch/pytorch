@@ -45,8 +45,8 @@ def raise_comms(
     which is the beginning of the forwards pass. We'll have to either do a special pass for FSDP,
     or we'll want to redo this pass with memory considerations so we handle the FSDP case in a general way.
     """
-    new_order_reversed: List["scheduler.BaseSchedulerNode"] = []
-    cur_comms: List["scheduler.BaseSchedulerNode"] = []
+    new_order_reversed: List[scheduler.BaseSchedulerNode] = []
+    cur_comms: List[scheduler.BaseSchedulerNode] = []
     for snode in reversed(snodes):
         if is_collective(snode.node):
             cur_comms.append(snode)
@@ -192,7 +192,7 @@ def reorder_compute_for_overlap(
                     all_nodes.remove(node)
                     progress = True
             if not progress:
-                raise Exception(  # noqa: TRY002
+                raise AssertionError(
                     "Unable to find a free node (indeg == 0). This is an impossible state to reach. "
                     "Please report a bug to PyTorch."
                 )
@@ -312,7 +312,7 @@ def visualize_overlap(order):
                 total_est_runtime += estimate_op_runtime(snode)
                 cur_comm_node = snode.node
             elif is_wait(snode.node):
-                raise Exception(  # noqa: TRY002
+                raise AssertionError(
                     "Wait is not expected when there is no collective running"
                 )
             else:  # exposed compute op
@@ -320,7 +320,7 @@ def visualize_overlap(order):
             overlap_log.debug(f"{node_summary(snode)}")  # noqa: G004
         else:  # cur_comm_node is not None
             if is_collective(snode.node):
-                raise Exception(  # noqa: TRY002
+                raise AssertionError(
                     "Found two collectives running at the same time. "
                     "`visualize_overlap` needs to be updated to handle this case"
                 )

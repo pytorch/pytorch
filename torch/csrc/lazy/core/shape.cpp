@@ -13,7 +13,7 @@ namespace lazy {
 Shape::Shape(
     at::ScalarType scalar_type,
     c10::ArrayRef<int64_t> sizes,
-    c10::optional<std::vector<bool>> is_symbolic)
+    std::optional<std::vector<bool>> is_symbolic)
     : scalar_type_(scalar_type),
       sizes_(sizes.begin(), sizes.end()),
       is_symbolic_(std::move(is_symbolic)) {}
@@ -49,7 +49,7 @@ hash_t Shape::hash(bool bakeInSizes) const {
 }
 
 Shape Shape::with_symbolic_dims(
-    c10::optional<std::vector<bool>> symbolic_dims) const {
+    std::optional<std::vector<bool>> symbolic_dims) const {
   Shape copy = *this;
   copy.is_symbolic_ = symbolic_dims;
   return copy;
@@ -75,7 +75,7 @@ static c10::SymbolicShape get_symbolic_shape(at::Tensor& tensor) {
   TORCH_INTERNAL_ASSERT(
       sizes.size() == is_symbolic->size(),
       "Dims of two values are not consistent");
-  std::vector<c10::optional<int64_t>> symbolic_dims;
+  std::vector<std::optional<int64_t>> symbolic_dims;
   for (size_t i = 0; i < sizes.size(); i++) {
     if (is_symbolic->at(i)) {
       symbolic_dims.emplace_back(c10::nullopt);

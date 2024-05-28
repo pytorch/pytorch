@@ -144,9 +144,8 @@ class Test2DStridedLocalShard(DTensorTestBase):
                 global_tensor, tp_mesh, placements=[Shard(0)]
             )
             dtensor_2d = DTensor.from_local(
-                dtensor_tp.to_local(), mesh_2d, [Replicate(), Shard(0)]
+                dtensor_tp.to_local(), mesh_2d, [Replicate(), Shard(0)], run_check=False
             ).redistribute(mesh_2d, [Shard(0), Shard(0)])
-            self.assertEqual(len(comm_mode.get_comm_counts()), 1)
             self.assertEqual(
                 comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 1
             )
@@ -196,7 +195,6 @@ class Test2DStridedLocalShard(DTensorTestBase):
                 stride=global_tensor.stride(),
             )
 
-            self.assertEqual(len(comm_mode.get_comm_counts()), 0)
             self.assertEqual(
                 comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 0
             )

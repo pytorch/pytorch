@@ -26,7 +26,7 @@ class TORCH_API SavedVariable {
       bool is_output,
       bool is_inplace_on_view = false);
   SavedVariable(
-      const c10::optional<Variable>& variable,
+      const std::optional<Variable>& variable,
       bool is_output,
       bool is_inplace_on_view = false);
   SavedVariable(SavedVariable&&) = default;

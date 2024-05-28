@@ -224,7 +224,7 @@ class ExportedProgram:
 
         self._graph_signature: ExportGraphSignature = graph_signature
         self._state_dict: Dict[str, Any] = state_dict
-        self._range_constraints: "Dict[sympy.Symbol, ValueRanges]" = range_constraints
+        self._range_constraints: Dict[sympy.Symbol, ValueRanges] = range_constraints
         assert module_call_graph is not None
         self._module_call_graph: List[ModuleCallEntry] = module_call_graph
         self._example_inputs = example_inputs
@@ -448,7 +448,7 @@ class ExportedProgram:
                 res = pytree.tree_unflatten(res, self.call_spec.out_spec)
             except Exception:
                 _, received_spec = pytree.tree_flatten(res)
-                raise error.InternalError(  # noqa: TRY200
+                raise error.InternalError(  # noqa: B904
                     "Trying to flatten user outputs with exported output tree spec: \n"
                     f"{self.call_spec.out_spec}\n"
                     "but actually got outputs with tree spec of: \n"
@@ -530,9 +530,6 @@ class ExportedProgram:
         For now, we do not decompose joint graphs.
         """
         from torch._decomp import core_aten_decompositions
-        from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
-            _AddRuntimeAssertionsForInlineConstraintsPass,
-        )
         from torch._export.passes.lift_constants_pass import (
             ConstantAttrMap,
             lift_constants_pass,
@@ -550,7 +547,8 @@ class ExportedProgram:
                 placeholders.append(node)
             return placeholders
 
-        decomp_table = decomp_table or core_aten_decompositions()
+        if decomp_table is None:
+            decomp_table = core_aten_decompositions()
 
         old_placeholders = _get_placeholders(self.graph_module)
         fake_args = [node.meta["val"] for node in old_placeholders]
@@ -661,13 +659,6 @@ class ExportedProgram:
             self.constants[k] = v
 
         _replace_sym_size_ops_pass(gm)
-
-        if len(new_range_constraints) > 0:
-            res = _AddRuntimeAssertionsForInlineConstraintsPass(new_range_constraints)(
-                gm
-            )
-            assert res is not None
-            gm = res.graph_module
 
         exported_program = ExportedProgram(
             root=gm,
@@ -823,15 +814,15 @@ def _get_updated_range_constraints(
 
         fake_mode = detect_fake_mode(vals)
         if fake_mode is not None:
-            return fake_mode.shape_env, fake_mode
+            return fake_mode.shape_env
         for v in vals:
             if isinstance(v, torch.SymInt):
-                return v.node.shape_env, fake_mode
+                return v.node.shape_env
 
     # FIXME(tmanlaibaatar) Remove this whole branch once https://github.com/pytorch/pytorch/pull/123764
     if _is_executorch:
         assert old_range_constraints is None
-        shape_env, _ = get_shape_env(gm)
+        shape_env = get_shape_env(gm)
         if shape_env is None:
             return {}
         range_constraints = {
@@ -849,7 +840,7 @@ def _get_updated_range_constraints(
 
     assert old_range_constraints is not None
 
-    shape_env, fake_mode = get_shape_env(gm)
+    shape_env = get_shape_env(gm)
     if shape_env is None:
         return {}
 

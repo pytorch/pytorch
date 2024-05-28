@@ -40,7 +40,6 @@ if(USE_CUDA)
   set(CAFFE2_USE_CUDNN ${USE_CUDNN})
   set(CAFFE2_USE_CUSPARSELT ${USE_CUSPARSELT})
   set(CAFFE2_USE_NVRTC ${USE_NVRTC})
-  set(CAFFE2_USE_TENSORRT ${USE_TENSORRT})
   include(${CMAKE_CURRENT_LIST_DIR}/public/cuda.cmake)
   if(CAFFE2_USE_CUDA)
     # A helper variable recording the list of Caffe2 dependent libraries
@@ -63,11 +62,6 @@ if(USE_CUDA)
     else()
       caffe2_update_option(USE_CUSPARSELT OFF)
     endif()
-    if(CAFFE2_USE_TENSORRT)
-      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::tensorrt)
-    else()
-      caffe2_update_option(USE_TENSORRT OFF)
-    endif()
     find_program(SCCACHE_EXECUTABLE sccache)
     if(SCCACHE_EXECUTABLE)
       # Using RSP/--options-file renders output noncacheable by sccache
@@ -84,12 +78,10 @@ if(USE_CUDA)
     caffe2_update_option(USE_CUDNN OFF)
     caffe2_update_option(USE_CUSPARSELT OFF)
     caffe2_update_option(USE_NVRTC OFF)
-    caffe2_update_option(USE_TENSORRT OFF)
     set(CAFFE2_USE_CUDA OFF)
     set(CAFFE2_USE_CUDNN OFF)
     set(CAFFE2_USE_CUSPARSELT OFF)
     set(CAFFE2_USE_NVRTC OFF)
-    set(CAFFE2_USE_TENSORRT OFF)
   endif()
 endif()
 
@@ -140,35 +132,6 @@ if(TARGET Threads::Threads)
 else()
   message(FATAL_ERROR
       "Cannot find threading library. PyTorch requires Threads to compile.")
-endif()
-
-if(USE_TBB)
-  if(USE_SYSTEM_TBB)
-    find_package(TBB 2018.0 REQUIRED CONFIG COMPONENTS tbb)
-
-    get_target_property(TBB_INCLUDE_DIR TBB::tbb INTERFACE_INCLUDE_DIRECTORIES)
-  else()
-    message(STATUS "Compiling TBB from source")
-    # Unset our restrictive C++ flags here and reset them later.
-    # Remove this once we use proper target_compile_options.
-    set(OLD_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
-    set(CMAKE_CXX_FLAGS)
-
-    set(TBB_ROOT_DIR "${PROJECT_SOURCE_DIR}/third_party/tbb")
-    set(TBB_BUILD_STATIC OFF CACHE BOOL " " FORCE)
-    set(TBB_BUILD_SHARED ON CACHE BOOL " " FORCE)
-    set(TBB_BUILD_TBBMALLOC OFF CACHE BOOL " " FORCE)
-    set(TBB_BUILD_TBBMALLOC_PROXY OFF CACHE BOOL " " FORCE)
-    set(TBB_BUILD_TESTS OFF CACHE BOOL " " FORCE)
-    add_subdirectory(${PROJECT_SOURCE_DIR}/aten/src/ATen/cpu/tbb)
-    set_property(TARGET tbb tbb_def_files PROPERTY FOLDER "dependencies")
-
-    set(CMAKE_CXX_FLAGS ${OLD_CMAKE_CXX_FLAGS})
-
-    set(TBB_INCLUDE_DIR "${TBB_ROOT_DIR}/include")
-
-    add_library(TBB::tbb ALIAS tbb)
-  endif()
 endif()
 
 # ---[ protobuf
@@ -237,6 +200,12 @@ elseif(BLAS STREQUAL "MKL")
     set(CAFFE2_USE_EIGEN_FOR_BLAS ON)
     set(CAFFE2_USE_MKL OFF)
   endif()
+elseif(BLAS STREQUAL "NVPL")
+  find_package(NVPL_BLAS REQUIRED)
+  list(APPEND Caffe2_DEPENDENCY_LIBS nvpl::blas_lp64_omp)
+  set(BLAS_INFO "nvpl")
+  set(BLAS_FOUND 1)
+  set(BLAS_USE_CBLAS_DOT TRUE)
 elseif(BLAS STREQUAL "vecLib")
   find_package(vecLib REQUIRED)
   include_directories(SYSTEM ${vecLib_INCLUDE_DIR})
@@ -269,7 +238,7 @@ if(NOT INTERN_BUILD_MOBILE)
   set(AT_MKL_ENABLED 0)
   set(AT_MKL_SEQUENTIAL 0)
   set(USE_BLAS 1)
-  if(NOT (ATLAS_FOUND OR BLIS_FOUND OR GENERIC_BLAS_FOUND OR MKL_FOUND OR OpenBLAS_FOUND OR VECLIB_FOUND OR FlexiBLAS_FOUND))
+  if(NOT (ATLAS_FOUND OR BLIS_FOUND OR GENERIC_BLAS_FOUND OR MKL_FOUND OR OpenBLAS_FOUND OR VECLIB_FOUND OR FlexiBLAS_FOUND OR NVPL_BLAS_FOUND))
     message(WARNING "Preferred BLAS (" ${BLAS} ") cannot be found, now searching for a general BLAS library")
     find_package(BLAS)
     if(NOT BLAS_FOUND)
@@ -311,7 +280,7 @@ endif()
 # mismatch between these shared dependencies, explicitly declare our intent to these
 # libraries that we are interested in using the exact same source dependencies for all.
 
-if(USE_NNPACK OR USE_QNNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
+if(USE_NNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
   set(DISABLE_NNPACK_AND_FAMILY OFF)
 
   # Sanity checks - Can we actually build NNPACK and family given the configuration provided?
@@ -352,14 +321,12 @@ if(USE_NNPACK OR USE_QNNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
 
   if(DISABLE_NNPACK_AND_FAMILY)
     caffe2_update_option(USE_NNPACK OFF)
-    caffe2_update_option(USE_QNNPACK OFF)
     caffe2_update_option(USE_PYTORCH_QNNPACK OFF)
     caffe2_update_option(USE_XNNPACK OFF)
   else()
     # Disable unsupported NNPack combinations with MSVC
     if(MSVC)
       caffe2_update_option(USE_NNPACK OFF)
-      caffe2_update_option(USE_QNNPACK OFF)
       caffe2_update_option(USE_PYTORCH_QNNPACK OFF)
     endif()
 
@@ -383,13 +350,6 @@ if(USE_NNPACK OR USE_QNNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
   endif()
 else()
   set(DISABLE_NNPACK_AND_FAMILY ON)
-endif()
-
-if(USE_QNNPACK AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64" AND CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-  message(WARNING
-    "QNNPACK does not compile for Apple Silicon. "
-    "Turn this warning off by explicit USE_QNNPACK=OFF.")
-  caffe2_update_option(USE_QNNPACK OFF)
 endif()
 
 set(CONFU_DEPENDENCIES_SOURCE_DIR ${PROJECT_BINARY_DIR}/confu-srcs
@@ -481,70 +441,9 @@ if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(s390x|ppc64le)$")
   list(APPEND Caffe2_DEPENDENCY_LIBS cpuinfo)
 endif()
 
-# ---[ QNNPACK
-if(USE_QNNPACK)
-  set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
-
-  if(NOT DEFINED QNNPACK_SOURCE_DIR)
-    set(QNNPACK_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/QNNPACK" CACHE STRING "QNNPACK source directory")
-  endif()
-
-  if(NOT TARGET qnnpack)
-    if(NOT USE_SYSTEM_PTHREADPOOL AND USE_INTERNAL_PTHREADPOOL_IMPL)
-      set(QNNPACK_CUSTOM_THREADPOOL ON CACHE BOOL "")
-    endif()
-
-    set(QNNPACK_BUILD_TESTS OFF CACHE BOOL "")
-    set(QNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
-    set(QNNPACK_LIBRARY_TYPE "static" CACHE STRING "")
-    add_subdirectory(
-      "${QNNPACK_SOURCE_DIR}"
-      "${CONFU_DEPENDENCIES_BINARY_DIR}/QNNPACK")
-
-    # TODO: See https://github.com/pytorch/pytorch/issues/56285
-    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-      target_compile_options(qnnpack PRIVATE -Wno-deprecated-declarations)
-    endif()
-
-    # We build static versions of QNNPACK and pthreadpool but link
-    # them into a shared library for Caffe2, so they need PIC.
-    set_property(TARGET qnnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
-    set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
-
-    if(QNNPACK_CUSTOM_THREADPOOL)
-      target_compile_definitions(
-        qnnpack PRIVATE
-        pthreadpool_t=legacy_pthreadpool_t
-        pthreadpool_function_1d_t=legacy_pthreadpool_function_1d_t
-        pthreadpool_function_1d_tiled_t=legacy_pthreadpool_function_1d_tiled_t
-        pthreadpool_function_2d_t=legacy_pthreadpool_function_2d_t
-        pthreadpool_function_2d_tiled_t=legacy_pthreadpool_function_2d_tiled_t
-        pthreadpool_function_3d_tiled_t=legacy_pthreadpool_function_3d_tiled_t
-        pthreadpool_function_4d_tiled_t=legacy_pthreadpool_function_4d_tiled_t
-        pthreadpool_create=legacy_pthreadpool_create
-        pthreadpool_destroy=legacy_pthreadpool_destroy
-        pthreadpool_get_threads_count=legacy_pthreadpool_get_threads_count
-        pthreadpool_compute_1d=legacy_pthreadpool_compute_1d
-        pthreadpool_parallelize_1d=legacy_pthreadpool_parallelize_1d
-        pthreadpool_compute_1d_tiled=legacy_pthreadpool_compute_1d_tiled
-        pthreadpool_compute_2d=legacy_pthreadpool_compute_2d
-        pthreadpool_compute_2d_tiled=legacy_pthreadpool_compute_2d_tiled
-        pthreadpool_compute_3d_tiled=legacy_pthreadpool_compute_3d_tiled
-        pthreadpool_compute_4d_tiled=legacy_pthreadpool_compute_4d_tiled)
-    endif()
-  endif()
-
-  list(APPEND Caffe2_DEPENDENCY_LIBS qnnpack)
-endif()
-
-# ---[ Caffe2 Int8 operators (enabled by USE_QNNPACK) depend on gemmlowp and neon2sse headers
-if(USE_QNNPACK)
-  set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
-  include_directories(SYSTEM "${CAFFE2_THIRD_PARTY_ROOT}/gemmlowp")
-  include_directories(SYSTEM "${CAFFE2_THIRD_PARTY_ROOT}/neon2sse")
-endif()
 
 # ---[ PYTORCH_QNNPACK
+set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
 if(USE_PYTORCH_QNNPACK)
     if(NOT DEFINED PYTORCH_QNNPACK_SOURCE_DIR)
       set(PYTORCH_QNNPACK_SOURCE_DIR "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/quantized/cpu/qnnpack" CACHE STRING "QNNPACK source directory")
@@ -565,6 +464,8 @@ if(USE_PYTORCH_QNNPACK)
       # them into a shared library for Caffe2, so they need PIC.
       set_property(TARGET pytorch_qnnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
       set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
+      # QNNPACK depends on gemmlowp headers
+      target_include_directories(pytorch_qnnpack PRIVATE "${CAFFE2_THIRD_PARTY_ROOT}/gemmlowp")
 
       if(PYTORCH_QNNPACK_CUSTOM_THREADPOOL)
         target_compile_definitions(
@@ -859,40 +760,11 @@ else()
   caffe2_update_option(USE_FAKELOWP OFF)
 endif()
 
-# ---[ LMDB
-if(USE_LMDB)
-  find_package(LMDB)
-  if(LMDB_FOUND)
-    include_directories(SYSTEM ${LMDB_INCLUDE_DIR})
-    list(APPEND Caffe2_DEPENDENCY_LIBS ${LMDB_LIBRARIES})
-  else()
-    message(WARNING "Not compiling with LMDB. Suppress this warning with -DUSE_LMDB=OFF")
-    caffe2_update_option(USE_LMDB OFF)
-  endif()
-endif()
-
 if(USE_OPENCL)
   message(INFO "USING OPENCL")
   find_package(OpenCL REQUIRED)
   include_directories(SYSTEM ${OpenCL_INCLUDE_DIRS})
-  include_directories(${CMAKE_CURRENT_LIST_DIR}/../caffe2/contrib/opencl)
   list(APPEND Caffe2_DEPENDENCY_LIBS ${OpenCL_LIBRARIES})
-endif()
-
-# ---[ LevelDB
-# ---[ Snappy
-if(USE_LEVELDB)
-  find_package(LevelDB)
-  find_package(Snappy)
-  if(LEVELDB_FOUND AND SNAPPY_FOUND)
-    include_directories(SYSTEM ${LevelDB_INCLUDE})
-    list(APPEND Caffe2_DEPENDENCY_LIBS ${LevelDB_LIBRARIES})
-    include_directories(SYSTEM ${Snappy_INCLUDE_DIR})
-    list(APPEND Caffe2_DEPENDENCY_LIBS ${Snappy_LIBRARIES})
-  else()
-    message(WARNING "Not compiling with LevelDB. Suppress this warning with -DUSE_LEVELDB=OFF")
-    caffe2_update_option(USE_LEVELDB OFF)
-  endif()
 endif()
 
 # ---[ NUMA
@@ -906,69 +778,6 @@ if(USE_NUMA)
   else()
     message(WARNING "NUMA is currently only supported under Linux.")
     caffe2_update_option(USE_NUMA OFF)
-  endif()
-endif()
-
-# ---[ ZMQ
-if(USE_ZMQ)
-  find_package(ZMQ)
-  if(ZMQ_FOUND)
-    include_directories(SYSTEM ${ZMQ_INCLUDE_DIR})
-    list(APPEND Caffe2_DEPENDENCY_LIBS ${ZMQ_LIBRARIES})
-  else()
-    message(WARNING "Not compiling with ZMQ. Suppress this warning with -DUSE_ZMQ=OFF")
-    caffe2_update_option(USE_ZMQ OFF)
-  endif()
-endif()
-
-# ---[ Redis
-if(USE_REDIS)
-  find_package(Hiredis)
-  if(HIREDIS_FOUND)
-    include_directories(SYSTEM ${Hiredis_INCLUDE})
-    list(APPEND Caffe2_DEPENDENCY_LIBS ${Hiredis_LIBRARIES})
-  else()
-    message(WARNING "Not compiling with Redis. Suppress this warning with -DUSE_REDIS=OFF")
-    caffe2_update_option(USE_REDIS OFF)
-  endif()
-endif()
-
-
-# ---[ OpenCV
-if(USE_OPENCV)
-  # OpenCV 4
-  find_package(OpenCV 4 QUIET COMPONENTS core highgui imgproc imgcodecs optflow videoio video)
-  if(NOT OpenCV_FOUND)
-    # OpenCV 3
-    find_package(OpenCV 3 QUIET COMPONENTS core highgui imgproc imgcodecs videoio video)
-    if(NOT OpenCV_FOUND)
-      # OpenCV 2
-      find_package(OpenCV QUIET COMPONENTS core highgui imgproc)
-    endif()
-  endif()
-  if(OpenCV_FOUND)
-    include_directories(SYSTEM ${OpenCV_INCLUDE_DIRS})
-    list(APPEND Caffe2_DEPENDENCY_LIBS ${OpenCV_LIBS})
-    if(MSVC AND USE_CUDA)
-        list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${OpenCV_LIBS})
-    endif()
-    message(STATUS "OpenCV found (${OpenCV_CONFIG_PATH})")
-  else()
-    message(WARNING "Not compiling with OpenCV. Suppress this warning with -DUSE_OPENCV=OFF")
-    caffe2_update_option(USE_OPENCV OFF)
-  endif()
-endif()
-
-# ---[ FFMPEG
-if(USE_FFMPEG)
-  find_package(FFmpeg REQUIRED)
-  if(FFMPEG_FOUND)
-    message("Found FFMPEG/LibAV libraries")
-    include_directories(SYSTEM ${FFMPEG_INCLUDE_DIR})
-    list(APPEND Caffe2_DEPENDENCY_LIBS ${FFMPEG_LIBRARIES})
-  else()
-    message("Not compiling with FFmpeg. Suppress this warning with -DUSE_FFMPEG=OFF")
-    caffe2_update_option(USE_FFMPEG OFF)
   endif()
 endif()
 
@@ -1254,9 +1063,19 @@ if(USE_ROCM)
   # Currently only active for Ubuntu 20.04 and greater versions.
   if(UNIX AND EXISTS "/etc/os-release")
     file(STRINGS /etc/os-release OS_RELEASE)
-    string(REGEX REPLACE "NAME=\"([A-Za-z]+).*" "\\1" OS_DISTRO ${OS_RELEASE})
-    string(REGEX REPLACE ".*VERSION_ID=\"([0-9\.]+).*" "\\1" OS_VERSION ${OS_RELEASE})
-    if(OS_DISTRO STREQUAL "Ubuntu" AND OS_VERSION VERSION_GREATER_EQUAL "20.04")
+    set(DISTRO_NAME "")
+    set(DISTRO_VERSION "")
+    foreach(line ${OS_RELEASE})
+      string(REGEX MATCH "^NAME=" DISTRO_NAME_MATCH ${line})
+      if(NOT DISTRO_NAME_MATCH STREQUAL "")
+        string(REGEX REPLACE "^NAME=\"(.*)\"" "\\1" DISTRO_NAME ${line})
+      endif()
+      string(REGEX MATCH "^VERSION_ID=" DISTRO_VERSION_MATCH ${line})
+      if(NOT DISTRO_VERSION_MATCH STREQUAL "")
+        string(REGEX REPLACE "^VERSION_ID=\"(.*)\"" "\\1" DISTRO_VERSION ${line})
+      endif()
+    endforeach()
+    if(DISTRO_NAME STREQUAL "Ubuntu" AND DISTRO_VERSION VERSION_GREATER_EQUAL "20.04")
       find_library(LIBTINFO_LOC tinfo NO_CMAKE_PATH NO_CMAKE_ENVIRONMENT_PATH)
       if(LIBTINFO_LOC)
         get_filename_component(LIBTINFO_LOC_PARENT ${LIBTINFO_LOC} DIRECTORY)
@@ -1289,18 +1108,7 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
     list(APPEND HIP_CXX_FLAGS -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
     list(APPEND HIP_CXX_FLAGS -std=c++17)
-    if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "6.0.0")
-      list(APPEND HIP_CXX_FLAGS -DHIPBLAS_V2)
-    endif()
-    if(HIPBLASLT_CUSTOM_DATA_TYPE)
-      list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_CUSTOM_DATA_TYPE)
-    endif()
-    if(HIPBLASLT_CUSTOM_COMPUTE_TYPE)
-      list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_CUSTOM_COMPUTE_TYPE)
-    endif()
-    if(HIPBLASLT_HAS_GETINDEXFROMALGO)
-      list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_HAS_GETINDEXFROMALGO)
-    endif()
+    list(APPEND HIP_CXX_FLAGS -DHIPBLAS_V2)
     if(HIP_NEW_TYPE_ENUMS)
       list(APPEND HIP_CXX_FLAGS -DHIP_NEW_TYPE_ENUMS)
     endif()
@@ -1332,9 +1140,7 @@ if(USE_ROCM)
 
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       ${PYTORCH_HIP_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB} ${ROCM_ROCTX_LIB})
-    if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "5.7.0")
-      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS ${hipblaslt_LIBRARIES})
-    endif()
+    list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS ${hipblaslt_LIBRARIES})
 
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       roc::hipblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver)
@@ -1355,18 +1161,6 @@ if(USE_ROCM)
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()
-endif()
-
-# ---[ ROCm
-if(USE_ROCM AND ROCM_VERSION_DEV VERSION_LESS "5.2.0")
-  # We check again for USE_ROCM because it might have been set to OFF
-  # in the if above
-  include_directories(SYSTEM ${HIP_PATH}/include)
-  include_directories(SYSTEM ${HIPBLAS_PATH}/include)
-  include_directories(SYSTEM ${HIPFFT_PATH}/include)
-  include_directories(SYSTEM ${HIPSPARSE_PATH}/include)
-  include_directories(SYSTEM ${HIPRAND_PATH}/include)
-  include_directories(SYSTEM ${THRUST_PATH})
 endif()
 
 # ---[ NCCL
@@ -1401,11 +1195,10 @@ endif()
 # ---[ CUB
 if(USE_CUDA)
   find_package(CUB)
-  if(CUB_FOUND)
-    include_directories(SYSTEM ${CUB_INCLUDE_DIRS})
-  else()
-    include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/cub)
+  if(NOT CUB_FOUND)
+    message(FATAL_ERROR "Cannot find CUB.")
   endif()
+  include_directories(SYSTEM ${CUB_INCLUDE_DIRS})
 endif()
 
 if(USE_DISTRIBUTED AND USE_TENSORPIPE)
@@ -1522,45 +1315,9 @@ if(USE_SNPE AND ANDROID)
   endif()
 endif()
 
-if(USE_METAL)
-  if(NOT IOS)
-    message(WARNING "Metal is only used in ios builds.")
-    caffe2_update_option(USE_METAL OFF)
-  endif()
-endif()
-
 if(USE_NNAPI AND NOT ANDROID)
   message(WARNING "NNApi is only used in android builds.")
   caffe2_update_option(USE_NNAPI OFF)
-endif()
-
-if(NOT INTERN_BUILD_MOBILE AND BUILD_CAFFE2_OPS)
-  if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
-    list(APPEND Caffe2_DEPENDENCY_LIBS aten_op_header_gen)
-    if(USE_CUDA)
-      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS aten_op_header_gen)
-    endif()
-    include_directories(${PROJECT_BINARY_DIR}/caffe2/contrib/aten)
-  endif()
-endif()
-
-if(USE_ZSTD)
-  if(USE_SYSTEM_ZSTD)
-    find_package(zstd REQUIRED)
-    if(TARGET zstd::libzstd_shared)
-      set(ZSTD_TARGET zstd::libzstd_shared)
-    else()
-      set(ZSTD_TARGET zstd::libzstd_static)
-    endif()
-    list(APPEND Caffe2_DEPENDENCY_LIBS ${ZSTD_TARGET})
-    get_property(ZSTD_INCLUDE_DIR TARGET ${ZSTD_TARGET} PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
-    include_directories(SYSTEM ${ZSTD_INCLUDE_DIR})
-  else()
-    list(APPEND Caffe2_DEPENDENCY_LIBS libzstd_static)
-    include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/zstd/lib)
-    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/zstd/build/cmake)
-    set_property(TARGET libzstd_static PROPERTY POSITION_INDEPENDENT_CODE ON)
-  endif()
 endif()
 
 # ---[ Onnx
@@ -1629,27 +1386,6 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
 endif()
 
-# --[ TensorRT integration with onnx-trt
-function(add_onnx_tensorrt_subdir)
-  # We pass the paths we found to onnx tensorrt.
-  set(CUDNN_INCLUDE_DIR "${CUDNN_INCLUDE_PATH}")
-  set(CUDNN_LIBRARY "${CUDNN_LIBRARY_PATH}")
-  set(CMAKE_VERSION_ORIG "{CMAKE_VERSION}")
-  # TODO: this WAR is for https://github.com/pytorch/pytorch/issues/18524
-  set(CMAKE_VERSION "3.9.0")
-  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx-tensorrt EXCLUDE_FROM_ALL)
-  set(CMAKE_VERSION "{CMAKE_VERSION_ORIG}")
-endfunction()
-if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
-  if(USE_TENSORRT)
-    add_onnx_tensorrt_subdir()
-    include_directories("${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx-tensorrt")
-    caffe2_interface_library(nvonnxparser_static onnx_trt_library)
-    list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_trt_library)
-    set(CAFFE2_USE_TRT 1)
-  endif()
-endif()
-
 # --[ ATen checks
 set(USE_LAPACK 0)
 
@@ -1715,22 +1451,23 @@ if(NOT INTERN_BUILD_MOBILE)
 
   set(CUDA_ATTACH_VS_BUILD_RULE_TO_CUDA_FILE OFF)
 
-  if(USE_MAGMA)
-    find_package(MAGMA)
-  endif()
-  if((USE_CUDA OR USE_ROCM) AND MAGMA_FOUND)
-    set(USE_MAGMA 1)
-    message(STATUS "Compiling with MAGMA support")
-    message(STATUS "MAGMA INCLUDE DIRECTORIES: ${MAGMA_INCLUDE_DIR}")
-    message(STATUS "MAGMA LIBRARIES: ${MAGMA_LIBRARIES}")
-    message(STATUS "MAGMA V2 check: ${MAGMA_V2}")
+  if(USE_CUDA OR USE_ROCM)
+    if(USE_MAGMA)
+      find_package(MAGMA)
+      if(MAGMA_FOUND)
+        message(STATUS "Compiling with MAGMA support")
+        message(STATUS "MAGMA INCLUDE DIRECTORIES: ${MAGMA_INCLUDE_DIR}")
+        message(STATUS "MAGMA LIBRARIES: ${MAGMA_LIBRARIES}")
+        message(STATUS "MAGMA V2 check: ${MAGMA_V2}")
+      else()
+        message(STATUS "MAGMA not found. Compiling without MAGMA support")
+        caffe2_update_option(USE_MAGMA OFF)
+      endif()
+    endif()
   elseif(USE_MAGMA)
     message(WARNING
       "Not compiling with MAGMA. Suppress this warning with "
       "-DUSE_MAGMA=OFF.")
-    caffe2_update_option(USE_MAGMA OFF)
-  else()
-    message(STATUS "MAGMA not found. Compiling without MAGMA support")
     caffe2_update_option(USE_MAGMA OFF)
   endif()
 
@@ -1803,9 +1540,6 @@ if(NOT INTERN_BUILD_MOBILE)
     if(MKLDNN_FOUND)
       set(AT_MKLDNN_ENABLED 1)
       include_directories(AFTER SYSTEM ${MKLDNN_INCLUDE_DIR})
-      if(BUILD_CAFFE2_OPS)
-        list(APPEND Caffe2_DEPENDENCY_LIBS caffe2::mkldnn)
-      endif(BUILD_CAFFE2_OPS)
     else()
       message(WARNING "MKLDNN could not be found.")
       caffe2_update_option(USE_MKLDNN OFF)
