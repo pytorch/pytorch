@@ -76,7 +76,7 @@
 #     you MUST refer to the gradient of the differentiable output with
 #     'grad' (this case is special-cased in our code generation).
 #
-#     Note that the number of differentibale outputs can be modified by the
+#     Note that the number of differentiable outputs can be modified by the
 #     'output_differentiability' entry (see above).
 #
 #     Across a differentiable function's derivatives set, it is not
