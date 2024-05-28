@@ -4,6 +4,10 @@
 
 #include <cstdint>
 
+#if defined(SYCL_LANGUAGE_VERSION)
+#include <sycl/sycl.hpp>
+#endif
+
 namespace c10::detail {
 
 /*
