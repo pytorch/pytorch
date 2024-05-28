@@ -241,6 +241,7 @@ class TestCuda(TestCase):
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats()
 
+    @serialTest()
     def test_set_per_process_memory_fraction(self):
         # test invalid fraction value.
         with self.assertRaisesRegex(TypeError, "Invalid type"):
@@ -1720,7 +1721,7 @@ torch.cuda.synchronize()
     def test_autocast_custom_enabled(self):
         class MyMM(torch.autograd.Function):
             @staticmethod
-            @torch.cuda.amp.custom_fwd
+            @torch.amp.custom_fwd(device_type="cuda")
             def forward(ctx, a, b):
                 self.assertTrue(a.dtype is torch.float32)
                 self.assertTrue(b.dtype is torch.float32)
@@ -1729,7 +1730,7 @@ torch.cuda.synchronize()
                 return a.mm(b)
 
             @staticmethod
-            @torch.cuda.amp.custom_bwd
+            @torch.amp.custom_bwd(device_type="cuda")
             def backward(ctx, grad):
                 self.assertTrue(torch.is_autocast_enabled())
                 a, b = ctx.saved_tensors
@@ -1753,7 +1754,7 @@ torch.cuda.synchronize()
     def test_autocast_custom_cast_inputs(self):
         class MyMM(torch.autograd.Function):
             @staticmethod
-            @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
+            @torch.amp.custom_fwd(device_type="cuda", cast_inputs=torch.float32)
             def forward(ctx, a, container, expect_type):
                 b = container[1][0]
                 self.assertTrue(a.dtype is expect_type)
@@ -1763,7 +1764,7 @@ torch.cuda.synchronize()
                 return a.mm(b)
 
             @staticmethod
-            @torch.cuda.amp.custom_bwd
+            @torch.amp.custom_bwd(device_type="cuda")
             def backward(ctx, grad):
                 self.assertFalse(torch.is_autocast_enabled())
                 a, b = ctx.saved_tensors
@@ -1796,6 +1797,39 @@ torch.cuda.synchronize()
         output = mymm(x, y, torch.float16)
         self.assertTrue(output.dtype is torch.float16)
         loss = output.sum()
+        loss.backward()
+
+    def test_autocast_custom_deprecated_warning(self):
+        with warnings.catch_warnings(record=True) as w:
+
+            class MyMM(torch.autograd.Function):
+                @staticmethod
+                @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
+                def forward(ctx, x, y):
+                    ctx.save_for_backward(x, y)
+                    self.assertFalse(torch.is_autocast_enabled())
+                    return x + y
+
+                @staticmethod
+                @torch.cuda.amp.custom_bwd
+                def backward(ctx, grad):
+                    _, _ = ctx.saved_tensors
+                    self.assertFalse(torch.is_autocast_enabled())
+                    return grad, grad
+
+        self.assertRegex(
+            str(w[0].message), r"torch.cuda.amp.custom_fwd\(args...\) is deprecated."
+        )
+        self.assertRegex(
+            str(w[1].message), r"torch.cuda.amp.custom_bwd\(args...\) is deprecated."
+        )
+
+        mymm = MyMM.apply
+        x = torch.randn(3, 3, requires_grad=True)
+        y = torch.randn(3, 3, requires_grad=True)
+        with torch.amp.autocast("cuda"):
+            output = mymm(x, y)
+            loss = output.sum()
         loss.backward()
 
     def test_autocast_cat_jit(self):
@@ -3436,13 +3470,15 @@ exit(2)
                     grads_graphed = [[g.clone() for g in gs] for gs in grads]
 
                 # Gradient Scaler
-                scaler_for_control = torch.cuda.amp.GradScaler(init_scale=128.0)
+                scaler_for_control = torch.amp.GradScaler(
+                    device="cuda", init_scale=128.0
+                )
                 with torch.no_grad():
                     scaler_for_control._lazy_init_scale_growth_tracker(
                         torch.device("cuda")
                     )
 
-                scaler_for_graphed = torch.cuda.amp.GradScaler()
+                scaler_for_graphed = torch.amp.GradScaler(device="cuda")
                 scaler_for_graphed.load_state_dict(scaler_for_control.state_dict())
                 with torch.no_grad():
                     scaler_for_graphed._lazy_init_scale_growth_tracker(
@@ -4721,7 +4757,7 @@ class TestCudaOptims(TestCase):
     def test_graph_grad_scaling(self, device, dtype, optim_info, foreach, fused):
         torch.cuda.empty_cache()
 
-        scaler = torch.cuda.amp.GradScaler(init_scale=4.0)
+        scaler = torch.amp.GradScaler(device="cuda", init_scale=4.0)
         g = torch.cuda.CUDAGraph()
         s = torch.cuda.Stream()
 

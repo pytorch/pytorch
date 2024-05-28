@@ -44,6 +44,7 @@ HAS_TRITON = has_triton()
 
 if HAS_TRITON:
     import triton
+
     from torch.testing._internal.triton_utils import add_kernel
 
 requires_gpu = functools.partial(unittest.skipIf, not HAS_GPU, "requires gpu")
