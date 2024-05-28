@@ -2435,7 +2435,7 @@ class TestDimConstraints(TestCase):
         def dummy_fn(a, b, c, d, e, f):
             pass
 
-        action_code = dim_constraints.prettify_results(inspect.signature(dummy_fn))
+        action_code = dim_constraints.prettify_results(inspect.signature(dummy_fn), {})
         static_code, dynamic_code = re.findall(r"```(.*?)```", action_code, re.DOTALL)
         expected_static = """
 def specializations(a, b, c, d, e, f):

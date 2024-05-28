@@ -223,6 +223,7 @@ def _flatten_dynamic_shapes(
 def produce_guards_and_solve_constraints(
     fake_mode: FakeTensorMode,
     gm: torch.fx.GraphModule,
+    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any], None],
     equalities_inputs: EqualityConstraint,
     original_signature: inspect.Signature,
     _disable_forced_specializations: Optional[bool] = False,
@@ -273,7 +274,10 @@ def produce_guards_and_solve_constraints(
     forced_specializations = dim_constraints.forced_specializations()
     if not _is_torch_jit_trace:
         msg = dim_constraints.prettify_results(
-            original_signature, constraint_violation_error, forced_specializations
+            original_signature,
+            dynamic_shapes,
+            constraint_violation_error,
+            forced_specializations,
         )
     else:
         # FIXME(ycao): This is a hack to get around missing signature from ScriptMethod
