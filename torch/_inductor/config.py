@@ -381,7 +381,9 @@ developer_warnings = is_fbcode() or is_nightly_or_source
 # The multiprocessing start method to use for inductor workers in the codecache.
 # "subprocess", "fork", or "spawn"
 def decide_worker_start_method():
-    start_method = os.environ.get("TORCHINDUCTOR_WORKER_START", "subprocess")
+    start_method = os.environ.get(
+        "TORCHINDUCTOR_WORKER_START", "subprocess" if is_fbcode() else "fork"
+    )
     assert start_method in [
         "subprocess",
         "fork",
@@ -884,10 +886,19 @@ class trace:
     log_autotuning_results: bool = False
 
 
-_save_config_ignore = {
+_save_config_ignore = [
     # workaround: "Can't pickle <function ...>"
     "trace.upload_tar",
-}
+]
+
+_cache_config_ignore_prefix = [
+    # trace functions are not relevant to config caching
+    "trace",
+    # uses absolute path
+    "cuda.cutlass_dir",
+    # not relevant
+    "compile_threads",
+]
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403

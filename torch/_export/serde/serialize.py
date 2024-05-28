@@ -1643,7 +1643,7 @@ class GraphModuleDeserializer(metaclass=Final):
             self.deserialize_outputs(serialized_node, fx_node)
         else:
             raise SerializeError(
-                f"Unsupported target type for node {serialized_node}: {target}"
+                f"Unsupported target type for node {serialized_node}: {type(target)}"
             )
 
         fx_node.meta.update(self.deserialize_metadata(serialized_node.metadata))

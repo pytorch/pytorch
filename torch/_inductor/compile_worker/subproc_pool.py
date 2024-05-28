@@ -237,6 +237,8 @@ def _warm_process_pool(pool: AnyPool, n: int):
     # But if we waited until then fork time will be long and we will be waiting for the processes to initialize.
 
     # We force them to start here with some YOLOing of the internal methods.
+
+    # TODO(masnesral): Are these still relevant?
     if hasattr(pool, "_start_queue_management_thread"):
         pool._start_queue_management_thread()
     else:
