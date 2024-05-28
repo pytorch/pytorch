@@ -14,6 +14,8 @@ from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overloa
 from typing_extensions import Self
 from ...utils.hooks import RemovableHandle
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.__future__ import _get_swap_overwrite_escape_hatch, get_overwrite_module_params_on_conversion, \
+    get_swap_module_params_on_conversion
 
 __all__ = ['register_module_forward_pre_hook', 'register_module_forward_hook',
            'register_module_full_backward_pre_hook', 'register_module_backward_hook',
@@ -778,8 +780,9 @@ class Module:
             for module in self.children():
                 module._apply(fn)
 
-        should_overwrite = torch.__future__.get_overwrite_module_params_on_conversion()
-        should_use_swap_tensors = torch.__future__.get_swap_module_params_on_conversion()
+        should_overwrite = get_overwrite_module_params_on_conversion()
+        should_use_swap_tensors = get_swap_module_params_on_conversion()
+        swap_overwrite_escape_hatch = _get_swap_overwrite_escape_hatch()
 
         def compute_should_use_set_data(tensor, tensor_applied):
             if torch._has_compatible_shallow_copy_type(tensor, tensor_applied):
@@ -802,7 +805,7 @@ class Module:
                     or ((tensor.device.type == 'meta'
                          or tensor_applied.device.type == 'meta'
                          or tensor.device.type == 'xla'
-                         or tensor_applied.device.type == 'xla') and not should_overwrite))
+                         or tensor_applied.device.type == 'xla') and not swap_overwrite_escape_hatch))
 
         for key, param in self._parameters.items():
             if param is None:
@@ -815,7 +818,6 @@ class Module:
             p_should_use_set_data = compute_should_use_set_data(param, param_applied)
 
             p_should_use_swap_tensors = compute_should_use_swap_tensors(param, param_applied)
-
             param_grad = param.grad
             if p_should_use_swap_tensors:
                 try:
