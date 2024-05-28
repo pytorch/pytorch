@@ -2749,11 +2749,7 @@ class FixedLayout(Layout):
             for idx, stride, sz in zip(index, self.stride, self.size):
                 # If there is indirect indexing we have to perform the
                 # idx wrapping and check that 0 <= idx < 1 checks
-                if not (
-                    sz == 1
-                    and isinstance(idx, sympy.Symbol)
-                    and symbol_is_type(idx, SymT.TMP)
-                ):
+                if sz != 1:
                     result = result + idx * stride
             return result
 
