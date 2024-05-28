@@ -1880,9 +1880,6 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
         if not is_standalone:
             extra_ldflags.append('-ltorch_python')
 
-        if is_standalone and "TBB" in torch.__config__.parallel_info():
-            extra_ldflags.append('-ltbb')
-
         if is_standalone:
             extra_ldflags.append(f"-Wl,-rpath,{TORCH_LIB_PATH}")
 
