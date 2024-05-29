@@ -43,12 +43,14 @@ BUILD_BIN_DIR="$BUILD_DIR"/bin
 SHARD_NUMBER="${SHARD_NUMBER:=1}"
 NUM_TEST_SHARDS="${NUM_TEST_SHARDS:=1}"
 
+pushd test
 CUDA_VERSION=$(python3 -c "import torch; print(torch.version.cuda)")
 if [ "$CUDA_VERSION" == "12.4" ]; then
     ISCUDA124="cu124"
 else
     ISCUDA124=""
 fi
+popd
 
 export VALGRIND=ON
 # export TORCH_INDUCTOR_INSTALL_GXX=ON
