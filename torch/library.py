@@ -570,7 +570,7 @@ def register_fake(
     This API may be used as a decorator (see examples).
 
     For a detailed guide on custom ops, please see
-    https://docs.google.com/document/d/1W--T6wz8IY8fOI0Vm8BF44PdBgs283QvpelJZWieQWQ/edit
+    https://pytorch.org/docs/main/notes/custom_operators.html
 
     Examples:
         >>> import torch
