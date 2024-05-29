@@ -1917,7 +1917,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         node_list = [
             # first linear is not quantized
             torch.ops.aten.linear.default,
-            # two  Q/DQ pairs for two linear layers from `sub` are quantized
+            # two  Q/DQ pairs for two linear layers from `sub`
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.aten.linear.default,
@@ -1947,7 +1947,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             def forward(self, x):
                 return self.baz(self.foo_bar(x))
 
-        # Set global to no quantization and then default config for a specific submodule.
+        # Set global to no quantization and then default config for a specific submodule whose name includes an underscore.
         quantizer = X86InductorQuantizer()
         quantizer.set_module_name_qconfig(
             "foo_bar", xiq.get_default_x86_inductor_quantization_config()
@@ -2041,7 +2041,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
     def test_set_module_name_and_module_type_case2(self):
         """Test that set `module_name_qconfig` and `module_type_qconfig` at the same time.
 
-        Expect that all linear are quantized except the last one.
+        Expect that all linear layers are quantized except the last one.
         """
 
         class M(torch.nn.Module):
@@ -2170,14 +2170,14 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                         )
                     )
                     quant_op = (
-                        torch.ops.quantized_decomposed.quantize_per_tensor.default
-                        if not q_is_dynamic
-                        else torch.ops.quantized_decomposed.quantize_per_tensor.tensor
+                        torch.ops.quantized_decomposed.quantize_per_tensor.tensor
+                        if q_is_dynamic
+                        else torch.ops.quantized_decomposed.quantize_per_tensor.default
                     )
                     dequant_op = (
-                        torch.ops.quantized_decomposed.dequantize_per_tensor.default
-                        if not q_is_dynamic
-                        else torch.ops.quantized_decomposed.dequantize_per_tensor.tensor
+                        torch.ops.quantized_decomposed.dequantize_per_tensor.tensor
+                        if q_is_dynamic
+                        else torch.ops.quantized_decomposed.dequantize_per_tensor.default
                     )
                     node_occurrence = {
                         # quantize and dequantize the input
@@ -2220,7 +2220,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
     def test_set_module_name_and_module_type_with_mixed_configs(self):
         """Test that set `module_name_qconfig` and `module_type_qconfig` at the same time with mixed the configs.
 
-        Expect that all linear are quantized with static quantization except the last one.
+        Expect that all linear layers are quantized with static quantization except the last one.
         """
 
         class M(torch.nn.Module):
