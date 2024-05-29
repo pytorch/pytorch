@@ -152,9 +152,6 @@ void CUDAGeneratorState::register_graph(cuda::CUDAGraph* graph) {
  * Unregisters a CUDA graph from the RNG state.
  */
 void CUDAGeneratorState::unregister_graph(cuda::CUDAGraph* graph) {
-  // Ensures that the RNG state is not currently being captured.
-  at::cuda::assertNotCapturing(
-      "Cannot unregister the state during capturing stage.");
   // Verify the graph was previously registered.
   TORCH_CHECK(
       registered_graphs_.find(graph) != registered_graphs_.end(),
