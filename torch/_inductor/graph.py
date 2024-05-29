@@ -348,7 +348,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.device_idxs: Set[int] = const_module.device_idxs if const_module else set()
         self.cuda = False
         self.buffers: List[ir.Buffer] = []
-        self.buffer_mutation: bool = False
         self.const_output_index: Dict[str, int] = (
             const_output_index if const_output_index else {}
         )
@@ -391,7 +390,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.aot_mode = aot_mode
         self.graph_id = graph_id
         self.post_grad_graph_id = next(_post_grad_graph_counter)
-        self.scheduler: "torch._inductor.scheduler.Scheduler" = None  # type: ignore[assignment]
+        self.scheduler: torch._inductor.scheduler.Scheduler = None  # type: ignore[assignment]
         self.nodes_prefer_channels_last = (
             self.find_nodes_prefer_channels_last() if self.layout_opt else set()
         )
@@ -927,7 +926,22 @@ class GraphLowering(torch.fx.Interpreter):
             # which run through implicit fallback must constrain their
             # arguments' fx strides
             layout_constraint = None
-            if torch._C.Tag.needs_fixed_stride_order in target.tags:
+
+            def needs_fixed_stride_order(target):
+                if (
+                    torch._C.Tag.needs_fixed_stride_order in target.tags
+                    and torch._C.Tag.does_not_need_fixed_stride_order in target.tags
+                ):
+                    # If both tags were specified, pessimistically assume that we do need it.
+                    return True
+                if torch._library.utils.is_builtin(target):
+                    return torch._C.Tag.needs_fixed_stride_order in target.tags
+                else:
+                    return (
+                        torch._C.Tag.does_not_need_fixed_stride_order not in target.tags
+                    )
+
+            if needs_fixed_stride_order(target):
                 # We have to set the current args because call_function will immediately
                 # evaluate this lowering after creating the fallback, without evaluating
                 # the layout constraint

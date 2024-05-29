@@ -1020,6 +1020,31 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
                 self.assertNotEqual(run_once, run_twice)
 
+        def test_remove_hooks_on_cached_tensors(self):
+            @torch.compile()
+            def foo(x):
+                return x * x
+
+            inp = torch.rand([4], device="cuda", requires_grad=True)
+
+            for _ in range(5):
+                out = foo(inp)
+                self.assertIsNone(out._backward_hooks)
+                out.register_hook(lambda: None)
+
+            # today, torch.compile never outputs a leaf tensor which is the only
+            # tensor that can register _post_accumulate_grad_hooks
+            # add this as a preventative test
+
+            @torch.compile()
+            def foo(x):
+                return torch.rand([4], device="cuda", requires_grad=True)
+
+            for _ in range(5):
+                out = foo(inp)
+                self.assertIsNone(out._post_accumulate_grad_hooks)
+                out.register_post_accumulate_grad_hook(lambda: None)
+
         def test_multiple_insert_removal_caching(self):
             torch._C._set_cached_tensors_enabled(True)
             try:
@@ -1774,7 +1799,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         @torch._inductor.config.patch("triton.cudagraphs", True)
         @torch._dynamo.config.patch("error_on_recompile", True)
         def test_multi_dispatch_custom_module(self):
-            # Test that we can correclty dispatch multiple graphs
+            # Test that we can correctly dispatch multiple graphs
             # if params of a custom module change
             class TestModule(torch.nn.Module):
                 def __init__(self, param) -> None:
@@ -1817,8 +1842,8 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 # Graph 2
                 return y + x
 
-            # We have 5 graphs here
-            #    Graph 1 w/ p1    Graph 1 w/ pw
+            # We have 6 graphs here
+            #    Graph 1 w/ p1    Graph 1 w/ p2
             #          |                |
             #     Graph 2 (v1)     Graph 2 (v2)
             # There are two versions of graph 2 because
