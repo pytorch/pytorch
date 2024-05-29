@@ -234,13 +234,12 @@ force_same_precision = (
 )
 
 # Specify candidate backends for gemm autotune.
-# Possible choices are combinations of: ATen, Triton, CUTLASS, CPP.
+# Possible choices are combinations of: ATen, Triton, CUTLASS.
 # ATen: default Pytorch ATen kernels.
 # Triton: Triton templates defined in torch inductor.
 # CUTLASS: Cutlass templates and kernels.
-# CPP: CPP templates and kernels for CPU.
 max_autotune_gemm_backends = os.environ.get(
-    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP"
+    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON"
 ).upper()
 
 # Specify the size of the search space for GEMM autotuning.
@@ -249,6 +248,11 @@ max_autotune_gemm_backends = os.environ.get(
 max_autotune_gemm_search_space = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_SEARCH_SPACE", "DEFAULT"
 ).upper()
+
+# Whether we fall back to ATen or hard error when no matches are found during autotuning
+autotune_fallback_to_aten = (
+    os.environ.get("TORCHINDUCTOR_AUTOTUNE_FALLBACK_TO_ATEN", "1") == "1"
+)
 
 # the value used as a fallback for the unbacked SymInts
 # that can appear in the input shapes (e.g., in autotuning)
