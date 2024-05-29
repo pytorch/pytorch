@@ -768,6 +768,11 @@ def optim_inputs_func_radam(device=None, dtype=None):
             kwargs={"weight_decay": 0.1, "decoupled_weight_decay": True},
             desc="decoupled_weight_decay",
         ),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.1, "maximize": True},
+            desc="maximize",
+        ),
     ] + (cuda_supported_configs if "cuda" in str(device) else [])
 
 
@@ -962,13 +967,6 @@ def optim_error_inputs_func_sparseadam(device, dtype):
     error_inputs = get_error_inputs_for_all_optims(device, dtype)
 
     if str(device) == "cpu":
-        # SparseAdam raises a warning and not an error for the first entry. We
-        # update it here:
-        error_inputs[0].error_type = FutureWarning
-        error_inputs[
-            0
-        ].error_regex = "Passing in a raw Tensor as ``params`` to SparseAdam"
-
         error_inputs += [
             ErrorOptimizerInput(
                 OptimizerInput(

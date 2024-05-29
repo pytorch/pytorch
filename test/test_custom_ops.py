@@ -13,6 +13,7 @@ import torch._custom_ops as custom_ops
 
 import torch.testing._internal.optests as optests
 import torch.utils.cpp_extension
+
 from functorch import make_fx
 from torch import Tensor
 from torch._custom_op.impl import custom_op, CustomOp, infer_schema
@@ -198,6 +199,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         ):
             torch.library.opcheck(op, (x,), {})
 
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_incorrect_abstract_impl(self, device):
         lib = self.lib()
         lib.define("foo(Tensor x) -> Tensor")
@@ -1752,6 +1754,17 @@ dynamic shape operator: _torch_testing.numpy_nonzero.default
             schema = torch._C.parse_schema(schema_str)
             res = torch._library.utils.is_functional_schema(schema)
             self.assertEqual(res, expected)
+
+    def test_incorrect_schema_types(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            with self.assertRaisesRegex(RuntimeError, "unknown type specifier"):
+                lib.define("foo12(Tensor a) -> asdfasdf")
+            with self.assertRaisesRegex(RuntimeError, "unknown type specifier"):
+                lib.define("foo12(asdf a) -> Tensor")
+            with self.assertRaisesRegex(RuntimeError, "Use `SymInt` or `int`"):
+                lib.define("foo12(int64_t a) -> Tensor")
+            with self.assertRaisesRegex(RuntimeError, "Use `float`"):
+                lib.define("foo12(double a) -> Tensor")
 
     def test_is_tensorlist_like_type(self):
         tensorlists = [
