@@ -329,9 +329,6 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_TENSORPIPE "Use TensorPipe. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
-option(USE_TBB "Use TBB (Deprecated)" OFF)
-cmake_dependent_option(
-    USE_SYSTEM_TBB "Use system-provided Intel TBB." OFF "USE_TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
 option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 option(BUILD_LIBTORCH_CPU_WITH_DEBUG "Enable RelWithDebInfo for libtorch_cpu target only" OFF)
@@ -430,9 +427,6 @@ if(USE_SYSTEM_LIBS)
   set(USE_SYSTEM_PYBIND11 ON)
   if(USE_NCCL)
     set(USE_SYSTEM_NCCL ON)
-  endif()
-  if(USE_TBB)
-    set(USE_SYSTEM_TBB ON)
   endif()
 endif()
 

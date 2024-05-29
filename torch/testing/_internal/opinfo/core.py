@@ -11,8 +11,6 @@ from functools import partial
 from itertools import product
 from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
 
-from torchgen.utils import dataclass_repr
-
 import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
@@ -35,6 +33,8 @@ from torch.testing._internal.common_utils import (
     TrackedInputIter,
 )
 from torch.testing._internal.opinfo import utils
+
+from torchgen.utils import dataclass_repr
 
 # Reasonable testing sizes for dimensions
 L = 20

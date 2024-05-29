@@ -71,7 +71,7 @@ class Library:
         self.ns = ns
         self._op_defs: Set[str] = set()
         self._op_impls: Set[str] = set()
-        self._registration_handles: List["torch._library.utils.RegistrationHandle"] = []
+        self._registration_handles: List[torch._library.utils.RegistrationHandle] = []
         self.kind = kind
         self.dispatch_key = dispatch_key
         # Use a finalizer to setup the "destructor" instead of __del__.
@@ -570,7 +570,7 @@ def register_fake(
     This API may be used as a decorator (see examples).
 
     For a detailed guide on custom ops, please see
-    https://docs.google.com/document/d/1W--T6wz8IY8fOI0Vm8BF44PdBgs283QvpelJZWieQWQ/edit
+    https://pytorch.org/docs/main/notes/custom_operators.html
 
     Examples:
         >>> import torch

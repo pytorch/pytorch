@@ -1,7 +1,5 @@
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-from torchgen.model import FunctionSchema
-
 import torch
 import torch.export._trace
 
@@ -15,6 +13,8 @@ from torch.export.graph_signature import (
 )
 from torch.fx import subgraph_rewriter
 from torch.onnx.utils import _create_jit_graph
+
+from torchgen.model import FunctionSchema
 
 
 def inplace_optimize_sym_size_div(gm: torch.fx.GraphModule):
