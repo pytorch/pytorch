@@ -52,6 +52,52 @@ def get_filtered_export_db_tests():
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerialize(TestCase):
+    def test_export_with_custom_op_serialization(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        class FooCustomOp(torch.nn.Module):
+            pass
+
+        class FooCustomOpHandler(torch._export.serde.serialize.CustomOpHandler):
+            def namespace(self):
+                return "Foo"
+
+            def op_name(self, op_type):
+                if op_type == FooCustomOp:
+                    return "FooCustomOp"
+                return None
+
+            def op_type(self, op_name):
+                if op_name == "FooCustomOp":
+                    return FooCustomOp
+                return None
+
+            def op_schema(self, op_type):
+                if op_type == FooCustomOp:
+                    return self.attached_schema
+                return None
+
+        inp = (torch.ones(10),)
+        ep = export(TestModule(), inp)
+
+        # Register the custom op handler.
+        foo_custom_op = FooCustomOp()
+        foo_custom_op_handler = FooCustomOpHandler()
+        torch._export.serde.serialize.register_custom_op_handler(
+            foo_custom_op_handler, type(foo_custom_op)
+        )
+
+        # Inject the custom operator.
+        for node in ep.graph.nodes:
+            if node.name == "add":
+                foo_custom_op_handler.attached_schema = node.target._schema
+                node.target = foo_custom_op
+
+        # Serialization.
+        serialize(ep)
+
     def test_predispatch_export_with_autograd_op(self):
         class Foo(torch.nn.Module):
             def __init__(self):
