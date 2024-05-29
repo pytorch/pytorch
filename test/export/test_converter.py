@@ -47,24 +47,36 @@ class TestConverter(TestCase):
         inp = (torch.rand(3, 4),)
         self._check_equal_ts_ep_converter(Module(), inp)
 
+    @requires_cuda
+    def test_prim_device_cuda(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                device = x.device
+                return torch.ones(2, 3, device=device)
+
+        inp = (torch.rand((3, 4), device="cuda:0"),)
+        self._check_equal_ts_ep_converter(Module(), inp)
+
     def test_prim_dtype(self):
         class Module(torch.nn.Module):
             def forward(self, x):
                 dtype = x.dtype
                 return torch.ones(2, 3, dtype=dtype)
 
-        inp = (torch.rand(3, 4),)
-        self._check_equal_ts_ep_converter(Module(), inp)
+        for dtype in [
+            torch.float32,
+            torch.double,
+        ]:
+            inp = (torch.rand((3, 4), dtype=dtype),)
+            self._check_equal_ts_ep_converter(Module(), inp)
 
-    @requires_cuda
-    def test_prim_dtype_cuda(self):
-        class Module(torch.nn.Module):
-            def forward(self, x):
-                dtype = x.dtype
-                return torch.ones(2, 3, dtype=dtype)
-
-        inp = (torch.rand((3, 4), device="cuda:0"),)
-        self._check_equal_ts_ep_converter(Module(), inp)
+        for dtype in [
+            torch.uint8,
+            torch.int8,
+            torch.int32,
+        ]:
+            inp = (torch.randint(high=128, size=(3, 4), dtype=dtype),)
+            self._check_equal_ts_ep_converter(Module(), inp)
 
 
 if __name__ == "__main__":
