@@ -169,6 +169,10 @@ def _create_operator_type_filter(
         num_nodes_with_operator_type = sum(
             node.target == operator_type for node in nodes
         )
+        if num_nodes_with_operator_type > 1:
+            raise NotImplementedError(
+                f"Several nodes within a single pattern are {operator_type}."
+            )
         return num_nodes_with_operator_type == 1
 
     return operator_type_filter

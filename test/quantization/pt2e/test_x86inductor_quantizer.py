@@ -1870,55 +1870,10 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
 
     @skipIfNoX86
     def test_set_module_name_qconfig(self):
-        """Test that quantize the specific submodule."""
+        """Test case for quantizing a specific submodule by configuring `set_module_name_qconfig`.
 
-        class Sub(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(5, 5)
-
-            def forward(self, x):
-                return self.linear(x)
-
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(5, 5)
-                self.sub = Sub()
-
-            def forward(self, x):
-                x = self.linear(x)
-                x = self.sub(x)
-                return x
-
-        m = M().eval()
-        example_inputs = (torch.randn(3, 5),)
-        # Set global to `None` and then default config for a specific submodule.
-        quantizer = X86InductorQuantizer()
-        quantizer.set_module_name_qconfig(
-            "sub", xiq.get_default_x86_inductor_quantization_config()
-        )
-        node_occurrence = {
-            torch.ops.aten.linear.default: 2,
-            # quantize and dequantize the input of the second linear (`sub`)
-            torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
-            # dequantize the weight of the second linear (`sub`)
-            torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
-        }
-        node_list = [
-            # first linear is not quantized
-            torch.ops.aten.linear.default,
-            # second linear (`sub`) is quantized
-            torch.ops.quantized_decomposed.quantize_per_tensor.default,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-            torch.ops.aten.linear.default,
-        ]
-        self._test_quantizer(m, example_inputs, quantizer, node_occurrence, node_list)
-
-    @skipIfNoX86
-    def test_set_module_name_qconfig_case2(self):
-        """Test that quantize the specific submodule."""
+        Expect that all linear layers within the submodule `sub` are quantized.
+        """
 
         class Sub(torch.nn.Module):
             def __init__(self):
@@ -1959,11 +1914,10 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             # dequantize the weight of two linear layers from `sub`
             torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
         }
-        # node_list = None
         node_list = [
             # first linear is not quantized
             torch.ops.aten.linear.default,
-            # two linear layers from `sub` are quantized
+            # two  Q/DQ pairs for two linear layers from `sub` are quantized
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.aten.linear.default,
@@ -2030,26 +1984,18 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 count += 1
 
     @skipIfNoX86
-    def test_set_module_name_and_set_module_type_case1(self):
+    def test_set_module_name_and_module_type_case1(self):
         """Test that set `module_name_qconfig` and `module_type_qconfig` at the same time.
 
-        All linear are not quantized except the last one.
+        Expect that all linear layers are not quantized except the last one.
         """
-
-        class Sub(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(5, 5)
-
-            def forward(self, x):
-                return self.linear(x)
 
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.linear1 = torch.nn.Linear(5, 10)
                 self.linear2 = torch.nn.Linear(10, 5)
-                self.sub = Sub()
+                self.sub = torch.nn.Linear(5, 5)
 
             def forward(self, x):
                 x = self.linear1(x)
@@ -2092,26 +2038,18 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         )
 
     @skipIfNoX86
-    def test_set_module_name_and_set_module_type_case2(self):
+    def test_set_module_name_and_module_type_case2(self):
         """Test that set `module_name_qconfig` and `module_type_qconfig` at the same time.
 
-        All linear are quantized except the last one.
+        Expect that all linear are quantized except the last one.
         """
-
-        class Sub(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(5, 5)
-
-            def forward(self, x):
-                return self.linear(x)
 
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.linear1 = torch.nn.Linear(5, 10)
                 self.linear2 = torch.nn.Linear(10, 5)
-                self.sub = Sub()
+                self.sub = torch.nn.Linear(5, 5)
 
             def forward(self, x):
                 x = self.linear1(x)
@@ -2121,7 +2059,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
 
         m = M().eval()
         example_inputs = (torch.randn(3, 5),)
-        # Set `sub` to None and then default config for a all `Linear`.
+        # Set `sub` with None and then default config for a all `Linear`.
         quantizer = X86InductorQuantizer()
         quantizer.set_module_name_qconfig("sub", None).set_module_type_qconfig(
             torch.nn.Linear, xiq.get_default_x86_inductor_quantization_config()
@@ -2136,10 +2074,13 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
         }
         node_list = [
-            # first and second linear are quantized
+            # Q/DQ for first lienar
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.aten.linear.default,
+            # Q/DQ for second lienar
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.aten.linear.default,
             # last linear is not quantized
             torch.ops.aten.linear.default,
@@ -2154,7 +2095,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
 
     @skipIfNoX86
     def test_set_module_name_qconfig_for_dynamic_quant(self):
-        """Test that quantize the specific submodule for dynamic quantization."""
+        """Test that quantize a specific submodule for dynamic quantization."""
 
         with override_quantized_engine("x86"), torch.no_grad():
             for is_qat in [False, True]:
@@ -2182,14 +2123,10 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.choose_qparams.tensor,
                     torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
-                    # # op for de-quantizing `q_proj`'s weight, disable this check to avoid random error.
-                    # torch.ops.quantized_decomposed.dequantize_per_channel.default,
                     # q_proj
                     torch.ops.aten.linear.default,
                     # k_proj
                     torch.ops.aten.linear.default,
-                    # # op for de-quantizing `v_proj`'s weight, disable this check to avoid random error.
-                    # torch.ops.quantized_decomposed.dequantize_per_channel.default,
                     # v_proj
                     torch.ops.aten.linear.default,
                 ]
@@ -2203,58 +2140,137 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 )
 
     @skipIfNoX86
-    def test_set_module_name_with_mixed_static_and_dynamic(self):
-        """Test that mixed static and dynamic quantization for a module.
+    def test_set_module_name_with_mixed_configs(self):
+        """Test case for setting module names with mixed static/dynamic or QAT/non-QAT configurations.
 
-        Currently, mixed static/dynamic quantization is not supported. The subsequent config will be ignored.
+        The config for 'v_proj' will always be ignored and raise a warning.
+        """
+        with override_quantized_engine("x86"), torch.no_grad():
+            with self.assertWarns(UserWarning) as context:
+                for q_is_dynamic, v_is_dynamic, q_is_qat, v_is_qat in itertools.product(
+                    [False, True], repeat=4
+                ):
+                    if q_is_dynamic == v_is_dynamic and q_is_qat == v_is_qat:
+                        continue
+                    m = TestHelperModules.SelfAttnLikeModule(input_dim=64).eval()
+                    example_inputs = (torch.randn(1, 4, 64),)
+                    quantizer = (
+                        X86InductorQuantizer()
+                        .set_module_name_qconfig(
+                            "q_proj",
+                            xiq.get_default_x86_inductor_quantization_config(
+                                is_qat=q_is_qat, is_dynamic=q_is_dynamic
+                            ),
+                        )
+                        .set_module_name_qconfig(
+                            "v_proj",
+                            xiq.get_default_x86_inductor_quantization_config(
+                                is_qat=v_is_qat, is_dynamic=v_is_dynamic
+                            ),
+                        )
+                    )
+                    quant_op = (
+                        torch.ops.quantized_decomposed.quantize_per_tensor.default
+                        if not q_is_dynamic
+                        else torch.ops.quantized_decomposed.quantize_per_tensor.tensor
+                    )
+                    dequant_op = (
+                        torch.ops.quantized_decomposed.dequantize_per_tensor.default
+                        if not q_is_dynamic
+                        else torch.ops.quantized_decomposed.dequantize_per_tensor.tensor
+                    )
+                    node_occurrence = {
+                        # quantize and dequantize the input
+                        quant_op: 1,
+                        dequant_op: 1,
+                        # only `q_proj` was quantized, dequantize its weight
+                        torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+                    }
+                    node_list = [
+                        # quantize and dequantize the input
+                        quant_op,
+                        dequant_op,
+                        # q_proj
+                        torch.ops.aten.linear.default,
+                        # k_proj/v_proj
+                        torch.ops.aten.linear.default,
+                        torch.ops.aten.linear.default,
+                    ]
+                    self._test_quantizer(
+                        m,
+                        example_inputs,
+                        quantizer,
+                        node_occurrence,
+                        node_list,
+                        is_qat=q_is_qat,
+                    )
+                    warning_msg = (
+                        "Mixed QAT and Non-QAT"
+                        if q_is_qat != v_is_qat
+                        else "Mixed dynamic and static"
+                    )
+                    self.assertTrue(
+                        any(
+                            warning_msg in msg
+                            for msg in [str(w.message) for w in context.warnings]
+                        )
+                    )
+
+    @skipIfNoX86
+    def test_set_module_name_and_module_type_with_mixed_configs(self):
+        """Test that set `module_name_qconfig` and `module_type_qconfig` at the same time with mixed the configs.
+
+        Expect that all linear are quantized with static quantization except the last one.
         """
 
-        with override_quantized_engine("x86"), torch.no_grad():
-            m = TestHelperModules.SelfAttnLikeModule(input_dim=64).eval()
-            example_inputs = (torch.randn(1, 4, 64),)
-            static_config = xiq.get_default_x86_inductor_quantization_config(
-                is_dynamic=False
-            )
-            dynamic_config = xiq.get_default_x86_inductor_quantization_config(
-                is_dynamic=True
-            )
-            # set `v_proj` with static config
-            # set `q_proj` with dynamic config (will be skipped)
-            quantizer = (
-                X86InductorQuantizer()
-                .set_module_name_qconfig("q_proj", static_config)
-                .set_module_name_qconfig("v_proj", dynamic_config)
-            )
-            node_occurrence = {
-                # quantize and dequantize the input
-                torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
-                torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
-                # only `q_proj`` was quantized, dequantize its weight
-                torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
-            }
-            node_list = [
-                # quantize and dequantize the input
-                torch.ops.quantized_decomposed.quantize_per_tensor.default,
-                torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-                # dequantize `q_proj`'s weight, disable this check to avoid random error.
-                # torch.ops.quantized_decomposed.dequantize_per_channel.default,
-                # q_proj
-                torch.ops.aten.linear.default,
-                # k_proj
-                torch.ops.aten.linear.default,
-                # not quantize `v_proj`'s weight
-                # torch.ops.quantized_decomposed.dequantize_per_channel.default,
-                # v_proj
-                torch.ops.aten.linear.default,
-            ]
-            self._test_quantizer(
-                m,
-                example_inputs,
-                quantizer,
-                node_occurrence,
-                node_list,
-                is_qat=True,
-            )
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(5, 10)
+                self.linear2 = torch.nn.Linear(10, 5)
+                self.sub = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = self.linear2(x)
+                x = self.sub(x)
+                return x
+
+        m = M().eval()
+        example_inputs = (torch.randn(3, 5),)
+        # Set `sub` with static config and then dynamic config for a all `Linear`(ignored).
+        quantizer = X86InductorQuantizer()
+        quantizer.set_module_name_qconfig(
+            "sub", xiq.get_default_x86_inductor_quantization_config(is_dynamic=False)
+        ).set_module_type_qconfig(
+            torch.nn.Linear,
+            xiq.get_default_x86_inductor_quantization_config(is_dynamic=True),
+        )
+
+        node_occurrence = {
+            torch.ops.aten.linear.default: 3,
+            # quantize and dequantize the input of the last linear
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
+            # dequantize the weight of the last linear
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+        }
+        node_list = [
+            # first and second linear are not quantized
+            torch.ops.aten.linear.default,
+            torch.ops.aten.linear.default,
+            # Q/DQ pairs for the last linear
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.linear.default,
+        ]
+        self._test_quantizer(
+            m,
+            example_inputs,
+            quantizer,
+            node_occurrence,
+            node_list,
+        )
 
     @skipIfNoX86
     def test_filter_conv2d_recipe(self):
