@@ -28,11 +28,21 @@ _score_mod_signature = Callable[
 ]
 
 
+def _identity(
+    score: torch.Tensor,
+    batch: torch.Tensor,
+    head: torch.Tensor,
+    token_q: torch.Tensor,
+    token_kv: torch.Tensor,
+) -> torch.Tensor:
+    return score
+
+
 def _flex_attention(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
-    score_mod: _score_mod_signature,
+    score_mod: _score_mod_signature = _identity,
 ) -> torch.Tensor:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
 
@@ -63,7 +73,7 @@ def _flex_attention(
         query (Tensor): Query tensor; shape :math:`(B, H, L, E)`.
         key (Tensor): Key tensor; shape :math:`(B, H, S, E)`.
         value (Tensor): Value tensor; shape :math:`(B, H, S, Ev)`.
-        score_mod (Callable): Function to modify attention scores
+        score_mod (Callable): Function to modify attention scores. By default no score_mod is applied.
 
     Returns:
         output (Tensor): Attention output; shape :math:`(B, H, L, Ev)`.
@@ -83,9 +93,8 @@ def _flex_attention(
     """
 
     if torch.compiler.is_dynamo_compiling():
-        # mark head_dim and dim always to be static
+        # mark head_dim always to be static
         for x in [query, key, value]:
-            torch._dynamo.mark_static(x, 1)
             torch._dynamo.mark_static(x, -1)
         out, _ = flex_attention_hop(query, key, value, score_mod)
         return out
@@ -97,6 +106,8 @@ def _flex_attention(
         raise ValueError(
             "NYI: The target sequence length (L) of the query tensor must match the source sequence length (S) of the key tensor."
         )
+    if query.size(-2) % 128 != 0:
+        raise ValueError("NYI: S and L must be a multiple of 128")
 
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("flex_attention requires dynamo support.")
@@ -111,16 +122,6 @@ def _flex_attention(
 
 
 """Some common used score_mod functions for flex_attention in PyTorch."""
-
-
-def _identity(
-    score: torch.Tensor,
-    batch: torch.Tensor,
-    head: torch.Tensor,
-    token_q: torch.Tensor,
-    token_kv: torch.Tensor,
-) -> torch.Tensor:
-    return score
 
 
 def _causal(
@@ -150,7 +151,7 @@ def _rel_causal(
     token_q: torch.Tensor,
     token_kv: torch.Tensor,
 ) -> torch.Tensor:
-    return torch.where(token_q <= token_kv, score + (token_q - token_kv), float("-inf"))
+    return torch.where(token_q >= token_kv, score + (token_q - token_kv), float("-inf"))
 
 
 def _generate_alibi_bias(num_heads: int):
