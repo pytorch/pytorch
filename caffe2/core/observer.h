@@ -23,7 +23,7 @@ class ObserverBase {
     return "Not implemented.";
   }
 
-  virtual ~ObserverBase() noexcept {};
+  virtual ~ObserverBase() noexcept {}
 
   T* subject() const {
     return subject_;
@@ -32,7 +32,7 @@ class ObserverBase {
   virtual std::unique_ptr<ObserverBase<T>> rnnCopy(T* subject, int rnn_order)
       const {
     return nullptr;
-  };
+  }
 
  protected:
   T* subject_;
