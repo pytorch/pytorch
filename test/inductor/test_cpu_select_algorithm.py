@@ -222,16 +222,22 @@ class TestSelectAlgorithm(TestCase):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         if (
-            dtype == torch.bfloat16
+            (
+                dtype == torch.bfloat16
+                or (
+                    dtype == torch.float16
+                    and torch.ops.mkldnn._is_mkldnn_fp16_supported()
+                )
+            )
             and epilogue != "mul"
             and epilogue != "div"
             or (dtype == torch.half and epilogue == "add" and not bias)
         ):
             # Several scenarios where epilogue fusion is not counted in:
             # 1. For bfloat16, the epilogue fusion is part of the template,
-            #    not fused via scheduler. This will also be true for float16 but
-            #    float16 oneDNN linear is not supported right now. The exception
-            #    is mul or div fusion which is not supported for oneDNN linear.
+            #    not fused via scheduler. This will also be true for float16 when
+            #    hardware has the float16 instruction. The exception is mul or
+            #    div fusion which is not supported for oneDNN linear.
             # 2. For float16, since oneDNN linear is not applied, linear w/o bias
             #    plus epilogue add is treated as linear w/ bias.
             self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
