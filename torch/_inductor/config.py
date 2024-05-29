@@ -377,20 +377,10 @@ debug_index_asserts = False
 is_nightly_or_source = "dev" in torch.__version__ or "git" in torch.__version__
 developer_warnings = is_fbcode() or is_nightly_or_source
 
-
 # The multiprocessing start method to use for inductor workers in the codecache.
-# "subprocess", "fork", or "spawn"
-def decide_worker_start_method():
-    start_method = os.environ.get("TORCHINDUCTOR_WORKER_START", "fork")
-    assert start_method in [
-        "subprocess",
-        "fork",
-        "spawn",
-    ], f"Invalid start method: {start_method}"
-    return start_method
-
-
-worker_start_method = decide_worker_start_method()
+# TODO: fork is not safe in a multithreaded environment, we should evaluate changing
+# the default to spawn.
+worker_start_method = "fork"
 
 # Flags to turn on all_reduce fusion. These 2 flags should be automaticaly turned
 # on by DDP and should not be set by the users.
@@ -884,10 +874,19 @@ class trace:
     log_autotuning_results: bool = False
 
 
-_save_config_ignore = {
+_save_config_ignore = [
     # workaround: "Can't pickle <function ...>"
     "trace.upload_tar",
-}
+]
+
+_cache_config_ignore_prefix = [
+    # trace functions are not relevant to config caching
+    "trace",
+    # uses absolute path
+    "cuda.cutlass_dir",
+    # not relevant
+    "compile_threads",
+]
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403

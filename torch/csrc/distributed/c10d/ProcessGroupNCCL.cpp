@@ -398,8 +398,7 @@ at::Device ProcessGroupNCCL::guessDeviceForRank() const {
   if (getBoundDeviceId()) {
     return *getBoundDeviceId();
   } else {
-    auto numGPUs = at::cuda::getNumGPUs();
-    int16_t deviceIdx = static_cast<int16_t>(rank_ % numGPUs);
+    int16_t deviceIdx = static_cast<int16_t>(rank_ % localDeviceCount_);
     return at::Device(at::DeviceType::CUDA, deviceIdx);
   }
 }
@@ -740,6 +739,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
   this->setGroupName(options_->group_name);
+  this->localDeviceCount_ = at::cuda::getNumGPUs();
   logPrefix_ = createLogPrefix();
   blockingWait_ = getCvarBool(TORCH_NCCL_BLOCKING_WAIT, false);
   asyncErrorHandling_ = static_cast<ErrorHandlingMode>(
@@ -816,8 +816,16 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   std::string torch_distributed_debug =
       getCvarString({"TORCH_DISTRIBUTED_DEBUG"}, OFF.c_str());
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL initialization options: "
-            << "NCCL version: " << getNcclVersion() << ", size: " << size
-            << ", global rank: " << globalRank()
+            << "size: " << size << ", global rank: " << globalRank()
+            << ", TIMEOUT(ms): " << options_->timeout.count()
+            << ", USE_HIGH_PRIORITY_STREAM: "
+            << options_->is_high_priority_stream
+            << ", SPLIT_FROM: " << options_->split_from
+            << ", SPLIT_COLOR: " << options_->split_color
+            << ", PG Name: " << options_->group_name;
+
+  LOG(INFO) << logPrefix() << "ProcessGroupNCCL environments: "
+            << "NCCL version: " << getNcclVersion()
             << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
             << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnException_
             << ", TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC: "
@@ -825,11 +833,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
             << ", TORCH_NCCL_ENABLE_TIMING: " << enableTiming_.load()
             << ", TORCH_NCCL_BLOCKING_WAIT: " << blockingWait_
-            << ", TIMEOUT(ms): " << options_->timeout.count()
-            << ", USE_HIGH_PRIORITY_STREAM: "
-            << options_->is_high_priority_stream
-            << ", SPLIT_FROM: " << options_->split_from
-            << ", SPLIT_COLOR: " << options_->split_color
             << ", TORCH_DISTRIBUTED_DEBUG: " << torch_distributed_debug
 #ifdef NCCL_HAS_COMM_REGISTER
             << ", TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
@@ -840,8 +843,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
             << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << ncclTraceBufferSize_
             << ", TORCH_NCCL_COORD_CHECK_MILSEC: " << coordCheckIntervalMilSec_
-            << ", TORCH_NCCL_NAN_CHECK: " << enableNanCheck_
-            << ", PG Name: " << options_->group_name;
+            << ", TORCH_NCCL_NAN_CHECK: " << enableNanCheck_;
 
   if (options_->global_ranks_in_group.empty()) {
     this->globalRankStart = 0;
@@ -1119,13 +1121,15 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
 
   if (!terminateProcessGroup_.load()) {
-    LOG(WARNING) << c10::str(
-        "WARNING: process group has NOT been destroyed before it is being destructed. ",
-        "On normal program exit, the application should call destroy_process_group to ",
-        "ensure that any pending NCCL data transfers have finished in this process. "
-        "In rare cases this process can exit before this point and block the progress of "
-        "another member of the process group. This constraint has always been present, "
-        " but this warning has only been added since PyTorch 2.4");
+    if (rank_ % localDeviceCount_ == 0) {
+      TORCH_WARN_ONCE(
+          "WARNING: process group has NOT been destroyed before we destruct ProcessGroupNCCL. ",
+          "On normal program exit, the application should call destroy_process_group to ",
+          "ensure that any pending NCCL operations have finished in this process. "
+          "In rare cases this process can exit before this point and block the progress of "
+          "another member of the process group. This constraint has always been present, "
+          " but this warning has only been added since PyTorch 2.4");
+    }
     // If user haven't explicitly destroy/shutdown process group, destructor
     // needs to do so
     shutdown();

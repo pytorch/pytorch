@@ -22,6 +22,7 @@ from typing import Any, Dict, Iterator, List, Tuple
 from unittest import mock
 
 import numpy as np
+
 import torch
 
 import torch._dynamo.test_case
@@ -4738,6 +4739,17 @@ def forward(self, primals_1, primals_2):
         except Exception as e:
             compiled_str = str(e)
         self.assertEqual(orig_str, compiled_str)
+
+    def test_nn_module_callable(self):
+        class M(nn.Module):
+            def forward(self, x):
+                return x.sin()
+
+        def f(m):
+            return callable(m)
+
+        res = torch.compile(f, fullgraph=True)(M())
+        self.assertTrue(res)
 
     def test_stk_sdd_is_transposed(self):
         trigger_graph_break = False

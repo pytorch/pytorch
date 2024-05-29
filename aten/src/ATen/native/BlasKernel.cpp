@@ -5,6 +5,7 @@
 #include <ATen/Parallel.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Unroll.h>
 #include <c10/util/complex.h>
 #include <c10/util/irange.h>
 #include <algorithm>
@@ -244,26 +245,30 @@ static inline float16_t reduce(float16x8_t x) {
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
-#define F16_ELEMENTS_PER_ITERATION 32
-#define F16_ELEMENTS_PER_REGISTER 8
-#define F16_REGISTERS_PER_ITERATION (F16_ELEMENTS_PER_ITERATION / F16_ELEMENTS_PER_REGISTER)
-static inline double reduce(float16x8_t x[F16_REGISTERS_PER_ITERATION]) {
-  int offset = F16_REGISTERS_PER_ITERATION / 2;
-  for (int i = 0; i < offset; ++i) {
-    x[i] = vaddq_f16(x[i], x[offset + i]);
-  }
-  offset /= 2;
-  for (int i = 0; i < offset; ++i) {
-    x[i] = vaddq_f16(x[i], x[offset + i]);
-  }
-  offset /= 2;
-  for (int i = 0; i < offset; ++i) {
-    x[i] = vaddq_f16(x[i], x[offset + i]);
-  }
+// We need the shift for reduce(), hence the extra constants.
+static constexpr auto kF16ElementsPerIterationShift = 7;
+static constexpr auto kF16ElementsPerIteration = 1 << kF16ElementsPerIterationShift;
+static_assert(kF16ElementsPerIteration == 128);
+
+static constexpr auto kF16ElementsPerRegisterShift = 3;
+static constexpr auto kF16ElementsPerRegister = 1 << kF16ElementsPerRegisterShift;
+static_assert(kF16ElementsPerRegister == 8);
+
+static constexpr auto kF16RegistersPerIterationShift = kF16ElementsPerIterationShift - kF16ElementsPerRegisterShift;
+static constexpr auto kF16RegistersPerIteration = 1 << kF16RegistersPerIterationShift;
+static_assert(kF16RegistersPerIteration == kF16ElementsPerIteration / kF16ElementsPerRegister);
+
+static inline double reduce(float16x8_t x[kF16RegistersPerIteration]) {
+  int offset = kF16RegistersPerIteration;
+  c10::ForcedUnroll<kF16RegistersPerIterationShift>{}([&offset, &x](auto idx) {
+    offset /= 2;
+    for (int i = 0; i < offset; ++i) {
+      x[i] = vaddq_f16(x[i], x[offset + i]);
+    }
+  });
   const float32x4_t t0 = vcvt_f32_f16(vget_low_f16(x[0]));
   const float32x4_t t1 = vcvt_f32_f16(vget_high_f16(x[0]));
   return (double)vaddvq_f32(vaddq_f32(t0, t1));
-
 }
 
 static inline float16x8_t f16_fma(float16x8_t a, float16x8_t b, float16x8_t c) {
@@ -280,13 +285,13 @@ static inline float16x8_t f16_fma(float16x8_t a, float16x8_t b, float16x8_t c) {
 static void fp16_gemv_trans_fp16_arith_by_dot_products(const int m, const int n, const float16_t* a, const int lda, const float16_t *x, float16_t* y, int incy) {
   parallel_for(0, n, 1, [&](int begin, int end) {
   for (int i = begin; i < end; ++i) {
-      float16x8_t sum[F16_REGISTERS_PER_ITERATION] = {vdupq_n_f16(0)};
+      float16x8_t sum[kF16RegistersPerIteration] = {vdupq_n_f16(0)};
 
-      const auto m_aligned = m & ~(F16_ELEMENTS_PER_ITERATION - 1);
-      for (int j = 0; j < m_aligned ; j += F16_ELEMENTS_PER_ITERATION) {
-        for (int k = 0; k < F16_REGISTERS_PER_ITERATION; ++k) {
-          const auto temp_x = vld1q_f16(x + j + k * F16_ELEMENTS_PER_REGISTER);
-          const auto temp_a = vld1q_f16(a + lda * i + j + k * F16_ELEMENTS_PER_REGISTER);
+      const auto m_aligned = m & ~(kF16ElementsPerIteration - 1);
+      for (int j = 0; j < m_aligned ; j += kF16ElementsPerIteration) {
+        for (int k = 0; k < kF16RegistersPerIteration; ++k) {
+          const auto temp_x = vld1q_f16(x + j + k * kF16ElementsPerRegister);
+          const auto temp_a = vld1q_f16(a + lda * i + j + k * kF16ElementsPerRegister);
           sum[k] = f16_fma(sum[k], temp_x, temp_a);
         }
       }
@@ -315,45 +320,76 @@ static inline float32x4_t f32_fma(float32x4_t a, float32x4_t b, float32x4_t c) {
 #endif
 }
 
+static inline float32x4_t f32_fma_low_f16(float32x4_t a, float16x8_t b, float16x8_t c) {
+#ifdef __ARM_FEATURE_FP16_FML
+  // NOTE: this instruction is an optional instruction in ARM v8.2 and
+  // v8.3, but mandatory in v8.4 per
+  // https://developer.arm.com/documentation/ddi0596/2021-03/SIMD-FP-Instructions/FMLAL--FMLAL2--vector---Floating-point-fused-Multiply-Add-Long-to-accumulator--vector--?lang=en
+  // I'm not certain that I have the right feature test macro.
+  return vfmlalq_low_f16(a, b, c);
+#else
+  return f32_fma(a, vcvt_f32_f16(vget_low_f16(b)), vcvt_f32_f16(vget_low_f16(c)));
+#endif
+}
+
+static inline float32x4_t f32_fma_high_f16(float32x4_t a, float16x8_t b, float16x8_t c) {
+#ifdef __ARM_FEATURE_FP16_FML
+  // See above note about this instruction.
+  return vfmlalq_high_f16(a, b, c);
+#else
+  return f32_fma(a, vcvt_f32_f16(vget_high_f16(b)), vcvt_f32_f16(vget_high_f16(c)));
+#endif
+}
+
 // The below reduce overload and
 // fp16_gemv_trans_fp32_arith_by_dot_products are adapted from
 // llama.cpp's ggml_vec_dot_f32 and surrounding utility functions. See
 // NOTE [ GGML Copyright Notice ] above for the required notice.
-#define F32_ELEMENTS_PER_ITERATION 16
-#define F32_ELEMENTS_PER_REGISTER 4
-#define F32_REGISTERS_PER_ITERATION (F32_ELEMENTS_PER_ITERATION / F32_ELEMENTS_PER_REGISTER)
-static inline double reduce(float32x4_t x[F32_REGISTERS_PER_ITERATION]) {
-  int offset = F32_REGISTERS_PER_ITERATION / 2;
-  for (int i = 0; i < offset; ++i) {
-    x[i] = vaddq_f32(x[i], x[offset + i]);
-  }
-  offset /= 2;
-  for (int i = 0; i < offset; ++i) {
-    x[i] = vaddq_f32(x[i], x[offset + i]);
-  }
-  offset /= 2;
-  for (int i = 0; i < offset; ++i) {
-    x[i] = vaddq_f32(x[i], x[offset + i]);
-  }
-  offset /= 2;
-  for (int i = 0; i < offset; ++i) {
-    x[i] = vaddq_f32(x[i], x[offset + i]);
-  }
+
+// We need the shift for reduce(), hence the extra constants.
+static constexpr auto kF32ElementsPerIterationShift = 5;
+static constexpr auto kF32ElementsPerIteration = 1 << kF32ElementsPerIterationShift;
+static_assert(kF32ElementsPerIteration == 32);
+
+static constexpr auto kF32ElementsPerRegisterShift = 2;
+static constexpr auto kF32ElementsPerRegister = 1 << kF32ElementsPerRegisterShift;
+static_assert(kF32ElementsPerRegister == 4);
+
+static constexpr auto kF32RegisterPairsPerIteration = 4;
+static constexpr auto kF32RegistersPerIteration = kF32RegisterPairsPerIteration * 2;
+static constexpr auto kF32RegistersPerIterationShift = 3;
+static_assert(kF32RegistersPerIteration == kF32ElementsPerIteration / kF32ElementsPerRegister);
+static_assert(kF32RegistersPerIteration == 1 << kF32RegistersPerIterationShift);
+
+static inline double reduce(float32x4_t x[kF32RegistersPerIteration]) {
+  int offset = kF32RegistersPerIteration;
+  c10::ForcedUnroll<kF32RegistersPerIterationShift>{}([&offset, &x](auto idx) {
+    offset /= 2;
+    for (int i = 0; i < offset; ++i) {
+      x[i] = vaddq_f32(x[i], x[offset + i]);
+    }
+  });
   return vaddvq_f32(x[0]);
 }
 
+// On my Apple M1 Macbook (which is ARM v8.5 and thus has the
+// instructions f32_fma_{low,high}_f16 is targeting), this kernel has
+// equivalent performance to the fp16-native kernel.
 static void fp16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n, const float16_t* a, const int lda, const float16_t *x, float16_t* y, int incy) {
   parallel_for(0, n, 1, [&](int begin, int end) {
   for (int i = begin; i < end; ++i) {
-      float32x4_t sum[F32_REGISTERS_PER_ITERATION] = {vdupq_n_f32(0)};
+      float32x4_t sum[kF32RegistersPerIteration] = {vdupq_n_f32(0)};
 
-      const auto m_aligned = m & ~(F32_ELEMENTS_PER_ITERATION - 1);
-      for (int j = 0; j < m_aligned ; j += F32_ELEMENTS_PER_ITERATION) {
-        for (int k = 0; k < F32_REGISTERS_PER_ITERATION; ++k) {
-          const auto temp_x = vcvt_f32_f16(vld1_f16(x + j + k * F32_ELEMENTS_PER_REGISTER));
-          const auto temp_a = vcvt_f32_f16(vld1_f16(a + lda * i + j + k * F32_ELEMENTS_PER_REGISTER));
-          sum[k] = f32_fma(sum[k], temp_x, temp_a);
-        }
+      const auto m_aligned = m & ~(kF32ElementsPerIteration - 1);
+      for (int j = 0; j < m_aligned ; j += kF32ElementsPerIteration) {
+        c10::ForcedUnroll<kF32RegisterPairsPerIteration>{}([x, a, lda, i, j, &sum](auto k) {
+          // Load a pair of f32 registers at a time.
+          const auto temp_x = vld1q_f16(x + j + k * 2 * kF32ElementsPerRegister);
+          const auto temp_a = vld1q_f16(a + lda * i + j + k * 2 * kF32ElementsPerRegister);
+
+          sum[2 * k] = f32_fma_low_f16(sum[2 * k], temp_x, temp_a);
+          sum[2 * k + 1] = f32_fma_high_f16(sum[2 * k + 1], temp_x, temp_a);
+        });
       }
       auto reducedSum = reduce(sum);
 

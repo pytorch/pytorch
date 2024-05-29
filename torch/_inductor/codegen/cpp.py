@@ -1970,6 +1970,8 @@ class CppKernel(Kernel):
     @property
     def assert_function(self) -> str:
         if V.graph.aot_mode:
+            # TODO: Using AOTI_TORCH_CHECK is causing performance drop for some models
+            # compared with JIT Inductor which uses TORCH_CHECK
             return "AOTI_TORCH_CHECK"
         else:
             return "TORCH_CHECK"
@@ -3393,7 +3395,7 @@ class CppKernelProxy(CppKernel):
 class OuterLoopFusedKernel(CppKernel):
     def __init__(self, kernel_group):
         super().__init__(kernel_group.args, kernel_group.ws.num_threads)
-        self.inner: List["LoopLevel"] = []
+        self.inner: List[LoopLevel] = []
 
     def decide_parallel_depth(self, max_parallel_depth, threads) -> int:
         kernels_parallel_depth = []
