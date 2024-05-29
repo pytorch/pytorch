@@ -8936,7 +8936,9 @@ class TestNNDeviceType(NNTestCase):
         _test_module_empty_input(self, mod, inp)
 
     def test_one_hot(self, device):
-        if self.device_type != 'cuda':  # cuda throws device assert for invalid data
+        # cuda throws device assert for invalid data
+        # xla ignores out of bound indices
+        if self.device_type != 'cuda' and self.device_type != 'xla':
             with self.assertRaises(RuntimeError):
                 torch.nn.functional.one_hot(torch.tensor([3, 4, -1, 0], device=device), -1)
 
