@@ -1434,7 +1434,6 @@ class TestDimConstraints(TestCase):
         ):
             dcp.doprint(answer)
 
-    @unittest.expectedFailure  # avik, you are our only hope!
     def test_dim_constraints_solve_full(self):
         from sympy import Eq, Integer, Ne, Symbol
         from torch._dynamo.source import (
