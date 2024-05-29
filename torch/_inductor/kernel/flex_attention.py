@@ -478,8 +478,10 @@ flex_attention_backward_template = TritonTemplate(
     # M: Number of queries, N: Number of keys/values, D: Model dimension
     # z: Batch size, h: Number of heads, m: Number of queries per head, k: Number of keys per head
     # (Modifiable) Config options:
-    # BLOCK_M
-    # BLOCK_N
+    # BLOCK_M1: when calculating DK & DV, iterate over BLOCK_M1 across the seqlen dim of Q in each thread block.
+    # BLOCK_N1: when calculating DK & DV, the thread block size across the seqlen dim of K/V.
+    # BLOCK_M2: when calculating DQ, the thread block size across the seqlen dim of Q.
+    # BLOCK_N2: when calculating DQ, iterate over BLOCK_N2 across the seqlen dim of K/V in each thread block.
     # SCORE_MOD_IS_LINEAR: Is the score modifier linear? If so, we can lift the
     # change of base out of the loop
 

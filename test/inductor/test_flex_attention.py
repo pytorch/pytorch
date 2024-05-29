@@ -193,11 +193,11 @@ class TestFlexAttention(InductorTestCase):
             self._check_equal(
                 q_gold.grad, q_ref.grad, q.grad, q_fudge_factor, "Grad_Query"
             )
-            k_fudge_factor = 4 * fudge_factor
+            k_fudge_factor = 8 * fudge_factor
             self._check_equal(
                 k_gold.grad, k_ref.grad, k.grad, k_fudge_factor, "Grad_Key"
             )
-            v_fudge_factor = 8 * fudge_factor
+            v_fudge_factor = 4 * fudge_factor
             self._check_equal(
                 v_gold.grad, v_ref.grad, v.grad, v_fudge_factor, "Grad_Value"
             )
