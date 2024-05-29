@@ -294,7 +294,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 generated_kernel_count = 2
             if memory_format == torch.channels_last_3d:
                 # for float conv3d, the output for eager is channel last, we will generate "to_contiguous" for output
-                # for lp conv3d, the output for eager is channel last too, we will only generate "to_dtype" 
+                # for lp conv3d, the output for eager is channel last too, we will only generate "to_dtype"
                 generated_kernel_count = 1
             self.assertEqual(metrics.generated_kernel_count, generated_kernel_count)
 
