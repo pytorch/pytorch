@@ -801,15 +801,10 @@ class InstructionTranslatorBase(
         try:
             self.dispatch_table[inst.opcode](self, inst)
             return not self.output.should_exit
-        except exc.ObservedException:
-            if inst.exn_tab_entry is not None:
-                self.jump(inst.exn_tab_entry)
-                self.push(self.exn_vt_stack[-1])
-                return True
-            # else:
-            #     breakpoint()
-            #     # self.parent.push(self.pop())
-            raise
+        except exc.ObservedExceptionFromInlinedFrame:
+            # Inlined frame
+            self.exception_handler()
+            return True
         except ReturnValueOp:
             return False
         except Unsupported:
@@ -1239,19 +1234,6 @@ class InstructionTranslatorBase(
                 self.push(ConstantVariable.create(None))
             self.jump(inst)
 
-    def JUMP_IF_NOT_EXC_MATCH(self, inst):
-        # TODO(anijain2305) - Share code with CHECK_EXC_MATCH
-        assert len(self.stack) >= 2
-        expected_exc_types = self.pop()
-        exn = self.pop()
-
-        if not (
-            isinstance(expected_exc_types, BuiltinVariable)
-            and isinstance(exn, variables.ExceptionVariable)
-            and issubclass(exn.exc_type, expected_exc_types.fn)
-        ):
-            self.jump(inst.target)
-
     def RAISE_VARARGS(self, inst):
         if inst.arg == 0:
             unimplemented("re-raise")
@@ -1274,18 +1256,18 @@ class InstructionTranslatorBase(
                 # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L6547-L6549
                 val = val.call_function(self, [], {})
 
+            # Save the exception in a global data structure
+            self.exn_vt_stack.append(val)
+
             # 2) when user raises exception instance
             if isinstance(val, variables.ExceptionVariable):
-                self.get_exception_handler(val)
+                self.exception_handler()
                 return
             unimplemented(f"raise {exc}")
         else:
             unimplemented("raise ... from ...")
 
-    def get_exception_handler(self, exception_var):
-        # Save the exception in a global data structure
-        self.exn_vt_stack.append(exception_var)
-
+    def exception_handler(self):
         if sys.version_info >= (3, 11):
             exn_tab_entry = self.current_instruction.exn_tab_entry
             if exn_tab_entry:
@@ -1305,7 +1287,8 @@ class InstructionTranslatorBase(
                     )
 
                 # 3) push the exception to the stack
-                self.push(exception_var)
+                assert len(self.exn_vt_stack)
+                self.push(self.exn_vt_stack[-1])
 
                 # 4) jump to the handler
                 self.jump(exn_tab_entry)
@@ -1316,6 +1299,9 @@ class InstructionTranslatorBase(
                 raise exc.ObservedException
         else:
             if len(self.block_stack):
+                assert len(self.exn_vt_stack)
+                exception_var = self.exn_vt_stack[-1]
+
                 inst_to_jump = self.block_stack.pop()
                 # Push old exception
                 self.push(variables.ConstantVariable(None))
@@ -1337,20 +1323,22 @@ class InstructionTranslatorBase(
 
     def PUSH_EXC_INFO(self, inst):
         val = self.pop()
-
-        if self.exn_vt_stack:
-            self.push(self.exn_vt_stack.pop())
-
+        assert len(self.exn_vt_stack)
+        self.push(self.exn_vt_stack[-1])
         self.push(val)
 
     def POP_EXCEPT(self, inst):
         if sys.version_info >= (3, 11):
             val = self.pop()
             assert isinstance(val, variables.ExceptionVariable)
+
+            # This exception is handled and therefore we can clear the error indicator
+            assert len(self.exn_vt_stack)
+            self.exn_vt_stack.pop()
         else:
             self.popn(3)
 
-    def CHECK_EXC_MATCH(self, inst):
+    def check_if_exc_matches(self):
         assert len(self.stack) >= 2
         expected_exc_types = self.pop()
         exc_instance = self.stack[-1]
@@ -1382,10 +1370,16 @@ class InstructionTranslatorBase(
                     f"except has an unsupported types of object {expected_type}"
                 )
             if issubclass(exc_instance.exc_type, expected_type.fn):
-                self.push(ConstantVariable(True))
-                return
+                return True
 
-        self.push(ConstantVariable(False))
+        return False
+
+    def CHECK_EXC_MATCH(self, inst):
+        self.push(variables.ConstantVariable(self.check_if_exc_matches()))
+
+    def JUMP_IF_NOT_EXC_MATCH(self, inst):
+        if self.check_if_exc_matches():
+            self.jump(inst)
 
     def COMPARE_OP(self, inst):
         self.push(compare_op_handlers[inst.argval](self, self.popn(2), {}))
@@ -2721,9 +2715,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 tracer.run()
         except exc.ObservedException as e:
             msg = f"Observed exception DURING INLING {code} : {e}"
+            # TODO(anijain2305) - We should probably have a global data structure for exn_vt_stack
             parent.exn_vt_stack.extend(tracer.exn_vt_stack)
             log.debug(msg)
-            raise
+            # bubble up the exception to the parent frame.
+            raise exc.ObservedExceptionFromInlinedFrame(msg) from e
         except exc.SkipFrame as e:
             msg = f"SKIPPED INLINING {code}: {e}"
             log.debug(msg)

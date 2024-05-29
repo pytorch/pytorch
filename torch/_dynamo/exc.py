@@ -187,6 +187,10 @@ class ObservedException(TorchDynamoException):
     pass
 
 
+class ObservedExceptionFromInlinedFrame(TorchDynamoException):
+    pass
+
+
 # These exceptions are ok to fallback to eager/graph_break.
 exceptions_allowed_to_be_fallback = (
     torch._subclasses.fake_tensor.DataDependentOutputException,
