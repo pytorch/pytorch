@@ -451,6 +451,9 @@ def compile_fx_inner(
         _LazyGraphModule.force_recompile(gm)
         return make_boxed_func(gm.forward)
 
+    if static_input_idxs is None:
+        static_input_idxs = []
+
     assert isinstance(
         next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)
     ), f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
