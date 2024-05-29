@@ -50,9 +50,9 @@ def swap_tensors(t1, t2):
         raise RuntimeError("Trying to execute AccumulateGrad node that was poisoned by swap_tensors "
                            "this can happen when you try to run backward on a tensor that was swapped. "
                            "For a module m with `torch.__future__.set_swap_module_params_on_conversion(True)` "
-                           "this could happen if trying to run backward changing the device or dtype of the module "
-                           "(e.g. `m.cpu()` or `m.half()`). To resolve this, please run backward before changing "
-                           "the device/dtype.")
+                           "you should not change the device or dtype of the module (e.g. `m.cpu()` or `m.half()`) "
+                           "between running forward and backward. To resolve this, please only change the "
+                           "device/dtype before running forward (or after both forward and backward).")
 
     def check_use_count(t, name='t1'):
         use_count = t._use_count()
