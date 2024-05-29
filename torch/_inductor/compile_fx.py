@@ -124,11 +124,10 @@ def get_static_input_idxs(num_fixed):
     # like we do for normal inputs on each run, we will re-record a cudagraph if these
     # parameter locations change.
     context = torch._guards.TracingContext.try_get()
-    return (
-        list(range(num_fixed)) + context.fw_metadata.static_parameter_indices
-        if context
-        else []
-    )
+    if not context or not context.fw_metadata:
+        return []
+
+    return list(range(num_fixed)) + context.fw_metadata.static_parameter_indices
 
 
 @functools.lru_cache(None)
@@ -1201,7 +1200,8 @@ def fw_compiler_freezing(
             if i not in preserved_arg_indices:
                 params_flat[i] = None
 
-        static_input_idxs += tracing_context.fw_metadata.static_parameter_indices
+        if tracing_context.fw_metadata:
+            static_input_idxs += tracing_context.fw_metadata.static_parameter_indices
 
     with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
         optimized_function = inner_compile(
@@ -1339,7 +1339,7 @@ def compile_fx(
             num_example_inputs, len(example_inputs)
         )
 
-        user_visible_outputs = set()
+        user_visible_outputs = {}
 
         if config.keep_output_stride:
             model_outputs_node = output_node(model)
