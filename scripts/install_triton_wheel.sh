@@ -18,6 +18,6 @@ else
     TRITON_XPU_REPO="https://github.com/intel/intel-xpu-backend-for-triton"
     TRITON_XPU_COMMIT_ID="$(cat .ci/docker/ci_commit_pins/triton-xpu.txt)"
 
-    # force-reinstall to ensure the latest version is installed
+    # force-reinstall to ensure the pinned version is installed
     pip install --force-reinstall "git+${TRITON_XPU_REPO}@${TRITON_XPU_COMMIT_ID}#subdirectory=python"
 fi
