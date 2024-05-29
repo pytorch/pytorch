@@ -153,10 +153,14 @@ def has_torchvision_roi_align() -> bool:
     try:
         from torchvision.ops import roi_align  # noqa: F401
 
+        torch._C._dispatch_has_kernel_for_dispatch_key("torchvision::nms", "Meta")
         return roi_align is not None and hasattr(
             getattr(torch.ops, "torchvision", None), "roi_align"
         )
     except ImportError:
+        return False
+    except RuntimeError as e:
+        assert "torchvision::nms does not exist" in str(e)
         return False
 
 
@@ -571,6 +575,10 @@ def sympy_index_symbol_with_prefix(prefix: SymT, idx: int) -> sympy.Symbol:
     return make_symbol(prefix, idx, integer=True, nonnegative=True)
 
 
+def generate_assert(check):
+    return (check or config.debug_index_asserts) and config.assert_indirect_indexing
+
+
 def sympy_index_symbol(name: str) -> sympy.Symbol:
     """
     Used to generate an integer-nonnegative symbol.
@@ -873,6 +881,21 @@ class IndentedBuffer:
         res.writelines(self._lines)
         res.writelines(other._lines)
         return res
+
+
+class FakeIndentedBuffer(IndentedBuffer):
+    def __init__(self):
+        super().__init__()
+
+    def __getattribute__(self, name):
+        if name == "__class__":  # Allow access to the class attribute
+            return object.__getattribute__(self, name)
+        raise RuntimeError(
+            f"Tried to call self.{name} on FakeIndentedBuffer. This buffer"
+            "is currently used on TritonTemplateKernel to prevent actual"
+            "writes to the body without explicitly specifying the body with"
+            "`TritonTemplateKernel.set_subgraph_body(name)`"
+        )
 
 
 @contextlib.contextmanager

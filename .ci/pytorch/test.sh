@@ -693,7 +693,6 @@ test_aten() {
   ${SUDO} ln -sf "$TORCH_LIB_DIR"/libmkldnn* "$TEST_BASE_DIR"
   ${SUDO} ln -sf "$TORCH_LIB_DIR"/libnccl* "$TEST_BASE_DIR"
   ${SUDO} ln -sf "$TORCH_LIB_DIR"/libtorch* "$TEST_BASE_DIR"
-  ${SUDO} ln -sf "$TORCH_LIB_DIR"/libtbb* "$TEST_BASE_DIR"
 
   ls "$TEST_BASE_DIR"
   aten/tools/run_tests.sh "$TEST_BASE_DIR"
@@ -718,21 +717,6 @@ test_without_numpy() {
   popd
 }
 
-# pytorch extensions require including torch/extension.h which includes all.h
-# which includes utils.h which includes Parallel.h.
-# So you can call for instance parallel_for() from your extension,
-# but the compilation will fail because of Parallel.h has only declarations
-# and definitions are conditionally included Parallel.h(see last lines of Parallel.h).
-# I tried to solve it #39612 and #39881 by including Config.h into Parallel.h
-# But if Pytorch is built with TBB it provides Config.h
-# that has AT_PARALLEL_NATIVE_TBB=1(see #3961 or #39881) and it means that if you include
-# torch/extension.h which transitively includes Parallel.h
-# which transitively includes tbb.h which is not available!
-if [[ "${BUILD_ENVIRONMENT}" == *tbb* ]]; then
-  sudo mkdir -p /usr/include/tbb
-  sudo cp -r "$PWD"/third_party/tbb/include/tbb/* /usr/include/tbb
-fi
-
 test_libtorch() {
   local SHARD="$1"
 
@@ -746,7 +730,6 @@ test_libtorch() {
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libshm* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
-    ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libnvfuser* "$TORCH_BIN_DIR"
 
     export CPP_TESTS_DIR="${TORCH_BIN_DIR}"
@@ -883,7 +866,6 @@ test_rpc() {
   # test reporting process to function as expected.
   ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
   ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
-  ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_BIN_DIR"
 
   CPP_TESTS_DIR="${TORCH_BIN_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_cpp_rpc
 }
