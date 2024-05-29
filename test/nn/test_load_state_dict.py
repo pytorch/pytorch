@@ -581,6 +581,15 @@ class MyWrapperLoadTensor(MyLoadTensor):
     def __repr__(self):
         return f"MyWrapperLoadTensor({self._data.__repr__()})"
 
+    def __tensor_flatten__(self):
+        return ["_data"], None
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+        assert meta is None
+        data = inner_tensors["_data"]
+        return MyWrapperLoadTensor(data)
+
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         def unwrap(t):
@@ -595,12 +604,18 @@ class MyWrapperLoadTensor(MyLoadTensor):
 
 
 class TestLoadStateDictSwap(TestCase):
-    @skipIfCrossRef
-    @skipIfTorchDynamo("Can't swap with dynamo as dynamo installs weakrefs")
-    @swap([True])
-    @parametrize("assign", [True, False])
-    def test_swap_subclass(self, assign):
+    def _test_load_subclasses(self, m_subclass=None, sd_subclass=None, assign=False):
+        """
+        Tests that the model and state_dict are loaded correctly when
+        model has parameters of type m_subclass and state_dict has valuse
+        of type sd_subclass.
+        """
+
         def _create_model(subclass=None):
+            """
+            Creates a Linear layer with a weight and buffer that are of type subclass
+            (or regular Linear layer if subclass is None)
+            """
             m = torch.nn.Linear(2, 3, bias=False)
             m.register_buffer("buf", torch.randn(2, 3))
             if subclass is not None:
@@ -608,36 +623,61 @@ class TestLoadStateDictSwap(TestCase):
                 m.buf = subclass(m.buf)
             return m
 
-        def _test(m_subclass=None, sd_subclass=None):
-            m = _create_model(m_subclass)
-            sd = _create_model(sd_subclass).state_dict()
-            m.load_state_dict(sd, assign=assign)
-            self.assertEqual(m.weight, sd["weight"])
-            self.assertEqual(m.buf, sd["buf"])
-            self.assertTrue(isinstance(m.weight, torch.nn.Parameter))
-            self.assertTrue(not isinstance(m.buf, torch.nn.Parameter))
+        m = _create_model(m_subclass)
+        sd = _create_model(sd_subclass).state_dict()
+        m.load_state_dict(sd, assign=assign)
+        self.assertEqual(m.weight, sd["weight"])
+        self.assertEqual(m.buf, sd["buf"])
+        self.assertTrue(isinstance(m.weight, torch.nn.Parameter))
+        self.assertTrue(not isinstance(m.buf, torch.nn.Parameter))
 
-            weight_type, buf_type = (torch.nn.Parameter, torch.Tensor)
-            if assign:
-                if sd_subclass is not None:
-                    weight_type, buf_type = (sd_subclass, sd_subclass)
-            else:
-                if m_subclass is not None:
-                    weight_type, buf_type = (m_subclass, m_subclass)
+        weight_type, buf_type = (torch.nn.Parameter, torch.Tensor)
+        if assign:
+            if sd_subclass is not None:
+                weight_type, buf_type = (sd_subclass, sd_subclass)
+        else:
+            if m_subclass is not None:
+                weight_type, buf_type = (m_subclass, m_subclass)
 
-            self.assertTrue(type(m.weight) is weight_type)
-            self.assertTrue(type(m.buf) is buf_type)
+        self.assertTrue(type(m.weight) is weight_type)
+        self.assertTrue(type(m.buf) is buf_type)
 
+    @skipIfCrossRef
+    @skipIfTorchDynamo("Can't swap with dynamo as dynamo installs weakrefs")
+    @swap([True])
+    @parametrize("assign", [True, False])
+    def test_swap_subclass(self, assign):
+        """
+        Tests that swap_tensors path has the correct behavior for various combinations
+        of subclass types (e.g. no subclass, subclass, wrapper subclass) for params
+        and state_dict.
+        """
         # (MyLoadTensor, MyWrapperLoadTensor) tests the behavior of (superclass, subclass)
         subclasses = [None, MyLoadTensor, MyLoadTensor2, MyWrapperLoadTensor]
         for m_s, sd_s in product(subclasses, subclasses):
-            _test(m_s, sd_s)
+            self._test_load_subclasses(m_s, sd_s, assign)
 
         # MyBrokenLoadTensor should error since its module_load doesn't call .detach()
         with self.assertRaisesRegex(
             RuntimeError, re.escape("Error(s) in loading state_dict for Linear:")
         ):
-            _test(None, MyBrokenLoadTensor)
+            self._test_load_subclasses(None, MyBrokenLoadTensor)
+
+    @skipIfTorchDynamo("Can't swap with dynamo as dynamo installs weakrefs")
+    @swap([False])
+    @parametrize("assign", [True, False])
+    def test_swap_traceable_wrapper_subclass(self, assign):
+        """
+        Tests that swap_tensors path is used by default when either of params
+        or state_dict[value] are traceable wrapper subclasses.
+        """
+        subclasses = [
+            (None, MyWrapperLoadTensor),
+            (MyWrapperLoadTensor, None),
+            (MyWrapperLoadTensor, MyWrapperLoadTensor),
+        ]
+        for m_s, sd_s in subclasses:
+            self._test_load_subclasses(m_s, sd_s, assign)
 
 
 instantiate_parametrized_tests(TestLoadStateDict)
