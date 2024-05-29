@@ -201,6 +201,16 @@ class TS2EPConverter:
 
         self.constant_map[name] = value
 
+    def convert_prim_device(self, node: torch._C.Node):
+        device = node.input().type().device()
+        output_name = node.output().debugName()
+        self.constant_map[output_name] = device
+
+    def convert_prim_dtype(self, node: torch._C.Node):
+        dtype = node.input().type().dtype()
+        output_name = node.output().debugName()
+        self.constant_map[output_name] = dtype
+
     def convert_prim_GetAttr(self, node: torch._C.Node):
         def get_attr(name: str):
             if name in self.attribute_map:
@@ -315,6 +325,7 @@ class TS2EPConverter:
         self.convert_aten_op(node)
 
     def convert_node(self, node: torch._C.Node):
+        breakpoint()
         node_kind = node.kind()
         if node_kind == "prim::CreateObject":
             self.convert_prim_CreateObject(node)
@@ -326,6 +337,10 @@ class TS2EPConverter:
             self.convert_prim_NumToTensor(node)
         elif node_kind == "prim::ListConstruct":
             self.convert_prim_ListConstruct(node)
+        elif node_kind == "prim::device":
+            self.convert_prim_device(node)
+        elif node_kind == "prim::dtype":
+            self.convert_prim_dtype(node)
         # elif node_kind == "aten::Int":
         #     convert_aten_Int(node)
         elif node_kind == "aten::_convolution":
