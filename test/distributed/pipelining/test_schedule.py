@@ -55,6 +55,46 @@ class ScheduleTest(MultiProcContinousTest):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
+    def test_multi_iter(self, ScheduleClass):
+        mod = MultiMLP(d_hid, n_layers=self.world_size)
+        mod.to(self.device)
+
+        x = torch.randn(batch_size, d_hid, device=self.device)
+        target = torch.randn(batch_size, d_hid, device=self.device)
+        loss_fn = torch.nn.MSELoss(reduction="sum")
+
+        # Create a pipeline
+        chunks = 4
+        split_spec = mod.split_spec if hasattr(mod, "split_spec") else None
+        pipe = pipeline(
+            mod,
+            chunks,
+            example_args=(x,),
+            split_spec=split_spec,
+        )
+
+        stage = PipelineStage(
+            pipe,
+            self.rank,
+            device=self.device,
+        )
+
+        # Attach to a schedule
+        schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn)
+
+        # Run
+        for _ in range(20):
+            if self.rank == 0:
+                schedule.step(x)
+            elif self.rank == self.world_size - 1:
+                losses = []
+                out = schedule.step(target=target, losses=losses)
+            else:
+                schedule.step()
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
     def test_kwargs_with_tracer(self, ScheduleClass):
         mod = ModelWithKwargs(d_hid)
         mod.to(self.device)
