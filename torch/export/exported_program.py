@@ -224,7 +224,7 @@ class ExportedProgram:
 
         self._graph_signature: ExportGraphSignature = graph_signature
         self._state_dict: Dict[str, Any] = state_dict
-        self._range_constraints: "Dict[sympy.Symbol, ValueRanges]" = range_constraints
+        self._range_constraints: Dict[sympy.Symbol, ValueRanges] = range_constraints
         assert module_call_graph is not None
         self._module_call_graph: List[ModuleCallEntry] = module_call_graph
         self._example_inputs = example_inputs
