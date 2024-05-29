@@ -190,12 +190,9 @@ void gemm_transb_impl(
     int64_t lda,
     const scalar_t* b,
     int64_t ldb,
-    opmath_t beta,
+    /* we expect pre-applied beta */
     opmath_t* c,
     int64_t ldc) {
-  // c *= beta
-  scale_(m, n, beta, c, ldc);
-
   // c += alpha * (a @ b.T)
   for (const auto l : c10::irange(k)) {
     for (const auto j : c10::irange(n)) {
@@ -229,7 +226,10 @@ gemm_transb_(
     opmath_t beta,
     scalar_t* c,
     int64_t ldc) {
-  gemm_transb_impl(transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+  // c *= beta
+  scale_(m, n, beta, c, ldc);
+
+  gemm_transb_impl(transb, m, n, k, alpha, a, lda, b, ldb, c, ldc);
 }
 
 // std::is_same<scalar_t, at::BFloat16> || std::is_same<scalar_t, at::Half>
@@ -262,10 +262,32 @@ gemm_transb_(
   // FMA it with an entire matrix row into the entire result vector"
   // algorithm instead.
   const auto c_size = m * n;
-  std::unique_ptr<opmath_t[]> c_accum = std::make_unique<opmath_t[]>(m * n);
-  std::copy(c, c + c_size, c_accum.get());
-  gemm_transb_impl(transb, m, n, k, alpha, a, lda, b, ldb, beta, c_accum.get(), ldc);
-  std::copy(c_accum.get(), c_accum.get() + c_size, c);
+  auto c_accum = std::make_unique<opmath_t[]>(c_size);
+  if (beta == 1) {
+    for (const auto j : c10::irange(n)) {
+      for (const auto i : c10::irange(m)) {
+        c_accum[j * m + i] = c[j * ldc + i];
+      }
+    }
+  } else if (beta == 0) {
+    for (const auto j : c10::irange(n)) {
+      for (const auto i : c10::irange(m)) {
+        c_accum[j * m + i] = 0;
+      }
+    }
+  } else {
+    for (const auto j : c10::irange(n)) {
+      for (const auto i : c10::irange(m)) {
+        c_accum[j * m + i] = beta * c[j * ldc + i];
+      }
+    }
+  }
+  gemm_transb_impl(transb, m, n, k, alpha, a, lda, b, ldb, c_accum.get(), m);
+  for (const auto j : c10::irange(n)) {
+    for (const auto i : c10::irange(m)) {
+      c[j * ldc + i] = c_accum[j * m + i];
+    }
+  }
 }
 
 template <typename scalar_t, typename opmath_t>
