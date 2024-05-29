@@ -431,6 +431,7 @@ def fn():
 
     @skipIfNotPy311
     def test_bytecode_from_template_noprefix(self):
+        # Test that 3.11+ prefix instructions are removed
         def gen_fn():
             cl = None
 
@@ -452,6 +453,8 @@ def fn():
         self.assertNotIn("COPY_FREE_VARS", names)
 
     def test_bytecode_from_template_noreturn1(self):
+        # Test that functions with multiple returns will have their
+        # returns replaced with jumps to the end
         def fn():
             if x:
                 return y
@@ -473,7 +476,11 @@ def fn():
                 self.assertIn("JUMP", i1.opname)
                 self.assertIs(i1.target, insts[-1])
 
+    # Should work with 3.10, but testing with 3.11+ is sufficient.
+    # In 3.8, `fn` ends with a RETURN_VALUE.
+    @skipIfNotPy311
     def test_bytecode_from_template_noreturn2(self):
+        # Test function that doesn't end with RETURN_VALUE
         def fn():
             if x:
                 return x
@@ -495,6 +502,7 @@ def fn():
 
     @skipIfNotPy312
     def test_bytecode_from_template_noreturn_const(self):
+        # Test 3.12+ RETURN_CONST
         def fn():
             if x:
                 return 1
