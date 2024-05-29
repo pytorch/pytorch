@@ -45,7 +45,7 @@ class CppTemplateKernel(Kernel):
     def render(self, template, **kwargs):
         return PartialRender(
             template.render(kernel=self, **kwargs), self.render_hooks
-        ).finalize()
+        ).finalize_all()
 
     def def_kernel(
         self,
