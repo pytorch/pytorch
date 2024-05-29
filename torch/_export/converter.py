@@ -380,7 +380,7 @@ class TS2EPConverter:
                 )
             )
 
-        self.fx_graph.output(args)
+        self.fx_graph.output(args[0])  # Get rid of an extra list wrapped around final output.
 
     def retrace_as_exported_program(self, gm: torch.fx.GraphModule):
         # TODO: adjust input orders to match GraphSignature convention
