@@ -106,9 +106,8 @@ class EfficientConvBNEvalTemplate(TestCase):
         def test_conv_bn_eval(
             test_class, use_bias, module, sync_bn, decompose_nn_module
         ):
-            from torch._dispatch.python import enable_python_dispatcher
-
             from functorch import make_fx
+            from torch._dispatch.python import enable_python_dispatcher
 
             kwargs = {"kernel_size": 3, "stride": 2} if module[0] != nn.Linear else {}
             mod_eager = test_class(

@@ -13,14 +13,14 @@ import torch._custom_ops as custom_ops
 
 import torch.testing._internal.optests as optests
 import torch.utils.cpp_extension
+
+from functorch import make_fx
 from torch import Tensor
 from torch._custom_op.impl import custom_op, CustomOp, infer_schema
 from torch._utils_internal import get_file_path_2
 from torch.testing._internal import custom_op_db
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.custom_op_db import numpy_nonzero
-
-from functorch import make_fx
 from typing import *  # noqa: F403
 import numpy as np
 
@@ -199,6 +199,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         ):
             torch.library.opcheck(op, (x,), {})
 
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_incorrect_abstract_impl(self, device):
         lib = self.lib()
         lib.define("foo(Tensor x) -> Tensor")

@@ -276,6 +276,9 @@ class PythonMod(sympy.Function):
         if less.is_Boolean and bool(less) and r.is_positive:
             return p
 
+        if sympy.Mod(p, q) == 0:
+            return S.Zero
+
     # NB: args[1] for PythonMod
     def _eval_is_nonnegative(self):
         return True if self.args[1].is_positive else None  # type: ignore[attr-defined]
