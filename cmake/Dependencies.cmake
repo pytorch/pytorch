@@ -864,7 +864,11 @@ if(BUILD_PYTHON)
 
   # These should fill in the rest of the variables, like versions, but resepct
   # the variables we set above
-  find_package(Python COMPONENTS Interpreter Development)
+  if(USE_NUMPY)
+    find_package(Python COMPONENTS Interpreter Development NumPy)
+  else()
+    find_package(Python COMPONENTS Interpreter Development)
+  endif()
 
   if(NOT Python_Development_FOUND)
     message(FATAL_ERROR
@@ -876,29 +880,20 @@ if(BUILD_PYTHON)
       "Found Python libraries version ${Python_VERSION}. Python < 3.8 is no longer supported by PyTorch.")
   endif()
 
-  # When building pytorch, we pass this in directly from setup.py, and
-  # don't want to overwrite it because we trust python more than cmake
-  if(NUMPY_INCLUDE_DIR)
-    set(NUMPY_FOUND ON)
-  elseif(USE_NUMPY)
-    find_package(NumPy)
-    if(NOT NUMPY_FOUND)
-      message(WARNING "NumPy could not be found. Not building with NumPy. Suppress this warning with -DUSE_NUMPY=OFF")
-    endif()
-  endif()
-
-  if(Python_Interpreter_FOUND AND Python_Development_FOUND)
+  if(Python_Interpreter_FOUND)
     add_library(python::python INTERFACE IMPORTED)
     target_include_directories(python::python SYSTEM INTERFACE ${Python_INCLUDE_DIRS})
     if(WIN32)
       target_link_libraries(python::python INTERFACE ${Python_LIBRARIES})
     endif()
 
-    caffe2_update_option(USE_NUMPY OFF)
-    if(NUMPY_FOUND)
-      caffe2_update_option(USE_NUMPY ON)
-      add_library(numpy::numpy INTERFACE IMPORTED)
-      target_include_directories(numpy::numpy SYSTEM INTERFACE ${NUMPY_INCLUDE_DIR})
+    if(USE_NUMPY)
+      if(NOT Python_NumPy_FOUND)
+        message(WARNING "NumPy could not be found. Not building with NumPy. Suppress this warning with -DUSE_NUMPY=OFF")
+        caffe2_update_option(USE_NUMPY OFF)
+      else()
+        caffe2_update_option(USE_NUMPY ON)
+      endif()
     endif()
     # Observers are required in the python build
     caffe2_update_option(USE_OBSERVERS ON)
