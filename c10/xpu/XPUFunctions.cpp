@@ -2,8 +2,6 @@
 #include <c10/util/Exception.h>
 #include <c10/xpu/XPUFunctions.h>
 
-#include <sys/wait.h>
-#include <unistd.h>
 #include <vector>
 
 namespace c10::xpu {
