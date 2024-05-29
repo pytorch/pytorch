@@ -283,6 +283,7 @@ The following ops are currently supported:
     kron
     meshgrid
     narrow
+    nn.functional.unfold
     ravel
     select
     split
