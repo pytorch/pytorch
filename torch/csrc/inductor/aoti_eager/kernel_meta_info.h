@@ -33,6 +33,8 @@ struct TensorMetadata {
   bool is_symbolic_;
   // Dtype of a tensor(For scalar, we will wrap it as a scalar tensor)
   c10::ScalarType dtype_;
+  // Concrete scalar value. Serve for operations w/ scalar parameter
+  c10::IValue scalar_value_;
   // Device of a tensor.
   c10::Device device_;
   // Sizes of a tensor. Currently, we only support static shape and use int64_t
@@ -46,6 +48,13 @@ struct TensorMetadata {
   TensorMetadata(
       bool is_symbolic,
       c10::ScalarType dtype,
+      c10::Device device,
+      std::vector<int64_t> sizes,
+      std::vector<int64_t> strides);
+  TensorMetadata(
+      bool is_symbolic,
+      c10::ScalarType dtype,
+      c10::IValue scalar_value,
       c10::Device device,
       std::vector<int64_t> sizes,
       std::vector<int64_t> strides);

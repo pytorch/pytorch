@@ -406,13 +406,25 @@ class _TorchDynamoContext:
 
             cleanups = [enter() for enter in self.enter_exit_hooks]
             prior = set_eval_frame(callback)
+
+            # Ensure that if an assertion occurs after graph pushes
+            # something onto the DynamicLayerStack then we pop it off (the
+            # constructed graph code isn't guarded with try/finally).
+            #
+            # This used to be a context but putting a `with` here is a noticible
+            # perf regression (#126293)
+            saved_dynamic_layer_stack_depth = (
+                torch._C._functorch.get_dynamic_layer_stack_depth()
+            )
+
             try:
-                # Ensure that if an assertion occurs after graph pushes
-                # something onto the DynamicLayerStack then we pop it off (the
-                # constructed graph code isn't guarded with try/finally).
-                with torch._C._functorch._PreserveDynamicLayerStack():
-                    return fn(*args, **kwargs)
+                return fn(*args, **kwargs)
             finally:
+                # Restore the dynamic layer stack depth if necessary.
+                torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
+                    saved_dynamic_layer_stack_depth
+                )
+
                 set_eval_frame(prior)
                 for cleanup in cleanups:
                     cleanup()
@@ -760,7 +772,8 @@ def explain(f, *extra_args, **extra_kwargs):
         warnings.warn(
             "explain(f, *args, **kwargs) is deprecated, use explain(f)(*args, **kwargs) instead.  "
             "If you don't migrate, we may break your explain call in the future if your user defined kwargs "
-            "conflict with future kwargs added to explain(f)."
+            "conflict with future kwargs added to explain(f).",
+            FutureWarning,
         )
         return inner(*extra_args, **extra_kwargs)
     else:
@@ -903,7 +916,7 @@ def check_signature_rewritable(graph):
             tb = "".join(traceback.format_list(stack))
             extra = ""
             if len(user_stacks) > 1:
-                extra = f"(elided {len(user_stacks)-1} more accesses)"
+                extra = f"(elided {len(user_stacks) - 1} more accesses)"
             msg = f"{source.name()}, accessed at:\n{tb}{extra}"
         # TODO: option to print ALL of the stack traces at once
         input_errors.append(msg)
@@ -1321,7 +1334,10 @@ def export(
             dim_constraints.remove_redundant_dynamic_results()
             forced_specializations = dim_constraints.forced_specializations()
             msg = dim_constraints.prettify_results(
-                original_signature, constraint_violation_error, forced_specializations
+                original_signature,
+                dynamic_shapes,
+                constraint_violation_error,
+                forced_specializations,
             )
             if constraint_violation_error:
                 constraint_violation_error.args = (
@@ -1387,7 +1403,7 @@ def export(
                     )(*example_fake_inputs)
                 except CondOpArgsMismatchError as e:
                     # Wrap the internal error to the user-facing error
-                    raise UserError(  # noqa: TRY200
+                    raise UserError(  # noqa: B904
                         UserErrorType.DYNAMIC_CONTROL_FLOW,
                         str(e),
                         case_name="cond_operands",
@@ -1431,7 +1447,8 @@ def export(
         warnings.warn(
             "export(f, *args, **kwargs) is deprecated, use export(f)(*args, **kwargs) instead.  "
             "If you don't migrate, we may break your export call in the future if your user defined kwargs "
-            "conflict with future kwargs added to export(f)."
+            "conflict with future kwargs added to export(f).",
+            FutureWarning,
         )
         return inner(*extra_args, **extra_kwargs)
     else:

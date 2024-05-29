@@ -85,6 +85,10 @@ static std::vector<std::string> TORCH_NCCL_ENABLE_MONITORING = {
 static std::vector<std::string> TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC = {
     "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"};
 
+// Whether to rethrow CUDA Errors in the watchdog (default true)
+static std::vector<std::string> TORCH_NCCL_RETHROW_CUDA_ERRORS = {
+    "TORCH_NCCL_RETHROW_CUDA_ERRORS"};
+
 // The maximum number of events we store in the flight recorder's ring buffer.
 // (One event could be the start or end of a collective, for example).
 static std::vector<std::string> TORCH_NCCL_TRACE_BUFFER_SIZE = {
@@ -99,6 +103,8 @@ static std::vector<std::string> TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC = {
 // signal from other ranks, e.g. to dump the debugging information.
 static std::vector<std::string> TORCH_NCCL_COORD_CHECK_MILSEC = {
     "TORCH_NCCL_COORD_CHECK_MILSEC"};
+
+static std::vector<std::string> TORCH_NCCL_NAN_CHECK = {"TORCH_NCCL_NAN_CHECK"};
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
@@ -1024,6 +1030,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // timeout and nccl errors.
   bool dumpOnException_;
 
+  // Whether or not to enable nan check for input tensors to collectives.
+  bool enableNanCheck_;
+
   // Whether or not to create start CUDAEvent and enable timing for start
   // and end events. Note that enableTiming_ is always true if desyncDebug_
   // is set to true.
@@ -1035,6 +1044,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Whether or not TORCH_NCCL_AVOID_RECORD_STREAMS was set
   bool avoidRecordStreams_ = false;
+
+  // Whether the NCCL watchdog should rethrow CUDA errors.
+  bool rethrowCUDAErrors_ = false;
 
   // Set of communicators that this process group has aborted and their
   // ncclUniqueId has been written to the store. We don't need a lock
@@ -1050,13 +1062,16 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Counting for the sequential number of NCCL collective call.
   // (specifically, how many actual kernels we launched, which differs from
   // op_id_ when coalescing is enabled)
-  uint64_t seq_{0};
+  uint64_t seqCollective_{0};
+
+  // Counting for the sequential number of NCCL P2P calls.
+  uint64_t seqP2P_{0};
 
   // Incrementing counter for logical operations (collective or p2p) issued on
   // the ProcessGroup
   uint64_t op_id_{0};
 
-  // the sequential number of the last colletive enqueued into workMetaList_
+  // the sequential number of the last collective enqueued into workMetaList_
   // This is useful for indentifying a rank that has not join a collective
   // initialized to be -1 to indicate no collective has been enqueued
   int64_t lastEnqueuedSeq_{-1};
@@ -1064,10 +1079,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // the name of the last collective enqueued into workMetaList_
   std::string lastEnqueuedWorkName_;
 
-  // the sequential number of the last colletive started as the kernal
+  // the sequential number of the last collective started as the kernel
   int64_t lastStartedSeq_{-1};
 
-  // the name of the last collective started as the kernal
+  // the name of the last collective started as the kernel
   std::string lastStartedWorkName_;
 
   // the sequential number of the last colletive completed marked by
@@ -1085,6 +1100,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::string logPrefix_;
 
   c10::intrusive_ptr<intra_node_comm::IntraNodeComm> intraNodeComm_;
+
+  // Number of devices on this node.
+  int localDeviceCount_{0};
 };
 
 TORCH_API std::string dump_nccl_trace();

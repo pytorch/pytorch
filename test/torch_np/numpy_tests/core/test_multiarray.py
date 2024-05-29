@@ -409,7 +409,7 @@ class TestAttributes(TestCase):
             try:
                 r = np.ndarray([size], dtype=int, buffer=x, offset=offset * x.itemsize)
             except Exception as e:
-                raise RuntimeError(e)  # noqa: TRY200
+                raise RuntimeError(e)  # noqa: B904
             r.strides = strides = strides * x.itemsize
             return r
 
@@ -6304,7 +6304,7 @@ class TestDelMisc(TestCase):
         except TypeError:
             pass
         except Exception:
-            raise AssertionError
+            raise AssertionError from None
 
 
 class TestConversion(TestCase):

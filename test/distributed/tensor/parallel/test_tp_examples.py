@@ -262,8 +262,11 @@ class DistTensorParallelExampleTest(DTensorTestBase):
 
         # Ensure model weights are still the same after update.
         optim.step()
-        with CommDebugMode() as comm_mode:
-            optim_tp.step()
+        from torch.distributed._tensor.experimental import implicit_replication
+
+        with implicit_replication():
+            with CommDebugMode() as comm_mode:
+                optim_tp.step()
         self._check_module(model, model_tp)
         if is_seq_parallel:
             self.assertDictEqual(
