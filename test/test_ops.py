@@ -166,7 +166,6 @@ class TestCommon(TestCase):
     @onlyCUDAAndXPU
     @deviceCountAtLeast(2)
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long))
-    #@ops(_xpu_computation_ops, dtypes=any_common_cpu_device_one)
     def test_multiple_devices(self, devices, dtype, op):
         for cuda_device_str in devices:
             cuda_device = torch.device(cuda_device_str)

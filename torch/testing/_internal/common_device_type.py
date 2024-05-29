@@ -402,6 +402,7 @@ class DeviceTypeTestBase(TestCase):
                 if hasattr(test, 'num_required_devices'):
                     device_arg = cls.get_all_devices()
                 _update_param_kwargs(param_kwargs, 'device', device_arg)
+
             # Apply decorators based on param kwargs.
             for decorator in decorator_fn(param_kwargs):
                 test = decorator(test)
@@ -436,8 +437,7 @@ class DeviceTypeTestBase(TestCase):
                 return result
 
             assert not hasattr(cls, name), f"Redefinition of test {name}"
-            #import pdb
-            #pdb.set_trace()
+
             setattr(cls, name, instantiated_test)
 
         def default_parametrize_fn(test, generic_cls, device_cls):
@@ -449,8 +449,7 @@ class DeviceTypeTestBase(TestCase):
 
         # If one of the @dtypes* decorators is present, also parametrize over the dtypes set by it.
         dtypes = cls._get_dtypes(test)
-        #import pdb
-        #pdb.set_trace()
+        
         if dtypes is not None:
 
             def dtype_parametrize_fn(test, generic_cls, device_cls, dtypes=dtypes):
@@ -476,7 +475,6 @@ class DeviceTypeTestBase(TestCase):
                 dtype_kwarg = param_kwargs['dtypes'] if 'dtypes' in param_kwargs else param_kwargs['dtype']
             test_name = f'{name}{test_suffix}{device_suffix}{_dtype_test_suffix(dtype_kwarg)}'
 
-            print(test_name)
             instantiate_test_helper(cls=cls, name=test_name, test=test, param_kwargs=param_kwargs,
                                     decorator_fn=decorator_fn)
 
@@ -1004,7 +1002,6 @@ class ops(_TestParametrizer):
                     decorator_fn = partial(op.get_decorators, generic_cls.__name__,
                                            test.__name__, device_cls.device_type, dtype)
 
-                    #print("create test {} op={} dtype={} param_kwargs={} decorator_fn={}".format(test_name, op, dtype, param_kwargs, decorator_fn))
                     yield (test_wrapper, test_name, param_kwargs, decorator_fn)
                 except Exception as ex:
                     # Provides an error message for debugging before rethrowing the exception
@@ -1605,5 +1602,3 @@ def skipPRIVATEUSE1(fn):
 #  This should probably enumerate all available device type test base classes.
 def get_all_device_types() -> List[str]:
     return ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-
-

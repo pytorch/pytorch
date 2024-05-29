@@ -98,14 +98,12 @@ class DecorateInfo:
         self.dtypes = dtypes
         self.active_if = active_if
 
-        
         # Validate dtypes
         if self.dtypes is not None:
             for dtype in self.dtypes:
                 assert isinstance(dtype, torch.dtype)
 
     def is_active(self, cls_name, test_name, device_type, dtype, param_kwargs):
-     
         return (
             self.active_if
             and (self.cls_name is None or self.cls_name == cls_name)
@@ -1165,9 +1163,6 @@ class OpInfo:
             self.aliases = tuple(AliasInfo(a) for a in self.aliases)  # type: ignore[assignment]
         else:
             self.aliases = ()
-        
-        
-
 
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
@@ -1372,7 +1367,6 @@ class OpInfo:
     def get_decorators(self, test_class, test_name, device, dtype, param_kwargs):
         """Returns the decorators targeting the given test."""
         result = []
-   
         for decorator in self.decorators:
             if isinstance(decorator, DecorateInfo):
                 if decorator.is_active(

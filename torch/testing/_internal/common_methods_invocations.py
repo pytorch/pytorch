@@ -13268,7 +13268,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta_inplace'),
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_inplace'),
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_inplace_all_strides'),
-               DecorateInfo(unittest.skip("Not support XPU"), 'TestCompositeCompliance', 'test_operator', device_type='xpu', dtypes=None),
+               DecorateInfo(unittest.skip("No XPU backend support in this operation"), 'TestCompositeCompliance', 'test_operator', device_type='xpu', dtypes=None),
            )),
     OpInfo('as_strided_scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
@@ -13866,6 +13866,8 @@ op_db: List[OpInfo] = [
                # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
                # Consider making it a parameter or input, or detaching the gradient
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad',
+                            active_if=TEST_WITH_ROCM)
            ],
            sample_inputs_func=sample_inputs_instance_norm,
            supports_expanded_weight=True,),
@@ -15187,6 +15189,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness'),
                DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo', 'test_nnc_correctness',
                             device_type='cpu', dtypes=(torch.bfloat16, torch.float16)),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad',
+                            device_type="cuda", active_if=TEST_WITH_ROCM),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-05, rtol=1e-05)}),
                             'TestCompositeCompliance', 'test_forward_ad', device_type="cpu"),
            )),
@@ -19908,58 +19912,6 @@ op_db: List[OpInfo] = [
 op_db += opinfo.definitions.op_db
 
 
-# def enable_skipped_device(op_db_list: List[OpInfo]):
-#         if TEST_XPU:
-#             import os, yaml
-#             device = 'xpu'
-#             op_db_dict = {}
-
-#             xpu_op_db = os.getcwd() + "/xpu/xpu_op_db.yaml" if os.path.exists(os.getcwd() + "/xpu/xpu_op_db.yaml") else os.getcwd() + "../xpu/xpu_op_db.yaml"
-#             if os.path.exists(xpu_op_db):
-#                 with open(xpu_op_db) as stream:
-#                     try:
-#                         op_db_dict = yaml.safe_load(stream)
-#                     except yaml.YAMLError:
-#                         print("Error in loading xpu_op_db.yaml.")
-
-#             for op in op_db_list:
-#                 if not op_db_dict or op.name not in op_db_dict['supported']:
-#                     if hasattr(op, "torch_opinfo"):
-#                         # import pdb
-#                         # pdb.set_trace()
-#                         torch_opinfo = getattr(op, "torch_opinfo")
-#                         if hasattr(torch_opinfo, 'name') and torch_opinfo.name in op_db_dict['supported']:
-#                             continue
-
-#                     if op.skips is not None:
-#                         op.skips = (*op.skips, DecorateInfo(unittest.skip, device_type=device, dtypes=None))
-#                         op.decorators = (*op.decorators, DecorateInfo(unittest.skip, device_type=device, dtypes=None))
-#                     else:
-#                         op.skips = (DecorateInfo(unittest.skip, device_type=device, dtypes=None))
-#                         op.decorators = (DecorateInfo(unittest.skip, device_type=device, dtypes=None))
-#             return op_db_list            
-            
-#op_db = enable_skipped_device(op_db) 
-
-# import os, yaml
-# xpu_op_db = os.getcwd() + "/xpu/xpu_op_db.yaml" if os.path.exists(os.getcwd() + "/xpu/xpu_op_db.yaml") else os.getcwd() + "../xpu/xpu_op_db.yaml"
-# if os.path.exists(xpu_op_db):
-#     with open(xpu_op_db) as stream:
-#         try:
-#             op_db_dict = yaml.safe_load(stream)
-#         except yaml.YAMLError:
-#             print("Error in loading xpu_op_db.yaml.")
-
-# for op in op_db:
-#     if op.name not in op_db_dict['supported']:  
-#         if op.name == "__rpow__":
-#             import pdb
-#             pdb.set_trace()
-#         print("***", op.name, op.decorators)              
-
-
-        
-
 # Separate registry for experimental Python Reference OpInfos.
 python_ref_db = [
     #
@@ -22932,7 +22884,6 @@ python_ref_db = [
     ),
 ]
 python_ref_db += opinfo.definitions.python_ref_db
-#python_ref_db = enable_skipped_device(python_ref_db)
 
 # Common operator groupings
 ops_and_refs = op_db + python_ref_db
