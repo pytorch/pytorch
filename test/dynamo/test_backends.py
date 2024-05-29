@@ -106,6 +106,9 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     def test_eager(self):
         self._check_backend_works("eager")
 
+    def test_eager_noexcept(self):
+        self._check_backend_works("eager_noexcept")
+
     @_force_skip_lazy_graph_module()
     def test_torchscript(self):
         self._check_backend_works("ts")
