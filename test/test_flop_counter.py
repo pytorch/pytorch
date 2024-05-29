@@ -7,16 +7,17 @@ import torch
 import torch.nn.functional as F
 import torch.utils.flop_counter
 from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-    PLATFORM_SUPPORTS_CUDNN_ATTENTION
 )
 from torch.testing._internal.common_utils import (
     run_tests,
+    skipIfRocm,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    skipIfRocm,
 )
+
 
 try:
     from torchvision import models as torchvision_models
@@ -420,7 +421,12 @@ class TestFlopCounter(TestCase):
             run_uniform_flops(backend, with_backward=True)
             for backend in ["math", "flash", "mem_efficient", "cudnn"]
         ]
-        flops_fw_bw_math, flops_fw_bw_flash, flops_fw_bw_efficient, flops_fw_bw_cudnn = flops
+        (
+            flops_fw_bw_math,
+            flops_fw_bw_flash,
+            flops_fw_bw_efficient,
+            flops_fw_bw_cudnn,
+        ) = flops
         self.assertEqual(flops_fw_math * 3, flops_fw_bw_math)
         self.assertEqual(flops_fw_math * 7 // 2, flops_fw_bw_flash)
         self.assertEqual(flops_fw_bw_flash, flops_fw_bw_efficient)
