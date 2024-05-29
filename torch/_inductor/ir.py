@@ -1910,6 +1910,9 @@ class BaseView(IRNode):
     def is_extern(self):
         return self.data.is_extern()  # type: ignore[attr-defined]
 
+    def is_module_buffer(self):
+        return self.data.is_module_buffer()  # type: ignore[attr-defined]
+
     def get_reads(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             return extract_read_writes(
