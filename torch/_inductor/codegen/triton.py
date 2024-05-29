@@ -1027,22 +1027,14 @@ class TritonKernel(SIMDKernel):
         if config.triton.multi_kernel:
             threshold *= 16
         last_numel = self.numels[-1]
-        if not isinstance(last_numel, (int, sympy.Integer)):
-            # Not static
-            return False
-        hint = V.graph.sizevars.size_hint(last_numel)
-        if hint > threshold:
-            return False
-        # will need to recompile if we cross a larger power of 2 boundary
-        V.graph.sizevars.guard_leq(self.numels[-1], next_power_of_2(hint))  # type: ignore[arg-type]
-        return True
+        return V.graph.sizevars.statically_known_leq(last_numel, threshold)  # type: ignore[arg-types]
 
     def want_no_x_dim(self):
         return (
             self.reduction_hint == ReductionHint.INNER
             and self.persistent_reduction
             and len(self.numels) == 2
-            and self.numels[-1] >= 256
+            and V.graph.sizevars.statically_known_geq(self.numels[-1], 256)  # type: ignore[arg-types]
         )
 
     def generate_assert(self, check):
@@ -2227,9 +2219,16 @@ class TritonKernel(SIMDKernel):
                 simplified_tree_numel = V.graph.sizevars.simplify(tree.numel)
                 if isinstance(simplified_tree_numel, (sympy.Integer, int)):
                     val = int(simplified_tree_numel)
+                    val = next_power_of_2(val)
                 else:
-                    continue
-                val = next_power_of_2(val)
+                    val = 128
+                    while not V.graph.sizevars.statically_known_leq(
+                        simplified_tree_numel, val
+                    ):
+                        assert (
+                            val <= 16 * 1024
+                        ), f"Failed to find static RBLOCK for {simplified_tree_numel}"
+                        val *= 2
                 code.writeline(f"RBLOCK: tl.constexpr = {val}")
 
             if tree.prefix == "x" and self.no_x_dim:
