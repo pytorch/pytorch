@@ -4008,6 +4008,25 @@ class TestNestedTensorSubclass(TestCase):
         nt1_t, nt2_t, nt3_t, nt4_t = (x.transpose(1, 2) for x in (nt1, nt2, nt3, nt4))
         check_size(nt1_t, nt2_t, nt3_t, nt4_t)
 
+    def test_specialize_dynamic_shape(self, device):
+        values = torch.randn((18, 16), device=device)
+        offsets = torch.tensor([0, 2, 3, 6, 15, 18], device=device)
+        like_values = torch.randn_like(values)
+
+        # this marks values as dynamic
+        nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+
+        def fn(values, same_size):
+            # here, the dynamic shape is specialized by same_size's shape
+            # https://github.com/pytorch/pytorch/issues/127097
+            # make sure this doesn't error out in torch.compile
+            return values + same_size
+
+        self.assertEqual(
+            fn(values, like_values),
+            torch.compile(fn)(values, like_values),
+        )
+
     # Doesn't work until we have real views
     @xfailIfTorchDynamo
     # Note 1: Math fallback doesn't work with bfloat16 on CUDA
