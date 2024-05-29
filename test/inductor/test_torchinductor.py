@@ -10319,6 +10319,27 @@ class CommonTemplate:
         t = rand_strided((2, 3), (3, 1), device=self.device, dtype=torch.float8_e4m3fn)
         self.assertTrue(t.dtype is torch.float8_e4m3fn)
 
+    def test_large_grid(self):
+        # https://github.com/pytorch/pytorch/issues/123210
+        def fn(primals_1, primals_2, primals_5):
+            view = torch.ops.aten.reshape.default(primals_5, [-1, 4, 128])
+            primals_5 = None
+            permute = torch.ops.aten.permute.default(view, [0, 2, 1])
+            clone = torch.ops.aten.clone.default(
+                permute, memory_format=torch.contiguous_format
+            )
+            return clone
+
+        s0 = 727828
+        s1 = 512
+        self.common(
+            fn,
+            [
+                torch.rand(2, 4),
+                torch.rand(2),
+                torch.rand(s0, s1),
+            ],
+        )
 
 @dataclasses.dataclass
 class TestFailure:
