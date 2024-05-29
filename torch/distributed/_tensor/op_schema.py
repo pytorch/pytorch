@@ -243,7 +243,7 @@ class OpSchema:
             if self.schema_info is not None and self.schema_info.needs_pytree
             else self.args_schema
         )
-        return tuple(item for item in self.args_schema if isinstance(item, DTensorSpec))
+        return tuple(item for item in args if isinstance(item, DTensorSpec))
 
     @property
     def args_strategy(self) -> Tuple[OpStrategy, ...]:

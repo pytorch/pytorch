@@ -76,7 +76,7 @@
 #     you MUST refer to the gradient of the differentiable output with
 #     'grad' (this case is special-cased in our code generation).
 #
-#     Note that the number of differentibale outputs can be modified by the
+#     Note that the number of differentiable outputs can be modified by the
 #     'output_differentiability' entry (see above).
 #
 #     Across a differentiable function's derivatives set, it is not
@@ -3154,6 +3154,6 @@
 
 # note(crcrpar): forward-mode AD is tricky for a simple string replace to handle:
 #   formula.replace("p", "ord") produces `norm_jvord(self_ord, self_t, ord, result)`
-- name: _foreach_norm.Scalar(Tensor[] self, Scalar ord=2) -> Tensor[]
+- name: _foreach_norm.Scalar(Tensor[] self, Scalar ord=2, ScalarType? dtype=None) -> Tensor[]
   self: norm_backward(grads[i], self[i], ord, result[i])
   result: norm_jvp(self_p, self_t, ord, result[i])
