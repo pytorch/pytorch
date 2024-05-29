@@ -3450,10 +3450,7 @@ class CppKernelProxy(CppKernel):
             else torch.float
         )
 
-        is_valid_codegen = True
-
         def fn(node, *index_vars):
-            op_handle = None
             ctx = contextlib.nullcontext()
             if (
                 isinstance(V.local_buffer_scope, LocalBufferScope)
@@ -3480,15 +3477,18 @@ class CppKernelProxy(CppKernel):
                     index = sympy_subs(index, replacements)  # type: ignore[arg-type]
                     return name, index
 
-                op_handle = LocalizeBufferHandler(
-                    V.get_ops_handler(),
-                    global_buf=next(iter(V.local_buffer_scope.local_nodes.items()))[
-                        1
-                    ].node,
-                    local_buf=next(iter(V.local_buffer_scope.local_buffers.items()))[1],
-                    localize_fn=localize_fn,
+                ctx = V.set_ops_handler(
+                    LocalizeBufferHandler(
+                        V.get_ops_handler(),
+                        global_buf=next(iter(V.local_buffer_scope.local_nodes.items()))[
+                            1
+                        ].node,
+                        local_buf=next(
+                            iter(V.local_buffer_scope.local_buffers.items())
+                        )[1],
+                        localize_fn=localize_fn,
+                    )
                 )
-                ctx = V.set_ops_handler(op_handle)
             with ctx:
                 node.decide_inplace_update()
                 node.mark_run()
@@ -3500,7 +3500,6 @@ class CppKernelProxy(CppKernel):
         fn_list = [functools.partial(fn, node) for node in nodes]
         var_sizes_list = [node.group[1] for node in nodes]
         self.codegen_functions(fn_list, var_sizes_list, vec_dtype)
-        return is_valid_codegen
 
     def codegen_loops(self, code, worksharing):
         self.codegen_loops_impl(self.loop_nest, code, worksharing)
@@ -3879,9 +3878,7 @@ class CppScheduling(BaseScheduling):
                     scope.add_local_buffer(
                         local_buffers[0].local_buf, local_buffers[0].global_snode
                     )
-                    if not cpp_kernel_proxy.codegen_nodes(_node.get_nodes()):  # type: ignore[arg-type]
-                        # Failed to use local buf by checking the kernel codegn
-                        return False
+                    cpp_kernel_proxy.codegen_nodes(_node.get_nodes())  # type: ignore[arg-type]
                 cpp_kernel_proxy_list.append(cpp_kernel_proxy)
                 nodes_list.append(_node.get_nodes())  # type: ignore[arg-type]
 
