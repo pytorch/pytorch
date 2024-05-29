@@ -16,7 +16,6 @@ import platform
 import re
 import shlex
 import shutil
-import signal
 import struct
 import subprocess
 import sys
@@ -31,8 +30,7 @@ from copy import copy
 from ctypes import c_void_p, cdll, CDLL
 from functools import partial
 from pathlib import Path
-from threading import Thread
-from time import sleep, time, time_ns
+from time import time, time_ns
 from types import ModuleType
 from typing import (
     Any,
@@ -1948,7 +1946,7 @@ class AotCodeCompiler:
                 run_command_and_check(cmd)
             log.debug("aot constant binary command: %s", cmd)
 
-            if graph.buffer_mutation:
+            if graph.mutated_buffers & set(graph.constants.keys()):
                 # .data section is between .text and .bss. When the size of .data is large,
                 # during the linking, the relocation of .text against .bss may overflow.
                 # Rename it to .ldata so that it won't be in between the .text and .bss section
@@ -2349,7 +2347,8 @@ class CppCodeCache:
                 if lib is None:
                     if future is not None:
                         future.result()
-                    worker_fn()
+                    result = worker_fn()
+                    assert result is None
                     lib = cls._load_library(output_path, key)
                     assert lib is not None
                 return lib
@@ -3195,7 +3194,8 @@ class TritonFuture(CodeCacheFuture):
     def result(self) -> ModuleType:
         if self.future is not None:
             # If the worker failed this will throw an exception.
-            self.future.result()
+            result = self.future.result()
+            assert result is None
             self.future = None
             self.kernel.precompile()
         return self.kernel
