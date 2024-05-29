@@ -457,7 +457,7 @@ def _str_intern(inp, *, tensor_contents=None):
                 indices_str = "..."
             else:
                 indices_str = _tensor_str(indices, indent + len(indices_prefix))
-            if indices.numel() == 0 or is_meta:
+            if is_meta or indices.numel() == 0:
                 indices_str += ", size=" + str(tuple(indices.shape))
             values_prefix = "values=tensor("
             values = self._values().detach()
@@ -465,7 +465,7 @@ def _str_intern(inp, *, tensor_contents=None):
                 values_str = "..."
             else:
                 values_str = _tensor_str(values, indent + len(values_prefix))
-            if values.numel() == 0 or is_meta:
+            if is_meta or values.numel() == 0:
                 values_str += ", size=" + str(tuple(values.shape))
             tensor_str = (
                 indices_prefix
