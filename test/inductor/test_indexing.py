@@ -12,8 +12,9 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 from torch.utils._sympy.functions import (
-    FloorDiv,
     ModularIndexing,
+    NaturalDiv,
+    PythonFloorDiv,
     RoundDecimal,
     RoundToInt,
 )
@@ -44,7 +45,7 @@ class TestIndexingSimplification(InductorTestCase):
         self.assertEqual(
             sizevars.simplify_with_ranges(expr, var_ranges), i1 + 128 * i2 + 64 * r3
         )
-        # if there are negative terms in ModularIndexing base, we cannot replace it with FloorDiv
+        # if there are negative terms in ModularIndexing base, we cannot replace it with NaturalDiv
         expr = ModularIndexing(i1 - 15, 1, 64)
         self.assertEqual(
             sizevars.simplify_with_ranges(expr, var_ranges),
@@ -52,8 +53,8 @@ class TestIndexingSimplification(InductorTestCase):
         )
         # small terms should be kept if the rest is not guaranteed to be divisible
         self.assertEqual(
-            sizevars.simplify_with_ranges(FloorDiv(r3 + i2 + i1, 32), var_ranges),
-            FloorDiv(r3 + i2 + i1, 32),
+            sizevars.simplify_with_ranges(NaturalDiv(r3 + i2 + i1, 32), var_ranges),
+            NaturalDiv(r3 + i2 + i1, 32),
         )
 
         expr = ModularIndexing(2 * i2 + r3, 1, 64)
@@ -61,7 +62,7 @@ class TestIndexingSimplification(InductorTestCase):
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), 2 * i2 + r3)
 
         # check the same thing but with symbolic divisor
-        self.assertEqual(FloorDiv(r3 * i0, r3), i0)
+        self.assertEqual(NaturalDiv(r3 * i0, r3), i0)
         self.assertEqual(ModularIndexing(r3 * i0, r3, 10), ModularIndexing(i0, 1, 10))
 
         # (10*i) % 10 is always zero and should get optimized away
@@ -89,7 +90,7 @@ class TestIndexingSimplification(InductorTestCase):
 
         # Constant fold from divisor into base
         self.assertEqual(ModularIndexing(i0 * 4, 2, 10), ModularIndexing(i0 * 2, 1, 10))
-        self.assertEqual(FloorDiv(i0 * 4, 2), i0 * 2)
+        self.assertEqual(NaturalDiv(i0 * 4, 2), i0 * 2)
 
         # Nested modular indexing is correctly simplified
         var_ranges = {sympy.Symbol("i1"): 13, sympy.Symbol("i2"): 121}
@@ -99,7 +100,7 @@ class TestIndexingSimplification(InductorTestCase):
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
         var_ranges = {sympy.Symbol("i2"): 784}
         expr = ModularIndexing(ModularIndexing(i2, 1, 28), 7, 4)
-        expected = FloorDiv(ModularIndexing(i2, 1, 28), 7)
+        expected = NaturalDiv(ModularIndexing(i2, 1, 28), 7)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expected)
         expr = ModularIndexing(ModularIndexing(i2, 1, 28) + 1, 7, 4)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
@@ -146,8 +147,8 @@ class TestIndexingSimplification(InductorTestCase):
             ModularIndexing(i0, 10, i1 * i2) + 10,
         )
 
-        # works for ModularIndexing + FloorDiv
-        expr5 = 197 * FloorDiv(i0, 197) + ModularIndexing(i0, 1, 197)
+        # works for ModularIndexing + NaturalDiv
+        expr5 = 197 * NaturalDiv(i0, 197) + ModularIndexing(i0, 1, 197)
         simplified = sizevars.simplify_with_ranges(expr5, {})
         self.assertEqual(simplified, i0)
         self.assertEqual(expr5.subs({i0: 39485}), simplified.subs({i0: 39485}))
@@ -159,9 +160,9 @@ class TestIndexingSimplification(InductorTestCase):
         )
 
         # divisor != 1
-        expr6 = 197 * FloorDiv(i0, 197 * 3) + ModularIndexing(i0, 3, 197)
+        expr6 = 197 * NaturalDiv(i0, 197 * 3) + ModularIndexing(i0, 3, 197)
         simplified = sizevars.simplify_with_ranges(expr6, {})
-        self.assertEqual(simplified, FloorDiv(i0, 3))
+        self.assertEqual(simplified, NaturalDiv(i0, 3))
         self.assertEqual(expr6.subs({i0: 39485}), simplified.subs({i0: 39485}))
 
 
@@ -247,13 +248,13 @@ class ExprPrinterTests(InductorTestCase):
     def test_print_floor_div(self):
         s1 = sympy.Symbol("s1", integer=True)
         s2 = sympy.Symbol("s2", integer=True)
-        expr = FloorDiv(s1, s2)
+        expr = PythonFloorDiv(s1, s2)
         self.assertEqual(pexpr(expr), "(s1 // s2)")
         self.assertEqual(cexpr(expr), "c10::div_floor_integer(s1, s2)")
 
         s1 = sympy.Symbol("s1", integer=True)
         s2 = sympy.S(-1)
-        expr = FloorDiv(s1, s2)
+        expr = PythonFloorDiv(s1, s2)
         self.assertEqual(pexpr(expr), "(-1)*s1")
         self.assertEqual(cexpr(expr), "(-1L)*s1")
 

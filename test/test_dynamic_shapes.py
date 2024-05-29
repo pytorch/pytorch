@@ -41,7 +41,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._sympy.functions import FloorDiv, Mod
+from torch.utils._sympy.functions import Mod, NaturalDiv, PythonFloorDiv
 
 aten = torch.ops.aten
 
@@ -1278,7 +1278,7 @@ class TestFloorDiv(TestCase):
         # Note: we fully evaluate here since FloorDiv might not always do
         # that.
         shape_env = ShapeEnv()
-        return shape_env.evaluate_expr(FloorDiv(x, y))
+        return shape_env.evaluate_expr(PythonFloorDiv(x, y))
 
     @staticmethod
     def yield_test_cases(values, negate=True):
@@ -1309,7 +1309,7 @@ class TestFloorDiv(TestCase):
         # Tests how we simplify or evaluate FloorDiv without free variables
         shape_env = ShapeEnv()
         result = 21
-        exprs = (7 * FloorDiv(6, 2),)
+        exprs = (7 * PythonFloorDiv(6, 2),)
 
         for expr in exprs:
             self.assertEqual(expr, result)
@@ -1328,7 +1328,7 @@ class TestFloorDiv(TestCase):
         for base, divisor in itertools.product(cases, repeat=2):
 
             def op():
-                return FloorDiv(base, divisor)
+                return PythonFloorDiv(base, divisor)
 
             def is_complex(x):
                 return x.is_integer is False and x.is_real is False and x.is_complex
@@ -1346,7 +1346,7 @@ class TestFloorDiv(TestCase):
 
             op = op()
 
-            # In regular Python, x//x == 1.0 if x is a float, but FloorDiv
+            # In regular Python, x//x == 1.0 if x is a float, but PythonFloorDiv
             # always returns an integer 1 when both args are the same object.
             # This even works for Symbols with no assumptions specified.
             if base is divisor:
@@ -1512,6 +1512,8 @@ class TestDimConstraints(TestCase):
         dim_constraints.add_equality(src10, s6)
         dim_constraints.add_equality(src11, Integer(1))
         dim_constraints.add_equality(src12, Integer(3))
+
+        FloorDiv = NaturalDiv
 
         dim_constraints.add(s1**2 <= 2147483647)
         dim_constraints.add(32 * s1**2 <= 2147483647)

@@ -390,7 +390,7 @@ class ExprPrinter(Printer):
         return f"{self.paren(self._print(lhs))} / {self.paren(self._print(rhs))}"
 
     def _print_CleanDiv(self, expr):
-        return self._print_FloorDiv(expr)
+        return self._print_PythonFloorDiv(expr)
 
     def _print_GreaterThan(self, expr):
         # GreaterThan:          >=
@@ -438,8 +438,16 @@ class ExprPrinter(Printer):
             f"_print_NegativeInfinity not implemented for {type(self)}"
         )
 
-    def _print_FloorDiv(self, expr):
-        raise NotImplementedError(f"_print_FloorDiv not implemented for {type(self)}")
+    def _print_PythonFloorDiv(self, expr):
+        raise NotImplementedError(
+            f"_print_PythonFloorDiv not implemented for {type(self)}"
+        )
+
+    def _print_NaturalDiv(self, expr):
+        raise NotImplementedError(f"_print_NaturalDiv not implemented for {type(self)}")
+
+    def _print_TruncDiv(self, expr):
+        raise NotImplementedError(f"_print_TruncDiv not implemented for {type(self)}")
 
     def _print_PythonMod(self, expr):
         raise NotImplementedError(f"_print_PythonMod not implemented for {type(self)}")
@@ -504,8 +512,14 @@ class PythonPrinter(ExprPrinter):
     def _print_PythonMod(self, expr):
         return " % ".join(map(self.paren, map(self._print, expr.args)))
 
+    def _print_NaturalDiv(self, expr):
+        x, div = expr.args
+        x = self.paren(self.doprint(x))
+        div = self.paren(self.doprint(div))
+        return f"({x} // {div})"
+
     # WARNING: this is dangerous for Triton, which has C-style modulus
-    def _print_FloorDiv(self, expr):
+    def _print_PythonFloorDiv(self, expr):
         x, div = expr.args
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))

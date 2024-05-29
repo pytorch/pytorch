@@ -873,44 +873,6 @@ class SymPyValueRangeAnalysis:
     def trunc(x):
         return ValueRanges.increasing_map(x, TruncToFloat)
 
-
-class ValueRangeAnalysis(SymPyValueRangeAnalysis):
-    def __init__(self):
-        self.name = "ValueRangeAnalysis"
-        boolean_operators = (
-            "xor",
-            "logical_and",
-            "logical_or",
-            "logical_not",
-        )
-        for op in boolean_operators:
-            setattr(self, op, self.bool_handler)
-
-    @staticmethod
-    def bool_handler(*args, **kwargs):
-        # just assuming bools can have both values
-        return ValueRanges(sympy.false, sympy.true)  # type: ignore[arg-type]
-
-    @staticmethod
-    def default_handler(*args, **kwargs):
-        # many ops are unlikely to show up in optimizable indexing compute,
-        # so we dont have full coverage
-        return ValueRanges.unknown()
-
-    def load(self, name: str, index: sympy.Expr):
-        return ValueRanges.unknown()
-
-    def store(self, name, index, value, mode=None):
-        return
-
-    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
-        return ValueRanges.unknown()
-
-    @classmethod
-    def index_expr(cls, index, dtype):
-        assert isinstance(index, ValueRanges)
-        return cls.to_dtype(index, dtype)
-
     @staticmethod
     def to_dtype(x, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None):
         x = ValueRanges.wrap(x)
@@ -964,6 +926,44 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
     @classmethod
     def sub(cls, a, b):
         return cls.add(a, cls.neg(b))
+
+
+class ValueRangeAnalysis(SymPyValueRangeAnalysis):
+    def __init__(self):
+        self.name = "ValueRangeAnalysis"
+        boolean_operators = (
+            "xor",
+            "logical_and",
+            "logical_or",
+            "logical_not",
+        )
+        for op in boolean_operators:
+            setattr(self, op, self.bool_handler)
+
+    @staticmethod
+    def bool_handler(*args, **kwargs):
+        # just assuming bools can have both values
+        return ValueRanges(sympy.false, sympy.true)  # type: ignore[arg-type]
+
+    @staticmethod
+    def default_handler(*args, **kwargs):
+        # many ops are unlikely to show up in optimizable indexing compute,
+        # so we dont have full coverage
+        return ValueRanges.unknown()
+
+    def load(self, name: str, index: sympy.Expr):
+        return ValueRanges.unknown()
+
+    def store(self, name, index, value, mode=None):
+        return
+
+    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
+        return ValueRanges.unknown()
+
+    @classmethod
+    def index_expr(cls, index, dtype):
+        assert isinstance(index, ValueRanges)
+        return cls.to_dtype(index, dtype)
 
     def __getattr__(self, name):
         log.debug("unhandled ValueRange op %s", name)

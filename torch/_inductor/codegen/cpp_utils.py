@@ -92,7 +92,13 @@ class CppPrinter(ExprPrinter):
         mod = self.paren(self.doprint(mod))
         return f"static_cast<{INDEX_TYPE}>({x}) % static_cast<{INDEX_TYPE}>({mod})"
 
-    def _print_FloorDiv(self, expr):
+    def _print_NaturalDiv(self, expr):
+        x, div = expr.args
+        x = self.paren(self.doprint(x))
+        div = self.paren(self.doprint(div))
+        return f"{x} / {div}"
+
+    def _print_PythonFloorDiv(self, expr):
         x, div = expr.args
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))

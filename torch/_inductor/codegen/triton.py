@@ -302,7 +302,15 @@ class TritonPrinter(PythonPrinter):
     # https://github.com/triton-lang/triton/issues/955
     # But for Sympy expressions, things will /mostly/ work out because we
     # don't usually deal with negative numbers in the division
-    def _print_FloorDiv(self, expr):
+    def _print_PythonFloorDiv(self, expr):
+        assert expr.is_integer
+        x, div = expr.args
+        x = self.paren(self.doprint(x))
+        div = self.paren(self.doprint(div))
+        return f"({x} // {div})"
+
+    # This is OK, natural numbers only
+    def _print_NaturalDiv(self, expr):
         assert expr.is_integer
         x, div = expr.args
         x = self.paren(self.doprint(x))
