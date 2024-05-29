@@ -6,7 +6,7 @@ from typing import cast, List, Optional
 
 import torch
 import torch.distributed._functional_collectives as funcol
-from torch.distributed._tensor.op_schema import (
+from torch.distributed._tensor._op_schema import (
     OpSchema,
     OpStrategy,
     PlacementStrategy,
@@ -19,8 +19,8 @@ from torch.distributed._tensor.ops.utils import (
 )
 
 from torch.distributed._tensor.placement_types import (
-    _Partial,
     DTensorSpec,
+    Partial,
     Placement,
     Replicate,
     Shard,
@@ -42,7 +42,7 @@ class MaskBuffer:
 
     def release_mask(self):
         # TODO: evaluate if we need to release the mask buffer or the buffer
-        # can just have the same lifetime as the _Partial placement
+        # can just have the same lifetime as the Partial placement
         if self.data is None:
             raise RuntimeError("MaskBuffer has not been materialized")
         self.data = None
@@ -62,7 +62,7 @@ class MaskBuffer:
 
 
 @dataclass(frozen=True)
-class _MaskPartial(_Partial):
+class _MaskPartial(Partial):
     """
     A partial mask placement devised for rowwise sharded embedding op, where we need
     to mask and adjust the indices to the local embedding shard, embedding masking
@@ -275,11 +275,11 @@ def embedding_dense_backward_strategy(
         # batch dim sharding, weight replicated, grad_out/input have same sharding
         # that can shard on any dim, weight grad partial
         for input_dim in range(len(indices_shape)):
-            batch_sharding = [_Partial(), Shard(input_dim), Shard(input_dim)]
+            batch_sharding = [Partial(), Shard(input_dim), Shard(input_dim)]
             single_mesh_dim_strategies.append(batch_sharding)
 
         # grad_out partial, input replicate, weight grad keep partial
-        partial_sharding = [_Partial(), _Partial(), Replicate()]
+        partial_sharding = [Partial(), Partial(), Replicate()]
         single_mesh_dim_strategies.append(partial_sharding)
 
         all_mesh_dim_strategies.append(single_mesh_dim_strategies)

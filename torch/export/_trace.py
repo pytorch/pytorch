@@ -2,6 +2,7 @@ import dataclasses
 import functools
 import inspect
 import logging
+import os
 import re
 import time
 import warnings
@@ -481,6 +482,7 @@ def _export_to_torch_ir(
     *,
     preserve_module_call_signature: Tuple[str, ...] = (),
     disable_constraint_solver: bool = False,
+    _allow_complex_guards_as_runtime_asserts: bool = False,
     restore_fqn: bool = True,
     _log_export_usage: bool = True,
     same_signature: bool = True,
@@ -513,6 +515,10 @@ def _export_to_torch_ir(
                     assume_static_by_default=True,
                     tracing_mode="symbolic",
                     disable_constraint_solver=disable_constraint_solver,
+                    # currently the following 2 flags are tied together for export purposes,
+                    # but untangle for sake of dynamo export api
+                    prefer_deferred_runtime_asserts_over_guards=_allow_complex_guards_as_runtime_asserts,
+                    _allow_complex_guards_as_runtime_asserts=_allow_complex_guards_as_runtime_asserts,
                     _log_export_usage=_log_export_usage,
                     same_signature=same_signature,
                 )(
@@ -547,6 +553,10 @@ def _export_to_aten_ir(
     pre_dispatch=False,
     _is_torch_jit_trace=False,
 ):
+    # set this to False if env variable is specified
+    if os.environ.get("TORCH_DYNAMO_DO_NOT_EMIT_RUNTIME_ASSERTS", "0") == "1":
+        should_insert_runtime_assertion = False
+
     # [NOTE] If the user is exporting under training mode, we want to detect if there is any
     # state change in the autograd global state and error. If the user is exporting under inference
     # mode, we don't care. At predispatch level, we don't care about the state change.
@@ -699,18 +709,16 @@ def _export_to_aten_ir(
     constants = rewrite_script_object_meta(gm)
     constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
 
-    # FIXME: Skipping this because traced modules do not have signature yet
-    if not _is_torch_jit_trace:
-        # prettify names for placeholder nodes
-        placeholder_naming_pass(
-            gm,
-            export_graph_signature,
-            mod,
-            fake_args,
-            fake_kwargs,
-            fake_params_buffers,
-            constants,
-        )
+    # Prettify names for placeholder nodes.
+    placeholder_naming_pass(
+        gm,
+        export_graph_signature,
+        mod,
+        fake_args,
+        fake_kwargs,
+        fake_params_buffers,
+        constants,
+    )
 
     return ExportedArtifact(
         gm,
@@ -945,46 +953,95 @@ def _log_export_wrapper(fn):
     return wrapper
 
 
-def _convert_ts_to_export_experimental(traced_callable, args, kwargs=None):
+def _process_jit_trace_inputs_for_export(example_inputs, example_kwarg_inputs):
+    if not isinstance(example_inputs, (tuple, list, dict)):
+        example_inputs = (example_inputs,)
+
+    elif isinstance(example_inputs, list):
+        example_inputs = tuple(example_inputs)
+
+    elif (
+        isinstance(example_inputs, (torch.Tensor, dict))
+        and example_kwarg_inputs is None
+    ):
+        example_inputs = (example_inputs,)
+
+    if example_kwarg_inputs is None:
+        example_kwarg_inputs = {}
+    return example_inputs, example_kwarg_inputs
+
+
+@contextmanager
+def patch_forward(obj: torch.nn.Module, new_method):
+    """Helper method to make it easier to cleanly torch.export() a method on a
+    module that is not `forward`.
+    """
+    # Save the original method
+    original_method = obj.forward
+
+    # Patch the method
+    obj.forward = new_method.__get__(obj, obj.__class__)
+
+    try:
+        yield
+    finally:
+        # Restore the original method
+        obj.forward = original_method
+
+
+@contextmanager
+def _temp_disable_texpr_fuser():
+    original_state = torch._C._jit_texpr_fuser_enabled()
     torch._C._jit_set_texpr_fuser_enabled(False)
+    try:
+        yield
+    finally:
+        torch._C._jit_set_texpr_fuser_enabled(original_state)
 
-    def process_trace_inputs_for_export(example_inputs, example_kwarg_inputs):
-        if not isinstance(example_inputs, tuple):
-            example_inputs = (example_inputs,)
 
-        if example_kwarg_inputs is None:
-            example_kwarg_inputs = {}
-        return example_inputs, example_kwarg_inputs
+def _convert_ts_to_export_experimental(traced_callable, args, kwargs=None):
+    with _temp_disable_texpr_fuser():
 
-    class _WrapperModule(torch.nn.Module):
-        def __init__(self, f):
-            super().__init__()
-            self.f = f
+        class _WrapperModule(torch.nn.Module):
+            def __init__(self, f):
+                super().__init__()
+                self.f = f
 
-        def forward(self, *args, **kwargs):
-            return self.f(*args, **kwargs)
+            def forward(self, *args, **kwargs):
+                return self.f(*args, **kwargs)
 
-    from torch.jit._trace import TopLevelTracedModule
+        from torch.jit._trace import TopLevelTracedModule
 
-    export_args, export_kwargs = process_trace_inputs_for_export(args, kwargs)
+        export_args, export_kwargs = _process_jit_trace_inputs_for_export(args, kwargs)
 
-    if isinstance(traced_callable, TopLevelTracedModule):
-        return _export(
-            traced_callable,
-            export_args,
-            export_kwargs,
-            strict=False,
-            _is_torch_jit_trace=True,
-        ).module()
+        if isinstance(traced_callable, (TopLevelTracedModule, torch._C.ScriptModule)):  # type: ignore[operator]
+            return _export(
+                traced_callable,
+                export_args,
+                export_kwargs,
+                strict=False,
+                _is_torch_jit_trace=True,
+            ).module()
 
-    else:
-        return _export(
-            _WrapperModule(traced_callable),
-            export_args,
-            export_kwargs,
-            strict=False,
-            _is_torch_jit_trace=True,
-        ).module()
+        elif isinstance(traced_callable, torch.ScriptMethod) and isinstance(
+            traced_callable.owner(), (torch._C.ScriptModule, torch.nn.Module)  # type: ignore[operator]
+        ):
+            with patch_forward(traced_callable.owner(), traced_callable):  # type: ignore[operator]
+                return _export(
+                    traced_callable.owner(),  # type: ignore[operator]
+                    export_args,
+                    export_kwargs,
+                    strict=False,
+                    _is_torch_jit_trace=True,
+                ).module()
+        else:
+            return _export(
+                _WrapperModule(traced_callable),
+                export_args,
+                export_kwargs,
+                strict=False,
+                _is_torch_jit_trace=True,
+            ).module()
 
 
 def _strict_export(
@@ -996,6 +1053,7 @@ def _strict_export(
     pre_dispatch: bool,
     original_state_dict: Dict[str, Any],
     orig_in_spec: TreeSpec,
+    _allow_complex_guards_as_runtime_asserts: bool,
     _disable_forced_specializations: Optional[bool],
     _is_torch_jit_trace: bool,
 ):
@@ -1006,6 +1064,7 @@ def _strict_export(
         dynamic_shapes,
         preserve_module_call_signature=preserve_module_call_signature,
         restore_fqn=False,  # don't need to restore because we will do it later
+        _allow_complex_guards_as_runtime_asserts=_allow_complex_guards_as_runtime_asserts,
         _log_export_usage=False,
     )
 
@@ -1168,6 +1227,7 @@ def _non_strict_export(
     pre_dispatch: bool,
     original_state_dict: Dict[str, Any],
     orig_in_spec: TreeSpec,
+    _allow_complex_guards_as_runtime_asserts: bool,
     _disable_forced_specializations: Optional[bool],
     _is_torch_jit_trace: bool,
 ):
@@ -1236,7 +1296,12 @@ def _non_strict_export(
         equalities_inputs,
         original_signature,
     ) = make_fake_inputs(
-        mod, args, kwargs, dynamic_shapes, _is_torch_jit_trace=_is_torch_jit_trace
+        mod,
+        args,
+        kwargs,
+        dynamic_shapes,
+        _is_torch_jit_trace=_is_torch_jit_trace,
+        _allow_complex_guards_as_runtime_asserts=_allow_complex_guards_as_runtime_asserts,  # for shape env initialization
     )
 
     fake_params_buffers = make_fake_params_buffers(fake_mode, _get_params_buffers(mod))
@@ -1269,6 +1334,7 @@ def _non_strict_export(
         produce_guards_and_solve_constraints(
             fake_mode,
             aten_export_artifact.gm,
+            dynamic_shapes,
             equalities_inputs,
             original_signature,
             _disable_forced_specializations=_disable_forced_specializations,
@@ -1298,6 +1364,7 @@ def _export(
     strict: bool = True,
     preserve_module_call_signature: Tuple[str, ...] = (),
     pre_dispatch: bool = False,
+    _allow_complex_guards_as_runtime_asserts: bool = False,
     _disable_forced_specializations: Optional[bool] = False,
     _is_torch_jit_trace: bool = False,
 ) -> ExportedProgram:
@@ -1330,13 +1397,23 @@ def _export(
         preserve_module_call_signature: A list of submodule paths for which the original
             calling conventions are preserved as metadata.
 
+        _allow_complex_guards_as_runtime_asserts:
+         With the current dynamic shapes language for dims and derived dims, we can run into constraints
+         that are not expressible with the language. For example, flattening a matrix and adding to a vector,
+         both fully dynamic (i.e. x.reshape([-1]) + y) emits a guard s0 * s1 = s2, which is not expressible.
+         By default, we either raise a constraint violation error or specialize to static values.
+         If this flag is set to True, we avoid erroring out and instead allow complex constraints to exist as runtime
+         assertions in the graph. The sympy interpreter (torch/utils/_sympy/interp.py) will produce the math ops
+         required to compute and assert the value of the guard (e.g. sym_size_int, eq, _assert_scalar).
+         Additionally, if TORCH_DYNAMO_DO_NOT_EMIT_RUNTIME_ASSERTS=1 is specified, we will allow complex constraints
+         while not emitting runtime asserts, returning a cleaner graph with lesser guarantees around dynamic shapes.
+
         _disable_forced_specializations:
-         By default, some inferred dynamic shapes guards/constraints that are not expressible with the current
-         dynamic shapes language will lead to specialization to the concrete input values provided.
-         If _disable_forced_specializations is set to True, we will not specialize, and will not perform runtime
-         checks on such produced guards. Instead, we allow the user to specify arbitrary shapes,
-         and fail during runtime if the inputs are invalid. Constraints expressible with the language
-         (e.g. ranges, linear derived dims) will still be enforced.
+         Similar to _allow_complex_guards_as_runtime_asserts, but only avoids specializing to static values if set to True.
+         For complex guards that don't specialize, this flag doesn't have any effect. Ideally this would be subsumed by
+         _allow_complex_guards_as_runtime_asserts, but this handles one additional case: single-variable equalities where
+         the symbol is solvable for a concrete value (e.g. Eq(s0 // 4, 400) -> s0 = 1600). If set to True, this flag will
+         avoid specializations. Direct equalities (e.g. s0 = 4), will still specialize.
 
     Returns:
         An ExportedProgram containing the traced method.
@@ -1384,6 +1461,7 @@ def _export(
         pre_dispatch,
         original_state_dict,
         orig_in_spec,
+        _allow_complex_guards_as_runtime_asserts,
         _disable_forced_specializations,
         _is_torch_jit_trace,
     )
@@ -1414,7 +1492,9 @@ def _export(
         ),
         len(export_graph_signature.input_specs),
     )
-    combined_args = _combine_args(mod, args, kwargs)
+    combined_args = _combine_args(
+        mod, args, kwargs, _is_torch_jit_trace=_is_torch_jit_trace
+    )
     range_constraints = make_constraints(
         fake_mode,
         gm,
