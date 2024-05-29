@@ -1,22 +1,18 @@
 import operator
 import types
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
-from torch._export import capture_pre_autograd_graph
-from torch.fx import (
-    GraphModule,
-    Node,
-)
 import torch.nn.functional as F
-from torch.nn.utils.fusion import fuse_conv_bn_weights
-from typing import Any, Callable, Dict, Optional, Tuple, List, Union
-from torch.utils._pytree import LeafSpec
-from torch.export.unflatten import _AttrKind, _assign_attr
 
 # Makes sure that quantized_decomposed ops are registered
 from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
 
 from torch.ao.quantization.quantizer import QuantizationAnnotation
+from torch.export.unflatten import _assign_attr, _AttrKind
+from torch.fx import GraphModule, Node
+from torch.nn.utils.fusion import fuse_conv_bn_weights
+from torch.utils._pytree import LeafSpec
 
 
 __all__ = [
@@ -41,22 +37,22 @@ _DEQUANTIZE_OPS = [
 _conv1d_bn_example_inputs = (
     torch.randn(1, 1, 3),  # x
     torch.randn(1, 1, 1),  # conv_weight
-    torch.randn(1),        # conv_bias
-    torch.randn(1),        # bn_weight
-    torch.randn(1),        # bn_bias
-    torch.randn(1),        # bn_running_mean
-    torch.randn(1),        # bn_running_var
+    torch.randn(1),  # conv_bias
+    torch.randn(1),  # bn_weight
+    torch.randn(1),  # bn_bias
+    torch.randn(1),  # bn_running_mean
+    torch.randn(1),  # bn_running_var
 )
 
 # Example inputs for conv-bn2d patterns
 _conv2d_bn_example_inputs = (
     torch.randn(1, 1, 3, 3),  # x
     torch.randn(1, 1, 1, 1),  # conv_weight
-    torch.randn(1),           # conv_bias
-    torch.randn(1),           # bn_weight
-    torch.randn(1),           # bn_bias
-    torch.randn(1),           # bn_running_mean
-    torch.randn(1),           # bn_running_var
+    torch.randn(1),  # conv_bias
+    torch.randn(1),  # bn_weight
+    torch.randn(1),  # bn_bias
+    torch.randn(1),  # bn_running_mean
+    torch.randn(1),  # bn_running_var
 )
 
 def _is_connected(source: torch.fx.Node, dest: torch.fx.Node) -> bool:
@@ -313,11 +309,7 @@ def _get_aten_graph_module_for_pattern(
     """
     if is_cuda:
         example_inputs = tuple([x.cuda() if isinstance(x, torch.Tensor) else x for x in example_inputs])
-    aten_pattern = capture_pre_autograd_graph(
-        pattern,
-        example_inputs,
-        kwargs,
-    )
+    aten_pattern = torch.export._trace._export(pattern, example_inputs, kwargs, pre_dispatch=True).module()
     aten_pattern.graph.eliminate_dead_code()
     aten_pattern.recompile()
 
