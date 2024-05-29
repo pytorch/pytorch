@@ -1251,17 +1251,22 @@ class WrapperCodeGen(CodeGen):
                         compile_wrapper.splice(symbol.src, strip=True)
                         symbols_included.add(symbol_name)
                         traverse(symbol)
-                    elif isinstance(symbol, (int, str, bool)):
+                    elif isinstance(symbol, (int, str, bool, constexpr)):
                         compile_wrapper.newline()
+                        if isinstance(symbol, constexpr):
+                            symbol_str = f"tl.constexpr({symbol.value!r})"
+                        else:
+                            symbol_str = f"{symbol!r}"
                         if annotation := global_annotations.get(symbol_name):
+                            annotion_code = ""
                             if isinstance(annotation, type):
                                 annotation_code = (
-                                    f"{annotation.__module__}.{annotation.__name__}"
+                                    f": {annotation.__module__}.{annotation.__name__}"
                                 )
                             else:
-                                annotation_code = annotation
+                                annotation_code = f": {annotation!r}"
                             compile_wrapper.writeline(
-                                f"{symbol_name}: {annotation_code} = {symbol!r}"
+                                f"{symbol_name}{annotation_code} = {symbol_str}"
                             )
                         else:
                             compile_wrapper.writeline(f"{symbol_name} = {symbol!r}")
