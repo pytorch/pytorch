@@ -720,14 +720,20 @@ def aot_dispatch_subclass(
     )
 
 
-def create_functional_call(mod, params_spec, params_len, store_orig_mod=False):
+def create_functional_call(mod, params_spec, params_len, store_orig_mod=False, reparamaterize=True):
     # Redundant with dynamo, but worth having in case this gets invoked elsewhere.
     # https://github.com/pytorch/pytorch/issues/103569
 
     def functional_call(*args, **kwargs):
-        with stateless._reparametrize_module(
-            mod, pytree.tree_unflatten(args[:params_len], params_spec)
-        ):
+        if not reparamaterize:
+            import contextlib
+            ctx = contextlib.nullcontext()
+        else:
+            ctx = stateless._reparametrize_module(
+                mod, pytree.tree_unflatten(args[:params_len], params_spec)
+            )
+
+        with ctx:
             if isinstance(mod, torch.fx.GraphModule):
                 with fx_traceback.preserve_node_meta(), warnings.catch_warnings():
                     warnings.filterwarnings(

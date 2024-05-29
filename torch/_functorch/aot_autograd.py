@@ -844,6 +844,7 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
     named_params = dict(mod.named_parameters(remove_duplicate=False))
     named_buffers = dict(mod.named_buffers(remove_duplicate=False))
     num_params_buffers = len(named_params) + len(named_buffers)
+    # need to fix this too
     compiled_f = aot_function(
         functional_call, *args, num_params_buffers=num_params_buffers, **kwargs
     )
@@ -891,8 +892,22 @@ def aot_module_simplified(
     params_flat, params_spec = pytree.tree_flatten(params)
     params_flat = list(params_flat)
     params_len = len(params_flat)
+    # not being able to detect the params on the CA GraphModule
+    print(f"Found {params_len} params by AOT Autograd")
+    if params_len == 0:
+        # check inputs for params
+        i = 0
+        while i < len(args):
+            if not isinstance(args[i], torch.nn.Parameter):
+                break
+            i += 1
 
-    functional_call = create_functional_call(mod, params_spec, params_len)
+        if i > 0:
+            params_len = i
+            params_flat = args[:params_len]
+            functional_call = create_functional_call(mod, params_spec, params_len, reparamaterize=False)
+    else:
+        functional_call = create_functional_call(mod, params_spec, params_len)
 
     if bw_compiler is None:
         bw_compiler = fw_compiler

@@ -285,8 +285,12 @@ class MarkStepBox:
 
 # We need to register this as an object that will be copied over as TLS when new
 # threads are created in autograd
-torch._C._stash_obj_in_tls("tree_manager_containers", local.tree_manager_containers)
-torch._C._stash_obj_in_tls("tree_manager_locks", local.tree_manager_locks)
+import os
+if os.environ["CA_DISABLE_TLS"] == "0":
+    torch._C._stash_obj_in_tls("tree_manager_containers", local.tree_manager_containers)
+    torch._C._stash_obj_in_tls("tree_manager_locks", local.tree_manager_locks)
+else:
+    log.debug("disabling cudagraph tree TLS")
 
 
 def mark_step_begin():
@@ -936,6 +940,8 @@ class CUDAGraphNode:
         self.graph.replay()
 
     def _copy_inputs_and_remove_from_src(self, dsts, srcs):
+        log.debug(f"_copy_inputs_and_remove_from_src: Copying {len(self.non_static_input_idx)} inputs to static locations")
+        log.debug(f"copying self.non_static_input_idx={self.non_static_input_idx}")
         dst_tensors = []
         src_tensors = []
         for idx in self.non_static_input_idx:
@@ -1526,16 +1532,27 @@ class CUDAGraphNode:
             mem_pool=self.cuda_graphs_pool,
             stream=self.stream,
         ):
+            # this runs during recording
+            # ints = []
+            # tensor_not_static = []
+            # tensor_static = []
             for i, inp in enumerate(inputs):
                 if not isinstance(inp, torch.Tensor):
+                    # ints.append(i)
                     assert isinstance(inp, int)
                     recording_inputs.append(inp)
                 elif i not in self.static_input_idxs:
+                    # tensor_not_static.append(i)
                     # static_input does an allocation!
                     recording_inputs.append(static_input(inp))
                 else:
+                    # tensor_static.append(i)
                     recording_inputs.append(inp)
 
+            # print("_allocate_and_copy_recording_inputs")
+            # print(f"{len(ints)}, ints={ints}")
+            # print(f"{len(tensor_not_static)}, tensor_not_static={tensor_not_static}")
+            # print(f"{len(tensor_static)}, tensor_static={tensor_static}")
             self._copy_inputs_and_remove_from_src(recording_inputs, inputs)
 
         return recording_inputs

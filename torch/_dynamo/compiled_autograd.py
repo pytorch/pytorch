@@ -50,6 +50,7 @@ def maybe_clone(x):
         return clone_preserve_strides(x)
     return x
 
+prev_data_ptrs = None
 
 class AutogradCompilerInstance:
     def __init__(self, compiler_fn) -> None:
@@ -83,9 +84,24 @@ class AutogradCompilerInstance:
         sizes_proxy = self.fx_tracer.create_proxy("placeholder", "sizes", (), {})
         self.hooks_proxy = self.fx_tracer.create_proxy("placeholder", "hooks", (), {})
 
+        params_idx = []
+        non_params_idx = []
+        for i,inp in enumerate(inputs):
+            if isinstance(inp, torch.nn.Parameter):
+                params_idx.append(i)
+            else:
+                non_params_idx.append(i)
+        new_order = params_idx + non_params_idx
+        assert len(new_order) == len(inputs)
+        self.new_order = new_order
+
+        reverse = {}
+        for old,new in enumerate(new_order):
+            reverse[new] = old
+
         # tensor inputs to fake tensors
         inputs = [
-            self.wrap_fake(x, self.source("inputs", idx))
+            self.wrap_fake(x, self.source("inputs", reverse[idx]))
             for idx, x in enumerate(inputs)
         ]
         proxies = [args_proxy[i] for i in range(len(inputs))]
@@ -256,9 +272,20 @@ class AutogradCompilerInstance:
             self.fx_tracer.root, self.fx_tracer.graph, "CompiledAutograd"
         )
         set_locals_to_steal(graph, ["inputs"])
-        compiled_autograd_log.info(
-            "%s", lazy_format_graph_code("Compiled autograd graph", graph)
-        )
+
+        offset = 3
+        nodes = list(graph.graph.nodes)
+        for dst_idx, src_idx in enumerate(self.new_order):
+            param_node = nodes[src_idx+offset]
+            param_node.args = (param_node.args[0], dst_idx)
+
+        graph.recompile()
+
+        # compiled_autograd_log.info(
+        #     "%s", lazy_format_graph_code("Compiled autograd graph", graph)
+        # )
+        compiled_autograd_log.info("Compiled autograd traced")
+        # print("Compiled autograd traced new graph")
         verbose_log.debug(
             "%s", lazy_format_graph_code("Compiled autograd graph", graph)
         )
@@ -268,10 +295,48 @@ class AutogradCompilerInstance:
         )
 
         def runtime_wrapper(compiled_fn, inputs, sizes, hooks):
+            import os
+            set_env = False
+            if "PYTHONBREAKPOINT" in os.environ:
+                set_env = True
+                del os.environ["PYTHONBREAKPOINT"]
+            print(f"Moving {len(runtime_inputs_to_move)} inputs: {runtime_inputs_to_move}")
+            # breakpoint()
+            # os.environ["PYTHONBREAKPOINT"] = "0"
             for i in runtime_inputs_to_move:
                 inputs[i] = inputs[i].cuda()
 
-            return compiled_fn(inputs, sizes, hooks)
+            new_inputs = []
+            for idx in self.new_order:
+                new_inputs.append(inputs[idx])
+
+            inputs.clear()
+            inputs = new_inputs
+
+            # data_ptrs = [x.data_ptr() for x in inputs]
+            # global prev_data_ptrs
+            # if prev_data_ptrs is None:
+            #     prev_data_ptrs = data_ptrs
+            # else:
+            #     def compare(a, b):
+            #         msg = "Comparing compiled autograd inputs data_ptr:"
+            #         if len(a) != len(b):
+            #             print(f"{msg} different input length")
+            #             return
+
+            #         differents = []
+            #         for i in range(len(a)):
+            #             if a[i] != b[i]:
+            #                 differents.append(i)
+            #         print(f"{msg} {len(differents)} different address inputs (out of {len(data_ptrs)})")
+
+            #     compare(prev_data_ptrs, data_ptrs)
+            #     prev_data_ptrs = data_ptrs
+
+            temp = compiled_fn(inputs, sizes, hooks)
+            if set_env:
+                os.environ["PYTHONBREAKPOINT"] = "0"
+            return temp
 
         return runtime_wrapper, self.compiler_fn(graph)
 

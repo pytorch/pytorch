@@ -2114,6 +2114,9 @@ class BenchmarkRunner:
                 self.autocast_arg["dtype"] = amp_dtype
 
     def init_optimizer(self, name, device, params):
+        self.optimizer = None
+        return
+
         if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
             if (name in CI_USE_SGD and self.args.ci) or name in BENCHMARK_USE_SGD:
                 self.optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
@@ -2739,7 +2742,9 @@ class BenchmarkRunner:
                     torch.cuda.reset_peak_memory_stats()
                     empty_gpu_cache(current_device)
                 t0 = time.perf_counter()
-                for _ in range(niters):
+                for i in range(niters):
+                    if mode == "dynamo":
+                        print(f"----> Running {mode} warmup iter {i}")
                     fn(model, example_inputs)
                 t1 = time.perf_counter()
                 latency = t1 - t0
