@@ -752,6 +752,7 @@ class GuardBuilder(GuardBuilderBase):
             guard_manager_enum=GuardManagerType.GUARD_MANAGER,
         )
 
+    @functools.lru_cache(None)
     def get_guard_manager_from_source(self, source):
         assert self.guard_manager  # to make mypy happy
         root_guard_manager = self.guard_manager.root
