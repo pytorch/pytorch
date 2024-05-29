@@ -6,14 +6,14 @@ from typing import cast, Iterable, List, Sequence, Tuple, Union
 
 import torch
 from torch.distributed._tensor._collective_utils import redistribute_cost
-from torch.distributed._tensor.api import DTensor
-from torch.distributed._tensor.device_mesh import DeviceMesh
-from torch.distributed._tensor.op_schema import (
+from torch.distributed._tensor._op_schema import (
     OpSchema,
     OpStrategy,
     PlacementStrategy,
     RuntimeSchemaInfo,
 )
+from torch.distributed._tensor.api import DTensor
+from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import (
     _Partial,
     DTensorSpec,

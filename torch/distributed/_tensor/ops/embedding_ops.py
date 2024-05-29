@@ -5,7 +5,7 @@ from typing import cast, List, Optional
 
 import torch
 import torch.distributed._functional_collectives as funcol
-from torch.distributed._tensor.op_schema import OpSchema, OpStrategy, StrategyType
+from torch.distributed._tensor._op_schema import OpSchema, OpStrategy, StrategyType
 from torch.distributed._tensor.ops.utils import (
     expand_to_full_mesh_op_strategy,
     register_op_strategy,
