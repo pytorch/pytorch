@@ -824,7 +824,6 @@ def _advise_is_size(a):
         isinstance(a, SymInt)
         and isinstance(a.node, SymNode)
         and isinstance(a.node.expr, sympy.Symbol)
-        and a.node.shape_env.is_unbacked_symint(a.node.expr)
     ):
         _constrain_range_for_size(a)
 
