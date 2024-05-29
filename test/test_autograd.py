@@ -80,7 +80,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils.checkpoint import checkpoint, checkpoint_sequential, gen_selective_checkpoint_context_fn
+from torch.utils.checkpoint import checkpoint, checkpoint_sequential, gen_selective_checkpoint_context_fn, CheckpointPolicy
 from torch.utils.hooks import RemovableHandle
 
 
@@ -13116,7 +13116,6 @@ class TestSelectiveActivationCheckpoint(TestCase):
             @torch.library.custom_op("mylib::sin_with_counter", mutates_args=())
             def sin_with_counter(x: torch.Tensor) -> torch.Tensor:
                 counter[0] += 1
-                # hold a weakpointer to whatever is saved here?
                 return x.sin()
 
             def setup_context(ctx, inputs, output) -> torch.Tensor:
@@ -13138,32 +13137,71 @@ class TestSelectiveActivationCheckpoint(TestCase):
 
             def policy_fn(ctx, op, *args, **kwargs):
                 if op == torch.ops.mylib.sin_with_counter.default:
-                    return torch.utils.checkpoint.CheckpointPolicy.SAVE_NON_OVERRIDABLE
+                    return CheckpointPolicy.MUST_SAVE
                 else:
-                    return torch.utils.checkpoint.CheckpointPolicy.RECOMPUTE_OVERRIDABLE
+                    return CheckpointPolicy.PREFER_RECOMPUTE
 
-            counter = [0]
-            context_fn = functools.partial(gen_selective_checkpoint_context_fn, policy_fn=policy_fn)
-            out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
-            out.sum().backward()
-            self.assertEqual(counter[0], 1)
+            op_list = [torch.ops.mylib.sin_with_counter.default]
 
-            counter = [0]
-            out = checkpoint(fn, x, use_reentrant=False)
-            out.sum().backward()
-            self.assertEqual(counter[0], 2)
+            for policy_fn in (policy_fn, op_list):
+                counter = [0]
+                context_fn = gen_selective_checkpoint_context_fn(policy_fn)
+                out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
+                out.sum().backward()
+                self.assertEqual(counter[0], 1)
 
-            counter = [0]
-            out = fn(x)
-            out.sum().backward()
-            self.assertEqual(counter[0], 1)
+                counter = [0]
+                out = checkpoint(fn, x, use_reentrant=False)
+                out.sum().backward()
+                self.assertEqual(counter[0], 2)
 
-    # Have some more example of policy functions we want here.
-    def test_list_of_ops_policy_helper(self):
-        pass
+                counter = [0]
+                out = fn(x)
+                out.sum().backward()
+                self.assertEqual(counter[0], 1)
 
-    def test_counter_policy(self):
-        pass
+    def test_bad_inputs(self):
+        bad_op_list1 = [2]
+
+        with self.assertRaisesRegex(ValueError, "Expected op in `op_list` to be an OpOverload"):
+            gen_selective_checkpoint_context_fn(bad_op_list1)
+
+        bad_op_list2 = [torch.ops.aten.sin]
+
+        with self.assertRaisesRegex(ValueError, "update the OpOverloadPacket to a specific OpOverload"):
+            gen_selective_checkpoint_context_fn(bad_op_list2)
+
+        with self.assertRaisesRegex(TypeError, "either a function or a list of ops."):
+            gen_selective_checkpoint_context_fn(2)
+
+    def test_policy_with_state(self):
+        # If I have a stateful callable, state is shared between the original
+        # forward and the recompute.
+        counters = []
+
+        class Policy:
+            def __init__(self):
+                self.counter = [0]
+                self.recompute_counter = [0]
+
+            def __call__(self, ctx, func, *args, **kwargs):
+                counter = self.recompute_counter if ctx.is_recompute else self.counter
+                counter[0] += 1
+                counters.append(counter[0])
+                if counter == 1 and func is torch.ops.aten.mm.default:
+                    return CheckpointPolicy.MUST_SAVE
+                return CheckpointPolicy.PREFER_RECOMPUTE
+
+        def fn(x):
+            return x.sin().sin().sin()
+
+        x = torch.randn(3, requires_grad=True)
+        context_fn = gen_selective_checkpoint_context_fn(Policy(), allow_cache_entry_mutation=True)
+        out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
+        out.sum().backward()
+        # 1. counter properly reset to 0 for the recompute
+        # 2. due to early-stop we do not recompute the final op
+        self.assertEqual(counters, [1, 2, 3, 1, 2])
 
     def test_storage_lifetime(self):
         # The storage object saved by SAC survives as long as the graph is alive
@@ -13171,9 +13209,9 @@ class TestSelectiveActivationCheckpoint(TestCase):
         # However, we make sure to eagerly free any cached objects upon use.
         def policy_fn(ctx, op, *args, **kwargs):
             if op == torch.ops.aten.sin.default:
-                return torch.utils.checkpoint.CheckpointPolicy.MUST_SAVE
+                return CheckpointPolicy.MUST_SAVE
             else:
-                return torch.utils.checkpoint.CheckpointPolicy.RECOMPUTE
+                return CheckpointPolicy.PREFER_RECOMPUTE
 
         ref = None
 
@@ -13194,7 +13232,7 @@ class TestSelectiveActivationCheckpoint(TestCase):
             return out.cos()
 
         x = torch.randn(3, requires_grad=True)
-        context_fn = gen_selective_checkpoint_context_fn(policy_fn=policy_fn)
+        context_fn = gen_selective_checkpoint_context_fn(policy_fn)
         out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
         self.assertIsNotNone(ref())
         out.sum().backward()
@@ -13203,46 +13241,87 @@ class TestSelectiveActivationCheckpoint(TestCase):
     def test_version_counter(self):
         def policy_fn(ctx, op, *args, **kwargs):
             if op == torch.ops.aten.sin.default:
-                return torch.utils.checkpoint.CheckpointPolicy.MUST_SAVE
+                return CheckpointPolicy.MUST_SAVE
             else:
-                return torch.utils.checkpoint.CheckpointPolicy.RECOMPUTE
+                return CheckpointPolicy.PREFER_RECOMPUTE
 
         def fn(x):
             return x.sin().mul_(2).cos().exp()
 
         x = torch.randn(3, requires_grad=True)
-        context_fn = functools.partial(gen_selective_checkpoint_context_fn, policy_fn=policy_fn)
+        context_fn = gen_selective_checkpoint_context_fn(policy_fn)
         out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
 
+        # 1) Error because the output of sin is saved and mutated by mul_
         with self.assertRaisesRegex(RuntimeError, "has been mutated"):
             out.sum().backward()
 
-        functools.partial(gen_selective_checkpoint_context_fn, policy_fn=policy_fn, allow_mutation=True)
+        x = torch.randn(3, requires_grad=True)
+        context_fn = gen_selective_checkpoint_context_fn(policy_fn, allow_cache_entry_mutation=True)
+        out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
 
-    def test_override_verison_counter(self):
-        # TODO: Expose an override to allow the user to say they know what they are doing
-        # and don't care if the saved thing has been mutated. This may be useful
-        # for AutoAC.
-        pass
+        # 2) No longer should be an error because of allow_cache_entry_mutation
+        out.sum().backward()
 
     def test_function_with_more_than_one_output(self):
+        # maybe there is a more systematic way:
+        counter = [0]
+
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.var_mean.correction:
+                counter[0] += 1
+                return CheckpointPolicy.MUST_SAVE
+            else:
+                return CheckpointPolicy.PREFER_RECOMPUTE
         # var_mean has two outputs
-        pass
+        def fn(x):
+            a, b = torch.var_mean(x)
+            return a * b
+
+        x = torch.randn(3, requires_grad=True)
+        context_fn = gen_selective_checkpoint_context_fn(policy_fn)
+        out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
+        x_grad = torch.autograd.grad(out.sum(), (x,))
+        x_grad_ref = torch.autograd.grad(fn(x).sum(), (x,))
+        self.assertEqual(x_grad, x_grad_ref)
+        self.assertEqual(counter[0], 2)
 
     def test_function_with_non_tensor_output(self):
-        # all_close has no outputs
-        pass
+        # When SAC is enabled, the op is not computed a second time
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            counter = [0]
 
-    def test_views(self):
-        pass
+            @torch.library.custom_op("mylib::sin_with_extra", mutates_args=())
+            def sin_with_extra(x: torch.Tensor) -> Tuple[torch.Tensor, int]:
+                counter[0] += 1
+                return x.sin(), 2
 
-    def test_inplace(self):
-        # Mutate things that are not cached should be ok.
-        pass
+            def setup_context(ctx, inputs, output) -> torch.Tensor:
+                (x,) = inputs
+                ctx.save_for_backward(x)
 
-    def test_randomness(self):
-        # We should have a list of ops that use randomness (what about for compile?)
-        pass
+            def backward(ctx, grad, _unused):
+                (x,) = ctx.saved_tensors
+                return grad * x.cos()
+
+            torch.library.register_autograd(
+                "mylib::sin_with_extra", setup_context, backward
+            )
+
+            x = torch.randn(3, requires_grad=True)
+
+            def fn(x):
+                return (torch.ops.mylib.sin_with_extra(x)[0] * x.sin().exp()).sin()
+
+            ops_list = [torch.ops.mylib.sin_with_extra.default]
+
+            x = torch.randn(3, requires_grad=True)
+            context_fn = gen_selective_checkpoint_context_fn(ops_list)
+            out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
+            x_grad = torch.autograd.grad(out.sum(), (x,))
+            self.assertEqual(counter[0], 1)
+            x_grad_ref = torch.autograd.grad(fn(x).sum(), (x,))
+            self.assertEqual(x_grad, x_grad_ref)
 
     def test_can_only_trigger_recompute_once(self):
         # We don't support this to avoid adding extra complexity for now.
@@ -13250,19 +13329,19 @@ class TestSelectiveActivationCheckpoint(TestCase):
         # TODO: have a nice error message here.
         def policy_fn(ctx, op, *args, **kwargs):
             if op == torch.ops.aten.sin.default:
-                return torch.utils.checkpoint.CheckpointPolicy.MUST_SAVE
+                return CheckpointPolicy.MUST_SAVE
             else:
-                return torch.utils.checkpoint.CheckpointPolicy.RECOMPUTE
+                return CheckpointPolicy.PREFER_RECOMPUTE
 
         def fn(x):
             return x.sin().cos().exp()
 
         x = torch.randn(3, requires_grad=True)
-        context_fn = gen_selective_ac_context_fn(policy_fn)
+        context_fn = gen_selective_checkpoint_context_fn(policy_fn)
         out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
         out.sum().backward(retain_graph=True)
 
-        with self.assertRaisesRegex(RuntimeError, "trying to backward an extra time"):
+        with self.assertRaisesRegex(RuntimeError, "Trying to backward an extra time"):
             out.sum().backward(retain_graph=True)
 
 
