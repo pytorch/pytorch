@@ -12,8 +12,8 @@ import torch
 from torch._dynamo import reset
 from torch._dynamo.utils import counters
 from torch._inductor import config, metrics
+from torch._inductor.async_compile import AsyncCompile
 from torch._inductor.codecache import (
-    AsyncCompile,
     cuda_compile_command,
     CUDACodeCache,
     FxGraphCachePickler,
@@ -44,6 +44,7 @@ HAS_TRITON = has_triton()
 
 if HAS_TRITON:
     import triton
+
     from torch.testing._internal.triton_utils import add_kernel
 
 requires_gpu = functools.partial(unittest.skipIf, not HAS_GPU, "requires gpu")
