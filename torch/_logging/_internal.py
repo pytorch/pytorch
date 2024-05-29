@@ -214,6 +214,7 @@ def set_logs(
     trace_call: bool = False,
     trace_bytecode: bool = False,
     output_code: bool = False,
+    kernel_code: bool = False,
     schedule: bool = False,
     perf_hints: bool = False,
     post_grad_graphs: bool = False,
@@ -355,7 +356,10 @@ def set_logs(
             traces bytecode. Default: ``False``
 
         output_code (:class:`bool`):
-            Whether to emit the TorchInductor output code. Default: ``False``
+            Whether to emit the TorchInductor output code on a per-graph basis. Default: ``False``
+
+        kernel_code (:class:`bool`):
+            Whether to emit the TorchInductor output code on a per-kernel bases. Default: ``False``
 
         schedule (:class:`bool`):
             Whether to emit the TorchInductor schedule. Default: ``False``
@@ -473,6 +477,7 @@ def set_logs(
         trace_call=trace_call,
         trace_bytecode=trace_bytecode,
         output_code=output_code,
+        kernel_code=kernel_code,
         schedule=schedule,
         perf_hints=perf_hints,
         post_grad_graphs=post_grad_graphs,

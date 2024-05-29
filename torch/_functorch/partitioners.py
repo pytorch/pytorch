@@ -533,12 +533,13 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
 
     # Populate depth for the nodes. Depth is the distance from the inputs.
     depths = {}
-    output_node = next(iter(gm.graph.find_nodes(op="output")))
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             depths[node] = 0
         else:
-            depths[node] = max([depths[arg] for arg in node.all_input_nodes], default=0)
+            depths[node] = (
+                max((depths[arg] for arg in node.all_input_nodes), default=0) + 1
+            )
 
     def insert_node_in_graph(node):
         if node in env:
@@ -802,6 +803,8 @@ def get_saved_values(
             return False
         if node.target == operator.getitem:
             return False
+        if op_types.is_view(node):
+            return False
         if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
             return False
         # NB: "recompute" == 0 means that must save this node.
@@ -854,6 +857,14 @@ def get_saved_values(
 
     def get_node_weight(node) -> float:
         mem_sz = _size_of(node)
+        if op_types.is_view(node):
+            # We never choose to save views, since views are free to recompute.
+            # It makes it a bit simpler to analyze
+            # NB: If they're not free to recompute (e.g. nested tensors)... I
+            # think we should modify checks for view_ops to `is_view` and check
+            # that. Basically, with nested tensors, `aten.view` is not a "view
+            # op".
+            return math.inf
 
         if isinstance(node.meta["val"], py_sym_types):
             # We never want to save symfloats

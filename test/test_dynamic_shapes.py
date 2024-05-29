@@ -9,6 +9,7 @@ import operator
 import re
 
 import sympy
+
 import torch
 import torch.fx
 import torch.nn.functional as F
@@ -1490,6 +1491,7 @@ class TestDimConstraints(TestCase):
 
         from sympy import Symbol
         from sympy.solvers.inequalities import reduce_inequalities
+
         from torch._dynamo.source import (
             LocalSource,
             TensorProperty,
@@ -1521,6 +1523,7 @@ class TestDimConstraints(TestCase):
 
     def test_dim_constraints_solve_full(self):
         from sympy import Eq, Integer, Ne, Symbol
+
         from torch._dynamo.source import (
             LocalSource,
             TensorProperty,
