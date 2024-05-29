@@ -2390,12 +2390,9 @@ class CppVecKernel(CppKernel):
                 lambda x, y: x * y, self.ranges[self.reduction_depth :]
             )
             if self.tiling_idx >= self.reduction_depth:
+                assert self.tiling_idx == len(self.ranges) - 1
                 # calculate the reduction size that will be vectorized
-                reduction_inner_size = (
-                    self.ranges[-1]
-                    if self.reduction_depth < len(self.ranges) - 1
-                    else self.ranges[self.reduction_depth]
-                )
+                reduction_inner_size = self.ranges[-1]
                 # calculate loops size outside the vectorized loop
                 self.reduction_outer_size = reduction_size // reduction_inner_size
                 # calculate the main loop size
@@ -2837,6 +2834,7 @@ class CppVecKernelChecker(CppVecKernel):
             torch.int64,
         ]
 
+        # TODO: remove it after all data types support masked vectorization.
         self.supported_dtypes_for_masked_vec: List[torch.dtype] = [
             torch.float,
             torch.bfloat16,
