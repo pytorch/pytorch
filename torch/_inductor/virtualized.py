@@ -71,6 +71,7 @@ from .ops_handler import (  # noqa: F401
 
 if TYPE_CHECKING:
     import torch
+    from torch._inductor.codegen.cpp_utils import LocalBufferScope
     from torch._inductor.debug import DebugContext
     from torch._inductor.graph import GraphLowering
     from torch._inductor.ir import InterpreterShim
@@ -161,6 +162,9 @@ _debug: Virtualized[DebugContext] = Virtualized("debug", NullHandler)
 _interpreter: Virtualized[InterpreterShim] = Virtualized("interpreter", NullHandler)
 _aot_compilation: Virtualized[bool] = Virtualized("aot_compilation", NullHandler)
 _current_node: Virtualized[torch.fx.Node] = Virtualized("current_node", NullHandler)
+_local_buffer_scope: Virtualized[LocalBufferScope] = Virtualized(
+    "local_buffer_scope", NullHandler
+)
 
 
 class OpsValue:
@@ -305,6 +309,8 @@ class _V:
     get_aot_compilation: Callable[[], Any] = _aot_compilation._get_handler
     set_current_node: Callable[[Any], Any] = _current_node._set_handler
     get_current_node: Callable[[], Any] = _current_node._get_handler
+    set_local_buffer_scope: Callable[[Any], Any] = _local_buffer_scope._set_handler
+    get_local_buffer_scope: Callable[[], Any] = _local_buffer_scope._get_handler
 
     @property
     def ops(self) -> OpsHandler[Any]:
@@ -346,6 +352,10 @@ class _V:
     @property
     def current_node(self):
         return _current_node._get_handler()
+
+    @property
+    def local_buffer_scope(self):
+        return _local_buffer_scope._get_handler()
 
 
 V = _V()

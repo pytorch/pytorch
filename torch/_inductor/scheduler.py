@@ -450,23 +450,6 @@ class BaseSchedulerNode:
             V.graph.wrapper_code.codegen_allocation(self.node)
             return
 
-        # Hacky check for if V.kernel using local buffer.
-        # If so, early return to avoid allocation of this buffer
-        # since its usage has been replaced with local buffer.
-        if (
-            hasattr(V.graph.scheduler, "get_local_buffer")
-            and V.graph.scheduler.get_local_buffer()
-            and V.graph.scheduler.get_name_to_node(
-                next(iter(V.graph.scheduler.get_local_buffer().items()))[0]
-            ).get_name()
-            == self.node.get_name()
-        ):
-            # Never resue this buffer, sinice it's not real allocated.
-            V.graph.never_reuse_buffers.add(self.node.get_name())
-            # Mark this buffer as freed, so that we don't free it later.
-            V.graph.wrapper_code.freed.add(self.node.get_name())
-            return
-
         # hacky check for if V.kernel is a real kernel or NullHandler
         if (
             hasattr(V.kernel, "args")
@@ -2600,12 +2583,6 @@ class Scheduler:
 
         self.buffer_names_to_free.clear()
 
-    def get_name_to_node(self, name: str) -> BaseSchedulerNode:
-        return self.name_to_node[name]
-
-    def get_local_buffer(self) -> Dict[str, ir.Buffer]:
-        return {}
-
     def remove_kernel_local_buffers(self) -> None:
         """
         Any buffers that are both created and have a last use in the
@@ -2617,7 +2594,7 @@ class Scheduler:
         fused_node_names = V.kernel.store_buffer_names
         names_to_remove = []
         for out_buf in V.kernel.store_buffer_names:
-            users = self.get_name_to_node(out_buf).users
+            users = self.name_to_node[out_buf].users
             assert users is not None
             users = {user.get_name() for user in users if not user.is_weak}
             if users.issubset(fused_node_names):

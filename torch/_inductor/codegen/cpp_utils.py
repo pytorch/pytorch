@@ -3,8 +3,7 @@ import copy
 import math
 
 from collections import namedtuple
-from enum import Enum
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from unittest.mock import patch
 
 import sympy
@@ -256,111 +255,44 @@ def value_to_cpp(value, cpp_type):
         return f"static_cast<{cpp_type}>({repr(value)})"
 
 
-LocalBuffer = namedtuple("LocalBuffer", ["local_buf", "global_snode"])
-
-
-class LocalBufferCase(Enum):
-    GEMMEPILOGUE = 0
-    OUTERLOOPFUSION = 1
-
-
 class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
     def __init__(
         self,
         inner,
         global_buf=None,
         local_buf=None,
-        local_buffer_case=LocalBufferCase.GEMMEPILOGUE,
+        localize_fn: Optional[
+            Callable[["LocalizeBufferHandler", str, sympy.Expr], Any]
+        ] = None,
     ):
         super().__init__(inner)
         self.global_buf = global_buf
         self.local_buf = local_buf
-        self.local_buffer_case = local_buffer_case
-        self.can_use_local_buf = True
+        self.localize_fn = localize_fn
 
     def localize(self, name: str, index: sympy.Expr):
         if self.global_buf and name == self.global_buf.get_name():
-            if self.local_buffer_case == LocalBufferCase.OUTERLOOPFUSION:
-                scheduler_nodes = V.graph.scheduler.name_to_node.get(name).get_nodes()  # type: ignore[union-attr]
-
-                # Rename buffer name to Local Buffer
-                name = self.local_buf.get_name()
-
-                # Use the last dim
-                _, (group, reduction_group) = max(
-                    scheduler_nodes, key=lambda x: int(x.is_reduction())
-                ).group
-                call_ranges = tuple(group) + tuple(reduction_group)
-                index_id_to_keep = len(call_ranges) - 1
-                sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)  # type: ignore[attr-defined]
-                replacements = {}
-                for x in sorted_symbols:
-                    if x.name.startswith("x") and x.name != f"x{index_id_to_keep}":  # type: ignore[attr-defined]
-                        # Only keep index used by local buffer
-                        replacements[x] = sympy.core.numbers.Zero()
-                from ..utils import sympy_subs
-
-                index = sympy_subs(index, replacements)  # type: ignore[arg-type]
-            else:
-                name = self.local_buf.get_name()
-                index_vars = sorted(
-                    [s for s in index.free_symbols if symbol_is_type(s, SymT.INDEX)],
-                    key=str,
-                )
-                index = self.local_buf.layout.make_indexer()(index_vars)
+            assert self.localize_fn is not None
+            name, index = self.localize_fn(self, name, index)
         return name, index
 
     def load(self, name: str, index: sympy.Expr):
-        from .cpp import CppKernel, CppTile2DKernel, CppVecKernel
-
-        if (
-            self.local_buffer_case == LocalBufferCase.OUTERLOOPFUSION
-            and name == self.global_buf.get_name()
-            and isinstance(V.kernel, (CppTile2DKernel, CppVecKernel, CppKernel))
-        ):
-            if isinstance(V.kernel, CppTile2DKernel):
-                self.can_use_local_buf = False
-            elif isinstance(V.kernel, CppVecKernel):
-                _index = V.kernel.rename_indexing(index)
-                tiling_var = V.kernel.itervars[V.kernel.tiling_idx]
-                stride = V.kernel._try_get_const_stride(_index, tiling_var)
-                if stride != 1:
-                    self.can_use_local_buf = False
-                else:
-                    name, index = self.localize(name, index)
-            else:
-                assert isinstance(V.kernel, CppKernel)
-                name, index = self.localize(name, index)
-            return self._inner.load(name, index)
         return self._inner.load(*self.localize(name, index))
 
     def store(self, name, index, value, mode=None):
-        from .cpp import CppKernel, CppTile2DKernel, CppVecKernel
-
+        local_buffer_name, local_buffer_index = self.localize(name, index)
+        res = self._inner.store(local_buffer_name, local_buffer_index, value, mode)
         if (
-            self.local_buffer_case == LocalBufferCase.OUTERLOOPFUSION
+            self.global_buf
             and name == self.global_buf.get_name()
-            and isinstance(V.kernel, (CppTile2DKernel, CppVecKernel, CppKernel))
+            and isinstance(V.kernel, Kernel)
         ):
-            if isinstance(V.kernel, CppTile2DKernel):
-                self.can_use_local_buf = False
-            elif isinstance(V.kernel, CppVecKernel):
-                _index = V.kernel.rename_indexing(index)
-                tiling_var = V.kernel.itervars[V.kernel.tiling_idx]
-                stride = V.kernel._try_get_const_stride(_index, tiling_var)
-                if stride != 1:
-                    self.can_use_local_buf = False
-                else:
-                    name, index = self.localize(name, index)
-            else:
-                assert isinstance(V.kernel, CppKernel)
-                if mode is not None:
-                    # Doesn't support atomic_add
-                    self.can_use_local_buf = False
-                else:
-                    name, index = self.localize(name, index)
-            return self._inner.store(name, index, value, mode)
-        return self._inner.store(*self.localize(name, index), value, mode)
+            # Remove name of local buffer from Kernel.store_buffer_names
+            # local_buffer_name is added to Kernel.store_buffer_names in Kernel.CSEProxy.store.
+            # A special case is CppVecKernelChecker which uses VecCheckerProxy
+            # instead of CSEProxy, so local_buffer_name is not in store_buffer_names
+            V.kernel.store_buffer_names.discard(local_buffer_name)
+        return res
 
     def store_reduction(self, name, index, value):
         return self._inner.store_reduction(*self.localize(name, index), value)
@@ -411,26 +343,8 @@ class LocalBufferScope:
 
         self.exit_stack.enter_context(patch.object(self.kernel.args, "output", output))
 
-        from ..scheduler import Scheduler
-
-        if isinstance(V.graph.scheduler, Scheduler):
-            original_get_name_to_node = V.graph.scheduler.get_name_to_node
-
-            def get_name_to_node(name):
-                if name in self.local_nodes:
-                    return self.local_nodes[name]
-                return original_get_name_to_node(name)
-
-            self.exit_stack.enter_context(
-                patch.object(V.graph.scheduler, "get_name_to_node", get_name_to_node)
-            )
-
-            def get_local_buffer():
-                return self.local_buffers
-
-            self.exit_stack.enter_context(
-                patch.object(V.graph.scheduler, "get_local_buffer", get_local_buffer)
-            )
+        # Set current LocalBufferScope into V
+        self.exit_stack.enter_context(V.set_local_buffer_scope(self))
 
         return self
 
@@ -445,6 +359,21 @@ class LocalBufferScope:
         self.local_buffers[buffer.get_name()] = buffer
         if node:
             self.local_nodes[buffer.get_name()] = node
+            # Patch the buffer's method of should_allocate
+            assert isinstance(node.node, ir.ComputedBuffer)
+
+            def should_allocate():
+                # Local Buffer shouldn't allocate globally
+                assert isinstance(node.node, ir.ComputedBuffer)
+                # Never resue this buffer, sinice it's not real allocated.
+                V.graph.never_reuse_buffers.add(node.node.get_name())
+                # Mark this buffer as freed, so that we don't free it later.
+                V.graph.wrapper_code.freed.add(node.node.get_name())
+                return False
+
+            self.exit_stack.enter_context(
+                patch.object(node.node, "should_allocate", should_allocate)
+            )
 
     def localize_buffer(
         self, global_buf: ir.Buffer, local_buf: ir.Buffer, nodes: List[ir.IRNode]
@@ -478,8 +407,26 @@ class LocalBufferScope:
 
         def inner_fn_wrapper(inner_fn):
             def inner(index):
+                def localize_fn(self, name, index):
+                    name = self.local_buf.get_name()
+                    index_vars = sorted(
+                        [
+                            s
+                            for s in index.free_symbols
+                            if symbol_is_type(s, SymT.INDEX)
+                        ],
+                        key=str,
+                    )
+                    index = self.local_buf.layout.make_indexer()(index_vars)
+                    return name, index
+
                 with V.set_ops_handler(
-                    LocalizeBufferHandler(V.get_ops_handler(), global_buf, local_buf)
+                    LocalizeBufferHandler(
+                        V.get_ops_handler(),
+                        global_buf,
+                        local_buf,
+                        localize_fn=localize_fn,
+                    )
                 ):
                     return inner_fn(index)
 

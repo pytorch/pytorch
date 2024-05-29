@@ -6,6 +6,7 @@ import logging
 import math
 import re
 import sys
+from collections import namedtuple
 from copy import copy, deepcopy
 from enum import Enum
 from typing import Any, cast, Dict, List, Optional, Sequence, Set, Tuple, Union
@@ -67,8 +68,8 @@ from .cpp_utils import (
     cexpr_index,
     DTYPE_TO_CPP,
     INDEX_TYPE,
-    LocalBuffer,
-    LocalBufferCase,
+    LocalBufferScope,
+    LocalizeBufferHandler,
     unify_mask_base_type,
     value_to_cpp,
 )
@@ -1987,9 +1988,13 @@ class CppKernel(Kernel):
 
             stack.enter_context(code.indent())
             if loop_nest.root:
-                if has_outer_loop_kernel and V.graph.scheduler.get_local_buffer():
+                if (
+                    has_outer_loop_kernel
+                    and isinstance(V.local_buffer_scope, LocalBufferScope)
+                    and V.local_buffer_scope.local_buffers
+                ):
                     # Allocate local buffer
-                    local_buffers = V.graph.scheduler.get_local_buffer()
+                    local_buffers = V.local_buffer_scope.local_buffers
                     assert len(local_buffers.items()) == 1
                     local_buffer = next(iter(local_buffers.items()))[1]
 
@@ -3428,11 +3433,7 @@ class CppKernelProxy(CppKernel):
             DataTypePropagation.propagate_loopbody(body)
         self.codegen_functions(loop_bodies, var_sizes_list)
 
-    def codegen_nodes(
-        self,
-        nodes: List[SchedulerNode],
-        local_buffers: Optional[List[LocalBuffer]] = None,
-    ):
+    def codegen_nodes(self, nodes: List[SchedulerNode]):
         # Legalize BF16 node by adding to_dtype explicitly
         self.legalize_lowp_fp_dtype(nodes)
         self.data_type_propagation(nodes)
@@ -3449,46 +3450,57 @@ class CppKernelProxy(CppKernel):
             else torch.float
         )
 
-        from .cpp_utils import LocalBufferScope, LocalizeBufferHandler
+        is_valid_codegen = True
 
-        can_use_local_buf = True
-        with LocalBufferScope(self) as scope:
-            if local_buffers:
-                assert len(local_buffers) == 1
-                scope.add_local_buffer(
-                    local_buffers[0].local_buf, local_buffers[0].global_snode
+        def fn(node, *index_vars):
+            op_handle = None
+            ctx = contextlib.nullcontext()
+            if (
+                isinstance(V.local_buffer_scope, LocalBufferScope)
+                and V.local_buffer_scope.local_buffers
+            ):
+                assert len(V.local_buffer_scope.local_buffers.items()) == 1
+
+                def localize_fn(self, name, index):
+                    scheduler_nodes = V.graph.scheduler.name_to_node.get(name).get_nodes()  # type: ignore[union-attr]
+                    # Rename buffer name to Local Buffer
+                    name = self.local_buf.get_name()
+                    # Use the last dim
+                    _, (group, reduction_group) = max(
+                        scheduler_nodes, key=lambda x: int(x.is_reduction())
+                    ).group
+                    call_ranges = tuple(group) + tuple(reduction_group)
+                    index_id_to_keep = len(call_ranges) - 1
+                    sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)  # type: ignore[attr-defined]
+                    replacements = {}
+                    for x in sorted_symbols:
+                        if x.name.startswith("x") and x.name != f"x{index_id_to_keep}":  # type: ignore[attr-defined]
+                            # Only keep index used by local buffer
+                            replacements[x] = sympy.core.numbers.Zero()
+                    index = sympy_subs(index, replacements)  # type: ignore[arg-type]
+                    return name, index
+
+                op_handle = LocalizeBufferHandler(
+                    V.get_ops_handler(),
+                    global_buf=next(iter(V.local_buffer_scope.local_nodes.items()))[
+                        1
+                    ].node,
+                    local_buf=next(iter(V.local_buffer_scope.local_buffers.items()))[1],
+                    localize_fn=localize_fn,
                 )
+                ctx = V.set_ops_handler(op_handle)
+            with ctx:
+                node.decide_inplace_update()
+                node.mark_run()
+                if isinstance(V.kernel, NullKernelHandler):
+                    return node._body(*index_vars)
+                else:
+                    return node.codegen(index_vars)
 
-            def fn(node, *index_vars):
-                op_handle = None
-                ctx = contextlib.nullcontext()
-                if local_buffers:
-                    assert len(local_buffers) == 1
-                    op_handle = LocalizeBufferHandler(
-                        V.get_ops_handler(),
-                        global_buf=local_buffers[0].global_snode.node,
-                        local_buf=local_buffers[0].local_buf,
-                        local_buffer_case=LocalBufferCase.OUTERLOOPFUSION,
-                    )
-                    ctx = V.set_ops_handler(op_handle)
-                with ctx:
-                    node.decide_inplace_update()
-                    node.mark_run()
-                    if isinstance(V.kernel, NullKernelHandler):
-                        res = node._body(*index_vars)
-                    else:
-                        res = node.codegen(index_vars)
-                    if op_handle:
-                        nonlocal can_use_local_buf
-                        can_use_local_buf = (
-                            can_use_local_buf and op_handle.can_use_local_buf
-                        )
-                    return res
-
-            fn_list = [functools.partial(fn, node) for node in nodes]
-            var_sizes_list = [node.group[1] for node in nodes]
-            self.codegen_functions(fn_list, var_sizes_list, vec_dtype)
-            return can_use_local_buf
+        fn_list = [functools.partial(fn, node) for node in nodes]
+        var_sizes_list = [node.group[1] for node in nodes]
+        self.codegen_functions(fn_list, var_sizes_list, vec_dtype)
+        return is_valid_codegen
 
     def codegen_loops(self, code, worksharing):
         self.codegen_loops_impl(self.loop_nest, code, worksharing)
@@ -3826,6 +3838,8 @@ class CppScheduling(BaseScheduling):
                 # Only support this typical case at first.
                 return False
 
+            LocalBuffer = namedtuple("LocalBuffer", ["local_buf", "global_snode"])
+
             local_buffers: List[LocalBuffer] = []
             for scheduler_node in node.get_nodes():
                 # all users inside same OuterLoopFusedSchedulerNode
@@ -3856,13 +3870,18 @@ class CppScheduling(BaseScheduling):
                 # No local buffer found
                 return False
             assert len(local_buffers) == 1
-
             for _node in node.get_outer_nodes():
                 assert isinstance(_node, (FusedSchedulerNode, SchedulerNode))
                 cpp_kernel_proxy = CppKernelProxy(kernel_group)
-                if not cpp_kernel_proxy.codegen_nodes(_node.get_nodes(), local_buffers):  # type: ignore[arg-type]
-                    # Failed to use local buf by checking the kernel codegn
-                    return False
+
+                with LocalBufferScope(cpp_kernel_proxy) as scope:
+                    assert len(local_buffers) == 1
+                    scope.add_local_buffer(
+                        local_buffers[0].local_buf, local_buffers[0].global_snode
+                    )
+                    if not cpp_kernel_proxy.codegen_nodes(_node.get_nodes()):  # type: ignore[arg-type]
+                        # Failed to use local buf by checking the kernel codegn
+                        return False
                 cpp_kernel_proxy_list.append(cpp_kernel_proxy)
                 nodes_list.append(_node.get_nodes())  # type: ignore[arg-type]
 
@@ -3873,7 +3892,6 @@ class CppScheduling(BaseScheduling):
             outer_fusion_cpp_kernel_proxy = node.merge_outer_fusion_kernels(
                 cpp_kernel_proxy_list,
             )
-            from .cpp_utils import LocalBufferScope
 
             with LocalBufferScope(outer_fusion_cpp_kernel_proxy) as scope:
                 # Also need the local buffer inform in codegen loop
