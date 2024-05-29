@@ -386,6 +386,12 @@ try:
         def mod(self, p: z3.ArithRef, q: z3.ArithRef) -> z3.ArithRef:
             return self._ops.mod(p, q)
 
+        def ceil_to_int(self, x: z3.ArithRef, dtype: torch.dtype) -> z3.ArithRef:
+            return self._ops.ceil(x)
+
+        def floor_to_int(self, x: z3.ArithRef, dtype: torch.dtype) -> z3.ArithRef:
+            return self._ops.floor(x)
+
         def __getattr__(self, name: str) -> Any:
             REPLACEMENT = {
                 "and_": z3.And,
@@ -393,8 +399,6 @@ try:
                 "not_": z3.Not,
                 "floor": self._ops.floor,
                 "ceil": self._ops.ceil,
-                "floor_to_int": self._ops.floor,
-                "ceil_to_int": self._ops.ceil,
                 "minimum": self._ops.min,
                 "maximum": self._ops.max,
             }
