@@ -2065,6 +2065,28 @@ def _constrain_as_size(symbol, min: Optional[builtins.int] = None, max: Optional
     """
     torch.sym_constrain_range_for_size(symbol, min=min, max=max)
 
+def import_device_backends():
+    if sys.version_info < (3, 10):
+            from importlib_metadata import entry_points
+    else:
+        from importlib.metadata import entry_points
+
+    for backend in entry_points(group='torch.backends'):
+        try:
+            backend_hook = backend.load() 
+            if not hasattr(backend_hook, 'init_custom_backend'):
+                print(f"No explicit backend init function for \'{backend_hook.__name__}\' has been found, custom backend can't be loaded.")
+                continue
+            backend_hook.init_custom_backend()
+        except IndexError:
+            pass
+
+    def is_device_backend_autoload_enabled() -> bool:
+        var = os.getenv("TORCH_DISABLE_DEVICE_BACKEND_AUTOLOAD")
+        return not var in (1, 'True', 'true', 'Yes', 'yes')
+    
+    if is_device_backend_autoload_enabled():
+        import_device_backends()
 
 from . import _logging
 _logging._init_logs()
