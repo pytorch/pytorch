@@ -241,8 +241,10 @@ flex_attention_template = TritonTemplate(
         start_n = tl.multiple_of(start_n, BLOCK_N)
         # -- load k, v --
         k = tl.load(K_block_ptr)
+        v = tl.load(V_block_ptr)
         # -- compute qk ---
-        qk = tl.dot(q, k)
+        qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
+        qk = tl.dot(q, k.to(MATMUL_PRECISION), acc=qk)
         # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
         m = offs_m[:, None]
         n = start_n + offs_n[None, :]
@@ -275,8 +277,7 @@ flex_attention_template = TritonTemplate(
         # -- scale and update acc --
         acc_scale = l_i * 0 + alpha  # workaround some compiler bug
         acc *= acc_scale[:, None]
-        v = tl.load(V_block_ptr)
-        acc = tl.dot(p.to(MATMUL_PRECISION), v, acc)
+        acc = tl.dot(p.to(MATMUL_PRECISION), v.to(MATMUL_PRECISION), acc)
 
         # -- update m_i and l_i --
         l_i = l_i * alpha + tl.sum(p, 1)
@@ -401,11 +402,13 @@ def flex_attention(*args, **kwargs):
     configs: List[Tuple[int, int, int, int]] = []
     configs.append(_get_default_config_fwd(query))
     if config.max_autotune:
-        for BM in [64, 128]:
-            for BN in [64, 128]:
-                for s in [3, 4, 7]:
-                    for w in [4, 8]:
-                        configs.append((BM, BN, w, s))
+        configs += [
+            (128, 64, 4, 3),
+            (128, 128, 4, 3),
+            (128, 128, 8, 2),
+            (64, 128, 4, 3),
+            (64, 64, 4, 3),
+        ]
 
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
