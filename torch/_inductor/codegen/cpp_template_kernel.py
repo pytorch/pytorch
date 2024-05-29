@@ -103,7 +103,7 @@ class CppTemplateKernel(Kernel):
             cpp_argdefs, _, _ = self.args.cpp_argdefs()
             return f"void {self.kernel_name}({', '.join(cpp_argdefs)})"
 
-        placeholder = "<DEFINE_KERNEL>"
+        placeholder = "<DEF_KERNEL>"
         assert placeholder not in self.render_hooks
         self.render_hooks[placeholder] = hook
         return placeholder
