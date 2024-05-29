@@ -15,7 +15,7 @@ from typing_extensions import Self
 from ...utils.hooks import RemovableHandle
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.__future__ import _get_swap_overwrite_escape_hatch, get_overwrite_module_params_on_conversion, \
-    get_swap_module_params_on_conversion
+    get_swap_module_params_on_conversion, _get_swap_load_state_dict_escape_hatch
 
 __all__ = ['register_module_forward_pre_hook', 'register_module_forward_hook',
            'register_module_full_backward_pre_hook', 'register_module_backward_hook',
@@ -2024,7 +2024,7 @@ class Module:
         local_name_params = itertools.chain(self._parameters.items(), persistent_buffers.items())
         local_state = {k: v for k, v in local_name_params if v is not None}
         assign_to_params_buffers = local_metadata.get("assign_to_params_buffers", False)
-        use_swap_tensors = torch.__future__.get_swap_module_params_on_conversion()
+        _use_swap_tensors = torch.__future__.get_swap_module_params_on_conversion()
 
         for name, param in local_state.items():
             key = prefix + name
@@ -2057,6 +2057,10 @@ class Module:
                                   'pass `assign=True` to assign items in the state dictionary to their '
                                   'corresponding key in the module instead of copying them in place?)')
 
+                use_swap_tensors = (_use_swap_tensors
+                                    or ((is_traceable_wrapper_subclass(param)
+                                        or is_traceable_wrapper_subclass(input_param))
+                                        and not _get_swap_load_state_dict_escape_hatch()))
                 try:
                     with torch.no_grad():
                         if use_swap_tensors:
