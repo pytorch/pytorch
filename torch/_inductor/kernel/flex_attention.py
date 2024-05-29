@@ -529,22 +529,21 @@ flex_attention_backward_template = TritonTemplate(
         dq = tl.zeros([BLOCK_M2, BLOCK_DMODEL], dtype=tl.float32)
         do = tl.load(DO + offs_m_[:, None] * stride_tok + offs_k[None, :] * stride_d)
 
-        m_ = tl.load(LSE + offs_m_)
-        m_ = m_[:, None]
-
-        num_steps = Q_LEN // BLOCK_N2
+        lse = tl.load(LSE + offs_m_)
+        lse = lse[:, None]
 
         # start bwd_dq
         start_n = 0
         offs_m_ = start_m + tl.arange(0, BLOCK_M2)
         offs_n_ = start_n + tl.arange(0, BLOCK_N2)
-        offs_k = tl.arange(0, BLOCK_DMODEL)
         kT_ptrs = K + offs_n_[None, :] * stride_tok + offs_k[:, None] * stride_d
         vT_ptrs = V + offs_n_[None, :] * stride_tok + offs_k[:, None] * stride_d
         Di = tl.load(DELTA + offs_m_)
         # BLOCK_M2 must be a multiple of BLOCK_N2, otherwise the code wouldn't work.
         tl.static_assert(BLOCK_M2 % BLOCK_N2 == 0)
+
         curr_n = start_n
+        num_steps = KV_LEN // BLOCK_N2
         for blk_idx in range(num_steps):
             offs_n_= curr_n + tl.arange(0, BLOCK_N2)
             kT = tl.load(kT_ptrs)
@@ -552,22 +551,22 @@ flex_attention_backward_template = TritonTemplate(
             qk = tl.dot(q, kT)
             # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
             pre_mod_scores = qk
-            _m = offs_m_[:, None]
-            _n = offs_n_[None, :]
+            m = offs_m_[:, None]
+            n = offs_n_[None, :]
             {{ modification(
                 subgraph_number=0,
                 output_name="post_mod_scores",
                 score="qk",
                 b="off_z",
                 h="off_h",
-                m="_m",
-                n="_n",
+                m="m",
+                n="n",
                 out="qk"
             ) | indent_except_first(3) }}
             # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             if not SCORE_MOD_IS_LINEAR:
                 post_mod_scores *= 1.44269504
-            p = tl.math.exp2(post_mod_scores - m_).to(MATMUL_PRECISION)
+            p = tl.math.exp2(post_mod_scores - lse).to(MATMUL_PRECISION)
             # Compute dP and dS.
             dp = tl.dot(do, vT).to(tl.float32)
             ds = p * (dp - Di[:, None])
@@ -578,8 +577,8 @@ flex_attention_backward_template = TritonTemplate(
                 score="pre_mod_scores",
                 b="off_z",
                 h="off_h",
-                m="_m",
-                n="_n",
+                m="m",
+                n="n",
                 grad_score_mod="ds"
             ) | indent_except_first(3) }}
             ds = grad_scores
@@ -610,7 +609,6 @@ flex_attention_backward_template = TritonTemplate(
         # start bwd dkdv
         offs_m = start_m + tl.arange(0, BLOCK_M1)
         offs_n = start_n + tl.arange(0, BLOCK_N1)
-        # offs_k = tl.arange(0, BLOCK_DMODEL)
         qT_ptrs = Q + offs_m[None, :] * stride_tok + offs_k[:, None] * stride_d
         do_ptrs = DO + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d
         # BLOCK_N1 must be a multiple of BLOCK_M1, otherwise the code wouldn't work.
@@ -620,14 +618,14 @@ flex_attention_backward_template = TritonTemplate(
         num_steps = Q_LEN // BLOCK_M1
         for blk_idx in range(num_steps):
             qT = tl.load(qT_ptrs)
-            # Load m before computing qk to reduce pipeline stall.
+            # Load LSE before computing qk to reduce pipeline stall.
             offs_m = curr_m + tl.arange(0, BLOCK_M1)
-            m = tl.load(LSE + offs_m)
+            lse = tl.load(LSE + offs_m)
             qkT = tl.dot(k, qT)
             # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
             pre_mod_scores = qkT
-            m_ = offs_m[:, None]
-            n_ = offs_n[None, :]
+            m = offs_m[:, None]
+            n = offs_n[None, :]
             qk = tl.trans(qkT, 1, 0)
             {{ modification(
                 subgraph_number=0,
@@ -635,20 +633,19 @@ flex_attention_backward_template = TritonTemplate(
                 score="qk",
                 b="off_z",
                 h="off_h",
-                m="m_",
-                n="n_",
+                m="m",
+                n="n",
                 out="qk"
             ) | indent_except_first(3) }}
             post_mod_scores = tl.trans(post_mod_scores, 1, 0)
             # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             if not SCORE_MOD_IS_LINEAR:
                 post_mod_scores *= 1.44269504
-            pT = tl.math.exp2(post_mod_scores - m[None, :])
+            pT = tl.math.exp2(post_mod_scores - lse[None, :])
             do = tl.load(do_ptrs)
             # Compute dV.
             ppT = pT
-            ppT = ppT.to(MATMUL_PRECISION)
-            dv += tl.dot(ppT, do)
+            dv += tl.dot(ppT.to(MATMUL_PRECISION), do)
             Di = tl.load(DELTA + offs_m)
             # Compute dP and dS.
             dpT = tl.dot(v, tl.trans(do)).to(tl.float32)
@@ -662,22 +659,17 @@ flex_attention_backward_template = TritonTemplate(
                 score="pre_mod_scores",
                 b="off_z",
                 h="off_h",
-                m="m_",
-                n="n_",
+                m="m",
+                n="n",
                 grad_score_mod="ds"
             ) | indent_except_first(3) }}
             dsT = tl.trans(grad_scores, 1, 0)
             # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-            dsT = dsT.to(MATMUL_PRECISION)
-
-            dk += tl.dot(dsT, tl.trans(qT))
+            dk += tl.dot(dsT.to(MATMUL_PRECISION), tl.trans(qT))
             # Increment pointers.
             curr_m += BLOCK_M1
             qT_ptrs += BLOCK_M1 * stride_tok
             do_ptrs += BLOCK_M1 * stride_tok
-        # return dk, dv
-        # end bwd dkdv
 
         dv_ptrs = DV + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
         tl.store(dv_ptrs, dv)
