@@ -186,6 +186,7 @@ struct CacheNode {
     next.clear();
     key_storage.clear();
     expected_sizes.clear();
+    runtime_wrapper = nullptr;
     compiled_fn = nullptr;
   }
 
@@ -193,10 +194,12 @@ struct CacheNode {
     return next.empty() && !compiled_fn;
   }
 
-  CacheNode() : compiled_fn(nullptr) {}
+  CacheNode() : runtime_wrapper(nullptr), compiled_fn(nullptr) {}
   ~CacheNode() {
     if (!Py_IsInitialized()) {
-      compiled_fn.release(); // leak on shutdown
+      // leak on shutdown
+      runtime_wrapper.release();
+      compiled_fn.release();
     }
   }
   CacheNode(CacheNode&&) = delete;
@@ -250,6 +253,7 @@ struct CacheNode {
     if (!cache_hit) {
       // we missed cache because static size inputs didn't match; force
       // recompilation with the varying size input as dynamic
+      runtime_wrapper = nullptr;
       compiled_fn = nullptr;
     }
     return cache_hit;
