@@ -1271,12 +1271,6 @@ class WrapperCodeGen(CodeGen):
                         else:
                             compile_wrapper.writeline(f"{symbol_name} = {symbol!r}")
                         symbols_included.add(symbol_name)
-                    elif isinstance(symbol, constexpr):
-                        compile_wrapper.newline()
-                        compile_wrapper.writeline(
-                            f"{symbol_name} = tl.constexpr({symbol.value!r}"
-                        )
-                        symbols_included.add(symbol_name)
                     elif (
                         symbol_name in unqualified_loads
                         and symbol_name != "tl"  # already imported
