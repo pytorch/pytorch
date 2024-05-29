@@ -379,19 +379,37 @@ static inline double reduce(float32x4_t x[kF32RegistersPerIteration]) {
   return vaddvq_f32(x[0]);
 }
 
-float fp16_dot_with_fp32_arith(const float16_t* x, const float16_t* a, int64_t len) {
+static C10_ALWAYS_INLINE void fp16_dot_with_fp32_arith_main_inner_loop(
+  const float16_t* vec1,
+  const float16_t* vec2,
+  float32x4_t sum[kF32RegistersPerIteration],
+  int registerPairIndex) {
+  // Load a pair of f32 registers at a time.
+  const auto temp_vec1 = vld1q_f16(&vec1[registerPairIndex * 2 * kF32ElementsPerRegister]);
+  const auto temp_vec2 = vld1q_f16(&vec2[registerPairIndex * 2 * kF32ElementsPerRegister]);
+
+  sum[2 * registerPairIndex] = f32_fma_low_f16(sum[2 * registerPairIndex], temp_vec1, temp_vec2);
+  sum[2 * registerPairIndex + 1] = f32_fma_high_f16(sum[2 * registerPairIndex + 1], temp_vec1, temp_vec2);
+}
+
+static C10_ALWAYS_INLINE void fp16_dot_with_fp32_arith_vectorized_tail_inner_loop(
+  const float16_t* vec1,
+  const float16_t* vec2,
+  float32x4_t* tailSum,
+  int idx) {
+  const auto temp_vec1 = vld1_f16(&vec1[idx]);
+  const auto temp_vec2 = vld1_f16(&vec2[idx]);
+  *tailSum = f32_fma_f16(*tailSum, temp_vec1, temp_vec2);
+}
+
+float fp16_dot_with_fp32_arith(const float16_t* vec1, const float16_t* vec2, int64_t len) {
   float32x4_t sum[kF32RegistersPerIteration] = {vdupq_n_f32(0)};
   const auto len_aligned = len & ~(kF32ElementsPerIteration - 1);
   for (int j = 0; j < len_aligned ; j += kF32ElementsPerIteration) {
-    const auto* x_ = x + j;
-    const auto* a_ = a + j;
-    c10::ForcedUnroll<kF32RegisterPairsPerIteration>{}([x_, a_, &sum](auto k) {
-      // Load a pair of f32 registers at a time.
-      const auto temp_x = vld1q_f16(x_ + k * 2 * kF32ElementsPerRegister);
-      const auto temp_a = vld1q_f16(a_ + k * 2 * kF32ElementsPerRegister);
-
-      sum[2 * k] = f32_fma_low_f16(sum[2 * k], temp_x, temp_a);
-      sum[2 * k + 1] = f32_fma_high_f16(sum[2 * k + 1], temp_x, temp_a);
+    const auto* vec1_ = vec1 + j;
+    const auto* vec2_ = vec2 + j;
+    c10::ForcedUnroll<kF32RegisterPairsPerIteration>{}([vec1_, vec2_, &sum](auto k) {
+      fp16_dot_with_fp32_arith_main_inner_loop(vec1_, vec2_, sum, k);
     });
   }
   auto reducedSum = reduce(sum);
@@ -402,16 +420,14 @@ float fp16_dot_with_fp32_arith(const float16_t* x, const float16_t* a, int64_t l
   float32x4_t tailSum = vdupq_n_f32(0);
   const auto len_aligned_4 = len & ~3;
   for (int j = len_aligned; j < len_aligned_4; j += 4) {
-    const auto temp_x = vld1_f16(x + j);
-    const auto temp_a = vld1_f16(a + j);
-    tailSum = f32_fma_f16(tailSum, temp_x, temp_a);
+    fp16_dot_with_fp32_arith_vectorized_tail_inner_loop(vec1, vec2, &tailSum, j);
   }
   auto reducedTail = vpaddq_f32(tailSum, tailSum);
   reducedSum += vgetq_lane_f32(vpaddq_f32(reducedTail, reducedTail), 0);
 
   // Second-tier tail fixup: handle all workloads.
   for (int j = len_aligned_4; j < len; ++j) {
-    reducedSum += x[j] * a[j];
+    reducedSum += vec1[j] * vec2[j];
   }
   return reducedSum;
 }
