@@ -14,9 +14,12 @@ class TestConverter(TestCase):
     def _check_equal_ts_ep_converter(self, mod, inp):
         ts_model = torch.jit.script(mod)
         ep = TS2EPConverter(ts_model, inp).convert()
-        ep_out = ep.module()(*inp)
-        orig_out = mod(*inp)
-        print(ep_out, pytree.tree_flatten(ep_out))
+        ep_out, _ = pytree.tree_flatten(ep.module()(*inp)[0])
+        orig_out, _ = pytree.tree_flatten(mod(*inp))
+        self.assertEqual(len(ep_out), len(orig_out))
+        for ep_t, orig_t in zip(ep_out, orig_out):
+            self.assertEqual(ep_t.shape, orig_t.shape)
+            self.assertTrue(torch.allclose(ep_t, orig_t))
 
     def test_ts2ep_converter_basic(self):
         class M(torch.nn.Module):
