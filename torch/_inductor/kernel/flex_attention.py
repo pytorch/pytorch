@@ -188,7 +188,7 @@ flex_attention_template = TritonTemplate(
 
     Z = {{size("Q", 0)}}
     H = {{size("Q", 1)}}
-    N_CTX = {{size("Q", 2)}}
+    Q_LEN = {{size("Q", 2)}}
 
     qk_scale = 1.0
     MATMUL_PRECISION = Q.dtype.element_ty
@@ -199,7 +199,7 @@ flex_attention_template = TritonTemplate(
     qkv_offset = off_hz * stride_qh
     Q_block_ptr = tl.make_block_ptr(
         base=Q + qkv_offset,
-        shape=(N_CTX, BLOCK_DMODEL),
+        shape=(Q_LEN, BLOCK_DMODEL),
         strides=(stride_qm, stride_qk),
         offsets=(start_m * BLOCK_M, 0),
         block_shape=(BLOCK_M, BLOCK_DMODEL),
@@ -207,7 +207,7 @@ flex_attention_template = TritonTemplate(
     )
     K_block_ptr = tl.make_block_ptr(
         base=K + qkv_offset,
-        shape=(BLOCK_DMODEL, N_CTX),
+        shape=(BLOCK_DMODEL, Q_LEN),
         strides=(stride_kk, stride_kn),
         offsets=(0, 0),
         block_shape=(BLOCK_DMODEL, BLOCK_N),
@@ -215,7 +215,7 @@ flex_attention_template = TritonTemplate(
     )
     V_block_ptr = tl.make_block_ptr(
         base=V + qkv_offset,
-        shape=(N_CTX, BLOCK_DMODEL),
+        shape=(Q_LEN, BLOCK_DMODEL),
         strides=(stride_vk, stride_vn),
         offsets=(0, 0),
         block_shape=(BLOCK_N, BLOCK_DMODEL),
@@ -235,7 +235,7 @@ flex_attention_template = TritonTemplate(
     q = (q * qk_scale).to(MATMUL_PRECISION)
     # loop over k, v and update accumulator
     lo = 0
-    hi = N_CTX
+    hi = Q_LEN
     for start_n in range(lo, hi, BLOCK_N):
         start_n = tl.multiple_of(start_n, BLOCK_N)
         # -- load k, v --
@@ -298,7 +298,7 @@ flex_attention_template = TritonTemplate(
 
     # TODO dont want to write this if we dont require grad
     if OUTPUT_LOGSUMEXP:
-        l_ptrs = LSE + off_hz * N_CTX + offs_m
+        l_ptrs = LSE + off_hz * Q_LEN + offs_m
         lse = m_i + tl.math.log2(l_i)
         tl.store(l_ptrs, lse)
  """,
@@ -481,14 +481,6 @@ flex_attention_backward_template = TritonTemplate(
     # BLOCK_N
     # SCORE_MOD_IS_LINEAR: Is the score modifier linear? If so, we can lift the
     # change of base out of the loop
-    # ROWS_GUARANTEED_SAFE: Is it guaranteed that at least one value in each row
-    # is not masked out? If so, we can skip an extra safety check
-    # OUTPUT_LOGSUMEXP: We only need to store the logsumexp if we require grad
-
-    sm_scale = 1.0
-    M = LSE
-    D = DELTA
-    DK = OUT
 
     # Define Q Strides
     stride_z = {{stride("Q", 0)}}
@@ -498,17 +490,16 @@ flex_attention_backward_template = TritonTemplate(
 
     Z = {{size("Q", 0)}}
     H = {{size("Q", 1)}}
-    N_CTX = {{size("Q", 2)}}
+    Q_LEN = {{size("Q", 2)}}
     KV_LEN = {{size("K", 2)}}
-
-    LN2: tl.constexpr = 0.6931471824645996  # = ln(2)
-    pid = tl.program_id(0)
-    NUM_KV_BLOCKS = KV_LEN // BLOCK_N1
 
     MATMUL_PRECISION = Q.dtype.element_ty
 
+    pid = tl.program_id(0)
+    NUM_KV_BLOCKS = KV_LEN // BLOCK_N1
+
     bhid = tl.program_id(2)
-    off_chz = (bhid * N_CTX).to(tl.int64)
+    off_chz = (bhid * Q_LEN).to(tl.int64)
     adj = (stride_h * (bhid % H) + stride_z * (bhid // H)).to(tl.int64)
 
     off_hz = tl.program_id(2)
@@ -521,18 +512,16 @@ flex_attention_backward_template = TritonTemplate(
     V += adj
     DO += adj
     DQ += adj
-    # DK += adj
     DV += adj
-    M += off_chz
-    D += off_chz
+    LSE += off_chz
+    DELTA += off_chz
 
     offs_k = tl.arange(0, BLOCK_DMODEL)
 
     if pid >= NUM_KV_BLOCKS:
-        pid = pid - NUM_KV_BLOCKS
         # THIS BLOCK DOES DQ:
-        start_m = pid * BLOCK_M2
-        end_n = N_CTX
+        off_pid = pid - NUM_KV_BLOCKS
+        start_m = off_pid * BLOCK_M2
 
         offs_m_ = start_m + tl.arange(0, BLOCK_M2)
 
@@ -540,10 +529,10 @@ flex_attention_backward_template = TritonTemplate(
         dq = tl.zeros([BLOCK_M2, BLOCK_DMODEL], dtype=tl.float32)
         do = tl.load(DO + offs_m_[:, None] * stride_tok + offs_k[None, :] * stride_d)
 
-        m_ = tl.load(M + offs_m_)
+        m_ = tl.load(LSE + offs_m_)
         m_ = m_[:, None]
 
-        num_steps = end_n // BLOCK_N2
+        num_steps = Q_LEN // BLOCK_N2
 
         # start bwd_dq
         start_n = 0
@@ -552,18 +541,14 @@ flex_attention_backward_template = TritonTemplate(
         offs_k = tl.arange(0, BLOCK_DMODEL)
         kT_ptrs = K + offs_n_[None, :] * stride_tok + offs_k[:, None] * stride_d
         vT_ptrs = V + offs_n_[None, :] * stride_tok + offs_k[:, None] * stride_d
-        # D (= delta) is pre-divided by ds_scale.
-        Di = tl.load(D + offs_m_)
+        Di = tl.load(DELTA + offs_m_)
         # BLOCK_M2 must be a multiple of BLOCK_N2, otherwise the code wouldn't work.
         tl.static_assert(BLOCK_M2 % BLOCK_N2 == 0)
         curr_n = start_n
-        step_n = BLOCK_N2
         for blk_idx in range(num_steps):
             offs_n_= curr_n + tl.arange(0, BLOCK_N2)
             kT = tl.load(kT_ptrs)
             vT = tl.load(vT_ptrs)
-            # q = q.to(MATMUL_PRECISION)
-            # kT = kT.to(MATMUL_PRECISION)
             qk = tl.dot(q, kT)
             # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
             pre_mod_scores = qk
@@ -583,15 +568,9 @@ flex_attention_backward_template = TritonTemplate(
             if not SCORE_MOD_IS_LINEAR:
                 post_mod_scores *= 1.44269504
             p = tl.math.exp2(post_mod_scores - m_).to(MATMUL_PRECISION)
-            # Autoregressive masking.
-            # if MASK:
-            #     offs_n = curr_n + tl.arange(0, BLOCK_N2)
-            #     mask = (offs_m[:, None] >= offs_n[None, :])
-            #     p = tl.where(mask, p, 0.0)
             # Compute dP and dS.
             dp = tl.dot(do, vT).to(tl.float32)
             ds = p * (dp - Di[:, None])
-
             # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
             {{ modification(
                 subgraph_number=1,
@@ -605,27 +584,17 @@ flex_attention_backward_template = TritonTemplate(
             ) | indent_except_first(3) }}
             ds = grad_scores
             # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
             ds = ds.to(MATMUL_PRECISION)
             # Compute dQ.
-            # NOTE: We need to de-scale dq in the end, because kT was pre-scaled.
             dq += tl.dot(ds, tl.trans(kT))
             # Increment pointers.
-            curr_n += step_n
-            kT_ptrs += step_n * stride_tok
-            vT_ptrs += step_n * stride_tok
-        # return dq
-
-        # end bwd_dq
-
+            curr_n += BLOCK_N2
+            kT_ptrs += BLOCK_N2 * stride_tok
+            vT_ptrs += BLOCK_N2 * stride_tok
         # Write back dQ.
         dq_ptrs = DQ + offs_m_[:, None] * stride_tok + offs_k[None, :] * stride_d
-        # dq *= LN2
         tl.store(dq_ptrs, dq)
     else:
-        # if pid < NUM_KV_BLOCKS:
-        # load scales
-
         start_n = pid * BLOCK_N1
         start_m = 0
 
@@ -638,23 +607,22 @@ flex_attention_backward_template = TritonTemplate(
         k = tl.load(K + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d)
         v = tl.load(V + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d)
 
-        num_steps = N_CTX // BLOCK_M1
-
         # start bwd dkdv
         offs_m = start_m + tl.arange(0, BLOCK_M1)
         offs_n = start_n + tl.arange(0, BLOCK_N1)
-        offs_k = tl.arange(0, BLOCK_DMODEL)
+        # offs_k = tl.arange(0, BLOCK_DMODEL)
         qT_ptrs = Q + offs_m[None, :] * stride_tok + offs_k[:, None] * stride_d
         do_ptrs = DO + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d
         # BLOCK_N1 must be a multiple of BLOCK_M1, otherwise the code wouldn't work.
         tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
+
         curr_m = start_m
-        step_m = BLOCK_M1
+        num_steps = Q_LEN // BLOCK_M1
         for blk_idx in range(num_steps):
             qT = tl.load(qT_ptrs)
             # Load m before computing qk to reduce pipeline stall.
             offs_m = curr_m + tl.arange(0, BLOCK_M1)
-            m = tl.load(M + offs_m)
+            m = tl.load(LSE + offs_m)
             qkT = tl.dot(k, qT)
             # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
             pre_mod_scores = qkT
@@ -676,24 +644,18 @@ flex_attention_backward_template = TritonTemplate(
             if not SCORE_MOD_IS_LINEAR:
                 post_mod_scores *= 1.44269504
             pT = tl.math.exp2(post_mod_scores - m[None, :])
-            # Autoregressive masking.
-            # if MASK:
-            #     mask = (offs_m[None, :] >= offs_n[:, None])
-            #     pT = tl.where(mask, pT, 0.0)
             do = tl.load(do_ptrs)
             # Compute dV.
             ppT = pT
             ppT = ppT.to(MATMUL_PRECISION)
             dv += tl.dot(ppT, do)
-            # D (= delta) is pre-divided by ds_scale.
-            Di = tl.load(D + offs_m)
+            Di = tl.load(DELTA + offs_m)
             # Compute dP and dS.
             dpT = tl.dot(v, tl.trans(do)).to(tl.float32)
             dsT = pT * (dpT - Di[None, :])
-            dsT = dsT
 
             ds = tl.trans(dsT, 1, 0)
-             # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
+            # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
             {{ modification(
                 subgraph_number=1,
                 output_name = "grad_scores",
@@ -711,9 +673,9 @@ flex_attention_backward_template = TritonTemplate(
 
             dk += tl.dot(dsT, tl.trans(qT))
             # Increment pointers.
-            curr_m += step_m
-            qT_ptrs += step_m * stride_tok
-            do_ptrs += step_m * stride_tok
+            curr_m += BLOCK_M1
+            qT_ptrs += BLOCK_M1 * stride_tok
+            do_ptrs += BLOCK_M1 * stride_tok
         # return dk, dv
         # end bwd dkdv
 
@@ -721,9 +683,6 @@ flex_attention_backward_template = TritonTemplate(
         tl.store(dv_ptrs, dv)
 
         # Write back dK.
-        dk *= sm_scale
-        # dk_ptrs = DK + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
-        # tl.store(dk_ptrs, dk)
         index_n = offs_n[:, None]
         index_k = offs_k[None, :]
         # TODO generalize and add proper mask support
