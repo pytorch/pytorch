@@ -4,6 +4,7 @@ from typing import cast, List, Optional, Sequence, Tuple
 import torch
 
 from torch.distributed._tensor.op_schema import (
+    _is_inplace_op,
     OpSchema,
     OpStrategy,
     OutputSharding,
@@ -365,12 +366,6 @@ def replica_only_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType
 )
 def scatter_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     input_strategy = cast(OpStrategy, op_schema.args_schema[0])
-    dim = cast(int, op_schema.args_schema[1])
-    index_strategy = cast(OpStrategy, op_schema.args_schema[2])
-
-    input_shape = input_strategy.output_shape
-    index_shape = index_strategy.output_shape
-
     single_mesh_dim_strategies = []
 
     # placement list stores placements of [output, input, index, src]
@@ -378,26 +373,11 @@ def scatter_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     all_replicate: List[Placement] = [Replicate()] * 4
     single_mesh_dim_strategies.append(all_replicate)
 
-    # input sharding, input sharded, index accepts mask partial, output follows index
-    # this only works when the input is sharded on the scatter dimension, and
-    # index has size 1 on the scatter dimension
-    if index_shape[dim] == 1:
-        index_partial_placement = _MaskPartial(logical_dim_size=input_shape[dim])
-        input_sharding = [
-            index_partial_placement,
-            Shard(dim),
-            index_partial_placement,
-            index_partial_placement,
-        ]
-        single_mesh_dim_strategies.append(input_sharding)
-
-    # index sharding, input replicated, index sharded, output/src follows index
-    # this only works when the sharding dimension is the scatter dimension
-    index_sharding = [Shard(dim), Replicate(), Shard(dim), Shard(dim)]
-    single_mesh_dim_strategies.append(index_sharding)
+    # TODO: see if we can support input sharding pattern
+    inplace_op = _is_inplace_op(op_schema.op)
 
     op_strategy = expand_to_full_mesh_op_strategy(
-        mesh, op_schema, single_mesh_dim_strategies
+        mesh, op_schema, single_mesh_dim_strategies, inplace_op=inplace_op
     )
     return op_strategy
 

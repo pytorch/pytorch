@@ -420,49 +420,6 @@ class DistTensorOpsTest(DTensorTestBase):
             self.assertEqual(output_dt.placements, [Replicate()])
             self.assertEqual(output_dt.to_local(), global_output)
 
-        # case 2 index sharding: input replicated, index sharded, output sharded
-        # only works when the sharding dimension is the scatter dimension
-        global_indexs = [
-            torch.tensor([[0, 1, 2, 0]]),
-            torch.tensor([[0, 1, 2], [0, 1, 4]]),
-        ]
-        for scatter_dim in [0, 1]:
-            global_src = torch.arange(1, 11).reshape((2, 5))
-            global_input = torch.zeros(4, 8, dtype=global_src.dtype)
-            global_index = global_indexs[scatter_dim]
-            print(f">>>> global index: {global_index.shape}")
-
-            input_dt = distribute_tensor(global_input, device_mesh, [Replicate()])
-            index_dt = distribute_tensor(global_index, device_mesh, [Shard(scatter_dim)])
-            global_output = torch.scatter(
-                global_input, scatter_dim, global_index, global_src
-            )
-            with comm_mode:
-                output_dt = torch.scatter(input_dt, scatter_dim, index_dt, src_dt)
-
-            self.assertEqual(comm_mode.get_total_counts(), 0)
-            self.assertEqual(output_dt.placements, [Shard(scatter_dim)])
-            self.assertEqual(output_dt.full_tensor(), global_output)
-            #     output_dt = torch.gather(input_dt, scatter_dim, index_dt)
-
-        # case 2 input sharding: input sharded, index replicated, output mask partial
-        # only works when index has size 1 on the gather dimension and
-        # input is sharded on the gather dimension
-        # from torch.distributed._tensor.ops.embedding_ops import _MaskPartial
-
-        # gather_dim = 1
-        # global_input = torch.randn(12, 8, 16)
-        # global_index = torch.randint(8, (4, 1, 8))
-        # global_output = torch.gather(global_input, gather_dim, global_index)
-        # input_dt = distribute_tensor(global_input, device_mesh, [Shard(gather_dim)])
-        # index_dt = distribute_tensor(global_index, device_mesh, [Replicate()])
-        # with comm_mode:
-        #     output_dt = torch.gather(input_dt, gather_dim, index_dt)
-        #     self.assertEqual(comm_mode.get_total_counts(), 0)
-        # self.assertIsInstance(output_dt.placements[0], _MaskPartial)
-        # self.assertEqual(output_dt.full_tensor(), global_output)
-
-
     @with_comms
     def test_gather(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
