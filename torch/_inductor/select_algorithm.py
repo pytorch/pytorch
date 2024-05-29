@@ -150,7 +150,7 @@ class TritonTemplateKernel(TritonKernel):
     @contextlib.contextmanager
     def set_subgraph_body(self, body_name: str):
         old_body = self.body
-        assert body_name in self.subgraph_bodies
+        assert body_name in self.subgraph_bodies, body_name
         self.body = self.subgraph_bodies[body_name]
         yield
         self.body = old_body

@@ -1358,6 +1358,9 @@ def dp_knapsack(
     n = len(memory)
 
     # Initialize the DP table
+    # TODO(chilli): I think if needed, this memory can be optimized with sliding
+    # window trick + Hirschberg trick:
+    # https://codeforces.com/blog/entry/47247?#comment-316200
     dp = torch.zeros(
         (n + 1, quantized_max_memory + 1), dtype=torch.float32, device="cpu"
     )
