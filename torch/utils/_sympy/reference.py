@@ -212,7 +212,7 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
         return a / b
 
     @staticmethod
-    def to_dtype(a, dtype):
+    def to_dtype(x, dtype):
         if dtype == torch.float64:
             return float(x)
         raise NotImplementedError(f"to_dtype {dtype} NYI")

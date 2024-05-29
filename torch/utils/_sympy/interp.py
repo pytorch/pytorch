@@ -16,6 +16,7 @@ from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 import torch
 from .functions import (
     CleanDiv,
+    CMod,
     FloatPow,
     FloatTrueDiv,
     FloorDiv,
@@ -126,7 +127,9 @@ def sympy_interp(
     ):
         return analysis.sqrt(sympy_interp(analysis, env, expr.args[0]))
     if isinstance(expr, ToFloat):
-        return analysis.to_dtype(sympy_interp(analysis, env, expr.args[0]), torch.float64)
+        return analysis.to_dtype(
+            sympy_interp(analysis, env, expr.args[0]), torch.float64
+        )
 
     # Recursive case
     args = [sympy_interp(analysis, env, arg) for arg in expr.args]  # type: ignore[arg-type]
