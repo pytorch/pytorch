@@ -877,7 +877,6 @@ def _build_table(
     row_format_lst = [""]
     header_sep_lst = [""]
     line_length_lst = [-SPACING_SIZE]
-    MAX_STACK_ENTRY = 5
 
     def add_column(padding, text_dir=">"):
         row_format_lst[0] += (
@@ -1043,7 +1042,7 @@ def _build_table(
 
         if has_stack:
             empty_headers = [""] * (len(headers) - 1)
-            for entry in evt.stack[1:MAX_STACK_ENTRY]:
+            for entry in evt.stack[1:]:
                 append(
                     row_format.format(
                         *(empty_headers + [trim_path(entry, src_column_width)])
