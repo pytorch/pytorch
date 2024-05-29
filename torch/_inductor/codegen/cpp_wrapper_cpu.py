@@ -2309,10 +2309,9 @@ if (py_{buf_name}.get() == NULL) {{
             return "AtenTensorHandle"
         elif isinstance(type_, (torch.IntType, torch.SymIntType)):
             return "int64_t"
-        elif (
-            isinstance(type_, (torch.BoolType, torch.SymBoolType, torch.EnumType))
-            or repr(type_) == "ScalarType"
-        ):
+        elif isinstance(
+            type_, (torch.BoolType, torch.SymBoolType, torch.EnumType)
+        ) or repr(type_) in ("ScalarType", "Layout"):
             return "int32_t"
         elif isinstance(type_, torch.FloatType):
             return "double"
