@@ -606,7 +606,6 @@ def _flatten_optim_state_dict(state_dict: OptimizerStateType) -> Dict[str, Value
     this API won't flattent it.
     """
 
-
     def _raise_if_type_not_supported(v):
         if not isinstance(v, (torch.Tensor, int, float)):
             raise NotImplementedError(
@@ -764,6 +763,14 @@ def _split_optim_state_dict(
     pg_state: ListDictValueType = []
     return_osd: OptimizerStateType = {STATE: state, PG: pg_state}
     pg_mapping: Dict[int, int] = {}
+
+    if all(
+        [
+            isinstance(k, int)
+            for k in cast(DictValueType, optim_state_dict[STATE]).keys()
+        ]
+    ):
+        return optim_state_dict
 
     for param_group in optim.param_groups:
         pg_state.append({PARAMS: []})
