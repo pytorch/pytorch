@@ -5235,6 +5235,9 @@ class FallbackKernel(ExternKernelAlloc):
             is_optional_tensor = isinstance(
                 info.type, torch.OptionalType
             ) and isinstance(info.type.getElementType(), torch.TensorType)
+            is_list_tensor = isinstance(info.type, torch.ListType) and isinstance(
+                info.type.getElementType(), torch.TensorType
+            )
             if is_optional_tensor or isinstance(info.type, torch.TensorType):
                 # PyTorch also accepts None and scalar types for args marked as "Tensor".
                 # We're not going to check all of them here.
@@ -5246,6 +5249,9 @@ class FallbackKernel(ExternKernelAlloc):
                 return
             # can_auto_functionalize already filters out mutable List[Tensor].
             # We can support this in the future, but this is very uncommon.
+            assert (
+                not is_list_tensor
+            ), "Operators that accept mutable List[Tensor] are not yet supported in inductor"
             assert isinstance(info.type, torch.TensorType) or is_optional_tensor
             self.alias_names.append(arg.get_name())
             if info.alias_info.is_write:

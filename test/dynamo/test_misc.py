@@ -829,26 +829,23 @@ def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: 
             del lib
 
     def test_auto_functionalize_tensorlist(self):
-        try:
-            lib = torch.library.Library("mylib", "FRAGMENT")
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
                 "mylib::foo",
-                "(Tensor all_gather_output, SymInt[] all_gather_input_split_sizes, int dim=0, *, Tensor(a!)[] out) -> ()",
+                "(Tensor all_gather_output, SymInt[] all_gather_input_split_sizes, int dim, Tensor(a!)[] out) -> ()",
                 tags=torch.Tag.pt2_compliant_tag,
                 lib=lib,
             )
 
             @torch.library.impl("mylib::foo", "cpu", lib=lib)
             @torch._dynamo.disable
-            def foo_impl(
-                all_gather_output, all_gather_input_split_sizes, dim=0, *, out
-            ):
+            def foo_impl(all_gather_output, all_gather_input_split_sizes, dim, out):
                 for o in out:
                     o.copy_(all_gather_output)
 
             def f(all_gather_output, all_gather_input_split_sizes, dim, out):
                 torch.ops.mylib.foo(
-                    all_gather_output, all_gather_input_split_sizes, dim, out=out
+                    all_gather_output, all_gather_input_split_sizes, dim, out
                 )
 
             a = torch.ones(4)
@@ -858,17 +855,12 @@ def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: 
             orig_args = (a, b, c, d)
 
             compiled_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
-            with ctx():
-                torch.compile(f, backend="aot_eager", fullgraph=True)(
-                    *compiled_args[:-1], out=compiled_args[-1]
-                )
+            # Inductor doesn't support mutable List[Tensor] codegen for now
+            torch.compile(f, backend="aot_eager", fullgraph=True)(*compiled_args)
 
             eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
             f(*eager_args)
             self.assertEqual(compiled_args, eager_args)
-        finally:
-            cleanup_op("mylib::foo")
-            del lib
 
     def test_shape_int_inplace_binops(self):
         def fn(x):

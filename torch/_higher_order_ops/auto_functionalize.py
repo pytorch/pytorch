@@ -98,7 +98,7 @@ def can_auto_functionalize(op: torch._ops.OperatorBase) -> bool:
         ):
             continue
         # Not yet supported: other Tensor types. This includes things like
-        # Tensor[], Tensor?[], Tensor[]?.
+        # Tensor?[], Tensor[]?.
         return False
 
     # The returns must not alias anything
@@ -252,21 +252,21 @@ def do_auto_functionalize(
         if unwrapped_out is None:
             continue
         # We only handle Tensor or List[Tensor] here for now.
-
-        if isinstance(unwrapped_out, torch.Tensor):
-            orig_arg = normalized_kwargs[name]
-            ctx.replace(orig_arg, unwrapped_out)
+        def sync_update(o, orig_arg):
+            ctx.replace(orig_arg, o)
             ctx.commit_update(orig_arg)
             ctx.sync(orig_arg)
+
+        orig_arg = normalized_kwargs[name]
+
+        if isinstance(unwrapped_out, torch.Tensor):
+            sync_update(unwrapped_out, orig_arg)
         elif isinstance(unwrapped_out, list) and all(
             isinstance(o, torch.Tensor) for o in unwrapped_out
         ):
-            orig_args = normalized_kwargs[name]
-            assert len(orig_args) == len(unwrapped_out)
-            for orig_arg, o in zip(orig_args, unwrapped_out):
-                ctx.replace(orig_arg, o)
-                ctx.commit_update(orig_arg)
-                ctx.sync(orig_arg)
+            assert len(orig_arg) == len(unwrapped_out)
+            for orig_a, o in zip(orig_arg, unwrapped_out):
+                sync_update(o, orig_a)
         else:
             raise RuntimeError(
                 f"unsupported type for auto-functionalization: {unwrapped_out}"
