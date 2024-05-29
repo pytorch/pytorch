@@ -1130,6 +1130,9 @@ class BuiltinVariable(VariableTracker):
         return pos_method.call_function(tx, [], {})
 
     def call_index(self, tx, arg: "VariableTracker"):
+        if isinstance(arg, variables.TensorVariable):
+            unimplemented("unsupported index(tensor)")
+
         arg = guard_if_dyn(arg)
         constant_value = operator.index(arg)
         return variables.ConstantVariable.create(constant_value)
