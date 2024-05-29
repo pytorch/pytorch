@@ -1612,7 +1612,10 @@ class DimConstraints:
             congruence = (base - mod_reduced) % divisor
             if congruence != 0:
                 self._congruences[s].add(congruence)
-            return CleanDiv(base - mod_reduced, divisor)
+            # NB: Must not be CleanDiv, it needs to be regular sympy division
+            # so inequality solver works.  This is sort of problematic for
+            # is_integer tests though haha
+            return (base - mod_reduced) / divisor
 
         if expr.has(Mod):
             expr = expr.replace(Mod, mod_handler)
