@@ -1,8 +1,9 @@
+from benchmark_helper import time_with_torch_timer
+
 import torch
 
 import torch._dynamo
 import torch._inductor.config as inductor_config
-from benchmark_helper import time_with_torch_timer
 
 inductor_config.triton.mm = "triton"
 

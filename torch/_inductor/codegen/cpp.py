@@ -46,7 +46,7 @@ from ..utils import (
     sympy_subs,
 )
 
-from ..virtualized import ops, OpsValue, V
+from ..virtualized import NullKernelHandler, ops, OpsValue, V
 from .common import (
     BracesBuffer,
     CppWrapperKernelArgs,
@@ -1701,6 +1701,39 @@ class CppKernel(Kernel):
             index, itervar
         )
 
+    def var_ranges(self):
+        return dict(zip(self.itervars, self.ranges))
+
+    def check_bounds(
+        self,
+        expr: sympy.Expr,
+        size: sympy.Expr,
+        lower: bool,
+        upper: bool,
+    ):
+        if not (lower or upper):
+            return
+
+        indirect = free_symbol_is_type(expr, SymT.TMP)
+        if indirect:
+            # indexing in compute
+            csevar = ops.index_expr(expr, torch.int32).value
+            buffer = V.kernel.compute
+        else:
+            # indexing in loads
+            prior_compute = V.kernel.compute
+            try:
+                V.kernel.compute = self.loads
+                csevar = ops.index_expr(expr, torch.int32).value
+            finally:
+                V.kernel.compute = prior_compute
+            buffer = self.loads
+
+        size_str = V.kernel.sexpr(self.rename_indexing(size)) if upper else None
+
+        line = self.indirect_assert(csevar, "0" if lower else None, size_str)
+        self.cse.generate(buffer, line, assignment=False)
+
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
         index = self.rename_indexing(index)
@@ -1971,6 +2004,8 @@ class CppKernel(Kernel):
     @property
     def assert_function(self) -> str:
         if V.graph.aot_mode:
+            # TODO: Using AOTI_TORCH_CHECK is causing performance drop for some models
+            # compared with JIT Inductor which uses TORCH_CHECK
             return "AOTI_TORCH_CHECK"
         else:
             return "TORCH_CHECK"
@@ -2805,13 +2840,17 @@ class CppVecKernelChecker(CppVecKernel):
             return tuple([self.simd_vec] * 3)
         return self.simd_vec
 
+    def check_bounds(
+        self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+    ):
+        return self.simd_vec
+
     def store_reduction(self, name, index, value):
         return self.simd_vec
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        assert self._orig_wrapper_code is not None
         # Restore the wrapper_code
-        V.graph.wrapper_code = self._orig_wrapper_code
+        V.graph.wrapper_code = self._orig_wrapper_code  # type: ignore[assignment]
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
     def __enter__(self):
@@ -2853,6 +2892,12 @@ class CppVecKernelChecker(CppVecKernel):
             @staticmethod
             def store_reduction(name, index, value):
                 return self.store_reduction(name, index, value)
+
+            @staticmethod
+            def check_bounds(
+                expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+            ):
+                return self.check_bounds(expr, size, lower, upper)
 
             @staticmethod
             def constant(val, dtype):
@@ -3209,27 +3254,11 @@ class CppKernelProxy(CppKernel):
                 body: ir.LoopBody = node._body
                 _legalize_lowp_fp(body)
 
-    def codegen_nodes(self, nodes: List[SchedulerNode]):
-        # Legalize BF16 node by adding to_dtype explicitly
-        self.legalize_lowp_fp_dtype(nodes)
-        self.data_type_propagation(nodes)
-
-        assert len(nodes) >= 1
-        first_node = nodes[0]
-        vec_dtype = (
-            first_node._lowp_fp_type  # type: ignore[attr-defined]
-            if all(
-                hasattr(_node, "_lowp_fp_type")
-                and _node._lowp_fp_type == first_node._lowp_fp_type  # type: ignore[attr-defined]
-                for _node in nodes
-            )
-            else torch.float
-        )
-
+    def codegen_functions(self, fn_list, var_sizes_list, vec_dtype=torch.float):
+        # TODO(jgong5): remove vec_dtype arg with alternative tiling factors for various dtypes
+        assert len(fn_list) == len(var_sizes_list)
         kernel_group = self.kernel_group
-        _, (group, reduction_group) = max(
-            nodes, key=lambda x: int(x.is_reduction())
-        ).group
+        group, reduction_group = max(var_sizes_list, key=lambda sizes: len(sizes[1]))
 
         self.set_ranges(group, reduction_group)
 
@@ -3245,22 +3274,22 @@ class CppKernelProxy(CppKernel):
         def run(kernel):
             vars, reduction_vars = kernel.set_ranges(group, reduction_group)
             in_suffix = False
-            for node in nodes:
-                if node.group[1] in [
+            for fn, var_sizes in zip(fn_list, var_sizes_list):
+                if var_sizes in [
                     (group, reduction_group),
                     (tuple(itertools.chain(group, reduction_group)), ()),
                 ]:
                     assert not in_suffix
-                    node.run(vars, reduction_vars)
+                    fn(vars, reduction_vars)
                 else:
                     in_suffix = True
-                    assert node.group[1] == (
+                    assert var_sizes == (
                         group,
                         (),
-                    ), f"unexpected group: {node.group[1]} != {group}, {reduction_group}"
+                    ), f"unexpected group: {var_sizes} != {group}, {reduction_group}"
                     # we can fuse in some extra pointwise into the suffix
                     with kernel.write_to_suffix():
-                        node.run(vars, ())
+                        fn(vars, ())
 
         scalar_kernel = codegen_kernel(CppKernel)
         V.graph.removed_buffers |= scalar_kernel.removed_buffers
@@ -3272,8 +3301,8 @@ class CppKernelProxy(CppKernel):
 
         def select_tiling_indices(tiling_factor):
             all_index = []
-            for node in nodes:
-                rw = dependencies.extract_read_writes(node._body, *node._sizes)
+            for fn, var_sizes in zip(fn_list, var_sizes_list):
+                rw = dependencies.extract_read_writes(fn, *var_sizes)
                 all_index += [dep.index for dep in itertools.chain(rw.reads, rw.writes)]
             contig_vars = set()
             contig_vars_list = []
@@ -3387,6 +3416,41 @@ class CppKernelProxy(CppKernel):
                 inner_main_loop.set_kernel(tile2d_kernel)
                 inner_tail_loop.set_kernel(vec_kernel)
 
+    def codegen_loop_bodies(self, loop_bodies, var_sizes_list):
+        # TODO(jgong5): support lowp legalization
+        for body in loop_bodies:
+            DataTypePropagation.propagate_loopbody(body)
+        self.codegen_functions(loop_bodies, var_sizes_list)
+
+    def codegen_nodes(self, nodes: List[SchedulerNode]):
+        # Legalize BF16 node by adding to_dtype explicitly
+        self.legalize_lowp_fp_dtype(nodes)
+        self.data_type_propagation(nodes)
+
+        assert len(nodes) >= 1
+        first_node = nodes[0]
+        vec_dtype = (
+            first_node._lowp_fp_type  # type: ignore[attr-defined]
+            if all(
+                hasattr(_node, "_lowp_fp_type")
+                and _node._lowp_fp_type == first_node._lowp_fp_type  # type: ignore[attr-defined]
+                for _node in nodes
+            )
+            else torch.float
+        )
+
+        def fn(node, *index_vars):
+            node.decide_inplace_update()
+            node.mark_run()
+            if isinstance(V.kernel, NullKernelHandler):
+                return node._body(*index_vars)
+            else:
+                return node.codegen(index_vars)
+
+        fn_list = [functools.partial(fn, node) for node in nodes]
+        var_sizes_list = [node.group[1] for node in nodes]
+        self.codegen_functions(fn_list, var_sizes_list, vec_dtype)
+
     def codegen_loops(self, code, worksharing):
         self.codegen_loops_impl(self.loop_nest, code, worksharing)
 
@@ -3394,7 +3458,7 @@ class CppKernelProxy(CppKernel):
 class OuterLoopFusedKernel(CppKernel):
     def __init__(self, kernel_group):
         super().__init__(kernel_group.args, kernel_group.ws.num_threads)
-        self.inner: List["LoopLevel"] = []
+        self.inner: List[LoopLevel] = []
 
     def decide_parallel_depth(self, max_parallel_depth, threads) -> int:
         kernels_parallel_depth = []
@@ -3451,6 +3515,9 @@ class CppScheduling(BaseScheduling):
     def fuse(self, node1, node2):
         if node1.is_foreach() or node2.is_foreach():
             return ForeachKernelSchedulerNode.fuse(node1, node2)
+        elif node1.is_template():
+            assert not node2.is_template()
+            return FusedSchedulerNode.fuse(node1, node2)
         else:
             if (
                 self._why_fuse_nodes(node1, node2)
@@ -3649,7 +3716,9 @@ class CppScheduling(BaseScheduling):
 
     def can_fuse_vertical_outer_loop(self, node1, node2):
         return (
-            node1.get_names() & node2.ancestors
+            not node1.is_template()
+            and not node2.is_template()
+            and node1.get_names() & node2.ancestors
             and not (
                 self._can_fuse_horizontal_impl(node1, node2)
                 and not node1.is_reduction()
@@ -3665,9 +3734,11 @@ class CppScheduling(BaseScheduling):
             return 0
 
     def can_fuse_vertical(self, node1, node2):
-        # TODO(jgong5): support vertical fusion for template nodes
-        if node1.is_template() or node2.is_template():
+        if node2.is_template():
+            # TODO(jgong5): support pre-op fusion with template
             return False
+        if node1.is_template():
+            return not node2.is_reduction()
         return (
             self._can_fuse_horizontal_impl(node1, node2) and not node1.is_reduction()
         ) or self.can_fuse_vertical_outer_loop(node1, node2)
@@ -3752,6 +3823,7 @@ class CppScheduling(BaseScheduling):
         kernel, render = ctb.make_kernel_render(ctb, epilogue_nodes=epilogue_ir_nodes)
         with kernel:
             for node in [template_node, *epilogue_nodes]:
+                node.decide_inplace_update()
                 node.mark_run()  # type: ignore[attr-defined]
             src_code = render()
 

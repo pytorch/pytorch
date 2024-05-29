@@ -51,6 +51,9 @@ time python test/run_test.py --verbose -i distributed/tensor/parallel/test_tp_ra
 # FSDP2 tests
 time python test/run_test.py --verbose -i distributed/_composable/fsdp/test_fully_shard_training -- -k test_2d_mlp_with_nd_mesh
 
+# Pipelining composability tests
+time python test/run_test.py --verbose -i distributed/pipelining/test_composability.py
+
 # Other tests
 time python test/run_test.py --verbose -i test_cuda_primary_ctx
 time python test/run_test.py --verbose -i test_optim -- -k test_forloop_goes_right_direction_multigpu
