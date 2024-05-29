@@ -3258,7 +3258,7 @@ class TestComposability(TestCase):
         x = torch.randn(3, device=device)
 
         # functorch version of the API is deprecated
-        with self.assertWarnsRegex(UserWarning, "Please use torch.vmap"):
+        with self.assertWarnsRegex(FutureWarning, "Please use `torch.vmap`"):
             vmap(torch.sin)
 
         # the non-functorch version is not deprecated
@@ -3276,7 +3276,9 @@ class TestComposability(TestCase):
         new_api = getattr(torch.func, transform)
 
         # functorch version of the API is deprecated
-        with self.assertWarnsRegex(UserWarning, f"Please use torch.func.{transform}"):
+        with self.assertWarnsRegex(
+            FutureWarning, f"Please use `torch.func.{transform}`"
+        ):
             api(torch.sin)
 
         # the non-functorch version is not deprecated

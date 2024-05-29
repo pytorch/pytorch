@@ -44,10 +44,7 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   fi
 fi
 
-if [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
-  export ATEN_THREADING=TBB
-  export USE_TBB=1
-elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
+if [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
   export ATEN_THREADING=NATIVE
 fi
 
