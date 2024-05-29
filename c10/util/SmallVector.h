@@ -1208,13 +1208,9 @@ struct alignas(T) SmallVectorStorage<T, 0> {};
 template <typename T, unsigned N>
 class /* LLVM_GSL_OWNER */ SmallVector;
 
-/// Helper class for calculating the default number of inline elements for
-/// `SmallVector<T>`.
-///
-/// This should be migrated to a constexpr function when our minimum
-/// compiler support is enough for multi-statement constexpr functions.
+/// Calculating the default number of inline elements for `SmallVector<T>`.
 template <typename T>
-struct CalculateSmallVectorDefaultInlinedElements {
+constexpr size_t calculateSmallVectorDefaultInlinedElements() {
   // Parameter controlling the default number of inlined elements
   // for `SmallVector<T>`.
   //
@@ -1222,7 +1218,7 @@ struct CalculateSmallVectorDefaultInlinedElements {
   // 1. There is at least one inlined element.
   // 2. `sizeof(SmallVector<T>) <= kPreferredSmallVectorSizeof` unless
   // it contradicts 1.
-  static constexpr size_t kPreferredSmallVectorSizeof = 64;
+  constexpr size_t kPreferredSmallVectorSizeof = 64;
 
   // static_assert that sizeof(T) is not "too big".
   //
@@ -1255,11 +1251,10 @@ struct CalculateSmallVectorDefaultInlinedElements {
 
   // Discount the size of the header itself when calculating the maximum inline
   // bytes.
-  static constexpr size_t PreferredInlineBytes =
+  constexpr size_t PreferredInlineBytes =
       kPreferredSmallVectorSizeof - sizeof(SmallVector<T, 0>);
-  static constexpr size_t NumElementsThatFit = PreferredInlineBytes / sizeof(T);
-  static constexpr size_t value =
-      NumElementsThatFit == 0 ? 1 : NumElementsThatFit;
+  constexpr size_t NumElementsThatFit = PreferredInlineBytes / sizeof(T);
+  return NumElementsThatFit == 0 ? 1 : NumElementsThatFit;
 };
 
 /// This is a 'vector' (really, a variable-sized array), optimized
@@ -1280,7 +1275,7 @@ struct CalculateSmallVectorDefaultInlinedElements {
 /// \see https://llvm.org/docs/ProgrammersManual.html#llvm-adt-smallvector-h
 template <
     typename T,
-    unsigned N = CalculateSmallVectorDefaultInlinedElements<T>::value>
+    unsigned N = calculateSmallVectorDefaultInlinedElements<T>()>
 class /* LLVM_GSL_OWNER */ SmallVector : public SmallVectorImpl<T>,
                                          SmallVectorStorage<T, N> {
  public:
