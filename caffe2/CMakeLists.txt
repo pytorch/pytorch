@@ -388,7 +388,7 @@ add_custom_command(
   OUTPUT
   ${TORCH_GENERATED_CODE}
   COMMAND
-  "${PYTHON_EXECUTABLE}" tools/setup_helpers/generate_code.py
+  "${Python_EXECUTABLE}" tools/setup_helpers/generate_code.py
     --native-functions-path "aten/src/ATen/native/native_functions.yaml"
     --tags-path "aten/src/ATen/native/tags.yaml"
     $<$<BOOL:${INTERN_DISABLE_AUTOGRAD}>:--disable-autograd>
@@ -1144,7 +1144,7 @@ if(BUILD_LITE_INTERPRETER AND SELECTED_OP_LIST)
     add_custom_command(
       OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
       COMMAND
-        "${PYTHON_EXECUTABLE}"
+        "${Python_EXECUTABLE}"
         -m tools.code_analyzer.gen_oplist
         --model_file_list_path "${SELECTED_OP_LIST}"
         --output_dir "${CMAKE_BINARY_DIR}/aten/src/ATen"
@@ -1159,7 +1159,7 @@ if(BUILD_LITE_INTERPRETER AND SELECTED_OP_LIST)
     add_custom_command(
       OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
       COMMAND
-        "${PYTHON_EXECUTABLE}"
+        "${Python_EXECUTABLE}"
         -m tools.lite_interpreter.gen_selected_mobile_ops_header
         --yaml_file_path "${SELECTED_OP_LIST}"
         --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen"
