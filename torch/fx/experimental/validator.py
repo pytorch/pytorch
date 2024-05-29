@@ -168,7 +168,7 @@ try:
             self.validator.add_assertion(denominator != 0)  # type: ignore[arg-type]
             return _Z3Ops.to_real(numerator) / _Z3Ops.to_real(denominator)
 
-        def floor(self, number: z3.ArithRef, dtype: torch.dtype) -> z3.ArithRef:
+        def floor(self, number: z3.ArithRef) -> z3.ArithRef:
             # Z3 ToInt function rounds a real number towards negative infinity.
             return _Z3Ops.to_int(number)
 
@@ -181,10 +181,10 @@ try:
             # whether we should cast it to real.
             return _Z3Ops.to_real(result) if cast_result_to_real else result
 
-        def ceil(self, number: z3.ArithRef, dtype: torch.dtype) -> z3.ArithRef:
+        def ceil(self, number: z3.ArithRef) -> z3.ArithRef:
             return z3.If(
-                self.floor(number, dtype) < number,
-                self.floor(number + 1, dtype),
+                self.floor(number) < number,
+                self.floor(number + 1),
                 number
             )  # type: ignore[return-value]
 
@@ -216,7 +216,7 @@ try:
         def abs(self, number: z3.ArithRef) -> z3.ArithRef:
             return z3.Abs(number)
 
-        def round_to_int(self, number: z3.ArithRef, dtype: torch.dtype) -> z3.ArithRef:
+        def round_to_int(self, number: z3.ArithRef) -> z3.ArithRef:
             # Pythons builtin 'round' implements the 'round half to even' strategy
             # See https://en.wikipedia.org/wiki/Rounding#Rounding_half_to_even
             # z3 has an equivalent z3.fpRoundToIntegral(z3.RoundNearestTiesToEven(), ...), but this only applies to
@@ -227,8 +227,8 @@ try:
             # to round down, i.e. use the 'round half down' strategy
             return z3.If(
                 self.mod(number, z3.IntVal(2)) == 0.5,
-                self.ceil(number - 0.5, dtype),
-                self.floor(number + 0.5, dtype),
+                self.ceil(number - 0.5),
+                self.floor(number + 0.5),
             )
 
     # Lifts a callable to be used in Z3.
@@ -363,7 +363,7 @@ try:
             return z3.ToInt(x)
 
         def round_to_int(self, x: z3.ArithRef, dtype: torch.dtype) -> z3.ArithRef:
-            return self._ops.round_to_int(x, dtype)
+            return self._ops.round_to_int(x)
 
         def int_truediv(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
             return self._ops.div(numerator, denominator)
