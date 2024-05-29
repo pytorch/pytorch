@@ -1,7 +1,8 @@
+from collections import defaultdict
 from contextlib import contextmanager
 
 from functools import partial
-from typing import Callable, cast, List, Tuple, Union
+from typing import Callable, cast, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -141,6 +142,24 @@ def test_with_non_cuda_p2p_group():
         yield
     finally:
         _test_with_non_cuda_p2p_group = prev
+
+
+_current_p2p_usage_counter: Optional[Dict[str, int]] = None
+
+
+@contextmanager
+def p2p_usage_counter():
+    """
+    Record the number of ops that utilized p2p capability for testing purposes.
+    Fallbacks are excluded.
+    """
+    global _current_p2p_usage_counter
+    prev = _current_p2p_usage_counter
+    try:
+        _current_p2p_usage_counter = defaultdict(int)
+        yield _current_p2p_usage_counter
+    finally:
+        _current_p2p_usage_counter = prev
 
 
 def _pipelined_all_gather_and_consume(
@@ -295,32 +314,21 @@ lib.define(
 
 
 @torch.library.impl(lib, "fused_all_gather_matmul", "Meta")
-def _fused_all_gather_matmul_meta(
-    A_shard: torch.Tensor,
-    Bs: List[torch.Tensor],
-    gather_dim: int,
-    group_name: str,
-) -> Tuple[torch.Tensor, List[torch.Tensor]]:
-    group_size = c10d._get_group_size_by_name(group_name)
-    ag_out_shape = list(A_shard.shape)
-    ag_out_shape[gather_dim] *= group_size
-    ag_out = (
-        A_shard.new_empty(ag_out_shape)
-        .swapdims(0, gather_dim)
-        .contiguous()
-        .swapdims(0, gather_dim)
-    )
-    return ag_out, [ag_out @ B for B in Bs]
-
-
 def _fused_all_gather_matmul_fallback(
     A_shard: torch.Tensor,
     Bs: List[torch.Tensor],
     gather_dim: int,
     group_name: str,
 ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
-    A = funcol.all_gather_tensor(A_shard, gather_dim, group_name)
-    return A, [torch.matmul(A, B) for B in Bs]
+    group_size = c10d._get_group_size_by_name(group_name)
+    A = torch.ops._c10d_functional.all_gather_into_tensor(
+        A_shard.contiguous(), group_size, group_name
+    )
+    A = torch.ops._c10d_functional.wait_tensor(A)
+    A = A.view(group_size, *A_shard.shape).movedim(gather_dim + 1, 1).flatten(0, 1)
+    return A.movedim(0, gather_dim), [
+        torch.matmul(A, B).movedim(0, gather_dim) for B in Bs
+    ]
 
 
 @torch.library.impl(lib, "fused_all_gather_matmul", "CUDA")
@@ -353,6 +361,9 @@ def _fused_all_gather_matmul(
         or gather_dim == len(A_shard.shape) - 1
     ):
         return _fused_all_gather_matmul_fallback(A_shard, Bs, gather_dim, group_name)
+
+    if _current_p2p_usage_counter is not None:
+        _current_p2p_usage_counter["fused_all_gather_matmul"] += 1
 
     # Move the gather_dim to the front and flatten the tensor into a 2D matrix.
     # The flattened tensor doesn't need to be contiguous (for computation
@@ -394,19 +405,6 @@ def _fused_all_gather_matmul(
 
 
 @torch.library.impl(lib, "fused_matmul_reduce_scatter", "Meta")
-def _fused_matmul_reduce_scatter_meta(
-    A: torch.Tensor,
-    B: torch.Tensor,
-    reduce_op: str,
-    scatter_dim: int,
-    group_name: str,
-) -> torch.Tensor:
-    group_size = c10d._get_group_size_by_name(group_name)
-    res_shape = list((A @ B).shape)
-    res_shape[scatter_dim] //= group_size
-    return A.new_empty(res_shape)
-
-
 def _fused_matmul_reduce_scatter_fallback(
     A: torch.Tensor,
     B: torch.Tensor,
@@ -458,6 +456,9 @@ def _fused_matmul_reduce_scatter(
         return _fused_matmul_reduce_scatter_fallback(
             A, B, reduce_op, scatter_dim, group_name
         )
+
+    if _current_p2p_usage_counter is not None:
+        _current_p2p_usage_counter["fused_matmul_reduce_scatter"] += 1
 
     # Move the gather_dim to the front and flatten the tensor into a 2D matrix
     x = A.movedim(scatter_dim, 0)
