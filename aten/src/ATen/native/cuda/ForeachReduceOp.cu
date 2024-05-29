@@ -68,8 +68,8 @@ struct LpMaxFunctor {
     T vals[kILP];
     T r_x[kILP];
     for (int64_t i = 0; i < kILP; i++) {
-      vals[i] = T(-INFINITY);
-      r_x[i] = T(-INFINITY);
+      vals[i] = T(std::numeric_limits<T>::lowest());
+      r_x[i] = T(std::numeric_limits<T>::lowest());
     }
 
     if (n % kILP == 0 && (chunk_size & kILP) == 0 && is_aligned(x)) {
@@ -96,7 +96,7 @@ struct LpMaxFunctor {
       }
     }
 
-    auto val = T(-INFINITY);
+    auto val = T(std::numeric_limits<T>::lowest());
     for (int i = 0; i < kILP; i++) {
       val = max_propagate_nan(val, vals[i]);
     }
@@ -118,7 +118,7 @@ __global__ void lpmax_cleanup(
   __shared__ T vals[512];
   const T* output_this_tensor =
       output_per_tensor + blockIdx.x * max_chunks_per_tensor;
-  T val = -INFINITY;
+  T val = std::numeric_limits<T>::lowest();
   for (size_t i = threadIdx.x; i < max_chunks_per_tensor; i += blockDim.x) {
     val = max_propagate_nan(val, output_this_tensor[i]);
   }
@@ -130,21 +130,11 @@ __global__ void lpmax_cleanup(
 
 std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
   check_foreach_api_restrictions(tensors);
-  // we currently use -INF as the identity value to compare against, which
-  // does not work for int8, int16, nor bool. Fall back to slow path here.
-  const bool has_small_int_or_bool =
-      std::any_of(tensors.begin(), tensors.end(), [](const auto& t) {
-        const auto scalar_type = t.scalar_type();
-        return scalar_type == at::ScalarType::Short ||
-            scalar_type == at::ScalarType::Char ||
-            scalar_type == at::ScalarType::Bool;
-      });
-  if (!can_use_fast_route(tensors) || has_small_int_or_bool) {
+  if (!can_use_fast_route(tensors)) {
     return foreach_tensor_max_slow(tensors);
   }
 
-  // for parity with max in ReduceAllOps.cpp, though I think max(empty) should
-  // eventually be allowed.
+  // for parity with max in ReduceAllOps.cpp, as max(empty) is ???
   TORCH_CHECK(
       std::all_of(
           tensors.begin(),
