@@ -144,12 +144,12 @@ class TestFlexAttention(InductorTestCase):
     ):
         compiled_error = (golden_out - compiled_out).abs().mean()
         ref_error = (golden_out - ref_out).abs().mean()
+        if torch.isnan(compiled_error).any() and torch.isnan(ref_error).any():
+            self.assertTrue(False, "Output/Grad with NaN")
         if compiled_error > ref_error * fudge_factor:
             name = tensor_name if tensor_name is not None else ""
             msg = f"{name} Compiled error {compiled_error} is greater than ref error {ref_error} by more than {fudge_factor}X."
             self.assertTrue(False, msg)
-            # print(name)
-            # print(msg)
 
     def run_test(
         self,
@@ -331,19 +331,19 @@ class TestFlexAttention(InductorTestCase):
     def test_builtin_score_mods(self, dtype: torch.dtype, score_mod: Callable):
         self.run_test(score_mod, dtype)
 
-    # @supported_platform
-    # @common_utils.parametrize("dtype", test_dtypes)
-    # @common_utils.parametrize("score_mod", test_score_mods)
-    # def test_builtin_score_mods_dynamic(self, dtype: torch.dtype, score_mod: Callable):
-    #     self.run_dynamic_test(score_mod, dtype)
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    def test_builtin_score_mods_dynamic(self, dtype: torch.dtype, score_mod: Callable):
+        self.run_dynamic_test(score_mod, dtype)
 
-    # @supported_platform
-    # @common_utils.parametrize("dtype", test_dtypes)
-    # @common_utils.parametrize("score_mod", test_score_mods)
-    # def test_builtin_score_mods_automatic_dynamic(
-    #     self, dtype: torch.dtype, score_mod: Callable
-    # ):
-    #     self.run_automatic_dynamic_test(score_mod, dtype)
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    def test_builtin_score_mods_automatic_dynamic(
+        self, dtype: torch.dtype, score_mod: Callable
+    ):
+        self.run_automatic_dynamic_test(score_mod, dtype)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
