@@ -978,10 +978,6 @@ class CUDAGraphNode:
         return outputs
 
     def run(self, new_inputs):
-        log.debug(
-            "Running graph recording id %d",
-            self.id.id,
-        )
         self.check_static_inputs_are_stable(new_inputs)
 
         self._copy_inputs_and_remove_from_src(self.reconstructed_inputs, new_inputs)
