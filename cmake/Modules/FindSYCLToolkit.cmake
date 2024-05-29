@@ -49,12 +49,27 @@ find_file(
   )
 
 # Find SYCL library fullname.
-find_library(
-  SYCL_LIBRARY
-  NAMES sycl
-  HINTS ${SYCL_LIBRARY_DIR}
-  NO_DEFAULT_PATH
-)
+# On both Linux and Windows, the current version of SYCL runtime is 7.
+# On Linux, libsycl.so symbolic links to libsycl.so.7.
+# On Windows, sycl7.dll version suffix is used.
+foreach(sycl_lib_version "" 7)
+    set(SYCL_LIBRARY_NAME "sycl${sycl_lib_version}")
+
+    find_library(
+      SYCL_LIBRARY
+      NAMES ${SYCL_LIBRARY_NAME}
+      HINTS ${SYCL_LIBRARY_DIR}
+      NO_DEFAULT_PATH
+    )
+
+    if(EXISTS "${SYCL_LIBRARY}")
+        set(SYCL_LIBRARY_FOUND TRUE)
+        break()
+    endif()
+endforeach()
+if(NOT SYCL_LIBRARY_FOUND)
+  message(FATAL_ERROR "Cannot find a SYCL library")
+endif()
 
 find_library(
   OCL_LIBRARY
