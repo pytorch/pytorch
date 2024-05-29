@@ -7,9 +7,9 @@ import itertools
 import math
 import operator
 import re
-import unittest
 
 import sympy
+
 import torch
 import torch.fx
 import torch.nn.functional as F
@@ -1405,6 +1405,7 @@ class TestDimConstraints(TestCase):
 
         from sympy import Symbol
         from sympy.solvers.inequalities import reduce_inequalities
+
         from torch._dynamo.source import (
             LocalSource,
             TensorProperty,
@@ -1434,9 +1435,9 @@ class TestDimConstraints(TestCase):
         ):
             dcp.doprint(answer)
 
-    @unittest.expectedFailure  # avik, you are our only hope!
     def test_dim_constraints_solve_full(self):
         from sympy import Eq, Integer, Ne, Symbol
+
         from torch._dynamo.source import (
             LocalSource,
             TensorProperty,
@@ -2348,7 +2349,7 @@ class TestDimConstraints(TestCase):
         def dummy_fn(a, b, c, d, e, f):
             pass
 
-        action_code = dim_constraints.prettify_results(inspect.signature(dummy_fn))
+        action_code = dim_constraints.prettify_results(inspect.signature(dummy_fn), {})
         static_code, dynamic_code = re.findall(r"```(.*?)```", action_code, re.DOTALL)
         expected_static = """
 def specializations(a, b, c, d, e, f):

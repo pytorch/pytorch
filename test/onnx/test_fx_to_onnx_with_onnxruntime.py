@@ -14,10 +14,11 @@ import onnx_test_common
 import onnxruntime  # type: ignore[import]
 import parameterized  # type: ignore[import]
 import pytorch_test_common
-import torch
-import torch.onnx
 
 import transformers  # type: ignore[import]
+
+import torch
+import torch.onnx
 from torch import nn
 
 from torch._subclasses import fake_tensor
@@ -160,9 +161,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                     # This requires torch.sym_float, probably easy to lower to
                     # ONNX but I don't know where to put it
                     # torch.tensor([operator.floordiv(x.item(), y.item())]),
-                    # Pow now generates a runtime assert that x is
-                    # non-negative
-                    # torch.tensor([operator.pow(x.item(), y.item())]),
+                    # NB: abs so that the base and exponent are provably
+                    # non-negative, so we don't generate runtime asserts
+                    torch.tensor([operator.pow(abs(x.item()), abs(y.item()))]),
                     torch.tensor([operator.abs(x.item())]),
                     torch.tensor([operator.neg(x.item())]),
                     torch.tensor([math.ceil(x.item())]),
