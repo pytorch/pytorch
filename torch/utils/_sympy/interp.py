@@ -59,7 +59,6 @@ def handlers():
         FloorDiv: "floordiv",
         CleanDiv: "floordiv",  # TODO: hmm?
         TruncToFloat: "trunc",
-        ToFloat: "to_float",
         Where: "where",
         sympy.Add: "add",
         sympy.Mul: "mul",
@@ -74,6 +73,11 @@ def handlers():
         sympy.Pow: "pow_by_natural",
         Mod: "mod",
         PythonMod: "mod",  # TODO: this is wrong
+        # This is fine for all backends, but a dedicated cmod would be better
+        # in case we ever add a backend to a language with Python mod-style
+        # semantics
+        CMod: "mod",
+        # TODO: You shouldn't ever hit this one
         sympy.Mod: "mod",
         sympy.Abs: "abs",
         sympy.log: "log",
@@ -121,6 +125,8 @@ def sympy_interp(
         expr.args[1], sympy.core.numbers.Half
     ):
         return analysis.sqrt(sympy_interp(analysis, env, expr.args[0]))
+    if isinstance(expr, ToFloat):
+        return analysis.to_dtype(sympy_interp(analysis, env, expr.args[0]), torch.float64)
 
     # Recursive case
     args = [sympy_interp(analysis, env, arg) for arg in expr.args]  # type: ignore[arg-type]

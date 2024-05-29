@@ -356,8 +356,10 @@ try:
                 return z3.BoolVal(bool(value))
             raise ValueError(f"unsupported dtype (SympyToZ3): {dtype}")
 
-        def to_float(self, x: z3.ArithRef) -> z3.ArithRef:
-            return z3.ToReal(x)
+        def to_dtype(x, dtype):
+            if dtype == torch.float64:
+                return z3.ToReal(x)
+            raise NotImplementedError(f"to_dtype {dtype} NYI")
 
         def trunc_to_int(self, x: z3.ArithRef, dtype: torch.dtype) -> z3.ArithRef:
             return z3.ToInt(x)

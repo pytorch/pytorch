@@ -102,8 +102,10 @@ class ReferenceAnalysis:
         return _keep_float(sympy.ceiling)(x)
 
     @staticmethod
-    def to_float(x):
-        return ToFloat(x)
+    def to_dtype(x, dtype):
+        if dtype == torch.float64:
+            return ToFloat(x)
+        raise NotImplementedError(f"to_dtype {dtype} NYI")
 
     @staticmethod
     def mod(x, y):
@@ -210,8 +212,10 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
         return a / b
 
     @staticmethod
-    def to_float(a):
-        return float(a)
+    def to_dtype(a, dtype):
+        if dtype == torch.float64:
+            return float(x)
+        raise NotImplementedError(f"to_dtype {dtype} NYI")
 
     @staticmethod
     def exp(x):

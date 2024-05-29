@@ -421,10 +421,6 @@ class SymPyValueRangeAnalysis:
         return ValueRanges.increasing_map(a, TruncToInt)
 
     @staticmethod
-    def to_float(a):
-        return ValueRanges.increasing_map(a, ToFloat)
-
-    @staticmethod
     def not_(a):
         a = ValueRanges.wrap(a)
         a = a.boolify()
