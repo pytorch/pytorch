@@ -276,7 +276,6 @@ def aoti_compile_with_persistent_cache(
     *,
     dynamic_shapes: Optional[Dict[str, Any]] = None,
     options: Optional[Dict[str, Any]] = None,
-    remove_runtime_assertions: bool = False,
     disable_constraint_solver: bool = False,
 ):
     flattened_inputs = pytree.arg_tree_leaves(*args, **kwargs)
@@ -333,7 +332,6 @@ def aoti_compile_with_persistent_cache(
                 args,
                 kwargs,
                 dynamic_shapes=dynamic_shapes,
-                remove_runtime_assertions=remove_runtime_assertions,
                 disable_constraint_solver=disable_constraint_solver,
                 # Disabling this flag, because instead we can rely on the mapping
                 # dynamo_flat_name_to_original_fqn which is coming from Dynamo.
