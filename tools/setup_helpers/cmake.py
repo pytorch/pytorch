@@ -13,7 +13,7 @@ from typing import Any, cast, Dict, List, Optional
 from . import which
 from .cmake_utils import CMakeValue, get_cmake_cache_variables_from_file
 from .env import BUILD_DIR, check_negative_env_flag, IS_64BIT, IS_DARWIN, IS_WINDOWS
-from .numpy_ import NUMPY_INCLUDE_DIR, USE_NUMPY
+from .numpy_ import USE_NUMPY
 
 
 def _mkdir_p(d: str) -> None:
@@ -309,7 +309,6 @@ class CMake:
             args,
             Python_EXECUTABLE=sys.executable,
             TORCH_BUILD_VERSION=version,
-            NUMPY_INCLUDE_DIR=NUMPY_INCLUDE_DIR,
             **build_options,
         )
 
