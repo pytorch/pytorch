@@ -28,10 +28,12 @@ from torch.nested._internal.nested_tensor import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    munge_exc,
     parametrize,
     subtest,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.two_tensor import TwoTensor
 
 
@@ -1369,6 +1371,191 @@ class GraphModule(torch.nn.Module):
             out_ref = f(view)
             out_test = compiled_f(view)
             self.assertEqual(out_ref, out_test)
+
+
+class SubclassAOTTests(LoggingTestCase):
+    def _compile_check(self, fn, inps, *, backend="aot_eager", dynamic=True):
+        records_ = None
+
+        @make_logging_test(aot=10)
+        def inner(self_, records):
+            compile_fn = torch.compile(backend=backend, dynamic=dynamic)(fn)
+            expected = fn(*inps)
+            got = compile_fn(*inps)
+            self.assertEqual(expected, got)
+            self.assertGreater(len(records), 0)
+            nonlocal records_
+            records_ = records
+
+        inner(self)
+        return records_
+
+    @make_logging_test(aot=10)
+    def test_tensor_subclass_simple(self, records):
+        def f(tt):
+            return tt * tt.size()[0]
+
+        a = torch.ones(3, 4)
+        b = a.clone()
+        tt = TwoTensor(a, b)
+
+        records = self._compile_check(f, [tt])
+        gm = records[1].getMessage()
+
+        self.assertExpectedInline(
+            munge_exc(gm),
+            """\
+TRACED GRAPH
+ ===== Forward graph 10 =====
+ fx/_lazy_graph_module.py class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[s0, s1]", arg1_1: "f32[s0, s1]", arg2_1: "Sym(s0)", arg3_1: "Sym(s1)", arg4_1: "Sym(s0)", arg5_1: "Sym(s1)"):
+        # File: test_subclasses.py:N in f, code: return tt * tt.size()[0]
+        mul: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(arg0_1, arg4_1);  arg0_1 = None
+        mul_1: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(arg1_1, arg4_1);  arg1_1 = arg4_1 = None
+        return [mul, mul_1]
+
+""",  # noqa: B950
+        )
+
+    def test_tensor_subclass_clone_view(self):
+        def f(tt):
+            y = tt.clone()
+            return y.view(y.shape[1], y.shape[0])
+
+        a = torch.ones(3, 4)
+        b = a.clone()
+        tt = TwoTensor(a, b)
+
+        records = self._compile_check(f, [tt])
+        gm = records[1].getMessage()
+
+        self.assertExpectedInline(
+            munge_exc(gm),
+            """\
+TRACED GRAPH
+ ===== Forward graph 5 =====
+ fx/_lazy_graph_module.py class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[s0, s1]", arg1_1: "f32[s0, s1]", arg2_1: "Sym(s0)", arg3_1: "Sym(s1)", arg4_1: "Sym(s0)", arg5_1: "Sym(s1)"):
+        # File: test_subclasses.py:N in f, code: y = tt.clone()
+        clone: "f32[s0, s1]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+        clone_1: "f32[s0, s1]" = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
+
+        # File: test_subclasses.py:N in f, code: return y.view(y.shape[1], y.shape[0])
+        view: "f32[s1, s0]" = torch.ops.aten.view.default(clone, [arg5_1, arg4_1]);  clone = None
+        view_1: "f32[s1, s0]" = torch.ops.aten.view.default(clone_1, [arg5_1, arg4_1]);  clone_1 = arg5_1 = arg4_1 = None
+        return [view, view_1]
+
+""",  # noqa: B950
+        )
+
+    def test_tensor_subclass_mul(self):
+        def f(tt, a, b):
+            s0, s1 = a.size()
+            s2, s3 = b.size()
+            return tt * s0 * s1 * s2 * s3
+
+        a = torch.ones(3, 4)
+        b = a.clone()
+        tt = TwoTensor(a, b)
+
+        records = self._compile_check(f, [tt, a, b])
+        gm = records[1].getMessage()
+
+        self.assertExpectedInline(
+            munge_exc(gm),
+            """\
+TRACED GRAPH
+ ===== Forward graph 7 =====
+ fx/_lazy_graph_module.py class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "Sym(s0)", arg1_1: "Sym(s1)", arg2_1: "f32[s0, s1]", arg3_1: "f32[s0, s1]", arg4_1: "f32[s0, s1]", arg5_1: "f32[s0, s1]", arg6_1: "Sym(s0)", arg7_1: "Sym(s1)"):
+        # File: test_subclasses.py:N in f, code: return tt * s0 * s1 * s2 * s3
+        mul: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(arg4_1, arg6_1);  arg4_1 = None
+        mul_1: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(arg5_1, arg6_1);  arg5_1 = None
+        mul_2: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(mul, arg7_1);  mul = None
+        mul_3: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(mul_1, arg7_1);  mul_1 = None
+        mul_4: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(mul_2, arg6_1);  mul_2 = None
+        mul_5: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(mul_3, arg6_1);  mul_3 = arg6_1 = None
+        mul_6: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(mul_4, arg7_1);  mul_4 = None
+        mul_7: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(mul_5, arg7_1);  mul_5 = arg7_1 = None
+        return [mul_6, mul_7]
+
+""",  # noqa: B950
+        )
+
+    def test_tensor_subclass_view(self):
+        def f(tt):
+            y = tt.clone()
+            return y.view(y.shape[0], y.shape[1])
+
+        a = torch.ones(3, 4)
+        b = a.clone()
+        tt = TwoTensor(a, b)
+
+        records = self._compile_check(f, [tt])
+        gm = records[1].getMessage()
+
+        self.assertExpectedInline(
+            munge_exc(gm),
+            """\
+TRACED GRAPH
+ ===== Forward graph 14 =====
+ fx/_lazy_graph_module.py class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[s0, s1]", arg1_1: "f32[s0, s1]", arg2_1: "Sym(s0)", arg3_1: "Sym(s1)", arg4_1: "Sym(s0)", arg5_1: "Sym(s1)"):
+        # File: test_subclasses.py:N in f, code: y = tt.clone()
+        clone: "f32[s0, s1]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+        clone_1: "f32[s0, s1]" = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
+
+        # File: test_subclasses.py:N in f, code: return y.view(y.shape[0], y.shape[1])
+        view: "f32[s0, s1]" = torch.ops.aten.view.default(clone, [arg4_1, arg5_1]);  clone = None
+        view_1: "f32[s0, s1]" = torch.ops.aten.view.default(clone_1, [arg4_1, arg5_1]);  clone_1 = arg4_1 = arg5_1 = None
+        return [view, view_1]
+
+""",  # noqa: B950
+        )
+
+    def test_tensor_subclass_view_mul(self):
+        def f(tt):
+            y = tt.clone()
+            return y.view(y.shape[0] * y.shape[1])
+
+        a = torch.ones(3, 4)
+        b = a.clone()
+        tt = TwoTensor(a, b)
+
+        records = self._compile_check(f, [tt])
+        gm = records[1].getMessage()
+
+        self.assertExpectedInline(
+            munge_exc(gm),
+            """\
+TRACED GRAPH
+ ===== Forward graph 16 =====
+ fx/_lazy_graph_module.py class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[s0, s1]", arg1_1: "f32[s0, s1]", arg2_1: "Sym(s0)", arg3_1: "Sym(s1)", arg4_1: "Sym(s0)", arg5_1: "Sym(s1)"):
+        # File: test_subclasses.py:N in f, code: y = tt.clone()
+        clone: "f32[s0, s1]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+        clone_1: "f32[s0, s1]" = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
+
+        # File: test_subclasses.py:N in f, code: return y.view(y.shape[0] * y.shape[1])
+        mul: "Sym(s0*s1)" = arg4_1 * arg5_1;  arg4_1 = arg5_1 = None
+        view: "f32[s0*s1]" = torch.ops.aten.view.default(clone, [mul]);  clone = None
+        view_1: "f32[s0*s1]" = torch.ops.aten.view.default(clone_1, [mul]);  clone_1 = mul = None
+        return [view, view_1]
+
+""",  # noqa: B950
+        )
+
+    def test_tensor_subclass_return_shape(self):
+        @torch.compile(backend="aot_eager", dynamic=True)
+        def fn(x):
+            return x.clone().view(x.shape[0] * x.shape[1])
+
+        a = torch.ones(2, 3)
+        b = a.clone()
+        tt = TwoTensor(a, b)
+        out = fn(tt)
+        self.assertEqual(tt.view(2 * 3), out)
+        self.assertEqual(out.shape, (6,))
 
 
 instantiate_parametrized_tests(SubclassTests)
