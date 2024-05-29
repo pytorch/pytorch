@@ -17,6 +17,8 @@ from typing import (
     Union,
 )
 
+from typing_extensions import TypeAlias
+
 import torch
 import torch.nn.functional as F
 from torch.ao.quantization.fake_quantize import (
@@ -53,6 +55,9 @@ from torch.fx.passes.utils.source_matcher_utils import (
     get_source_partitions,
     SourcePartition,
 )
+
+FilterFn: TypeAlias = Callable[[List[Node]], bool]
+
 
 if TYPE_CHECKING:
     from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
@@ -104,9 +109,7 @@ quantizable_ops = default_quantizable_ops | {
 QUANT_ANNOTATION_KEY = "quantization_annotation"
 
 
-def _skip_annotate(
-    nodes: List[Node], filter_fn: Optional[Callable[[List[Node]], bool]] = None
-) -> bool:
+def _skip_annotate(nodes: List[Node], filter_fn: Optional[FilterFn] = None) -> bool:
     """Determine whether to skip annotation for a list of nodes."""
 
     # 1) Skip annotate if any node is already annotated
@@ -121,7 +124,7 @@ def _skip_annotate(
     return True
 
 
-def _create_module_name_filter(module_name: str) -> Callable[[List[Node]], bool]:
+def _create_module_name_filter(module_name: str) -> FilterFn:
     """Create a filter function for a given module name.
 
     The filter function takes a list of nodes (as determined by the annotate function)
@@ -147,7 +150,7 @@ def _create_module_name_filter(module_name: str) -> Callable[[List[Node]], bool]
 
 def _create_operator_type_filter(
     operator_type: Callable,
-) -> Callable[[List[Node]], bool]:
+) -> FilterFn:
     """Create a filter function for a given operator type.
 
     The filter function takes a list of nodes and returns True if it contains
@@ -389,7 +392,7 @@ def _annotate_nodes_not_quantize(nodes: Union[Node, List[Node]]) -> None:
         )
 
 
-def config_checker(method: Callable) -> Callable:
+def _config_checker(method: Callable) -> Callable:
     @functools.wraps(method)
     def wrapper(
         quantizer: "X86InductorQuantizer",
@@ -406,6 +409,12 @@ def config_checker(method: Callable) -> Callable:
     return wrapper
 
 
+@dataclass
+class _QuantizationMode:
+    is_qat: Optional[bool]
+    is_dynamic: Optional[bool]
+
+
 class X86InductorQuantizer(Quantizer):
     supported_config_and_operators = _get_supported_config_and_operators()
     module_function_to_aten_operator_type = _map_module_function_to_aten_operator_type()
@@ -417,8 +426,6 @@ class X86InductorQuantizer(Quantizer):
             torch._ops.OpOverloadPacket, Optional[QuantizationConfig]
         ] = {}
         self.module_name_qconfig: Dict[str, Optional[QuantizationConfig]] = {}
-        self._is_dynamic = None
-        self._is_qat = None
 
     @classmethod
     def get_supported_quantization_configs(cls) -> List[QuantizationConfig]:
@@ -442,6 +449,23 @@ class X86InductorQuantizer(Quantizer):
                 return ops
         return []
 
+    def _get_current_quantization_mode(self) -> _QuantizationMode:
+        """Retrieves the current quantization mode based on all configurations."""
+        is_qat = None
+        is_dynamic = None
+
+        for qconfig in (
+            list(self.module_name_qconfig.values())
+            + list(self.operator_type_qconfig.values())
+            + [self.global_config]
+        ):
+            if qconfig is not None:
+                is_qat = qconfig.is_qat
+                input_activation_spec = qconfig.input_activation
+                if input_activation_spec is not None:
+                    is_dynamic = input_activation_spec.is_dynamic
+        return _QuantizationMode(is_qat=is_qat, is_dynamic=is_dynamic)
+
     def _need_skip_config(
         self, quantization_config: Optional[QuantizationConfig]
     ) -> bool:
@@ -450,28 +474,27 @@ class X86InductorQuantizer(Quantizer):
         Mixed static/dynamic configurations or mixed QAT/non-QAT configurations are not supported.
         If such a mix is detected, the configuration will be marked for skipping..
         """
-        need_skip = False
         if quantization_config is None:
             return False
 
-        if self._is_qat is None:
-            self._is_qat = quantization_config.is_qat
-        else:
-            if self._is_qat != quantization_config.is_qat:
+        need_skip = False
+        current_mode = self._get_current_quantization_mode()
+        if (
+            current_mode.is_qat is not None
+            and current_mode.is_qat != quantization_config.is_qat
+        ):
+            warnings.warn("Mixed QAT and Non-QAT quantization config is not supported.")
+            need_skip = True
+        if current_mode.is_dynamic is not None:
+            input_activation_spec = quantization_config.input_activation
+            if (
+                input_activation_spec is not None
+                and current_mode.is_dynamic != input_activation_spec.is_dynamic
+            ):
                 warnings.warn(
-                    "Mixed QAT and Non-QAT quantization config is not supported."
+                    "Mixed dynamic and static quantization config is not supported."
                 )
                 need_skip = True
-        input_activation_spec = quantization_config.input_activation
-        if input_activation_spec is not None:
-            if self._is_dynamic is None:
-                self._is_dynamic = input_activation_spec.is_dynamic
-            else:
-                if self._is_dynamic != input_activation_spec.is_dynamic:
-                    warnings.warn(
-                        "Mixed dynamic and static quantization config is not supported."
-                    )
-                    need_skip = True
         return need_skip
 
     def set_global(self, quantization_config: QuantizationConfig):
@@ -489,7 +512,7 @@ class X86InductorQuantizer(Quantizer):
             )
         return self.global_config
 
-    @config_checker
+    @_config_checker
     def set_function_type_qconfig(
         self,
         function_type: Callable,
@@ -508,7 +531,7 @@ class X86InductorQuantizer(Quantizer):
             )
         return self
 
-    @config_checker
+    @_config_checker
     def set_module_type_qconfig(
         self,
         module_type: torch.nn.Module,
@@ -525,7 +548,7 @@ class X86InductorQuantizer(Quantizer):
             )
         return self
 
-    @config_checker
+    @_config_checker
     def set_module_name_qconfig(
         self, module_name: str, quantization_config: Optional[QuantizationConfig]
     ):
@@ -555,7 +578,7 @@ class X86InductorQuantizer(Quantizer):
         self,
         conv_node: torch.fx.Node,
         annotate_output: bool,
-        quantization_config: QuantizationConfig,
+        quantization_config: Optional[QuantizationConfig],
     ) -> None:
         """Helper function to annotate the conv node"""
         if quantization_config is None:
@@ -587,7 +610,7 @@ class X86InductorQuantizer(Quantizer):
         self,
         linear_node: torch.fx.Node,
         annotate_output: bool,
-        quantization_config: QuantizationConfig,
+        quantization_config: Optional[QuantizationConfig],
     ) -> None:
         """Helper function to annotate the linear node"""
         if quantization_config is None:
@@ -679,14 +702,14 @@ class X86InductorQuantizer(Quantizer):
         For each pair of (module_name_or_operator_type_or_global, qconfig), a filter function is created.
         This filter function checks if the node is marked by current stage and not annotated by the previous stage.
         """
-        for module_name, qconfig in self.module_name_qconfig.items():
+        for module_name, quantization_config in self.module_name_qconfig.items():
             self._annotate_with_config(
-                model, qconfig, _create_module_name_filter(module_name)
+                model, quantization_config, _create_module_name_filter(module_name)
             )
 
-        for operator_type, qconfig in self.operator_type_qconfig.items():
+        for operator_type, quantization_config in self.operator_type_qconfig.items():
             self._annotate_with_config(
-                model, qconfig, _create_operator_type_filter(operator_type)
+                model, quantization_config, _create_operator_type_filter(operator_type)
             )
 
         if self.global_config:
@@ -709,8 +732,8 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_with_config(
         self,
         model: torch.fx.GraphModule,
-        config: Optional[QuantizationConfig],
-        filter_fn: Callable,
+        quantization_config: Optional[QuantizationConfig],
+        filter_fn: FilterFn,
     ) -> None:
         """Annotate the model with the given quantization configuration.
 
@@ -722,31 +745,36 @@ class X86InductorQuantizer(Quantizer):
         """
 
         # Step1: Recipe of fusion patterns like conv/linear.
-        self._annotate_conv2d_fusion_pattern(model, config, filter_fn)
-        self._annotate_linear_fusion_pattern(model, config, filter_fn)
-        self._annotate_matmul(model, config, filter_fn)
+        self._annotate_conv2d_fusion_pattern(model, quantization_config, filter_fn)
+        self._annotate_linear_fusion_pattern(model, quantization_config, filter_fn)
+        self._annotate_matmul(model, quantization_config, filter_fn)
 
         # Step2: Recipe to propagate annotation for patterns beside conv/linear.
         # Go through all the nodes from start to end.
         # Recipe refer to https://github.com/intel/intel-extension-for-pytorch/blob/
         # 90d19323d96afc53fcc22ba5a7bb3fb07fdd6c1c/intel_extension_for_pytorch/quantization/_recipe.py#L538
 
-        self._annotate_propagation_quantizable_pattern_entry(model, config, filter_fn)
+        self._annotate_propagation_quantizable_pattern_entry(
+            model, quantization_config, filter_fn
+        )
 
     def _annotate_qat_conv2d_fusion_pattern(
-        self, model: torch.fx.GraphModule, config: QuantizationConfig, filter_fn
+        self,
+        model: torch.fx.GraphModule,
+        quantization_config: Optional[QuantizationConfig],
+        filter_fn: Optional[FilterFn] = None,
     ):
         # Annotate QAT Specific patterns
-        self._annotate_qat_conv2d_bn_binary_unary(model, config, filter_fn)
-        self._annotate_qat_conv2d_bn_binary(model, config, filter_fn)
-        self._annotate_qat_conv2d_bn_unary(model, config, filter_fn)
-        self._annotate_qat_conv2d_bn(model, config, filter_fn)
+        self._annotate_qat_conv2d_bn_binary_unary(model, quantization_config, filter_fn)
+        self._annotate_qat_conv2d_bn_binary(model, quantization_config, filter_fn)
+        self._annotate_qat_conv2d_bn_unary(model, quantization_config, filter_fn)
+        self._annotate_qat_conv2d_bn(model, quantization_config, filter_fn)
 
     def _annotate_qat_conv2d_bn_binary_unary(
         self,
         gm: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
-        filter_fn: Optional[Callable[[List[Node]], bool]] = None,
+        quantization_config: Optional[QuantizationConfig],
+        filter_fn: Optional[FilterFn] = None,
     ) -> None:
         fused_partitions = find_sequential_partitions(
             gm, [torch.nn.Conv2d, torch.nn.BatchNorm2d, operator.add, torch.nn.ReLU]
@@ -823,8 +851,8 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_qat_conv2d_bn_binary(
         self,
         gm: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
-        filter_fn: Optional[Callable[[List[Node]], bool]] = None,
+        quantization_config: Optional[QuantizationConfig],
+        filter_fn: Optional[FilterFn] = None,
     ) -> None:
         fused_partitions = find_sequential_partitions(
             gm, [torch.nn.Conv2d, torch.nn.BatchNorm2d, operator.add]
@@ -887,8 +915,8 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_qat_conv2d_bn_unary(
         self,
         gm: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
-        filter_fn: Optional[Callable[[List[Node]], bool]] = None,
+        quantization_config: Optional[QuantizationConfig],
+        filter_fn: Optional[FilterFn] = None,
     ) -> None:
         fused_partitions = []
         unary_patterns = [
@@ -943,8 +971,8 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_qat_conv2d_bn(
         self,
         gm: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
-        filter_fn: Optional[Callable[[List[Node]], bool]] = None,
+        quantization_config: Optional[QuantizationConfig],
+        filter_fn: Optional[FilterFn] = None,
     ) -> None:
         fused_partitions = find_sequential_partitions(
             gm, [torch.nn.Conv2d, torch.nn.BatchNorm2d]
@@ -981,30 +1009,41 @@ class X86InductorQuantizer(Quantizer):
             _mark_nodes_as_annotated(nodes_to_mark_annotated)
 
     def _annotate_conv2d_fusion_pattern(
-        self, model: torch.fx.GraphModule, config, filter_fn
+        self,
+        model: torch.fx.GraphModule,
+        quantization_config: Optional[QuantizationConfig],
+        filter_fn: Optional[FilterFn] = None,
     ):
-        if self._is_qat:
+        if (quantization_config is None) or (quantization_config.is_qat):
             # Annotate QAT specific pattern: mainly due to BN not folded in prepare_qat
-            self._annotate_qat_conv2d_fusion_pattern(model, config, filter_fn)
-        self._annotate_conv2d_binary_unary(model, config, filter_fn)
-        self._annotate_conv2d_binary(model, config, filter_fn)
-        self._annotate_conv2d_unary(model, config, filter_fn)
-        self._annotate_conv2d(model, config, filter_fn)
+            self._annotate_qat_conv2d_fusion_pattern(
+                model, quantization_config, filter_fn
+            )
+        self._annotate_conv2d_binary_unary(model, quantization_config, filter_fn)
+        self._annotate_conv2d_binary(model, quantization_config, filter_fn)
+        self._annotate_conv2d_unary(model, quantization_config, filter_fn)
+        self._annotate_conv2d(model, quantization_config, filter_fn)
 
     def _annotate_linear_fusion_pattern(
-        self, model: torch.fx.GraphModule, config, filter_fn
+        self,
+        model: torch.fx.GraphModule,
+        quantization_config: Optional[QuantizationConfig],
+        filter_fn: Optional[FilterFn] = None,
     ):
-        if not self._is_dynamic:
+        if (quantization_config is None) or (
+            quantization_config.input_activation
+            and not quantization_config.input_activation.is_dynamic
+        ):
             # <TODO> Weiwen: Dynamic Quant of linear unary will be supported in next step
-            self._annotate_linear_binary_unary(model, config, filter_fn)
-            self._annotate_linear_unary(model, config, filter_fn)
-        self._annotate_linear(model, config, filter_fn)
+            self._annotate_linear_binary_unary(model, quantization_config, filter_fn)
+            self._annotate_linear_unary(model, quantization_config, filter_fn)
+        self._annotate_linear(model, quantization_config, filter_fn)
 
     def _annotate_matmul(
         self,
         model: torch.fx.GraphModule,
         quantization_config: Optional[QuantizationConfig],
-        filter_fn: Optional[Callable[[List[Node]], bool]] = None,
+        filter_fn: Optional[FilterFn] = None,
     ):
         for node in model.graph.nodes:
             if node.target != torch.ops.aten.matmul.default:
@@ -1029,8 +1068,8 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_conv2d_binary_unary(
         self,
         gm: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
-        filter_fn: Optional[Callable[[List[Node]], bool]] = None,
+        quantization_config: Optional[QuantizationConfig],
+        filter_fn: Optional[FilterFn] = None,
     ) -> None:
         # Conv2d + add + unary op
         fused_partitions = find_sequential_partitions(
@@ -1082,8 +1121,8 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_conv2d_binary(
         self,
         gm: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
-        filter_fn: Optional[Callable[[List[Node]], bool]] = None,
+        quantization_config: Optional[QuantizationConfig],
+        filter_fn: Optional[FilterFn] = None,
     ) -> None:
         # Conv2d + add
         fused_partitions = find_sequential_partitions(
@@ -1133,8 +1172,8 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_conv2d_unary(
         self,
         gm: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
-        filter_fn: Optional[Callable[[List[Node]], bool]] = None,
+        quantization_config: Optional[QuantizationConfig],
+        filter_fn: Optional[FilterFn] = None,
     ) -> None:
         fused_partitions = []
         unary_patterns = [
@@ -1176,8 +1215,8 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_conv2d(
         self,
         gm: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
-        filter_fn: Optional[Callable[[List[Node]], bool]] = None,
+        quantization_config: Optional[QuantizationConfig],
+        filter_fn: Optional[FilterFn] = None,
     ) -> None:
         conv_partitions = get_source_partitions(
             gm.graph, [torch.nn.Conv2d, torch.nn.functional.conv2d]
@@ -1257,9 +1296,12 @@ class X86InductorQuantizer(Quantizer):
         )
 
     def _annotate_propagation_quantizable_pattern_entry(
-        self, model, quantization_config, filter_fn
+        self,
+        gm: torch.fx.GraphModule,
+        quantization_config: Optional[QuantizationConfig],
+        filter_fn: Optional[FilterFn] = None,
     ):
-        for node in model.graph.nodes:
+        for node in gm.graph.nodes:
             self._annotate_propagation_quantizable_pattern(
                 node, quantization_config, filter_fn
             )
@@ -1393,8 +1435,8 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_linear(
         self,
         gm: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
-        filter_fn: Optional[Callable[[List[Node]], bool]] = None,
+        quantization_config: Optional[QuantizationConfig],
+        filter_fn: Optional[FilterFn] = None,
     ) -> None:
         linear_partitions = get_source_partitions(
             gm.graph, [torch.nn.Linear, torch.nn.functional.linear]
@@ -1420,8 +1462,8 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_linear_unary(
         self,
         gm: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
-        filter_fn: Optional[Callable[[List[Node]], bool]] = None,
+        quantization_config: Optional[QuantizationConfig],
+        filter_fn: Optional[FilterFn] = None,
     ) -> None:
         postop_list = [
             torch.nn.ReLU,
@@ -1459,8 +1501,8 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_linear_binary_unary(
         self,
         gm: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig,
-        filter_fn: Optional[Callable[[List[Node]], bool]] = None,
+        quantization_config: Optional[QuantizationConfig],
+        filter_fn: Optional[FilterFn] = None,
     ) -> None:
         # linear + binary_op + (optional) unary op
         binary_op_list = [operator.add]

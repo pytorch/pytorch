@@ -2199,7 +2199,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     quantizer,
                     node_occurrence,
                     node_list,
-                    is_qat=True,
+                    is_qat=is_qat,
                 )
 
     @skipIfNoX86
