@@ -117,15 +117,48 @@ class TestCommMode(TestCase):
         comm_mode = CommDebugMode()
         with comm_mode:
             dist.all_reduce(inp)
-            dist.all_gather_into_tensor(all_gather_out, inp)
-            dist.reduce_scatter_tensor(inp, all_gather_out)
-            dist.broadcast(inp, 0)
 
         comm_counts = comm_mode.get_comm_counts()
         self.assertEqual(comm_counts[c10d_ops.allreduce_], 1)
+
+        with comm_mode:
+            dist.all_gather_into_tensor(all_gather_out, inp)
+
+        comm_counts = comm_mode.get_comm_counts()
         self.assertEqual(comm_counts[c10d_ops._allgather_base_], 1)
+
+        with comm_mode:
+            dist.reduce_scatter_tensor(inp, all_gather_out)
+
+        comm_counts = comm_mode.get_comm_counts()
         self.assertEqual(comm_counts[c10d_ops._reduce_scatter_base_], 1)
+
+        with comm_mode:
+            dist.broadcast(inp, 0)
+
+        comm_counts = comm_mode.get_comm_counts()
         self.assertEqual(comm_counts[c10d_ops.broadcast_], 1)
+
+        # tests c10d gather tracing
+        with comm_mode:
+            dist.gather(inp, None, 0)
+
+        comm_counts = comm_mode.get_comm_counts()
+        self.assertEqual(comm_counts[c10d_ops.gather_], 1)
+
+        # tests c10d reduce tracing
+        with comm_mode:
+            dist.reduce(inp, 0)
+
+        comm_counts = comm_mode.get_comm_counts()
+        self.assertEqual(comm_counts[c10d_ops.reduce_], 1)
+
+        # tests c10d scatter tracing
+        with comm_mode:
+            dist.scatter(inp, None, 0)
+
+        comm_counts = comm_mode.get_comm_counts()
+        self.assertEqual(comm_counts[c10d_ops.scatter_], 1)
 
     @requires_nccl()
     def test_comm_mode_with_c10d_allreduce_coalesced(self):
