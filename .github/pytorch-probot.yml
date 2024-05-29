@@ -12,6 +12,7 @@ ciflow_push_tags:
 - ciflow/inductor-micro-benchmark-cpu-x86
 - ciflow/inductor-cu124
 - ciflow/linux-aarch64
+- ciflow/linux-s390x
 - ciflow/mps
 - ciflow/nightly
 - ciflow/periodic
