@@ -267,7 +267,7 @@ def delete_branches() -> None:
     print(f"To delete ({len(delete)}):")
     for branch in delete:
         print(f"About to delete branch {branch}")
-        delete_branch(git_repo, branch)
+        # delete_branch(git_repo, branch)
 
 
 if __name__ == "__main__":
