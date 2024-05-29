@@ -28,12 +28,13 @@ if not c10d.is_available() or not c10d.is_nccl_available():
 from typing import Dict, List
 
 import test_c10d_common
+from test_c10d_common import ConvNet, DoubleGpuNet, gpus_for_rank, ModuleForDdpCommHook
+
 import torch.distributed as dist
 import torch.distributed.algorithms.ddp_comm_hooks.default_hooks as default
 import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
 import torch.nn.functional as F
 import torch.testing._internal.common_utils as common
-from test_c10d_common import ConvNet, DoubleGpuNet, gpus_for_rank, ModuleForDdpCommHook
 from torch import nn
 from torch._C._distributed_c10d import OpType
 from torch.nn.parallel import DistributedDataParallel
@@ -333,8 +334,15 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         del pg
 
+    CUDA_12_AND_ABOVE = torch.cuda.is_available() and (
+        torch.version.cuda is not None and int(torch.version.cuda.split(".")[0]) >= 12
+    )
+
     @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_but_pass_in_sandcastle_if(
+        not (TEST_MULTIGPU and CUDA_12_AND_ABOVE),
+        "NCCL test requires 2+ GPUs and Device side assert could cause unexpected errors in lower versions of CUDA",
+    )
     @parametrize("type", [torch.float16, torch.float32, torch.float64])
     @skip_if_rocm
     def test_nan_assert(self, type):
@@ -3524,7 +3532,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         ver = t["version"]
-        self.assertEqual(ver, "1.5")
+        self.assertEqual(ver, "2.1")
         pg_config = t["pg_config"]
         self.assertEqual(len(pg_config), 1)
         default_pg_info = pg_config["0"]
@@ -3547,8 +3555,10 @@ class NCCLTraceTest(NCCLTraceTestBase):
             self.assertTrue(s <= f)
         self.assertIn("test_c10d_nccl.py", str(last["frames"]))
         self.assertEqual(last["input_sizes"], ((3, 4),))
+        self.assertEqual(last["input_dtypes"], ["Float"])
         self.assertEqual(last["output_sizes"], ((3, 4),))
-        self.assertEqual(last["seq_id"], 2)
+        self.assertEqual(last["output_dtypes"], ["Float"])
+        self.assertEqual(last["collective_seq_id"], 2)
         now = datetime.now()
         event_created_time = datetime.fromtimestamp(
             last["time_created_ns"] / 1000000000
@@ -3628,8 +3638,10 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertEqual(last["state"], "completed")
         self.assertIn("test_c10d_nccl.py", str(last["frames"]))
         self.assertEqual(last["input_sizes"], ((3, 4),))
+        self.assertEqual(last["input_dtypes"], ["Float"])
         self.assertEqual(last["output_sizes"], ((3, 4),))
-        self.assertEqual(last["seq_id"] - first["seq_id"], 9)
+        self.assertEqual(last["output_dtypes"], ["Float"])
+        self.assertEqual(last["collective_seq_id"] - first["collective_seq_id"], 9)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -3659,10 +3671,10 @@ class NCCLTraceTest(NCCLTraceTestBase):
             t = t["entries"]
             self.assertEqual(t[-1]["profiling_name"], "nccl:all_reduce")
             if self.rank == 0:
-                self.assertEqual(t[-1]["seq_id"], 1)
+                self.assertEqual(t[-1]["collective_seq_id"], 1)
                 self.assertEqual(t[-1]["state"], "completed")
             else:
-                self.assertEqual(t[-1]["seq_id"], 2)
+                self.assertEqual(t[-1]["collective_seq_id"], 2)
                 self.assertEqual(
                     t[-1]["state"], self.started_or_scheduled(timing_enabled)
                 )
@@ -3704,10 +3716,10 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 t = t["entries"]
                 self.assertEqual(t[-1]["profiling_name"], "nccl:all_reduce")
                 if self.rank == 0:
-                    self.assertEqual(t[-1]["seq_id"], 1)
+                    self.assertEqual(t[-1]["collective_seq_id"], 1)
                     self.assertEqual(t[-1]["state"], "completed")
                 else:
-                    self.assertEqual(t[-1]["seq_id"], 2)
+                    self.assertEqual(t[-1]["collective_seq_id"], 2)
                     self.assertEqual(
                         t[-1]["state"], self.started_or_scheduled(timing_enabled)
                     )
@@ -3799,7 +3811,9 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 self.assertEqual(
                     t["entries"][p2p_op_idx]["profiling_name"], profiling_name
                 )
-                self.assertEqual(t["entries"][p2p_op_idx]["seq_id"], expected_seq)
+                self.assertEqual(
+                    t["entries"][p2p_op_idx]["collective_seq_id"], expected_seq
+                )
                 self.assertEqual(t["entries"][p2p_op_idx]["op_id"], expected_op_id)
                 expected_op_id += 1
                 self.assertEqual(t["entries"][p2p_op_idx]["input_sizes"], [input_sizes])
@@ -3819,7 +3833,9 @@ class NCCLTraceTest(NCCLTraceTestBase):
             self.assertEqual(
                 t["entries"][coalesced_op]["profiling_name"], "nccl:coalesced"
             )
-            self.assertEqual(t["entries"][coalesced_op]["seq_id"], expected_seq)
+            self.assertEqual(
+                t["entries"][coalesced_op]["collective_seq_id"], expected_seq
+            )
             expected_seq += 1
             self.assertEqual(t["entries"][coalesced_op]["state"], "completed")
             self.assertEqual(t["entries"][coalesced_op]["input_sizes"], [])
@@ -3875,7 +3891,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             input_sizes = op_sizes[seq % ops_per_repeat]
             profiling_name = "nccl:recv 0<-1" if self.rank == 0 else "nccl:send 1->0"
             self.assertEqual(t["entries"][seq]["profiling_name"], profiling_name)
-            self.assertEqual(t["entries"][seq]["seq_id"], expected_seq)
+            self.assertEqual(t["entries"][seq]["p2p_seq_id"], expected_seq)
             expected_seq += 1
             self.assertEqual(t["entries"][seq]["op_id"], expected_op_id)
             expected_op_id += 1
@@ -3935,7 +3951,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertEqual(
             t["entries"][0]["profiling_name"], "nccl:reduce_scatter_tensor_coalesced"
         )
-        self.assertEqual(t["entries"][0]["seq_id"], 1)
+        self.assertEqual(t["entries"][0]["collective_seq_id"], 1)
         self.assertEqual(t["entries"][0]["input_sizes"], [[2, 2], [2, 2]])
         self.assertEqual(
             t["entries"][0]["output_sizes"],
@@ -4003,9 +4019,9 @@ class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
                 t = pickle.load(f)
                 t = t["entries"]
                 self.assertEqual(len(t), 2)
-                self.assertEqual(t[0]["seq_id"], 1)
+                self.assertEqual(t[0]["collective_seq_id"], 1)
                 self.assertEqual(t[0]["state"], "completed")
-                self.assertEqual(t[1]["seq_id"], 2)
+                self.assertEqual(t[1]["collective_seq_id"], 2)
                 self.assertEqual(
                     t[1]["state"], self.started_or_scheduled(timing_enabled)
                 )
@@ -4066,7 +4082,7 @@ class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
                 t = pickle.load(f)
                 t = t["entries"]
                 self.assertEqual(len(t), 1)
-                self.assertEqual(t[0]["seq_id"], 1)
+                self.assertEqual(t[0]["collective_seq_id"], 1)
                 self.assertEqual(t[0]["state"], "completed")
             return
 

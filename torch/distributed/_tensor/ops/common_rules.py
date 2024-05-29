@@ -40,7 +40,6 @@ def _gen_reshard_suggestions(
     return OutputSharding(
         None,
         redistribute_schema=suggested_schema,
-        failed_reason="Input placements op sharding propagation failed, need to reshard!",
     )
 
 
