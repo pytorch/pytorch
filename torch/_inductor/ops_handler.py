@@ -10,10 +10,10 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import Protocol
 from unittest.mock import patch
 
 import sympy
-from typing_extensions import Protocol
 
 import torch
 import torch.utils._pytree as pytree
