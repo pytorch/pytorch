@@ -9,6 +9,8 @@ from torch.distributed._cuda_p2p import (
     _fused_all_gather_matmul_fallback,
     _fused_matmul_reduce_scatter_fallback,
     get_cuda_p2p_backend,
+    get_optimal_A_shard_stride_order_for_fused_all_gather_matmul,
+    get_optimal_A_stride_order_for_fused_matmul_reduce_scatter,
     get_p2p_buffer_size,
     is_cuda_p2p_group,
     p2p_usage_counter,
@@ -215,6 +217,23 @@ class ProcessGroupCudaP2PTest(MultiProcessTestCase):
         dist.barrier()
         torch.cuda.synchronize()
         dist.destroy_process_group()
+
+    @parametrize("dim", [0, 1, 2])
+    def test_optimal_layout(self, dim: int) -> None:
+        shape = torch.Size([8, 64, 32, 16])
+        t = torch.empty(shape.numel(), device="meta")
+
+        stride_order = get_optimal_A_shard_stride_order_for_fused_all_gather_matmul(
+            shape, dim
+        )
+        x = torch.as_strided(t, shape, stride_order)
+        assert x.movedim(dim, 0).is_contiguous()
+
+        stride_order = get_optimal_A_stride_order_for_fused_matmul_reduce_scatter(
+            shape, dim
+        )
+        x = torch.as_strided(t, shape, stride_order)
+        assert x.movedim(dim, 0).is_contiguous()
 
 
 if __name__ == "__main__":

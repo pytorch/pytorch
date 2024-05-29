@@ -343,6 +343,11 @@ def _fused_all_gather_matmul(
     communication:
 
         all_gather_tensor(A_shard, gather_dim, group_name) @ B
+
+    Optimal stride order for A_shard - if A_shard.movedim(scatter_dim, 0) is
+    contiguous, no extra copy is required for input layout transformation.
+    Otherwise A_shard needs to be copied once.
+
     """
     if A_shard.dim() < 2:
         raise ValueError("A_shard must be a matrix")
@@ -404,6 +409,14 @@ def _fused_all_gather_matmul(
     return unflatten(ag_out), [unflatten(output) for output in outputs]
 
 
+def get_optimal_A_shard_stride_order_for_fused_all_gather_matmul(
+    shape: torch.Size,
+    scatter_dim: int,
+) -> Tuple[int, ...]:
+    t = torch.empty(shape, device="meta")
+    return t.movedim(scatter_dim, 0).contiguous().movedim(0, scatter_dim).stride()
+
+
 @torch.library.impl(lib, "fused_matmul_reduce_scatter", "Meta")
 def _fused_matmul_reduce_scatter_fallback(
     A: torch.Tensor,
@@ -430,6 +443,10 @@ def _fused_matmul_reduce_scatter(
     communication:
 
         reduce_scatter_tensor(A @ B, reduce_op, scatter_dim, group_name)
+
+    Optimal stride order for A - if A.movedim(scatter_dim, 0) is contiguous, no
+    extra copy is required for input layout transformation. Otherwise A needs
+    to be copied once.
 
     NOTE:
     - The K dim across ranks are currently accumulated with bf16 with results
@@ -486,3 +503,11 @@ def _fused_matmul_reduce_scatter(
         .movedim(0, scatter_dim),
         dim=scatter_dim,
     )
+
+
+def get_optimal_A_stride_order_for_fused_matmul_reduce_scatter(
+    shape: torch.Size,
+    scatter_dim: int,
+) -> Tuple[int, ...]:
+    t = torch.empty(shape, device="meta")
+    return t.movedim(scatter_dim, 0).contiguous().movedim(0, scatter_dim).stride()
