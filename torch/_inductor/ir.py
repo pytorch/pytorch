@@ -3480,7 +3480,8 @@ class ComputedBuffer(Buffer):
                 index_vars
             )
             # consider both layout(strides) and reordering(reordering_reindex)
-            if reordering_reindex is not None:
+            # if reordering_reindex is not None:
+            if False:
                 for i in range(len(memory_addrs)):
                     try:
                         strides[i] = reordering_reindex[i](strides[i])
