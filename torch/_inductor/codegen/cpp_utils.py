@@ -1,10 +1,15 @@
+import contextlib
 import math
 
 from collections import namedtuple
+from typing import Dict
+from unittest.mock import patch
 
 import torch
+from .. import ir
+from ..virtualized import V
 
-from .common import ExprPrinter
+from .common import ExprPrinter, Kernel
 
 DTYPE_TO_CPP = {
     torch.float32: "float",
@@ -241,3 +246,58 @@ def value_to_cpp(value, cpp_type):
         return f"std::numeric_limits<{cpp_type}>::quiet_NaN()"
     else:
         return f"static_cast<{cpp_type}>({repr(value)})"
+
+
+class LocalBufferScope:
+    """
+    This class creates a context that helps to generate code involving Inductor IR with
+    function local buffers. These buffers are constructed during the codegen process and
+    are used to store intermediate results such as local accumulators. We do not want to
+    add them to `V.graph` since they are not global and we do not want to add them as
+    function arguments either. So we patch the codegen processes under this scope to support
+    these buffers without exposure to the outside world.
+    """
+
+    def __init__(self, kernel: Kernel):
+        self.kernel = kernel
+        self.exit_stack = contextlib.ExitStack()
+        self.local_buffers: Dict[str, ir.Buffer] = {}
+
+    def __enter__(self):
+        self.exit_stack.__enter__()
+        original_get_dtype = V.graph.get_dtype
+
+        def get_dtype(name):
+            if name in self.local_buffers:
+                return self.local_buffers[name].get_dtype()
+            return original_get_dtype(name)
+
+        self.exit_stack.enter_context(patch.object(V.graph, "get_dtype", get_dtype))
+
+        original_input = self.kernel.args.input
+
+        def input(name):
+            if name in self.local_buffers:
+                return name
+            return original_input(name)
+
+        self.exit_stack.enter_context(patch.object(self.kernel.args, "input", input))
+
+        original_output = self.kernel.args.output
+
+        def output(name):
+            if name in self.local_buffers:
+                return name
+            return original_output(name)
+
+        self.exit_stack.enter_context(patch.object(self.kernel.args, "output", output))
+
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.local_buffers.clear()
+        self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
+
+    def add_local_buffer(self, buffer: ir.Buffer):
+        assert buffer.get_name() not in self.local_buffers
+        self.local_buffers[buffer.get_name()] = buffer
