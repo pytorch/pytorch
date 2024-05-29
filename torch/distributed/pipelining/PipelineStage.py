@@ -1067,6 +1067,7 @@ class ManualPipelineStage(_PipelineStageBase):
     as opposed to the PipelineStage class that is outputed from pipeline().
     This class extends the `_PipelineStageBase` class and can similarly be used
     in `PipelineScheule`.
+
     Args:
         submodule (nn.Module): The PyTorch module wrapped by this stage.
         stage_index (int): The ID of this stage.
