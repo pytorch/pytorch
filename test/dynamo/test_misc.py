@@ -245,7 +245,9 @@ class MiscTests(torch._inductor.test_case.TestCase):
         def f(x):
             return module.foobar(x)
 
-        with self.assertWarnsOnceRegex(UserWarning, '.*https://pytorch.org/docs/main/notes/custom_operators.html.*'):
+        with self.assertWarnsOnceRegex(
+            UserWarning, ".*https://pytorch.org/docs/main/notes/custom_operators.html.*"
+        ):
             f(x)
         self.assertEqual(len(counters["graph_break"]), 1)
         first_graph_break = list(counters["graph_break"].keys())[0]

@@ -6,10 +6,10 @@ import functools
 import inspect
 import itertools
 import types
+import warnings
 from typing import Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
-import warnings
 
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_rot_n
