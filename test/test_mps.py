@@ -301,7 +301,9 @@ def mps_ops_modifier(ops):
         'narrow',
         'narrow_copy',
         'nn.functional.conv1d',
+        'nn.functional.conv2d',
         'nn.functional.conv_transpose1d',
+        'nn.functional.conv_transpose2d',
         'nn.functional.feature_alpha_dropoutwithout_train',
         'nn.functional.padcircular',
         'nn.functional.unfold',
@@ -351,6 +353,7 @@ def mps_ops_modifier(ops):
 
     AFTER_MACOS_14_0_SUPPORTED_COMPLEX_OPS = {
         '__rdiv__',
+        '__rmatmul__',
         '_chunk_cat',
         '_unsafe_masked_index',
         'acos',
@@ -360,16 +363,20 @@ def mps_ops_modifier(ops):
         'any',
         'addcdiv',
         'addcmul',
+        'addmmdecomposed',
+        'addmv',
         'asin',
         'atan',
         'atanh',
         'bfloat16',
+        'bmm',
         'bool',
         'cartesian_prod',
         'cat',
         'char',
         'column_stack',
         'combinations',
+        'corrcoef',
         'constant_pad_nd',
         'cos',
         'cosh',
@@ -379,6 +386,7 @@ def mps_ops_modifier(ops):
         'divno_rounding_mode',
         'dot',
         'dstack',
+        'einsum',
         'eq',
         'equal',
         'exp2',
@@ -405,10 +413,13 @@ def mps_ops_modifier(ops):
         'gradient',
         'half',
         'hstack',
+        'inner',
         'int',
         'isclose',
         'isnan',
         'ldexp',
+        'linalg.multi_dot',
+        'linalg.pinv',
         'log10',
         'log1p',
         'log2',
@@ -424,7 +435,10 @@ def mps_ops_modifier(ops):
         'masked.std',
         'masked.sum',
         'masked.var',
+        'matmul',
         'mean',
+        'mm',
+        'mv',
         'ne',
         'neg',
         'nn.functional.padconstant',
@@ -435,6 +449,7 @@ def mps_ops_modifier(ops):
         'nn.functional.rms_norm',
         'nn.functional.softsign',
         'nn.functional.tanhshrink',
+        'pinverse',
         'prod',
         'reciprocal',
         'roll',
@@ -452,6 +467,7 @@ def mps_ops_modifier(ops):
         'sum_to_size',
         'tan',
         'tanh',
+        'tensordot',
         'trace',
         'trapz',
         'trapezoid',
@@ -11766,7 +11782,7 @@ class TestConsistency(TestCaseMPS):
     }
 
     def _compute_tolerances(self, op, dtype):
-        if (op.name in self.FP32_LOW_PRECISION_LIST) and dtype == torch.float32:
+        if (op.name in self.FP32_LOW_PRECISION_LIST) and dtype in [torch.float32, torch.complex64]:
             return (1e-4, 3e-5)
 
         if op.name in self.FP16_LOW_PRECISION_LIST and dtype == torch.float16:
