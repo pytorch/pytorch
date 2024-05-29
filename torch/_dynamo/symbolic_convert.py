@@ -1378,7 +1378,7 @@ class InstructionTranslatorBase(
         self.push(variables.ConstantVariable(self.check_if_exc_matches()))
 
     def JUMP_IF_NOT_EXC_MATCH(self, inst):
-        if self.check_if_exc_matches():
+        if not self.check_if_exc_matches():
             self.jump(inst)
 
     def COMPARE_OP(self, inst):
