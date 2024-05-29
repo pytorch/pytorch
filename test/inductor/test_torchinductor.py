@@ -10341,6 +10341,7 @@ class CommonTemplate:
             ],
         )
 
+
 @dataclasses.dataclass
 class TestFailure:
     suffixes: Tuple[str]
