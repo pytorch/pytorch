@@ -19,6 +19,7 @@ import inspect
 import threading
 import pdb
 import importlib
+import importlib.util
 
 # multipy/deploy is setting this import before importing torch, this is the most
 # reliable way we have to detect if we're running within deploy.

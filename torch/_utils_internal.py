@@ -6,9 +6,20 @@ import tempfile
 from typing import Any, Dict, Optional
 
 import torch
+from torch._strobelight.compile_time_profiler import StrobelightCompileTimeProfiler
 
 log = logging.getLogger(__name__)
 
+if os.environ.get("TORCH_COMPILE_STROBELIGHT", False):
+    import shutil
+
+    if not shutil.which("strobeclient"):
+        log.info(
+            "TORCH_COMPILE_STROBELIGHT is true, but seems like you are not on a FB machine."
+        )
+    else:
+        log.info("Strobelight profiler is enabled via environment variable")
+        StrobelightCompileTimeProfiler.enable()
 
 # this arbitrary-looking assortment of functionality is provided here
 # to have a central place for overrideable behavior. The motivating
@@ -62,8 +73,6 @@ def throw_abstract_impl_not_imported_error(opname, module, context):
         )
 
 
-# Meta only, act as nop otherwise.
-#
 # NB!  This treats "skip" kwarg specially!!
 def compile_time_strobelight_meta(phase_name):
     def compile_time_strobelight_meta_inner(function):
@@ -71,7 +80,9 @@ def compile_time_strobelight_meta(phase_name):
         def wrapper_function(*args, **kwargs):
             if "skip" in kwargs:
                 kwargs["skip"] = kwargs["skip"] + 1
-            return function(*args, **kwargs)
+            return StrobelightCompileTimeProfiler.profile_compile_time(
+                function, phase_name, *args, **kwargs
+            )
 
         return wrapper_function
 
