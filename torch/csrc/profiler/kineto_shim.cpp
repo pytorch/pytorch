@@ -8,9 +8,8 @@
 #include <c10/util/Exception.h>
 
 namespace torch {
-namespace profiler {
-namespace impl {
-namespace kineto {
+
+namespace profiler::impl::kineto {
 
 // Here lies pain and `#ifdef USE_KINETO`
 
@@ -334,12 +333,9 @@ void logInvariantViolation(
 #endif // USE_KINETO
 }
 
-} // namespace kineto
-} // namespace impl
-} // namespace profiler
+} // namespace profiler::impl::kineto
 
-namespace autograd {
-namespace profiler {
+namespace autograd::profiler {
 c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
   // fallthrough
   switch (activity_type) {
@@ -410,6 +406,6 @@ void profilerStep() {
 #endif // USE_KINETO
 }
 
-} // namespace profiler
-} // namespace autograd
+} // namespace autograd::profiler
+
 } // namespace torch
