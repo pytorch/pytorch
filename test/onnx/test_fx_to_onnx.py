@@ -10,8 +10,9 @@ from typing import Mapping, Tuple
 import onnx
 import onnx.inliner
 import pytorch_test_common
-import torch
 import transformers  # type: ignore[import]
+
+import torch
 from torch import nn
 from torch._subclasses import fake_tensor
 from torch.nn import functional as F

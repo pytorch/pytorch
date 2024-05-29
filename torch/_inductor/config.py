@@ -508,7 +508,7 @@ freezing_discard_parameters: bool = False
 # Kill switch for allowing temporary tensors to be allocated as stack arrays. Tests
 # should be run with this flag both on and off to make sure we have coverage.
 allow_stack_allocation: bool = (
-    os.environ.get("TORCHINDUCTOR_STACK_ALLOCATION", "1") == "1"
+    os.environ.get("TORCHINDUCTOR_STACK_ALLOCATION", "1" if is_fbcode() else "0") == "1"
 )
 
 # Enables an alternate DSO interface (the "minimal ArrayRef interface") intended
@@ -744,9 +744,6 @@ class aot_inductor:
     # rather than embedded into the data section. Needed to support 1B+ parameter models
     force_mmap_weights: bool = False
 
-    # flag to allow buffer mutation. This would remove the read-only property from buffers.
-    allow_buffer_mutation: bool = False
-
 
 class cuda:
     # CUDA arch to use for CUDA template kernel compilation.
@@ -877,10 +874,19 @@ class trace:
     log_autotuning_results: bool = False
 
 
-_save_config_ignore = {
+_save_config_ignore = [
     # workaround: "Can't pickle <function ...>"
     "trace.upload_tar",
-}
+]
+
+_cache_config_ignore_prefix = [
+    # trace functions are not relevant to config caching
+    "trace",
+    # uses absolute path
+    "cuda.cutlass_dir",
+    # not relevant
+    "compile_threads",
+]
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403

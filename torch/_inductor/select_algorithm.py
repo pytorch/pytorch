@@ -158,7 +158,7 @@ class TritonTemplateKernel(TritonKernel):
         if self.use_jit:
             return "@triton.jit"
 
-        argdefs, _, signature = self.args.python_argdefs()
+        argdefs, _, signature, _ = self.args.python_argdefs()
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
             "device": DeviceProperties.create(self.output_node.get_device()),
@@ -274,7 +274,9 @@ class TritonTemplateKernel(TritonKernel):
             val = self.named_input_nodes[name].get_stride()[index]
         return texpr(self.rename_indexing(val))
 
-    def modification(self, subgraph_number: int, **fixed_inputs) -> str:
+    def modification(
+        self, subgraph_number: int, output_name: str, **fixed_inputs
+    ) -> str:
         """This creates a modification function for a subgraph.
         To use this inside a template, the first argument should specify which subgraph to codegen for
 
@@ -319,7 +321,7 @@ class TritonTemplateKernel(TritonKernel):
                 out = subgraph.data.inner_fn((1,))
 
         self.codegen_body()
-        self.body.writeline(f"{fixed_inputs['out']} = {out.value}")
+        self.body.writeline(f"{output_name} = {out.value}")
 
         body_val = self.body.getvalue()
         self.body.clear()
@@ -461,7 +463,7 @@ class TritonTemplateKernel(TritonKernel):
 
     def call_kernel(self, name: str, node: Optional[ir.IRNode] = None):
         wrapper = V.graph.wrapper_code
-        _, call_args, _ = self.args.python_argdefs()
+        _, call_args, _, arg_types = self.args.python_argdefs()
         call_args = [str(a) for a in call_args]
 
         for i in range(len(call_args)):
@@ -469,6 +471,8 @@ class TritonTemplateKernel(TritonKernel):
                 call_args[i] = call_args[i] + ".item()"
             if isinstance(call_args[i], sympy.Symbol):
                 call_args[i] = texpr(call_args[i])
+
+        current_device = V.graph.scheduler.get_current_device_or_throw()
 
         if V.graph.cpp_wrapper:
             # In the cpp_wrapper case, we have to compute CUDA launch grid at runtime
@@ -484,14 +488,13 @@ class TritonTemplateKernel(TritonKernel):
             wrapper.generate_kernel_call(
                 name,
                 call_args,
-                device_index=V.graph.scheduler.current_device.index,
+                device_index=current_device.index,
+                arg_types=arg_types,
                 grid=grid,
                 triton_meta=self.triton_meta,
             )
         else:
-            stream_name = wrapper.write_get_raw_stream(
-                V.graph.scheduler.current_device.index
-            )
+            stream_name = wrapper.write_get_raw_stream(current_device.index)
 
             wrapper.add_import_once(f"import {self.grid_fn.__module__}")
             meta = wrapper.add_meta_once(self.meta)
