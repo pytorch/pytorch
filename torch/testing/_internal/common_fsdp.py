@@ -10,7 +10,17 @@ from contextlib import nullcontext
 from copy import deepcopy
 from enum import auto, Enum
 from functools import partial, wraps
-from typing import Any, Callable, Dict, no_type_check, Optional, Tuple, Type, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    no_type_check,
+    Optional,
+    Tuple,
+    Type,
+    Union,
+)
 from unittest import mock
 
 import torch
@@ -39,6 +49,7 @@ from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
     RowwiseParallel,
+    SequenceParallel,
 )
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
@@ -865,15 +876,17 @@ class MLP(nn.Module):
 
 
 class MLPStack(nn.Sequential):
-    def __init__(self, mlp_dim: int):
-        modules = [
-            nn.LayerNorm(mlp_dim, bias=False),
+    def __init__(self, mlp_dim: int, *, with_seq_parallel: bool = False):
+        modules: List[nn.Module] = [
             # Use multiplier of 3 to exercise uneven case
             MLP(mlp_dim, dim_multiplier=3),
             MLP(mlp_dim),
             MLP(mlp_dim, dim_multiplier=3),
         ]
+        if with_seq_parallel:
+            modules.append(nn.LayerNorm(mlp_dim, bias=False))
         super().__init__(*modules)
+        self.with_seq_parallel = with_seq_parallel
 
     def parallelize(
         self,
@@ -882,25 +895,29 @@ class MLPStack(nn.Sequential):
         use_activation_checkpointing: bool,
         reshard_after_forward: bool,
     ) -> "MLPStack":
-        parallelize_module(
-            self,
-            device_mesh=tp_mesh,
-            # Leave the layer norm as implicitly replicated
-            parallelize_plan={
-                # Pass `use_local_output=False` to keep as DTensor to preserve
-                # uneven activation dims
-                "1.in_proj": ColwiseParallel(use_local_output=False),
-                "1.out_proj": RowwiseParallel(use_local_output=False),
-                "2.in_proj": ColwiseParallel(use_local_output=False),
-                "2.out_proj": RowwiseParallel(use_local_output=False),
-                "3.in_proj": ColwiseParallel(use_local_output=False),
-                "3.out_proj": RowwiseParallel(),
-            },
-        )
-        for mlp in self:
+        parallelize_plan = {
+            # Pass `use_local_output=False` to keep as DTensor to preserve
+            # uneven activation dims
+            "0.in_proj": ColwiseParallel(use_local_output=False),
+            "0.out_proj": RowwiseParallel(use_local_output=False),
+            "1.in_proj": ColwiseParallel(use_local_output=False),
+            "1.out_proj": RowwiseParallel(use_local_output=False),
+            "2.in_proj": ColwiseParallel(use_local_output=False),
+            "2.out_proj": RowwiseParallel(output_layouts=Shard(1))
+            if self.with_seq_parallel
+            else RowwiseParallel(),
+        }
+        if self.with_seq_parallel:
+            parallelize_plan["3"] = SequenceParallel(sequence_dim=1)
+        parallelize_module(self, device_mesh=tp_mesh, parallelize_plan=parallelize_plan)
+        for module in self:
+            if isinstance(module, nn.LayerNorm):
+                continue
             if use_activation_checkpointing:
-                checkpoint(mlp)
-            fully_shard(mlp, mesh=dp_mesh, reshard_after_forward=reshard_after_forward)
+                checkpoint(module)
+            fully_shard(
+                module, mesh=dp_mesh, reshard_after_forward=reshard_after_forward
+            )
         fully_shard(self, mesh=dp_mesh, reshard_after_forward=reshard_after_forward)
         return self
 

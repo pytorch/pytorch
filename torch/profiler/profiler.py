@@ -7,9 +7,8 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from functools import partial
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
-from warnings import warn
-
 from typing_extensions import Self
+from warnings import warn
 
 import torch
 import torch.autograd.profiler as prof
