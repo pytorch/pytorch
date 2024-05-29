@@ -317,6 +317,9 @@ function(caffe2_binary_target target_name_or_src)
   if(DEFINED Caffe2_MODULES)
     target_link_libraries(${__target} ${Caffe2_MODULES})
   endif()
+  if(USE_TBB AND NOT USE_SYSTEM_TBB)
+    target_include_directories(${__target} PUBLIC ${TBB_INCLUDE_DIR})
+  endif()
   install(TARGETS ${__target} DESTINATION bin)
 endfunction()
 
@@ -479,7 +482,9 @@ function(torch_compile_options libname)
     # templated classes crossing library boundary get duplicated (but identical)
     # definitions. It's easier to just disable it.
     target_compile_options(${libname} PRIVATE
-        $<$<COMPILE_LANGUAGE:CXX>: -fvisibility=hidden>)
+        $<$<COMPILE_LANGUAGE:CXX>: -fvisibility=hidden>
+        $<$<COMPILE_LANGUAGE:OBJC>: -fvisibility=hidden>
+        $<$<COMPILE_LANGUAGE:OBJCXX>: -fvisibility=hidden>)
   endif()
 
   # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
