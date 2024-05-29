@@ -29,18 +29,20 @@ typedef SSIZE_T ssize_t;
 
 namespace c10d {
 
-TORCH_API size_t getTensorsNumel(const std::vector<at::Tensor> &tensors);
+TORCH_API size_t getTensorsNumel(const std::vector<at::Tensor>& tensors);
 
 // Retrieve tensor shapes from a given tensor.
-TORCH_API std::vector<at::Tensor>
-getTensorShapes(const std::vector<at::Tensor> &tensors);
+TORCH_API std::vector<at::Tensor> getTensorShapes(
+    const std::vector<at::Tensor>& tensors);
 
 // Use -2 to represent unset state of env vars
 #define C10D_ENV_NOT_SET -2
 
-#define WARN_ENV_VAR_ONCE(deprecated_env, new_env)                             \
-  TORCH_WARN_ONCE("Environment variable " + deprecated_env +                   \
-                  " is deprecated; use " + new_env + " instead");
+#define WARN_ENV_VAR_ONCE(deprecated_env, new_env) \
+  TORCH_WARN_ONCE( \
+          "Environment variable " + deprecated_env + " is deprecated; use " + new_env + \
+          " instead");
+
 
 // Turns at::IntArrayRef into "(1, 2, 3, 4)".
 inline std::string toString(at::IntArrayRef l) {
@@ -56,14 +58,15 @@ inline std::string toString(at::IntArrayRef l) {
   return ss.str();
 }
 
-inline std::string toString(const c10::Layout &layout) {
+inline std::string toString(const c10::Layout& layout) {
   std::stringstream ss;
   ss << layout;
   return ss.str();
 }
 
-inline void assertSameType(const at::DeprecatedTypeProperties &type,
-                           const std::vector<at::Tensor> &tensors) {
+inline void assertSameType(
+    const at::DeprecatedTypeProperties& type,
+    const std::vector<at::Tensor>& tensors) {
   for (const auto i : c10::irange(tensors.size())) {
     if (!tensors[i].options().type_equal(type.options())) {
       const std::string expected = type.toString();
@@ -75,8 +78,9 @@ inline void assertSameType(const at::DeprecatedTypeProperties &type,
   }
 }
 
-inline std::vector<std::string> split(char separator,
-                                      const std::string &string) {
+inline std::vector<std::string> split(
+    char separator,
+    const std::string& string) {
   std::vector<std::string> pieces;
   std::stringstream ss(string);
   std::string item;
@@ -86,9 +90,10 @@ inline std::vector<std::string> split(char separator,
   return pieces;
 }
 
-inline std::string getCvarString(const std::vector<std::string> &env,
-                                 const char *def) {
-  const char *ret = def;
+inline std::string getCvarString(
+    const std::vector<std::string>& env,
+    const char* def) {
+  const char* ret = def;
 
   if (env.empty()) {
     TORCH_CHECK(false, "No environment variables passed");
@@ -99,7 +104,7 @@ inline std::string getCvarString(const std::vector<std::string> &env,
    * versions of a variable get higher priority than the latter
    * versions of the same variable */
   for (ssize_t i = static_cast<ssize_t>(env.size()) - 1; i >= 0; i--) {
-    const char *val = std::getenv(env[i].c_str());
+    const char* val = std::getenv(env[i].c_str());
     if (val == nullptr) {
       continue;
     } else if (i) {
@@ -112,7 +117,7 @@ inline std::string getCvarString(const std::vector<std::string> &env,
   return ret;
 }
 
-inline int getCvarInt(const std::vector<std::string> &env, int def) {
+inline int getCvarInt(const std::vector<std::string>& env, int def) {
   int ret = def;
 
   if (env.empty()) {
@@ -124,7 +129,7 @@ inline int getCvarInt(const std::vector<std::string> &env, int def) {
    * versions of a variable get higher priority than the latter
    * versions of the same variable */
   for (ssize_t i = static_cast<ssize_t>(env.size()) - 1; i >= 0; i--) {
-    char *val = std::getenv(env[i].c_str());
+    char* val = std::getenv(env[i].c_str());
     if (val == nullptr) {
       continue;
     } else if (i) {
@@ -133,7 +138,7 @@ inline int getCvarInt(const std::vector<std::string> &env, int def) {
 
     try {
       ret = std::stoi(val);
-    } catch (std::exception &) {
+    } catch (std::exception&) {
       TORCH_CHECK(false, "Invalid value for environment variable: " + env[i]);
     }
   }
@@ -141,7 +146,7 @@ inline int getCvarInt(const std::vector<std::string> &env, int def) {
   return ret;
 }
 
-inline bool getCvarBool(const std::vector<std::string> &env, bool def) {
+inline bool getCvarBool(const std::vector<std::string>& env, bool def) {
   bool ret = def;
 
   if (env.empty()) {
@@ -153,7 +158,7 @@ inline bool getCvarBool(const std::vector<std::string> &env, bool def) {
    * versions of a variable get higher priority than the latter
    * versions of the same variable */
   for (ssize_t i = static_cast<ssize_t>(env.size()) - 1; i >= 0; i--) {
-    char *val_ = std::getenv(env[i].c_str());
+    char* val_ = std::getenv(env[i].c_str());
     if (val_ == nullptr) {
       continue;
     } else if (i) {
@@ -161,7 +166,7 @@ inline bool getCvarBool(const std::vector<std::string> &env, bool def) {
     }
 
     std::string val = std::string(val_);
-    for (auto &x : val) {
+    for (auto& x : val) {
       // NOLINTNEXTLINE(*-narrowing-conversions)
       x = std::tolower(x);
     }
@@ -169,8 +174,9 @@ inline bool getCvarBool(const std::vector<std::string> &env, bool def) {
     if (val == "y" || val == "yes" || val == "1" || val == "t" ||
         val == "true") {
       ret = true;
-    } else if (val == "n" || val == "no" || val == "0" || val == "f" ||
-               val == "false") {
+    } else if (
+        val == "n" || val == "no" || val == "0" || val == "f" ||
+        val == "false") {
       ret = false;
     } else {
       TORCH_CHECK(false, "Invalid value for environment variable: " + env[i]);
@@ -181,8 +187,9 @@ inline bool getCvarBool(const std::vector<std::string> &env, bool def) {
   return ret;
 }
 
-inline void assertSameSizes(const at::IntArrayRef &sizes,
-                            const std::vector<at::Tensor> &tensors) {
+inline void assertSameSizes(
+    const at::IntArrayRef& sizes,
+    const std::vector<at::Tensor>& tensors) {
   for (const auto i : c10::irange(tensors.size())) {
     if (!tensors[i].sizes().equals(sizes)) {
       const auto expected = toString(sizes);
@@ -194,7 +201,7 @@ inline void assertSameSizes(const at::IntArrayRef &sizes,
   }
 }
 
-inline void assertSameSizeAndType(const std::vector<at::Tensor> &tensors) {
+inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
   // Ensure we have at least one tensor
   if (tensors.empty()) {
     throw std::invalid_argument("argument is empty");
@@ -223,123 +230,135 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor> &tensors) {
   }
 }
 
-inline void assertTypeMatch(const std::function<void(const std::string &)> &fn,
-                            const at::DeprecatedTypeProperties &type,
-                            const at::ArrayRef<at::Tensor> tensors,
-                            size_t index) {
+inline void assertTypeMatch(
+    const std::function<void(const std::string&)>& fn,
+    const at::DeprecatedTypeProperties& type,
+    const at::ArrayRef<at::Tensor> tensors,
+    size_t index) {
   if (!tensors[index].options().type_equal(type.options())) {
     fn("invalid tensor type at index " + std::to_string(index) + " (expected " +
        type.toString() + ", got " + tensors[index].toString() + ")");
   }
 }
 
-inline void assertTypeMatch(const std::function<void(const std::string &)> &fn,
-                            const at::TensorOptions &options,
-                            const at::ArrayRef<at::Tensor> tensors,
-                            size_t index) {
+inline void assertTypeMatch(
+    const std::function<void(const std::string&)>& fn,
+    const at::TensorOptions& options,
+    const at::ArrayRef<at::Tensor> tensors,
+    size_t index) {
   if (!tensors[index].options().type_equal(options)) {
     fn("invalid tensor type at index " + std::to_string(index) + " (expected " +
        toString(options) + ", got " + toString(tensors[index].options()) + ")");
   }
 }
 
-inline void assertSizesMatch(const std::function<void(const std::string &)> &fn,
-                             const at::IntArrayRef &sizes,
-                             const at::ArrayRef<at::Tensor> tensors,
-                             size_t index) {
+inline void assertSizesMatch(
+    const std::function<void(const std::string&)>& fn,
+    const at::IntArrayRef& sizes,
+    const at::ArrayRef<at::Tensor> tensors,
+    size_t index) {
   if (tensors[index].sizes() != sizes) {
     fn("invalid tensor size at index " + std::to_string(index) + " (expected " +
        toString(sizes) + ", got " + toString(tensors[index].sizes()) + ")");
   }
 }
 
-inline void
-assertLayoutMatch(const std::function<void(const std::string &)> &fn,
-                  const c10::Layout &expected,
-                  const at::ArrayRef<at::Tensor> tensors, size_t index) {
-  const auto &actual = tensors[index].layout();
+inline void assertLayoutMatch(
+    const std::function<void(const std::string&)>& fn,
+    const c10::Layout& expected,
+    const at::ArrayRef<at::Tensor> tensors,
+    size_t index) {
+  const auto& actual = tensors[index].layout();
   if (actual != expected) {
     fn("invalid tensor layout at index " + std::to_string(index) +
        " (expected " + toString(expected) + ", got " + toString(actual) + ")");
   }
 }
 
-inline void
-assertLayoutMatch(const std::function<void(const std::string &)> &fn,
-                  const at::ArrayRef<at::Tensor> tensors) {
-  const auto &layout = tensors[0].layout();
+inline void assertLayoutMatch(
+    const std::function<void(const std::string&)>& fn,
+    const at::ArrayRef<at::Tensor> tensors) {
+  const auto& layout = tensors[0].layout();
   for (const auto i : c10::irange(1, tensors.size())) {
     assertLayoutMatch(fn, layout, tensors, i);
   }
 }
 
-inline void assertNonEmpty(const std::function<void(const std::string &)> &fn,
-                           const at::ArrayRef<at::Tensor> tensors) {
+inline void assertNonEmpty(
+    const std::function<void(const std::string&)>& fn,
+    const at::ArrayRef<at::Tensor> tensors) {
   if (tensors.empty()) {
     fn("requires non-empty tensor list");
   }
 }
 
-inline void
-assertSingleElement(const std::function<void(const std::string &)> &fn,
-                    const at::ArrayRef<at::Tensor> tensors) {
+inline void assertSingleElement(
+    const std::function<void(const std::string&)>& fn,
+    const at::ArrayRef<at::Tensor> tensors) {
   if (tensors.size() != 1) {
     fn("requires a single-element tensor list");
   }
 }
 
-inline void
-assertSingleElementInput(const std::function<void(const std::string &)> &fn,
-                         const at::ArrayRef<at::Tensor> tensors) {
+inline void assertSingleElementInput(
+    const std::function<void(const std::string&)>& fn,
+    const at::ArrayRef<at::Tensor> tensors) {
   if (tensors.size() != 1) {
     fn("requires a single-element input tensor list");
   }
 }
 
-inline void
-assertSingleElementOutput(const std::function<void(const std::string &)> &fn,
-                          const at::ArrayRef<at::Tensor> tensors) {
+inline void assertSingleElementOutput(
+    const std::function<void(const std::string&)>& fn,
+    const at::ArrayRef<at::Tensor> tensors) {
   if (tensors.size() != 1) {
     fn("requires a single-element output tensor list");
   }
 }
 
-inline void assertRootRank(const std::function<void(const std::string &)> &fn,
-                           int64_t rank, int64_t size) {
+inline void assertRootRank(
+    const std::function<void(const std::string&)>& fn,
+    int64_t rank,
+    int64_t size) {
   if (rank < 0 || rank >= size) {
     fn("invalid root rank: " + std::to_string(rank));
   }
 }
 
-inline void assertRootTensor(const std::function<void(const std::string &)> &fn,
-                             int64_t rank, int64_t size) {
+inline void assertRootTensor(
+    const std::function<void(const std::string&)>& fn,
+    int64_t rank,
+    int64_t size) {
   if (rank < 0 || rank >= size) {
     fn("invalid root tensor: " + std::to_string(rank));
   }
 }
 
-inline void assertDense(const std::function<void(const std::string &)> &fn,
-                        const at::ArrayRef<at::Tensor> tensors) {
-  const auto &layout = tensors[0].layout();
+inline void assertDense(
+    const std::function<void(const std::string&)>& fn,
+    const at::ArrayRef<at::Tensor> tensors) {
+  const auto& layout = tensors[0].layout();
   if (layout != at::kStrided) {
     fn("only supports dense tensors");
   }
 }
 
-inline void assertCPU(const std::function<void(const std::string &)> &fn,
-                      const at::ArrayRef<at::Tensor> tensors) {
-  const auto &device = tensors[0].device();
+inline void assertCPU(
+    const std::function<void(const std::string&)>& fn,
+    const at::ArrayRef<at::Tensor> tensors) {
+  const auto& device = tensors[0].device();
   if (device.type() != at::kCPU) {
     fn("only supports CPU tensors");
   }
 }
 
-inline void assertSameDevice(const std::function<void(const std::string &)> &fn,
-                             const at::ArrayRef<at::Tensor> tensors) {
+inline void assertSameDevice(
+    const std::function<void(const std::string&)>& fn,
+    const at::ArrayRef<at::Tensor> tensors) {
   if (tensors.size() < 2) {
     return;
   }
-  const auto &device = tensors[0].device();
+  const auto& device = tensors[0].device();
   for (const auto i : c10::irange(1, tensors.size())) {
     if (tensors[i].device() != device) {
       fn("tensors should be on the same device");
@@ -347,43 +366,43 @@ inline void assertSameDevice(const std::function<void(const std::string &)> &fn,
   }
 }
 
-inline void
-assertTypeAndSizesMatch(const std::function<void(const std::string &)> &fn,
-                        const at::ArrayRef<at::Tensor> tensors,
-                        const at::DeprecatedTypeProperties &type,
-                        const at::IntArrayRef &sizes) {
+inline void assertTypeAndSizesMatch(
+    const std::function<void(const std::string&)>& fn,
+    const at::ArrayRef<at::Tensor> tensors,
+    const at::DeprecatedTypeProperties& type,
+    const at::IntArrayRef& sizes) {
   for (const auto i : c10::irange(tensors.size())) {
     assertTypeMatch(fn, type, tensors, i);
     assertSizesMatch(fn, sizes, tensors, i);
   }
 }
 
-inline void
-assertTypeAndSizesMatch(const std::function<void(const std::string &)> &fn,
-                        const at::ArrayRef<at::Tensor> tensors,
-                        const at::TensorOptions &options,
-                        const at::IntArrayRef &sizes) {
+inline void assertTypeAndSizesMatch(
+    const std::function<void(const std::string&)>& fn,
+    const at::ArrayRef<at::Tensor> tensors,
+    const at::TensorOptions& options,
+    const at::IntArrayRef& sizes) {
   for (const auto i : c10::irange(tensors.size())) {
     assertTypeMatch(fn, options, tensors, i);
     assertSizesMatch(fn, sizes, tensors, i);
   }
 }
 
-inline void
-assertTypeAndSizesMatch(const std::function<void(const std::string &)> &fn,
-                        const at::ArrayRef<at::Tensor> tensors) {
-  const auto &options = tensors[0].options();
+inline void assertTypeAndSizesMatch(
+    const std::function<void(const std::string&)>& fn,
+    const at::ArrayRef<at::Tensor> tensors) {
+  const auto& options = tensors[0].options();
   const auto sizes = tensors[0].sizes();
   assertTypeAndSizesMatch(fn, tensors.slice(1), options, sizes);
 }
 
 // Copied from ATen/core/functional.h.
 template <typename F, typename T>
-inline auto fmap(T &inputs, const F &fn)
+inline auto fmap(T& inputs, const F& fn)
     -> std::vector<decltype(fn(*inputs.begin()))> {
   std::vector<decltype(fn(*inputs.begin()))> r;
   r.reserve(inputs.size());
-  for (auto &input : inputs) {
+  for (auto& input : inputs) {
     r.push_back(fn(input));
   }
   return r;
@@ -391,7 +410,7 @@ inline auto fmap(T &inputs, const F &fn)
 
 // Copied from torch/csrc/utils/tensor_flatten.h.
 inline at::Tensor flattenDenseTensors(at::TensorList tensors) {
-  static const auto flatten = [](const at::Tensor &t) {
+  static const auto flatten = [](const at::Tensor& t) {
     return t.contiguous().view({-1});
   };
   if (tensors.size() == 1) {
@@ -400,15 +419,16 @@ inline at::Tensor flattenDenseTensors(at::TensorList tensors) {
   return at::cat(::c10d::fmap(tensors, flatten));
 }
 
-inline at::Tensor newLikeFlat(std::vector<std::vector<at::Tensor>> &tensors,
-                              size_t deviceIdx) {
+inline at::Tensor newLikeFlat(
+    std::vector<std::vector<at::Tensor>>& tensors,
+    size_t deviceIdx) {
   if (tensors.empty() || tensors[0].empty()) {
     TORCH_CHECK(false, "Received an empty list");
   }
   if (deviceIdx >= tensors.size()) {
     TORCH_CHECK(false, "Invalid device index");
   }
-  auto &t = tensors[deviceIdx][0];
+  auto& t = tensors[deviceIdx][0];
   auto device = t.device();
   for (const auto i : c10::irange(1, tensors[deviceIdx].size())) {
     if (tensors[deviceIdx][i].device() != device) {
@@ -420,23 +440,23 @@ inline at::Tensor newLikeFlat(std::vector<std::vector<at::Tensor>> &tensors,
   std::vector<int64_t> strides{static_cast<int64_t>(t.numel())};
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
   strides.insert(strides.end(), t.strides().begin(), t.strides().end());
-  return at::empty_strided(sizes, strides,
-                           t.options().memory_format(c10::nullopt));
+  return at::empty_strided(
+      sizes, strides, t.options().memory_format(c10::nullopt));
 }
 
-inline at::Tensor newLikeFlat(std::vector<at::Tensor> &tensors) {
+inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {
   if (tensors.empty()) {
     TORCH_CHECK(false, "Received an empty list");
   }
-  auto &t = tensors[0];
+  auto& t = tensors[0];
   at::DeviceGuard gpuGuard(t.device());
   std::vector<int64_t> sizes{static_cast<int64_t>(tensors.size())};
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
   return at::empty(sizes, t.options());
 }
 
-inline std::vector<std::vector<int64_t>>
-getSizes(const std::vector<at::Tensor> &tensors) {
+inline std::vector<std::vector<int64_t>> getSizes(
+    const std::vector<at::Tensor>& tensors) {
   std::vector<std::vector<int64_t>> sizes(tensors.size());
   for (const auto i : c10::irange(tensors.size())) {
     sizes[i] = tensors[i].sizes().vec();
@@ -444,7 +464,7 @@ getSizes(const std::vector<at::Tensor> &tensors) {
   return sizes;
 }
 
-inline std::vector<int> getDevices(const std::vector<at::Tensor> &tensors) {
+inline std::vector<int> getDevices(const std::vector<at::Tensor>& tensors) {
   std::vector<int> devices(tensors.size(), -1);
   if (tensors[0].device().is_cuda()) {
     for (const auto i : c10::irange(tensors.size())) {
@@ -455,19 +475,20 @@ inline std::vector<int> getDevices(const std::vector<at::Tensor> &tensors) {
   return devices;
 }
 
-template <typename T> inline T *getDataPointer(const at::Tensor &tensor) {
+template <typename T>
+inline T* getDataPointer(const at::Tensor& tensor) {
   // This method is only used in ProcessGroupGloo for now. Call sites must make
   // sure that the input tensor is contiguous. It is OK if the tensor does not
   // start from the beginning of the storage. For example, it could come from
   // chunk(..., dim=0)[1]. Hence, we need to use data_ptr() instead of
   // tensor.storage().data()
   // NB: not using tensor.data<T>() because tensor is not aware of gloo::TYPE
-  return static_cast<T *>(tensor.data_ptr());
+  return static_cast<T*>(tensor.data_ptr());
 }
 
 template <typename T>
-std::vector<T *> getDataPointers(const std::vector<at::Tensor> &tensors) {
-  std::vector<T *> ptrs(tensors.size());
+std::vector<T*> getDataPointers(const std::vector<at::Tensor>& tensors) {
+  std::vector<T*> ptrs(tensors.size());
   for (const auto i : c10::irange(tensors.size())) {
     ptrs[i] = getDataPointer<T>(tensors[i]);
   }
@@ -475,26 +496,31 @@ std::vector<T *> getDataPointers(const std::vector<at::Tensor> &tensors) {
 }
 
 // For alltoall split size sanity check
-inline void checkSplitSizes(const std::vector<int64_t> &split_sizes,
-                            const at::Tensor &tensor, int group_size) {
+inline void checkSplitSizes(
+    const std::vector<int64_t>& split_sizes,
+    const at::Tensor& tensor,
+    int group_size) {
   if (split_sizes.empty()) {
-    TORCH_CHECK(tensor.size(0) % group_size == 0,
-                "Tensor's dim 0 does not divide equally across group size");
+    TORCH_CHECK(
+        tensor.size(0) % group_size == 0,
+        "Tensor's dim 0 does not divide equally across group size");
   } else {
-    TORCH_CHECK(split_sizes.size() == static_cast<size_t>(group_size),
-                "Number of tensor splits not equal to group size");
+    TORCH_CHECK(
+        split_sizes.size() == static_cast<size_t>(group_size),
+        "Number of tensor splits not equal to group size");
     const auto sum = c10::sum_integers(split_sizes);
-    TORCH_CHECK(sum == tensor.size(0),
-                "Split sizes doesn't match total dim 0 size");
+    TORCH_CHECK(
+        sum == tensor.size(0), "Split sizes doesn't match total dim 0 size");
   }
 }
 
 // Compute alltoall lengths and offsets, handling multi-dimension tensors
 template <typename T>
-size_t computeLengthsAndOffsets(const std::vector<int64_t> &split_sizes,
-                                const at::Tensor &tensor,
-                                std::vector<T> *lengths,
-                                std::vector<T> *offsets) {
+size_t computeLengthsAndOffsets(
+    const std::vector<int64_t>& split_sizes,
+    const at::Tensor& tensor,
+    std::vector<T>* lengths,
+    std::vector<T>* offsets) {
   size_t group_size = lengths->size();
   bool equal_splits = false;
   size_t dim0_size = tensor.size(0);
@@ -517,9 +543,10 @@ size_t computeLengthsAndOffsets(const std::vector<int64_t> &split_sizes,
 }
 
 template <typename T>
-size_t computeLengthsAndOffsets(const std::vector<at::Tensor> &tensors,
-                                std::vector<T> *lengths,
-                                std::vector<T> *offsets) {
+size_t computeLengthsAndOffsets(
+    const std::vector<at::Tensor>& tensors,
+    std::vector<T>* lengths,
+    std::vector<T>* offsets) {
   size_t group_size = lengths->size();
   size_t offset = 0;
   for (const auto i : c10::irange(group_size)) {
@@ -543,40 +570,40 @@ using SizeType = uint64_t;
 // `fork()`, we can use `SYSCHECK(pid = fork(), pid != -1)`. The function output
 // is stored in variable `__output` and may be used in `success_cond`.
 #ifdef _WIN32
-#define SYSCHECK(expr, success_cond)                                           \
-  while (true) {                                                               \
-    auto __output = (expr);                                                    \
-    auto errno_local = WSAGetLastError();                                      \
-    (void)__output;                                                            \
-    if (!(success_cond)) {                                                     \
-      if (errno == EINTR) {                                                    \
-        continue;                                                              \
-      } else if (errno_local == WSAETIMEDOUT ||                                \
-                 errno_local == WSAEWOULDBLOCK) {                              \
-        C10_THROW_ERROR(DistNetworkError, "Socket Timeout");                   \
-      } else {                                                                 \
-        C10_THROW_ERROR(DistNetworkError, std::strerror(errno_local));         \
-      }                                                                        \
-    } else {                                                                   \
-      break;                                                                   \
-    }                                                                          \
+#define SYSCHECK(expr, success_cond)                                      \
+  while (true) {                                                          \
+    auto __output = (expr);                                               \
+    auto errno_local = WSAGetLastError();                                 \
+    (void)__output;                                                       \
+    if (!(success_cond)) {                                                \
+      if (errno == EINTR) {                                               \
+        continue;                                                         \
+      } else if (                                                         \
+          errno_local == WSAETIMEDOUT || errno_local == WSAEWOULDBLOCK) { \
+        C10_THROW_ERROR(DistNetworkError, "Socket Timeout");              \
+      } else {                                                            \
+        C10_THROW_ERROR(DistNetworkError, std::strerror(errno_local));    \
+      }                                                                   \
+    } else {                                                              \
+      break;                                                              \
+    }                                                                     \
   }
 #else
-#define SYSCHECK(expr, success_cond)                                           \
-  while (true) {                                                               \
-    auto __output = (expr);                                                    \
-    (void)__output;                                                            \
-    if (!(success_cond)) {                                                     \
-      if (errno == EINTR) {                                                    \
-        continue;                                                              \
-      } else if (errno == EAGAIN || errno == EWOULDBLOCK) {                    \
-        C10_THROW_ERROR(DistNetworkError, "Socket Timeout");                   \
-      } else {                                                                 \
-        C10_THROW_ERROR(DistNetworkError, std::strerror(errno));               \
-      }                                                                        \
-    } else {                                                                   \
-      break;                                                                   \
-    }                                                                          \
+#define SYSCHECK(expr, success_cond)                             \
+  while (true) {                                                 \
+    auto __output = (expr);                                      \
+    (void)__output;                                              \
+    if (!(success_cond)) {                                       \
+      if (errno == EINTR) {                                      \
+        continue;                                                \
+      } else if (errno == EAGAIN || errno == EWOULDBLOCK) {      \
+        C10_THROW_ERROR(DistNetworkError, "Socket Timeout");     \
+      } else {                                                   \
+        C10_THROW_ERROR(DistNetworkError, std::strerror(errno)); \
+      }                                                          \
+    } else {                                                     \
+      break;                                                     \
+    }                                                            \
   }
 #endif
 
@@ -585,20 +612,23 @@ using SizeType = uint64_t;
 // Since SOCKET_ERROR = -1 in MSVC, so also leverage SYSCHECK_ERR_RETURN_NEG1
 #define SYSCHECK_ERR_RETURN_NEG1(expr) SYSCHECK(expr, __output != -1)
 
-void checkForNan(const at::Tensor &tensor);
+void checkForNan(const at::Tensor& tensor);
 
 namespace tcputil {
 
 // Send and receive
 template <typename T>
-void sendBytes(int socket, const T *buffer, size_t length,
-               bool moreData = false) {
+void sendBytes(
+    int socket,
+    const T* buffer,
+    size_t length,
+    bool moreData = false) {
   size_t bytesToSend = sizeof(T) * length;
   if (bytesToSend == 0) {
     return;
   }
 
-  auto currentBytes = reinterpret_cast<const char *>(buffer);
+  auto currentBytes = reinterpret_cast<const char*>(buffer);
 
   int flags = 0;
 
@@ -626,18 +656,19 @@ void sendBytes(int socket, const T *buffer, size_t length,
   }
 }
 
-template <typename T> void recvBytes(int socket, T *buffer, size_t length) {
+template <typename T>
+void recvBytes(int socket, T* buffer, size_t length) {
   size_t bytesToReceive = sizeof(T) * length;
   if (bytesToReceive == 0) {
     return;
   }
 
-  auto currentBytes = reinterpret_cast<char *>(buffer);
+  auto currentBytes = reinterpret_cast<char*>(buffer);
 
   while (bytesToReceive > 0) {
     ssize_t bytesReceived = 0;
-    SYSCHECK_ERR_RETURN_NEG1(bytesReceived =
-                                 recv(socket, currentBytes, bytesToReceive, 0))
+    SYSCHECK_ERR_RETURN_NEG1(
+        bytesReceived = recv(socket, currentBytes, bytesToReceive, 0))
     if (bytesReceived == 0) {
       C10_THROW_ERROR(DistNetworkError, std::strerror(ECONNRESET));
     }
@@ -649,14 +680,15 @@ template <typename T> void recvBytes(int socket, T *buffer, size_t length) {
 
 // send a vector's length and data
 template <typename T>
-void sendVector(int socket, const std::vector<T> &vec, bool moreData = false) {
+void sendVector(int socket, const std::vector<T>& vec, bool moreData = false) {
   SizeType size = vec.size();
   sendBytes<SizeType>(socket, &size, 1, true);
   sendBytes<T>(socket, vec.data(), size, moreData);
 }
 
 // receive a vector as sent in sendVector
-template <typename T> std::vector<T> recvVector(int socket) {
+template <typename T>
+std::vector<T> recvVector(int socket) {
   SizeType valueSize = 0;
   recvBytes<SizeType>(socket, &valueSize, 1);
   std::vector<T> value(valueSize);
@@ -666,19 +698,22 @@ template <typename T> std::vector<T> recvVector(int socket) {
 
 // this is only for convenience when sending rvalues
 template <typename T>
-void sendValue(int socket, const T &value, bool moreData = false) {
+void sendValue(int socket, const T& value, bool moreData = false) {
   sendBytes<T>(socket, &value, 1, moreData);
 }
 
-template <typename T> T recvValue(int socket) {
+template <typename T>
+T recvValue(int socket) {
   T value;
   recvBytes<T>(socket, &value, 1);
   return value;
 }
 
 // send a string's length and data
-inline void sendString(int socket, const std::string &str,
-                       bool moreData = false) {
+inline void sendString(
+    int socket,
+    const std::string& str,
+    bool moreData = false) {
   SizeType size = str.size();
   sendBytes<SizeType>(socket, &size, 1, true);
   sendBytes<char>(socket, str.data(), size, moreData);
