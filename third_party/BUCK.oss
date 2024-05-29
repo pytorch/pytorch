@@ -384,7 +384,6 @@ cxx_library(
     visibility = [
         "PUBLIC",
     ],
-    xcode_public_headers_symlinks = True,
     exported_deps = [
         ":gtest_headers",
     ],

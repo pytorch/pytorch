@@ -14,6 +14,7 @@ import warnings
 from collections import namedtuple
 from datetime import timedelta
 from typing import Any, Callable, Dict, Optional, Tuple, Union, List, TYPE_CHECKING
+from typing_extensions import deprecated
 
 import torch
 from torch._C._distributed_c10d import (
@@ -51,8 +52,8 @@ __all__ = [
     'Backend', 'BackendConfig', 'GroupMember', 'P2POp', 'all_gather', 'all_gather_coalesced',
     'all_gather_object', 'all_reduce',
     'all_reduce_coalesced', 'all_to_all',
-    'all_to_all_single', 'barrier', 'batch_isend_irecv', 'broadcast',
-    'broadcast_object_list', 'destroy_process_group',
+    'all_to_all_single', 'barrier', 'batch_isend_irecv', 'broadcast', 'send_object_list',
+    'recv_object_list', 'broadcast_object_list', 'destroy_process_group',
     'gather', 'gather_object', 'get_backend_config', 'get_backend', 'get_rank',
     'get_world_size', 'get_pg_count', 'group', 'init_process_group', 'irecv',
     'is_gloo_available', 'is_initialized', 'is_mpi_available', 'is_backend_available',
@@ -66,7 +67,7 @@ __all__ = [
     'ProcessGroup', 'ReduceOp', 'ReduceOptions', 'ReduceScatterOptions',
     'ScatterOptions', 'Store', 'DebugLevel', 'get_debug_level', 'Work',
     'default_pg_timeout', 'get_group_rank', 'get_global_rank', 'get_process_group_ranks',
-    'reduce_op', 'all_gather_into_tensor', 'reduce_scatter_tensor',
+    'reduce_op', 'all_gather_into_tensor', 'reduce_scatter_tensor', 'get_node_local_rank',
 ]
 
 _MPI_AVAILABLE = True
@@ -110,8 +111,10 @@ except ImportError:
 
 try:
     from torch._C._distributed_c10d import ProcessGroupNCCL
+    from torch._C._distributed_c10d import ProcessGroupCudaP2P
     ProcessGroupNCCL.__module__ = "torch.distributed.distributed_c10d"
-    __all__ += ["ProcessGroupNCCL"]
+    ProcessGroupCudaP2P.__module__ = "torch.distributed.distributed_c10d"
+    __all__ += ["ProcessGroupNCCL", "ProcessGroupCudaP2P"]
 except ImportError:
     _NCCL_AVAILABLE = False
 
@@ -362,11 +365,12 @@ class _reduce_op:
             setattr(self, k, v)
         self.__members__ = ReduceOp.RedOpType.__members__
 
+    @deprecated(
+        "`torch.distributed.reduce_op` is deprecated, "
+        "please use `torch.distributed.ReduceOp` instead",
+        category=FutureWarning,
+    )
     def __getattribute__(self, key):
-        warnings.warn(
-            "torch.distributed.reduce_op is deprecated, please use "
-            "torch.distributed.ReduceOp instead"
-        )
         return object.__getattribute__(self, key)
 
 
@@ -408,6 +412,21 @@ class P2POp:
         _check_single_tensor(tensor, "tensor")
         return object.__new__(cls)
 
+    def __repr__(self):
+        my_group_rank = get_rank(self.group)
+        peer_group_rank = get_group_rank(self.group, self.peer) if self.group else self.peer
+        op_name = self.op.__name__
+        group_name = self.group.group_name if self.group else "default_pg"
+        if "send" in op_name:
+            s = my_group_rank
+            d = peer_group_rank
+        elif "recv" in op_name:
+            s = peer_group_rank
+            d = my_group_rank
+        else:
+            return super().__repr__()
+
+        return f"P2POp({op_name} pg={group_name}, s={s}, d={d},  {self.tensor.shape}, {self.tensor.dtype})"
 
 class _CollOp:
     """
@@ -658,7 +677,8 @@ def _get_pg_default_device(group: Optional[ProcessGroup] = None) -> torch.device
         warnings.warn(
             f"You are using a Backend {type(group)} as a ProcessGroup. "
             "This usage is deprecated since PyTorch 2.0. Please use a public API "
-            "of PyTorch Distributed instead."
+            "of PyTorch Distributed instead.",
+            FutureWarning,
         )
         # Most users create Gloo with private API for object collectives
         _world.pg_default_device[group] = torch.device("cpu")
@@ -737,7 +757,7 @@ def _store_based_barrier(rank, store, group_name, rendezvous_count, timeout, log
             )
 
             if timedelta(seconds=(time.time() - start)) > timeout:
-                raise DistStoreError(  # noqa: TRY200
+                raise DistStoreError(  # noqa: B904
                     "Timed out initializing process group in store based barrier on "
                     f"rank {rank}, for key: {store_key} (world_size={world_size}, "
                     f"num_workers_joined={worker_count}, timeout={timeout} error={e})"
@@ -812,13 +832,15 @@ def get_global_rank(group: ProcessGroup, group_rank: int) -> int:
             return rank
     raise ValueError(f"Group rank {group_rank} is not part of group {group}")
 
+
 # TODO: remove this once the ecosystem moves away from it.
+@deprecated(
+    "`torch.distributed.distributed_c10d._get_global_rank` is deprecated, "
+    "please use `torch.distributed.distributed_c10d.get_global_rank` instead",
+    category=FutureWarning,
+)
 def _get_global_rank(group, rank) -> int:
     """Use get_global_rank as this method is deprecated."""
-    warnings.warn(
-        "torch.distributed.distributed_c10d._get_global_rank is deprecated "
-        "please use torch.distributed.distributed_c10d.get_global_rank instead"
-    )
     return get_global_rank(group, rank)
 
 
@@ -1113,7 +1135,7 @@ def get_pg_count() -> int:
     """
     return _world.group_count
 
-def get_node_local_rank() -> int:
+def get_node_local_rank(fallback_rank: Optional[int] = None) -> int:
     """
     Return the local rank of the current process relative to the node.
 
@@ -1125,14 +1147,17 @@ def get_node_local_rank() -> int:
     and communicated via the `LOCAL_RANK` environment variable.
 
     Torchrun will automatically populate `LOCAL_RANK`, but other launchers may not.  If `LOCAL_RANK` is unspecified,
-    this API will raise an exception.
+    this API will fall back to the provided kwarg 'fallback_rank' if specified, otherwise it will raise an error. The
+    intent is to allow writing an application that runs either in single or multi device contexts without error.
 
     """
     if "LOCAL_RANK" in os.environ:
         return int(os.environ["LOCAL_RANK"])
+    elif fallback_rank is not None:
+        return int(fallback_rank)
     raise RuntimeError(
-        "LOCAL_RANK is not in the environment, so `get_node_local_rank` can't be used. "
-        "Consider using torchrun or updating your process launcher to specify LOCAL_RANK."
+        "LOCAL_RANK is not in the environment. Consider passing fallback_rank to allow `get_node_local_rank` to work, "
+        "assuming you are not running in a multi-device context and want the code to run locally instead."
     )
 
 def _set_pg_timeout(timeout: timedelta, group: Optional[ProcessGroup] = None) -> None:
@@ -1276,6 +1301,17 @@ def init_process_group(
 
     set_pytorch_distributed_envs_from_justknobs()
 
+    # Depending on the import order, some trace_rules functions may be evaluated
+    # during the import phase. In such a case, these functions may not correctly
+    # add the distributed related rules due to import circular dependency.
+    # We need to clear the lru_cache during the runtime to ensure the correctness
+    # of these trace_rules.
+    #
+    # Since this API must be called before all distributed code being compiled,
+    # clearing the cache here should be safe.
+    if "torch._dynamo" in sys.modules:
+        torch._dynamo.trace_rules.clear_lru_cache()
+
     assert (store is None) or (
         init_method is None
     ), "Cannot specify both init_method and store."
@@ -1346,6 +1382,7 @@ def init_process_group(
     _default_pg_init_method = init_method
 
     old_hook = sys.excepthook
+    excepthook_prefix = f"[rank{get_rank()}]"
 
     def _distributed_excepthook(*args):
         old_stderr = sys.stderr
@@ -1355,8 +1392,7 @@ def init_process_group(
         finally:
             sys.stderr = old_stderr
         msg = buf.getvalue()
-        prefix = f"[rank{get_rank()}]"
-        msg = "\n".join(f"{prefix}: {s}" if s != "" else "" for s in msg.split("\n"))
+        msg = "\n".join(f"{excepthook_prefix}: {s}" if s != "" else "" for s in msg.split("\n"))
         sys.stderr.write(msg)
         sys.stderr.flush()
 
@@ -1415,7 +1451,7 @@ def _shutdown_backend(pg):
         backend = pg._get_backend(torch.device("cuda"))
     except RuntimeError:
         pass
-    if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
+    if is_nccl_available() and isinstance(backend, (ProcessGroupNCCL, ProcessGroupCudaP2P)):
         # explictly call shutdown to ensure that NCCL resources are released
         backend._shutdown()
 
@@ -1602,7 +1638,7 @@ def _new_process_group_helper(
             break
 
         # Process group wrapper initialization for supported PGs when TORCH_DISTRIBUTED_DEBUG is set
-        if backend_str in [Backend.GLOO, Backend.NCCL, Backend.UCC]:
+        if backend_str in [Backend.GLOO, Backend.NCCL, Backend.UCC] or backend_str.upper() in Backend._plugins:
             # In debug mode and if GLOO is available, wrap in a wrapper PG that
             # enables enhanced collective checking for debuggability.
             if get_debug_level() == DebugLevel.DETAIL:
@@ -1633,17 +1669,19 @@ def _new_process_group_helper(
 
         pg._register_backend(torch.device(device), backend_type, backend_class)
 
+    # set group_name and group_dsec to backend
+    assert group_name is not None
+    assert group_desc is not None
+    pg._set_group_name(group_name)
+    pg._set_group_desc(group_desc)
+
     if device_id and pg._get_backend(device_id).supports_splitting:
         eager_backend = pg._get_backend(device_id)
         eager_backend.eager_connect_single_device(device_id)
 
     # update global state
-    assert group_name is not None
-    assert group_desc is not None
     _world.pg_map[pg] = (backend, prefix_store)
     _world.pg_names[pg] = group_name
-    pg._set_group_name(group_name)
-    pg._set_group_desc(group_desc)
     _register_process_group(group_name, pg)
 
     _world.pg_backend_config[pg] = str(backend_config)
@@ -1878,6 +1916,9 @@ def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, t
     """
     Send a tensor synchronously.
 
+    .. warning::
+        ``tag`` is not supported with the NCCL backend.
+
     Args:
         tensor (Tensor): Tensor to send.
         dst (int): Destination rank on global process group (regardless of ``group`` argument).
@@ -1912,6 +1953,9 @@ def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, t
 def recv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[ProcessGroup] = None, tag: int = 0) -> int:
     """
     Receives a tensor synchronously.
+
+    .. warning::
+        ``tag`` is not supported with the NCCL backend.
 
     Args:
         tensor (Tensor): Tensor to fill with received data.
@@ -2247,6 +2291,12 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
         work.wait()
 
 @_exception_logger
+@deprecated(
+    "`torch.distributed.all_reduce_coalesced` will be deprecated. If you must "
+    "use it, please revisit our documentation later at "
+    "https://pytorch.org/docs/main/distributed.html#collective-functions",
+    category=FutureWarning,
+)
 def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
     """
     WARNING: at this time individual shape checking is not implemented across nodes.
@@ -2281,11 +2331,6 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
         None, if not async_op or if not part of the group.
 
     """
-    warnings.warn(
-        "torch.distributed.all_reduce_coalesced will be deprecated. If you must "
-        "use it, please revisit our documentation later at "
-        "https://pytorch.org/docs/main/distributed.html#collective-functions"
-    )
     if isinstance(tensors, torch.Tensor):
         tensors = [tensors]
     _check_tensor_list(tensors, "tensor")
@@ -2588,6 +2633,188 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
 
 
 @_exception_logger
+def send_object_list(object_list, dst, group=None, device=None):
+    """
+    Sends picklable objects in ``object_list`` synchronously.
+
+    Similar to :func:`send`, but Python objects can be passed in.
+    Note that all objects in ``object_list`` must be picklable in order to be
+    sent.
+
+    Args:
+        object_list (List[Any]): List of input objects to sent.
+            Each object must be picklable. Receiver must provide lists of equal sizes.
+        dst (int): Destination rank to send ``object_list`` to.
+            Destination rank is based on global process group (regardless of ``group`` argument)
+        group: (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used. Default is ``None``.
+        device (``torch.device``, optional): If not None, the objects are
+            serialized and converted to tensors which are moved to the
+            ``device`` before sending. Default is ``None``.
+
+    Returns:
+        ``None``.
+
+    .. note:: For NCCL-based process groups, internal tensor representations
+        of objects must be moved to the GPU device before communication takes
+        place. In this case, the device used is given by
+        ``torch.cuda.current_device()`` and it is the user's responsibility to
+        ensure that this is set so that each rank has an individual GPU, via
+        ``torch.cuda.set_device()``.
+
+    .. warning::
+        :func:`send_object_list` uses ``pickle`` module implicitly, which
+        is known to be insecure. It is possible to construct malicious pickle
+        data which will execute arbitrary code during unpickling. Only call this
+        function with data you trust.
+
+    .. warning::
+        Calling :func:`send_object_list` with GPU tensors is not well supported
+        and inefficient as it incurs GPU -> CPU transfer since tensors would be
+        pickled. Please consider using :func:`send` instead.
+
+    Example::
+        >>> # xdoctest: +SKIP("need process group init")
+        >>> # Note: Process group initialization omitted on each rank.
+        >>> import torch.distributed as dist
+        >>> # Assumes backend is not NCCL
+        >>> device = torch.device("cpu")
+        >>> if dist.get_rank() == 0:
+        >>>     # Assumes world_size of 2.
+        >>>     objects = ["foo", 12, {1: 2}] # any picklable object
+        >>>     dist.send_object_list(objects, dst=1, device=device)
+        >>> else:
+        >>>     objects = [None, None, None]
+        >>>     dist.recv_object_list(objects, src=0, device=device)
+        >>> objects
+        ['foo', 12, {1: 2}]
+    """
+    if get_rank() == dst:
+        raise ValueError(
+            "Invalid destination rank: destination rank should not be the same as "
+            "the rank of the current process."
+        )
+
+    if _rank_not_in_group(group):
+        _warn_not_in_group("send_object_list")
+        return
+
+    # Current device selection.
+    # To preserve backwards compatibility, ``device`` is default to ``None``
+    # in which case we run current logic of device selection, i.e.
+    # ``current_device`` is CUDA if backend is NCCL otherwise CPU device. In the
+    # case it is not ``None`` we move the size and object tensors to be
+    # sent to this device.
+    current_device = device or _get_pg_default_device(group)
+    # Serialize object_list elements to tensors on src rank.
+    tensor_list, size_list = zip(*[_object_to_tensor(obj, current_device, group) for obj in object_list])
+    object_sizes_tensor = torch.cat(size_list)
+
+    # Send object sizes
+    send(object_sizes_tensor, dst=dst, group=group)
+
+    # Concatenate and send serialized object tensors
+    # Note: torch.cat will do an extra memory copy to the current device, if the tensor_list
+    # has only one element, we can skip the copy.
+    if len(tensor_list) == 1:  # type: ignore[possibly-undefined]
+        object_tensor = tensor_list[0]
+    else:
+        object_tensor = torch.cat(tensor_list)
+
+    send(object_tensor, dst=dst, group=group)
+
+
+@_exception_logger
+def recv_object_list(object_list, src=None, group=None, device=None):
+    """
+    Receives picklable objects in ``object_list`` synchronously.
+
+    Similar to :func:`recv`, but can receive Python objects.
+
+    Args:
+        object_list (List[Any]): List of objects to receive into.
+            Must provide a list of sizes equal to the size of the list being sent.
+        src (int, optional): Source rank from which to recv ``object_list``.
+            Source rank is based on global process group (regardless of ``group`` argument)
+            Will receive from any rank if set to None. Default is ``None``.
+        group: (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used. Default is ``None``.
+        device (``torch.device``, optional): If not None, receives on this device.
+            Default is ``None``.
+
+    Returns:
+        Sender rank. -1 if rank is not part of the group. If rank is part of the group,
+        ``object_list`` will contain the sent objects from ``src`` rank.
+
+    .. note:: For NCCL-based process groups, internal tensor representations
+        of objects must be moved to the GPU device before communication takes
+        place. In this case, the device used is given by
+        ``torch.cuda.current_device()`` and it is the user's responsibility to
+        ensure that this is set so that each rank has an individual GPU, via
+        ``torch.cuda.set_device()``.
+
+    .. warning::
+        :func:`recv_object_list` uses ``pickle`` module implicitly, which
+        is known to be insecure. It is possible to construct malicious pickle
+        data which will execute arbitrary code during unpickling. Only call this
+        function with data you trust.
+
+    .. warning::
+        Calling :func:`recv_object_list` with GPU tensors is not well supported
+        and inefficient as it incurs GPU -> CPU transfer since tensors would be
+        pickled. Please consider using :func:`recv` instead.
+
+    Example::
+        >>> # xdoctest: +SKIP("need process group init")
+        >>> # Note: Process group initialization omitted on each rank.
+        >>> import torch.distributed as dist
+        >>> # Assumes backend is not NCCL
+        >>> device = torch.device("cpu")
+        >>> if dist.get_rank() == 0:
+        >>>     # Assumes world_size of 2.
+        >>>     objects = ["foo", 12, {1: 2}] # any picklable object
+        >>>     dist.send_object_list(objects, dst=1, device=device)
+        >>> else:
+        >>>     objects = [None, None, None]
+        >>>     dist.recv_object_list(objects, src=0, device=device)
+        >>> objects
+        ['foo', 12, {1: 2}]
+    """
+    if _rank_not_in_group(group):
+        _warn_not_in_group("recv_object_list")
+        return -1
+
+    # Current device selection.
+    # To preserve backwards compatibility, ``device`` is default to ``None``
+    # in which case we run current logic of device selection, i.e.
+    # ``current_device`` is CUDA if backend is NCCL otherwise CPU device. In the
+    # case it is not ``None`` we move the size and object tensors to be
+    # received to this device.
+    current_device = device or _get_pg_default_device(group)
+    object_sizes_tensor = torch.empty(len(object_list), dtype=torch.long, device=current_device)
+
+    # Receive object sizes
+    rank_sizes = recv(object_sizes_tensor, src=src, group=group)
+
+    # Tensor to receive serialized objects into.
+    object_tensor = torch.empty(  # type: ignore[call-overload]
+        torch.sum(object_sizes_tensor).item(),  # type: ignore[arg-type]
+        dtype=torch.uint8,
+        device=current_device
+    )
+
+    rank_objects = recv(object_tensor, src=src, group=group)
+    assert rank_sizes == rank_objects, "Mismatch in return ranks for object sizes and objects."
+    # Deserialize objects using their stored sizes.
+    offset = 0
+    for i, obj_size in enumerate(object_sizes_tensor):
+        obj_view = object_tensor[offset : offset + obj_size]
+        obj_view = obj_view.type(torch.uint8)
+        offset += obj_size
+        object_list[i] = _tensor_to_object(obj_view, obj_size, group)
+    return rank_objects
+
+@_exception_logger
 def broadcast_object_list(object_list, src=0, group=None, device=None):
     """
     Broadcasts picklable objects in ``object_list`` to the whole group.
@@ -2619,7 +2846,7 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
         ensure that this is set so that each rank has an individual GPU, via
         ``torch.cuda.set_device()``.
 
-    .. note:: Note that this API differs slightly from the :func:`all_gather`
+    .. note:: Note that this API differs slightly from the :func:`broadcast`
         collective since it does not provide an ``async_op`` handle and thus
         will be a blocking call.
 
@@ -2977,6 +3204,11 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
 
 
 @_exception_logger
+@deprecated(
+    "`torch.distributed._all_gather_base` is a private function and will be deprecated. "
+    "Please use `torch.distributed.all_gather_into_tensor` instead.",
+    category=FutureWarning,
+)
 def _all_gather_base(output_tensor, input_tensor, group=None, async_op=False):
     """
     Single tensor all gather. Gathers a single tensor from all ranks, and puts them in a single output tensor.
@@ -2998,15 +3230,16 @@ def _all_gather_base(output_tensor, input_tensor, group=None, async_op=False):
         `all_gather_into_tensor` instead.
 
     """
-    warnings.warn(
-        "torch.distributed._all_gather_base is a private function and will be "
-        "deprecated. Please use torch.distributed.all_gather_into_tensor "
-        "instead."
-    )
     return all_gather_into_tensor(output_tensor, input_tensor, group, async_op)
 
 
 @_exception_logger
+@deprecated(
+    "`torch.distributed.all_gather_coalesced` will be deprecated. If you must use it, "
+    "please revisit our documentation later at "
+    "https://pytorch.org/docs/main/distributed.html#collective-functions",
+    category=FutureWarning,
+)
 def all_gather_coalesced(
     output_tensor_lists, input_tensor_list, group=None, async_op=False
 ):
@@ -3053,11 +3286,6 @@ def all_gather_coalesced(
     performance improvements but users of this function should take extra care
     to ensure that each node passes in tensors whose shapes match across nodes.
     """
-    warnings.warn(
-        "torch.distributed.all_gather_coalesced will be deprecated. If you must "
-        "use it, please revisit our documentation later at "
-        "https://pytorch.org/docs/main/distributed.html#collective-functions"
-    )
     # We only check basic compatibility with C++ params here, C++ code will
     # do shape and type checking.
     if _rank_not_in_group(group):
@@ -3387,6 +3615,11 @@ def reduce_scatter_tensor(output, input, op=ReduceOp.SUM, group=None, async_op=F
         work.wait()
 
 
+@deprecated(
+    "`torch.distributed._reduce_scatter_base` is a private function and will be deprecated. "
+    "Please use `torch.distributed.reduce_scatter_tensor` instead.",
+    category=FutureWarning,
+)
 def _reduce_scatter_base(output, input, op=ReduceOp.SUM, group=None, async_op=False):
     """
     Reduces, then scatters a flattened tensor to all processes in a group.
@@ -3407,11 +3640,6 @@ def _reduce_scatter_base(output, input, op=ReduceOp.SUM, group=None, async_op=Fa
         `reduce_scatter_tensor` instead.
 
     """
-    warnings.warn(
-        "torch.distributed._reduce_scatter_base is a private function and will "
-        "be deprecated. Please use torch.distributed.reduce_scatter_tensor "
-        "instead."
-    )
     return reduce_scatter_tensor(output, input, op, group, async_op)
 
 
@@ -3879,7 +4107,8 @@ def new_group(ranks=None, timeout=None, backend=None, pg_options=None, use_local
         group_desc (str, optional): a string to describe the process group.
 
     Returns:
-        A handle of distributed group that can be given to collective calls or None if the rank is not part of ``ranks``.
+        A handle of distributed group that can be given to collective calls or
+        GroupMember.NON_GROUP_MEMBER if the rank is not part of ``ranks``.
 
     N.B. use_local_synchronization doesn't work with MPI.
 
@@ -4294,6 +4523,8 @@ dynamo_unsupported_distributed_c10d_ops = [
     all_to_all,
     all_reduce_coalesced,
     gather,
+    send_object_list,
+    recv_object_list,
     broadcast_object_list,
     barrier,
     scatter,

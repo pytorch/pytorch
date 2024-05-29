@@ -2195,13 +2195,13 @@ Example::
 add_docstr(
     torch.can_cast,
     r"""
-can_cast(from, to) -> bool
+can_cast(from_, to) -> bool
 
 Determines if a type conversion is allowed under PyTorch casting rules
 described in the type promotion :ref:`documentation <type-promotion-doc>`.
 
 Args:
-    from (dtype): The original :class:`torch.dtype`.
+    from\_ (dtype): The original :class:`torch.dtype`.
     to (dtype): The target :class:`torch.dtype`.
 
 Example::
@@ -4021,7 +4021,7 @@ Alias for :func:`torch.div`.
 add_docstr(
     torch.dot,
     r"""
-dot(input, other, *, out=None) -> Tensor
+dot(input, tensor, *, out=None) -> Tensor
 
 Computes the dot product of two 1D tensors.
 
@@ -4032,7 +4032,7 @@ Computes the dot product of two 1D tensors.
 
 Args:
     input (Tensor): first tensor in the dot product, must be 1D.
-    other (Tensor): second tensor in the dot product, must be 1D.
+    tensor (Tensor): second tensor in the dot product, must be 1D.
 
 Keyword args:
     {out}
@@ -4041,6 +4041,10 @@ Example::
 
     >>> torch.dot(torch.tensor([2, 3]), torch.tensor([2, 1]))
     tensor(7)
+
+    >>> t1, t2 = torch.tensor([0, 1]), torch.tensor([2, 3])
+    >>> torch.dot(t1, t2)
+    tensor(3)
 """.format(
         **common_args
     ),
@@ -7587,7 +7591,7 @@ Supports strided and sparse 2-D tensors as inputs, autograd with
 respect to strided inputs.
 
 This operation has support for arguments with :ref:`sparse layouts<sparse-docs>`.
-If :attr:`out` is provided it's layout will be used. Otherwise, the result
+If :attr:`out` is provided its layout will be used. Otherwise, the result
 layout will be deduced from that of :attr:`input`.
 
 {sparse_beta_warning}
@@ -7873,9 +7877,8 @@ Example::
     >>> weights = torch.tensor([0, 10, 3, 0], dtype=torch.float) # create a tensor of weights
     >>> torch.multinomial(weights, 2)
     tensor([1, 2])
-    >>> torch.multinomial(weights, 4) # ERROR!
-    RuntimeError: invalid argument 2: invalid multinomial distribution (with replacement=False,
-    not enough non-negative category to sample) at ../aten/src/TH/generic/THTensorRandom.cpp:320
+    >>> torch.multinomial(weights, 5) # ERROR!
+    RuntimeError: cannot sample n_sample > prob_dist.size(-1) samples without replacement
     >>> torch.multinomial(weights, 4, replacement=True)
     tensor([ 2,  1,  1,  1])
 """.format(

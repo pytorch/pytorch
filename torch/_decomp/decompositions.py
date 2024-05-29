@@ -332,8 +332,8 @@ def rrelu_with_noise(
 def rrelu_with_noise_(
     self: Tensor,
     noise: Tensor,
-    lower: float,
-    upper: float,
+    lower: float = 0.125,
+    upper: float = 0.3333333333333333,
     training: bool = False,
     generator: Optional[torch.Generator] = None,
 ) -> Tensor:
@@ -1415,6 +1415,15 @@ def tensor_split_tensor_indices_or_sections_py_impl(
         return self.tensor_split(sections, dim)
     else:
         indices = [i.item() for i in tensor_indices_or_sections]
+        # WARNING: Tempted to torch._check_is_size on the indices here?  You
+        # can't: tensor_split works with negative values in indices:
+        #
+        # >>> torch.tensor_split(torch.randn(10), torch.tensor([-5, 5]))
+        # (tensor([ 0.3540,  2.1074, -0.8507,  1.1639,  0.3055]), tensor([]),
+        # tensor([-0.4285,  1.0692, -0.1776,  0.9362,  1.6143]))
+        #
+        # Sorry, I don't make the rules.  Explicitly do the item call in user
+        # code if you KNOW that they are non-negative.
         return self.tensor_split(indices, dim)
 
 
@@ -2310,6 +2319,32 @@ def native_batch_norm_backward_out(
             _safe_copy_out(copy_from=r, copy_to=grad_input[i], exact_dtype=True)
 
     return grad_input
+
+
+@register_decomposition(aten.miopen_batch_norm_backward)
+@out_wrapper("out0", "out1", "out2")
+def miopen_batch_norm_backward(
+    input: Tensor,
+    grad_output: Tensor,
+    weight: Tensor,
+    running_mean: Optional[Tensor],
+    running_var: Optional[Tensor],
+    save_mean: Optional[Tensor],
+    save_var: Optional[Tensor],
+    epsilon: float,
+):
+    return aten.native_batch_norm_backward(
+        grad_output,
+        input,
+        weight,
+        running_mean,
+        running_var,
+        save_mean,
+        save_var,
+        True,
+        epsilon,
+        [True, True, True],
+    )
 
 
 @register_decomposition(aten.cudnn_batch_norm_backward)

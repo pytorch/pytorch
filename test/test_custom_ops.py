@@ -13,6 +13,7 @@ import torch._custom_ops as custom_ops
 
 import torch.testing._internal.optests as optests
 import torch.utils.cpp_extension
+
 from functorch import make_fx
 from torch import Tensor
 from torch._custom_op.impl import custom_op, CustomOp, infer_schema
@@ -198,6 +199,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         ):
             torch.library.opcheck(op, (x,), {})
 
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_incorrect_abstract_impl(self, device):
         lib = self.lib()
         lib.define("foo(Tensor x) -> Tensor")
@@ -1838,7 +1840,6 @@ dynamic shape operator: _torch_testing.numpy_nonzero.default
 
     def test_autogen_aten_ops_are_pt2_compliant(self):
         for op in [
-            torch.ops.aten._foreach_copy.default,
             torch.ops.aten.fill.Tensor_out,
         ]:
             self.assertIn(torch.Tag.generated, op.tags)
@@ -2434,6 +2435,16 @@ class TestCustomOpAPI(TestCase):
             self.assertGreater(after, prev)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    @parametrize("idx", [0, 1, 2, 3, 4, 5])
+    def test_library_register_fake_source(self, idx):
+        opname = f"source{idx}"
+        op = getattr(torch.ops._torch_testing, opname).default
+        entry = torch._library.simple_registry.singleton.find(op._name)
+        source = entry.abstract_impl.kernel.source
+        assert source is not None
+        self.assertTrue("custom_op_db.py" in source)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_fake(self):
         for mode in ["function", "qualname", "opoverload"]:
 
@@ -2447,10 +2458,15 @@ class TestCustomOpAPI(TestCase):
 
             if mode == "function":
                 dec = torch.library.register_fake(add)
+                self.assertIsNotNone(dec)
             elif mode == "qualname":
                 dec = torch.library.register_fake("_torch_testing::add")
+                self.assertIsNotNone(dec)
             elif mode == "opoverload":
                 dec = torch.library.register_fake(torch.ops._torch_testing.add.default)
+                self.assertIsNotNone(dec)
+            else:
+                raise AssertionError("should not get here")
 
             @dec
             def _(x, y):
@@ -3137,6 +3153,21 @@ opcheck(op, args, kwargs, test_utils="test_schema")
                 "test_aot_dispatch_dynamic": "SUCCESS",
             },
         )
+
+    def test_opcheck_does_not_require_extra_deps(self):
+        # torch.testing._internal.common_utils comes with a lot of additional
+        # test-time dependencies. Since opcheck is public API, it should be
+        # usable only with pytorch install-time dependencies.
+        cmd = [
+            sys.executable,
+            "-c",
+            "import torch; import sys; \
+               x = torch.randn(3, requires_grad=True); \
+               torch.library.opcheck(torch.ops.aten.sin.default, (x,)); \
+               assert 'expecttest' not in sys.modules; \
+               assert 'torch.testing._internal.common_utils' not in sys.modules",
+        ]
+        subprocess.check_output(cmd, shell=False)
 
 
 only_for = ("cpu", "cuda")

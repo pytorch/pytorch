@@ -149,9 +149,9 @@ struct SchemaParser {
     auto fake_type = std::move(std::get<0>(p));
     auto real_type = std::move(std::get<1>(p));
     auto alias_info = std::move(std::get<2>(p));
-    c10::optional<int32_t> N;
-    c10::optional<IValue> default_value;
-    c10::optional<std::string> alias_set;
+    std::optional<int32_t> N;
+    std::optional<IValue> default_value;
+    std::optional<std::string> alias_set;
     std::string name;
     if (L.nextIf('[')) {
       // note: an array with a size hint can only occur at the Argument level
@@ -162,7 +162,7 @@ struct SchemaParser {
       auto container = type_parser.parseAliasAnnotation();
       if (alias_info) {
         if (!container) {
-          container = c10::optional<at::AliasInfo>(at::AliasInfo());
+          container = std::optional<at::AliasInfo>(at::AliasInfo());
           container->setIsWrite(alias_info->isWrite());
         }
         container->addContainedType(std::move(*alias_info));
@@ -297,7 +297,7 @@ struct SchemaParser {
   IValue parseDefaultValue(
       const c10::Type& arg_type,
       TypeKind kind,
-      c10::optional<int32_t> arg_N) {
+      std::optional<int32_t> arg_N) {
     auto range = L.cur().range;
     switch (kind) {
       case TypeKind::TensorType:

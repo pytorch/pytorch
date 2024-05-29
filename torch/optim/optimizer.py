@@ -20,24 +20,24 @@ from typing import (
     TypeVar,
     Union,
 )
-
 from typing_extensions import ParamSpec, Self, TypeAlias
 
 import torch
 import torch.utils.hooks as hooks
-from torch._utils import is_compiling
 from torch.utils._foreach_utils import (
     _get_foreach_kernels_supported_devices,
     _get_fused_kernels_supported_devices,
     _group_tensors_by_device_and_dtype,
     Indices,
-    TensorListList,
 )
 from torch.utils.hooks import RemovableHandle
 
 Args: TypeAlias = Tuple[Any, ...]
 Kwargs: TypeAlias = Dict[str, Any]
 StateDict: TypeAlias = Dict[str, Any]
+TensorListList: TypeAlias = List[List[torch.Tensor]]
+DeviceDict = Dict[Optional[torch.device], torch.Tensor]
+
 
 GlobalOptimizerPreHook: TypeAlias = Callable[
     ["Optimizer", Args, Kwargs], Optional[Tuple[Args, Kwargs]]
@@ -96,14 +96,14 @@ def _use_grad_for_differentiable(func):
 
 def _get_value(x):
     # item is significantly faster than a cpu tensor in eager mode
-    if not torch.jit.is_scripting() and is_compiling():
+    if not torch.jit.is_scripting() and torch.compiler.is_compiling():
         return x
     else:
-        return x.item()
+        return x.item() if isinstance(x, torch.Tensor) else x
 
 
 def _stack_if_compiling(x):
-    if not torch.jit.is_scripting() and is_compiling():
+    if not torch.jit.is_scripting() and torch.compiler.is_compiling():
         return torch.stack(x)
     else:
         return x
@@ -116,6 +116,51 @@ def _dispatch_sqrt(
         return x.sqrt()
     else:
         return math.sqrt(x)
+
+
+def _disable_dynamo_if_unsupported(single_tensor_fn=None):
+    # workaround for torchscript BC
+    # it requires all called functions to be in the
+    # global environment at the site at which the
+    # maybe_fallback closure is created
+    if single_tensor_fn:
+        globals()[single_tensor_fn.__name__] = single_tensor_fn
+
+    def wrapper(func):
+        import inspect
+
+        disabled_func = torch._disable_dynamo(func)
+        ps = inspect.signature(func).parameters
+        has_state_steps = True
+        try:
+            state_steps_ind = list(ps.keys()).index("state_steps")
+        except ValueError:
+            has_state_steps = False
+
+        # Today, there are cases where we stack state steps
+        # and pass them as the value arg of foreach ops.
+        # Having state steps on cuda as the value arg is not supported in eager,
+        # but this only occurs in the rare case that the user explicitly deletes
+        # the capturable flag. If capturable=True, this is not a problem.
+        @functools.wraps(func)
+        def maybe_fallback(*args, **kwargs):
+            if torch.compiler.is_compiling() and (
+                not kwargs.get("capturable", False)
+                and has_state_steps
+                and (args[state_steps_ind] and args[state_steps_ind][0].is_cuda)
+                or (
+                    "state_steps" in kwargs
+                    and kwargs["state_steps"]
+                    and kwargs["state_steps"][0].is_cuda
+                )
+            ):
+                return disabled_func(*args, **kwargs)
+            else:
+                return func(*args, **kwargs)
+
+        return maybe_fallback
+
+    return wrapper
 
 
 # For any optimizer with a faster implementation, we attempt to default to the
@@ -168,6 +213,16 @@ def _get_scalar_dtype(is_fused=None):
     )
 
 
+def _get_capturable_supported_devices(supports_xla: bool = True) -> List[str]:
+    r"""Return the device type list that supports capturable optimizer."""
+    capturable_supported_devices = ["cuda"]
+    if not torch.jit.is_scripting():
+        capturable_supported_devices.append(torch._C._get_privateuse1_backend_name())
+    if supports_xla:
+        capturable_supported_devices.append("xla")
+    return capturable_supported_devices
+
+
 # Common doc strings among optimizers
 _foreach_doc = r"""foreach (bool, optional): whether foreach implementation of optimizer
             is used. If unspecified by the user (so foreach is None), we will try to use
@@ -177,7 +232,7 @@ _foreach_doc = r"""foreach (bool, optional): whether foreach implementation of o
             being a tensorlist vs just one tensor. If memory is prohibitive, batch fewer
             parameters through the optimizer at a time or switch this flag to False (default: None)"""
 
-_fused_doc = r"""fused (bool, optional): whether the fused implementation (CUDA only) is used.
+_fused_doc = r"""fused (bool, optional): whether the fused implementation is used.
             Currently, `torch.float64`, `torch.float32`, `torch.float16`, and `torch.bfloat16`
             are supported. (default: None)
 
@@ -292,21 +347,10 @@ class Optimizer:
         self._patch_step_function()
 
         if isinstance(params, torch.Tensor):
-            if self.__class__.__name__ == "SparseAdam":
-                warnings.warn(
-                    (
-                        "Passing in a raw Tensor as ``params`` to SparseAdam "
-                        "is deprecated. In the future, this will raise an error. "
-                        "Please wrap your Tensor in an iterable instead."
-                    ),
-                    FutureWarning,
-                )
-                params = [params]
-            else:
-                raise TypeError(
-                    "params argument given to the optimizer should be "
-                    "an iterable of Tensors or dicts, but got " + torch.typename(params)
-                )
+            raise TypeError(
+                "params argument given to the optimizer should be "
+                "an iterable of Tensors or dicts, but got " + torch.typename(params)
+            )
 
         self.state: DefaultDict[torch.Tensor, Any] = defaultdict(dict)
         self.param_groups: List[Dict[str, Any]] = []
@@ -373,7 +417,7 @@ class Optimizer:
         # Thus, when compiling, inductor will determine if cudagraphs
         # can be enabled based on whether there is input mutation or CPU tensors.
         if (
-            not is_compiling()
+            not torch.compiler.is_compiling()
             and torch.backends.cuda.is_built()
             and torch.cuda.is_available()
         ):
@@ -460,10 +504,10 @@ class Optimizer:
         """Groups a list of lists of tensors by device and dtype.
         Skips this step if we are compiling since this will occur during inductor lowering.
         """
-        if is_compiling():
+        if torch.compiler.is_compiling():
             return {(None, None): (tensorlistlist, list(range(len(tensorlistlist[0]))))}
         else:
-            return _group_tensors_by_device_and_dtype(tensorlistlist, with_indices)
+            return _group_tensors_by_device_and_dtype(tensorlistlist, with_indices)  # type: ignore[return-value, arg-type]
 
     def _patch_step_function(self) -> None:
         self._zero_grad_profile_name = (

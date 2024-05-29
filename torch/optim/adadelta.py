@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import torch
 from torch import Tensor
@@ -7,12 +7,15 @@ from .optimizer import (
     _capturable_doc,
     _default_to_fused_or_foreach,
     _differentiable_doc,
+    _disable_dynamo_if_unsupported,
     _foreach_doc,
+    _get_capturable_supported_devices,
     _get_scalar_dtype,
     _maximize_doc,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
+    ParamsT,
 )
 
 __all__ = ["Adadelta", "adadelta"]
@@ -21,11 +24,11 @@ __all__ = ["Adadelta", "adadelta"]
 class Adadelta(Optimizer):
     def __init__(
         self,
-        params,
-        lr=1.0,
-        rho=0.9,
-        eps=1e-6,
-        weight_decay=0,
+        params: ParamsT,
+        lr: float = 1.0,
+        rho: float = 0.9,
+        eps: float = 1e-6,
+        weight_decay: float = 0,
         foreach: Optional[bool] = None,
         *,
         capturable: bool = False,
@@ -73,9 +76,16 @@ class Adadelta(Optimizer):
                     )
 
     def _init_group(
-        self, group, params_with_grad, grads, square_avgs, acc_deltas, state_steps
+        self,
+        group: Dict[str, Any],
+        params_with_grad: List[Tensor],
+        grads: List[Tensor],
+        square_avgs: List[Tensor],
+        acc_deltas: List[Tensor],
+        state_steps: List[Tensor],
     ):
         has_complex = False
+        p: Tensor
         for p in group["params"]:
             if p.grad is None:
                 continue
@@ -124,11 +134,11 @@ class Adadelta(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            params_with_grad = []
-            grads = []
-            square_avgs = []
-            acc_deltas = []
-            state_steps = []
+            params_with_grad: List[Tensor] = []
+            grads: List[Tensor] = []
+            square_avgs: List[Tensor] = []
+            acc_deltas: List[Tensor] = []
+            state_steps: List[Tensor] = []
             (
                 lr,
                 rho,
@@ -227,70 +237,6 @@ Adadelta.__doc__ = (
 )
 
 
-def adadelta(
-    params: List[Tensor],
-    grads: List[Tensor],
-    square_avgs: List[Tensor],
-    acc_deltas: List[Tensor],
-    state_steps: List[Tensor],
-    # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
-    # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    capturable: bool = False,
-    foreach: Optional[bool] = None,
-    differentiable: bool = False,
-    has_complex: bool = False,
-    *,
-    lr: float,
-    rho: float,
-    eps: float,
-    weight_decay: float,
-    maximize: bool,
-):
-    r"""Functional API that performs Adadelta algorithm computation.
-
-    See :class:`~torch.optim.Adadelta` for details.
-    """
-
-    # this check is slow during compilation, so we skip it
-    # if it's strictly needed we can add this check back in dynamo
-    if not torch._utils.is_compiling() and not all(
-        isinstance(t, torch.Tensor) for t in state_steps
-    ):
-        raise RuntimeError(
-            "API has changed, `state_steps` argument must contain a list of singleton tensors"
-        )
-
-    # We still respect when the user inputs False for foreach.
-    if foreach is None:
-        _, foreach = _default_to_fused_or_foreach(
-            params, differentiable, use_fused=False
-        )
-
-    if foreach and torch.jit.is_scripting():
-        raise RuntimeError("torch.jit.script not supported with foreach optimizers")
-
-    if foreach and not torch.jit.is_scripting():
-        func = _multi_tensor_adadelta
-    else:
-        func = _single_tensor_adadelta
-
-    func(
-        params,
-        grads,
-        square_avgs,
-        acc_deltas,
-        state_steps,
-        lr=lr,
-        rho=rho,
-        eps=eps,
-        weight_decay=weight_decay,
-        maximize=maximize,
-        differentiable=differentiable,
-        capturable=capturable,
-        has_complex=has_complex,
-    )
-
-
 def _single_tensor_adadelta(
     params: List[Tensor],
     grads: List[Tensor],
@@ -308,10 +254,15 @@ def _single_tensor_adadelta(
     has_complex: bool,
 ):
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-    if not torch._utils.is_compiling() and capturable:
+    if not torch.compiler.is_compiling() and capturable:
+        capturable_supported_devices = _get_capturable_supported_devices(
+            supports_xla=False
+        )
         assert all(
-            p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)
-        ), "If capturable=True, params and state_steps must be CUDA tensors."
+            p.device.type == step.device.type
+            and p.device.type in capturable_supported_devices
+            for p, step in zip(params, state_steps)
+        ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
 
     for param, grad, square_avg, acc_delta, step in zip(
         params, grads, square_avgs, acc_deltas, state_steps
@@ -348,9 +299,9 @@ def _multi_tensor_adadelta(
     state_steps: List[Tensor],
     *,
     lr: float,
-    weight_decay: float,
     rho: float,
     eps: float,
+    weight_decay: float,
     maximize: bool,
     differentiable: bool,
     capturable: bool,
@@ -359,10 +310,15 @@ def _multi_tensor_adadelta(
     assert not differentiable, "_foreach ops don't support autograd"
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-    if not torch._utils.is_compiling() and capturable:
+    if not torch.compiler.is_compiling() and capturable:
+        capturable_supported_devices = _get_capturable_supported_devices(
+            supports_xla=False
+        )
         assert all(
-            p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)
-        ), "If capturable=True, params and state_steps must be CUDA tensors."
+            p.device.type == step.device.type
+            and p.device.type in capturable_supported_devices
+            for p, step in zip(params, state_steps)
+        ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
 
     if len(params) == 0:
         return
@@ -394,14 +350,14 @@ def _multi_tensor_adadelta(
             torch._foreach_add_(device_state_steps, 1)
 
         if maximize:
-            device_grads = torch._foreach_neg(device_grads)
+            device_grads = torch._foreach_neg(device_grads)  # type: ignore[assignment]
 
         if weight_decay != 0:
             # Re-use the intermediate memory (device_grads) already allocated for maximize
             if maximize:
                 torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
             else:
-                device_grads = torch._foreach_add(
+                device_grads = torch._foreach_add(  # type: ignore[assignment]
                     device_grads, device_params, alpha=weight_decay
                 )
 
@@ -428,3 +384,68 @@ def _multi_tensor_adadelta(
             torch._foreach_add_(device_params, deltas)
         else:
             torch._foreach_add_(device_params, deltas, alpha=-lr)
+
+
+@_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_adadelta)
+def adadelta(
+    params: List[Tensor],
+    grads: List[Tensor],
+    square_avgs: List[Tensor],
+    acc_deltas: List[Tensor],
+    state_steps: List[Tensor],
+    # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
+    # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
+    capturable: bool = False,
+    foreach: Optional[bool] = None,
+    differentiable: bool = False,
+    has_complex: bool = False,
+    *,
+    lr: float,
+    rho: float,
+    eps: float,
+    weight_decay: float,
+    maximize: bool,
+):
+    r"""Functional API that performs Adadelta algorithm computation.
+
+    See :class:`~torch.optim.Adadelta` for details.
+    """
+
+    # this check is slow during compilation, so we skip it
+    # if it's strictly needed we can add this check back in dynamo
+    if not torch.compiler.is_compiling() and not all(
+        isinstance(t, torch.Tensor) for t in state_steps
+    ):
+        raise RuntimeError(
+            "API has changed, `state_steps` argument must contain a list of singleton tensors"
+        )
+
+    # We still respect when the user inputs False for foreach.
+    if foreach is None:
+        _, foreach = _default_to_fused_or_foreach(
+            params, differentiable, use_fused=False
+        )
+
+    if foreach and torch.jit.is_scripting():
+        raise RuntimeError("torch.jit.script not supported with foreach optimizers")
+
+    if foreach and not torch.jit.is_scripting():
+        func = _multi_tensor_adadelta
+    else:
+        func = _single_tensor_adadelta
+
+    func(
+        params,
+        grads,
+        square_avgs,
+        acc_deltas,
+        state_steps,
+        lr=lr,
+        rho=rho,
+        eps=eps,
+        weight_decay=weight_decay,
+        maximize=maximize,
+        differentiable=differentiable,
+        capturable=capturable,
+        has_complex=has_complex,
+    )

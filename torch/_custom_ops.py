@@ -250,7 +250,7 @@ def impl_abstract(qualname, *, func=None):
     """
     import torch.library
 
-    return torch.library.impl_abstract(qualname, func, _stacklevel=2)
+    return torch.library.register_fake(qualname, func, _stacklevel=2)
 
 
 def impl_save_for_backward(qualname, *, func=None):

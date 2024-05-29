@@ -7,11 +7,16 @@ import subprocess
 import sys
 import warnings
 
-import torch
 from common import BenchmarkRunner, download_retry_decorator, main
+
+import torch
 
 from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
 from torch._dynamo.utils import clone_inputs
+
+# Enable FX graph caching
+if "TORCHINDUCTOR_FX_GRAPH_CACHE" not in os.environ:
+    torch._inductor.config.fx_graph_cache = True
 
 
 def pip_install(package):
@@ -201,6 +206,12 @@ class TimmRunner(BenchmarkRunner):
         if self.args.accuracy and self.args.training:
             return SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS
         return set()
+
+    @property
+    def guard_on_nn_module_models(self):
+        return {
+            "convit_base",
+        }
 
     @download_retry_decorator
     def _download_model(self, model_name):

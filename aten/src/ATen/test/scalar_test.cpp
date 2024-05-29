@@ -28,8 +28,6 @@
 using std::cout;
 using namespace at;
 
-constexpr auto Float = ScalarType::Float;
-
 template<typename scalar_type>
 struct Foo {
   static void apply(Tensor a, Tensor b) {

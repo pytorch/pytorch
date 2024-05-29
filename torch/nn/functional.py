@@ -1818,7 +1818,8 @@ See :class:`~torch.nn.Softplus` for more details.
 
 def _get_softmax_dim(name: str, ndim: int, stacklevel: int) -> int:
     warnings.warn(
-        f"Implicit dimension choice for {name} has been deprecated. Change the call to include dim=X as an argument.",
+        f"Implicit dimension choice for {name} has been deprecated. "
+        "Change the call to include dim=X as an argument.",
         stacklevel=stacklevel,
     )
     if ndim == 0 or ndim == 1 or ndim == 3:
@@ -3210,7 +3211,7 @@ def binary_cross_entropy_with_logits(
             operations. For a target of size [B, C, H, W] (where B is batch size) pos_weight of
             size [B, C, H, W] will apply different pos_weights to each element of the batch or
             [C, H, W] the same pos_weights across the batch. To apply the same positive weight
-            along all spacial dimensions for a 2D multi-class target [C, H, W] use: [C, 1, 1].
+            along all spatial dimensions for a 2D multi-class target [C, H, W] use: [C, 1, 1].
             Default: ``None``
 
     Examples::
@@ -3823,7 +3824,10 @@ def upsample(input, size=None, scale_factor=None, mode="nearest", align_corners=
         affects the outputs.
 
     """
-    warnings.warn("nn.functional.upsample is deprecated. Use nn.functional.interpolate instead.")
+    warnings.warn(
+        "`nn.functional.upsample` is deprecated. "
+        "Use `nn.functional.interpolate` instead.",
+    )
     return interpolate(input, size, scale_factor, mode, align_corners)
 
 
@@ -4143,7 +4147,10 @@ def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
         {backward_reproducibility_note}
     """
     # DeprecationWarning is ignored by default
-    warnings.warn("nn.functional.upsample_nearest is deprecated. Use nn.functional.interpolate instead.")
+    warnings.warn(
+        "`nn.functional.upsample_nearest` is deprecated. "
+        "Use `nn.functional.interpolate` instead.",
+    )
     return interpolate(input, size, scale_factor, mode="nearest")
 
 
@@ -4199,7 +4206,10 @@ def upsample_bilinear(input, size=None, scale_factor=None):  # noqa: F811
         {backward_reproducibility_note}
     """
     # DeprecationWarning is ignored by default
-    warnings.warn("nn.functional.upsample_bilinear is deprecated. Use nn.functional.interpolate instead.")
+    warnings.warn(
+        "`nn.functional.upsample_bilinear` is deprecated. "
+        "Use `nn.functional.interpolate` instead.",
+    )
     return interpolate(input, size, scale_factor, mode="bilinear", align_corners=True)
 
 
@@ -5015,6 +5025,24 @@ greater than 0.0 is specified. The optional scale argument can only be specified
         return attn_weight @ value
 
 .. warning:: This function is beta and subject to change.
+
+.. warning::
+
+    This function always applies dropout according to the specified ``dropout_p`` argument.
+    To disable dropout during evaluation, be sure to pass a value of ``0.0`` when the module
+    that makes the function call is not in training mode.
+
+    For example:
+
+    .. code-block:: python
+
+        class MyModel(nn.Module):
+            def __init__(self, p=0.5):
+                super().__init__()
+                self.p = p
+
+            def forward(self, ...):
+                return F.scaled_dot_product_attention(..., dropout_p=(self.p if self.training else 0.0))
 
 Note:
 

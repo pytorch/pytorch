@@ -427,5 +427,5 @@ def verify_skippables(module: nn.Sequential) -> None:
 
     if msgs:
         raise TypeError(
-            "one or more pairs of stash and pop do not match:\n\n%s" "" % "\n".join("* %s" % x for x in msgs)
+            "one or more pairs of stash and pop do not match:\n\n{}" "".format("\n".join(f"* {x}" for x in msgs))
         )

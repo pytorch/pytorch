@@ -23,7 +23,7 @@ struct MatrixMultiplier {
   torch::Tensor tensor_;
 };
 
-bool function_taking_optional(c10::optional<torch::Tensor> tensor) {
+bool function_taking_optional(std::optional<torch::Tensor> tensor) {
   return tensor.has_value();
 }
 

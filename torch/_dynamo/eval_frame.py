@@ -22,7 +22,18 @@ import warnings
 import weakref
 from enum import Enum
 from os.path import dirname, join
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 from unittest.mock import patch
 
 import torch
@@ -30,7 +41,6 @@ import torch.fx
 import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch import _guards
-from torch._subclasses import fake_tensor
 from torch._utils_internal import log_export_usage
 from torch.export.dynamic_shapes import _process_dynamic_shapes
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
@@ -57,7 +67,6 @@ from . import config, convert_frame, external_utils, trace_rules, utils
 from .code_context import code_context
 from .exc import CondOpArgsMismatchError, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
-from .types import CacheEntry, DynamoCallback
 from .utils import common_constant_types, compile_times
 
 log = logging.getLogger(__name__)
@@ -69,6 +78,10 @@ null_context = contextlib.nullcontext
 
 
 import sympy
+
+if TYPE_CHECKING:
+    from torch._subclasses import fake_tensor
+    from .types import CacheEntry, DynamoCallback
 
 
 # See https://github.com/python/typing/pull/240
@@ -137,7 +150,10 @@ class OptimizedModule(torch.nn.Module):
 
     def _initialize(self):
         # Do this stuff in constructor to lower overhead slightly
-        if isinstance(self._orig_mod.forward, types.MethodType) and trace_rules.check(
+        if isinstance(self.dynamo_ctx, DisableContext):
+            # No need to check trace rules
+            self.forward = self.dynamo_ctx(self._orig_mod.__call__)
+        elif isinstance(self._orig_mod.forward, types.MethodType) and trace_rules.check(
             self._orig_mod.forward
         ):
             # This may be a torch.nn.* instance in trace_rules.py which
@@ -340,14 +356,9 @@ class _TorchDynamoContext:
             # User has wrapped the class with compile/disable decorator. Apply
             # disable to init/call method.
             cls_obj = fn
-            if isinstance(self, DisableContext):
-                # Disable on init is useful for reconstruction of bytecodes where we
-                # want to prevent Dynamo from tracing into the init function. Check
-                # test_reconstruction in test_model_output.py.
-                cls_obj.__init__ = self(cls_obj.__init__)
             cls_obj.__call__ = self(cls_obj.__call__)
             if issubclass(cls_obj, torch.nn.Module):
-                # NN module variable tracker directly inlines the _call_impl. Disable it.
+                # NN module variable tracker directly inlines the _call_impl.
                 cls_obj._call_impl = self(cls_obj._call_impl)
             return cls_obj
 
@@ -370,12 +381,8 @@ class _TorchDynamoContext:
 
         callback = self.callback
 
-        if isinstance(self, DisableContext):
-            is_jit_tracing = always_false
-            is_fx_tracing = always_false
-        else:
-            is_jit_tracing = torch._C._is_tracing
-            is_fx_tracing = torch.fx._symbolic_trace.is_fx_tracing
+        is_jit_tracing = torch._C._is_tracing
+        is_fx_tracing = torch.fx._symbolic_trace.is_fx_tracing
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
@@ -399,18 +406,31 @@ class _TorchDynamoContext:
 
             cleanups = [enter() for enter in self.enter_exit_hooks]
             prior = set_eval_frame(callback)
+
+            # Ensure that if an assertion occurs after graph pushes
+            # something onto the DynamicLayerStack then we pop it off (the
+            # constructed graph code isn't guarded with try/finally).
+            #
+            # This used to be a context but putting a `with` here is a noticible
+            # perf regression (#126293)
+            saved_dynamic_layer_stack_depth = (
+                torch._C._functorch.get_dynamic_layer_stack_depth()
+            )
+
             try:
                 return fn(*args, **kwargs)
             finally:
+                # Restore the dynamic layer stack depth if necessary.
+                torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
+                    saved_dynamic_layer_stack_depth
+                )
+
                 set_eval_frame(prior)
                 for cleanup in cleanups:
                     cleanup()
 
         # hooks to properly handle inlining
-        if isinstance(self, DisableContext):
-            _fn._torchdynamo_disable = True  # type: ignore[attr-defined]
-        else:
-            _fn._torchdynamo_inline = fn  # type: ignore[attr-defined]
+        _fn._torchdynamo_inline = fn  # type: ignore[attr-defined]
 
         # Save the function pointer to find the original callable while nesting
         # of decorators.
@@ -501,6 +521,53 @@ class RunOnlyContext(_TorchDynamoContext):
 class DisableContext(_TorchDynamoContext):
     def __init__(self):
         super().__init__(callback=None)
+
+    def __call__(self, fn):
+        # Earlier this code was in the base class _TorchDynamoContext. But we
+        # moved it here to have better code organization. For disable, we just
+        # want the callback to be None. We don't have to check trace_rules or
+        # create any wrapper.
+        fn = innermost_fn(fn)
+
+        if isinstance(fn, torch.nn.Module):
+            mod = fn
+            new_mod = OptimizedModule(mod, self)
+            new_mod._torchdynamo_orig_callable = mod.forward
+            return new_mod
+
+        if inspect.isclass(fn):
+            # User has wrapped the class with compile/disable decorator. Apply
+            # disable to init/call method.
+            cls_obj = fn
+            # Disable on init is useful for reconstruction of bytecodes where we
+            # want to prevent Dynamo from tracing into the init function. Check
+            # test_reconstruction in test_model_output.py.
+            cls_obj.__init__ = self(cls_obj.__init__)
+            cls_obj.__call__ = self(cls_obj.__call__)
+            if issubclass(cls_obj, torch.nn.Module):
+                # NN module variable tracker directly inlines the _call_impl. Disable it.
+                cls_obj._call_impl = self(cls_obj._call_impl)
+            return cls_obj
+
+        assert callable(fn)
+
+        callback = self.callback
+
+        @functools.wraps(fn)
+        def _fn(*args, **kwargs):
+            prior = set_eval_frame(callback)
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                set_eval_frame(prior)
+
+        _fn._torchdynamo_disable = True  # type: ignore[attr-defined]
+
+        # Save the function pointer to find the original callable while nesting
+        # of decorators.
+        _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+
+        return _fn
 
 
 def _optimize_catch_errors(
@@ -705,7 +772,8 @@ def explain(f, *extra_args, **extra_kwargs):
         warnings.warn(
             "explain(f, *args, **kwargs) is deprecated, use explain(f)(*args, **kwargs) instead.  "
             "If you don't migrate, we may break your explain call in the future if your user defined kwargs "
-            "conflict with future kwargs added to explain(f)."
+            "conflict with future kwargs added to explain(f).",
+            FutureWarning,
         )
         return inner(*extra_args, **extra_kwargs)
     else:
@@ -848,7 +916,7 @@ def check_signature_rewritable(graph):
             tb = "".join(traceback.format_list(stack))
             extra = ""
             if len(user_stacks) > 1:
-                extra = f"(elided {len(user_stacks)-1} more accesses)"
+                extra = f"(elided {len(user_stacks) - 1} more accesses)"
             msg = f"{source.name()}, accessed at:\n{tb}{extra}"
         # TODO: option to print ALL of the stack traces at once
         input_errors.append(msg)
@@ -1061,6 +1129,8 @@ def export(
     assume_static_by_default: bool = False,
     same_signature: bool = True,
     disable_constraint_solver: bool = False,
+    prefer_deferred_runtime_asserts_over_guards: bool = False,
+    _allow_complex_guards_as_runtime_asserts: bool = False,
     _log_export_usage: bool = True,
     **extra_kwargs,
 ) -> Callable[..., ExportResult]:
@@ -1236,6 +1306,8 @@ def export(
             automatic_dynamic_shapes=False,
             capture_dynamic_output_shape_ops=True,
             capture_scalar_outputs=True,
+            prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
+            _allow_complex_guards_as_runtime_asserts=_allow_complex_guards_as_runtime_asserts,
         ):
             opt_f = optimize_assert(
                 dynamo_normalization_capturing_compiler,
@@ -1266,7 +1338,10 @@ def export(
             dim_constraints.remove_redundant_dynamic_results()
             forced_specializations = dim_constraints.forced_specializations()
             msg = dim_constraints.prettify_results(
-                original_signature, constraint_violation_error, forced_specializations
+                original_signature,
+                dynamic_shapes,
+                constraint_violation_error,
+                forced_specializations,
             )
             if constraint_violation_error:
                 constraint_violation_error.args = (
@@ -1332,7 +1407,7 @@ def export(
                     )(*example_fake_inputs)
                 except CondOpArgsMismatchError as e:
                     # Wrap the internal error to the user-facing error
-                    raise UserError(  # noqa: TRY200
+                    raise UserError(  # noqa: B904
                         UserErrorType.DYNAMIC_CONTROL_FLOW,
                         str(e),
                         case_name="cond_operands",
@@ -1376,7 +1451,8 @@ def export(
         warnings.warn(
             "export(f, *args, **kwargs) is deprecated, use export(f)(*args, **kwargs) instead.  "
             "If you don't migrate, we may break your export call in the future if your user defined kwargs "
-            "conflict with future kwargs added to export(f)."
+            "conflict with future kwargs added to export(f).",
+            FutureWarning,
         )
         return inner(*extra_args, **extra_kwargs)
     else:
