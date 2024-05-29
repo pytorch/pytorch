@@ -3473,7 +3473,7 @@ class ComputedBuffer(Buffer):
 
         try:
             strides = [
-                V.graph.sizevars.stride_hints(expr, index_vars, support_vars)
+                abs(V.graph.sizevars.stride_hints(expr, index_vars, support_vars))
                 for expr in memory_addrs
             ]
             assert len(strides) == len(memory_addrs) and len(strides[0]) == len(
