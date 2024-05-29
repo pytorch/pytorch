@@ -5088,8 +5088,10 @@ Args:
         A boolean mask where a value of True indicates that the element *should* take part in attention.
         A float mask of the same type as query, key, value that is added to the attention score.
     dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
-    is_causal (bool): If true, assumes upper left causal attention masking and errors if both attn_mask and is_causal
-        are set.
+    is_causal (bool): If set to true, the attention masking is a lower triangular matrix when the mask is a
+        square matrix. The attention masking has the form of the upper left causal bias due to the alignment
+        (see :class:`torch.nn.attention.bias.CausalBias`) when the mask is a non-square matrix.
+        An error is thrown if both attn_mask and is_causal are set.
     scale (optional float, keyword-only): Scaling factor applied prior to softmax. If None, the default value is set
         to :math:`\frac{1}{\sqrt{E}}`.
 

@@ -1813,6 +1813,12 @@ class BuiltinVariable(VariableTracker):
             nn_mod_variable = args[0]
             mod = tx.output.get_submodule(nn_mod_variable.module_key)
             return variables.ConstantVariable.create(id(mod))
+        elif len(args) == 1 and isinstance(
+            args[0], variables.UserDefinedObjectVariable
+        ):
+            install_guard(args[0].source.make_guard(GuardBuilder.ID_MATCH))
+            constant_result = id(args[0].value)
+            return variables.ConstantVariable.create(constant_result)
         else:
             unimplemented(f"call_id with args {args}")
 

@@ -15,8 +15,8 @@ from torch.distributed._tensor._redistribute import (
 )
 from torch.distributed._tensor._utils import compute_global_tensor_info
 from torch.distributed._tensor.placement_types import (
-    _Partial,
     DTensorSpec,
+    Partial,
     Placement,
     Replicate,
     Shard,
@@ -275,10 +275,10 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         )
 
     def __coerce_tangent_metadata__(self):
-        if not any(isinstance(p, _Partial) for p in self.placements):
+        if not any(isinstance(p, Partial) for p in self.placements):
             return self
         placements = [
-            Replicate() if isinstance(p, _Partial) else p for p in self.placements
+            Replicate() if isinstance(p, Partial) else p for p in self.placements
         ]
         return self.redistribute(device_mesh=self.device_mesh, placements=placements)
 
@@ -456,7 +456,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         for i, placement in enumerate(placements):
             if placement.is_partial():
                 raise RuntimeError(
-                    "Can not redistribute to _Partial, _Partial is for internal use only!"
+                    "Can not redistribute to Partial, redistributing to Partial is for internal use only!"
                 )
             elif isinstance(placement, Shard) and placement.dim < 0:
                 # normalize shard dim to be positive
