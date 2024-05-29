@@ -5,16 +5,16 @@ import unittest
 
 import numpy as np
 import pytorch_test_common
+from pytorch_helper import PyTorchModule
 
 import torch.nn.init as init
 import torch.onnx
-from pytorch_helper import PyTorchModule
-from torch import nn
-from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import skipIfNoLapack
 
 from caffe2.python.core import workspace
 from caffe2.python.model_helper import ModelHelper
+from torch import nn
+from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import skipIfNoLapack
 
 
 class TestCaffe2Backend(pytorch_test_common.ExportTestCase):

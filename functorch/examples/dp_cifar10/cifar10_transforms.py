@@ -12,16 +12,17 @@ import sys
 from datetime import datetime, timedelta
 
 import numpy as np
+import torchvision.transforms as transforms
+from torchvision import models
+from torchvision.datasets import CIFAR10
+from tqdm import tqdm
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.utils.data
-import torchvision.transforms as transforms
 
 from torch.func import functional_call, grad_and_value, vmap
-from torchvision import models
-from torchvision.datasets import CIFAR10
-from tqdm import tqdm
 
 logging.basicConfig(
     format="%(asctime)s:%(levelname)s:%(message)s",
