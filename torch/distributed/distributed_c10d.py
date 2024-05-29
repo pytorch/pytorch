@@ -4100,7 +4100,8 @@ def new_group(ranks=None, timeout=None, backend=None, pg_options=None, use_local
         group_desc (str, optional): a string to describe the process group.
 
     Returns:
-        A handle of distributed group that can be given to collective calls or None if the rank is not part of ``ranks``.
+        A handle of distributed group that can be given to collective calls or
+        GroupMember.NON_GROUP_MEMBER if the rank is not part of ``ranks``.
 
     N.B. use_local_synchronization doesn't work with MPI.
 
