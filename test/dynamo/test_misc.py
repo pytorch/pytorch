@@ -245,12 +245,13 @@ class MiscTests(torch._inductor.test_case.TestCase):
         def f(x):
             return module.foobar(x)
 
-        f(x)
+        with self.assertWarnsOnceRegex(UserWarning, '.*https://pytorch.org/docs/main/notes/custom_operators.html.*'):
+            f(x)
         self.assertEqual(len(counters["graph_break"]), 1)
         first_graph_break = list(counters["graph_break"].keys())[0]
         self.assertExpectedInline(
             first_graph_break,
-            """Unsupported builtin PyCapsule.foobar. This function is either a Python builtin (e.g. functools.partial) or a third-party C/C++ Python extension (perhaps created with pybind). If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround. If it is a third-party C/C++ Python extension, please wrap it into a PyTorch-understood custom operator (see https://docs.google.com/document/d/1_W62p8WJOQQUzPsJYa7s701JXt0qf2OfLub2sbkHOaU for more details)""",
+            """Graph break due to unsupported builtin PyCapsule.foobar. This function is either a Python builtin (e.g. functools.partial) or a third-party C/C++ Python extension (perhaps created with pybind). If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround. If it is a third-party C/C++ Python extension, please wrap it into a PyTorch-understood custom operator (see https://pytorch.org/docs/main/notes/custom_operators.html for more details)""",
         )
 
     def test_callpacked(self):
