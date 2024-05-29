@@ -864,7 +864,7 @@ if(BUILD_PYTHON)
 
   # These should fill in the rest of the variables, like versions, but resepct
   # the variables we set above
-  if (USE_NUMPY)
+  if(USE_NUMPY)
     find_package(Python COMPONENTS Interpreter Development NumPy)
   else()
     find_package(Python COMPONENTS Interpreter Development)
@@ -888,7 +888,7 @@ if(BUILD_PYTHON)
     endif()
 
     if(USE_NUMPY)
-      if (NOT Python_NumPy_FOUND)
+      if(NOT Python_NumPy_FOUND)
         message(WARNING "NumPy could not be found. Not building with NumPy. Suppress this warning with -DUSE_NUMPY=OFF")
         caffe2_update_option(USE_NUMPY OFF)
       else()
