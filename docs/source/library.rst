@@ -1,3 +1,5 @@
+.. _torch-library-docs:
+
 torch.library
 ===================================
 .. py:module:: torch.library
