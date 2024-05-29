@@ -1334,14 +1334,16 @@ def compile_fx(
         model: torch.fx.GraphModule,
         example_inputs: List[torch.Tensor],
         is_inference: bool,
+        num_params_buffers: int,
     ):
         if is_inference:
             # partition_fn won't be called
             _recursive_joint_graph_passes(model)
 
-        fixed = torch._inductor.utils.num_fw_fixed_arguments(
-            num_example_inputs, len(example_inputs)
-        )
+        print(f"fw_compiler_base, found num_params_buffers={num_params_buffers}")
+        # num_params_buffers = torch._inductor.utils.num_fw_fixed_arguments(
+        #     num_example_inputs, len(example_inputs)
+        # )
         user_visible_outputs = {}
 
         if config.keep_output_stride:
@@ -1397,7 +1399,7 @@ def compile_fx(
         return inner_compile(
             model,
             example_inputs,
-            num_fixed=fixed,
+            num_fixed=num_params_buffers,
             cudagraphs=cudagraphs,
             graph_id=graph_id,
             is_inference=is_inference,

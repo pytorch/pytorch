@@ -734,6 +734,7 @@ class InstructionTranslatorBase(
             inner_fn = fn.fn
         if inner_fn and callable(inner_fn) and is_forbidden(inner_fn):
             raise AssertionError(f"Attempt to trace forbidden callable {inner_fn}")
+        # breakpoint()
         self.push(fn.call_function(self, args, kwargs))
 
     def inline_user_function_return(self, fn, args, kwargs):
