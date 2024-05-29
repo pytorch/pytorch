@@ -334,14 +334,14 @@ def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
 
 @register_op_impl(torch.ops.aten._local_scalar_dense.default)
 def local_scalar_dense(fake_mode, func, arg):
+    if (r := arg.item_memo) is not None:
+        return r
     if fake_mode.shape_env is None or (
         not fake_mode.shape_env.allow_scalar_outputs
         and not fake_mode.allow_scalar_outputs
     ):
         # Without symints/symfloats, cannot handle this
         raise DataDependentOutputException(func)
-    if (r := arg.item_memo) is not None:
-        return r
     if is_float_dtype(arg.dtype):
         r = fake_mode.shape_env.create_unbacked_symfloat()
     elif is_integer_dtype(arg.dtype):

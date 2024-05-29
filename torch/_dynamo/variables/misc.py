@@ -675,22 +675,41 @@ class GetAttrVariable(VariableTracker):
         kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
         if (
-            name == "__getitem__"
+            name in ("__getitem__", "get")
             and self.name == "__dict__"
-            and len(args) == 1
             and not kwargs
             and args[0].is_python_constant()
+            and isinstance(self.obj, variables.UserDefinedObjectVariable)
         ):
             obj = self.obj
             key = args[0].as_python_constant()
-            # redirect to var_getattr on the original obj
-            if isinstance(obj, variables.UserDefinedObjectVariable):
-                obj._check_for_getattribute()
-                if (
-                    key in obj.value.__dict__
-                    or tx.output.side_effects.has_pending_mutation_of_attr(obj, key)
-                ):
-                    return obj.var_getattr(tx, key)
+            obj._check_for_getattribute()
+            if obj.has_key_in_generic_dict(tx, key):
+                # redirect to var_getattr on the original obj
+                return obj.var_getattr(tx, key)
+
+            # Return the default value for get
+            if name == "get":
+                if len(args) == 2:
+                    return args[1]
+                else:
+                    return variables.ConstantVariable(None)
+
+        elif (
+            name == "__contains__"
+            and self.name == "__dict__"
+            and len(args) == 1
+            and args[0].is_python_constant()
+            and not kwargs
+            and isinstance(self.obj, variables.UserDefinedObjectVariable)
+        ):
+            obj = self.obj
+            key = args[0].as_python_constant()
+            obj._check_for_getattribute()
+            if obj.has_key_in_generic_dict(tx, key):
+                return variables.ConstantVariable(True)
+            else:
+                return variables.ConstantVariable(False)
 
         return super().call_method(tx, name, args, kwargs)
 

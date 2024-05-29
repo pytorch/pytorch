@@ -426,8 +426,8 @@ std::optional<int64_t> batch_dim_if_not_empty(const Tensor& t) {
 }
 
 fourOutputs linalg_lstsq_batch_rule(
-    const Tensor& self, std::optional<int64_t> self_bdim, const Tensor& b, c10::optional<int64_t> b_bdim,
-    std::optional<double> rcond, c10::optional<c10::string_view> driver) {
+    const Tensor& self, std::optional<int64_t> self_bdim, const Tensor& b, std::optional<int64_t> b_bdim,
+    std::optional<double> rcond, std::optional<c10::string_view> driver) {
   TORCH_CHECK(rankWithoutBatchDim(self, self_bdim) >= 2, "torch.linalg.lstsq: input must have at least 2 dimensions.");
   TORCH_CHECK(rankWithoutBatchDim(b, b_bdim) >= 1, "torch.linalg.lstsq: other must have at least 1 dimension.");
 
