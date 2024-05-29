@@ -3308,7 +3308,7 @@ class ComputedBuffer(Buffer):
                 else:
                     indices = index_vars
                 stride_lengths = [
-                    V.graph.sizevars.stride_hints(expr, indices) for expr in reads  # type: ignore[arg-type]
+                    abs(V.graph.sizevars.stride_hints(expr, indices)) for expr in reads  # type: ignore[arg-type]
                 ]
                 from .scheduler import pick_loop_order
 
