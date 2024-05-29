@@ -1,19 +1,28 @@
+# Owner(s): ["oncall: pt2"]
 import torch
-from torch.utils.flop_counter import FlopCounterMode
 import torch._functorch.config as config
 from torch.testing._internal.common_utils import run_tests, TestCase
-torch.set_default_device('cuda')
+from torch.utils.flop_counter import FlopCounterMode
+
+torch.set_default_device("cuda")
+
 
 def compile_with_ac(f, memory_budget):
     return torch.compile(f, backend="aot_eager_decomp_partition")
 
+
 def get_act_mem(f):
-    f().backward()
-    start_mem = torch.cuda.memory_allocated()
     out = f()
-    act_mem = (torch.cuda.memory_allocated() - start_mem) / (1024 * 1024)
+    out.backward()
+    # start_mem = torch.cuda.memory_allocated()
+    start_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
+    # old_stats = torch.cuda.memory_stats()
+    out = f()
+    cur_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
+    act_mem = (cur_mem - start_mem) / (1024 * 1024)
     out.backward()
     return act_mem
+
 
 def get_bw_flops(f):
     f().backward()
@@ -22,14 +31,18 @@ def get_bw_flops(f):
         out.backward()
     return mode.get_total_flops() / (1024 * 1024)
 
+
 def get_mem_and_flops(f, memory_budget=None):
     # Returns megabytes rounded to 1 decimal point and FLOPs
-    if memory_budget is not None:
-        torch._dynamo.reset()
-        with config.patch(memory_budget=memory_budget):
+    # Note that each value of size (512, 512, torch.float32) is 1 MiB
+    torch._dynamo.reset()
+    with config.patch(memory_budget=memory_budget):
+        if memory_budget is not None:
             f = torch.compile(f, backend="aot_eager_decomp_partition")
 
-    return round(get_act_mem(f), 1), get_bw_flops(f)
+        # We round this to nearest 10th of a megabyte.
+        return round(get_act_mem(f), 1), get_bw_flops(f)
+
 
 class MemoryBudgetTest(TestCase):
     def test_rematerializes_cheap(self):
@@ -37,16 +50,108 @@ class MemoryBudgetTest(TestCase):
             x = x.cos()
             x = torch.mm(x, w)
             return x.sum()
+
         x = torch.randn(512, 512, requires_grad=True)
         w = torch.randn(512, 512, requires_grad=True)
-        call = lambda: f(x, w)
+
+        def call():
+            return f(x, w)
+
         eager_mem, eager_flops = get_mem_and_flops(call)
         self.assertEqual(eager_mem, 1.0)
         mem_10, flops_10 = get_mem_and_flops(call, memory_budget=1.0)
+        # Recomputing `.cos()` is not free here.
         self.assertEqual(mem_10, 1.0)
         self.assertEqual(eager_flops, flops_10)
-        breakpoint()
-        pass
+        mem_5, flops_5 = get_mem_and_flops(call, memory_budget=0.5)
+        # We can just recompute `x.cos()` here to only depend on the inputs
+        self.assertEqual(mem_5, 0.0)
+        self.assertEqual(flops_5, eager_flops)
+
+    def test_matmul_even_chain(self):
+        def f(x, ws):
+            x = x.cos()
+            for w in ws:
+                x = torch.mm(x, w).cos()
+            return x.sum()
+
+        x = torch.randn(512, 512, requires_grad=True)
+        ws = [torch.randn(512, 512, requires_grad=True) for _ in range(5)]
+
+        def call():
+            return f(x, ws)
+
+        eager_mem, eager_flops = get_mem_and_flops(call)
+        one_mm_flops = 2 * (512**3) // (1024**2)
+        for budget in range(0, 11):
+            mem, flops = get_mem_and_flops(call, memory_budget=budget / 10)
+            if budget <= 5:
+                # We start saving the matmuls
+                self.assertEqual(mem, budget)
+                self.assertEqual(flops, eager_flops + (5 - budget) * one_mm_flops)
+            elif budget < 10:
+                # We're only recomputing the `cos` operations
+                self.assertEqual(mem, 5.0)
+                self.assertEqual(flops, eager_flops)
+            elif budget == 10:
+                self.assertEqual(mem, 10.0)
+                self.assertEqual(flops, eager_flops)
+
+    def test_matmul_uneven_chain(self):
+        # This function is constructed so that we are saving one input of size
+        # [512, in_dim] for each w
+        # In addition, every matmul has a same ratio of compute to "memory
+        # saved", so this test is essentially testing our knapsack solving
+
+        def f(x, ws):
+            xs = [torch.mm(x, w).cos() for w in ws]
+            return sum([x.sum() for x in xs])
+
+        x = torch.randn(512, 512, requires_grad=True)
+
+        def make_weights(w_shapes):
+            ws = []
+            for idx, dim in enumerate(w_shapes):
+                ws.append(torch.randn(512, dim * 512, requires_grad=True))
+            return ws
+
+        def make_weights_chain(w_shapes):
+            ws = []
+            for idx, _ in enumerate(w_shapes):
+                old_dim = 512 if idx == 0 else w_shapes[idx - 1] * 512
+                new_dim = w_shapes[idx] * 512
+                ws.append(torch.randn(old_dim, new_dim, requires_grad=True))
+            return ws
+
+        weight_configs = [
+            (
+                [11, 3, 4, 2],
+                [
+                    18,  # 11 + 4 + 3
+                    17,  # 11 + 4 + 2
+                    16,  # 11 + 3 + 2
+                    15,  # 11 + 4
+                    14,  # 11 + 3
+                    13,  # 11 + 2
+                    11,  # 11 + 2
+                    7,  # 4 + 3
+                    6,  # 4 + 2
+                ],
+            ),
+        ]
+        for weight_shapes, exact_solves in weight_configs:
+            ws = make_weights(weight_shapes)
+
+            def call():
+                return f(x, ws)
+
+            eager_mem, eager_flops = get_mem_and_flops(call)
+            total_mem = sum(weight_shapes)
+            self.assertEqual(eager_mem, sum(weight_shapes))
+            for mem_achieved in exact_solves:
+                mem, _ = get_mem_and_flops(call, memory_budget=mem_achieved / total_mem)
+                self.assertEqual(mem, mem_achieved)
+
 
 if __name__ == "__main__":
     run_tests()

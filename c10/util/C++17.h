@@ -58,13 +58,6 @@ template <class... B>
 using conjunction = std::conjunction<B...>;
 template <class... B>
 using disjunction = std::disjunction<B...>;
-template <bool B>
-using bool_constant = std::bool_constant<B>;
-template <class B>
-using negation = std::negation<B>;
-
-template <class T>
-using void_t = std::void_t<T>;
 
 #if defined(__cpp_lib_apply) && !defined(__CUDA_ARCH__) && !defined(__HIP__)
 

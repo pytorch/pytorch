@@ -1280,58 +1280,135 @@ def get_name_to_node(graph: fx.Graph):
     return name_to_node
 
 
+def greedy_knapsack(
+    memory: List[float], runtimes: List[float], max_memory: float
+) -> Tuple[float, List[int], List[int]]:
+    n = len(runtimes)
+    items = list(range(n))
+
+    # Sort items based on the ratio of runtime to memory in descending order
+    items = sorted(items, key=lambda i: runtimes[i] / memory[i], reverse=True)
+
+    total_memory = 0.0
+    total_runtime = 0.0
+    items_to_save = []
+    items_to_allow_recomputing = []
+
+    for i in items:
+        if total_memory + memory[i] <= max_memory:
+            total_memory += memory[i]
+            total_runtime += runtimes[i]
+            items_to_save.append(i)
+        else:
+            items_to_allow_recomputing.append(i)
+    return total_runtime, items_to_save, items_to_allow_recomputing
+
+
+def ilp_knapsack(
+    memory: List[float], runtimes: List[float], max_memory: float
+) -> Tuple[float, List[int], List[int]]:
+    import numpy as np
+
+    try:
+        from scipy.optimize import Bounds, LinearConstraint, milp
+    except ImportError:
+        raise RuntimeError(
+            "To use the ILP for memory budget checkpointing you need to install scipy"
+        ) from None
+
+    np_memory = np.array(memory)
+    np_runtimes = np.array(runtimes)
+    c = -np_runtimes  # type: ignore[operator]
+
+    memory_constraint = LinearConstraint(A=np_memory, ub=np.array(max_memory))
+    constraints = [memory_constraint]
+
+    integrality = np.ones_like(c)
+    res = milp(
+        c=c, constraints=constraints, integrality=integrality, bounds=Bounds(0, 1)
+    )
+    if not res.success:
+        raise RuntimeError("Somehow scipy solving failed")
+
+    items_to_save = []
+    items_to_allow_recomputing = []
+    for idx, i in enumerate(res.x):
+        if i == 1:
+            items_to_save.append(idx)
+        else:
+            items_to_allow_recomputing.append(idx)
+    return -res.fun, items_to_save, items_to_allow_recomputing
+
+
+def dp_knapsack(
+    memory: List[float], runtimes: List[float], max_memory: float
+) -> Tuple[float, List[int], List[int]]:
+    # Scaling factor to convert floating point weights to integers
+    S = 10000
+
+    # Quantize the memory weights
+    quantized_memory = torch.tensor(
+        [int(m * S) for m in memory], dtype=torch.long, device="cpu"
+    )
+    runtimes = torch.tensor(runtimes, dtype=torch.float32, device="cpu")
+
+    # Quantize the max_memory capacity
+    quantized_max_memory = round(max_memory * S)
+
+    n = len(memory)
+
+    # Initialize the DP table
+    dp = torch.zeros(
+        (n + 1, quantized_max_memory + 1), dtype=torch.float32, device="cpu"
+    )
+
+    # Fill the DP table using vectorized operations
+    for i in range(1, n + 1):
+        current_memory = quantized_memory[i - 1]
+        current_runtime = runtimes[i - 1]
+
+        # Copy the previous row
+        dp[i, :] = dp[i - 1, :]
+
+        # Update dp[i, j] for all j >= current_memory
+        dp[i, current_memory:] = torch.maximum(
+            dp[i - 1, current_memory:], dp[i - 1, :-current_memory] + current_runtime
+        )
+
+    # Backtrack to find the items included in the knapsack
+    selected_items = []
+    unselected_items = []
+    j: int = quantized_max_memory
+    for i in range(n, 0, -1):
+        if dp[i][j] != dp[i - 1][j]:
+            selected_items.append(i - 1)  # Include this item (indexing from 0)
+            j -= int(quantized_memory[i - 1].item())
+        else:
+            unselected_items.append(i - 1)
+
+    selected_items.reverse()  # To get items in the order they were added
+
+    # The maximum runtime that can be achieved within the max_memory constraint
+    max_runtime = dp[n][quantized_max_memory].item()
+
+    return max_runtime, selected_items, unselected_items
+
+
 def _optimize_runtime_with_given_memory(
     memory: List[float],
     runtimes: List[float],
     max_memory: float,
 ) -> Tuple[float, List[int], List[int]]:
-    SOLVER = "milp"
+    SOLVER = config.memory_budget_solver
+    SOLVER = "dp"
     if SOLVER == "greedy":
-        n = len(runtimes)
-        items = list(range(n))
-
-        # Sort items based on the ratio of runtime to memory in descending order
-        items = sorted(items, key=lambda i: runtimes[i] / memory[i], reverse=True)
-
-        total_memory = 0.0
-        total_runtime = 0.0
-        items_to_save = []
-        items_to_allow_recomputing = []
-
-        for i in items:
-            if total_memory + memory[i] <= max_memory:
-                total_memory += memory[i]
-                total_runtime += runtimes[i]
-                items_to_save.append(i)
-            else:
-                items_to_allow_recomputing.append(i)
-        return total_runtime, items_to_save, items_to_allow_recomputing
+        return greedy_knapsack(memory, runtimes, max_memory)
+    elif SOLVER == "ilp":
+        return ilp_knapsack(memory, runtimes, max_memory)
+    elif SOLVER == "dp":
+        return dp_knapsack(memory, runtimes, max_memory)
     else:
-        import numpy as np
-        from scipy.optimize import Bounds, LinearConstraint, milp
-
-        np_memory = np.array(memory)
-        np_runtimes = np.array(runtimes)
-        c = -np_runtimes  # type: ignore[operator]
-
-        memory_constraint = LinearConstraint(A=np_memory, ub=np.array(max_memory))
-        constraints = [memory_constraint]
-
-        integrality = np.ones_like(c)
-        res = milp(
-            c=c, constraints=constraints, integrality=integrality, bounds=Bounds(0, 1)
-        )
-        if not res.success:
-            raise RuntimeError("Somehow scipy solving failed")
-
-        items_to_save = []
-        items_to_allow_recomputing = []
-        for idx, i in enumerate(res.x):
-            if i == 1:
-                items_to_save.append(idx)
-            else:
-                items_to_allow_recomputing.append(idx)
-        return -res.fun, items_to_save, items_to_allow_recomputing
+        raise RuntimeError(f"Could not find solver {SOLVER}")
 
 
 from torch.utils._mode_utils import no_dispatch
@@ -1378,6 +1455,10 @@ def estimate_runtime(node):
 def choose_saved_values_set(
     joint_graph: fx.Graph, node_info: NodeInfo, memory_budget=1
 ) -> List[fx.Node]:
+    if memory_budget > 1 or memory_budget < 0:
+        raise RuntimeError(
+            f"The valid ranges for memory budget are 0 <= m <= 1. The provided value is {memory_budget}"
+        )
     min_cut_options = MinCutOptions(
         ban_if_used_far_apart=config.ban_recompute_used_far_apart,
         ban_if_long_fusible_chains=config.ban_recompute_long_fusible_chains,
