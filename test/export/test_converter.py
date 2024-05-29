@@ -22,12 +22,19 @@ class TestConverter(TestCase):
             self.assertTrue(torch.allclose(ep_t, orig_t))
 
     def test_ts2ep_converter_basic(self):
-        class M(torch.nn.Module):
+        class MSingle(torch.nn.Module):
             def forward(self, x, y):
                 return x + y
 
+        class MMulti(torch.nn.Module):
+            def forward(self, x, y):
+                x = x.cos() + 1
+                y = y.sin() - 1
+                return x, y
+
         inp = (torch.ones(1, 3), torch.ones(1, 3))
-        self._check_equal_ts_ep_converter(M(), inp)
+        self._check_equal_ts_ep_converter(MSingle(), inp)
+        self._check_equal_ts_ep_converter(MMulti(), inp)
 
     def test_ts2ep_converter_container_output(self):
         # Output is a List.

@@ -347,7 +347,7 @@ class TS2EPConverter:
             self.convert_prim_GetAttr(node)
         elif node_kind == "prim::NumToTensor":
             self.convert_prim_NumToTensor(node)
-        elif node_kind == "prim::ListConstruct" or node_kind == "prim::TupleConstruct":
+        elif node_kind in {"prim::ListConstruct", "prim::TupleConstruct"}:
             # Tuple is just a non-mutable List, so we can handle them together.
             self.convert_prim_ListConstruct(node)
         elif node_kind == "prim::DictConstruct":
