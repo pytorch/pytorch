@@ -16,11 +16,14 @@ endif()
 # ATen parallelism settings
 #  OMP - OpenMP for intra-op, native thread pool for inter-op parallelism
 #  NATIVE - using native thread pool for intra- and inter-op parallelism
+#  TBB - using TBB for intra- and native thread pool for inter-op parallelism
 if(INTERN_BUILD_MOBILE)
   set(ATEN_THREADING "NATIVE" CACHE STRING "ATen parallel backend")
 else()
   if(USE_OPENMP)
     set(ATEN_THREADING "OMP" CACHE STRING "ATen parallel backend")
+  elseif(USE_TBB)
+    set(ATEN_THREADING "TBB" CACHE STRING "ATen parallel backend")
   else()
     set(ATEN_THREADING "NATIVE" CACHE STRING "ATen parallel backend")
   endif()
@@ -28,12 +31,19 @@ endif()
 
 set(AT_PARALLEL_OPENMP 0)
 set(AT_PARALLEL_NATIVE 0)
+set(AT_PARALLEL_NATIVE_TBB 0)
 
 message(STATUS "Using ATen parallel backend: ${ATEN_THREADING}")
 if("${ATEN_THREADING}" STREQUAL "OMP")
   set(AT_PARALLEL_OPENMP 1)
 elseif("${ATEN_THREADING}" STREQUAL "NATIVE")
   set(AT_PARALLEL_NATIVE 1)
+elseif("${ATEN_THREADING}" STREQUAL "TBB")
+  if(NOT USE_TBB)
+    message(FATAL_ERROR "Using TBB backend but USE_TBB is off")
+  endif()
+  message(WARNING "ATEN TBB Threading is deprectated.")
+  set(AT_PARALLEL_NATIVE_TBB 1)
 else()
   message(FATAL_ERROR "Unknown ATen parallel backend: ${ATEN_THREADING}")
 endif()
@@ -775,6 +785,32 @@ set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS_NON_AVX} ${Caffe2_CPU_SRCS_AVX2} ${Caffe2_
 # END formerly-libtorch sources
 # ==========================================================
 
+if(BUILD_LIBTORCHLESS)
+  find_library(TORCH_LIB torch PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
+  find_library(TORCH_CPU_LIB torch_cpu PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
+
+  if(USE_CUDA)
+    find_library(TORCH_CUDA_LIB torch_cuda PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
+  endif()
+
+  if(USE_ROCM)
+    find_library(TORCH_HIP_LIB torch_hip PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
+  endif()
+
+  if(USE_XPU)
+    find_library(TORCH_XPU_LIB torch_xpu PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
+  endif()
+  add_subdirectory(../torch torch)
+else()
+  set(TORCH_LIB torch)
+  set(TORCH_CPU_LIB torch_cpu)
+  set(TORCH_CUDA_LIB torch_cuda)
+  set(TORCH_HIP_LIB torch_hip)
+  set(TORCH_XPU_LIB torch_xpu)
+endif()
+
+
+if(NOT BUILD_LIBTORCHLESS)
 add_library(torch_cpu ${Caffe2_CPU_SRCS})
 if(HAVE_SOVERSION)
   set_target_properties(torch_cpu PROPERTIES
@@ -1185,6 +1221,11 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
   set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/RNN.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
   set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/quantized/cpu/qlinear_prepack.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
   set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/quantized/qlinear_unpack.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+endif()
+
+if(USE_TBB)
+  list(APPEND ATen_CPU_INCLUDE ${TBB_INCLUDE_DIR})
+  target_link_libraries(torch_cpu PUBLIC TBB::tbb)
 endif()
 
 target_include_directories(torch_cpu PRIVATE ${ATen_CPU_INCLUDE})
@@ -1607,6 +1648,7 @@ endif()
 # ---[ XPU library.
 if(USE_XPU)
   target_link_libraries(torch_xpu INTERFACE torch::xpurt)
+
   target_link_libraries(torch_xpu PUBLIC c10_xpu)
 
   target_include_directories(
@@ -1663,6 +1705,10 @@ if(BUILD_SHARED_LIBS)
     target_link_libraries(torch_global_deps ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
     target_link_libraries(torch_global_deps torch::cudart torch::nvtoolsext)
   endif()
+  if(USE_TBB)
+    target_link_libraries(torch_global_deps TBB::tbb)
+  endif()
+
   install(TARGETS torch_global_deps DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 endif()
 
@@ -1682,6 +1728,7 @@ if(USE_ROCM)
 
   # Since PyTorch files contain HIP headers, these flags are required for the necessary definitions to be added.
   target_compile_options(torch_hip PUBLIC ${HIP_CXX_FLAGS})  # experiment
+
   target_link_libraries(torch_hip PUBLIC c10_hip)
 
   if(NOT INTERN_BUILD_MOBILE)
@@ -1783,6 +1830,9 @@ if(BUILD_TEST)
     target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
     target_include_directories(${test_name} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
     target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
+    if(NOT MSVC)
+      target_compile_options(${test_name} PRIVATE -Wno-unused-variable)
+    endif()
     add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
     if(INSTALL_TEST)
       install(TARGETS ${test_name} DESTINATION test)
@@ -1898,6 +1948,7 @@ if(MSVC)
     SET(tmp_path "../${tmp_path}")
     set_source_files_properties(${tmp_path} PROPERTIES COMPILE_FLAGS "-Xcompiler /Zc:lambda")
   endforeach()
+endif()
 endif()
 
 # Note: we only install the caffe2 python files if BUILD_CAFFE2_OPS is ON
