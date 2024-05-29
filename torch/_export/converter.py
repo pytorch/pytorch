@@ -5,6 +5,7 @@ import torch.export._trace
 
 from torch.export.exported_program import ExportedProgram
 from torch.export.graph_signature import (
+    ConstantArgument,
     InputKind,
     InputSpec,
     OutputKind,
@@ -202,9 +203,13 @@ class TS2EPConverter:
         self.constant_map[name] = value
 
     def convert_prim_device(self, node: torch._C.Node):
-        device = node.input().type().device()
-        output_name = node.output().debugName()
-        self.constant_map[output_name] = device
+        input_type = node.input().type()
+        if input_type.isSubtypeOf(torch._C.TensorType.get()):
+            device = input_type.device()  # type: ignore[attr-defined]
+            output_name = node.output().debugName()
+            self.constant_map[output_name] = device
+        else:
+            raise ValueError(f"Unsupported device type: {input_type}")
 
     def convert_prim_dtype(self, node: torch._C.Node):
         dtype = node.input().type().dtype()
@@ -325,7 +330,6 @@ class TS2EPConverter:
         self.convert_aten_op(node)
 
     def convert_node(self, node: torch._C.Node):
-        breakpoint()
         node_kind = node.kind()
         if node_kind == "prim::CreateObject":
             self.convert_prim_CreateObject(node)
@@ -358,16 +362,26 @@ class TS2EPConverter:
             output_name = graph_output.debugName()
             if output_name in self.name_to_node:
                 args.append(self.name_to_node[output_name])
+                self.output_specs.append(
+                    OutputSpec(
+                        OutputKind.USER_OUTPUT,
+                        arg=TensorArgument(name=output_name),
+                        target=output_name,
+                    )
+                )
+            elif output_name in self.constant_map:
+                args.append(self.constant_map[output_name])
+                self.output_specs.append(
+                    OutputSpec(
+                        OutputKind.USER_OUTPUT,
+                        arg=ConstantArgument(
+                            name=output_name, value=self.constant_map[output_name]
+                        ),
+                        target=output_name,
+                    )
+                )
             else:
                 raise ValueError(f"Output {output_name} not found")
-
-            self.output_specs.append(
-                OutputSpec(
-                    OutputKind.USER_OUTPUT,
-                    arg=TensorArgument(name=output_name),
-                    target=output_name,
-                )
-            )
 
         self.fx_graph.output(args)
 
