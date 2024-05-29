@@ -62,6 +62,69 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_exception_with_another_exception(self):
+        def fn(x):
+            x = torch.cos(x)
+            try:
+                x = torch.sin(x)
+                raise NotImplementedError("Not implemented")
+            except NotImplementedError as e:
+                x = torch.sigmoid(x)
+                try:
+                    x = torch.cos(x)
+                    raise AssertionError
+                except AssertionError:
+                    x = torch.cos(x)
+
+        x = torch.randn(4)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    # TODO(anijain2305) - does not work with fullgraph=True
+    def test_exception_with_another_exception2(self):
+        def gn(x):
+            try:
+                x = torch.cos(x)
+                raise NotImplementedError("Not implemented")
+            except NotImplementedError as e:
+                x = torch.sigmoid(x)
+                raise
+
+        def fn(x):
+            try:
+                x = torch.cos(x)
+                gn(x)
+            except Exception:
+                pass
+            return x
+
+        x = torch.randn(4)
+        ref = fn(x)
+        # Cant use fullgraph=True because RERAISE is not supported
+        opt_fn = torch.compile(fn, backend="eager")
+        res = opt_fn(x)
+
+    # TODO(anijain2305) - does not work with fullgraph=True
+    def test_exception_with_ctx_manager(self):
+        def fn(x):
+            x = torch.cos(x)
+            try:
+                with torch.no_grad():
+                    x = torch.sin(x)
+                    raise NotImplementedError("Not implemented")
+            except NotImplementedError as e:
+                x = torch.sigmoid(x)
+            return x
+
+        x = torch.randn(4)
+        ref = fn(x)
+        # Cant use fullgraph=True because WITH_EXCEPT_START is not supported
+        opt_fn = torch.compile(fn, backend="eager")
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_exception_raised_from_child(self):
         def gn():
             raise NotImplementedError("foo")

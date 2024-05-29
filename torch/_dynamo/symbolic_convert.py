@@ -1298,15 +1298,16 @@ class InstructionTranslatorBase(
 
                 # 2) if 'lasti' is true, then push the offset that the exception was raised at
                 if exn_tab_entry.lasti:
-                    # TODO(anijain2305) - This unimplemented should not be
-                    # required. Remove it once tested.
-                    unimplemented("lasti is True in exception handling")
-                    self.push(self.current_instruction.offset)
+                    # TODO(anijain2305) - This is untested. Any test that tests
+                    # this end-to-end requires supporting more bytecodes.
+                    self.push(
+                        variables.ConstantVariable(self.current_instruction.offset)
+                    )
 
                 # 3) push the exception to the stack
                 self.push(exception_var)
 
-                # 4) push the exception to the stack
+                # 4) jump to the handler
                 self.jump(exn_tab_entry)
             else:
                 # No handler found. Bubble the exception to the parent
