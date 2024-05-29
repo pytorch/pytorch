@@ -1,0 +1,319 @@
+name: Build Triton wheels
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      # NOTE: Binary build pipelines should only get triggered on release candidate builds
+      # Release candidate tags look like: v1.11.0-rc1
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+    paths:
+      - .github/workflows/build-triton-wheel.yml
+      - .github/scripts/build_triton_wheel.py
+      - .github/ci_commit_pins/triton.txt
+      - .ci/docker/ci_commit_pins/triton.txt
+      - .ci/docker/ci_commit_pins/triton-rocm.txt
+  pull_request:
+    paths:
+      - .github/workflows/build-triton-wheel.yml
+      - .github/scripts/build_triton_wheel.py
+      - .github/ci_commit_pins/triton.txt
+      - .ci/docker/ci_commit_pins/triton.txt
+      - .ci/docker/ci_commit_pins/triton-rocm.txt
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  build-wheel:
+    name: "Build Triton Wheel"
+    runs-on: [self-hosted, linux.2xlarge]
+    strategy:
+      fail-fast: false
+      matrix:
+        py_vers: [ "3.8", "3.9", "3.10", "3.11", "3.12" ]
+        device: ["cuda", "rocm"]
+        include:
+          - device: "rocm"
+            rocm_version: "6.1"
+          - device: "cuda"
+            rocm_version: ""
+    timeout-minutes: 40
+    env:
+      DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux-rocm:{0}', matrix.rocm_version) || 'pytorch/manylinux-builder:cpu' }}
+      PY_VERS: ${{ matrix.py_vers }}
+      BUILD_DEVICE: ${{ matrix.device }}
+    steps:
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: ${{ env.DOCKER_IMAGE }}
+
+      - name: Build Triton wheel
+        env:
+          IS_RELEASE_TAG: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
+        run: |
+          set -x
+          mkdir -p "${RUNNER_TEMP}/artifacts/"
+          container_name=$(docker run \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}:/pytorch" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w /artifacts/ \
+            "${DOCKER_IMAGE}"      \
+          )
+
+          # Determine python executable for given version
+          case $PY_VERS in
+          3.8)
+            PYTHON_EXECUTABLE=/opt/python/cp38-cp38/bin/python
+            ;;
+          3.9)
+            PYTHON_EXECUTABLE=/opt/python/cp39-cp39/bin/python
+            ;;
+          3.10)
+            PYTHON_EXECUTABLE=/opt/python/cp310-cp310/bin/python
+            ;;
+          3.11)
+            PYTHON_EXECUTABLE=/opt/python/cp311-cp311/bin/python
+            ;;
+          3.12)
+            PYTHON_EXECUTABLE=/opt/python/cp312-cp312/bin/python
+            ;;
+          *)
+            echo "Unsupported python version ${PY_VERS}"
+            exit 1
+            ;;
+          esac
+
+          BUILD_ROCM=""
+          if [[ "$BUILD_DEVICE" == "rocm" ]]; then
+            BUILD_ROCM="--build-rocm"
+          fi
+
+          RELEASE=""
+          if [[ "${IS_RELEASE_TAG}" == true ]]; then
+            RELEASE="--release"
+          fi
+
+          docker exec -t "${container_name}" yum install -y zlib-devel zip
+          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==67.4.0
+          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" /pytorch/.github/scripts/build_triton_wheel.py $BUILD_ROCM $RELEASE
+          docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: pytorch-triton-wheel-${{ matrix.py_vers }}-${{ matrix.device }}
+          if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/*
+
+      - name: Teardown Linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        if: always()
+
+  upload-wheel:
+    runs-on: ubuntu-22.04
+    needs: build-wheel
+    permissions:
+      id-token: write
+      contents: read
+    container:
+      image: continuumio/miniconda3:4.12.0
+    environment: ${{ (github.event_name == 'push' && (github.event.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v'))) && 'conda-aws-upload' || '' }}
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Configure AWS credentials(PyTorch account) for main
+        if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/main' }}
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: arn:aws:iam::749337293305:role/gha_workflow_nightly_build_wheels
+          aws-region: us-east-1
+
+      - name: Configure AWS credentials(PyTorch account) for RC builds
+        if: ${{ github.event_name == 'push' &&  (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/')) }}
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: arn:aws:iam::749337293305:role/gha_workflow_test_build_wheels
+          aws-region: us-east-1
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          # Download all available artifacts
+          path: ${{ runner.temp }}/artifacts-all
+
+      - name: Select Wheel Artifacts
+        shell: bash
+        run: |
+          set -x
+          mkdir -p "${RUNNER_TEMP}/artifacts/"
+          mv "${RUNNER_TEMP}"/artifacts-all/pytorch-triton-wheel-*/* "${RUNNER_TEMP}/artifacts/"
+
+      - name: Set DRY_RUN (only for tagged pushes)
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) }}
+        shell: bash
+        run: |
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
+
+      - name: Set UPLOAD_CHANNEL (only for tagged pushes)
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/v') }}
+        shell: bash
+        run: |
+          set -ex
+
+          # reference ends with an RC suffix
+          if [[ "${GITHUB_REF_NAME}" = *-rc[0-9]* ]]; then
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
+          fi
+
+      # NB: This step is gated by DRY_RUN, which is enabled everywhere except main and release branches
+      - name: Upload binaries
+        env:
+          PACKAGE_TYPE: wheel
+          # The UPLOAD_SUBFOLDER needs to be empty here so that triton wheels are uploaded
+          # to nightly or test
+          UPLOAD_SUBFOLDER: ""
+          PKG_DIR: ${{ runner.temp }}/artifacts
+        shell: bash
+        run: |
+          set -ex
+          bash .circleci/scripts/binary_upload.sh
+
+  build-conda:
+    name: "Build Triton Conda"
+    runs-on: [self-hosted, linux.2xlarge]
+    strategy:
+      fail-fast: false
+      matrix:
+        py_vers: [ "3.8", "3.9", "3.10", "3.11", "3.12" ]
+    timeout-minutes: 40
+    env:
+      DOCKER_IMAGE: pytorch/conda-builder:cpu
+      PY_VERS: ${{ matrix.py_vers }}
+    steps:
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: ${{ env.DOCKER_IMAGE }}
+
+      - name: Build Triton conda package
+        env:
+          IS_RELEASE_TAG: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
+        run: |
+          set -x
+          mkdir -p "${RUNNER_TEMP}/artifacts/"
+          container_name=$(docker run \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}:/pytorch" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w /artifacts/ \
+            "${DOCKER_IMAGE}" \
+          )
+
+          RELEASE=""
+          if [[ "${IS_RELEASE_TAG}" == true ]]; then
+            RELEASE="--release"
+          fi
+
+          docker exec -t "${container_name}" yum install -y llvm11 llvm11-devel llvm11-static llvm11-libs zlib-devel
+          docker exec -t "${container_name}" python /pytorch/.github/scripts/build_triton_wheel.py --build-conda --py-version="${PY_VERS}" $RELEASE
+          docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: pytorch-triton-conda-${{ matrix.py_vers }}
+          if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/*
+
+      - name: Teardown Linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        if: always()
+
+  upload-conda:
+    runs-on: ubuntu-22.04
+    needs: build-conda
+    container:
+      image: continuumio/miniconda3:4.12.0
+    environment: ${{ (github.event_name == 'push' && (github.event.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v'))) && 'conda-aws-upload' || '' }}
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          # Download all available artifacts
+          path: ${{ runner.temp }}/artifacts-all
+
+      - name: Select Conda Artifacts
+        shell: bash
+        run: |
+          set -x
+          mkdir -p "${RUNNER_TEMP}/artifacts/"
+          mv "${RUNNER_TEMP}"/artifacts-all/pytorch-triton-conda-*/* "${RUNNER_TEMP}/artifacts/"
+
+      - name: Set DRY_RUN (only for tagged pushes)
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) }}
+        shell: bash
+        run: |
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
+
+      - name: Set UPLOAD_CHANNEL (only for tagged pushes)
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/v') }}
+        shell: bash
+        run: |
+          set -ex
+
+          # reference ends with an RC suffix
+          if [[ "${GITHUB_REF_NAME}" = *-rc[0-9]* ]]; then
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
+          fi
+
+      # NB: This step is gated by DRY_RUN, which is enabled everywhere except nightly and release branches
+      - name: Upload binaries to Anaconda
+        env:
+          PACKAGE_TYPE: conda
+          PKG_DIR: ${{ runner.temp }}/artifacts
+          # When running these on pull_request events these should be blank
+          CONDA_PYTORCHBOT_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+          CONDA_PYTORCHBOT_TOKEN_TEST: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
+        shell: bash
+        run: |
+          set -ex
+
+          if [[ "${UPLOAD_CHANNEL:-nightly}" == "nightly" ]]; then
+            export ANACONDA_API_TOKEN="${CONDA_PYTORCHBOT_TOKEN}"
+          else
+            export ANACONDA_API_TOKEN="${CONDA_PYTORCHBOT_TOKEN_TEST}"
+          fi
+          bash .circleci/scripts/binary_upload.sh
