@@ -62,6 +62,9 @@ else:
         def __init__(self) -> None:
             self.mesh_stack: List[DeviceMesh] = []
             self.child_to_parent_mapping: Dict[DeviceMesh, DeviceMesh] = {}
+            self.mesh_dim_group_options: Dict[
+                int, Tuple[str, Optional[ProcessGroup.Options]]
+            ] = {}
 
         def get_current_mesh(self) -> "DeviceMesh":
             if len(self.mesh_stack) == 0:
@@ -140,6 +143,14 @@ else:
                 )
             return not_none(device_mesh.mesh_dim_names.index(mesh_dim_name))
 
+        def _set_mesh_dim_group_options(
+            self,
+            dim: int,
+            backend: str,
+            pg_options: Optional[ProcessGroup.Options] = None,
+        ) -> None:
+            self.mesh_dim_group_options[dim] = (backend, pg_options)
+
     _mesh_resources: _MeshEnv = _MeshEnv()
 
     def _get_device_handle(device_type: str = "cuda"):
@@ -150,14 +161,6 @@ else:
         return the corresponding module.
         """
         return getattr(torch, device_type, None)
-
-    _mesh_dim_group_options: Dict[int, Tuple[str, ProcessGroup.Options]] = {}
-
-    def _set_mesh_dim_group_options(
-        dim: int, backend: str, pg_options: ProcessGroup.Options
-    ) -> None:
-        global _mesh_dim_group_options
-        _mesh_dim_group_options[dim] = (backend, pg_options)
 
     class DeviceMesh:
         """
@@ -223,7 +226,7 @@ else:
 
             # private field to pre-generate DeviceMesh's hash
             self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
-            self._parent_mesh: Optional["DeviceMesh"] = None
+            self._parent_mesh: Optional[DeviceMesh] = None
             self._thread_id = threading.get_ident()
 
             # Skip process group initialization if xla device or init backend is False
@@ -305,13 +308,19 @@ else:
                     for dim_mesh in pg_ranks_by_dim:
                         subgroup_ranks = dim_mesh.tolist()
 
+                        # Respect dim group options specified via _MeshEnv.set_dim_group_options().
+                        # Inherit from the parent group if no options are specified for the group.
+                        if dim in _mesh_resources.mesh_dim_group_options:
+                            (
+                                backend,
+                                pg_options,
+                            ) = _mesh_resources.mesh_dim_group_options[dim]
+                        else:
+                            backend, pg_options = None, None
+
                         # We temporarily revert the re-use subgroup, since it breaks two internal tests.
                         # Temporarily reverting to resolve test timeout while root-causing.
                         # TODO: Add two tests to cover internal tests scenarios and re-enable reuse subgroup if exists.
-                        if dim in _mesh_dim_group_options:
-                            backend, pg_options = _mesh_dim_group_options[dim]
-                        else:
-                            backend, pg_options = None, None
                         dim_group = new_group(
                             ranks=subgroup_ranks,
                             backend=backend,

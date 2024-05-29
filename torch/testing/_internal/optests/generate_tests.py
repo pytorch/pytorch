@@ -569,7 +569,7 @@ class OpCheckMode(TorchFunctionMode):
         if (
             torch.jit.is_tracing()
             or torch.jit.is_scripting()
-            or torch._dynamo.is_compiling()
+            or torch.compiler.is_compiling()
         ):
             return func(*args, **kwargs)
         # Pre-existing code may not use the .default overload. If we see an

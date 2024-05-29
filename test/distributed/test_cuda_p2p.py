@@ -11,6 +11,7 @@ from torch.distributed._cuda_p2p import (
     get_cuda_p2p_backend,
     get_p2p_buffer_size,
     is_cuda_p2p_group,
+    p2p_usage_counter,
 )
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
@@ -18,6 +19,8 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
@@ -45,6 +48,7 @@ def requires_cuda_p2p_access():
     )
 
 
+@instantiate_parametrized_tests
 @requires_nccl()
 @requires_cuda_p2p_access()
 class ProcessGroupCudaP2PTest(MultiProcessTestCase):
@@ -141,7 +145,8 @@ class ProcessGroupCudaP2PTest(MultiProcessTestCase):
 
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
-    def test_fused_all_gather_matmul(self) -> None:
+    @parametrize("gather_dim", [0, 1])
+    def test_fused_all_gather_matmul(self, gather_dim: int) -> None:
         B = 8
         M = 64
         N = 16
@@ -158,15 +163,19 @@ class ProcessGroupCudaP2PTest(MultiProcessTestCase):
         Bs = [torch.rand(K, N, device="cuda") for _ in range(3)]
 
         ag_output_0, mm_outputs_0 = _fused_all_gather_matmul_fallback(
-            A_shard, Bs, gather_dim=0, group_name=group.group_name
+            A_shard, Bs, gather_dim=gather_dim, group_name=group.group_name
         )
-        ag_output_1, mm_outputs_1 = torch.ops.cuda_p2p.fused_all_gather_matmul(
-            A_shard, Bs, gather_dim=0, group_name=group.group_name
-        )
+        with p2p_usage_counter() as counter:
+            ag_output_1, mm_outputs_1 = torch.ops.cuda_p2p.fused_all_gather_matmul(
+                A_shard, Bs, gather_dim=gather_dim, group_name=group.group_name
+            )
+            assert counter["fused_all_gather_matmul"] == 1
 
         assert torch.allclose(ag_output_0, ag_output_1)
+        assert ag_output_0.stride() == ag_output_1.stride()
         for mm_output_0, mm_output_1 in zip(mm_outputs_0, mm_outputs_1):
             assert torch.allclose(mm_output_0, mm_output_1)
+            assert mm_output_0.stride(), mm_output_1.stride()
 
         dist.barrier()
         torch.cuda.synchronize()
@@ -174,7 +183,8 @@ class ProcessGroupCudaP2PTest(MultiProcessTestCase):
 
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
-    def test_fused_matmul_reduce_scatter(self) -> None:
+    @parametrize("scatter_dim", [0, 1])
+    def test_fused_matmul_reduce_scatter(self, scatter_dim: int) -> None:
         B = 8
         M = 64
         N = 16
@@ -191,13 +201,16 @@ class ProcessGroupCudaP2PTest(MultiProcessTestCase):
         B = torch.rand(K, N, device="cuda")
 
         output_0 = _fused_matmul_reduce_scatter_fallback(
-            A, B, "avg", scatter_dim=0, group_name=group.group_name
+            A, B, "avg", scatter_dim=scatter_dim, group_name=group.group_name
         )
-        output_1 = torch.ops.cuda_p2p.fused_matmul_reduce_scatter(
-            A, B, "avg", scatter_dim=0, group_name=group.group_name
-        )
+        with p2p_usage_counter() as counter:
+            output_1 = torch.ops.cuda_p2p.fused_matmul_reduce_scatter(
+                A, B, "avg", scatter_dim=scatter_dim, group_name=group.group_name
+            )
+            assert counter["fused_matmul_reduce_scatter"] == 1
 
         assert torch.allclose(output_0, output_1)
+        assert output_0.stride() == output_1.stride()
 
         dist.barrier()
         torch.cuda.synchronize()
