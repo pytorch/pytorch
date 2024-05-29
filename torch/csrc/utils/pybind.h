@@ -215,7 +215,7 @@ struct type_caster<at::ScalarType> {
       const at::ScalarType& src,
       return_value_policy /* policy */,
       handle /* parent */) {
-    return handle((PyObject*)torch::getTHPDtype(src));
+    return Py_NewRef(torch::getTHPDtype(src));
   }
 };
 
