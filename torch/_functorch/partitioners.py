@@ -1352,7 +1352,7 @@ def dp_knapsack(
     )
     runtimes = torch.tensor(runtimes, dtype=torch.float32, device="cpu")
 
-    # Quantize the max_memory capacity
+    # Quantized pseudopolynomial DP for 0-1 Knapsack
     quantized_max_memory = round(max_memory * S)
 
     n = len(memory)
@@ -1362,7 +1362,6 @@ def dp_knapsack(
         (n + 1, quantized_max_memory + 1), dtype=torch.float32, device="cpu"
     )
 
-    # Fill the DP table using vectorized operations
     for i in range(1, n + 1):
         current_memory = quantized_memory[i - 1]
         current_runtime = runtimes[i - 1]
@@ -1550,15 +1549,9 @@ def choose_saved_values_set(
     def print_budget_real_mem(act_size, name=""):
         print(f"{get_mem_ratio(act_size):.2f}: {act_size:.2f}GB ({name})")
 
-    # print_budget_real_mem(
-    #     estimate_activations_size(runtime_optimized_saved_values), "default"
-    # )
-    # print_budget_real_mem(
-    #     estimate_activations_size(more_aggressive_saved_values), "more aggressive"
-    # )
-    # print_budget_real_mem(
-    #     estimate_activations_size(aggressive_recomputation_saved_values), "aggressive"
-    # )
+    # default: runtime_optimized_saved_values
+    # more aggressive: more_aggressive_saved_values
+    # full aggressive: aggressive_recomputation_saved_values
 
     all_recomputable_banned_nodes = sorted(
         recomputable_banned_nodes, key=_size_of, reverse=True

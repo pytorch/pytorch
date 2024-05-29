@@ -1,4 +1,6 @@
 # Owner(s): ["oncall: pt2"]
+import random
+
 import torch
 import torch._functorch.config as config
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -13,9 +15,7 @@ def compile_with_ac(f, memory_budget):
 def get_act_mem(f):
     out = f()
     out.backward()
-    # start_mem = torch.cuda.memory_allocated()
     start_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
-    # old_stats = torch.cuda.memory_stats()
     out = f()
     cur_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
     act_mem = (cur_mem - start_mem) / (1024 * 1024)
@@ -24,11 +24,12 @@ def get_act_mem(f):
 
 
 def get_bw_flops(f):
+    # Normalized so that a 512 square matmul returns 1
     f().backward()
     out = f()
     with FlopCounterMode(display=False) as mode:
         out.backward()
-    return mode.get_total_flops() / (1024 * 1024)
+    return mode.get_total_flops() / (512**3 * 2)
 
 
 def get_mem_and_flops(f, memory_budget=None):
@@ -44,6 +45,10 @@ def get_mem_and_flops(f, memory_budget=None):
 
 
 class MemoryBudgetTest(TestCase):
+    def setUp(self):
+        super().setUp()
+        torch.set_default_device("cuda")
+
     def test_rematerializes_cheap(self):
         def f(x, w):
             x = x.cos()
@@ -81,13 +86,12 @@ class MemoryBudgetTest(TestCase):
             return f(x, ws)
 
         eager_mem, eager_flops = get_mem_and_flops(call)
-        one_mm_flops = 2 * (512**3) // (1024**2)
         for budget in range(0, 11):
             mem, flops = get_mem_and_flops(call, memory_budget=budget / 10)
             if budget <= 5:
                 # We start saving the matmuls
                 self.assertEqual(mem, budget)
-                self.assertEqual(flops, eager_flops + (5 - budget) * one_mm_flops)
+                self.assertEqual(flops, eager_flops + (5 - budget))
             elif budget < 10:
                 # We're only recomputing the `cos` operations
                 self.assertEqual(mem, 5.0)
@@ -135,9 +139,28 @@ class MemoryBudgetTest(TestCase):
                     11,  # 11 + 2
                     7,  # 4 + 3
                     6,  # 4 + 2
+                    5,  # 3 + 2
+                ],
+            ),
+            (
+                [3, 5, 11, 17, 14],
+                [
+                    42,  # 17 + 14 + 9
+                    30,  # 11 + 15 + 5
+                    19,  # 11 + 5 + 3
+                    8,  # 5 + 3
+                    3,  # 3
                 ],
             ),
         ]
+        random.seed(0)
+        random_arr = [random.randint(0, 50) for _ in range(10)]
+        exact_sums = []
+        for i in range(10):
+            random.shuffle(random_arr)
+            exact_sums.append(sum(random_arr[:i]))
+        weight_configs.append((random_arr, exact_sums))
+
         for weight_shapes, exact_solves in weight_configs:
             ws = make_weights(weight_shapes)
 
@@ -151,8 +174,28 @@ class MemoryBudgetTest(TestCase):
                 mem, _ = get_mem_and_flops(call, memory_budget=mem_achieved / total_mem)
                 self.assertEqual(mem, mem_achieved)
 
+    def test_prioritize_cheaper_matmul(self):
+        def f(xs, ws):
+            xs = [torch.mm(x, w).cos() for x, w in zip(xs, ws)]
+            return sum([x.sum() for x in xs])
+
+        x1 = torch.randn(512, 512, requires_grad=True)
+        w1 = torch.randn(512, 2048, requires_grad=True)
+        x2 = torch.randn(1024, 1024, requires_grad=True)
+        w2 = torch.randn(1024, 1024, requires_grad=True)
+
+        def call():
+            return f([x1, x2], [w1, w2])
+
+        eager_mem, eager_flops = get_mem_and_flops(call)
+        self.assertEqual(eager_mem, 8)
+        self.assertEqual(eager_flops, 24)
+        comp_mem, comp_flops = get_mem_and_flops(call, memory_budget=0.5)
+        self.assertEqual(comp_mem, 4)
+        # We are recomputing x1 @ w1 here!
+        self.assertEqual(comp_flops, eager_flops + 4)
+
 
 if __name__ == "__main__":
     if HAS_CUDA:
-        torch.set_default_device("cuda")
         run_tests()
