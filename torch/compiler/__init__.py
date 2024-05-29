@@ -60,9 +60,9 @@ def allow_in_graph(fn):
     +========================+=======================+================================+
     | no decorator           | trace inside          | trace inside                   |
     +------------------------+-----------------------+--------------------------------+
-    | allow_in_graph         | opaque                | trace inside                   |
+    | allow_in_graph         | opaque callable       | trace inside                   |
     +------------------------+-----------------------+--------------------------------+
-    | custom op              | opaque                | opaque                         |
+    | custom op              | opaque callable       | opaque callable                |
     +------------------------+-----------------------+--------------------------------+
 
     One common use case for :func:`allow_in_graph()` is as an escape hatch for the compiler

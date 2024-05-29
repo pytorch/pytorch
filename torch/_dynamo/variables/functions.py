@@ -644,9 +644,10 @@ class SkipFunctionVariable(VariableTracker):
                     f"If it is a Python builtin, please file an issue on GitHub "
                     f"so the PyTorch team can add support for it and see the next case for a workaround. "
                     f"If it is a third-party C/C++ Python extension, please "
-                    f"wrap it into a PyTorch-understood custom operator "
+                    f"either wrap it into a PyTorch-understood custom operator "
                     f"(see https://pytorch.org/docs/main/notes/custom_operators.html "
-                    f"for more details)"
+                    f"for more details) or, if it is traceable, use "
+                    f"torch.compiler.allow_in_graph."
                 )
                 # also warn on it because most users won't see the graph break message
                 warnings.warn(msg)
