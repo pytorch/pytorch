@@ -315,20 +315,6 @@ def aoti_compile_with_persistent_cache(
     if not persistent_cache_lib.exists():
         persistent_cache_lib.mkdir()
 
-    # Regarding aten operations with `out` parameter, we need to enable
-    # keep_inference_input_mutations to guarantee the correctness as
-    # the `out` parameter needs to be mutated.
-    options = (
-        {
-            "aot_inductor.keep_inference_input_mutations": True,
-        }
-        if options is None
-        else {
-            **options,
-            "aot_inductor.keep_inference_input_mutations": True,
-        }
-    )
-
     dynamic = dynamic and not torch._dynamo.config.assume_static_by_default
 
     with mock.patch.dict(
@@ -346,7 +332,8 @@ def aoti_compile_with_persistent_cache(
                 f,
                 args,
                 kwargs,
-                dynamic_shapes,
+                dynamic_shapes=dynamic_shapes,
+                remove_runtime_assertions=remove_runtime_assertions,
                 disable_constraint_solver=disable_constraint_solver,
                 # Disabling this flag, because instead we can rely on the mapping
                 # dynamo_flat_name_to_original_fqn which is coming from Dynamo.
