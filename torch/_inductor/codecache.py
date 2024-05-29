@@ -53,19 +53,16 @@ from torch._dynamo.device_interface import get_registered_device_interfaces
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
-<<<<<<< ck-inductor
 from torch._inductor.codegen.rocm.compile_command import (
     rocm_compile_command,
     rocm_compiler,
 )
-=======
 from torch._inductor.compile_worker.subproc_pool import (
     _warm_process_pool,
     AnyPool,
     SubprocPool,
 )
 from torch._inductor.compile_worker.watchdog import _async_compile_initializer
->>>>>>> main
 from torch._inductor.runtime.compile_tasks import (
     _module_to_triton_kernel,
     _reload_python_module,

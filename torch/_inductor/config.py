@@ -234,19 +234,12 @@ force_same_precision = (
 )
 
 # Specify candidate backends for gemm autotune.
-<<<<<<< ck-inductor
 # Possible choices are combinations of: ATen, Triton, CUTLASS, CK, CPP.
 # ATen: default Pytorch ATen kernels.
 # Triton: Triton templates defined in torch inductor (AMD and NVidia GPUs).
 # CUTLASS: Cutlass templates and kernels (NVidia GPUs only).
 # CK: Composable Kernel templates and kernels (AMD Instinct GPUs only).
-=======
-# Possible choices are combinations of: ATen, Triton, CUTLASS, CPP.
-# ATen: default Pytorch ATen kernels.
-# Triton: Triton templates defined in torch inductor.
-# CUTLASS: Cutlass templates and kernels.
 # CPP: CPP templates and kernels for CPU.
->>>>>>> main
 max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP"
 ).upper()
