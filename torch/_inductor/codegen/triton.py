@@ -18,7 +18,7 @@ from torch._dynamo.utils import preserve_rng_state
 from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
 from torch._prims_common import is_integer_dtype
 from torch.utils._triton import has_triton_package
-from ...utils._sympy.symbol import symbol_is_type, SymT
+from ...utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from ...utils._sympy.value_ranges import ValueRanges
 
 from .. import config, ir
@@ -108,6 +108,9 @@ class IndexingOptions:
 
     def has_mask(self):
         return bool(self.mask_vars)
+
+    def has_indirect(self):
+        return free_symbol_is_type(self.index, SymT.TMP)
 
     def has_rindex(self):
         return self._has_rindex
@@ -231,6 +234,9 @@ class BlockPtrOptions:
         advance = ["0"] * len(self.shape)
         advance[self.offsets.index("roffset")] = "RBLOCK"
         return V.kernel.index_to_str(advance)
+
+    def has_indirect(self):
+        return False  # block_ptr can't do indirect indexing
 
     def has_rindex(self):
         return "RBLOCK" in self.block_shape
@@ -1027,26 +1033,15 @@ class TritonKernel(SIMDKernel):
         if config.triton.multi_kernel:
             threshold *= 16
         last_numel = self.numels[-1]
-        if not isinstance(last_numel, (int, sympy.Integer)):
-            # Not static
-            return False
-        hint = V.graph.sizevars.size_hint(last_numel)
-        if hint > threshold:
-            return False
-        # will need to recompile if we cross a larger power of 2 boundary
-        V.graph.sizevars.guard_leq(self.numels[-1], next_power_of_2(hint))  # type: ignore[arg-type]
-        return True
+        return V.graph.sizevars.statically_known_leq(last_numel, threshold)  # type: ignore[arg-types]
 
     def want_no_x_dim(self):
         return (
             self.reduction_hint == ReductionHint.INNER
             and self.persistent_reduction
             and len(self.numels) == 2
-            and self.numels[-1] >= 256
+            and V.graph.sizevars.statically_known_geq(self.numels[-1], 256)  # type: ignore[arg-types]
         )
-
-    def generate_assert(self, check):
-        return torch.version.hip is None and super().generate_assert(check)
 
     @property
     def assert_function(self) -> str:
@@ -1218,20 +1213,49 @@ class TritonKernel(SIMDKernel):
         value = f"{value}.to({triton_store_type(V.graph.get_dtype(name))})"
         return f"tl.store({block_ptr}, {value}{other})"
 
-    def load_mask(self, var):
-        mask = ""
-        mask_vars = set(var.mask_vars)
-        if self._load_mask:
-            mask_vars.add(self._load_mask)
+    def check_bounds(
+        self,
+        expr: sympy.Expr,
+        size: sympy.Expr,
+        lower: bool,
+        upper: bool,
+    ):
+        if not (lower or upper):
+            return
 
-        if mask_vars:
-            mask = (
-                f"{next(iter(mask_vars))}"
-                if len(mask_vars) == 1
-                # sorted for deterministic order
-                else f"({' & '.join(sorted(map(str, mask_vars)))})"
-            )
-        return mask
+        assert isinstance(expr, sympy.Expr)
+        indexing = self.indexing(expr, block_ptr=False)
+        assert isinstance(indexing, IndexingOptions)
+
+        index_str = indexing.index_str
+        mask_str = indexing.mask_str if indexing.has_mask() else None
+        size_str = V.kernel.sexpr(self.rename_indexing(size)) if upper else None
+
+        # expr is already wrapped
+        line = self.indirect_assert(
+            index_str, "0" if lower else None, size_str, mask_str
+        )
+
+        indirect = self.is_indirect_indexing(expr) or any(
+            isinstance(m, TritonCSEVariable) for m in indexing.mask_vars
+        )
+        buffer = self.get_load_buffer(indexing)
+        self.cse.generate(buffer, line, assignment=False)
+
+    def get_load_buffer(self, indexing):
+        if indexing.has_indirect() or indexing.has_tmpmask():
+            # Masked loads must come after the mask is computed
+            return self.compute
+        elif (
+            self.inside_reduction
+            and self.range_trees[-1].is_loop
+            and not indexing.has_rindex()
+        ):
+            # can lift a common load outside of reduction loop
+            # One exception is when this is an indirect_load.
+            return self.body
+        else:
+            return self.loads
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
@@ -1312,21 +1336,7 @@ class TritonKernel(SIMDKernel):
                 # NOTE: Currently causes hangs on bool UTs for ROCm
                 line += ".to(tl.int1)"
 
-        if has_tmpmask:
-            # Masked loads must come after the mask is computed
-            load_buffer = self.compute
-        elif (
-            self.inside_reduction
-            and self.range_trees[-1].is_loop
-            and not indirect_indexing
-            and not has_rindex
-        ):
-            # can lift a common load outside of reduction loop
-            # One exception is when this is an indirect_load.
-            load_buffer = self.body
-        else:
-            load_buffer = self.loads
-
+        load_buffer = self.get_load_buffer(indexing)
         result_var = self.cse.generate(load_buffer, line)
         assert isinstance(result_var, TritonCSEVariable)
         result_var.mask_vars = indexing.mask_vars  # type: ignore[assignment]
@@ -2227,9 +2237,16 @@ class TritonKernel(SIMDKernel):
                 simplified_tree_numel = V.graph.sizevars.simplify(tree.numel)
                 if isinstance(simplified_tree_numel, (sympy.Integer, int)):
                     val = int(simplified_tree_numel)
+                    val = next_power_of_2(val)
                 else:
-                    continue
-                val = next_power_of_2(val)
+                    val = 128
+                    while not V.graph.sizevars.statically_known_leq(
+                        simplified_tree_numel, val
+                    ):
+                        assert (
+                            val <= 16 * 1024
+                        ), f"Failed to find static RBLOCK for {simplified_tree_numel}"
+                        val *= 2
                 code.writeline(f"RBLOCK: tl.constexpr = {val}")
 
             if tree.prefix == "x" and self.no_x_dim:

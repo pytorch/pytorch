@@ -15,7 +15,6 @@ import numpy as np
 import onnx
 import onnx_test_common
 import parameterized
-import torch
 import torchvision
 from model_defs import (
     lstm_flattening_result,
@@ -37,6 +36,8 @@ from pytorch_test_common import (
     skipShapeChecking,
     skipTraceTest,
 )
+
+import torch
 
 from torch import Tensor
 from torch.nn.utils import rnn as rnn_utils
