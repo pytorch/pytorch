@@ -455,18 +455,27 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 else:
                     return self.binary_fn(x1, x2)
 
+        dtypes = [
+            torch.float,
+        ]
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            dtypes.append(torch.float16)
         cl_format = torch.channels_last if dim == 4 else torch.channels_last_3d
         test_memory_format = [torch.contiguous_format, cl_format]
         options = itertools.product(
             binary_list,
             [True, False],
             test_memory_format,
+            dtypes,
         )
 
         for (
             binary_fn,
             has_relu,
             memory_format,
+            dtype,
         ) in options:
             metrics.reset()
             if dim == 4:
@@ -483,8 +492,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
             match_nodes = binary_list[binary_fn][1]
             if has_relu:
                 match_nodes += 1
-            self._test_common(mod, (v,), match_count, match_nodes + 2)
+            self._test_common(
+                mod, (v,), match_count, match_nodes + 2, check_autocast=dtype
+            )
             generated_kernel_count = 0
+            if dtype != torch.float32:
+                # "to_dtype" for input
+                generated_kernel_count = 1
             if memory_format == torch.contiguous_format:
                 # "to_dtype + to_channel_last" for input, "to_contiguous" for output
                 generated_kernel_count = 2
