@@ -41,7 +41,7 @@ def create_rebuild_stack(a):
     while todo:
         obj = todo.pop()
         inner_keys, metadata = obj.__tensor_flatten__()
-        rebuild_stack.append((obj, metadata, inner_keys, obj.size, obj.stride()))
+        rebuild_stack.append((obj, metadata, inner_keys, obj.size(), obj.stride()))
         for attr_name in inner_keys:
             val = getattr(obj, attr_name)
             if not is_traceable_wrapper_subclass(val):
@@ -96,10 +96,10 @@ def unwrap_tensor_subclasses(wrapped_args, *, is_joint_structure: bool):
     def concat_inner_tensors_from_subclasses(xs):
         xs_inner = []
         for x in xs:
-            if type(x) is Tensor:
-                xs_inner.append(x)
-            else:
+            if is_traceable_wrapper_subclass(x):
                 xs_inner.extend(create_rebuild_stack(x)[0])
+            else:
+                xs_inner.append(x)
         return xs_inner
 
     if is_joint_structure:

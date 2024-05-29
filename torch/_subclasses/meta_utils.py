@@ -703,10 +703,11 @@ class MetaConverter:
                     current_source = attr_source
 
                 context = None
-                current_context = symbolic_context
-                for a in attr_list:
-                    context = current_context.inner_contexts[a]
-                    current_context = context
+                if symbolic_context is not None:
+                    current_context = symbolic_context
+                    for a in attr_list:
+                        context = current_context.inner_contexts[a]
+                        current_context = context
 
                 r = callback(
                     lambda: empty_create(
