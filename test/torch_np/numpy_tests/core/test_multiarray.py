@@ -291,6 +291,7 @@ class TestFlag(TestCase):
         assert_equal(self.a.flags["X"], False)
         assert_equal(self.a.flags["WRITEBACKIFCOPY"], False)
 
+    @xfail  # invalid dtype
     def test_string_align(self):
         a = np.zeros(4, dtype=np.dtype("|S4"))
         assert_(a.flags.aligned)
@@ -298,6 +299,7 @@ class TestFlag(TestCase):
         a = np.zeros(5, dtype=np.dtype("|S4"))
         assert_(a.flags.aligned)
 
+    @xfail  # structured dtypes
     def test_void_align(self):
         a = np.zeros(4, dtype=np.dtype([("a", "i4"), ("b", "i4")]))
         assert_(a.flags.aligned)
@@ -1856,7 +1858,7 @@ class TestMethods(TestCase):
         y = np.searchsorted(x, x[-1])
         assert_equal(y, 2)
 
-    @xpassIfTorchDynamo  # (
+    @xfail  # (
     #    reason="'searchsorted_out_cpu' not implemented for 'ComplexDouble'"
     # )
     def test_searchsorted_complex(self):
@@ -5983,6 +5985,11 @@ class TestPEP3118Dtype(TestCase):
         self._check("i:f0:", [("f0", "i")])
 
 
+# NOTE: xpassIfTorchDynamo below
+# 1. TODO: torch._numpy does not handle/model _CopyMode
+# 2. order= keyword not supported (probably won't be)
+# 3. Under TEST_WITH_TORCHDYNAMO many of these make it through due
+#    to a graph break leaving the _CopyMode to only be handled by numpy.
 @skipif(numpy.__version__ < "1.23", reason="CopyMode is new in NumPy 1.22")
 @xpassIfTorchDynamo
 @instantiate_parametrized_tests

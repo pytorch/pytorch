@@ -1615,6 +1615,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return np.ones_like(x, dtype=np.float64)
 
     @make_test
+    def test_numpy_dtype_call_in_function(x):
+        dt = np.dtype("float")
+        return np.full_like(x, 2.4, dtype=dt)
+
+    @make_test
     def test_numpy_linalg(x):
         return np.linalg.norm(x.numpy(), axis=0)
 
