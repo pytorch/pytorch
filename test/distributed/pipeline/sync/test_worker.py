@@ -9,6 +9,7 @@
 import threading
 
 import pytest
+
 import torch
 
 from torch.distributed.pipeline.sync.microbatch import Batch
