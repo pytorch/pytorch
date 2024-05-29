@@ -262,7 +262,7 @@ def cuda_and_enabled_mixed_mm_and_not_int8(match):
                     aten.reshape.default,
                     CallFunction(
                         aten.cat.default,
-                        ListOf(
+                        [
                             CallFunction(
                                 aten.bitwise_and.Scalar,
                                 KeywordArg("mat2"),
@@ -273,7 +273,7 @@ def cuda_and_enabled_mixed_mm_and_not_int8(match):
                                 KeywordArg("mat2"),
                                 4,
                             ),
-                        ),
+                        ],
                         1,
                     ),
                     KeywordArg("mat2_mm_shape"),
