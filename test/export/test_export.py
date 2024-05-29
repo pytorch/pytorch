@@ -15,6 +15,7 @@ from typing import Dict, List
 import torch
 import torch._dynamo as torchdynamo
 import torch.nn.functional as F
+
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
 from torch._dynamo.test_case import TestCase
@@ -307,6 +308,17 @@ class TestExport(TestCase):
         self.assertEqual(exported_program.module()(*args), m(*args))
         args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
         self.assertEqual(exported_program.module()(*args), m(*args))
+
+        from torch._export import capture_pre_autograd_graph
+
+        gm: torch.fx.GraphModule = capture_pre_autograd_graph(
+            m, args=example_args, dynamic_shapes=dynamic_shapes
+        )
+
+        args = (torch.randn(17, 3, 256, 256), torch.ones(17, 32, 256, 256))
+        self.assertEqual(gm(*args), m(*args))
+        args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
+        self.assertEqual(gm(*args), m(*args))
 
     def test_basic_non_strict_real_tensor(self):
         class Basic(torch.nn.Module):
@@ -956,6 +968,35 @@ class TestExport(TestCase):
             6,
         )
 
+    def test_specialize_derived_dim_roots(self):
+        # dim & derived dim both specialize
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return x.reshape([-1]) + y
+
+        dy = Dim("dy", min=6)
+        x, y = torch.randn(6, 2), torch.randn(12)
+        dynamic_shapes = {
+            "x": (dy - 6, 2),
+            "y": (dy,),
+        }
+        try:
+            export(Foo(), (x, y), dynamic_shapes=dynamic_shapes)
+            raise Exception(
+                "export() call should have failed with dynamic shapes error."
+            )
+        except torch._dynamo.exc.UserError as exc:
+            expected_error_msg = (
+                "Specializations unexpectedly required \(dy\)!(.*\n)*.*"
+                ".*dy - 6.*must be specialized to 6 because the guards generated for it are too complex(.*\n)*.*"
+                "Suggested fixes(.*\n)*.*"
+                ".*dy = 12(.*\n)*.*"
+            )
+            self.assertTrue(re.search(expected_error_msg, exc.args[0]) is not None)
+            self.assertTrue(
+                "dy - 6 = 6" not in exc.args[0]
+            )  # don't suggest fix for non-root dim
+
     def test_derived_dim_out_of_order_simplified(self):
         _dimz = torch.export.Dim("_dimz", min=6, max=8)
         dimy = _dimz - 1
@@ -967,22 +1008,25 @@ class TestExport(TestCase):
                 return x + y[1:] + z[2:]
 
         foo = Foo()
-
         u, v, w = torch.randn(5), torch.randn(6), torch.randn(7)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
-            (
-                "Constraints violated \\(dimz\\)!(.*\n)*.*"
-                "The values of dimz.*must always be related to the values of _dimz - 2.*by.*(.*\n)*.*"
-                "Suggested fixes:(.*\n)*.*"
-                "dimz = _dimz"
-            ),
-        ):
+        try:
             export(
                 foo,
                 (u, v, w),
                 dynamic_shapes=({0: dimx}, {0: dimy}, {0: dimz}),
             )
+        except torch._dynamo.exc.UserError as exc:
+            expected_error_msg = (
+                "Constraints violated \(dimz\)!(.*\n)*.*"
+                "The values of dimz.*must always be related to the values of _dimz - 2.*by.*(.*\n)*.*"
+                "Suggested fixes:(.*\n)*.*"
+                "dimz = _dimz"
+            )
+            self.assertTrue(re.search(expected_error_msg, exc.args[0]) is not None)
+            # don't suggest fix for non-root dims, and no need to update root here
+            self.assertTrue("_dimz - 2 = Dim(" not in exc.args[0])
+            self.assertTrue("_dimz - 1 = _dimz - 1" not in exc.args[0])
+            self.assertTrue("_dimz = Dim(" not in exc.args[0])
 
         dimz = dimx + 2  # works, effectively = _dimz
         ep = export(
@@ -1499,6 +1543,50 @@ class TestExport(TestCase):
         self.assertTrue(torch.allclose(orig_res[1], ep_res[1]))
         self.assertTrue(torch.allclose(orig_res[2], ep_res[2]))
 
+    def test_unflatten_asserts(self):
+        # TODO: strict-export fails
+        class M1(torch.nn.Module):
+            def forward(self, x, y):
+                b = x.item()
+
+                torch._check_is_size(b)
+                torch._check(b < y.size(0))
+                return y[:b]
+
+        class M3(torch.nn.Module):
+            def forward(self, x, y):
+                b = x.item()
+
+                torch._check_is_size(b)
+                torch._check(b < y.size(0) * 2)
+                return y[:b]
+
+        class M2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m1 = M1()
+                self.m3 = M3()
+
+            def forward(self, x, y):
+                return self.m1(x, y) + self.m3(x, y)
+
+        inputs = (torch.tensor(3), torch.randn(10))
+
+        ep = torch.export.export(
+            M2(), inputs, dynamic_shapes={"x": None, "y": (Dim("moo"),)}, strict=False
+        )
+        orig_res = M2()(*inputs)
+        ep_res = ep.module()(*inputs)
+        self.assertTrue(torch.allclose(orig_res[0], ep_res[0]))
+        self.assertTrue(torch.allclose(orig_res[1], ep_res[1]))
+        self.assertTrue(torch.allclose(orig_res[2], ep_res[2]))
+
+        unflattened = torch.export.unflatten(ep)
+        ep_res = unflattened(*inputs)
+        self.assertTrue(torch.allclose(orig_res[0], ep_res[0]))
+        self.assertTrue(torch.allclose(orig_res[1], ep_res[1]))
+        self.assertTrue(torch.allclose(orig_res[2], ep_res[2]))
+
     def test_export_func_with_var_keyword_pytree_args(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, *args, kw1, kw2, **kwargs):
@@ -1831,6 +1919,55 @@ class TestExport(TestCase):
                 inputs,
                 dynamic_shapes={"x": (batch, M, K), "y": (batch, K, N)},
             )
+
+    def test_suggested_fixes_new_roots(self):
+        from torch.export import dims
+
+        # suggested fixes should introduce new root dim for modulo guard
+        class Foo(torch.nn.Module):
+            def forward(self, x, y, z):
+                # dy = 3 * _dx
+                # dx = 3 * _dx - 1
+                # dz = 3 * _dx + 2
+                # suggested fixes results will look something like
+                # {"dx": {"eq": 3*_dx-1, "min": 5, "max": 36}, "dy": {"eq": dx+1}, ...}
+                if x.shape[0] >= 5 and x.shape[0] <= 36 and y.shape[0] % 3 == 0:
+                    return x + y[1:] + z[3:]
+
+        foo = Foo()
+        inputs = (
+            torch.randn(
+                11,
+            ),
+            torch.randn(
+                12,
+            ),
+            torch.randn(
+                14,
+            ),
+        )
+        dx, dy, dz = dims("dx", "dy", "dz")
+        dynamic_shapes = {
+            "x": (dx,),
+            "y": (dy,),
+            "z": (dz,),
+        }
+        with self.assertRaisesRegex(  # figure out regex later
+            torch._dynamo.exc.UserError,
+            (
+                "Constraints violated.*!(.*\n)*.*"
+                "Suggested fixes(.*\n)*.*"
+                "_dx = Dim\(\\'_dx\\', max=12\)(.*\n)*.*"
+                "dx = 3\*_dx - 1(.*\n)*.*"
+                "dy = 3\*_dx(.*\n)*.*"
+                "dz = 3\*_dx \+ 2"
+            ),
+        ):
+            export(Foo(), inputs, dynamic_shapes=dynamic_shapes)
+        # retry export
+        _dx = Dim("_dx", min=2, max=12)
+        dynamic_shapes = {"x": (3 * _dx - 1,), "y": (3 * _dx,), "z": (3 * _dx + 2,)}
+        export(Foo(), inputs, dynamic_shapes=dynamic_shapes)
 
     def test_dynamic_shapes_spec_with_pytree(self):
         from torch.export import Dim, export
@@ -3167,6 +3304,7 @@ def forward(self, x):
         f = Foo()
 
         ep = export(f, (torch.tensor([3]),))
+
         FileCheck().check_count(
             "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
         ).run(ep.graph_module.code)
@@ -3485,7 +3623,6 @@ graph():
         test_inp = torch.ones(8, 4)
         self.assertTrue(torch.allclose(ep.module()(test_inp), Foo().forward(test_inp)))
 
-    @testing.expectedFailureRetraceability
     def test_runtime_assert_with_size(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -5009,7 +5146,6 @@ def forward(self, x, y):
             torch._dynamo.exc.UserError,
             r".*Specializations unexpectedly required(.*\n)*"
             r"Suggested fixes:(.*\n)*"
-            r".*dy = Dim.*(.*\n)*"
             r".*dw0 = 3(.*\n)*"
             r".*dw1 = 4(.*\n)*"
             r".*dx0 = 12(.*\n)*"
@@ -5026,9 +5162,6 @@ def forward(self, x, y):
             torch._dynamo.exc.UserError,
             r".*Constraints violated(.*\n)*"
             r"Suggested fixes:(.*\n)*"
-            r".*dw0 = Dim.*(.*\n)*"
-            r".*dw1 = Dim.*(.*\n)*"
-            r".*dy = Dim.*(.*\n)*"
             r".*dz = dy(.*\n)*",
         ) as msg:
             torch.export._trace._export(

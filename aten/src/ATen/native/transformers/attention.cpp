@@ -1,3 +1,4 @@
+#include <ATen/core/TensorBody.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/TensorOperators.h>
@@ -423,7 +424,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cpu(
 }
 
 int64_t _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Tensor& value,
-        const std::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, c10::optional<double> scale){
+        const std::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, std::optional<double> scale){
   sdp::sdp_params kernel_params{query_, key, value, attn_mask_, dropout_p, is_causal};
   auto backend = sdp::select_sdp_backend_cpp(kernel_params);
   if (backend == sdp::SDPBackend::error) {
@@ -512,7 +513,7 @@ inline void validate_sdpa_input(
 // the math and memory efficient attn_mask implementation
 //  Args:
 //    attn_mask: attn_mask of shape (B, L, S) or (L, S) or (B, N_heads, L, S)
-std::optional<Tensor> convert_boolean_attn_mask(const c10::optional<Tensor>& attn_mask, caffe2::TypeMeta dtype) {
+std::optional<Tensor> convert_boolean_attn_mask(const std::optional<Tensor>& attn_mask, caffe2::TypeMeta dtype) {
   // Pass through
   if(!attn_mask.has_value()){
     return c10::nullopt;
@@ -598,7 +599,7 @@ at::Tensor post_process_flash_output(
 }
 
 int64_t handle_private_use(const Tensor& query_, const Tensor& key, const Tensor& value,
-    const std::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, c10::optional<double> scale){
+    const std::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, std::optional<double> scale){
   int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
   try {
     choice_int = _fused_sdp_choice_stub(query_.device().type(),
@@ -606,6 +607,12 @@ int64_t handle_private_use(const Tensor& query_, const Tensor& key, const Tensor
   } catch(const ::c10::Error& e){
   }
   return choice_int;
+}
+
+bool should_compute_logsumexp(const Tensor& query, const Tensor& key, const Tensor& value) {
+  const bool any_inputs_require_grad = query.requires_grad() || key.requires_grad() || value.requires_grad();
+  const bool gradmode_enabled = at::GradMode::is_enabled();
+  return any_inputs_require_grad && gradmode_enabled;
 }
 
 } // namespace
@@ -649,25 +656,15 @@ Tensor scaled_dot_product_attention(
     std::optional<double> scale) {
   validate_sdpa_input(query_, key, value, attn_mask_, dropout_p, is_causal, scale);
   int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
-  if (query_.device().type() == DeviceType::CUDA
-      || query_.device().type() == DeviceType::CPU
-      || query_.device().type() == DeviceType::HIP
-      || query_.device().type() == DeviceType::PrivateUse1){
-    if (query_.device().type() == DeviceType::PrivateUse1){
-      choice_int = handle_private_use(
+  if (_fused_sdp_choice_stub.is_device_supported(query_.device().type())) {
+    choice_int = _fused_sdp_choice_stub(query_.device().type(),
           query_, key, value, attn_mask_, dropout_p, is_causal, scale);
-    } else {
-      choice_int = _fused_sdp_choice_stub(query_.device().type(),
-          query_, key, value, attn_mask_, dropout_p, is_causal, scale);
-    }
   }
   sdp::SDPBackend backend = static_cast<sdp::SDPBackend>(choice_int);
   std::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
   switch (backend) {
     case sdp::SDPBackend::cudnn_attention: {
-      bool compute_logsumexp =
-          (query_.requires_grad() || key.requires_grad() ||
-           value.requires_grad());
+      bool compute_logsumexp = should_compute_logsumexp(query_, key, value);
       auto out_lse_softmax = at::_scaled_dot_product_cudnn_attention(
           query_, key, value, dropout_p, is_causal, compute_logsumexp, scale);
       return std::get<0>(out_lse_softmax);
@@ -689,9 +686,7 @@ Tensor scaled_dot_product_attention(
           query_, key, value, dropout_p, is_causal, attn_mask, scale));
     }
     case sdp::SDPBackend::efficient_attention: {
-      bool compute_logsumexp =
-          (query_.requires_grad() || key.requires_grad() ||
-           value.requires_grad());
+      bool compute_logsumexp = should_compute_logsumexp(query_, key, value);
       if (attn_mask.has_value()) {
         attn_mask.value() = preprocess_mask(attn_mask.value(), query_, key, value);;
       }
@@ -720,7 +715,7 @@ Tensor scaled_dot_product_attention(
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         const Tensor& query_, const Tensor& key, const Tensor& value,
         const std::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal,
-        const std::optional<Tensor>& dropout_mask, c10::optional<double> scale) {
+        const std::optional<Tensor>& dropout_mask, std::optional<double> scale) {
   C10_LOG_API_USAGE_ONCE("torch.sdpa.math_fallback");
   if (query_.is_nested() || key.is_nested() || value.is_nested()) {
     TORCH_CHECK(
