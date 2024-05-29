@@ -1015,7 +1015,7 @@ class TestForeach(TestCase):
     def test_foreach_reduce_large_input(self, device, dtype, op):
         # test inputs larger than kChunkSize = 65536
         N = 65536 * 2
-        disable_fastpath = dtype in (torch.int8, torch.int16, torch.bool)
+        disable_fastpath = False
         kwargs = {}
         if op.name == "_foreach_norm":
             ord = 2
