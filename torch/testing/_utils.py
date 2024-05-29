@@ -1,7 +1,6 @@
 import contextlib
 
 import torch
-from torch.utils._mode_utils import no_dispatch
 
 # Common testing utilities for use in public testing APIs.
 # NB: these should all be importable without optional dependencies
@@ -24,16 +23,13 @@ def wrapper_set_seed(op, *args, **kwargs):
         return output
 
 
-disable_functorch = torch._C._DisableFuncTorch
-
-
 @contextlib.contextmanager
 def freeze_rng_state():
     # no_dispatch needed for test_composite_compliance
     # Some OpInfos use freeze_rng_state for rng determinism, but
     # test_composite_compliance overrides dispatch for all torch functions
     # which we need to disable to get and set rng state
-    with no_dispatch(), disable_functorch():
+    with torch.utils._mode_utils.no_dispatch(), torch._C._DisableFuncTorch():
         rng_state = torch.get_rng_state()
         if torch.cuda.is_available():
             cuda_rng_state = torch.cuda.get_rng_state()
@@ -48,7 +44,7 @@ def freeze_rng_state():
         # an operator.
         #
         # NB: Mode disable is to avoid running cross-ref tests on thes seeding
-        with no_dispatch(), disable_functorch():
+        with torch.utils._mode_utils.no_dispatch(), torch._C._DisableFuncTorch():
             if torch.cuda.is_available():
                 torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
             torch.set_rng_state(rng_state)
