@@ -4231,6 +4231,59 @@ utils_device.CURRENT_DEVICE == None""".split(
         opt_fn(x)
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_id_guarded_object(self):
+        class UDO:
+            @torch.compile(backend="eager")
+            def call(self, x, ref_id):
+                self_id = id(self)
+                if self_id == ref_id:
+                    x = torch.mul(x, 1.0)
+                else:
+                    x = torch.mul(x, 0)
+                return x
+
+        # Make sure we do recompile when id(self) is executed on
+        # different self objects.
+        x = torch.ones(2)
+        obj1 = UDO()
+        obj1_id = id(obj1)
+        self.assertEqual(obj1.call(x, obj1_id), torch.ones(2))
+
+        obj2 = UDO()
+        # if we do not install ID_MATCH: ___check_obj_id(L['self'], xxx) this fails.
+        self.assertEqual(obj2.call(x, obj1_id), torch.zeros(2))
+
+    def test_id_guarded_module(self):
+        class M(torch.nn.Module):
+            def forward(self, x, ref_id):
+                self_id = id(self)
+                if self_id == ref_id:
+                    x = torch.mul(x, 1.0)
+                else:
+                    x = torch.mul(x, 0)
+                return x
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        # Make sure we do recompile when id(self) is executed on
+        # different self objects.
+        x = torch.ones(2)
+        m1 = M()
+        m1_id = id(m1)
+        opt_m1 = torch._dynamo.optimize(cnts, nopython=True)(m1)
+        self.assertEqual(opt_m1(x, m1_id), torch.ones(2))
+        self.assertEqual(opt_m1(x, m1_id), torch.ones(2))
+
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
+        m2 = M()
+        opt_m2 = torch._dynamo.optimize(cnts, nopython=True)(m2)
+        # if we do not install ID_MATCH: ___check_obj_id(L['self'], xxx) this fails.
+        self.assertEqual(opt_m2(x, m1_id), torch.zeros(2))
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 2)
+
     def test_id_of_nn_module(self):
         class M(torch.nn.Module):
             def forward(self, x, ref_id):
