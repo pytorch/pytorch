@@ -442,9 +442,6 @@ inductor_all_samples = {
     "cummin",
     "_chunk_cat",
     "constant_pad_nd",
-    "clamp_max",
-    "clamp_min",
-    "ne",
 }
 
 
