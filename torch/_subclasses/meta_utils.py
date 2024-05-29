@@ -713,9 +713,7 @@ class MetaConverter:
                     lambda: empty_create(
                         inner_t,
                         attr_source,
-                        symbolic_context=(
-                            None if symbolic_context is None else context
-                        ),
+                        symbolic_context=context,
                     )
                 )
                 if self.copy_data:
