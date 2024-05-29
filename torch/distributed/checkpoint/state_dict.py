@@ -606,7 +606,6 @@ def _flatten_optim_state_dict(state_dict: OptimizerStateType) -> Dict[str, Value
     this API won't flattent it.
     """
 
-
     def _raise_if_type_not_supported(v):
         if not isinstance(v, (torch.Tensor, int, float)):
             raise NotImplementedError(
@@ -617,13 +616,13 @@ def _flatten_optim_state_dict(state_dict: OptimizerStateType) -> Dict[str, Value
 
     ret: Dict[str, ValueType] = {}
     for fqn, state in cast(DictValueType, state_dict[STATE]).items():
-        for k, v in state.items():
+        for k, v in cast(DictValueType, state).items():
             _raise_if_type_not_supported(v)
             ret[f"{STATE}.{fqn}.{k}"] = v
 
     for param_group in cast(ListDictValueType, state_dict[PG]):
         fqns = param_group.pop(PARAMS)
-        for fqn in fqns:
+        for fqn in cast(List[str], fqns):
             for k, v in param_group.items():
                 ret[f"{PG}.{fqn}.{k}"] = v
     return ret
@@ -631,7 +630,7 @@ def _flatten_optim_state_dict(state_dict: OptimizerStateType) -> Dict[str, Value
 
 def _unflatten_optim_state_dict(
     optim: torch.optim.Optimizer,
-    state_dict: OptimizerStateType,
+    state_dict: Dict[str, ValueType],
     info: _StateDictInfo,
 ) -> OptimizerStateType:
     """
@@ -646,14 +645,18 @@ def _unflatten_optim_state_dict(
         pg_state.append({PARAMS: []})
         for param in param_group[PARAMS]:
             for fqn in info.fqn_param_mapping[param]:
-                pg_state[-1][PARAMS].append(fqn)
+                params = pg_state[-1][PARAMS]
+                assert isinstance(params, list)  # typing
+                params.append(fqn)
                 if not param.requires_grad:
                     continue
                 state[fqn] = {}
                 for state_name in optim.state[param].keys():
-                    state[fqn][state_name] = state_dict[f"{STATE}.{fqn}.{state_name}"]
+                    cast(DictValueType, state[fqn])[state_name] = state_dict[
+                        f"{STATE}.{fqn}.{state_name}"
+                    ]
 
-        first_param_fqn = pg_state[-1][PARAMS][0]
+        first_param_fqn = cast(List[str], pg_state[-1][PARAMS])[0]
         for k in param_group.keys():
             if k == PARAMS:
                 continue
@@ -726,7 +729,9 @@ def _get_optim_state_dict(
         cast(ListDictValueType, optim_state_dict[PG]).extend(osd[PG])
 
     if info.flatten_optimizer_state_dict:
-        optim_state_dict = _flatten_optim_state_dict(optim_state_dict)
+        optim_state_dict = cast(
+            OptimizerStateType, _flatten_optim_state_dict(optim_state_dict)
+        )
 
     if info.full_state_dict:
         ranks_only = tuple() if not info.cpu_offload else (0,)
@@ -810,7 +815,9 @@ def _load_optim_state_dict(
                     model, optim, state_dict, info
                 )
             else:
-                optim_state_dict = _unflatten_optim_state_dict(optim, state_dict, info)
+                optim_state_dict = _unflatten_optim_state_dict(
+                    optim, cast(Dict[str, ValueType], state_dict), info
+                )
         else:
             optim_state_dict = {}
         if info.fsdp_modules:
