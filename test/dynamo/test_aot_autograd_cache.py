@@ -251,7 +251,7 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], expected_misses)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], expected_hits)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], expected_saves)
-
+            self.assertEqual(res1, res2)
 
 
 @inductor_config.patch("fx_graph_cache", True)
