@@ -209,7 +209,7 @@ class TS2EPConverter:
             output_name = node.output().debugName()
             self.constant_map[output_name] = device
         else:
-            raise ValueError(f"Unsupported device type: {input_type}")
+            raise ValueError(f"Unsupported JitType ({input_type}) when get device")
 
     def convert_prim_dtype(self, node: torch._C.Node):
         dtype = node.input().type().dtype()
