@@ -17,11 +17,28 @@ from functools import partial, wraps
 
 # NB: numpy is a testing dependency!
 import numpy as np
+from common_utils import expectedFailureIf
+
+import functorch
 import torch
 import torch.autograd.forward_ad as fwAD
 import torch.nn as nn
 import torch.nn.functional as F
-from common_utils import expectedFailureIf
+from functorch import (
+    combine_state_for_ensemble,
+    grad,
+    grad_and_value,
+    hessian,
+    jacfwd,
+    jacrev,
+    jvp,
+    make_functional,
+    make_functional_with_buffers,
+    make_fx,
+    vjp,
+    vmap,
+)
+from functorch.experimental import functionalize, replace_all_batch_norm_modules_
 from torch._C import _ExcludeDispatchKeyGuard, DispatchKey, DispatchKeySet
 from torch._dynamo import allow_in_graph
 from torch._functorch.eager_transforms import _slice_argnums
@@ -63,23 +80,6 @@ from torch.testing._internal.common_utils import (
 )
 
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
-
-import functorch
-from functorch import (
-    combine_state_for_ensemble,
-    grad,
-    grad_and_value,
-    hessian,
-    jacfwd,
-    jacrev,
-    jvp,
-    make_functional,
-    make_functional_with_buffers,
-    make_fx,
-    vjp,
-    vmap,
-)
-from functorch.experimental import functionalize, replace_all_batch_norm_modules_
 
 USE_TORCHVISION = False
 try:
