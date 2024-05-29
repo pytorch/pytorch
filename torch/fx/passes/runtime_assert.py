@@ -57,6 +57,7 @@ def insert_deferred_runtime_asserts(
         ConvertIntKey,
         DivideByKey,
         free_symbols,
+        InnerTensorKey,
     )
     from torch.utils._sympy.interp import sympy_interp
     from torch.utils._sympy.reference import PythonReferenceAnalysis
@@ -225,6 +226,13 @@ def insert_deferred_runtime_asserts(
                                 ),
                                 keypath[1:],
                             )
+                        elif isinstance(keypath[0], InnerTensorKey):
+                            return go(
+                                graph.call_function(
+                                    getattr, (node, keypath[0].inner_name)
+                                ),
+                                keypath[1:],
+                            )
                         else:
                             raise AssertionError(f"unrecognized keypath {keypath}")
 
@@ -296,23 +304,13 @@ def insert_deferred_runtime_asserts(
                         except TypeError:
                             return None
 
-                    if export:
-                        graph.call_function(
-                            torch.ops.aten.sym_constrain_range.default,
-                            (symbol_to_proxy[i0].node,),
-                            {
-                                "min": convert(vr.lower),
-                                "max": convert(vr.upper),
-                            },
-                        )
-                    else:
-                        graph.call_function(
-                            torch._constrain_as_value,
-                            (
-                                symbol_to_proxy[i0].node,
-                                convert(vr.lower),
-                                convert(vr.upper),
-                            ),
-                        )
+                    graph.call_function(
+                        torch.ops.aten.sym_constrain_range.default,
+                        (symbol_to_proxy[i0].node,),
+                        {
+                            "min": convert(vr.lower),
+                            "max": convert(vr.upper),
+                        },
+                    )
 
                 add_runtime_asserts(ras)
