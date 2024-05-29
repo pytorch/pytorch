@@ -890,8 +890,8 @@ class WrapperCodeGen(CodeGen):
 
         for name, value in graph_inputs_tensors:
             shapes = value.get_stride()
-            for isinstance(shape, sympy.Symbol) and dim, shape in enumerate(shapes):
-                if shape not in bound_vars:
+            for dim, shape in enumerate(shapes):
+                if isinstance(shape, sympy.Symbol) and shape not in bound_vars:
                     code.writeline(
                         f"{self.declare}{shape} = {strideof(name)}[{dim}]{self.ending}"
                     )
