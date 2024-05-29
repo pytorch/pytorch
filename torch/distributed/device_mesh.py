@@ -215,7 +215,7 @@ else:
 
             # private field to pre-generate DeviceMesh's hash
             self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
-            self._parent_mesh: Optional["DeviceMesh"] = None
+            self._parent_mesh: Optional[DeviceMesh] = None
             self._thread_id = threading.get_ident()
 
             # Skip process group initialization if xla device or init backend is False

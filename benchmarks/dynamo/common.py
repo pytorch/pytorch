@@ -36,23 +36,21 @@ from typing import (
     Type,
     TYPE_CHECKING,
 )
-from unittest.mock import MagicMock
-
 from typing_extensions import Self
-
-if TYPE_CHECKING:
-    from torch.onnx._internal.fx import diagnostics
+from unittest.mock import MagicMock
 
 import numpy as np
 import pandas as pd
 import psutil
+from scipy.stats import gmean, ttest_ind
+from tqdm.auto import tqdm, trange
+
 import torch
 import torch._dynamo
 import torch._dynamo.utils
 import torch._export
 import torch.distributed
 import torch.multiprocessing as mp
-from scipy.stats import gmean, ttest_ind
 from torch._C import _has_cuda as HAS_CUDA, _has_xpu as HAS_XPU
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import (
@@ -75,15 +73,13 @@ except ImportError:
         graph_break_reasons,
         maybe_enable_compiled_autograd,
     )
+
 import torch._functorch.config
 from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config, metrics
 from torch._subclasses.fake_tensor import FakeTensorMode
-
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map, tree_map_only
-
-from tqdm.auto import tqdm, trange
 
 try:
     import torch_xla
@@ -94,6 +90,11 @@ try:
 except ImportError:
     # ignore the error if torch_xla is not installed
     pass
+
+
+if TYPE_CHECKING:
+    from torch.onnx._internal.fx import diagnostics
+
 
 log = logging.getLogger(__name__)
 
@@ -2101,7 +2102,7 @@ class BenchmarkRunner:
             #  which is bad as Gradscaler has state and can adjust the scaling
             #  factor between eager and dynamo run, making accuracy check
             #  harder.
-            # self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
+            # self.grad_scaler = torch.amp.GradScaler(device="cuda", init_scale=2.0)
             self.autocast = functools.partial(
                 torch.amp.autocast, device_type=devices[0]
             )
@@ -2343,16 +2344,16 @@ class BenchmarkRunner:
 
     def get_fsdp_auto_wrap_policy(self, model_name: str):
         from diffusers.models.transformer_2d import Transformer2DModel
-
-        from torch.distributed.fsdp.wrap import (
-            ModuleWrapPolicy,
-            size_based_auto_wrap_policy,
-        )
         from torchbenchmark.models.nanogpt.model import Block
         from transformers.models.llama.modeling_llama import LlamaDecoderLayer
 
         from transformers.models.t5.modeling_t5 import T5Block
         from transformers.models.whisper.modeling_whisper import WhisperEncoderLayer
+
+        from torch.distributed.fsdp.wrap import (
+            ModuleWrapPolicy,
+            size_based_auto_wrap_policy,
+        )
 
         # handcrafted wrap policy
         MODEL_FSDP_WRAP = {
@@ -3491,6 +3492,18 @@ def parse_args(args=None):
         help="Measure speedup with TorchInductor",
     )
     group.add_argument(
+        "--quantization",
+        choices=[
+            "int8dynamic",
+            "int8weightonly",
+            "int4weightonly",
+            "autoquant",
+            "noquant",
+        ],
+        default=None,
+        help="Measure speedup of torchao quantization with TorchInductor baseline",
+    )
+    group.add_argument(
         "--export",
         action="store_true",
         help="Measure pass rate with export",
@@ -3684,6 +3697,9 @@ def run(runner, args, original_dir=None):
     if args.inductor:
         assert args.backend is None
         args.backend = "inductor"
+    if args.quantization:
+        assert args.backend is None
+        args.backend = "torchao"
     if args.dynamic_batch_only:
         args.dynamic_shapes = True
         torch._dynamo.config.assume_static_by_default = True
@@ -3962,6 +3978,23 @@ def run(runner, args, original_dir=None):
 
             # AOTInductor doesn't support control flow yet
             runner.skip_models.update(runner.skip_models_due_to_control_flow)
+        elif args.backend == "torchao":
+            assert "cuda" in args.devices, "Quantization requires CUDA device."
+            assert args.bfloat16, "Quantization requires dtype bfloat16."
+            try:
+                from .torchao_backend import setup_baseline, torchao_optimize_ctx
+            except ImportError:
+                from torchao_backend import setup_baseline, torchao_optimize_ctx
+
+            setup_baseline()
+            baseline_ctx = functools.partial(
+                torch.compile,
+                backend="inductor",
+                fullgraph=args.nopython,
+                mode=args.inductor_compile_mode,
+            )
+            runner.model_iter_fn = baseline_ctx(runner.model_iter_fn)
+            optimize_ctx = torchao_optimize_ctx(args.quantization)
         else:
             optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
         experiment = speedup_experiment
