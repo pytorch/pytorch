@@ -18,7 +18,14 @@ from ..utils import cache_on_self, sympy_product
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import IndentedBuffer
-from .cpp_utils import cexpr, CppPrinter, DEVICE_TO_ATEN, DTYPE_TO_ATEN, DTYPE_TO_CPP
+from .cpp_utils import (
+    cexpr,
+    CppPrinter,
+    DEVICE_TO_ATEN,
+    DTYPE_TO_ATEN,
+    DTYPE_TO_CPP,
+    LAYOUT_TO_ATEN,
+)
 from .wrapper import EnterSubgraphLine, ExitSubgraphLine, WrapperCodeGen
 
 
@@ -56,6 +63,7 @@ class CppWrapperCpu(WrapperCodeGen):
         self.arg_var_id = count()
         self.used_cached_devices = set()
         self.used_cached_dtypes = set()
+        self.used_cached_layouts = set()
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
@@ -722,9 +730,14 @@ class CppWrapperCpu(WrapperCodeGen):
                 self.prefix.writeline(
                     f"constants_info_[{idx}].offset = {tensor.storage_offset()};"
                 )
-                self.prefix.writeline(
-                    f"constants_info_[{idx}].data_size = {tensor.untyped_storage().nbytes()};"
-                )
+                if tensor.is_mkldnn:
+                    self.prefix.writeline(
+                        f"constants_info_[{idx}].data_size = {torch.ops.mkldnn._nbytes(tensor)};"
+                    )
+                else:
+                    self.prefix.writeline(
+                        f"constants_info_[{idx}].data_size = {tensor.untyped_storage().nbytes()};"
+                    )
                 from_folded = "true" if name in V.graph.folded_constants else "false"
                 self.prefix.writeline(
                     f"constants_info_[{idx}].from_folded = {from_folded};"
@@ -737,6 +750,23 @@ class CppWrapperCpu(WrapperCodeGen):
                 self.prefix.writeline(
                     f"constants_info_[{idx}].stride = {{{stride_str}}};"
                 )
+                self.prefix.writeline(
+                    f"constants_info_[{idx}].layout = static_cast<int32_t>({self.codegen_layout(tensor.layout)});"
+                )
+
+                if tensor.is_mkldnn:
+                    opaque_metadata_tensor = torch.ops.mkldnn._get_mkldnn_serialized_md(
+                        tensor
+                    )
+                    assert (
+                        opaque_metadata_tensor.dim() == 1
+                    ), "Expect opaque_metadata_tensor to be 1-D"
+
+                    opaque_metadata_list = opaque_metadata_tensor.tolist()
+                    opaque_metadata_str = self.codegen_shape_tuple(opaque_metadata_list)
+                    self.prefix.writeline(
+                        f"constants_info_[{idx}].opaque_metadata = {opaque_metadata_str};"
+                    )
                 if name in V.graph.dynamo_flat_name_to_original_fqn:
                     original_fqn = V.graph.dynamo_flat_name_to_original_fqn.get(
                         name, name
@@ -877,6 +907,8 @@ class CppWrapperCpu(WrapperCodeGen):
                 cached_dtypes_buffer.writeline(f"CACHE_TORCH_DTYPE({dtype});")
             for device in self.used_cached_devices:
                 cached_dtypes_buffer.writeline(f"CACHE_TORCH_DEVICE({device});")
+            for layout in self.used_cached_layouts:
+                cached_dtypes_buffer.writeline(f"CACHE_TORCH_LAYOUT({layout});")
         cached_dtypes_buffer.splice(self.prefix)
         self.prefix = cached_dtypes_buffer
 
@@ -1492,6 +1524,14 @@ class CppWrapperCpu(WrapperCodeGen):
             return f"cached_torch_dtype_{dtype_str}"
         else:
             return DTYPE_TO_ATEN[dtype]
+
+    def codegen_layout(self, layout):
+        if config.abi_compatible:
+            layout_str = str(layout).split(".")[-1]
+            self.used_cached_layouts.add(layout_str)
+            return f"cached_torch_layout_{layout_str}"
+        else:
+            return LAYOUT_TO_ATEN[layout]
 
     @functools.lru_cache(None)
     def codegen_int_array_var(
