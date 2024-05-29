@@ -752,6 +752,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_c
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
+    bool compute_logsumexp,
     double dropout_p,
     bool is_causal,
     c10::optional<double> scale) {
@@ -809,9 +810,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_c
 
   const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
   Tensor debugmask;
-  bool compute_logsumexp =
-      (query.requires_grad() || key.requires_grad() ||
-       value.requires_grad());
 
   run_cudnn_SDP_fprop(batch_size/*int64_t b*/,
                       num_heads/*int64_t h*/,
