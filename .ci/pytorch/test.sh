@@ -43,6 +43,13 @@ BUILD_BIN_DIR="$BUILD_DIR"/bin
 SHARD_NUMBER="${SHARD_NUMBER:=1}"
 NUM_TEST_SHARDS="${NUM_TEST_SHARDS:=1}"
 
+CUDA_VERSION=$(python3 -c "import torch; print(torch.version.cuda)")
+if [ "$CUDA_VERSION" == "12.4" ]; then
+    ISCUDA124="cu124"
+else
+    ISCUDA124=""
+fi
+
 export VALGRIND=ON
 # export TORCH_INDUCTOR_INSTALL_GXX=ON
 if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
@@ -350,12 +357,6 @@ test_inductor() {
 }
 
 test_inductor_cpp_wrapper_abi_compatible() {
-  CUDA_VERSION=$(python3 -c "import torch; print(torch.version.cuda)")
-  if [ "$CUDA_VERSION" == "12.4" ]; then
-    ISCUDA124="cu124"
-  else
-    ISCUDA124=""
-  fi
   export TORCHINDUCTOR_ABI_COMPATIBLE=1
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
@@ -511,13 +512,6 @@ test_single_dynamo_benchmark() {
     partition_flags=( --total-partitions "$NUM_TEST_SHARDS" --partition-id "$shard_id" )
   fi
 
-  CUDA_VERSION=$(python3 -c "import torch; print(torch.version.cuda)")
-  if [ "$CUDA_VERSION" == "12.4" ]; then
-    ISCUDA124="cu124"
-  else
-    ISCUDA124=""
-  fi
-
   if [[ "${TEST_CONFIG}" == *perf_compare* ]]; then
     python "benchmarks/dynamo/$suite.py" \
       --ci --performance --disable-cudagraphs --inductor \
@@ -580,13 +574,6 @@ test_inductor_torchbench_smoketest_perf() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
-  CUDA_VERSION=$(python3 -c "import torch; print(torch.version.cuda)")
-  if [ "$CUDA_VERSION" == "12.4" ]; then
-    ISCUDA124="cu124"
-  else
-    ISCUDA124=""
-  fi
-
   # Test some models in the cpp wrapper mode
   TORCHINDUCTOR_ABI_COMPATIBLE=1 TORCHINDUCTOR_CPP_WRAPPER=1 python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
     --bfloat16 --inference --inductor --only hf_T5 --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
@@ -610,14 +597,10 @@ test_inductor_torchbench_smoketest_perf() {
   # and thus we lower its threshold to reduce flakiness. If this continues to be a problem,
   # we switch to use some other model.
   # Use 4.7 for cuda 12.4, change back to 4.9 after fixing https://github.com/pytorch/pytorch/issues/126692
-
-  CUDA_VERSION=$(python3 -c "import torch; print(torch.version.cuda)")
   if [ "$CUDA_VERSION" == "12.4" ]; then
     THRESHOLD=4.7
-    ISCUDA124="cu124"
   else
     THRESHOLD=4.9
-    ISCUDA124=""
   fi
   python benchmarks/dynamo/check_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_inference_smoketest.csv" -t $THRESHOLD
 
