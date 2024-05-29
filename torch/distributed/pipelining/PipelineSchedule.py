@@ -10,13 +10,23 @@ import torch.distributed as dist
 from torch.profiler import record_function
 
 from ._IR import Pipe
-from ._PipelineStage import PipelineStageBase
 from .microbatch import merge_chunks, split_args_kwargs_into_chunks
+from .PipelineStage import _PipelineStageBase
+
+
+__all__ = [
+    "PipelineScheduleSingle",
+    "PipelineScheduleMulti",
+    "Schedule1F1B",
+    "ScheduleGPipe",
+    "ScheduleInterleaved1F1B",
+    "ScheduleLoopedBFS",
+]
 
 logger = logging.getLogger(__name__)
 
 
-class PipelineSchedule(ABC):
+class _PipelineSchedule(ABC):
     def __init__(
         self,
         n_microbatches: int,
@@ -40,9 +50,6 @@ class PipelineSchedule(ABC):
         if stage.is_last and self._has_backward:
             loss = self._compute_loss(output, target_mbs[mb_index])  # type: ignore[index]
             self._internal_losses.append(loss)
-            logger.debug(
-                f"[{stage.stage_index}] Loss of microbatch {mb_index}: {loss}"  # noqa: G004
-            )
 
     def _maybe_get_loss(self, stage, mb_index):
         valid_index = 0 <= mb_index < len(self._internal_losses)
@@ -195,7 +202,18 @@ class PipelineSchedule(ABC):
         )
 
 
-def sorted_batch_isend_irecv(p2p_ops: List[dist.P2POp]) -> Dict[int, dist.Work]:
+def _batch_p2p(p2p_ops: List[dist.P2POp], desc: Optional[str] = None):
+    """
+    Simple wrapper over batch_isend_irecv from torch.distributed, which just adds a descriptive logger on top.
+    """
+    desc_str = f"{desc}, " if desc else ""
+    logger.debug(f"batch_p2p {desc_str}{p2p_ops}")  # noqa: G004
+    return dist.batch_isend_irecv(p2p_ops).pop()
+
+
+def _sorted_batch_p2p(
+    p2p_ops: List[dist.P2POp], desc: Optional[str] = None
+) -> Dict[int, dist.Work]:
     """
     Sorts the list of P2P ops by the peer rank, and then calls
     batch_isend_irecv. Return a dictionary of works by peer rank. This function
@@ -215,12 +233,12 @@ def sorted_batch_isend_irecv(p2p_ops: List[dist.P2POp]) -> Dict[int, dist.Work]:
 
     # Call batch_isend_irecv per peer, in sorted order of the peers (to avoid hangs)
     for peer, ops in sorted(ops_by_peer.items()):
-        work_by_peer[peer] = dist.batch_isend_irecv(ops).pop()
+        work_by_peer[peer] = _batch_p2p(ops, desc=desc)
 
     return work_by_peer
 
 
-class PipelineScheduleSingle(PipelineSchedule):
+class PipelineScheduleSingle(_PipelineSchedule):
     """
     Base class for single-stage schedules.
     Implements the `step` method.
@@ -229,7 +247,7 @@ class PipelineScheduleSingle(PipelineSchedule):
 
     def __init__(
         self,
-        stage: PipelineStageBase,
+        stage: _PipelineStageBase,
         n_microbatches: int,
         loss_fn: Optional[Callable] = None,
         output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
@@ -301,14 +319,14 @@ class ScheduleGPipe(PipelineScheduleSingle):
         for i in range(self._n_microbatches):
             with record_function(f"Forward {i}"):
                 ops = self._stage.get_fwd_recv_ops()
-                works = sorted_batch_isend_irecv(ops)
+                works = _sorted_batch_p2p(ops, desc="fwd_recv")
                 for work in works.values():
                     work.wait()
 
                 output = self._stage.forward_one_chunk(arg_mbs[i], kwarg_mbs[i])  # type: ignore[index]
 
                 ops = self._stage.get_fwd_send_ops()
-                works = sorted_batch_isend_irecv(ops)
+                works = _sorted_batch_p2p(ops, desc="fwd_send")
                 fwd_sends_to_wait.extend(works.values())
 
             logger.debug(
@@ -336,7 +354,7 @@ class ScheduleGPipe(PipelineScheduleSingle):
 
             with record_function(f"Backward {i}"):
                 ops = self._stage.get_bwd_recv_ops()
-                works = sorted_batch_isend_irecv(ops)
+                works = _sorted_batch_p2p(ops, desc="bwd_recv")
                 for work in works.values():
                     work.wait()
 
@@ -344,7 +362,7 @@ class ScheduleGPipe(PipelineScheduleSingle):
                 self._stage.backward_one_chunk(loss=loss)
 
                 ops = self._stage.get_bwd_send_ops()
-                works = sorted_batch_isend_irecv(ops)
+                works = _sorted_batch_p2p(ops, desc="bwd_send")
                 bwd_sends_to_wait.extend(works.values())
 
             logger.debug(
@@ -381,9 +399,6 @@ class Schedule1F1B(PipelineScheduleSingle):
         """
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
 
-        # forward for num_microbatches + backward for num_microbatches
-        total_ops = self._n_microbatches * 2
-
         # Example, 4 GPUs, 8 microbatches
         # Stage 0: 6 warmup, 2 1f1b, 6 cooldown
         # Stage 1: 4 warmup, 4 1f1b, 4 cooldown
@@ -397,7 +412,9 @@ class Schedule1F1B(PipelineScheduleSingle):
         # fwd + bwd
         main_1f1b_steps = self._n_microbatches - warmup_steps
         # bwd only
-        cooldown_steps = total_ops - (warmup_steps + (2 * main_1f1b_steps))
+        cooldown_steps = (2 * self._n_microbatches) - (
+            warmup_steps + (2 * main_1f1b_steps)
+        )
         total_steps = warmup_steps + main_1f1b_steps + cooldown_steps
         logger.debug(
             f"Stage {self._stage.stage_index}: "  # noqa: G004
@@ -411,44 +428,83 @@ class Schedule1F1B(PipelineScheduleSingle):
         fwd_sends_to_wait: List[dist.Work] = []
         bwd_sends_to_wait: List[dist.Work] = []
 
+        def step_has_forward(i):
+            assert i >= 0, i
+            return i < self._n_microbatches
+
+        def step_has_backward(i):
+            assert i < total_steps, i
+            return i >= warmup_steps and self._has_backward
+
+        def is_1f1b_step(i):
+            return step_has_forward(i) and step_has_backward(i)
+
+        def is_warmup_step(i):
+            return step_has_forward(i) and not step_has_backward(i)
+
+        def is_cooldown_step(i):
+            return not step_has_forward(i) and step_has_backward(i)
+
+        def should_coalesce_fwd_send_bwd_recv(step):
+            return (
+                is_1f1b_step(step)
+                or (is_warmup_step(step) and is_cooldown_step(step + 1))
+                or (step >= 1 and is_warmup_step(step - 1) and is_cooldown_step(step))
+            )
+
+        def should_coalesce_bwd_send_fwd_recv(bwd_send_step):
+            # The backward send to prev stage should be coalesced with the fwd recv from the previous stage
+            return bwd_send_step >= warmup_steps and is_1f1b_step(bwd_send_step + 1)
+
         # bwd chunk counter
         bwd_mb_index = 0
         self._stage._configure_data_parallel_mode(last_backward=False)
         for i in range(total_steps):
-            if i < self._n_microbatches:
-                # forward
+            if step_has_forward(i):
                 with record_function(f"Forward {i}"):
                     ops = self._stage.get_fwd_recv_ops()
-                    works = sorted_batch_isend_irecv(ops)
+                    desc = "fwd_recv"
+                    if should_coalesce_bwd_send_fwd_recv(i - 1):
+                        desc += "_bwd_send"
+                        ops.extend(self._stage.get_bwd_send_ops())
+
+                    works = _sorted_batch_p2p(ops, desc=desc)
                     for work in works.values():
                         work.wait()
 
                     output = self._stage.forward_one_chunk(arg_mbs[i], kwarg_mbs[i])  # type: ignore[index]
 
-                    ops = self._stage.get_fwd_send_ops()
-                    works = sorted_batch_isend_irecv(ops)
-                    fwd_sends_to_wait.extend(works.values())
+                    if not should_coalesce_fwd_send_bwd_recv(i):
+                        ops = self._stage.get_fwd_send_ops()
+                        works = _sorted_batch_p2p(ops, desc="fwd_send")
+                        fwd_sends_to_wait.extend(works.values())
 
                 self._maybe_compute_loss(self._stage, output, target_mbs, i)
 
-            if i >= warmup_steps and self._has_backward:
+            if step_has_backward(i):
                 self._stage._configure_data_parallel_mode(
                     last_backward=(i == total_steps - 1)
                 )
-
-                # backward
                 with record_function(f"Backward {bwd_mb_index}"):
                     ops = self._stage.get_bwd_recv_ops()
-                    works = sorted_batch_isend_irecv(ops)
+                    desc = "bwd_recv"
+                    if should_coalesce_fwd_send_bwd_recv(i):
+                        ops.extend(self._stage.get_fwd_send_ops())
+                        desc += "_fwd_send"
+
+                    works = _sorted_batch_p2p(ops, desc=desc)
                     for work in works.values():
                         work.wait()
 
                     loss = self._maybe_get_loss(self._stage, bwd_mb_index)
                     self._stage.backward_one_chunk(loss=loss)
 
-                    ops = self._stage.get_bwd_send_ops()
-                    works = sorted_batch_isend_irecv(ops)
-                    bwd_sends_to_wait.extend(works.values())
+                    if not should_coalesce_bwd_send_fwd_recv(i):
+                        # see Note: coalesced bwd-send/fwd-recv
+                        ops = self._stage.get_bwd_send_ops()
+                        works = _sorted_batch_p2p(ops, desc="bwd_send")
+                        bwd_sends_to_wait.extend(works.values())
+
                     bwd_mb_index += 1
 
         # Wait for all forward sends to finish
@@ -463,7 +519,7 @@ class Schedule1F1B(PipelineScheduleSingle):
         self._update_losses(self._stage, losses)
 
 
-class PipelineScheduleMulti(PipelineSchedule):
+class PipelineScheduleMulti(_PipelineSchedule):
     """
     Base class for multi-stage schedules.
     Implements the `step` method.
@@ -472,7 +528,7 @@ class PipelineScheduleMulti(PipelineSchedule):
 
     def __init__(
         self,
-        stages: List[PipelineStageBase],
+        stages: List[_PipelineStageBase],
         n_microbatches: int,
         loss_fn: Optional[Callable] = None,
         output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
@@ -568,14 +624,14 @@ class ScheduleLoopedBFS(PipelineScheduleMulti):
                 with record_function(f"Stage {stage.stage_index} Forward"):
                     ops = stage.get_fwd_recv_ops()
                     if ops:
-                        dist.batch_isend_irecv(ops).pop().wait()
+                        _batch_p2p(ops, desc="fwd_recv").wait()
 
                     output = stage.forward_one_chunk(arg_mbs[i], kwarg_mbs[i])
                     self._maybe_compute_loss(stage, output, target_mbs, i)
 
                     ops = stage.get_fwd_send_ops()
                     if ops:
-                        dist.batch_isend_irecv(ops)
+                        _batch_p2p(ops, desc="fwd_send")
 
         for stage in reversed(self._stages):
             for i in range(self._n_microbatches):
@@ -583,14 +639,14 @@ class ScheduleLoopedBFS(PipelineScheduleMulti):
                 with record_function(f"Stage {stage.stage_index} Backward"):
                     ops = stage.get_bwd_recv_ops()
                     if ops:
-                        dist.batch_isend_irecv(ops).pop().wait()
+                        _batch_p2p(ops, desc="bwd_recv").wait()
 
                     loss = self._maybe_get_loss(stage, i)
                     stage.backward_one_chunk(loss=loss)
 
                     ops = stage.get_bwd_send_ops()
                     if ops:
-                        dist.batch_isend_irecv(ops)
+                        _batch_p2p(ops, desc="bwd_send")
 
         self._update_losses(self._stages, losses)
 
@@ -606,7 +662,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
 
     def __init__(
         self,
-        stages: List[PipelineStageBase],
+        stages: List[_PipelineStageBase],
         n_microbatches: int,
         loss_fn: Optional[Callable] = None,
         output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
@@ -645,7 +701,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
             - one happened before highest rank's warmup started,
             - one waiting for backward result to trickle down from highest rank
 
-        TODO: Interleaved 1F1B does not support using sorted_batch_isend_irecv()
+        TODO: Interleaved 1F1B does not support using _sorted_batch_p2p()
         because it requires recvs and sends from different peers
         to execute in the same coalesced operation. As a result, this schedule does
         not support models with skip connections.
@@ -680,8 +736,8 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
                 - ((step - warmup_steps) // self.pp_group_size) % self.n_local_stages
             )
 
-        fwd_stage_mb_index: Dict[PipelineStageBase, int] = defaultdict(int)
-        bwd_stage_mb_index: Dict[PipelineStageBase, int] = defaultdict(int)
+        fwd_stage_mb_index: Dict[_PipelineStageBase, int] = defaultdict(int)
+        bwd_stage_mb_index: Dict[_PipelineStageBase, int] = defaultdict(int)
 
         # Delay send waits
         sends_to_wait: List[dist.Work] = []
@@ -705,7 +761,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
             with record_function(f"Forward {step}"):
                 ops.extend(fwd_stage.get_fwd_recv_ops())
                 if ops:
-                    work = dist.batch_isend_irecv(ops).pop()
+                    work = _batch_p2p(ops, desc="warmup_pre_fwd")
                     work.wait()
                     ops.clear()
 
@@ -716,7 +772,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
                 # This is because fwd-bwd send/recvs among ranks need to be aligned to prevent a hang.
                 # In the edge cases where there are no fwd_bwds and cooldown is immediate, then no delay is needed
                 if ops and (step != warmup_steps - 1 or fwd_bwd_steps == 0):
-                    work = dist.batch_isend_irecv(ops).pop()
+                    work = _batch_p2p(ops, desc="warmup_post_fwd")
                     sends_to_wait.append(work)
                     ops.clear()
 
@@ -741,11 +797,12 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
                 f"Rank {self.rank}: {step=}, {fwd_stage.stage_index=}, "  # noqa: G004
                 f"{bwd_stage.stage_index=}, {fwd_mb_index=}, {bwd_mb_index=}"
             )
-            with record_function(f"1F1B {step}"):
+            desc = f"1F1B {step}"
+            with record_function(desc):
                 ops.extend(fwd_stage.get_fwd_recv_ops())
                 ops.extend(bwd_stage.get_bwd_recv_ops())
                 if ops:
-                    work = dist.batch_isend_irecv(ops).pop()
+                    work = _batch_p2p(ops, desc=desc)
                     work.wait()
                     ops.clear()
 
@@ -772,10 +829,11 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
             logger.debug(
                 f"Rank {self.rank}: {step=}, {bwd_stage.stage_index=}, {bwd_mb_index=}"  # noqa: G004
             )
-            with record_function(f"Cooldown {step}"):
+            desc = f"Cooldown {step}"
+            with record_function(desc):
                 ops.extend(bwd_stage.get_bwd_recv_ops())
                 if ops:
-                    work = dist.batch_isend_irecv(ops).pop()
+                    work = _batch_p2p(ops, desc=desc + " pre_bwd")
                     work.wait()
                     ops.clear()
 
@@ -784,7 +842,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
 
                 ops.extend(bwd_stage.get_bwd_send_ops())
                 if ops:
-                    work = dist.batch_isend_irecv(ops).pop()
+                    work = _batch_p2p(ops, desc=desc + " post_bwd")
                     sends_to_wait.append(work)
                     ops.clear()
 

@@ -36,9 +36,10 @@ from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
-    GRADCHECK_NONDET_TOL, freeze_rng_state, slowTest, TEST_WITH_SLOW,
+    GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
     TEST_WITH_TORCHINDUCTOR
 )
+from torch.testing._utils import wrapper_set_seed
 
 import torch._refs as refs  # noqa: F401
 import torch._refs.nn.functional
@@ -2909,6 +2910,14 @@ def error_inputs_gradient(op_info, device, **kwargs):
         yield ErrorInput(SampleInput(t, kwargs=dict(edge_order=2)),
                          error_type=RuntimeError,
                          error_regex='torch.gradient expected each dimension size to be at least')
+
+def sample_inputs_rrelu(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_elementwise_unary(
+        op_info, device, dtype, requires_grad, op_kwargs=dict(lower=0., upper=1., training=True))
+
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    yield SampleInput(make_arg(S))
+    yield SampleInput(make_arg(S), training=False)
 
 def error_inputs_rrelu(op_info, device, **kwargs):
     input = make_tensor((S, S), device=device, dtype=torch.float32)
@@ -9373,12 +9382,16 @@ class foreach_norm_sample_func(foreach_inputs_sample_func):
         _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
         _foreach_inputs_kwargs["requires_grad"] = requires_grad
 
-        for num_tensors, ord in product(num_input_tensors, (0, 1, 2, -1, -2, float('inf'), float('-inf'))):
+        for num_tensors, ord, out_dtype in product(
+            num_input_tensors,
+            (0, 1, 2, -1, -2, float('inf'), float('-inf')),
+            (None,) + (torch.complex128,) if dtype in complex_types() else (torch.float64,),
+        ):
             input = sample_inputs_foreach(None, device, dtype, num_tensors, zero_size=False, **_foreach_inputs_kwargs)
             disable_fastpath = True
             if ord in (1, 2, float('inf')) and dtype in floating_types_and(torch.half, torch.bfloat16):
                 disable_fastpath = False
-            yield ForeachSampleInput(input, ord=ord, disable_fastpath=disable_fastpath)
+            yield ForeachSampleInput(input, ord=ord, disable_fastpath=disable_fastpath, dtype=out_dtype)
 
         # Also test nan propagation with a single tensor, but skip autograd testing
         if not requires_grad:
@@ -9396,8 +9409,6 @@ class foreach_norm_sample_func(foreach_inputs_sample_func):
                 if ord in (1, 2, float('inf')) and dtype in floating_types_and(torch.half, torch.bfloat16):
                     disable_fastpath = False
                 yield ForeachSampleInput([x], ord=ord, disable_fastpath=disable_fastpath)
-
-
 
 
 class foreach_lerp_sample_func(foreach_inputs_sample_func):
@@ -11287,22 +11298,6 @@ def reference_mse_loss(input, target, reduction="mean"):
         return np.sum(se)
     else:  # reduction == "none"
         return se
-
-
-def wrapper_set_seed(op, *args, **kwargs):
-    """Wrapper to set seed manually for some functions like dropout
-    See: https://github.com/pytorch/pytorch/pull/62315#issuecomment-896143189 for more details.
-    """
-    with freeze_rng_state():
-        torch.manual_seed(42)
-        output = op(*args, **kwargs)
-
-        if isinstance(output, torch.Tensor) and output.device.type == "lazy":
-            # We need to call mark step inside freeze_rng_state so that numerics
-            # match eager execution
-            torch._lazy.mark_step()
-
-        return output
 
 
 def reference_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=None, bias=None, eps=1e-5):
@@ -15751,7 +15746,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         sample_kwargs=lambda device, dtype, input:
             (dict(lower=0., upper=1., training=True), dict(lower=0., upper=1., training=True)),
-        sample_inputs_func=partial(sample_inputs_elementwise_unary, op_kwargs=dict(lower=0., upper=1., training=True)),
+        sample_inputs_func=sample_inputs_rrelu,
         error_inputs_func=error_inputs_rrelu,
         decorators=(
             DecorateInfo(

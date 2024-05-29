@@ -1533,64 +1533,62 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
         )
 
     def test_verbose_logs_cpp(self):
-        script = """
-import torch
+        torch._logging.set_logs(compiled_autograd_verbose=True)
 
-def compiler_fn(gm):
-    return torch.compile(gm, backend="eager")
+        def fn():
+            model = torch.nn.Sequential(
+                torch.nn.Linear(4, 4),
+                torch.nn.ReLU(),
+                torch.nn.Linear(4, 4),
+                torch.nn.ReLU(),
+            )
+            for i in [10, 11, 12]:
+                model.zero_grad()
+                x = torch.randn([i, 4])
+                result = model(x).sum()
+                result.backward()
+                yield model[0].weight.grad
+                yield model[0].bias.grad
+                yield model[2].weight.grad
+                yield model[2].bias.grad
 
-def main():
-    torch._logging.set_logs(compiled_autograd_verbose=True)
-    model = torch.nn.Sequential(
-        torch.nn.Linear(4, 4),
-        torch.nn.ReLU(),
-        torch.nn.Linear(4, 4),
-        torch.nn.ReLU(),
-    )
+        logs, ctx = logs_to_string(
+            torch._dynamo.compiled_autograd.__name__, "compiled_autograd_verbose"
+        )
+        with ctx():
+            self.check_output_and_recompiles(fn, count=2)
 
-    for i in range(10, 100):
-        x = torch.randn([i, 4])
-        result = model(x).sum()
-        with torch._dynamo.compiled_autograd.enable(compiler_fn):
-            result.backward()
-
-main()
-"""
-        stdout, _ = self.run_process_no_exception(script)
-        stdout = stdout.decode("utf-8")
-
-        patterns = [
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for SumBackward0, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for ReluBackward0, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for AddmmBackward0, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for TBackward0, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for ReluBackward0, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for AddmmBackward0, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for TBackward0, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for ReluBackward0, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for AddmmBackward0, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for TBackward0, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
-            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
-            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
-            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
-            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
-            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
-            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
+        patterns1 = [
+            r".*Cache miss due to new autograd node: torch::autograd::GraphRoot \(NodeCall 0\) with key size (\d+), "
+            r"previous key sizes=\[\]\n",
         ]
 
-        pattern = r"".join(patterns)
-        matches = re.findall(pattern, stdout)
-        self.assertEqual(len(matches), 1)
-        self.assertEqual(len(matches[0]), len(patterns))
+        # recompile
+        patterns2 = [
+            r".*Cache miss due to changed shapes: marking size idx (\d+) of torch::autograd::GraphRoot \(NodeCall 0\) as dynamic\n",
+            r".*Cache miss due to changed shapes: marking size idx (\d+) of SumBackward0 \(NodeCall 1\) as dynamic\n",
+            r".*Cache miss due to changed shapes: marking size idx (\d+) of SumBackward0 \(NodeCall 1\) as dynamic\n",
+            r".*Cache miss due to changed shapes: marking size idx (\d+) of ReluBackward0 \(NodeCall 2\) as dynamic\n",
+            r".*Cache miss due to changed shapes: marking size idx (\d+) of AddmmBackward0 \(NodeCall 3\) as dynamic\n",
+            r".*Cache miss due to changed shapes: marking size idx (\d+) of torch::autograd::AccumulateGrad "
+            r"\(NodeCall 5\) as dynamic\n",
+            r".*Cache miss due to changed shapes: marking size idx (\d+) of ReluBackward0 \(NodeCall 6\) as dynamic\n",
+        ]
+
+        all_logs = logs.getvalue()
+
+        pattern1 = r"".join(patterns1)
+        matches1 = re.findall(pattern1, all_logs)
+        self.assertEqual(len(matches1), 1)
+        assert isinstance(
+            matches1[0], str
+        )  # for a single match: matches1=['match'], for multiple matches: matches1=[('match1', 'match2')]...
+        self.assertEqual(len(matches1), len(patterns1))
+
+        pattern2 = r"".join(patterns2)
+        matches2 = re.findall(pattern2, all_logs)
+        self.assertEqual(len(matches2), 1)
+        self.assertEqual(len(matches2[0]), len(patterns2))
 
     def test_snapshot_verbose_logs_flag(self):
         def fn():

@@ -428,14 +428,12 @@ class Loops(IRNode):
 
     @cache_on_self
     def inner_fn_opcount(self):
-        from .ir import FlexibleLayout
-
         opcounter = OpCounterCSE(V.MockHandler())
 
         with V.set_ops_handler(opcounter), patch.object(
             FlexibleLayout, "allow_indexing", True
         ):
-            result = self.inner_fn(*self.inner_fn_args())
+            self.inner_fn(*self.inner_fn_args())
             return opcounter.op_count
 
     def inner_fn_args(self):
@@ -1912,6 +1910,9 @@ class BaseView(IRNode):
     def is_extern(self):
         return self.data.is_extern()  # type: ignore[attr-defined]
 
+    def is_module_buffer(self):
+        return self.data.is_module_buffer()  # type: ignore[attr-defined]
+
     def get_reads(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             return extract_read_writes(
@@ -1939,6 +1940,7 @@ class ExpandView(BaseView):
     @staticmethod
     def _normalize_size(x, new_size):
         """Replace `-1` with correct sizes"""
+        sizevars = V.graph.sizevars
         new_size = list(map(sympy.expand, new_size))
         old_size = x.get_size()
         old_size = [None] * (len(new_size) - len(old_size)) + list(old_size)
@@ -1950,12 +1952,14 @@ class ExpandView(BaseView):
             elif old_size[i] is None or old_size[i] == 1:
                 pass
             else:
-                # NB: new_size[i] == old_size[i] is known because the meta
-                # formula was expected to have taught us this equality.
-                # We can't conveniently check it right now because
-                # statically_known_equals doesn't know to consult preexisting
-                # guards
-                pass
+                # Sanity check: Expect broadcast compatibility
+                #
+                # NB: new_size[i] == old_size[i] is expected to already be
+                # guarded because the meta formula was expected to have taught
+                # us this equality.
+                assert (
+                    sizevars.size_hint(new_size[i] - old_size[i], fallback=0) == 0
+                ), "Broadcast failed in ExpandView({x.get_size()}, {new_size}) on dimension {i}"
         return new_size
 
     @classmethod
@@ -2746,7 +2750,8 @@ class FixedLayout(Layout):
         """A closure containing math to read a given element"""
 
         def indexer(index):
-            assert len(index) == len(self.stride) == len(self.size)
+            assert len(index) == len(self.stride)
+            assert len(index) == len(self.size)
             result = self.offset
             for idx, stride, sz in zip(index, self.stride, self.size):
                 if sz != 1:
@@ -3721,6 +3726,13 @@ class CUDATemplateBuffer(TemplateBuffer):
         return self.workspace_size if self.workspace_size is not None else 0
 
 
+class CppTemplateBuffer(TemplateBuffer):
+    def __init__(self, layout, inputs, make_kernel_render, template, choice):
+        super().__init__(layout, inputs, make_kernel_render)
+        self.template = template
+        self.choice = choice
+
+
 @dataclasses.dataclass
 class InputsKernel(Buffer):
     inputs: List[Buffer]
@@ -4405,7 +4417,7 @@ class ExternKernel(InputsKernel):
                     type_ = self.arg_properties[i].get("type")
                     args.append(
                         V.graph.wrapper_code.val_to_cpp_arg_str(  # type: ignore[arg-type]
-                            type_, x
+                            x, type_
                         )
                     )
                 else:
@@ -4440,7 +4452,7 @@ class ExternKernel(InputsKernel):
                     )
                     kwargs.append(
                         V.graph.wrapper_code.val_to_cpp_arg_str(  # type: ignore[arg-type]
-                            type_, v
+                            v, type_
                         )
                     )
         else:
@@ -4652,20 +4664,26 @@ class UserDefinedTritonKernel(ExternKernel):
         )
 
         args = self.codegen_kwargs()
+        arg_types = []
         if V.graph.cpp_wrapper:
             # in C++ wrapper, we don't pass constexpr args, as they don't
             # get added as parameters to the PTX code compiled from the
             # user-defined Triton kernel (only non-constexpr args do)
             args = [arg for i, arg in enumerate(args) if i not in kernel.constexprs]
+            # cpp wrapper needs arg type info for codegen
+            for arg_name in self.ordered_kwargs_for_cpp_kernel:
+                val = self.get_kwargs_value(arg_name)
+                arg_types.append(
+                    val.get_dtype() if hasattr(val, "get_dtype") else type(val)
+                )
+            arg_types = [
+                t for i, t in enumerate(arg_types) if i not in kernel.constexprs
+            ]
 
         # Call to kernel
         self.codegen_comment(wrapper)
         wrapper.generate_user_defined_triton_kernel(
-            new_name,
-            self.grid,
-            configs,
-            args,
-            triton_meta,
+            new_name, self.grid, configs, args, triton_meta, arg_types
         )
 
     def should_allocate(self):
@@ -4738,27 +4756,35 @@ class UserDefinedTritonKernel(ExternKernel):
         return [i.get_name() for i in self.mutable_args]
 
 
-def mark_node_as_mutating(cur_buffer, *mutated_ops: IRNode):
+def mark_node_as_mutating(cur_buffer, *mutated_nodes: IRNode):
     """
-    Allows ops in mutated_ops to be marked as being mutated as well as
+    Allows ops in mutated_nodes to be marked as being mutated as well as
     indicates to the scheduler that these ops depend on cur_buffer.
+
+    NB: Use this instead of directly constructing MutationOutput
     """
-    for op in mutated_ops:
+    for node in mutated_nodes:
         assert isinstance(
-            op, IRNode
-        ), f"{op} op is type {type(op)} and is not an IRNode"
-        V.graph.mark_buffer_mutated(op.get_name())
-        assert hasattr(op, "layout")
-        MutationOutput(op.layout, op, cur_buffer)
+            node, IRNode
+        ), f"{node} node is type {type(node)} and is not an IRNode"
+        V.graph.mark_buffer_mutated(node.get_name())
+        MutationOutput(node.get_layout(), node, cur_buffer)
 
 
 class MutationOutput(ExternKernel):
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
 
-    def __init__(self, layout, input, parent):
-        super().__init__(None, layout, [input, parent], ())
+    def __init__(self, layout, mutated_node, node_doing_mutating):
+        # NB: Do not directly construct this - use `mark_node_as_mutating`
+        super().__init__(None, layout, [mutated_node], ())
+        self.node_doing_mutating = node_doing_mutating
         self.name = V.graph.register_buffer(self)
+
+    def get_read_writes(self):
+        read_writes = super().get_read_writes()
+        read_writes.reads.add(dependencies.WeakDep(self.node_doing_mutating.get_name()))
+        return read_writes
 
     def should_allocate(self):
         return False
@@ -5408,7 +5434,7 @@ class FallbackKernel(ExternKernelAlloc):
         if V.graph.cpp_wrapper and isinstance(self.op_overload, torch._ops.OpOverload):
             args = self.fill_non_provided_args(args, kwargs)
             args = [
-                V.graph.wrapper_code.val_to_cpp_arg_str(param.real_type, x)
+                V.graph.wrapper_code.val_to_cpp_arg_str(x, param.real_type)
                 for param, x in zip(self.op_overload._schema.arguments, args)
             ]
         else:
@@ -6251,7 +6277,7 @@ class MKLPackedLinear(ExternKernelAlloc):
         )
 
     @classmethod
-    def create(cls, x, packed_w, orig_w, batch_size):
+    def create(cls, x, packed_w, orig_w, B, batch_size):
         x = cls.require_stride1(cls.realize_input(x))
         orig_w = cls.require_stride1(cls.realize_input(orig_w))
         *m, _ = x.get_size()
@@ -6259,7 +6285,11 @@ class MKLPackedLinear(ExternKernelAlloc):
         output_size = list(m) + [oc]
         output_stride = make_contiguous_strides_for(output_size)
         inputs = [x, packed_w, orig_w]
-        constant_args = [None, batch_size]
+        constant_args = [batch_size]
+        if B is not None:
+            inputs += [B]
+        else:
+            constant_args.insert(0, None)
 
         return MKLPackedLinear(
             layout=FixedLayout(
@@ -6306,7 +6336,7 @@ class LinearUnary(ExternKernelAlloc):
         )
 
     @classmethod
-    def create(cls, x, w, b, attr, scalars, algorithm):
+    def create(cls, x, w, B, attr, scalars, algorithm):
         x = cls.require_contiguous(cls.realize_input(x))
         w = cls.require_contiguous(cls.realize_input(w))
 
@@ -6314,9 +6344,9 @@ class LinearUnary(ExternKernelAlloc):
         oc, ic = w.get_size()
         inputs = [x, w]
         constant_args = [attr, scalars if scalars else [-1], algorithm]
-        if b is not None:
-            b = cls.require_contiguous(cls.realize_input(b))
-            inputs.append(b)
+        if B is not None:
+            B = cls.require_contiguous(cls.realize_input(B))
+            inputs.append(B)
         else:
             constant_args.insert(0, None)
 
@@ -6374,7 +6404,7 @@ class LinearBinary(ExternKernelAlloc):
         )
 
     @classmethod
-    def create(cls, x, y, w, b, attr):
+    def create(cls, x, y, w, B, attr):
         x = cls.require_contiguous(cls.realize_input(x))
         y = cls.require_contiguous(cls.realize_input(y))
         w = cls.require_contiguous(cls.realize_input(w))
@@ -6384,11 +6414,11 @@ class LinearBinary(ExternKernelAlloc):
 
         inputs = [x, y, w]
         constant_args = [attr]
-        if b is not None:
-            b = cls.require_contiguous(cls.realize_input(b))
-            inputs.append(b)
+        if B is not None:
+            B = cls.require_contiguous(cls.realize_input(B))
+            inputs.append(B)
         else:
-            constant_args.insert(0, b)
+            constant_args.insert(0, B)
 
         return LinearBinary(
             layout=FlexibleLayout(
@@ -7409,7 +7439,7 @@ class MutableBox(IRNode):
 
     @property
     def layout(self):
-        return self.data.layout  # type: ignore[attr-defined]
+        return self.data.get_layout()
 
     def get_layout(self):
         return self.layout
@@ -8057,6 +8087,11 @@ class LoopBodyBlock:
                 index = add_index(index, "other")
                 return self._inner.index_expr(index, dtype)
 
+            def check_bounds(self, index, size, lower, upper):
+                index = add_index(index, "other")
+                size = add_index(size, "other")
+                return self._inner.check_bounds(index, size, lower, upper)
+
             def bucketize(
                 self,
                 values,
@@ -8151,7 +8186,7 @@ class LoopBodyBlock:
             CaptureIndexing(proxy_ops), self.body.var_ranges
         )
         if config.constant_and_index_propagation:
-            handler = IndexPropagation(handler)
+            handler = IndexPropagation(handler, self.body.var_ranges)
 
         with V.set_ops_handler(handler):
             # This indirection is just a cute way to get IndexPropagation to
@@ -8230,12 +8265,7 @@ class _CollectiveKernel(FallbackKernel):
         packed.cpp_kernel_name = cpp_kernel_name
         packed.python_kernel_name = python_kernel_name
 
-        def mark_mutation(x):
-            if isinstance(x.data, BaseView):
-                x = x.data.unwrap_view()
-            MutationOutput(x.layout, x, packed)
-
-        pytree.tree_map(lambda inp: mark_mutation(inp), inputs)
+        mark_node_as_mutating(packed, *pytree.tree_leaves(inputs))
 
     # NOTE: [Out-of-Place Collective Safety]
     # Between the initiation and completion of an out-of-place collective:
@@ -8351,9 +8381,8 @@ class _WaitKernel(_CollectiveKernel):
             non_tensor_args,
             unflatten_args,
         )
-        if isinstance(inp.data, BaseView):
-            inp = inp.data.unwrap_view()
-        MutationOutput(inp.layout, inp, packed)
+
+        mark_node_as_mutating(packed, inp)
 
     def get_read_writes(self):
         read_writes = super().get_read_writes()

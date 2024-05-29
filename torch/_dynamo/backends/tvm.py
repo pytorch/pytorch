@@ -5,6 +5,8 @@ import importlib
 import logging
 import os
 import tempfile
+from types import MappingProxyType
+from typing import Optional
 
 import torch
 from .common import device_from_inputs, fake_tensor_unsupported
@@ -16,7 +18,14 @@ log = logging.getLogger(__name__)
 
 @register_backend
 @fake_tensor_unsupported
-def tvm(gm, example_inputs, *, scheduler=None, trials=20000):
+def tvm(
+    gm,
+    example_inputs,
+    *,
+    options: Optional[MappingProxyType] = MappingProxyType(
+        {"scheduler": None, "trials": 20000}
+    ),
+):
     import tvm  # type: ignore[import]
     from tvm import relay  # type: ignore[import]
     from tvm.contrib import graph_executor  # type: ignore[import]
@@ -36,8 +45,11 @@ def tvm(gm, example_inputs, *, scheduler=None, trials=20000):
         dev = tvm.cpu(0)
         target = tvm.target.Target(llvm_target())
 
+    scheduler = options.get("scheduler", None)
     if scheduler is None:
         scheduler = os.environ.get("TVM_SCHEDULER", None)
+
+    trials = options.get("trials", 20000)
 
     if scheduler == "auto_scheduler":
         from tvm import auto_scheduler

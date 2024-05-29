@@ -1595,8 +1595,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             torch.__future__.set_overwrite_module_params_on_conversion(False)
 
     def test_swap_module_params_fails_after_forward(self):
-        torch.__future__.set_swap_module_params_on_conversion(True)
         try:
+            torch.__future__.set_swap_module_params_on_conversion(True)
             m = torch.nn.Linear(2, 3)
             inp = torch.randn(2, 2)
             # forward will init AccumulateGrad nodes, which bumps use_count of parameters' at::Tensors
@@ -8205,6 +8205,16 @@ class TestNNDeviceType(NNTestCase):
             weight = torch.empty([1, 0, 1], dtype=dtype, device=device)
             torch._C._nn.slow_conv3d(inp, weight, 1)
 
+        with self.assertRaisesRegex(RuntimeError, re.escape("2D kernel_size expected")):
+            torch._C._nn.thnn_conv2d(torch.rand([1, 1, 1, 1]), kernel_size=[], padding=[1, 1], stride=[1, 1],
+                                     weight=torch.rand([1, 1]))
+        with self.assertRaisesRegex(RuntimeError, re.escape("2D stride expected")):
+            torch._C._nn.thnn_conv2d(torch.rand([1, 1, 1, 1]), kernel_size=[1, 1], padding=[1, 1], stride=[],
+                                     weight=torch.rand([1, 1]))
+        with self.assertRaisesRegex(RuntimeError, re.escape("2D padding expected")):
+            torch._C._nn.thnn_conv2d(torch.rand([1, 1, 1, 1]), kernel_size=[1, 1], padding=[], stride=[1, 1],
+                                     weight=torch.rand([1, 1]))
+
     def test_InstanceNorm1d_general(self, device):
         b = random.randint(3, 5)
         c = random.randint(3, 5)
@@ -9604,7 +9614,11 @@ class TestNNDeviceType(NNTestCase):
 
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     def test_upsamplingBilinear2d_aa_correctness(self, device, memory_format):
-        t_in = torch.arange(3 * 8 * 8, dtype=torch.float, device=device).reshape(1, 3, 8, 8)
+        # NOTE: We expand the batch dim such that `b*c` is above the maximum
+        # size of CUDA grid z-dimension (2**16)
+        shape = [23000, 3, 8, 8]
+        t_in = torch.arange(3 * 8 * 8, dtype=torch.float, device=device).reshape(1, *shape[1:])
+        t_in = t_in.expand(shape)
         t_in = t_in.contiguous(memory_format=memory_format)
         # This expected result is obtain using PIL.Image.resize
         # for c in range(3):
@@ -9616,7 +9630,7 @@ class TestNNDeviceType(NNTestCase):
             106.75, 109.96428, 145.0357, 148.25, 170.75, 173.9643
         ], device=device, dtype=t_in.dtype).reshape(1, 3, 2, 2)
         t_out = F.interpolate(t_in, size=(2, 2), mode="bilinear", align_corners=False, antialias=True)
-        self.assertEqual(expected_out, t_out)
+        self.assertEqual(expected_out.expand([*shape[:2], 2, 2]), t_out)
 
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("mode", ["bilinear", "bicubic"])
