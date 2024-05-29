@@ -3020,8 +3020,7 @@ class TestSDPACudaOnly(NNTestCase):
         if fused_kernel == SDPBackend.FLASH_ATTENTION:
             kwargs['return_debug_mask'] = dropout_p > 0.0
         if fused_kernel == SDPBackend.CUDNN_ATTENTION:
-            if "compute_log_sumexp" in kwargs:
-                kwargs.pop("compute_log_sumexp")
+            kwargs["compute_log_sumexp"] = True
             if "return_debug_mask" in kwargs:
                 kwargs.pop("return_debug_mask")
         with torch.cuda.stream(s):
