@@ -381,9 +381,7 @@ developer_warnings = is_fbcode() or is_nightly_or_source
 # The multiprocessing start method to use for inductor workers in the codecache.
 # "subprocess", "fork", or "spawn"
 def decide_worker_start_method():
-    start_method = os.environ.get(
-        "TORCHINDUCTOR_WORKER_START", "fork" if is_fbcode() else "subprocess"
-    )
+    start_method = os.environ.get("TORCHINDUCTOR_WORKER_START", "subprocess")
     assert start_method in [
         "subprocess",
         "fork",
@@ -428,7 +426,7 @@ def decide_compile_threads():
     """
     if "TORCHINDUCTOR_COMPILE_THREADS" in os.environ:
         return int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
-    elif sys.platform == "win32" or is_fbcode():
+    elif sys.platform == "win32":
         return 1
     else:
         cpu_count = (
