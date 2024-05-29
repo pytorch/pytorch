@@ -71,7 +71,7 @@ class Library:
         self.ns = ns
         self._op_defs: Set[str] = set()
         self._op_impls: Set[str] = set()
-        self._registration_handles: List["torch._library.utils.RegistrationHandle"] = []
+        self._registration_handles: List[torch._library.utils.RegistrationHandle] = []
         self.kind = kind
         self.dispatch_key = dispatch_key
         # Use a finalizer to setup the "destructor" instead of __del__.

@@ -18,7 +18,8 @@ from torch.testing._internal.common_utils import \
      TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
      make_fullrank_matrices_with_distinct_singular_values,
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, parametrize, skipIfTorchDynamo,
-     setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest)
+     setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest,
+     xfailIfTorchDynamo)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, has_hipsolver,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
@@ -32,7 +33,7 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, SM90OrLater, tf32_on_and_off, _get_magma_version, \
     _get_torch_cuda_version
-from torch.testing._internal.common_quantization import _group_quantize_tensor
+from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel
 from torch.testing._internal.common_mkldnn import bf32_on_and_off
 from torch.distributions.binomial import Binomial
 import torch.backends.opt_einsum as opt_einsum
@@ -802,6 +803,8 @@ class TestLinalg(TestCase):
         # when beta is not zero
         self._test_addr_vs_numpy(device, dtype, beta=2, alpha=2)
 
+    # https://github.com/pytorch/pytorch/issues/127043
+    @xfailIfTorchDynamo
     @precisionOverride({torch.bfloat16: 1e-1})
     @dtypes(*floating_and_complex_types_and(torch.half, torch.bfloat16))
     def test_addr_float_and_complex(self, device, dtype):
@@ -6051,37 +6054,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         mean_err = ((res - ref).abs() / ref).mean()
         self.assertTrue(mean_err < 0.05)
 
-    def _dynamically_quantize_per_channel(self, x, quant_min, quant_max, target_dtype):
-        # source: https://github.com/pytorch-labs/gpt-fast/blob/main/quantize.py
-        # default setup for affine quantization of activations
-        x_dtype = x.dtype
-        x = x.float()
-        eps = torch.finfo(torch.float32).eps
-
-        # get min and max
-        min_val, max_val = torch.aminmax(x, dim=1)
-
-        # calculate scales and zero_points based on min and max
-        # reference: https://fburl.com/code/srbiybme
-        min_val_neg = torch.min(min_val, torch.zeros_like(min_val))
-        max_val_pos = torch.max(max_val, torch.zeros_like(max_val))
-        device = min_val_neg.device
-
-        # reference: https://fburl.com/code/4wll53rk
-        max_val_pos = torch.max(-min_val_neg, max_val_pos)
-        scales = max_val_pos / (float(quant_max - quant_min) / 2)
-        # ensure scales is the same dtype as the original tensor
-        scales = torch.clamp(scales, min=eps).to(x.dtype)
-        zero_points = torch.zeros(min_val_neg.size(), dtype=torch.int64, device=device)
-
-        # quantize based on qmin/qmax/scales/zp
-        x_div = x / scales.unsqueeze(-1)
-        x_round = torch.round(x_div)
-        x_zp = x_round + zero_points.unsqueeze(-1)
-        quant = torch.clamp(x_zp, quant_min, quant_max).to(target_dtype)
-
-        return quant, scales.to(x_dtype), zero_points
-
     @onlyCPU
     @parametrize("m", [32, 64])
     @parametrize("k", [32, 64])
@@ -6092,7 +6064,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         b = torch.rand((n, k), dtype=torch.bfloat16, device=device)
 
         def convert_weight_to_int8pack(b):
-            b_int8pack, b_scales, _ = self._dynamically_quantize_per_channel(
+            b_int8pack, b_scales, _ = _dynamically_quantize_per_channel(
                 b, -128, 127, torch.int8
             )
             return b_int8pack, b_scales
@@ -6118,7 +6090,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         a = torch.rand((m, k), dtype=torch.bfloat16, device=device)
         b = torch.rand((n, k), dtype=torch.bfloat16, device=device)
 
-        b_int8pack, b_scales, _ = self._dynamically_quantize_per_channel(
+        b_int8pack, b_scales, _ = _dynamically_quantize_per_channel(
             b, -128, 127, torch.int8
         )
 

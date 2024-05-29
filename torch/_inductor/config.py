@@ -249,6 +249,11 @@ max_autotune_gemm_search_space = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_SEARCH_SPACE", "DEFAULT"
 ).upper()
 
+# Whether we fall back to ATen or hard error when no matches are found during autotuning
+autotune_fallback_to_aten = (
+    os.environ.get("TORCHINDUCTOR_AUTOTUNE_FALLBACK_TO_ATEN", "1") == "1"
+)
+
 # the value used as a fallback for the unbacked SymInts
 # that can appear in the input shapes (e.g., in autotuning)
 unbacked_symint_fallback = 8192
@@ -874,10 +879,19 @@ class trace:
     log_autotuning_results: bool = False
 
 
-_save_config_ignore = {
+_save_config_ignore = [
     # workaround: "Can't pickle <function ...>"
     "trace.upload_tar",
-}
+]
+
+_cache_config_ignore_prefix = [
+    # trace functions are not relevant to config caching
+    "trace",
+    # uses absolute path
+    "cuda.cutlass_dir",
+    # not relevant
+    "compile_threads",
+]
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
