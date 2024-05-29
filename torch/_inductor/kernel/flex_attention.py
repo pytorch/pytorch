@@ -241,15 +241,14 @@ flex_attention_template = TritonTemplate(
         start_n = tl.multiple_of(start_n, BLOCK_N)
         # -- load k, v --
         k = tl.load(K_block_ptr)
-        v = tl.load(V_block_ptr)
         # -- compute qk ---
-        qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
-        qk = tl.dot(q, k.to(MATMUL_PRECISION), acc=qk)
+        qk = tl.dot(q, k)
         # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
         m = offs_m[:, None]
         n = start_n + offs_n[None, :]
         {{ modification(
             subgraph_number=0,
+            output_name="post_mod_scores",
             score="qk",
             b="off_hz // H",
             h="off_hz % H",
@@ -259,15 +258,15 @@ flex_attention_template = TritonTemplate(
         ) | indent_except_first(2) }}
         # TODO: In the case that score_mod is linear, this can be LICMed
         if not SCORE_MOD_IS_LINEAR:
-            qk *= 1.44269504
+            post_mod_scores *= 1.44269504
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
         # -- compute scaling constant ---
-        row_max = tl.max(qk, 1)
+        row_max = tl.max(post_mod_scores, 1)
         m_i_new = tl.maximum(m_i, row_max)
 
         alpha = tl.math.exp2(m_i - m_i_new)
-        p = tl.math.exp2(qk - m_i_new[:, None])
+        p = tl.math.exp2(post_mod_scores - m_i_new[:, None])
         if not ROWS_GUARANTEED_SAFE:
             masked_out_rows = (m_i_new == float("-inf"))
             alpha = tl.where(masked_out_rows, 0, alpha)
@@ -276,7 +275,8 @@ flex_attention_template = TritonTemplate(
         # -- scale and update acc --
         acc_scale = l_i * 0 + alpha  # workaround some compiler bug
         acc *= acc_scale[:, None]
-        acc = tl.dot(p.to(MATMUL_PRECISION), v.to(MATMUL_PRECISION), acc)
+        v = tl.load(V_block_ptr)
+        acc = tl.dot(p.to(MATMUL_PRECISION), v, acc)
 
         # -- update m_i and l_i --
         l_i = l_i * alpha + tl.sum(p, 1)
@@ -401,13 +401,11 @@ def flex_attention(*args, **kwargs):
     configs: List[Tuple[int, int, int, int]] = []
     configs.append(_get_default_config_fwd(query))
     if config.max_autotune:
-        configs += [
-            (128, 64, 4, 3),
-            (128, 128, 4, 3),
-            (128, 128, 8, 2),
-            (64, 128, 4, 3),
-            (64, 64, 4, 3),
-        ]
+        for BM in [64, 128]:
+            for BN in [64, 128]:
+                for s in [3, 4, 7]:
+                    for w in [4, 8]:
+                        configs.append((BM, BN, w, s))
 
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
@@ -560,6 +558,7 @@ flex_attention_backward_template = TritonTemplate(
             n = offs_n[None, :]
             {{ modification(
                 subgraph_number=0,
+                output_name="post_mod_scores",
                 score="qk",
                 b="off_z",
                 h="off_h",
@@ -569,10 +568,10 @@ flex_attention_backward_template = TritonTemplate(
             ) | indent_except_first(3) }}
             # TODO: In the case that score_mod is linear, this can be LICMed
             if not SCORE_MOD_IS_LINEAR:
-                qk *= 1.44269504
+                post_mod_scores *= 1.44269504
             # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             l_i = tl.load(l_ptrs + offs_m_curr)
-            p = tl.math.exp2(qk - l_i[:, None])
+            p = tl.math.exp2(post_mod_scores - l_i[:, None])
 
             # compute dv
             do = tl.load(do_ptrs)
@@ -589,13 +588,15 @@ flex_attention_backward_template = TritonTemplate(
             # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
             {{ modification(
                 subgraph_number=1,
+                output_name = "grad_scores",
                 score="pre_mod_scores",
                 b="off_z",
                 h="off_h",
                 m="m",
                 n="n",
-                out="ds"
+                grad_score_mod="ds"
             ) | indent_except_first(3) }}
+            ds = grad_scores
             # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             # compute dk = dot(ds.T, q)
             dk += tl.dot(tl.trans(ds.to(MATMUL_PRECISION)), q)
@@ -664,7 +665,7 @@ def flex_attention_backward(*args, **kwargs):
     )
 
     joint_placeholder_inps = fwd_placeholder_inps + [
-        create_placeholder("out", dtype, device)
+        create_placeholder("grad_score_mod", dtype, device)
     ]
     joint_subgraph_buffer = build_subgraph_buffer(
         args, joint_placeholder_inps, joint_graph, graph_type=SubgraphType.JOINT_BWD

@@ -159,7 +159,11 @@ kernel_name_to_op = {
 
 
 class BaseSchedulerNode:
-    group: Tuple[torch.device, Sequence[Sequence[sympy.Expr]]]
+    group: Tuple[torch.device, Tuple[Tuple[sympy.Expr, ...], ...]]
+    read_writes: dependencies.ReadWrites
+    unmet_dependencies: Set[Dep]
+    # Processed deps used while scoring fusion
+    read_and_write_deps_with_hint: Set[Tuple[Dep, int]]
 
     def __init__(self, scheduler: "Scheduler", node: ir.Buffer) -> None:
         self.scheduler: Scheduler = scheduler
@@ -212,9 +216,6 @@ class BaseSchedulerNode:
     def update_mutated_names(self, renames: Dict[str, str]) -> None:
         self.set_read_writes(self.read_writes.rename(renames))
 
-    def add_mutation_dep(self, dep: Dep) -> None:
-        self.set_read_writes(self.read_writes.with_read(dep))
-
     def add_fake_dep(self, dep: Dep) -> None:
         self.set_read_writes(self.read_writes.with_read(dep))
 
@@ -247,9 +248,28 @@ class BaseSchedulerNode:
         return bool(self.get_aliases() or self.get_mutations())
 
     def set_read_writes(self, rw: dependencies.ReadWrites) -> None:
-        self.read_writes: dependencies.ReadWrites = rw
+        self.read_writes = rw
         self.unmet_dependencies = self.read_writes.reads
         self.prune_deps()
+
+        # read_and_write_deps_with_hint are a summary of read_writes used by
+        # score_fusion_memory()
+        def dep_size_hint(dep: Dep) -> int:
+            try:
+                if dep.has_unbacked_symbols():
+                    return 0
+                return dep.numbytes_hint()
+            except KeyError:
+                # In at least one test (test/inductor/test_torchbind.py) we
+                # create a StarDep that doesn't exist in the graph and calling
+                # `has_unbacked_symbols()` throws an error.
+                return 0
+
+        self.read_and_write_deps_with_hint = {
+            (dep, hint)
+            for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes)
+            if (hint := dep_size_hint(dep)) > 0
+        }
 
     def op_counts(self) -> Counter[str]:
         return self.read_writes.op_counts
@@ -548,7 +568,11 @@ class BaseSchedulerNode:
         writes = {dep.name for dep in self.read_writes.writes}
 
         def is_materialized(buf: str, snodes: Sequence[BaseSchedulerNode]) -> bool:
-            users = self.scheduler.name_to_node[buf].users
+            users = [
+                user
+                for user in self.scheduler.name_to_node[buf].users
+                if not user.is_weak
+            ]
             buf_uses = {user.node for user in users}
             return len(buf_uses - set(snodes)) > 0
 
@@ -725,12 +749,15 @@ def debug_triton_code(node: Union["SchedulerNode", "FusedSchedulerNode"]) -> Lis
     if multi_template and multi_template.make_kernel_render is None:
         lines.append(f"{node.get_name()} Unfinalized multi template buffer")
     else:
+        from torch._inductor.codegen.cuda_combined_scheduling import (
+            CUDACombinedScheduling,
+        )
         from torch._inductor.codegen.triton import TritonScheduling
 
         snodes = (node,) if isinstance(node, SchedulerNode) else node.snodes
         device = snodes[0].get_device()
         backend = node.scheduler.get_backend(device)
-        assert isinstance(backend, TritonScheduling)
+        assert isinstance(backend, (TritonScheduling, CUDACombinedScheduling))
         V.graph.scheduler.current_device = device
 
         # Don't increment kernel count when generating debug string.
@@ -1036,7 +1063,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def update_mutated_names(self, renames: Dict[str, str]) -> None:
         raise NotImplementedError
 
-    def add_mutation_dep(self, name: Dep) -> None:
+    def add_fake_dep(self, name: Dep) -> None:
         raise NotImplementedError
 
     def set_users(self, users: List["NodeUser"]) -> None:
@@ -1113,6 +1140,12 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 for l, r in zip(producer.snodes, consumer.snodes)
             )
         elif consumer.is_foreach():
+            if producer.is_reduction():
+                why(
+                    "candidate producer is a reduction, foreach ops cannot be fused with reductions currently"
+                )
+                return False
+
             consumer = typing.cast(ForeachKernelSchedulerNode, consumer)
             consumer_subnode = consumer.get_consumer_subnode_for(producer)
             if consumer_subnode is not None:
@@ -1122,6 +1155,12 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             return False
 
         elif producer.is_foreach():
+            if consumer.is_reduction():
+                why(
+                    "candidate consumer is a reduction, foreach ops cannot be fused with reductions currently"
+                )
+                return False
+
             producer = typing.cast(ForeachKernelSchedulerNode, producer)
             producer_subnode = producer.get_producer_subnode_for(consumer)
             if producer_subnode is not None:
@@ -1236,7 +1275,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             for name in other_node.get_names():
                 self.name_to_node[name] = other_node
 
-        self.group = (nodes[0].get_device(), [[sympy.Expr("foreach")]])
+        self.group = (nodes[0].get_device(), ((sympy.Expr("foreach"),),))
 
         self.origins: Set[torch.fx.Node] = set()
 
@@ -1646,7 +1685,7 @@ class Scheduler:
                 alt_name = rename(alt_name)
                 # this node must run after the prior writer
                 add_user(alt_name, node)
-                node.add_mutation_dep(StarDep(alt_name, mode=node_mode))
+                node.add_fake_dep(StarDep(alt_name, mode=node_mode))
                 for other_node in name_to_users[alt_name].items:
                     # this node must run after all prior readers
                     other_name = rename(other_node.get_name())
@@ -1654,7 +1693,7 @@ class Scheduler:
                     if other_name not in known_dep_node_names:
                         # If this node already directly or indirectly depends on other_node,
                         # we don't need to insert an extra dep.
-                        node.add_mutation_dep(WeakDep(other_name))
+                        node.add_fake_dep(WeakDep(other_name))
                         add_user(other_name, node, is_weak=True)
 
             # add normal non-mutation dependencies
@@ -2376,41 +2415,11 @@ class Scheduler:
         computed_deps = set()
         why = WhyNoFuse(node1, node2)
 
-        # StarDep doesn't match MemoryDep, different indices don't match
-        # However, broadcasting sometimes strips dimensions, and if that's the case
-        # we still can match unmet dep
-        # if there's indirect indexing, don't match it
-        def fusable_read_and_write(read: Dep, write: Dep) -> bool:
-            read_name = self.mutation_renames.get(read.name, read.name)
-            write_name = self.mutation_renames.get(write.name, write.name)
-            if (
-                isinstance(read, MemoryDep)
-                and isinstance(write, MemoryDep)
-                and read.mode == write.mode
-                and write.mode is not None
-            ):
-                return True
-            if (
-                isinstance(read, StarDep)
-                and isinstance(write, MemoryDep)
-                and read.mode == write.mode
-                and write.mode is not None
-                and read_name == write_name
-            ):
-                return True
-            return (
-                self.mutation_renames.get(read.name, read.name) == write.name
-                and (isinstance(read, MemoryDep) and isinstance(write, MemoryDep))
-                and not free_symbol_is_type(read.index, SymT.TMP)
-                and not free_symbol_is_type(write.index, SymT.TMP)
-                and read.index == write.index
-                and len(read.size) >= len(write.size)
-                and read.size[: len(write.size)] == write.size
-            )
-
-        for rd in node2.unmet_dependencies:
-            for cd in node1.read_writes.writes:
-                if fusable_read_and_write(rd, cd):
+        for cd in node1.read_writes.writes:
+            if not isinstance(cd, MemoryDep):
+                continue
+            for rd in node2.unmet_dependencies:
+                if self.fusable_read_and_write(rd, cd):
                     computed_deps.add(rd)
 
         remaining_deps = {dep.name for dep in node2.unmet_dependencies - computed_deps}
@@ -2429,16 +2438,48 @@ class Scheduler:
         # similar to can_inplace, if we are going to fuse a write subsequent to a read
         # require that the indexing and size is the same
         for write in node2.read_writes.writes:
+            if not isinstance(write, MemoryDep):
+                continue
             for read in node1.read_writes.reads:
                 if write.name != self.mutation_renames.get(read.name, read.name):
                     continue
 
                 # bail on StarDep
-                if not fusable_read_and_write(read=read, write=write):
+                if not self.fusable_read_and_write(read, write):
                     why("fusing a write into a read with different indexing formula")
                     return False
 
         return True
+
+    # StarDep doesn't match MemoryDep, different indices don't match
+    # However, broadcasting sometimes strips dimensions, and if that's the case
+    # we still can match unmet dep
+    # if there's indirect indexing, don't match it
+    def fusable_read_and_write(self, read: Dep, write: MemoryDep) -> bool:
+        if isinstance(read, MemoryDep):
+            if read.mode == write.mode and write.mode is not None:
+                return True
+            read_name = read.name
+            if read_name in self.mutation_renames:
+                read_name = self.mutation_renames[read_name]
+            return (
+                read_name == write.name
+                and not free_symbol_is_type(read.index, SymT.TMP)
+                and not free_symbol_is_type(write.index, SymT.TMP)
+                and read.index == write.index
+                and len(read.size) >= len(write.size)
+                and read.size[: len(write.size)] == write.size
+            )
+        elif isinstance(read, StarDep):
+            read_name = self.mutation_renames.get(read.name, read.name)
+            write_name = self.mutation_renames.get(write.name, write.name)
+            if (
+                read.mode == write.mode
+                and write.mode is not None
+                and read_name == write_name
+            ):
+                return True
+        return False
 
     def score_fusion(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
@@ -2468,15 +2509,14 @@ class Scheduler:
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> int:
         """
-        The first term in our fusion score that estimates number of saved memory operations.
+        The first term in our fusion score that estimates number of saved
+        memory operations.
         """
-        common_memory_deps = (node1.read_writes.reads | node1.read_writes.writes) & (
-            node2.read_writes.reads | node2.read_writes.writes
+        return sum(
+            hint
+            for dep, hint in node1.read_and_write_deps_with_hint
+            & node2.read_and_write_deps_with_hint
         )
-        common_memory_deps = {
-            dep for dep in common_memory_deps if not dep.has_unbacked_symbols()
-        }
-        return sum(dep.numbytes_hint() for dep in common_memory_deps)
 
     def get_possible_fusions_with_highest_priority(
         self, possible_fusions: List[Tuple[BaseSchedulerNode, BaseSchedulerNode]]
@@ -2486,7 +2526,7 @@ class Scheduler:
         if len(possible_fusions) == 0:
             return possible_fusions
         possible_fusions_group_by_priority: Dict[
-            int, List[Tuple["BaseSchedulerNode", "BaseSchedulerNode"]]
+            int, List[Tuple[BaseSchedulerNode, BaseSchedulerNode]]
         ] = {}
 
         for node1, node2 in possible_fusions:
@@ -2789,7 +2829,7 @@ class BaseScheduling:
 
     def group_fn(
         self, sizes: Sequence[Sequence[sympy.Expr]]
-    ) -> Sequence[Sequence[sympy.Expr]]:
+    ) -> Tuple[Tuple[sympy.Expr, ...], ...]:
         """
         Process the iteration sizes in case a transformation needs to be applied.
         """

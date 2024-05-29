@@ -11,12 +11,17 @@ from itertools import count
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 from unittest import mock
 
+<<<<<<< HEAD
+=======
 from functorch.compile import min_cut_rematerialization_partition
 
 import torch._inductor.async_compile
 
+>>>>>>> ca9e918751f (Move AsyncCompile to a different file)
 import torch.fx
 import torch.utils._pytree as pytree
+
+from functorch.compile import min_cut_rematerialization_partition
 from torch._dynamo import (
     compiled_autograd,
     config as dynamo_config,
