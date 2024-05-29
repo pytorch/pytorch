@@ -12,120 +12,128 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # protobuf header files, because protobuf header files will transitively force
 # one to link against a specific protobuf version.
 
-# ---[ Configure macro file.
-set(C10_USE_GFLAGS ${USE_GFLAGS}) # used in cmake_macros.h.in
-set(C10_USE_GLOG ${USE_GLOG}) # used in cmake_macros.h.in
-set(C10_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS}) # used in cmake_macros.h.in
-set(C10_USE_NUMA ${USE_NUMA})
-set(C10_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
-set(C10_USE_ROCM_KERNEL_ASSERT ${USE_ROCM_KERNEL_ASSERT})
-configure_file(
-    ${CMAKE_CURRENT_LIST_DIR}/macros/cmake_macros.h.in
-    ${CMAKE_BINARY_DIR}/c10/macros/cmake_macros.h)
-
-# Note: if you want to add ANY dependency to the c10 library, make sure you
-# check with the core PyTorch developers as the dependency will be
-# transitively passed on to all libraries dependent on PyTorch.
-file(GLOB C10_SRCS
-        *.cpp
-        core/*.cpp
-        core/impl/*.cpp
-        mobile/*.cpp
-        macros/*.cpp
-        util/*.cpp
-      )
-file(GLOB C10_HEADERS
-        *.h
-        core/*.h
-        core/impl/*.h
-        mobile/*.h
-        macros/*.h
-        util/*.h
-      )
-add_library(c10 ${C10_SRCS} ${C10_HEADERS})
-target_compile_options_if_supported(c10 "-Wdeprecated")
-if(HAVE_SOVERSION)
-  set_target_properties(c10 PROPERTIES
-      VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
-endif()
-# If building shared library, set dllimport/dllexport proper.
-target_compile_options(c10 PRIVATE "-DC10_BUILD_MAIN_LIB")
-# Enable hidden visibility if compiler supports it.
-if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
-  target_compile_options(c10 PRIVATE "-fvisibility=hidden")
+if(BUILD_LIBTORCHLESS)
+  find_library(C10_LIB c10 PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
+else()
+  set(C10_LIB c10)
 endif()
 
-option(C10_USE_IWYU "Use include-what-you-use to clean up header inclusion" OFF)
-if(C10_USE_IWYU)
-  find_program(iwyu NAMES include-what-you-use)
-  if(iwyu)
-    set(iwyu_cmd
-        "include-what-you-use"
-        "-Xiwyu"
-        "--transitive_includes_only"
-        "-Xiwyu"
-        "--no_fwd_decls"
-        "-Xiwyu"
-        "--prefix_header_includes=keep"
-        "-Xiwyu"
-        "--mapping_file=${CMAKE_CURRENT_LIST_DIR}/../tools/iwyu/all.imp"
-      )
-    set_property(TARGET c10 PROPERTY CXX_INCLUDE_WHAT_YOU_USE ${iwyu_cmd})
+  # ---[ Configure macro file.
+  set(C10_USE_GFLAGS ${USE_GFLAGS}) # used in cmake_macros.h.in
+  set(C10_USE_GLOG ${USE_GLOG}) # used in cmake_macros.h.in
+  set(C10_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS}) # used in cmake_macros.h.in
+  set(C10_USE_NUMA ${USE_NUMA})
+  set(C10_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
+  set(C10_USE_ROCM_KERNEL_ASSERT ${USE_ROCM_KERNEL_ASSERT})
+  configure_file(
+      ${CMAKE_CURRENT_LIST_DIR}/macros/cmake_macros.h.in
+      ${CMAKE_BINARY_DIR}/c10/macros/cmake_macros.h)
+
+  # Note: if you want to add ANY dependency to the c10 library, make sure you
+  # check with the core PyTorch developers as the dependency will be
+  # transitively passed on to all libraries dependent on PyTorch.
+  file(GLOB C10_SRCS
+          *.cpp
+          core/*.cpp
+          core/impl/*.cpp
+          mobile/*.cpp
+          macros/*.cpp
+          util/*.cpp
+        )
+  file(GLOB C10_HEADERS
+          *.h
+          core/*.h
+          core/impl/*.h
+          mobile/*.h
+          macros/*.h
+          util/*.h
+        )
+if(NOT BUILD_LIBTORCHLESS)
+  add_library(c10 ${C10_SRCS} ${C10_HEADERS})
+  target_compile_options_if_supported(c10 "-Wdeprecated")
+  if(HAVE_SOVERSION)
+    set_target_properties(c10 PROPERTIES
+        VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
   endif()
-endif()
+  # If building shared library, set dllimport/dllexport proper.
+  target_compile_options(c10 PRIVATE "-DC10_BUILD_MAIN_LIB")
+  # Enable hidden visibility if compiler supports it.
+  if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
+    target_compile_options(c10 PRIVATE "-fvisibility=hidden")
+  endif()
 
-if(WERROR)
-  target_compile_options_if_supported(c10 PRIVATE "-Werror=sign-compare")
-  target_compile_options_if_supported(c10 PRIVATE "-Werror=shadow")
-endif()
+  option(C10_USE_IWYU "Use include-what-you-use to clean up header inclusion" OFF)
+  if(C10_USE_IWYU)
+    find_program(iwyu NAMES include-what-you-use)
+    if(iwyu)
+      set(iwyu_cmd
+          "include-what-you-use"
+          "-Xiwyu"
+          "--transitive_includes_only"
+          "-Xiwyu"
+          "--no_fwd_decls"
+          "-Xiwyu"
+          "--prefix_header_includes=keep"
+          "-Xiwyu"
+          "--mapping_file=${CMAKE_CURRENT_LIST_DIR}/../tools/iwyu/all.imp"
+        )
+      set_property(TARGET c10 PROPERTY CXX_INCLUDE_WHAT_YOU_USE ${iwyu_cmd})
+    endif()
+  endif()
 
-# ---[ Dependency of c10
-if(C10_USE_GFLAGS)
-  target_link_libraries(c10 PUBLIC gflags)
-endif()
+  if(WERROR)
+    target_compile_options_if_supported(c10 PRIVATE "-Werror=sign-compare")
+    target_compile_options_if_supported(c10 PRIVATE "-Werror=shadow")
+  endif()
 
-if(C10_USE_GLOG)
-  target_link_libraries(c10 PUBLIC glog::glog)
-endif()
-target_link_libraries(c10 PRIVATE fmt::fmt-header-only)
+  # ---[ Dependency of c10
+  if(C10_USE_GFLAGS)
+    target_link_libraries(c10 PUBLIC gflags)
+  endif()
 
-if(C10_USE_NUMA)
-  message(STATUS "NUMA paths:")
-  message(STATUS ${Numa_INCLUDE_DIR})
-  message(STATUS ${Numa_LIBRARIES})
-  target_include_directories(c10 PRIVATE ${Numa_INCLUDE_DIR})
-  target_link_libraries(c10 PRIVATE ${Numa_LIBRARIES})
-else()
-  message(STATUS "don't use NUMA")
-endif()
+  if(C10_USE_GLOG)
+    target_link_libraries(c10 PUBLIC glog::glog)
+  endif()
+  target_link_libraries(c10 PRIVATE fmt::fmt-header-only)
 
-if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "s390x" AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le")
-  target_link_libraries(c10 PRIVATE cpuinfo)
-endif()
+  if(C10_USE_NUMA)
+    message(STATUS "NUMA paths:")
+    message(STATUS ${Numa_INCLUDE_DIR})
+    message(STATUS ${Numa_LIBRARIES})
+    target_include_directories(c10 PRIVATE ${Numa_INCLUDE_DIR})
+    target_link_libraries(c10 PRIVATE ${Numa_LIBRARIES})
+  else()
+    message(STATUS "don't use NUMA")
+  endif()
 
-find_package(Backtrace)
-if(Backtrace_FOUND)
-  target_include_directories(c10 PRIVATE ${Backtrace_INCLUDE_DIRS})
-  target_link_libraries(c10 PRIVATE ${Backtrace_LIBRARIES})
-  target_compile_definitions(c10 PRIVATE SUPPORTS_BACKTRACE=1)
-else()
-  target_compile_definitions(c10 PRIVATE SUPPORTS_BACKTRACE=0)
-endif()
+  if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "s390x" AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le")
+    target_link_libraries(c10 PRIVATE cpuinfo)
+  endif()
 
-if(USE_MIMALLOC)
-  target_link_libraries(c10 PRIVATE "mimalloc-static")
-  add_dependencies(c10 mimalloc-static)
-endif()
+  find_package(Backtrace)
+  if(Backtrace_FOUND)
+    target_include_directories(c10 PRIVATE ${Backtrace_INCLUDE_DIRS})
+    target_link_libraries(c10 PRIVATE ${Backtrace_LIBRARIES})
+    target_compile_definitions(c10 PRIVATE SUPPORTS_BACKTRACE=1)
+  else()
+    target_compile_definitions(c10 PRIVATE SUPPORTS_BACKTRACE=0)
+  endif()
 
-if(ANDROID)
-  target_link_libraries(c10 PRIVATE log)
-endif()
+  if(USE_MIMALLOC)
+    target_link_libraries(c10 PRIVATE "mimalloc-static")
+    add_dependencies(c10 mimalloc-static)
+  endif()
 
-target_include_directories(
-    c10 PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../>
-    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
-    $<INSTALL_INTERFACE:include>)
+  if(ANDROID)
+    target_link_libraries(c10 PRIVATE log)
+  endif()
+
+  target_include_directories(
+      c10 PUBLIC
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../>
+      $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
+      $<INSTALL_INTERFACE:include>)
+endif()
 
 add_subdirectory(test)
 add_subdirectory(benchmark)
@@ -144,11 +152,14 @@ if(USE_XPU)
   add_subdirectory(xpu)
 endif()
 
-# ---[ Installation
-# Note: for now, we will put all export path into one single Caffe2Targets group
-# to deal with the cmake deployment need. Inside the Caffe2Targets set, the
-# individual libraries like libc10.so and libcaffe2.so are still self-contained.
-install(TARGETS c10 EXPORT Caffe2Targets DESTINATION lib)
+if(NOT BUILD_LIBTORCHLESS)
+  # ---[ Installation
+  # Note: for now, we will put all export path into one single Caffe2Targets group
+  # to deal with the cmake deployment need. Inside the Caffe2Targets set, the
+  # individual libraries like libc10.so and libcaffe2.so are still self-contained.
+  install(TARGETS c10 EXPORT Caffe2Targets DESTINATION lib)
+endif()
+
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         DESTINATION include
         FILES_MATCHING PATTERN "*.h")

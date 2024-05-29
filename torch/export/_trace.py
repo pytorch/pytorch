@@ -545,7 +545,6 @@ def _export_to_aten_ir(
     *,
     transform=lambda x: x,  # TODO(zhxchen17) Revisit if this is needed later.
     pre_dispatch=False,
-    should_insert_runtime_assertion=False,
     _is_torch_jit_trace=False,
 ):
     # [NOTE] If the user is exporting under training mode, we want to detect if there is any
@@ -667,20 +666,19 @@ def _export_to_aten_ir(
 
     fake_mode = detect_fake_mode(flat_args)
 
-    if should_insert_runtime_assertion:
-        stack_trace = (
-            'File "torch/fx/passes/runtime_assert.py", line 24, '
-            "in insert_deferred_runtime_asserts"
+    stack_trace = (
+        'File "torch/fx/passes/runtime_assert.py", line 24, '
+        "in insert_deferred_runtime_asserts"
+    )
+    with _set_node_metadata_hook(
+        gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+    ):
+        insert_deferred_runtime_asserts(
+            gm,
+            fake_mode.shape_env,
+            f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
+            export=True,
         )
-        with _set_node_metadata_hook(
-            gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
-        ):
-            insert_deferred_runtime_asserts(
-                gm,
-                fake_mode.shape_env,
-                f"non strict exported program: {first_call_function_nn_module_stack(gm.graph)}",
-                export=True,
-            )
 
     if pre_dispatch:
         from torch._export.passes.replace_set_grad_with_hop_pass import (
@@ -701,18 +699,16 @@ def _export_to_aten_ir(
     constants = rewrite_script_object_meta(gm)
     constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
 
-    # FIXME: Skipping this because traced modules do not have signature yet
-    if not _is_torch_jit_trace:
-        # prettify names for placeholder nodes
-        placeholder_naming_pass(
-            gm,
-            export_graph_signature,
-            mod,
-            fake_args,
-            fake_kwargs,
-            fake_params_buffers,
-            constants,
-        )
+    # Prettify names for placeholder nodes.
+    placeholder_naming_pass(
+        gm,
+        export_graph_signature,
+        mod,
+        fake_args,
+        fake_kwargs,
+        fake_params_buffers,
+        constants,
+    )
 
     return ExportedArtifact(
         gm,
@@ -947,46 +943,95 @@ def _log_export_wrapper(fn):
     return wrapper
 
 
-def _convert_ts_to_export_experimental(traced_callable, args, kwargs=None):
+def _process_jit_trace_inputs_for_export(example_inputs, example_kwarg_inputs):
+    if not isinstance(example_inputs, (tuple, list, dict)):
+        example_inputs = (example_inputs,)
+
+    elif isinstance(example_inputs, list):
+        example_inputs = tuple(example_inputs)
+
+    elif (
+        isinstance(example_inputs, (torch.Tensor, dict))
+        and example_kwarg_inputs is None
+    ):
+        example_inputs = (example_inputs,)
+
+    if example_kwarg_inputs is None:
+        example_kwarg_inputs = {}
+    return example_inputs, example_kwarg_inputs
+
+
+@contextmanager
+def patch_forward(obj: torch.nn.Module, new_method):
+    """Helper method to make it easier to cleanly torch.export() a method on a
+    module that is not `forward`.
+    """
+    # Save the original method
+    original_method = obj.forward
+
+    # Patch the method
+    obj.forward = new_method.__get__(obj, obj.__class__)
+
+    try:
+        yield
+    finally:
+        # Restore the original method
+        obj.forward = original_method
+
+
+@contextmanager
+def _temp_disable_texpr_fuser():
+    original_state = torch._C._jit_texpr_fuser_enabled()
     torch._C._jit_set_texpr_fuser_enabled(False)
+    try:
+        yield
+    finally:
+        torch._C._jit_set_texpr_fuser_enabled(original_state)
 
-    def process_trace_inputs_for_export(example_inputs, example_kwarg_inputs):
-        if not isinstance(example_inputs, tuple):
-            example_inputs = (example_inputs,)
 
-        if example_kwarg_inputs is None:
-            example_kwarg_inputs = {}
-        return example_inputs, example_kwarg_inputs
+def _convert_ts_to_export_experimental(traced_callable, args, kwargs=None):
+    with _temp_disable_texpr_fuser():
 
-    class _WrapperModule(torch.nn.Module):
-        def __init__(self, f):
-            super().__init__()
-            self.f = f
+        class _WrapperModule(torch.nn.Module):
+            def __init__(self, f):
+                super().__init__()
+                self.f = f
 
-        def forward(self, *args, **kwargs):
-            return self.f(*args, **kwargs)
+            def forward(self, *args, **kwargs):
+                return self.f(*args, **kwargs)
 
-    from torch.jit._trace import TopLevelTracedModule
+        from torch.jit._trace import TopLevelTracedModule
 
-    export_args, export_kwargs = process_trace_inputs_for_export(args, kwargs)
+        export_args, export_kwargs = _process_jit_trace_inputs_for_export(args, kwargs)
 
-    if isinstance(traced_callable, TopLevelTracedModule):
-        return _export(
-            traced_callable,
-            export_args,
-            export_kwargs,
-            strict=False,
-            _is_torch_jit_trace=True,
-        ).module()
+        if isinstance(traced_callable, (TopLevelTracedModule, torch._C.ScriptModule)):  # type: ignore[operator]
+            return _export(
+                traced_callable,
+                export_args,
+                export_kwargs,
+                strict=False,
+                _is_torch_jit_trace=True,
+            ).module()
 
-    else:
-        return _export(
-            _WrapperModule(traced_callable),
-            export_args,
-            export_kwargs,
-            strict=False,
-            _is_torch_jit_trace=True,
-        ).module()
+        elif isinstance(traced_callable, torch.ScriptMethod) and isinstance(
+            traced_callable.owner(), (torch._C.ScriptModule, torch.nn.Module)  # type: ignore[operator]
+        ):
+            with patch_forward(traced_callable.owner(), traced_callable):  # type: ignore[operator]
+                return _export(
+                    traced_callable.owner(),  # type: ignore[operator]
+                    export_args,
+                    export_kwargs,
+                    strict=False,
+                    _is_torch_jit_trace=True,
+                ).module()
+        else:
+            return _export(
+                _WrapperModule(traced_callable),
+                export_args,
+                export_kwargs,
+                strict=False,
+                _is_torch_jit_trace=True,
+            ).module()
 
 
 def _strict_export(
@@ -1097,15 +1142,15 @@ def _strict_export(
 
     # NOTE: graph module expects only positional args
     constant_attrs = _gather_constant_attrs(mod)
-    aten_export_artifact = _export_to_aten_ir(
-        gm_torch_level,
-        _convert_to_positional_args(orig_arg_names, fake_args, fake_kwargs),
-        {},
-        fake_params_buffers,
-        constant_attrs,
-        pre_dispatch=pre_dispatch,
-        should_insert_runtime_assertion=False,
-    )
+    with dynamo_fake_mode:
+        aten_export_artifact = _export_to_aten_ir(
+            gm_torch_level,
+            _convert_to_positional_args(orig_arg_names, fake_args, fake_kwargs),
+            {},
+            fake_params_buffers,
+            constant_attrs,
+            pre_dispatch=pre_dispatch,
+        )
 
     # Decompose for readability.
     gm = aten_export_artifact.gm
@@ -1259,7 +1304,6 @@ def _non_strict_export(
                 new_fake_constant_attrs,
                 pre_dispatch=pre_dispatch,
                 transform=_tuplify_outputs,
-                should_insert_runtime_assertion=True,
                 _is_torch_jit_trace=_is_torch_jit_trace,
             )
             # aten_export_artifact.constants contains only fake script objects, we need to map them back
@@ -1272,6 +1316,7 @@ def _non_strict_export(
         produce_guards_and_solve_constraints(
             fake_mode,
             aten_export_artifact.gm,
+            dynamic_shapes,
             equalities_inputs,
             original_signature,
             _disable_forced_specializations=_disable_forced_specializations,
@@ -1417,7 +1462,9 @@ def _export(
         ),
         len(export_graph_signature.input_specs),
     )
-    combined_args = _combine_args(mod, args, kwargs)
+    combined_args = _combine_args(
+        mod, args, kwargs, _is_torch_jit_trace=_is_torch_jit_trace
+    )
     range_constraints = make_constraints(
         fake_mode,
         gm,
