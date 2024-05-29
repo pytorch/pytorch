@@ -54,6 +54,41 @@ class ScheduleTest(MultiProcContinousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("ScheduleClass", [ScheduleGPipe])
+    def test_forward_only(self, ScheduleClass):
+        mod = MultiMLP(d_hid, n_layers=self.world_size)
+        mod.to(self.device)
+
+        x = torch.randn(batch_size, d_hid, device=self.device)
+
+        # Create a pipeline
+        chunks = 4
+        split_spec = mod.split_spec if hasattr(mod, "split_spec") else None
+        pipe = pipeline(
+            mod,
+            chunks,
+            example_args=(x,),
+            split_spec=split_spec,
+        )
+
+        stage = PipelineStage(
+            pipe,
+            self.rank,
+            device=self.device,
+        )
+
+        # Attach to a schedule
+        schedule = ScheduleClass(stage, chunks)
+
+        # Run
+        for _ in range(10):
+            if self.rank == 0:
+                schedule.step(x)
+            else:
+                schedule.step()
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
     def test_multi_iter(self, ScheduleClass):
         mod = MultiMLP(d_hid, n_layers=self.world_size)
