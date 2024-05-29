@@ -2203,6 +2203,21 @@ class GraphModule(torch.nn.Module):
         test(True, False)
         test(torch.ones(4, dtype=torch.float32), 1.1)
 
+    def test_index(self):
+        def fn(x, t):
+            if operator.index(x) > 0:
+                return torch.mul(t, 1)
+            else:
+                return torch.mul(t, 0)
+
+        for dynamic in [True, False]:
+            opt_fn = torch.compile(fullgraph=True, dynamic=dynamic)(fn)
+            t = torch.ones(1)
+            self.assertEqual(opt_fn(1, t), torch.ones(1))
+            self.assertEqual(opt_fn(True, t), torch.ones(1))
+            self.assertEqual(opt_fn(0, t), torch.zeros(1))
+            self.assertEqual(opt_fn(False, t), torch.zeros(1))
+
     def test_truth(self):
         def fn(x, y):
             return operator.truth(x) and bool(y)
