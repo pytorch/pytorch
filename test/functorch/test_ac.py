@@ -2,9 +2,8 @@
 import torch
 import torch._functorch.config as config
 from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.utils.flop_counter import FlopCounterMode
-
-torch.set_default_device("cuda")
 
 
 def compile_with_ac(f, memory_budget):
@@ -154,21 +153,6 @@ class MemoryBudgetTest(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
-# def f(x, w1, w2):
-#     x = torch.mm(x, w1)
-#     x = x.cos()
-#     x = torch.mm(x, w2)
-#     return x.sum()
-
-# x = torch.randn(512, 512, requires_grad=True)
-# w1 = torch.randn(512, 512, requires_grad=True)
-# w2 = torch.randn(512, 512, requires_grad=True)
-# print(get_act_mem(lambda: f(x, w1, w2)))
-# print(get_mem_and_flops(lambda: f(x, w1, w2), memory_budget=0.0))
-# f1 = compile_with_ac(f, memory_budget=1.0)
-# print(get_act_mem(lambda: f1(x, w1, w2)))
-# print(get_bw_flops(lambda: f1(x, w1, w2)))
-# f2 = compile_with_ac(f, memory_budget=0.0)
-# print(get_act_mem(lambda: f2(x, w1, w2)))
-# print(get_bw_flops(lambda: f2(x, w1, w2)))
+    if HAS_CUDA:
+        torch.set_default_device("cuda")
+        run_tests()

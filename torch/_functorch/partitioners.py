@@ -1400,7 +1400,6 @@ def _optimize_runtime_with_given_memory(
     max_memory: float,
 ) -> Tuple[float, List[int], List[int]]:
     SOLVER = config.memory_budget_solver
-    SOLVER = "dp"
     if SOLVER == "greedy":
         return greedy_knapsack(memory, runtimes, max_memory)
     elif SOLVER == "ilp":
