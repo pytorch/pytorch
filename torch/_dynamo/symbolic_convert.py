@@ -1239,29 +1239,100 @@ class InstructionTranslatorBase(
                 self.push(ConstantVariable.create(None))
             self.jump(inst)
 
+    def JUMP_IF_NOT_EXC_MATCH(self, inst):
+        # TODO(anijain2305) - Share code with CHECK_EXC_MATCH
+        assert len(self.stack) >= 2
+        expected_exc_types = self.pop()
+        exn = self.pop()
+
+        if not (
+            isinstance(expected_exc_types, BuiltinVariable)
+            and isinstance(exn, variables.ExceptionVariable)
+            and issubclass(exn.exc_type, expected_exc_types.fn)
+        ):
+            self.jump(inst.target)
+
     def RAISE_VARARGS(self, inst):
         if inst.arg == 0:
             unimplemented("re-raise")
         elif inst.arg == 1:
             val = self.pop()
+
+            # TODO(anijain2305) - Merge StopIterationVariable to use the same exception infra.
             if (
                 isinstance(val, BuiltinVariable) and val.fn is StopIteration
             ) or isinstance(val, variables.StopIterationVariable):
                 raise exc.UserStopIteration
+
+            # User can raise exception in 2 ways
+            #   1) raise exception type - raise NotImplementedError
+            #   2) raise execption instance - raise NotImplemetedError("foo")
+
+            # 1) when user raises exception type
+            if isinstance(val, variables.BuiltinVariable):
+                # Create the instance of the exception type
+                # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L6547-L6549
+                val = val.call_function(self, [], {})
+
+            # 2) when user raises exception instance
             if isinstance(val, variables.ExceptionVariable):
-                # TODO (anijain2305) - There is some stack cleanup code here -
-                # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L5762.
-                # Not sure what it means.
-                self.exn_vt_stack.append(val)
-                if not self.current_instruction.exn_tab_entry:
-                    # No exception handler, raise an exception to be caught by the parent frame
-                    raise exc.ObservedException
-                self.jump(self.current_instruction.exn_tab_entry)
-                self.push(val)
+                self.get_exception_handler(val)
                 return
             unimplemented(f"raise {exc}")
         else:
             unimplemented("raise ... from ...")
+
+    def get_exception_handler(self, exception_var):
+        # Save the exception in a global data structure
+        self.exn_vt_stack.append(exception_var)
+
+        if sys.version_info >= (3, 11):
+            exn_tab_entry = self.current_instruction.exn_tab_entry
+            if exn_tab_entry:
+                # Implementation is based on https://github.com/python/cpython/blob/3.11/Objects/exception_handling_notes.txt
+
+                # 1) pop values from the stack until it matches the stack depth
+                # for the handler
+                while len(self.stack) > exn_tab_entry.depth:
+                    self.pop()
+
+                # 2) if 'lasti' is true, then push the offset that the exception was raised at
+                if exn_tab_entry.lasti:
+                    # TODO(anijain2305) - This unimplemented should not be
+                    # required. Remove it once tested.
+                    unimplemented("lasti is True in exception handling")
+                    self.push(self.current_instruction.offset)
+
+                # 3) push the exception to the stack
+                self.push(exception_var)
+
+                # 4) push the exception to the stack
+                self.jump(exn_tab_entry)
+            else:
+                # No handler found. Bubble the exception to the parent
+                # instruction translater. We use special exception for this.
+                self.stack.clear()
+                raise exc.ObservedException
+        else:
+            if len(self.block_stack):
+                inst_to_jump = self.block_stack.pop()
+                # Push old exception
+                self.push(variables.ConstantVariable(None))
+                self.push(variables.ConstantVariable(None))
+                self.push(variables.ConstantVariable(None))
+
+                # Push new exception
+                self.push(exception_var)
+                self.push(exception_var)
+                self.push(exception_var)
+
+                # Jump to target
+                self.jump(inst_to_jump)
+            else:
+                # No handler found. Bubble the exception to the parent
+                # instruction translater. We use special exception for this.
+                self.stack.clear()
+                raise exc.ObservedException
 
     def PUSH_EXC_INFO(self, inst):
         val = self.pop()
@@ -1272,22 +1343,48 @@ class InstructionTranslatorBase(
         self.push(val)
 
     def POP_EXCEPT(self, inst):
-        val = self.pop()
-        assert isinstance(val, variables.ExceptionVariable)
+        if sys.version_info >= (3, 11):
+            val = self.pop()
+            assert isinstance(val, variables.ExceptionVariable)
+        else:
+            self.popn(3)
 
     def CHECK_EXC_MATCH(self, inst):
         assert len(self.stack) >= 2
-        expected_class = self.pop()
-        exn = self.stack[-1]
+        expected_exc_types = self.pop()
+        exc_instance = self.stack[-1]
 
-        if (
-            isinstance(expected_class, BuiltinVariable)
-            and isinstance(exn, variables.ExceptionVariable)
-            and issubclass(exn.exc_type, expected_class.fn)
-        ):
-            self.push(ConstantVariable(True))
+        # Users can check exception in 2 ways
+        # 1) except NotImplementedError --> BuilinVariable
+        # 2) except (NotImplemetedError, AttributeError) -> TupleVariable
+
+        if not isinstance(expected_exc_types, (BuiltinVariable, TupleVariable)):
+            unimplemented(
+                f"except has an unsupported types of objects {expected_exc_types}"
+            )
+
+        if not isinstance(exc_instance, variables.ExceptionVariable):
+            unimplemented(
+                f"except expects to recieve an object of exception type but received {exc_instance}"
+            )
+
+        if isinstance(expected_exc_types, TupleVariable):
+            expected_types = expected_exc_types.items
         else:
-            self.push(ConstantVariable(False))
+            expected_types = [
+                expected_exc_types,
+            ]
+
+        for expected_type in expected_types:
+            if not isinstance(expected_type, BuiltinVariable):
+                unimplemented(
+                    f"except has an unsupported types of object {expected_type}"
+                )
+            if issubclass(exc_instance.exc_type, expected_type.fn):
+                self.push(ConstantVariable(True))
+                return
+
+        self.push(ConstantVariable(False))
 
     def COMPARE_OP(self, inst):
         self.push(compare_op_handlers[inst.argval](self, self.popn(2), {}))
@@ -2428,6 +2525,8 @@ class InstructionTranslator(InstructionTranslatorBase):
             )
 
         if new_code.co_freevars:
+            # expose code object for debugging purposes
+            self.output.install_global_unsafe(name, new_code)
             cg.make_function_with_closure(name, new_code, True, stack_len)
         else:
             # This is safe: we pre-generate a unique name

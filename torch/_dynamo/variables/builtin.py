@@ -1224,9 +1224,15 @@ class BuiltinVariable(VariableTracker):
 
     def call_callable(self, tx, arg):
         from .functions import BaseUserFunctionVariable
+        from .nn_module import NNModuleVariable
 
         if isinstance(
-            arg, (variables.UserDefinedClassVariable, BaseUserFunctionVariable)
+            arg,
+            (
+                variables.UserDefinedClassVariable,
+                BaseUserFunctionVariable,
+                NNModuleVariable,
+            ),
         ):
             return variables.ConstantVariable.create(True)
         elif isinstance(arg, UserDefinedVariable):
@@ -1814,6 +1820,12 @@ class BuiltinVariable(VariableTracker):
             nn_mod_variable = args[0]
             mod = tx.output.get_submodule(nn_mod_variable.module_key)
             return variables.ConstantVariable.create(id(mod))
+        elif len(args) == 1 and isinstance(
+            args[0], variables.UserDefinedObjectVariable
+        ):
+            install_guard(args[0].source.make_guard(GuardBuilder.ID_MATCH))
+            constant_result = id(args[0].value)
+            return variables.ConstantVariable.create(constant_result)
         else:
             unimplemented(f"call_id with args {args}")
 

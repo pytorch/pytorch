@@ -15,6 +15,7 @@ NATIVE_TO_PY_MAPPING = {
     funcol_native.all_gather_into_tensor: funcol_py.all_gather_into_tensor,
     funcol_native.all_gather_into_tensor_coalesced: funcol_py.all_gather_into_tensor_coalesced,
     funcol_native.all_reduce: funcol_py.all_reduce,
+    funcol_native.all_reduce_coalesced: funcol_py.all_reduce_coalesced,
     funcol_native.all_to_all_single: funcol_py.all_to_all_single,
     funcol_native.broadcast: funcol_py.broadcast,
     funcol_native.reduce_scatter_tensor: funcol_py.reduce_scatter_tensor,
@@ -27,7 +28,11 @@ c10d_collective_ops = {
     c10d_ops.allreduce_,
     c10d_ops._allgather_base_,
     c10d_ops._reduce_scatter_base_,
+    c10d_ops.allreduce_coalesced_,
     c10d_ops.broadcast_,
+    c10d_ops.gather_,
+    c10d_ops.scatter_,
+    c10d_ops.reduce_,
 }
 
 
