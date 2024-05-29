@@ -1,3 +1,5 @@
+import warnings
+
 import torch
 
 __all__ = ["GradScaler"]
@@ -6,7 +8,7 @@ __all__ = ["GradScaler"]
 class GradScaler(torch.amp.GradScaler):
     r"""
     See :class:`torch.amp.GradScaler`.
-    ``torch.cuda.amp.GradScaler(args...)`` is equivalent to ``torch.amp.GradScaler("cuda", args...)``
+    ``torch.cuda.amp.GradScaler(args...)`` is deprecated. Please use ``torch.amp.GradScaler("cuda", args...)`` instead.
     """
 
     def __init__(
@@ -17,6 +19,9 @@ class GradScaler(torch.amp.GradScaler):
         growth_interval: int = 2000,
         enabled: bool = True,
     ) -> None:
+        warnings.warn(
+            "torch.cuda.amp.GradScaler(args...) is deprecated. Please use torch.amp.GradScaler('cuda', args...) instead."
+        )
         super().__init__(
             "cuda",
             init_scale=init_scale,
