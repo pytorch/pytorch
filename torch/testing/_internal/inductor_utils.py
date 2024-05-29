@@ -4,7 +4,9 @@ import torch
 import re
 import unittest
 import functools
+import os
 from subprocess import CalledProcessError
+import sys
 
 from torch._inductor.codecache import CppCodeCache
 from torch.utils._triton import has_triton
@@ -12,7 +14,11 @@ from torch.testing._internal.common_utils import (
     LazyVal,
     IS_FBCODE,
 )
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import (
+    TestCase,
+    IS_CI,
+    IS_WINDOWS,
+)
 
 def test_cpu():
     try:
@@ -78,6 +84,17 @@ def skipDeviceIf(cond, msg, *, device):
             return fn
 
     return decorate_fn
+
+def skip_windows_ci(name: str, file: str) -> None:
+    if IS_WINDOWS and IS_CI:
+        module = os.path.basename(file).strip(".py")
+        sys.stderr.write(
+            f"Windows CI does not have necessary dependencies for {module} tests yet\n"
+        )
+        if name == "__main__":
+            sys.exit(0)
+        raise unittest.SkipTest("requires sympy/functorch/filelock")
+
 
 skipCUDAIf = functools.partial(skipDeviceIf, device="cuda")
 skipXPUIf = functools.partial(skipDeviceIf, device="xpu")
