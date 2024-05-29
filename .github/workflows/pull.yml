@@ -342,6 +342,7 @@ jobs:
           { config: "default", shard: 4, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "default", shard: 5, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "deploy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
+        ]}
 
   linux-focal-cuda12_4-py3_10-gcc9-test:
     name: linux-focal-cuda12.4-py3.10-gcc9
