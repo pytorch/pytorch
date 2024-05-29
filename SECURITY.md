@@ -5,6 +5,7 @@
    - [Untrusted models](#untrusted-models)
    - [Untrusted inputs](#untrusted-inputs)
    - [Data privacy](#data-privacy)
+   - [Using distributed features](#using-distributed-features)
 
 ## Reporting Security Issues
 
@@ -54,3 +55,9 @@ If applicable, prepare your model against bad inputs and prompt injections. Some
 **Take special security measures if your model if you train models with sensitive data**. Prioritize [sandboxing](https://developers.google.com/code-sandboxing) your models and:
 - Do not feed sensitive data to untrusted model (even if runs in a sandboxed environment)
 - If you consider publishing a model that was partially trained with sensitive data, be aware that data can potentially be recovered from the trained weights (especially if model overfits).
+
+### Using distributed features
+
+PyTorch can be used for distributed computing, and as such there is a `torch.distributed` package. PyTorch Distributed features are intended for internal communication only. They are not built for use in untrusted environments or networks.
+
+For performance reasons, neither c10D/RPCD nor TCPServer include any authorization protocol and send messages unencrypted. They accept connections from anywhere, and execute the workload sent without performing any checks. Therefore, if you run a PyTorch Distributed in your network, anybody with access to the network can execute arbitrary code with the privileges of the user running c10d, TCPServer.
