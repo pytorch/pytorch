@@ -2,13 +2,22 @@ import builtins
 import dataclasses
 import inspect
 import math
+import re
 import sys
 import weakref
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+
+import sympy
 
 import torch
-from torch.utils._pytree import _get_node_type, BUILTIN_TYPES, SUPPORTED_NODES, tree_map
+from torch.utils._pytree import (
+    _get_node_type,
+    BUILTIN_TYPES,
+    SUPPORTED_NODES,
+    tree_flatten,
+    tree_map,
+)
 
 from .exported_program import ExportedProgram
 
@@ -896,3 +905,181 @@ def _process_dynamic_shapes(
                 constraints.append(primary)
 
     return constraints  # type: ignore[return-value]
+
+
+def get_dim_name_mapping(
+    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any], None]
+):
+    name_to_dim = {}
+    for dim in tree_flatten(
+        dynamic_shapes,
+        is_leaf=lambda x: isinstance(x, _Dim),
+    )[0]:
+        if dim is None or isinstance(dim, int):
+            continue
+        name_to_dim[dim.__name__] = dim
+        if isinstance(dim, _DerivedDim):
+            name_to_dim[dim.root.__name__] = dim.root  # type: ignore[attr-defined]
+    return name_to_dim
+
+
+def parse_and_refine_suggested_fixes(
+    msg: str, dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any]],
+) -> Union[Dict[str, Any], Tuple[Any], List[Any]]:
+    """
+    For working with export's dynamic shapes suggested fixes, and/or automatic dynamic shapes.
+    Refines the given dynamic shapes spec, given a ConstraintViolation error message and the original dynamic shapes.
+    Does this by parsing the suggested fixes and building an intermediate mapping suggested_fixes.
+
+    suggested_fixes is a dictionary mapping from dim names to either:
+    - integers (specialized values)
+    - Dims or DerivedDims
+    - strings representing valid derived dim expressions (a * x + b, where x is a Dim)
+
+    Finally returns the original dynamic shapes spec, but refined with the suggested fixes.
+
+    Some notes on behavior:
+    - Keys in suggested_fixes will be existing dim names (exists in original dynamic_shapes spec),
+      or newly introduced roots. The latter case is typically via suggested fixes to handle divisiblity
+      guard, e.g. if x % 2 == 0: -> Eq(Mod(x, 2), 0) -> dx = 2*_dx
+    - For refining derived dims, unless a value is explicitly provided for the derived dim name,
+      the root value provided in suggested_fixes is used to derive the new value.
+      For example:
+            dx = Dim("dx", max=2048); shapes = (dx, dx + 1, dx + 2);  #
+            suggested_fixes = {"dx": Dim("dx": max=16)} -> shapes[2] now has max = 18
+            suggested_fixes = {"dx": 16} -> shapes[2] is specialized to 18
+            suggested_fixes = {"dx": Dim("dx": max=16), "dx + 2": 18}
+                -> shapes[1] has max = 17, shapes[2] is specialized to 18
+                Keep in mind this case will actually fail export, since dx and dx + 1 should also be specialized.
+                Export's suggested fixes will never suggest this, but the flexibility is provided to the user.
+    """
+
+    from torch._dynamo.exc import UserError, UserErrorType
+    from torch.fx.experimental.symbolic_shapes import _is_supported_equivalence
+
+    try:
+        suggested_fixes_msg = msg.split("Suggested fixes:")[1].strip()
+    except:
+        raise UserError(
+            UserErrorType.INVALID_INPUT,
+            "Suggested fixes not found in error message given to parse_suggested_fixes()",
+        )
+
+    # build suggested_fixes dictionary
+    suggested_fixes = {}
+    for fix in suggested_fixes_msg.split("\n"):
+        fix = fix.strip()
+        if match := re.match(r"(.*) = Dim\('(.*)'.*\)", fix):
+            name = match.group(1)
+            _min, _max = None, None
+            if match_min := re.match(r".* = Dim\('.*', min\=([0-9]+).*\)", fix):
+                _min = int(match_min.group(1))
+            if match_max := re.match(r".* = Dim\('.*'.*max\=([0-9]+)\)", fix):
+                _max = int(match_max.group(1))
+            suggested_fixes[name] = Dim(name, min=_min, max=_max)
+        else:
+            name, expr = fix.split(" = ")
+            expr = sympy.sympify(expr)
+            if isinstance(expr, sympy.Number):
+                suggested_fixes[name] = int(expr)  # static, integer
+            else:
+                suggested_fixes[name] = str(expr)  # relation or derived dim
+
+    name_to_dim = get_dim_name_mapping(dynamic_shapes)
+
+    # track derived dim roots
+    roots: Set[str] = set()
+    for k, c in suggested_fixes.items():
+        if not isinstance(
+            c, (int, _Dim, _DerivedDim, str)
+        ):  # check derived dim expression
+            raise UserError(
+                UserErrorType.INVALID_INPUT,
+                (
+                    "Dictionary values to refine_with_suggested_fixes() must be integers, Dims, DerivedDims, "
+                    f"or strings representing derived dims, but instead found {c} of type {type(c)}"
+                ),
+            )
+        if isinstance(c, int) and not (
+            c >= 0 and c <= sys.maxsize - 1
+        ):  # check integer range
+            raise UserError(
+                UserErrorType.INVALID_INPUT,
+                (
+                    f"Integer values to refine_with_suggested_fixes() must be in the range [0, {sys.maxsize - 1}], "
+                    f"but instead found {c}"
+                ),
+            )
+        if isinstance(c, str):  # check dim/derived dim expression
+            expr = sympy.sympify(c)
+            if not _is_supported_equivalence(expr):
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    (
+                        "String inputs to refine_with_suggested_fixes() must be supported derived dim expressions "
+                        f"of the form a * x + b, but instead found {expr}"
+                    ),
+                )
+            suggested_fixes[k] = expr  # replace strings with sympy.Exprs
+            roots.add(str(list(expr.free_symbols)[0]))
+        if isinstance(c, _DerivedDim):
+            roots.add(c.root.__name__)  # type: ignore[arg-type]
+
+    # check keys are existing dims or new roots
+    for k, c in suggested_fixes.items():
+        if not (k in name_to_dim or k in roots):
+            raise UserError(
+                UserErrorType.INVALID_INPUT,
+                (
+                    f"Key {k}: {c} in refine_with_suggested_fixes() does not correspond to an existing dim "
+                    "or an introduced root in the new spec"
+                ),
+            )
+
+    # cache so we don't produce multiple derived dim objects
+    derived_dim_cache: Dict[str, _DerivedDim] = {}
+
+    def apply_fixes(dim, dummy):
+        if dim is None or isinstance(dim, int):  # not dynamic
+            return dim
+        elif dim.__name__ in suggested_fixes:  # directly fix
+            fix = suggested_fixes[dim.__name__]
+            if isinstance(fix, sympy.Expr):  # now derived or related
+                if str(fix) in derived_dim_cache:
+                    return derived_dim_cache[str(fix)]
+                else:
+                    symbol = list(fix.free_symbols)[0]
+                    # try to locate symbol
+                    if symbol.name in suggested_fixes:
+                        root = suggested_fixes[symbol.name]
+                    elif symbol.name in name_to_dim:
+                        root = name_to_dim[symbol.name]
+                    else:
+                        raise UserError(
+                            UserErrorType.INVALID_INPUT,
+                            (
+                                f"Dim or derived dim expression {fix} with symbol {symbol} was specified, "
+                                f"but {symbol} was not found in original shapes spec or new spec."
+                            ),
+                        )
+                    # figure out value of fix
+                    modulus, remainder = sympy.polys.polytools.div(fix, symbol)
+                    dim = root
+                    if modulus != 1:
+                        dim = int(modulus) * dim
+                    if remainder != 0:
+                        dim = dim + int(remainder)
+                    derived_dim_cache[str(fix)] = dim
+                    return dim
+            else:
+                return fix
+        elif isinstance(dim, _DerivedDim) and dim.root.__name__ in suggested_fixes:
+            if dim.__name__ in derived_dim_cache:
+                return derived_dim_cache[dim.__name__]
+            else:  # evaluate new derived value based on root
+                _dim = dim.fn(suggested_fixes[dim.root.__name__])
+                derived_dim_cache[dim.__name__] = _dim
+                return _dim
+        return dim  # unchanged dim
+
+    return _tree_map(apply_fixes, dynamic_shapes, dynamic_shapes)

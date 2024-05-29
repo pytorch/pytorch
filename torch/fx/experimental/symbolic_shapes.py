@@ -1986,7 +1986,10 @@ class DimConstraints:
             return (
                 self._is_dim(dim)
                 and ("min" in c or "max" in c)
-                and (dim.min < 2 or dim.min == c.get("min", 2))  # let pass if min < 2
+                and (
+                    (dim.min < 2 and c.get("min", 2) == 2)
+                    or dim.min == c.get("min", 2)
+                )  # let pass if analysis min = 2 and specified min = 0/1
                 and dim.max == c.get("max", sys.maxsize - 1)
             )
 
@@ -2114,6 +2117,7 @@ class DimConstraints:
         forced_specializations=None,
     ):
         """Format a message for constraint violation erros"""
+        from torch.export.dynamic_shapes import get_dim_name_mapping
         if self._dcp.source_name_to_debug_name:
 
             def transform(s, inverse=False):
@@ -2150,17 +2154,20 @@ class DimConstraints:
                     assert op == "=="
                     results[expr]["eq"] = digit
 
+            def format_dim(min_, max_):
+                if min_ == 2:
+                    min_ = None
+                if min_ is not None and max_ is not None:
+                    return f"Dim('{k}', min={min_}, max={max_})"
+                elif min_ is not None:
+                    return f"Dim('{k}', min={min_})"
+                elif max_ is not None:
+                    return f"Dim('{k}', max={max_})"
+                else:
+                    return f"Dim('{k}')"
+
             # retrieve dynamic shapes
-            name_to_dim = {}
-            for dim in pytree.tree_flatten(
-                dynamic_shapes,
-                is_leaf=lambda x: self._is_derived_dim(x) or self._is_dim(x),
-            )[0]:
-                if dim is None or isinstance(dim, int):
-                    continue
-                name_to_dim[dim.__name__] = dim
-                if self._is_derived_dim(dim):
-                    name_to_dim[dim.root.__name__] = dim.root
+            name_to_dim = get_dim_name_mapping(dynamic_shapes)
 
             for s in self._static_results.union(self._dynamic_results):
                 t = transform(s)
@@ -2225,17 +2232,8 @@ class DimConstraints:
                         others.append(f"{k} = {other}")
                 else:
                     min_ = c.get("min", None)
-                    if min_ == 2:
-                        min_ = None
                     max_ = c.get("max", None)
-                    if min_ is not None and max_ is not None:
-                        dims.append(f"{k} = Dim('{k}', min={min_}, max={max_})")
-                    elif min_ is not None:
-                        dims.append(f"{k} = Dim('{k}', min={min_})")
-                    elif max_ is not None:
-                        dims.append(f"{k} = Dim('{k}', max={max_})")
-                    else:
-                        dims.append(f"{k} = Dim('{k}')")
+                    dims.append(f"{k} = {format_dim(min_, max_)}")
 
             # results will get filtered out if no new suggestions,
             # this can happen if guards are too complex.
