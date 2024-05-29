@@ -3,7 +3,9 @@
 #include <c10/util/overloaded.h>
 #include <torch/csrc/profiler/collection.h>
 
-namespace torch::profiler::impl {
+namespace torch {
+namespace profiler {
+namespace impl {
 
 namespace {
 static constexpr TensorImplAddress NoTensorImpl{nullptr};
@@ -193,4 +195,6 @@ void calculateUniqueTensorIDs(
   }
 }
 
-} // namespace torch::profiler::impl
+} // namespace impl
+} // namespace profiler
+} // namespace torch

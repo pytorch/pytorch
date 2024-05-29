@@ -22,18 +22,19 @@ torch.manual_seed(0)
 class ExampleCode(torch.nn.Module):
     def __init__(self):
         super().__init__()
+        self.mm_param0 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
         self.mm_param1 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
         self.mm_param2 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
         self.lin1 = torch.nn.Linear(d_hid, d_hid)
         self.lin2 = torch.nn.Linear(d_hid, d_hid)
 
     def forward(self, x, y):
-        x = torch.mm(x, self.mm_param1)  # mutli-use param
+        x = torch.mm(x, self.mm_param0)
         skip_connection = x
         x = x + y
         x = torch.relu(x)
         pipe_split()
-        x = torch.mm(x, self.mm_param1)  # mutli-use param
+        x = torch.mm(x, self.mm_param1)
         x = self.lin1(x)
         pipe_split()
         x = torch.relu(x)

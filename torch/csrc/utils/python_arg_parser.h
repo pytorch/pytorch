@@ -347,7 +347,6 @@ struct FunctionParameter {
     at::ScalarType default_scalartype;
     at::Layout default_layout;
   };
-  std::string default_value;
 };
 
 template <int N>

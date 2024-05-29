@@ -13,7 +13,10 @@
 
 #include <c10/util/Exception.h>
 
-namespace torch::profiler::impl::linux_perf {
+namespace torch {
+namespace profiler {
+namespace impl {
+namespace linux_perf {
 
 /*
  * Maximum number of events supported
@@ -96,4 +99,7 @@ class PerfProfiler {
   std::vector<PerfEvent> events_;
   std::stack<perf_counters_t> start_values_;
 };
-} // namespace torch::profiler::impl::linux_perf
+} // namespace linux_perf
+} // namespace impl
+} // namespace profiler
+} // namespace torch

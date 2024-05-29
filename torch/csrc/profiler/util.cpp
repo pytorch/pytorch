@@ -13,7 +13,9 @@
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
 #endif // USE_DISTRIBUTED
 
-namespace torch::profiler::impl {
+namespace torch {
+namespace profiler {
+namespace impl {
 
 namespace {
 std::optional<bool> soft_assert_raises_;
@@ -745,4 +747,6 @@ uint64_t computeFlops(
   return 0;
 }
 
-} // namespace torch::profiler::impl
+} // namespace impl
+} // namespace profiler
+} // namespace torch

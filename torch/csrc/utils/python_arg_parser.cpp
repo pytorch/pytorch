@@ -1207,7 +1207,6 @@ void FunctionParameter::set_default_str(const std::string& str) {
   } else {
     throw std::runtime_error("unknown parameter type");
   }
-  default_value = str;
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -1281,6 +1280,7 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
 }
 
 std::string FunctionSignature::toString() const {
+  // TODO: consider printing more proper schema strings with defaults,
   // optionals, etc.
   std::ostringstream ss;
   bool keyword_already = false;
@@ -1295,9 +1295,6 @@ std::string FunctionSignature::toString() const {
       keyword_already = true;
     }
     ss << param.type_name() << " " << param.name;
-    if (param.optional) {
-      ss << " = " << param.default_value;
-    }
     i++;
   }
   ss << ")";

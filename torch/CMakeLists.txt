@@ -296,8 +296,6 @@ endif()
 
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
-add_dependencies(torch_python Caffe2_PROTO)
-add_dependencies(torch_python onnx_proto)
 # Avoid numpy for the DEPLOY build
 if(USE_NUMPY)
   target_link_libraries(torch_python PRIVATE numpy::numpy)
@@ -346,7 +344,7 @@ endif()
 
 target_compile_definitions(torch_python PRIVATE "-DTHP_BUILD_MAIN_LIB")
 
-target_link_libraries(torch_python PRIVATE ${TORCH_LIB} ${TORCH_PYTHON_LINK_LIBRARIES})
+target_link_libraries(torch_python PRIVATE torch_library ${TORCH_PYTHON_LINK_LIBRARIES})
 
 target_compile_definitions(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_DEFINITIONS})
 
@@ -361,9 +359,7 @@ endif()
 
 if(BUILD_ONEDNN_GRAPH)
   target_compile_definitions(torch_python PRIVATE "-DBUILD_ONEDNN_GRAPH")
-  if(NOT BUILD_LIBTORCHLESS)
-    target_compile_definitions(torch_cpu PRIVATE "-DBUILD_ONEDNN_GRAPH")
-  endif()
+  target_compile_definitions(torch_cpu PRIVATE "-DBUILD_ONEDNN_GRAPH")
 endif()
 
 if(NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
@@ -405,11 +401,7 @@ if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
           ${TORCH_SRC_DIR}/csrc/jit/backends/nnapi/nnapi_backend_preprocess.cpp
           )
   # Pybind11 requires explicit linking of the torch_python library
-  if(BUILD_LIBTORCHLESS)
-    target_link_libraries(nnapi_backend PRIVATE ${TORCH_LIB} torch_python pybind::pybind11)
-  else()
-    target_link_libraries(nnapi_backend PRIVATE torch torch_python pybind::pybind11)
-  endif()
+  target_link_libraries(nnapi_backend PRIVATE torch torch_python pybind::pybind11)
 endif()
 
 set(TORCH_PYTHON_COMPILE_OPTIONS ${TORCH_PYTHON_COMPILE_OPTIONS} PARENT_SCOPE)

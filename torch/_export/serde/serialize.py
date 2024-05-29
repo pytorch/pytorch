@@ -27,7 +27,6 @@ from typing import (
     Set,
     Tuple,
     Union,
-    Type,
 )
 
 import sympy
@@ -362,24 +361,13 @@ def serialize_range_constraints(
     }
 
 
-def _get_schema_from_target(target):
-    if isinstance(target, torch._ops.OpOverload):
-        return target._schema
-    elif type(target) in _serialization_registry:
-        return _serialization_registry[type(target)].op_schema(type(target))
-    raise RuntimeError(f"Cannot find schema for {type(target)}")
-
-
 def _is_single_tensor_return(target: torch._ops.OpOverload) -> bool:
-    schema = _get_schema_from_target(target)
-    returns = schema.returns
+    returns = target._schema.returns
     return len(returns) == 1 and isinstance(returns[0].real_type, torch.TensorType)
 
 
-def _is_single_tensor_list_return(target: Any) -> bool:
-    schema = _get_schema_from_target(target)
-    returns = schema.returns
-
+def _is_single_tensor_list_return(target: torch._ops.OpOverload) -> bool:
+    returns = target._schema.returns
     if len(returns) != 1:
         return False
     return_type = returns[0].real_type
@@ -531,19 +519,6 @@ class GraphModuleSerializer(metaclass=Final):
                 outputs=self.serialize_hoo_outputs(node),
                 metadata=self.serialize_metadata(node),
             )
-        elif type(node.target) in _serialization_registry:
-            custom_op_handler = node.target
-
-            # Sanity check for unhandled serialization.
-            assert type(node.target) in _serialization_registry, f"Miss {type(node.target)} CustomOpHandler"
-
-            handler = _serialization_registry[type(node.target)]
-            ex_node = Node(
-                target=f"${handler.namespace()}:{handler.op_name(node.target)}",
-                inputs=self.serialize_inputs(node.target, node.args, node.kwargs),
-                outputs=self.serialize_outputs(node),
-                metadata=self.serialize_metadata(node),
-            )
         else:
             raise SerializeError(f"Serializing {node.target} is not supported")
 
@@ -604,18 +579,12 @@ class GraphModuleSerializer(metaclass=Final):
         return serialized_args
 
     def serialize_inputs(
-        self,
-        target: Any,  # torch._ops.OpOverload and other custom operator types.
-        args,
-        kwargs=None
+        self, target: torch._ops.OpOverload, args, kwargs=None
     ) -> List[NamedArgument]:
-        assert isinstance(target, (torch._ops.OpOverload, *allowed_registered_op_types()))
+        assert isinstance(target, torch._ops.OpOverload)
         kwargs = kwargs or {}
         serialized_args = []
-
-        schema = _get_schema_from_target(target)
-
-        for i, schema_arg in enumerate(schema.arguments):
+        for i, schema_arg in enumerate(target._schema.arguments):
             if schema_arg.name in kwargs:
                 serialized_args.append(
                     NamedArgument(
@@ -1106,10 +1075,12 @@ class GraphModuleSerializer(metaclass=Final):
         mostly reuse the names coming from FX. This function computes a mapping from
         the FX representation to our representation, preserving the names.
         """
-        assert node.op == "call_function" and isinstance(node.target, (torch._ops.OpOverload, *allowed_registered_op_types()))
+        assert node.op == "call_function" and isinstance(
+            node.target, torch._ops.OpOverload
+        )
 
-        schema = _get_schema_from_target(node.target)
-        returns = schema.returns
+        assert isinstance(node.target, torch._ops.OpOverload)
+        returns = node.target._schema.returns
 
         if len(returns) == 0:
             return []
@@ -2808,50 +2779,3 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
         schema_version=ep.schema_version,
         dialect=ep.dialect
     )
-
-
-class CustomOpHandler:
-    """
-    Base class for handling custom operators.
-    """
-    @classmethod
-    def namespace(cls):
-        raise NotImplementedError(f"{cls.__class__} namespace() must be implemented")
-
-    @classmethod
-    def op_name(cls, op_type):
-        raise NotImplementedError(f"{cls.__class__} op_name() must be implemented")
-
-    @classmethod
-    def op_type(cls, op_name):
-        raise NotImplementedError(f"{cls.__class__} op_type() must be implemented")
-
-    @classmethod
-    def op_schema(cls, op_type):
-        raise NotImplementedError(f"{cls.__class__} op_schema() must be implemented")
-
-
-def register_custom_op_handler(
-    op_handler: CustomOpHandler,
-    op_type: Type[Any],
-):
-    """Register custom de/serialization method for a node."""
-    assert isinstance(op_handler, CustomOpHandler), f"Expected CustomOpHandler, got {type(op_handler)}."
-    _serialization_registry[op_type] = op_handler
-    # FIXME: handles deserialization later.
-    _deserialization_registry[op_handler.namespace()] = op_handler
-
-
-def allowed_registered_op_types():
-    return tuple(
-        _serialization_registry.keys()
-    )
-
-
-# Registry to store all custom serialization implementations.
-# The registry maps a operation to its serialization function (a callable), in their own
-# namespace to avoid conflicts.
-# Serialization: Op type --> custom handler.
-# De-serialization: Namespace --> custom handler.
-_serialization_registry: Dict[Type[Any], CustomOpHandler] = {}
-_deserialization_registry: Dict[str, CustomOpHandler] = {}
