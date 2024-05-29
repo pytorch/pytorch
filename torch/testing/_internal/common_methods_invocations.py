@@ -2135,6 +2135,10 @@ def sample_inputs_svd_lowrank(op_info, device, dtype, requires_grad=False, **kwa
         # This issues could be resolved with using a rank-revealing SVD
         # which does not include "zero" singular values.
         yield SampleInput(a, b, q=k, M=None).with_metadata(output_process_fn_grad=fn)
+
+    for (a, b) in sample_inputs_singular_matrix_factors(op_info, device, dtype, requires_grad):
+        *batch, m, k = a.shape
+        n = b.shape[-2]
         M = make_tensor((*batch, m, n), dtype=dtype, device=device, requires_grad=requires_grad)
         yield SampleInput(a, b, q=k, M=M).with_metadata(output_process_fn_grad=fn)
 
@@ -17703,7 +17707,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_pca_lowrank,
            decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack, with_tf32_off,
-                       DecorateInfo(toleranceOverride({torch.float32: tol(atol=4e-02, rtol=4e-02),
+                       DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03),
                                                        torch.complex64: tol(atol=4e-02, rtol=4e-02)}),
                                     'TestCommon', 'test_noncontiguous_samples'),
                        # FIXME This should be the following, but the toleranceOverride does not seem to do anything!
