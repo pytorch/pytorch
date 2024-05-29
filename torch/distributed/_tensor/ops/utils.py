@@ -255,11 +255,8 @@ def expand_to_full_mesh_op_strategy(
         input_specs = spec_list[input_index:]
         input_args_strategy = op_schema.args_strategy
         assert len(input_specs) == len(input_args_strategy)
-        if (
-            inplace_op
-            and input_args_strategy[0].output_spec.placements
-            != input_specs[0].placements
-        ):
+        self_spec = input_args_strategy[0].strategies[0].output_spec
+        if inplace_op and self_spec.placements != input_specs[0].placements:
             # if it's inplace op, we would only allow the placement strategy to be added when the
             # input_spec matches the first argument's runtime sharding, otherwise we skip
             continue
