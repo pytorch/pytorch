@@ -27,7 +27,7 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
-class ComputationType(Enum):
+class _ComputationType(Enum):
     FORWARD = 1
     BACKWARD = 2
 
@@ -687,7 +687,9 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
         # 1. Create the pipeline_order (all ranks do this calculation)
         # This will be used to keep track of the current state of the entire pipeline
         # pipeline_order[rank] = [(computation_type, microbatch_index, stage_index), ...]
-        self.pipeline_order: List[List[Optional[Tuple[ComputationType, int, int]]]] = []
+        self.pipeline_order: List[
+            List[Optional[Tuple[_ComputationType, int, int]]]
+        ] = []
         # ========================================================================
         for rank in range(self.pp_group_size):
             rank_ops = self._calculate_single_rank_operations(rank)
@@ -695,7 +697,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
 
     def _calculate_single_rank_operations(
         self, rank
-    ) -> List[Optional[Tuple[ComputationType, int, int]]]:
+    ) -> List[Optional[Tuple[_ComputationType, int, int]]]:
         def get_rank_warmup_steps(rank):
             # Increment warmup_steps by 2 for each hop away
             warmup_steps = (self.n_local_stages - 1) * self.pp_group_size
@@ -738,7 +740,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
         bwd_stage_mb_index: Dict[int, int] = defaultdict(int)
 
         # Store the list of operations used for that rank
-        rank_ops: List[Optional[Tuple[ComputationType, int, int]]] = []
+        rank_ops: List[Optional[Tuple[_ComputationType, int, int]]] = []
         # Pre-padding, rank starts with no-ops based on the warmup.
         for _ in range(rank):
             rank_ops.append(None)
@@ -756,7 +758,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
                 fwd_stage_mb_index[fwd_stage_index] = (
                     mb_index := fwd_stage_mb_index[fwd_stage_index]
                 ) + 1
-                rank_ops.append((ComputationType.FORWARD, mb_index, fwd_stage_index))
+                rank_ops.append((_ComputationType.FORWARD, mb_index, fwd_stage_index))
                 if step == warmup_steps - 1:
                     # This is the last step in the warmup phase, so we need to wait for the backward to trickle back up
                     while post_warmup_steps > 0:
@@ -769,7 +771,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
                     fwd_mb_index := fwd_stage_mb_index[fwd_stage_index]
                 ) + 1
                 rank_ops.append(
-                    (ComputationType.FORWARD, fwd_mb_index, fwd_stage_index)
+                    (_ComputationType.FORWARD, fwd_mb_index, fwd_stage_index)
                 )
 
                 bwd_stage_index = backward_stage_index(step)
@@ -777,7 +779,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
                     bwd_mb_index := bwd_stage_mb_index[bwd_stage_index]
                 ) + 1
                 rank_ops.append(
-                    (ComputationType.BACKWARD, bwd_mb_index, bwd_stage_index)
+                    (_ComputationType.BACKWARD, bwd_mb_index, bwd_stage_index)
                 )
             # Cooldown phase
             else:
@@ -788,7 +790,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
                     bwd_mb_index := bwd_stage_mb_index[bwd_stage_index]
                 ) + 1
                 rank_ops.append(
-                    (ComputationType.BACKWARD, bwd_mb_index, bwd_stage_index)
+                    (_ComputationType.BACKWARD, bwd_mb_index, bwd_stage_index)
                 )
 
         # Post padding
@@ -796,7 +798,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
             rank_ops.append(None)
         return rank_ops
 
-    def step_microbatches(
+    def _step_microbatches(
         self,
         arg_mbs: Optional[List] = None,
         kwarg_mbs: Optional[List] = None,
@@ -825,7 +827,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
             ops: List[dist.P2POp] = []
             if action is not None:
                 computation_type, mb_index, stage_index = action
-                if computation_type == ComputationType.FORWARD:
+                if computation_type == _ComputationType.FORWARD:
                     # perform forward computation
                     stage = stage_index_to_stage[stage_index]
                     output = stage.forward_one_chunk(
@@ -833,7 +835,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
                     )
                     self._maybe_compute_loss(stage, output, target_mbs, mb_index)
                     ops.extend(stage.get_fwd_send_ops())
-                elif computation_type == ComputationType.BACKWARD:
+                elif computation_type == _ComputationType.BACKWARD:
                     # perform backward computation
                     stage = stage_index_to_stage[stage_index]
                     loss = self._maybe_get_loss(stage, mb_index)
@@ -852,11 +854,11 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
             if prev_rank_action is not None:
                 computation_type, mb_index, stage_index = prev_rank_action
                 # only handle sends for the forward from a previous rank
-                if computation_type == ComputationType.FORWARD:
+                if computation_type == _ComputationType.FORWARD:
                     if stage_index != self._num_stages - 1:
                         stage = stage_index_to_stage[stage_index + 1]
                         ops.extend(stage.get_fwd_recv_ops())
-                elif computation_type == ComputationType.BACKWARD:
+                elif computation_type == _ComputationType.BACKWARD:
                     pass
                 else:
                     raise ValueError(f"Unknown computation type {computation_type}")
@@ -868,9 +870,9 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
             if next_rank_action is not None:
                 computation_type, mb_index, stage_index = next_rank_action
                 # only handle receives for the backwards from a next rank
-                if computation_type == ComputationType.FORWARD:
+                if computation_type == _ComputationType.FORWARD:
                     pass
-                elif computation_type == ComputationType.BACKWARD:
+                elif computation_type == _ComputationType.BACKWARD:
                     if stage_index != 0:
                         stage = stage_index_to_stage[stage_index - 1]
                         ops.extend(stage.get_bwd_recv_ops())
