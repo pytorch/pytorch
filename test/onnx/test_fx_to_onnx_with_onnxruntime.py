@@ -1141,6 +1141,11 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         reason="Dynamic shape check is not expected for exported program in this test suite.",
         model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
     )
+    @pytorch_test_common.xfail_dynamic_fx_test(
+        error_message="!(it.GetName().empty())",
+        reason="With after onnx==1.16, constant folding in optimizer causes this error.",
+        model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
+    )
     @pytorch_test_common.xfail_if_model_type_is_not_exportedprogram(
         error_message="Expected 4 inputs, got 2",
         reason="https://github.com/pytorch/pytorch/issues/115745",
