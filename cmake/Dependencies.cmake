@@ -837,25 +837,25 @@ include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
 # ---[ Python + Numpy
 if(BUILD_PYTHON)
   # If not given a Python installation, then use the current active Python
-  if(NOT Python3_EXECUTABLE)
+  if(NOT Python_EXECUTABLE)
     execute_process(
-      COMMAND "which" "python" RESULT_VARIABLE _exitcode OUTPUT_VARIABLE _py_exe)
+      COMMAND "which" "python3" RESULT_VARIABLE _exitcode OUTPUT_VARIABLE _py_exe)
     if(${_exitcode} EQUAL 0)
       if(NOT MSVC)
-        string(STRIP ${_py_exe} Python3_EXECUTABLE)
+        string(STRIP ${_py_exe} Python_EXECUTABLE)
       endif()
-      message(STATUS "Setting Python to ${Python3_EXECUTABLE}")
+      message(STATUS "Setting Python to ${Python_EXECUTABLE}")
     endif()
   endif()
 
   # Check that Python works
   set(PYTHON_VERSION)
-  if(DEFINED Python3_EXECUTABLE)
+  if(DEFINED Python_EXECUTABLE)
     execute_process(
-        COMMAND "${Python3_EXECUTABLE}" "--version"
+        COMMAND "${Python_EXECUTABLE}" "--version"
         RESULT_VARIABLE _exitcode OUTPUT_VARIABLE PYTHON_VERSION)
     if(NOT _exitcode EQUAL 0)
-      message(FATAL_ERROR "The Python executable ${Python3_EXECUTABLE} cannot be run. Make sure that it is an absolute path.")
+      message(FATAL_ERROR "The Python executable ${Python_EXECUTABLE} cannot be run. Make sure that it is an absolute path.")
     endif()
     if(PYTHON_VERSION)
       string(REGEX MATCH "([0-9]+)\\.([0-9]+)" PYTHON_VERSION ${PYTHON_VERSION})
@@ -864,16 +864,16 @@ if(BUILD_PYTHON)
 
   # These should fill in the rest of the variables, like versions, but resepct
   # the variables we set above
-  find_package(Python3 COMPONENTS Interpreter Development)
+  find_package(Python COMPONENTS Interpreter Development)
 
-  if(NOT Python3_Development_FOUND)
+  if(NOT Python_Development_FOUND)
     message(FATAL_ERROR
       "Python development libraries could not be found.")
   endif()
 
-  if(${Python3_VERSION} VERSION_LESS 3.8)
+  if(${Python_VERSION} VERSION_LESS 3.8)
     message(FATAL_ERROR
-      "Found Python libraries version ${Python3_VERSION}. Python < 3.8 is no longer supported by PyTorch.")
+      "Found Python libraries version ${Python_VERSION}. Python < 3.8 is no longer supported by PyTorch.")
   endif()
 
   # When building pytorch, we pass this in directly from setup.py, and
@@ -887,11 +887,11 @@ if(BUILD_PYTHON)
     endif()
   endif()
 
-  if(Python3_Interpreter_FOUND AND Python3_Development_FOUND)
+  if(Python_Interpreter_FOUND AND Python_Development_FOUND)
     add_library(python::python INTERFACE IMPORTED)
-    target_include_directories(python::python SYSTEM INTERFACE ${Python3_INCLUDE_DIRS})
+    target_include_directories(python::python SYSTEM INTERFACE ${Python_INCLUDE_DIRS})
     if(WIN32)
-      target_link_libraries(python::python INTERFACE ${Python3_LIBRARIES})
+      target_link_libraries(python::python INTERFACE ${Python_LIBRARIES})
     endif()
 
     caffe2_update_option(USE_NUMPY OFF)
@@ -927,7 +927,7 @@ endif()
 message(STATUS "pybind11 include dirs: " "${pybind11_INCLUDE_DIRS}")
 add_library(pybind::pybind11 INTERFACE IMPORTED)
 target_include_directories(pybind::pybind11 SYSTEM INTERFACE ${pybind11_INCLUDE_DIRS})
-target_link_libraries(pybind::pybind11 INTERFACE Python3::Module)
+target_link_libraries(pybind::pybind11 INTERFACE Python::Module)
 
 # ---[ OpenTelemetry API headers
 find_package(OpenTelemetryApi)

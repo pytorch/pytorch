@@ -15,8 +15,8 @@
 unset(NUMPY_VERSION)
 unset(NUMPY_INCLUDE_DIR)
 
-if(Python3_Interpreter_FOUND)
-  execute_process(COMMAND "${Python3_EXECUTABLE}" "-c"
+if(Python_Interpreter_FOUND)
+  execute_process(COMMAND "${Python_EXECUTABLE}" "-c"
     "import numpy as n; print(n.__version__); print(n.get_include());"
     RESULT_VARIABLE __result
     OUTPUT_VARIABLE __output
