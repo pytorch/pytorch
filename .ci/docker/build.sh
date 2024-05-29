@@ -93,7 +93,7 @@ _UCC_COMMIT=20eae37090a4ce1b32bcce6144ccad0b49943e0b
 case "$image" in
   pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9)
     CUDA_VERSION=12.4.0
-    CUDNN_VERSION=8
+    CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     PROTOBUF=yes
@@ -107,7 +107,7 @@ case "$image" in
     ;;
   pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9)
     CUDA_VERSION=12.1.1
-    CUDNN_VERSION=8
+    CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     PROTOBUF=yes
@@ -121,7 +121,7 @@ case "$image" in
     ;;
   pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9-inductor-benchmarks)
     CUDA_VERSION=12.4.0
-    CUDNN_VERSION=8
+    CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     PROTOBUF=yes
@@ -136,7 +136,7 @@ case "$image" in
     ;;
   pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9-inductor-benchmarks)
     CUDA_VERSION=12.1.1
-    CUDNN_VERSION=8
+    CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     PROTOBUF=yes
@@ -151,7 +151,7 @@ case "$image" in
     ;;
   pytorch-linux-focal-cuda12.1-cudnn9-py3.12-gcc9-inductor-benchmarks)
     CUDA_VERSION=12.1.1
-    CUDNN_VERSION=8
+    CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=9
     PROTOBUF=yes
@@ -181,7 +181,7 @@ case "$image" in
     ;;
   pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9)
     CUDA_VERSION=11.8.0
-    CUDNN_VERSION=8
+    CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     PROTOBUF=yes
@@ -195,7 +195,7 @@ case "$image" in
     ;;
   pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9)
     CUDA_VERSION=12.4.0
-    CUDNN_VERSION=8
+    CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     PROTOBUF=yes
@@ -209,7 +209,7 @@ case "$image" in
     ;;
   pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9)
     CUDA_VERSION=12.1.1
-    CUDNN_VERSION=8
+    CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     PROTOBUF=yes
@@ -333,7 +333,7 @@ case "$image" in
   pytorch-linux-jammy-cuda11.8-cudnn9-py3.8-clang12)
     ANACONDA_PYTHON_VERSION=3.8
     CUDA_VERSION=11.8
-    CUDNN_VERSION=8
+    CUDNN_VERSION=9
     CLANG_VERSION=12
     PROTOBUF=yes
     DB=yes
