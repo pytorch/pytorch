@@ -197,7 +197,7 @@ inline std::string getKeyFromDevice(at::Device& device) {
   return std::to_string(device.index());
 }
 
-inline at::DeviceIndex getIndexFromDeviceKey(std::string& deviceKey) {
+inline at::DeviceIndex getIndexFromDeviceKey(const std::string& deviceKey) {
   return static_cast<at::DeviceIndex>(std::stoi(deviceKey));
 }
 
