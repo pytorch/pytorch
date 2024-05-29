@@ -37,6 +37,7 @@ from .functions import (
     RoundDecimal,
     RoundToInt,
     safe_pow,
+    ToFloat,
     TruncToFloat,
     TruncToInt,
 )
@@ -414,6 +415,12 @@ class SymPyValueRangeAnalysis:
 
         r = ValueRanges.wrap(value)
         return r
+
+    @staticmethod
+    def to_dtype(a, dtype, src_dtype=None):
+        if dtype == torch.float64:
+            return ValueRanges.increasing_map(a, ToFloat)
+        return ValueRanges.unknown()
 
     @staticmethod
     def trunc_to_int(a, dtype):
