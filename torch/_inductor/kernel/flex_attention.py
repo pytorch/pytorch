@@ -559,6 +559,7 @@ flex_attention_backward_template = TritonTemplate(
         curr_n = start_n
         step_n = BLOCK_N2
         for blk_idx in range(num_steps):
+            offs_n_= curr_n + tl.arange(0, BLOCK_N2)
             kT = tl.load(kT_ptrs)
             vT = tl.load(vT_ptrs)
             # q = q.to(MATMUL_PRECISION)
@@ -659,16 +660,18 @@ flex_attention_backward_template = TritonTemplate(
             pre_mod_scores = qkT
             m_ = offs_m[:, None]
             n_ = offs_n[None, :]
+            qk = tl.trans(qkT, 1, 0)
             {{ modification(
                 subgraph_number=0,
                 output_name="post_mod_scores",
-                score="qkT",
+                score="qk",
                 b="off_z",
                 h="off_h",
                 m="m_",
                 n="n_",
-                out="qkT"
+                out="qk"
             ) | indent_except_first(3) }}
+            post_mod_scores = tl.trans(post_mod_scores, 1, 0)
             # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             if not SCORE_MOD_IS_LINEAR:
                 post_mod_scores *= 1.44269504
@@ -689,6 +692,7 @@ flex_attention_backward_template = TritonTemplate(
             dsT = pT * (dpT - Di[None, :])
             dsT = dsT
 
+            ds = tl.trans(dsT, 1, 0)
              # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
             {{ modification(
                 subgraph_number=1,
@@ -698,9 +702,9 @@ flex_attention_backward_template = TritonTemplate(
                 h="off_h",
                 m="m_",
                 n="n_",
-                grad_score_mod="dsT"
+                grad_score_mod="ds"
             ) | indent_except_first(3) }}
-            dsT = grad_scores
+            dsT = tl.trans(grad_scores, 1, 0)
             # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
             dsT = dsT.to(MATMUL_PRECISION)
