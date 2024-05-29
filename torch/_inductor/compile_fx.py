@@ -11,10 +11,10 @@ from itertools import count
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 from unittest import mock
 
-from functorch.compile import min_cut_rematerialization_partition
-
 import torch.fx
 import torch.utils._pytree as pytree
+
+from functorch.compile import min_cut_rematerialization_partition
 from torch._dynamo import (
     compiled_autograd,
     config as dynamo_config,

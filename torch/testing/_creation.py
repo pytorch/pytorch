@@ -150,7 +150,7 @@ def make_tensor(
             warnings.warn(
                 "Passing `low==high` to `torch.testing.make_tensor` for floating or complex types "
                 "is deprecated since 2.1 and will be removed in 2.3. "
-                "Use torch.full(...) instead.",
+                "Use `torch.full(...)` instead.",
                 FutureWarning,
             )
         elif low >= high:
