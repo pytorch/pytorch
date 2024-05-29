@@ -1,10 +1,12 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Type, Union, TYPE_CHECKING
 
 import torch
-from torch.ao.quantization.utils import Pattern
 from enum import Enum
+
+if TYPE_CHECKING:
+    from torch.ao.quantization.utils import Pattern
 
 
 __all__ = [

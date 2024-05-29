@@ -170,7 +170,7 @@ class TORCH_API RpcAgent {
       RpcRetryOptions retryOptions = RpcRetryOptions());
 
   // Return a reference to the ``WorkerInfo`` of this RpcAgent.
-  // NB: not using ``c10::optional<const std::string&>`` here because we might
+  // NB: not using ``std::optional<const std::string&>`` here because we might
   // need to create a separate RPC API lib and avoid forcing all ``RpcAgent``
   // implementations to depend on libtorch.
   const WorkerInfo& getWorkerInfo() const;

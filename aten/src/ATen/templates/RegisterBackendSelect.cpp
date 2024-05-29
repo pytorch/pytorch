@@ -23,7 +23,7 @@ namespace {
 
 ${backend_select_method_definitions}
 
-bool is_pinned(const Tensor& self, c10::optional<at::Device> device) {
+bool is_pinned(const Tensor& self, std::optional<at::Device> device) {
   // Only CPU tensors can be pinned
   if (!self.is_cpu()) {
     return false;
@@ -33,7 +33,7 @@ bool is_pinned(const Tensor& self, c10::optional<at::Device> device) {
   return at::_ops::is_pinned::redispatch(_dk, self, device);
 }
 
-at::Tensor _pin_memory(const Tensor& self, c10::optional<at::Device> device) {
+at::Tensor _pin_memory(const Tensor& self, std::optional<at::Device> device) {
   TORCH_CHECK(self.device().is_cpu(), "cannot pin '", self.toString(), "' only dense CPU tensors can be pinned");
   DispatchKeySet _dk = c10::DispatchKeySet(c10::computeDispatchKey(c10::nullopt, self.layout(), device.value_or(at::kCUDA)));
   if (self.is_nested()) {

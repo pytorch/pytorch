@@ -12,7 +12,7 @@ TEST(JitTypeTest, IsComplete) {
   auto tt = c10::TensorType::create(
       at::kFloat,
       at::kCPU,
-      c10::SymbolicShape(std::vector<c10::optional<int64_t>>({1, 49})),
+      c10::SymbolicShape(std::vector<std::optional<int64_t>>({1, 49})),
       std::vector<c10::Stride>(
           {c10::Stride{2, true, 1},
            c10::Stride{1, true, 1},

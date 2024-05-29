@@ -2,6 +2,7 @@
 
 import collections
 import contextlib
+import enum
 import functools
 import importlib
 import inspect
@@ -107,7 +108,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         from .. import trace_rules
-        from . import ConstantVariable
+        from . import ConstantVariable, EnumVariable
         from .builder import VariableBuilder
 
         if name == "__name__":
@@ -144,14 +145,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if self.value is collections.OrderedDict and name == "fromkeys":
             return super().var_getattr(tx, name)
 
-        if name in getattr(self.value, "__dict__", {}) or (
+        if ConstantVariable.is_literal(obj):
+            return ConstantVariable.create(obj)
+        elif isinstance(obj, enum.Enum):
+            return EnumVariable(obj)
+        elif name in getattr(self.value, "__dict__", {}) or (
             self.value.__module__.startswith("torch.")
             or self.value.__module__ == "torch"
         ):
             if source:
                 return VariableBuilder(tx, source)(obj)
-        elif ConstantVariable.is_literal(obj):
-            return ConstantVariable.create(obj)
 
         return super().var_getattr(tx, name)
 
@@ -438,6 +441,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
 
             return tensor_variable
+        elif issubclass(self.value, enum.Enum) and len(args) == 1 and not kwargs:
+            options = {"mutable_local": MutableLocal()}
+            return variables.EnumVariable.create(self.value, args[0], options)
 
         return super().call_function(tx, args, kwargs)
 
@@ -702,6 +708,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             example_value = self.value(*args, **kwargs)
             source = RandomValueSource(random_call_index)
             tx.output.random_calls.append((self.value, args, kwargs))
+            # TODO: arguably, this should route to wrap_symint/wrap_symfloat
+            # (currently hypothetical), but I'm not going to poke my hand in
+            # this nest for now
             return VariableBuilder(tx, source).wrap_unspecialized_primitive(
                 example_value
             )
@@ -809,6 +818,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             subobj = inspect.getattr_static(self.value, name)
         return subobj
 
+    def has_key_in_generic_dict(self, tx, key):
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
+            mutated_attr = tx.output.side_effects.load_attr(self, key, deleted_ok=True)
+            return not isinstance(mutated_attr, variables.DeletedVariable)
+
+        return key in self.value.__dict__
+
     def var_getattr(self, tx, name):
         from .. import trace_rules
         from . import ConstantVariable
@@ -821,22 +837,32 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             return tx.output.side_effects.load_attr(self, name)
 
+        if name == "__dict__":
+            options = {"source": source}
+            return variables.GetAttrVariable(self, name, **options)
+
         try:
             subobj = self._getattr_static(name)
         except AttributeError:
             subobj = NO_SUCH_SUBOBJ
             getattr_fn = self._check_for_getattr()
             if isinstance(getattr_fn, types.FunctionType):
+                # Dynamo is going to trace the __getattr__ function with
+                # args=name. Set the source accordingly.
+                new_source = None
+                if self.source:
+                    new_source = AttrSource(self.source, "__getattr__")
                 return variables.UserMethodVariable(
-                    getattr_fn, self, source=source
+                    getattr_fn, self, source=new_source
                 ).call_function(tx, [ConstantVariable.create(name)], {})
             elif getattr_fn is not None:
                 unimplemented("UserDefined with non-function __getattr__")
 
         if isinstance(subobj, property):
-            # Rewrite the source being explicit about reading it statically.
             if self.source:
-                source = AttrSource(self.source, name, get_static=True)
+                # Read the class attribute to reach the property
+                source = AttrSource(AttrSource(self.source, "__class__"), name)
+                # Get the getter function
                 source = AttrSource(source, "fget")
             return variables.UserMethodVariable(
                 subobj.fget, self, source=source

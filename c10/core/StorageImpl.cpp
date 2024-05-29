@@ -68,7 +68,7 @@ c10::intrusive_ptr<c10::StorageImpl> make_storage_impl(
     c10::DataPtr data_ptr,
     c10::Allocator* allocator,
     bool resizable,
-    c10::optional<at::Device> device_opt) {
+    std::optional<at::Device> device_opt) {
   // This will be non-nullptr only when there is a custom StorageImpl
   // constructor for the given device
   c10::StorageImplCreateHelper fptr = nullptr;

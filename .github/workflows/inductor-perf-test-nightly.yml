@@ -8,11 +8,16 @@ on:
   # out, let try to run torchao cudagraphs_low_precision as part of cudagraphs
   workflow_dispatch:
     inputs:
-      training_and_inference:
-        description: Run training and inference?
+      training:
+        description: Run training (on by default)?
         required: false
-        type: string
-        default: training-true-inference-false
+        type: boolean
+        default: true
+      inference:
+        description: Run inference (off by default)?
+        required: false
+        type: boolean
+        default: false
       default:
         description: Run inductor_default?
         required: false
@@ -28,11 +33,6 @@ on:
         required: false
         type: boolean
         default: true
-      cppwrapper:
-        description: Run inductor_cpp_wrapper for inference?
-        required: false
-        type: boolean
-        default: false
       freezing_cudagraphs:
         description: Run inductor_cudagraphs with freezing for inference?
         required: false
@@ -129,7 +129,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     with:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
-      dashboard-tag: ${{ inputs.training_and_inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cudagraphs-${{ inputs.cudagraphs }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}-maxautotune-${{ inputs.maxautotune }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs }}-cudagraphs_low_precision-${{ inputs.cudagraphs }}
+      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cudagraphs-${{ inputs.cudagraphs }}-cppwrapper-false-aotinductor-${{ inputs.aotinductor }}-maxautotune-${{ inputs.maxautotune }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs }}-cudagraphs_low_precision-${{ inputs.cudagraphs }}
       docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha

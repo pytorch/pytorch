@@ -8,6 +8,7 @@ import functools
 import inspect
 import io
 import itertools
+import json
 import logging
 import math
 import operator
@@ -21,6 +22,7 @@ import time
 import unittest
 from datetime import datetime
 from io import StringIO
+from pathlib import Path
 from typing import (
     Any,
     Callable,
@@ -32,29 +34,36 @@ from typing import (
     Optional,
     Protocol,
     Set,
+    Tuple,
     TypeVar,
     Union,
     ValuesView,
 )
+from typing_extensions import Concatenate, ParamSpec
 from unittest import mock
 
 import sympy
-from typing_extensions import Concatenate, ParamSpec
 
 import torch
+import torch._export
+import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import detect_fake_mode
 from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
+from torch.utils._sympy.symbol import make_symbol, SymT
+from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from . import config
-from .runtime.runtime_utils import ceildiv as runtime_ceildiv
+from .runtime.runtime_utils import cache_dir, ceildiv as runtime_ceildiv
 
 log = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
+
+ALIGNMENT = 16
 
 
 def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float:
@@ -144,10 +153,14 @@ def has_torchvision_roi_align() -> bool:
     try:
         from torchvision.ops import roi_align  # noqa: F401
 
+        torch._C._dispatch_has_kernel_for_dispatch_key("torchvision::nms", "Meta")
         return roi_align is not None and hasattr(
             getattr(torch.ops, "torchvision", None), "roi_align"
         )
     except ImportError:
+        return False
+    except RuntimeError as e:
+        assert "torchvision::nms does not exist" in str(e)
         return False
 
 
@@ -330,7 +343,7 @@ def print_performance(
 ):
     timings = torch.tensor([timed(fn, args, times, device) for _ in range(repeat)])
     took = torch.median(timings) / times
-    print(f"{took/baseline:.6f}")
+    print(f"{took / baseline:.6f}")
     return took
 
 
@@ -536,6 +549,36 @@ def sympy_str(expr: sympy.Expr) -> str:
     return str(expr)
 
 
+def get_bounds_index_expr(index):
+    from .virtualized import V
+
+    # If this expression does not come from an FX node, we compute its bounds
+    if (
+        config.compute_all_bounds
+        and (fx_node := getattr(V.interpreter, "current_node", None))
+        and fx_node.target != "index_expr"
+    ):
+        return bound_sympy(index)
+    else:
+        return ValueRanges.unknown()
+
+
+def sympy_index_symbol_with_prefix(prefix: SymT, idx: int) -> sympy.Symbol:
+    """
+    Used to generate an integer-nonnegative symbol.
+    """
+    # This should never be used for creating shape/stride symbols, as those
+    # should all be allocated before Inductor.
+    assert prefix != SymT.SIZE
+    # NOTE: shape symbols are positive (> 0), but index variables are only
+    # non-negative (>= 0).
+    return make_symbol(prefix, idx, integer=True, nonnegative=True)
+
+
+def generate_assert(check):
+    return (check or config.debug_index_asserts) and config.assert_indirect_indexing
+
+
 def sympy_index_symbol(name: str) -> sympy.Symbol:
     """
     Used to generate an integer-nonnegative symbol.
@@ -571,14 +614,6 @@ def sympy_subs(expr: sympy.Expr, replacements: Dict[sympy.Expr, Any]) -> sympy.E
     )
 
 
-def free_symbol_startswith(index: sympy.Expr, prefix: str):
-    return any(v.name.startswith(prefix) for v in index.free_symbols)  # type: ignore[attr-defined]
-
-
-def free_symbol_has(index: sympy.Expr, pattern: str):
-    return any(pattern in v.name for v in index.free_symbols)  # type: ignore[attr-defined]
-
-
 def is_symbolic(a: Any) -> bool:
     return isinstance(a, torch.SymInt) or (
         isinstance(a, torch.Tensor)
@@ -590,7 +625,7 @@ def any_is_symbolic(*args: Any) -> bool:
     return any(is_symbolic(a) for a in args)
 
 
-def has_incompatible_cudagraph_ops(gm):
+def get_first_incompatible_cudagraph_node(gm):
     from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
     forbidden_set = {
@@ -627,10 +662,14 @@ def has_incompatible_cudagraph_ops(gm):
         )
     for node in gm.graph.nodes:
         if str(node.target) in forbidden_set:
-            return True
+            return node
         if (val := node.meta.get("val")) is not None and free_unbacked_symbols(val):
-            return True
-    return False
+            return node
+    return None
+
+
+def has_incompatible_cudagraph_ops(gm):
+    return get_first_incompatible_cudagraph_node(gm) is not None
 
 
 def output_node(gm: torch.fx.GraphModule):
@@ -655,6 +694,14 @@ def clear_on_fresh_inductor_cache(obj: Any):
     return obj
 
 
+def clear_inductor_caches():
+    """
+    Clear all registered caches.
+    """
+    for obj in _registered_caches:
+        obj.cache_clear()
+
+
 @contextlib.contextmanager
 def fresh_inductor_cache(cache_entries=None):
     """
@@ -663,8 +710,7 @@ def fresh_inductor_cache(cache_entries=None):
     Optionally, pass a dict as 'cache_entries' to get a list of filenames and sizes
     generated with this cache instance.
     """
-    for obj in _registered_caches:
-        obj.cache_clear()
+    clear_inductor_caches()
 
     inductor_cache_dir = tempfile.mkdtemp()
     try:
@@ -689,6 +735,8 @@ def fresh_inductor_cache(cache_entries=None):
     except Exception:
         log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
         raise
+    finally:
+        clear_inductor_caches()
 
 
 def argsort(seq) -> List[int]:
@@ -836,6 +884,30 @@ class IndentedBuffer:
         return res
 
 
+class FakeIndentedBuffer(IndentedBuffer):
+    def __init__(self):
+        super().__init__()
+
+    def __getattribute__(self, name):
+        if name == "__class__":  # Allow access to the class attribute
+            return object.__getattribute__(self, name)
+        raise RuntimeError(
+            f"Tried to call self.{name} on FakeIndentedBuffer. This buffer"
+            "is currently used on TritonTemplateKernel to prevent actual"
+            "writes to the body without explicitly specifying the body with"
+            "`TritonTemplateKernel.set_subgraph_body(name)`"
+        )
+
+
+@contextlib.contextmanager
+def restore_stdout_stderr(initial_stdout, initial_stderr):
+    try:
+        yield
+    finally:
+        sys.stdout = initial_stdout
+        sys.stderr = initial_stderr
+
+
 class DeferredLineBase:
     """A line that can be 'unwritten' at a later time"""
 
@@ -937,6 +1009,48 @@ def use_cutlass_template(layout, m, n, k):
             )
             return False
     return res
+
+
+def _use_template_for_cpu(layout):
+    return use_max_autotune() and layout.device.type == "cpu"
+
+
+def use_cpp_packed_gemm_template(layout, mat1, mat2):
+    from . import ir
+    from .codegen.cpp_micro_gemm import create_micro_gemm
+    from .kernel.mm_common import mm_args
+
+    if not _use_template_for_cpu(layout) or not _use_autotune_backend("CPP"):
+        return False
+
+    if not config.cpp.weight_prepack:
+        return False
+
+    layout_dtypes = [torch.float32, torch.bfloat16, torch.half]
+    m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2)
+    # TODO(jgong5): support dynamic shapes for n or k
+    if has_free_symbols((n, k)):
+        return False
+    if isinstance(mat2, ir.BaseView):
+        mat2 = mat2.unwrap_view()
+    micro_gemm = create_micro_gemm(
+        "micro_gemm",
+        m,
+        n,
+        k,
+        input_dtype=layout.dtype,
+        output_dtype=torch.float,
+        num_threads=parallel_num_threads(),
+    )
+    # TODO(jgong5): support n % n_block_size != 0
+    return (
+        layout.dtype in layout_dtypes
+        and micro_gemm is not None
+        and n % micro_gemm.register_blocking[1] == 0
+        and mat1.get_stride()[-1] == 1  # TODO(jgong5): support transposed input
+        and isinstance(mat2, ir.StorageBox)
+        and mat2.is_module_buffer()
+    )
 
 
 def use_aten_gemm_kernels():
@@ -1192,6 +1306,12 @@ def get_gpu_dram_gbps():
     return get_dram_gbps()
 
 
+def get_gpu_shared_memory():
+    from triton.runtime import driver
+
+    return driver.active.utils.get_device_properties(0).get("max_shared_mem", 0)
+
+
 def is_welford_reduction(reduction_type):
     return reduction_type.startswith("welford")
 
@@ -1276,13 +1396,13 @@ def pass_execution_and_save(func, gm, inp, msg):
 def is_collective(node):
     from . import ir
 
-    return isinstance(node, ir.CollectiveKernel) or type(node) == ir._CollectiveKernel
+    return type(node) == ir._CollectiveKernel
 
 
 def is_wait(node):
     from . import ir
 
-    return isinstance(node, ir.Wait) or type(node) == ir._WaitKernel
+    return type(node) == ir._WaitKernel
 
 
 def num_fw_fixed_arguments(dynamo_gm_num_inputs: int, aot_fw_gm_num_inputs: int):
@@ -1402,7 +1522,7 @@ def dump_node_schedule(node_schedule):
     An API that can be used in pdb to dump a node_schedule.
     Right mainly dump the read/write dependencies but can add more as needed.
     """
-    from torch._inductor.codegen.triton import DisableReduction, EnableReduction
+    from torch._inductor.codegen.simd import DisableReduction, EnableReduction
     from torch._inductor.scheduler import SchedulerNode
 
     print(f"Node schedule with {len(node_schedule)} nodes")
@@ -1416,6 +1536,7 @@ def dump_node_schedule(node_schedule):
             is_red = node.is_reduction()
             print(f"{'red' if is_red else 'pw'} scheduler node")
             if is_red:
+                assert node.node is not None
                 print(f"original reduction hint {node.node.data.reduction_hint}")  # type: ignore[attr-defined]
             print("ReadDep:")
             for dep in node.read_writes.reads:
@@ -1425,3 +1546,222 @@ def dump_node_schedule(node_schedule):
                 print(dep)
         else:
             raise RuntimeError(f"Unrecognized node type: {type(node)}")
+
+
+def tensor_is_aligned(tensor: torch.Tensor):
+    # See Note: [Input Alignment handling in Inductor]
+    # Right now, we don't try to guard on the alignment of the storage offset.
+    # When this comment was written, non-symbolic storage_offsets are not guarded on
+    # but symbolic storage_offsets are. For consistency, we suppress guard creation
+    # upon performing this check: that ensures that we don't add recompiles when we
+    # add this logic.
+    return (tensor.storage_offset() * get_dtype_size(tensor.dtype)) % ALIGNMENT == 0
+
+
+def should_assume_input_aligned(example_input: torch.Tensor):
+    # See Note: [Input Alignment handling in Inductor]
+
+    # right now, we only care about alignment for cuda tensors.
+    if not is_gpu(example_input.device.type):
+        return False
+    return config.assume_aligned_inputs or tensor_is_aligned(example_input)
+
+
+def maybe_get_suppress_shape_guards_ctx():
+    # Try to get TracingContext.try_get().fake_mode.shape_env.suppress_guards()
+    # If it's not available, return a nullcontext.
+
+    # If we're dealing with cudagraphs, we might not have a tracing_context
+    tracing_context = torch._guards.TracingContext.try_get()
+    if not tracing_context:
+        return contextlib.nullcontext()
+
+    # In standalone inductor compile mode, we might not have a shape_env attached to the fake mode
+    shape_env = tracing_context.fake_mode.shape_env
+    if not shape_env:
+        return contextlib.nullcontext()
+
+    return shape_env.suppress_guards()
+
+
+def aoti_eager_cache_dir(namespace: str, device: str):
+    return Path(cache_dir()) / "aoti_eager" / namespace / device
+
+
+def aoti_eager_op_conf_lock(op_func_name_with_overload: str):
+    from filelock import FileLock
+
+    # Avoid circular import
+    from torch._inductor.codecache import get_lock_dir, LOCK_TIMEOUT
+
+    op_conf_lock_file = f"{op_func_name_with_overload}.lock"
+    lock_dir = get_lock_dir()
+    return FileLock(os.path.join(lock_dir, op_conf_lock_file), timeout=LOCK_TIMEOUT)
+
+
+def load_aoti_eager_cache(ns: str, op_func_name_with_overload: str, device_type: str):
+    device_kernel_cache = aoti_eager_cache_dir(ns, device_type)
+    op_conf = device_kernel_cache / f"{op_func_name_with_overload}.json"
+    if not op_conf.exists():
+        return []
+
+    with aoti_eager_op_conf_lock(op_func_name_with_overload):
+        with open(op_conf) as f:
+            json_data = json.load(f)
+            for item in json_data:
+                # Get absolution path for kernel library
+                kernel_lib_abs_path = device_kernel_cache / item["kernel_path"]
+                item["kernel_path"] = kernel_lib_abs_path.as_posix()
+
+                # Check if the kernel library exists
+                if not kernel_lib_abs_path.exists():
+                    return []
+
+                for metadata in item["meta_info"]:
+                    assert not metadata[
+                        "is_dynamic"
+                    ], "Only support static shape for now"
+                    if metadata["device_type"] == "cpu":
+                        metadata["device_index"] = -1
+                    metadata["dtype"] = getattr(torch, metadata["dtype"].split(".")[-1])
+
+            return json_data
+
+
+def aoti_compile_with_persistent_cache(
+    ns: str,
+    op_func_name_with_overload: str,
+    device_type: str,
+    dynamic: bool,
+    f: Callable[..., Any],
+    args: Tuple[Any],
+    kwargs: Dict[str, Any],
+    *,
+    dynamic_shapes: Optional[Dict[str, Any]] = None,
+    options: Optional[Dict[str, Any]] = None,
+    remove_runtime_assertions: bool = False,
+    disable_constraint_solver: bool = False,
+):
+    """
+    Compile the given function with persistent cache for AOTI eager mode.
+    """
+    assert not dynamic, "Only support static shape for now"
+    type_to_torch_dtype = {int: torch.int32, float: torch.float, bool: torch.bool}
+    supported_scalar_types = tuple(type_to_torch_dtype.keys())
+    flattened_inputs = pytree.arg_tree_leaves(*args, **kwargs)
+    if not all(
+        isinstance(input, (supported_scalar_types, torch.Tensor))
+        for input in flattened_inputs
+    ):
+        raise NotImplementedError("Only support tensor, int, float, bool for now")
+
+    persistent_cache = aoti_eager_cache_dir(ns, device_type)
+    if not persistent_cache.exists():
+        persistent_cache.mkdir(parents=True)
+
+    persistent_cache_lib = persistent_cache / "lib"
+    if not persistent_cache_lib.exists():
+        persistent_cache_lib.mkdir()
+
+    with mock.patch.dict(
+        os.environ,
+        {"TORCHINDUCTOR_CACHE_DIR": persistent_cache_lib.absolute().as_posix()},
+    ):
+        try:
+            kernel_lib_path = torch._export.aot_compile(
+                f,
+                args,
+                kwargs,
+                dynamic_shapes=dynamic_shapes,
+                options=options,
+                remove_runtime_assertions=remove_runtime_assertions,
+                disable_constraint_solver=disable_constraint_solver,
+                # Some operations may have non-Tensor parameters like int, float, bool. These
+                # non-Tensor parameters will not be the input of the graph. Therefore, we do
+                # need to keep the same signature.
+                same_signature=False,
+            )
+
+            kernel_metadata_items = []
+            for input in flattened_inputs:
+                # TODO(Eikan): To add dynamic support
+                metadata: Dict[str, Any] = {}
+                metadata["is_dynamic"] = dynamic
+
+                if isinstance(input, torch.Tensor):
+                    metadata["device_type"] = f"{input.device.type}"
+                    if is_cpu_device([input]):
+                        metadata["device_index"] = -1
+                    else:
+                        metadata["device_index"] = input.device.index
+                    metadata["dtype"] = f"{input.dtype}"
+                    metadata["sizes"] = list(input.size())
+                    metadata["strides"] = list(input.stride())
+                else:
+                    assert isinstance(input, supported_scalar_types)
+                    # Scalar tensor
+                    metadata["device_type"] = device_type
+                    metadata["device_index"] = -1 if device_type == "cpu" else 0
+                    metadata["dtype"] = f"{type_to_torch_dtype[type(input)]}"
+                    metadata["sizes"] = []
+                    metadata["strides"] = []
+                    metadata["scalar_value"] = input
+
+                kernel_metadata_items.append(metadata)
+
+            kernel_meta_info: Dict[str, Any] = {}
+            kernel_meta_info["meta_info"] = kernel_metadata_items
+            kernel_meta_info["kernel_path"] = (
+                Path(kernel_lib_path).relative_to(persistent_cache).as_posix()
+            )
+
+            json_data = []
+            update_json = True
+            op_conf = persistent_cache / f"{op_func_name_with_overload}.json"
+            mode = "r" if op_conf.exists() else "w"
+            with aoti_eager_op_conf_lock(op_func_name_with_overload):
+                with open(op_conf, mode) as op_conf_file:
+                    try:
+                        json_data = json.load(op_conf_file)
+                    except Exception as e:
+                        json_data = []
+
+                    assert isinstance(json_data, list)
+                    for item in json_data:
+                        assert isinstance(item, dict)
+                        # Same kernel meta info already exists in the json file
+                        if item["meta_info"] == kernel_metadata_items:
+                            update_json = False
+                            break
+
+                if update_json:
+                    json_data.append(kernel_meta_info)
+                    with open(op_conf, "w") as op_conf_file:
+                        json.dump(json_data, op_conf_file, indent=4)
+
+            return kernel_lib_path
+        except Exception as e:
+            return ""
+
+
+def run_and_get_cpp_code(fn, *args, **kwargs):
+    # We use the patch context manager instead of using it as a decorator.
+    # In this way, we can ensure that the attribute is patched and unpatched correctly
+    # even if this run_and_get_cpp_code function is called multiple times.
+    with unittest.mock.patch.object(config, "debug", True):
+        torch._dynamo.reset()
+        import io
+        import logging
+
+        log_capture_string = io.StringIO()
+        ch = logging.StreamHandler(log_capture_string)
+        from torch._inductor.graph import output_code_log
+
+        output_code_log.addHandler(ch)
+        prev_level = output_code_log.level
+        output_code_log.setLevel(logging.DEBUG)
+        result = fn(*args, **kwargs)
+        s = log_capture_string.getvalue()
+        output_code_log.setLevel(prev_level)
+        output_code_log.removeHandler(ch)
+    return result, s

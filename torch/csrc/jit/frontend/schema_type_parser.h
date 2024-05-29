@@ -13,11 +13,11 @@ using TypePtr = c10::TypePtr;
 
 struct TORCH_API SchemaTypeParser {
   TypePtr parseBaseType();
-  c10::optional<c10::AliasInfo> parseAliasAnnotation();
-  std::pair<TypePtr, c10::optional<c10::AliasInfo>> parseType();
-  std::tuple</*fake*/ TypePtr, /*real*/ TypePtr, c10::optional<c10::AliasInfo>>
+  std::optional<c10::AliasInfo> parseAliasAnnotation();
+  std::pair<TypePtr, std::optional<c10::AliasInfo>> parseType();
+  std::tuple</*fake*/ TypePtr, /*real*/ TypePtr, std::optional<c10::AliasInfo>>
   parseFakeAndRealType();
-  c10::optional<at::ScalarType> parseTensorDType(const std::string& dtype);
+  std::optional<at::ScalarType> parseTensorDType(const std::string& dtype);
   TypePtr parseRefinedTensor();
 
   SchemaTypeParser(
@@ -29,8 +29,8 @@ struct TORCH_API SchemaTypeParser {
         allow_typevars_(allow_typevars) {}
 
  private:
-  c10::optional<bool> tryToParseRequiresGrad();
-  c10::optional<c10::Device> tryToParseDeviceType();
+  std::optional<bool> tryToParseRequiresGrad();
+  std::optional<c10::Device> tryToParseDeviceType();
   void parseList(
       int begin,
       int sep,

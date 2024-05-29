@@ -2,6 +2,7 @@
 
 import contextlib
 import json
+import operator
 import os
 import time
 
@@ -94,7 +95,7 @@ def get_sorted_gpu_events(events):
         if not is_gpu_compute_event(event):
             continue
         sorted_gpu_events.append(event)
-    return sorted(sorted_gpu_events, key=lambda x: x["ts"])
+    return sorted(sorted_gpu_events, key=operator.itemgetter("ts"))
 
 
 def get_duration(sorted_gpu_events):

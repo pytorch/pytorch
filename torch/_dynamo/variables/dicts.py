@@ -9,7 +9,7 @@ from typing import Dict, List, Optional
 
 from torch._subclasses.fake_tensor import is_fake
 
-from .. import variables
+from .. import polyfill, variables
 from ..bytecode_transformation import (
     create_call_function,
     create_call_method,
@@ -17,7 +17,6 @@ from ..bytecode_transformation import (
     create_load_method,
 )
 from ..eval_frame import skip_code
-
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource
@@ -151,6 +150,15 @@ class ConstDictVariable(VariableTracker):
     def as_proxy(self):
         return {k.vt.as_proxy(): v.as_proxy() for k, v in self.items.items()}
 
+    def debug_repr(self):
+        return (
+            "{"
+            + ", ".join(
+                f"{k.vt.debug_repr()}: {v.debug_repr()}" for k, v in self.items.items()
+            )
+            + "}"
+        )
+
     def as_python_constant(self):
         return {
             k.vt.as_python_constant(): v.as_python_constant()
@@ -196,7 +204,7 @@ class ConstDictVariable(VariableTracker):
     def getitem_const(self, arg: VariableTracker):
         key = ConstDictVariable._HashableTracker(arg)
         if key not in self.items:
-            raise KeyError(arg.value)
+            unimplemented(f"dict KeyError: {arg.value}")
         return self.items[key]
 
     def call_method(
@@ -248,6 +256,10 @@ class ConstDictVariable(VariableTracker):
             assert not kwargs and len(args) == 2
             tx.output.side_effects.mutation(self)
             self.items[Hashable(args[0])] = args[1]
+            return ConstantVariable.create(None)
+        elif name == "__delitem__" and arg_hashable and self.mutable_local:
+            tx.output.side_effects.mutation(self)
+            self.items.__delitem__(Hashable(args[0]))
             return ConstantVariable.create(None)
         elif name in ("pop", "get") and len(args) in (1, 2) and args[0] not in self:
             # missing item, return the default value
@@ -312,6 +324,11 @@ class DefaultDictVariable(ConstDictVariable):
             return False
         return super().is_python_constant()
 
+    def debug_repr(self):
+        return (
+            f"defaultdict({self.default_factory.debug_repr()}, {super().debug_repr()})"
+        )
+
     @staticmethod
     def is_supported_arg(arg):
         if isinstance(arg, variables.BuiltinVariable):
@@ -355,6 +372,12 @@ class SetVariable(ConstDictVariable):
         items = dict.fromkeys(items, SetVariable._default_value())
         super().__init__(items, **kwargs)
 
+    def debug_repr(self):
+        if not self.items:
+            return "set()"
+        else:
+            return "{" + ",".join(k.vt.debug_repr() for k in self.items.keys()) + "}"
+
     @property
     def set_items(self):
         return set(self.items.keys())
@@ -384,6 +407,8 @@ class SetVariable(ConstDictVariable):
         args: List[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> "VariableTracker":
+        from . import ListVariable, TupleVariable
+
         # We foward the calls to the dictionary model
         if name == "add":
             assert not kwargs
@@ -397,6 +422,30 @@ class SetVariable(ConstDictVariable):
             result = self.set_items.pop().vt
             super().call_method(tx, name, (result,), kwargs)
             return result
+        elif name == "isdisjoint":
+            assert not kwargs
+            assert len(args) == 1
+            return variables.UserFunctionVariable(
+                polyfill.set_isdisjoint
+            ).call_function(tx, [self, args[0]], {})
+        elif (
+            name == "update"
+            and len(args) == 1
+            and isinstance(
+                args[0],
+                (
+                    SetVariable,
+                    ListVariable,
+                    TupleVariable,
+                ),
+            )
+            and self.mutable_local
+        ):
+            if isinstance(args[0], (ListVariable, TupleVariable)):
+                arg = SetVariable(args[0].unpack_var_sequence(tx))
+            else:
+                arg = args[0]
+            return super().call_method(tx, "update", (arg,), kwargs)
         return super().call_method(tx, name, args, kwargs)
 
     def getitem_const(self, arg: VariableTracker):
@@ -889,18 +938,13 @@ class PythonSysModulesVariable(VariableTracker):
     def call_method(
         self, tx, name, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ):
-        from .builder import VariableBuilder
-
         if name == "__getitem__":
             return self.call_getitem(tx, *args, **kwargs)
         elif name == "get":
             return self.call_get(tx, *args, **kwargs)
         elif name == "__contains__":
             return self.call_contains(tx, *args, **kwargs)
-
-        # Fallback to dict implementation
-        real_dict = VariableBuilder(tx, self.source)(sys.modules)
-        return real_dict.call_method(tx, name, args, kwargs)
+        unimplemented(f"sys.modules.{name}(*{args}, **{kwargs})")
 
     def _contains_helper(self, tx, key: VariableTracker):
         k = key.as_python_constant()

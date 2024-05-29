@@ -28,8 +28,10 @@ class MixedPrecisionPolicy:
             gradient reduction (i.e. reduce-scatter or all-reduce). If this is
             ``None`` but ``param_dtype`` is not ``None``, then the reduction
             uses the compute dtype. This can be used to run gradient reduction
-            in full precision while using low precision for compute. (Default:
-            ``None``)
+            in full precision while using low precision for compute. If also
+            gradient reduction is disabled via :meth:`set_requires_gradient_sync`,
+            then FSDP will accumulate gradients using ``reduce_dtype``.
+            (Default: ``None``)
         output_dtype (Optional[torch.dtype]): This specifies the dtype for
             casting floating-point forward outputs. This can be used to
             help implement cases where different modules have different mixed

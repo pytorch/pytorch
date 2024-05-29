@@ -768,7 +768,7 @@ def quantize_per_token(
     _quant_min_max_bounds_check(quant_min, quant_max, dtype)
     _per_token_quant_qparam_dim_check(input, scales, zero_points)
     input = (
-        torch.round(input / scales + zero_points).clamp(quant_min, quant_max).to(dtype)
+        input.mul(1.0 / scales).add(zero_points).round().clamp(quant_min, quant_max).to(dtype)
     )
     return input
 
@@ -875,7 +875,7 @@ def quantize_per_channel_group(
     zero_points = zero_points.reshape(-1, 1)
 
     input_int8 = (
-        to_quant.div(scales)
+        to_quant.mul(1.0 / scales)
         .add(zero_points)
         .round()
         .clamp_(quant_min, quant_max)

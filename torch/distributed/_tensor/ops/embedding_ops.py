@@ -6,7 +6,7 @@ from typing import cast, List, Optional
 
 import torch
 import torch.distributed._functional_collectives as funcol
-from torch.distributed._tensor.op_schema import (
+from torch.distributed._tensor._op_schema import (
     OpSchema,
     OpStrategy,
     PlacementStrategy,
@@ -114,7 +114,7 @@ class _MaskPartial(_Partial):
 
         # perform sum reduction
         return funcol.all_reduce(
-            tensor, reduceOp=self.reduce_op.name, group=(mesh, mesh_dim)
+            tensor, reduceOp=self.reduce_op, group=(mesh, mesh_dim)
         )
 
     def _reduce_shard_value(
@@ -174,13 +174,12 @@ def embedding_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     """
     This strategy handles embedding op. We have two possible embedding shardings:
     rowwise and colwise
-    # TODO: implement rowwise sharding
     """
     weight_strategy = cast(OpStrategy, op_schema.args_schema[0])
     indices_strategy = cast(OpStrategy, op_schema.args_schema[1])
 
-    weight_shape = weight_strategy.output_shape
-    indices_shape = indices_strategy.output_shape
+    weight_shape = weight_strategy.shape
+    indices_shape = indices_strategy.shape
     output_emd_dim = len(indices_shape)
 
     all_mesh_dim_strategies = []
@@ -250,13 +249,12 @@ def embedding_dense_backward_strategy(
     """
     This strategy handles embedding op. We have two possible embedding shardings:
     rowwise and colwise
-    # TODO: implement rowwise sharding backward
     """
     grad_out_strategy = cast(OpStrategy, op_schema.args_schema[0])
     indices_strategy = cast(OpStrategy, op_schema.args_schema[1])
 
-    grad_out_shape = grad_out_strategy.output_shape
-    indices_shape = indices_strategy.output_shape
+    grad_out_shape = grad_out_strategy.shape
+    indices_shape = indices_strategy.shape
     grad_out_ndim = len(grad_out_shape)
 
     all_mesh_dim_strategies = []

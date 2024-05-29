@@ -69,14 +69,15 @@ at::Tensor _float_to_bfloat16_cuda(const at::Tensor& input) {
 
   auto output = at::empty(
       {nrows, output_columns},
-      input.options().dtype(at::kHalf)); // at::kHalf
+#if HAS_NCCL_BF16_DATATYPE
+      input.options().dtype(at::kBFloat16));
+#else
+      input.options().dtype(at::kHalf));
+#endif
 
   if (nrows == 0 || output_columns == 0) {
     return output;
   }
-
-  // TODO: replace Half by BFloat16, after BFloat16 is supported by Nvidia
-  // NCCL input.options().dtype(at::kBFloat16)); // at::kBFloat16
 
   constexpr int threads_per_block = 256;
   const int blockDim_x = std::min(output_columns, threads_per_block);
@@ -93,10 +94,13 @@ at::Tensor _float_to_bfloat16_cuda(const at::Tensor& input) {
       input.const_data_ptr<float>(),
       nrows,
       ncols,
-      // TODO: replace Half by BFloat16, after BFloat16 is supported by Nvidia
-      // NCCL
-      reinterpret_cast<uint16_t*>(output.mutable_data_ptr<at::Half>()));
-  //C10_CUDA_KERNEL_LAUNCH_CHECK();
+#if HAS_NCCL_BF16_DATATYPE
+      reinterpret_cast<uint16_t*>(output.mutable_data_ptr<at::BFloat16>())
+#else
+      reinterpret_cast<uint16_t*>(output.mutable_data_ptr<at::Half>())
+#endif
+      );
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return output;
 }
@@ -134,9 +138,11 @@ at::Tensor _bfloat16_to_float_cuda(const at::Tensor& input) {
       blockDim,
       0,
       at::cuda::getCurrentCUDAStream()>>>(
-      // TODO: replace Half by BFloat16, after BFloat16 is supported by Nvidia
-      // NCCL
+#if HAS_NCCL_BF16_DATATYPE
+      reinterpret_cast<const uint16_t*>(input.const_data_ptr<at::BFloat16>()),
+#else
       reinterpret_cast<const uint16_t*>(input.const_data_ptr<at::Half>()),
+#endif
       nrows,
       ncols,
       output.mutable_data_ptr<float>());

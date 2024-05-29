@@ -71,7 +71,7 @@ class DecompSkip(abc.ABC):
         new_op_qualname = f"{_NEW_OP_NAMESPACE}::{cls.new_op_name}"
         torch.library.define(new_op_qualname, cls.new_op_schema)
         torch.library.impl(new_op_qualname, "default", cls.replacement)
-        torch.library.impl_abstract(new_op_qualname, cls.abstract)
+        torch.library.register_fake(new_op_qualname, cls.abstract)
 
     @classmethod
     def replacement(cls, *args, **kwargs):

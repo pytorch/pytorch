@@ -194,11 +194,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         # behaviors when comparing single-gpu models with multi-gpu models.
         model_args = ModelArgs(dropout_p=0.0)
 
-        # float64 precision is needed for the computation results on the single-gpu
-        # model and the distributed model to be asserted equal, especially when
-        # model size is large and various operations (e.g., positional embedding,
-        # weight tying, etc.) are performed.
-        model = Transformer(model_args).to(device=self.device_type, dtype=torch.float64)
+        model = Transformer(model_args).to(device=self.device_type)
         model_tp = deepcopy(model)
         self._check_module(model, model_tp)
 
@@ -215,7 +211,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         optim_tp = torch.optim.Adam(model_tp.parameters(), lr=LR)
 
         # Initialize input and make sure all ranks have the same input.
-        inp_size = [8, 12]  # [batch_size, seq_len]
+        inp_size = [8, 8]  # [batch_size, seq_len]
         if is_seq_parallel:
             assert inp_size[1] % self.world_size == 0
         torch.manual_seed(0)
@@ -230,17 +226,16 @@ class DistTensorParallelExampleTest(DTensorTestBase):
             self.assertDictEqual(
                 comm_mode.get_comm_counts(),
                 {
-                    c10d_functional.all_reduce: 1,
-                    c10d_functional.reduce_scatter_tensor: 4,
-                    c10d_functional.all_gather_into_tensor: 7,
+                    c10d_functional.reduce_scatter_tensor: 6,
+                    c10d_functional.all_gather_into_tensor: 6,
                 },
             )
         else:
             self.assertDictEqual(
                 comm_mode.get_comm_counts(),
                 {
-                    c10d_functional.all_reduce: 5,
-                    c10d_functional.all_gather_into_tensor: 2,
+                    c10d_functional.all_reduce: 6,
+                    c10d_functional.all_gather_into_tensor: 1,
                 },
             )
 
@@ -253,23 +248,25 @@ class DistTensorParallelExampleTest(DTensorTestBase):
             self.assertDictEqual(
                 comm_mode.get_comm_counts(),
                 {
-                    c10d_functional.reduce_scatter_tensor: 4,
-                    c10d_functional.all_gather_into_tensor: 7,
+                    c10d_functional.reduce_scatter_tensor: 5,
+                    c10d_functional.all_gather_into_tensor: 6,
                 },
             )
         else:
             self.assertDictEqual(
                 comm_mode.get_comm_counts(),
                 {
-                    c10d_functional.all_reduce: 8,
-                    c10d_functional.all_gather_into_tensor: 1,
+                    c10d_functional.all_reduce: 9,
                 },
             )
 
         # Ensure model weights are still the same after update.
         optim.step()
-        with CommDebugMode() as comm_mode:
-            optim_tp.step()
+        from torch.distributed._tensor.experimental import implicit_replication
+
+        with implicit_replication():
+            with CommDebugMode() as comm_mode:
+                optim_tp.step()
         self._check_module(model, model_tp)
         if is_seq_parallel:
             self.assertDictEqual(

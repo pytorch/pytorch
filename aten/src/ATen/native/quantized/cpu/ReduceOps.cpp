@@ -47,7 +47,7 @@ inline bool is_innnermost_dim(
 inline bool is_mean_inner_dim_fast_path(
     const Tensor& self,
     OptionalIntArrayRef opt_dim,
-    c10::optional<ScalarType> opt_dtype) {
+    std::optional<ScalarType> opt_dtype) {
   bool is_fast_path =
       is_innnermost_dim(self, opt_dim) &&
       (!opt_dtype.has_value() || opt_dtype.value() == self.scalar_type());
@@ -131,7 +131,7 @@ Tensor& mean_out_quantized_cpu(
     const Tensor& self,
     OptionalIntArrayRef opt_dim,
     bool keepdim,
-    c10::optional<ScalarType> opt_dtype,
+    std::optional<ScalarType> opt_dtype,
     Tensor& result) {
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
@@ -177,7 +177,7 @@ static Tensor& mean_out_quantized_cpu(
     const Tensor& self,
     DimnameList dim,
     bool keepdim,
-    c10::optional<ScalarType> opt_dtype) {
+    std::optional<ScalarType> opt_dtype) {
   return mean_out_quantized_cpu(
       self, dimnames_to_positions(self, dim), keepdim, opt_dtype, result);
 }
@@ -186,7 +186,7 @@ static Tensor& mean_out_quantized_cpu(
 inline bool is_std_inner_dim_fast_path(
     const Tensor& self,
     OptionalIntArrayRef dim,
-    const c10::optional<Scalar>& correction) {
+    const std::optional<Scalar>& correction) {
   // Do not enter fast path if there are too few elements
   IntArrayRef dims = dim.has_value() ? dim.value() : IntArrayRef();
   auto all_dims = std::vector<int64_t>(self.dim());
@@ -206,7 +206,7 @@ inline bool is_std_inner_dim_fast_path(
 Tensor& std_out_quantized_cpu(
     const Tensor& self,
     OptionalIntArrayRef dim,
-    const c10::optional<Scalar>& correction,
+    const std::optional<Scalar>& correction,
     bool keepdim,
     Tensor& result) {
   // Fast path
@@ -230,7 +230,7 @@ Tensor& std_out_quantized_cpu(
 Tensor std_quantized_cpu(
     const Tensor& self,
     OptionalIntArrayRef dim,
-    const c10::optional<Scalar>& correction,
+    const std::optional<Scalar>& correction,
     bool keepdim) {
   Tensor result;
   std_out_quantized_cpu(self, dim, correction, keepdim, result);
@@ -240,7 +240,7 @@ Tensor std_quantized_cpu(
 static Tensor std_quantized_cpu(
     const Tensor& self,
     DimnameList dim,
-    const c10::optional<Scalar>& correction,
+    const std::optional<Scalar>& correction,
     bool keepdim) {
   return std_quantized_cpu(
       self, dimnames_to_positions(self, dim), correction, keepdim);
@@ -250,7 +250,7 @@ static Tensor& std_out_quantized_cpu(
     Tensor& result,
     const Tensor& self,
     DimnameList dim,
-    const c10::optional<Scalar>& correction,
+    const std::optional<Scalar>& correction,
     bool keepdim) {
   return std_out_quantized_cpu(
       self, dimnames_to_positions(self, dim), correction, keepdim, result);
