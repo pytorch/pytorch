@@ -275,30 +275,28 @@ def _pipelined_produce_and_all2all(
     local_p2p_buf_0 = get_p2p_buf(rank, 0)
     local_p2p_buf_1 = get_p2p_buf(rank, 1)
 
-    # Directly write the local result to the destination.
-    # No need to go through the p2p buffers.
-    chunk_producer(rank, out_chunks[rank])
-
-    with torch.cuda.stream(backend.stream()):
-        chunk_producer((rank + 1) % group_size, local_p2p_buf_0)
-        backend.intra_node_barrier()
-        remote_p2p_buf = get_p2p_buf((rank - 1) % group_size, 0)
-        out_chunks[(rank - 1) % group_size].copy_(remote_p2p_buf)
-
-    for step in range(2, group_size):
+    for step in range(1, group_size):
         remote_rank = (rank - step) % group_size
         if step % 2 == 0:
             stream = torch.cuda.current_stream()
+            other_stream = backend.stream()
             p2p_buf = local_p2p_buf_1
             remote_p2p_buf = get_p2p_buf(remote_rank, 1)
         else:
             stream = backend.stream()
+            other_stream = torch.cuda.current_stream()
             p2p_buf = local_p2p_buf_0
             remote_p2p_buf = get_p2p_buf(remote_rank, 0)
         with torch.cuda.stream(stream):
             chunk_producer((rank + step) % group_size, p2p_buf)
             backend.intra_node_barrier()
+            # Make the other stream to wait for the barrier on the current
+            # stream to finish before chunk_producer to avoid the compute
+            # delaying the barrier.
+            other_stream.wait_stream(stream)
             out_chunks[remote_rank].copy_(remote_p2p_buf)
+
+    chunk_producer(rank, out_chunks[rank])
 
     torch.cuda.current_stream().wait_stream(backend.stream())
     backend.intra_node_barrier()
