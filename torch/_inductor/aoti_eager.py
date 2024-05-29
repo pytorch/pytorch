@@ -157,20 +157,6 @@ def aoti_compile_with_persistent_cache(
     if not persistent_cache_lib.exists():
         persistent_cache_lib.mkdir()
 
-    # Regarding aten operations with `out` parameter, we need to enable
-    # keep_inference_input_mutations to guarantee the correctness as
-    # the `out` parameter needs to be mutated.
-    options = (
-        {
-            "aot_inductor.keep_inference_input_mutations": True,
-        }
-        if options is None
-        else {
-            **options,
-            "aot_inductor.keep_inference_input_mutations": True,
-        }
-    )
-
     with mock.patch.dict(
         os.environ,
         {"TORCHINDUCTOR_CACHE_DIR": persistent_cache_lib.absolute().as_posix()},
@@ -181,7 +167,6 @@ def aoti_compile_with_persistent_cache(
                 args,
                 kwargs,
                 dynamic_shapes=dynamic_shapes,
-                options=options,
                 remove_runtime_assertions=remove_runtime_assertions,
                 disable_constraint_solver=disable_constraint_solver,
                 # Some operations may have non-Tensor parameters like int, float, bool. These
