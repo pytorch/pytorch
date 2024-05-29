@@ -772,7 +772,8 @@ def explain(f, *extra_args, **extra_kwargs):
         warnings.warn(
             "explain(f, *args, **kwargs) is deprecated, use explain(f)(*args, **kwargs) instead.  "
             "If you don't migrate, we may break your explain call in the future if your user defined kwargs "
-            "conflict with future kwargs added to explain(f)."
+            "conflict with future kwargs added to explain(f).",
+            FutureWarning,
         )
         return inner(*extra_args, **extra_kwargs)
     else:
@@ -915,7 +916,7 @@ def check_signature_rewritable(graph):
             tb = "".join(traceback.format_list(stack))
             extra = ""
             if len(user_stacks) > 1:
-                extra = f"(elided {len(user_stacks)-1} more accesses)"
+                extra = f"(elided {len(user_stacks) - 1} more accesses)"
             msg = f"{source.name()}, accessed at:\n{tb}{extra}"
         # TODO: option to print ALL of the stack traces at once
         input_errors.append(msg)
@@ -1333,7 +1334,10 @@ def export(
             dim_constraints.remove_redundant_dynamic_results()
             forced_specializations = dim_constraints.forced_specializations()
             msg = dim_constraints.prettify_results(
-                original_signature, constraint_violation_error, forced_specializations
+                original_signature,
+                dynamic_shapes,
+                constraint_violation_error,
+                forced_specializations,
             )
             if constraint_violation_error:
                 constraint_violation_error.args = (
@@ -1443,7 +1447,8 @@ def export(
         warnings.warn(
             "export(f, *args, **kwargs) is deprecated, use export(f)(*args, **kwargs) instead.  "
             "If you don't migrate, we may break your export call in the future if your user defined kwargs "
-            "conflict with future kwargs added to export(f)."
+            "conflict with future kwargs added to export(f).",
+            FutureWarning,
         )
         return inner(*extra_args, **extra_kwargs)
     else:
