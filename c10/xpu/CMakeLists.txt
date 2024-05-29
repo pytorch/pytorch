@@ -4,10 +4,6 @@
 
 include(../../cmake/public/xpu.cmake)
 
-if(NOT BUILD_LIBTORCHLESS)
-  find_library(C10_XPU_LIB c10_xpu PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
-endif()
-
 # ---[ Configure macro file.
 set(C10_XPU_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS}) # used in xpu_cmake_macros.h.in
 configure_file(

@@ -243,13 +243,6 @@ option(USE_ASAN "Use Address+Undefined Sanitizers" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
 option(USE_XPU "Use XPU" ON)
-cmake_dependent_option(
-     BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
-cmake_dependent_option(USE_XPU "Use XPU. Only available on Linux." ON "LINUX"
-                       OFF)
-cmake_dependent_option(
-  BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON
-  "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
 cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(USE_CUDNN "Use cuDNN" ON "USE_CUDA" OFF)
