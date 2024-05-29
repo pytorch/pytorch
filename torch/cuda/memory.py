@@ -155,7 +155,7 @@ def set_per_process_memory_fraction(
 
 
 def empty_cache(
-    device: Union[Device, int] = None, mempool_id: Tuple[int, int] = None
+    device: Union[Device, int] = None, mempool_id: Optional[Tuple[int, int]] = None
 ) -> None:
     r"""Release all unoccupied cached memory currently held by the caching
     allocator so that those can be used in other GPU application and visible in
@@ -474,7 +474,7 @@ def max_memory_cached(device: Union[Device, int] = None) -> int:
 
 
 def memory_snapshot(
-    device: Union[Device, int] = None, mempool_id: Tuple[int, int] = None
+    device: Union[Device, int] = None, mempool_id: Optional[Tuple[int, int]] = None
 ):
     r"""Return a snapshot of the CUDA memory allocator state.
 
@@ -774,7 +774,9 @@ def _record_memory_history_impl(
 _record_memory_history.__signature__ = signature(_record_memory_history_impl)  # type: ignore[attr-defined]
 
 
-def _snapshot(device: Union[Device, int] = None, mempool_id: Tuple[int, int] = None):
+def _snapshot(
+    device: Union[Device, int] = None, mempool_id: Optional[Tuple[int, int]] = None
+):
     """Save a snapshot of CUDA memory state at the time it was called.
 
     The state is represented as a dictionary with the following structure.

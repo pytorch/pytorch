@@ -2009,6 +2009,7 @@ class _CUDAGraph:
 # Defined in torch/csrc/cuda/MemPool.cpp
 class _MemPool:
     def __init__(self, allocator: Optional[_cuda_CUDAAllocator] = None, is_user_created: _bool = True) -> None: ...
+    @property
     def id(self) -> Tuple[_int, _int]: ...
 
 class _MemPoolContext:
