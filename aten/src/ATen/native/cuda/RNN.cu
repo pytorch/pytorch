@@ -516,7 +516,7 @@ void gru_backward_impl(const Tensor& grad_hy, const Tensor& workspace,
 
 std::tuple<Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_cuda(
       const Tensor& input_gates, const Tensor& hidden_gates,
-      const Tensor& cx, const std::optional<Tensor>& input_bias_opt, const c10::optional<Tensor>& hidden_bias_opt) {
+      const Tensor& cx, const std::optional<Tensor>& input_bias_opt, const std::optional<Tensor>& hidden_bias_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> input_bias_maybe_owned = at::borrow_from_optional_tensor(input_bias_opt);
   const Tensor& input_bias = *input_bias_maybe_owned;
@@ -564,7 +564,7 @@ void checkLSTMBackwardSizes(const TensorArg& grad_hy, const TensorArg& grad_cy,
   checkNumel(c, workspace, exp_size[0] * exp_size[1] * 4);
 }
 
-std::tuple<Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backward_impl_cuda( const std::optional<Tensor>& grad_hy_opt, const c10::optional<Tensor>& grad_cy_opt,
+std::tuple<Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backward_impl_cuda( const std::optional<Tensor>& grad_hy_opt, const std::optional<Tensor>& grad_cy_opt,
       const Tensor& cx, const Tensor& cy,
       const Tensor& workspace, bool has_bias) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -602,7 +602,7 @@ static constexpr int64_t GRU_WORKSPACE_MULTIPLIER = 5;
 
 std::tuple<Tensor, Tensor> _thnn_fused_gru_cell_cuda(
       const Tensor& input_gates, const Tensor& hidden_gates,
-      const Tensor& hx, const std::optional<Tensor>& input_bias_opt, const c10::optional<Tensor>& hidden_bias_opt) {
+      const Tensor& hx, const std::optional<Tensor>& input_bias_opt, const std::optional<Tensor>& hidden_bias_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> input_bias_maybe_owned = at::borrow_from_optional_tensor(input_bias_opt);
   const Tensor& input_bias = *input_bias_maybe_owned;

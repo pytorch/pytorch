@@ -398,6 +398,14 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             ``ignored_modules`` soon. For backward compatibility, we keep both
             ``ignored_states`` and `ignored_modules``, but FSDP only allows one
             of them to be specified as not ``None``.
+        device_mesh (Optional[DeviceMesh]): DeviceMesh can be used as an altenative to
+            process_group. When device_mesh is passed, FSDP will use the underlying process
+            groups for all-gather and reduce-scatter collective communications. Therefore,
+            these two args need to be mutually exclusive. For hybrid sharding strategies such as
+            ``ShardingStrategy.HYBRID_SHARD``, users can pass in a 2D DeviceMesh instead
+            of a tuple of process groups. For 2D FSDP + TP, users are required to pass in
+            device_mesh instead of process_group. For more DeviceMesh info, please visit:
+            https://pytorch.org/tutorials/recipes/distributed_device_mesh.html
     """
 
     def __init__(
@@ -425,6 +433,12 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
+        if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
+            warnings.warn(
+                "FSDP will not all-gather parameters for containers that do "
+                f"not implement forward: {module}",
+                stacklevel=2,
+            )
         _init_ignored_module_states(self, module, ignored_modules, ignored_states)
         _init_device_handle(self, module, self._ignored_params, device_id)
 
@@ -1187,8 +1201,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     def _warn_optim_input(optim_input):
         if optim_input is not None:
             warnings.warn(
-                "The `optim_input` argument is deprecated and will be removed after PyTorch 1.13. You may remove it "
-                "from your code without changing its functionality."
+                "The `optim_input` argument is deprecated and will be removed after PyTorch 1.13. "
+                "You may remove it from your code without changing its functionality.",
+                FutureWarning,
             )
 
     @staticmethod
@@ -1207,7 +1222,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         warnings.warn(
             f"``FullyShardedDataParallel.{curr}``is being deprecated and is "
             f"replaced by ``FullyShardedDataParallel.{new}``. "
-            f"``FullyShardedDataParallel.{curr}`` may be removed after PyTorch 2.2."
+            f"``FullyShardedDataParallel.{curr}`` may be removed after PyTorch 2.2.",
+            FutureWarning,
         )
 
     @staticmethod

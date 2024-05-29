@@ -666,8 +666,8 @@ struct CodeImpl {
 
   void emitFork(Node* node) {
     emitLoadInputs(node->inputs());
-    std::unique_ptr<GraphFunction> forked_fn(new GraphFunction(
-        "<forked function>", node->g(attr::Subgraph), nullptr));
+    auto forked_fn = std::make_unique<GraphFunction>(
+        "<forked function>", node->g(attr::Subgraph), nullptr);
     forked_functions_.emplace_back(std::move(forked_fn));
     function_table_.emplace_back(forked_functions_.back().get());
     insertInstruction(FORK, function_table_.size() - 1, node->inputs().size());
@@ -675,8 +675,8 @@ struct CodeImpl {
 
   void emitAwaitable(Node* node) {
     emitLoadInputs(node->inputs());
-    std::unique_ptr<GraphFunction> await_fn(new GraphFunction(
-        "<awaitable function>", node->g(attr::Subgraph), nullptr));
+    auto await_fn = std::make_unique<GraphFunction>(
+        "<awaitable function>", node->g(attr::Subgraph), nullptr);
     awaited_functions_.emplace_back(std::move(await_fn));
     function_table_.emplace_back(awaited_functions_.back().get());
     insertInstruction(
