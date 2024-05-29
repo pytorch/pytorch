@@ -2,6 +2,7 @@ import builtins
 import functools
 import inspect
 import itertools
+import json
 import logging
 
 import math
@@ -17,6 +18,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from unittest.mock import patch
 
 import sympy
+from filelock import FileLock
 
 import torch
 from torch._dynamo.testing import rand_strided
@@ -156,7 +158,7 @@ class TritonTemplateKernel(TritonKernel):
         if self.use_jit:
             return "@triton.jit"
 
-        argdefs, _, signature = self.args.python_argdefs()
+        argdefs, _, signature, _ = self.args.python_argdefs()
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
             "device": DeviceProperties.create(self.output_node.get_device()),
@@ -272,7 +274,9 @@ class TritonTemplateKernel(TritonKernel):
             val = self.named_input_nodes[name].get_stride()[index]
         return texpr(self.rename_indexing(val))
 
-    def modification(self, subgraph_number: int, **fixed_inputs) -> str:
+    def modification(
+        self, subgraph_number: int, output_name: str, **fixed_inputs
+    ) -> str:
         """This creates a modification function for a subgraph.
         To use this inside a template, the first argument should specify which subgraph to codegen for
 
@@ -317,7 +321,7 @@ class TritonTemplateKernel(TritonKernel):
                 out = subgraph.data.inner_fn((1,))
 
         self.codegen_body()
-        self.body.writeline(f"{fixed_inputs['out']} = {out.value}")
+        self.body.writeline(f"{output_name} = {out.value}")
 
         body_val = self.body.getvalue()
         self.body.clear()
@@ -459,7 +463,7 @@ class TritonTemplateKernel(TritonKernel):
 
     def call_kernel(self, name: str, node: Optional[ir.IRNode] = None):
         wrapper = V.graph.wrapper_code
-        _, call_args, _ = self.args.python_argdefs()
+        _, call_args, _, arg_types = self.args.python_argdefs()
         call_args = [str(a) for a in call_args]
 
         for i in range(len(call_args)):
@@ -467,6 +471,8 @@ class TritonTemplateKernel(TritonKernel):
                 call_args[i] = call_args[i] + ".item()"
             if isinstance(call_args[i], sympy.Symbol):
                 call_args[i] = texpr(call_args[i])
+
+        current_device = V.graph.scheduler.get_current_device_or_throw()
 
         if V.graph.cpp_wrapper:
             # In the cpp_wrapper case, we have to compute CUDA launch grid at runtime
@@ -482,14 +488,13 @@ class TritonTemplateKernel(TritonKernel):
             wrapper.generate_kernel_call(
                 name,
                 call_args,
-                device_index=V.graph.scheduler.current_device.index,
+                device_index=current_device.index,
+                arg_types=arg_types,
                 grid=grid,
                 triton_meta=self.triton_meta,
             )
         else:
-            stream_name = wrapper.write_get_raw_stream(
-                V.graph.scheduler.current_device.index
-            )
+            stream_name = wrapper.write_get_raw_stream(current_device.index)
 
             wrapper.add_import_once(f"import {self.grid_fn.__module__}")
             meta = wrapper.add_meta_once(self.meta)
@@ -908,6 +913,34 @@ class ExternKernelCaller(ChoiceCaller):
         }
 
 
+@functools.lru_cache(None)
+def get_mm_log_filename() -> Optional[str]:
+    mm_file_name = os.environ.get("TORCHINDUCTOR_MM_LOGGING_FILE", None)
+    if not mm_file_name:
+        return None
+
+    if "json" not in mm_file_name:
+        mm_file_name = f"{mm_file_name}.json"
+
+    return mm_file_name
+
+
+def append_to_log(filename, data):
+    lock_file = filename.replace(".json", ".lock")
+    lock = FileLock(lock_file)
+    with lock:
+        try:
+            with open(filename) as f:
+                log_data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            log_data = []
+
+        log_data.append(data)
+
+        with open(filename, "w") as f:
+            json.dump(log_data, f, indent=4)
+
+
 class ErrorFromChoice(RuntimeError):
     def __init__(self, msg, choice: ChoiceCaller, inputs_str):
         msg += f"\nFrom choice {choice}\n{inputs_str}"
@@ -962,6 +995,11 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # TODO(nmacchioni): remove once CI tests are fixed
         choices = [choice for choice in choices if choice is not None]
+
+        if mm_file_name := get_mm_log_filename():
+            M, K = input_nodes[-2].get_size()[:2]
+            N = input_nodes[-1].get_size()[-1]
+            append_to_log(mm_file_name, {"invoke": str((M, K, N))})
 
         if len(choices) == 0:
             raise NoValidChoicesError(
@@ -1344,9 +1382,48 @@ class AlgorithmSelectorCache(PersistentCache):
                 for n in input_nodes
             ]
         )
+
         n = None if log.getEffectiveLevel() == logging.DEBUG else 10
         top_k = sorted(timings, key=timings.__getitem__)[:n]
         best = top_k[0]
+
+        def get_choice_info(choice):
+            if isinstance(choice, torch._inductor.select_algorithm.ExternKernelCaller):
+                return {"type": "cublas", "time": timings[choice]}
+
+            assert isinstance(
+                choice, torch._inductor.select_algorithm.TritonTemplateCaller
+            )
+
+            info = choice.info_dict()
+            tile = info["tile_shape"]
+
+            tile_vals = eval(tile)  # type: ignore[arg-type]
+            BLOCK_M = tile_vals[0]
+            BLOCK_K = tile_vals[1]
+            BLOCK_N = tile_vals[2]
+
+            return {
+                "type": "triton",
+                "time": timings[choice],
+                "BLOCK_M": BLOCK_M,
+                "BLOCK_K": BLOCK_K,
+                "BLOCK_N": BLOCK_N,
+                "num_stages": info["num_stages"],
+                "num_warps": info["num_warps"],
+            }
+
+        mm_filename = get_mm_log_filename()
+        if mm_filename and "mm" in name:
+            M, K = input_nodes[-2].get_size()[:2]
+            N = input_nodes[-1].get_size()[-1]
+
+            out_dict = {
+                str((M, K, N)): [get_choice_info(choice) for choice in timings.keys()]
+            }
+
+            append_to_log(mm_filename, out_dict)
+
         best_time = timings[best]
         sys.stderr.write(f"AUTOTUNE {name}({sizes})\n")
         for choice in top_k:

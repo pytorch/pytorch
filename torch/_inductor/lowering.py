@@ -5083,6 +5083,7 @@ def mutate_to(changed, val, unsafe_alias=False):
         changed_data.data = val.data
         return changed
 
+    V.graph.buffer_mutation = True
     ir.MutationLayoutSHOULDREMOVE.realize_into(
         val, changed_data, unsafe_alias=unsafe_alias
     )

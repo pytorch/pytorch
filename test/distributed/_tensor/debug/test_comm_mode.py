@@ -59,6 +59,32 @@ class TestCommMode(TestCase):
         self.assertEqual(comm_counts[c10d_functional.all_gather_into_tensor], 1)
         self.assertEqual(comm_counts[c10d_functional.reduce_scatter_tensor], 1)
 
+    def test_comm_mode_coalesced(self):
+        world_pg = self.world_pg
+
+        class WrapperModelCoalesced(nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.model = MLPModule(device=device)
+
+            def forward(self, x):
+                x = funcol.all_gather_tensor(x, 0, world_pg)
+                x = funcol.reduce_scatter_tensor(x, "sum", 0, world_pg)
+                out = self.model(x)
+                return funcol.all_reduce_coalesced([out], "sum", world_pg)
+
+        model = WrapperModelCoalesced(self.device_type)
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            model(torch.randn(20, 10, device=self.device_type))
+
+        comm_counts = comm_mode.get_comm_counts()
+        self.assertEqual(comm_mode.get_total_counts(), 3)
+        self.assertEqual(comm_counts[c10d_functional.all_reduce_coalesced], 1)
+        self.assertEqual(comm_counts[c10d_functional.all_gather_into_tensor], 1)
+        self.assertEqual(comm_counts[c10d_functional.reduce_scatter_tensor], 1)
+
     def test_comm_mode_with_dtensor(self):
         world_pg = self.world_pg
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
@@ -97,6 +123,27 @@ class TestCommMode(TestCase):
 
         comm_counts = comm_mode.get_comm_counts()
         self.assertEqual(comm_counts[c10d_ops.allreduce_], 1)
+        self.assertEqual(comm_counts[c10d_ops._allgather_base_], 1)
+        self.assertEqual(comm_counts[c10d_ops._reduce_scatter_base_], 1)
+        self.assertEqual(comm_counts[c10d_ops.broadcast_], 1)
+
+    @requires_nccl()
+    def test_comm_mode_with_c10d_allreduce_coalesced(self):
+        world_pg = self.world_pg
+
+        inp = torch.rand(2, 8, 16).cuda()
+        all_gather_out = inp.new_empty(self.world_size * 2, 8, 16)
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            dist.all_reduce_coalesced(inp)
+            dist.all_gather_into_tensor(all_gather_out, inp)
+            dist.reduce_scatter_tensor(inp, all_gather_out)
+            dist.broadcast(inp, 0)
+
+        comm_counts = comm_mode.get_comm_counts()
+        self.assertEqual(comm_mode.get_total_counts(), 4)
+        self.assertEqual(comm_counts[c10d_ops.allreduce_coalesced_], 1)
         self.assertEqual(comm_counts[c10d_ops._allgather_base_], 1)
         self.assertEqual(comm_counts[c10d_ops._reduce_scatter_base_], 1)
         self.assertEqual(comm_counts[c10d_ops.broadcast_], 1)
