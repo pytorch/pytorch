@@ -1749,6 +1749,11 @@ def get_include_and_linking_paths(
         libs += ["c10"]
         lpaths += [cpp_extension.TORCH_LIB_PATH]
 
+    # For AOT mode, the produced library relies on torch cpu to set grad mode
+    # like aoti_torch_grad_mode_set_enabled
+    if aot_mode:
+        libs += ["torch", "torch_cpu"]
+
     # third party libs
     if config.is_fbcode():
         # Note that the order of include paths do matter, as a result
