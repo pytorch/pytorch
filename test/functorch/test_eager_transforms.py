@@ -15,15 +15,15 @@ import unittest
 import warnings
 from functools import partial, wraps
 
-import functorch
-
 # NB: numpy is a testing dependency!
 import numpy as np
+from common_utils import expectedFailureIf
+
+import functorch
 import torch
 import torch.autograd.forward_ad as fwAD
 import torch.nn as nn
 import torch.nn.functional as F
-from common_utils import expectedFailureIf
 from functorch import (
     combine_state_for_ensemble,
     grad,

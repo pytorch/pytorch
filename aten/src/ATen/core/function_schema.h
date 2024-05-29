@@ -416,10 +416,10 @@ struct TORCH_API FunctionSchema {
 
   // Returns whether the two AliasTypeSets contain any similarities
   // ie: whether the two type sets can alias.
-  bool canAliasTypeSetsAlias(const std::optional<AliasTypeSet> &lhs, const c10::optional<AliasTypeSet> &rhs) const;
+  bool canAliasTypeSetsAlias(const std::optional<AliasTypeSet> &lhs, const std::optional<AliasTypeSet> &rhs) const;
 
   // Recursively Finds all contained types within the AliasTypeSet.
-  std::optional<AliasTypeSet> getAliasTypeSetContainedTypes(const c10::optional<AliasTypeSet> &aliasTypeSet) const;
+  std::optional<AliasTypeSet> getAliasTypeSetContainedTypes(const std::optional<AliasTypeSet> &aliasTypeSet) const;
 
   // Similar to mapTypeToAliasTypeSet defined in alias_analysis.cpp.
   // Used to map types to a type such that all types that can alias will be mapped to the same type.
