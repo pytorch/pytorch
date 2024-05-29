@@ -294,8 +294,8 @@ else
         pip_install_whl "$LIBTORCH_WHL"
         cp "$LIBTORCH_WHL" /tmp/
         python setup.py clean
-        mv "/tmp/$(basename "$LIBTORCH_WHL")" dist/
         WERROR=1 BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py bdist_wheel
+        mv "/tmp/$(basename "$LIBTORCH_WHL")" dist/
       else
         WERROR=1 python setup.py clean
         WERROR=1 python setup.py bdist_wheel
@@ -310,8 +310,8 @@ else
         pip_install_whl "$LIBTORCH_WHL"
         cp "$LIBTORCH_WHL" /tmp/
         python setup.py clean
-        mv "/tmp/$(basename "$LIBTORCH_WHL")" dist/
         BUILD_PYTHON_ONLY=1 BUILD_LIBTORCH_WHL=0 python setup.py bdist_wheel
+        mv "/tmp/$(basename "$LIBTORCH_WHL")" dist/
       else
         python setup.py clean
         python setup.py bdist_wheel
