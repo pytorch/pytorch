@@ -3,7 +3,7 @@ import logging
 import os
 import sys
 import tempfile
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import torch
 
@@ -116,6 +116,17 @@ def log_torchscript_usage(api: str):
     return
 
 
+def check_if_torch_exportable():
+    return False
+
+
+def log_torch_jit_trace_exportability(
+    api: str, type_of_export: str, export_outcome: str, result: str
+):
+    _, _, _, _ = api, type_of_export, export_outcome, result
+    return
+
+
 def export_api_rollout_check() -> bool:
     return False
 
@@ -195,6 +206,6 @@ USE_RTLD_GLOBAL_WITH_LIBTORCH = False
 REQUIRES_SET_PYTHON_MODULE = False
 
 
-def maybe_upload_prof_stats_to_manifold(profile_path: str) -> None:
+def maybe_upload_prof_stats_to_manifold(profile_path: str) -> Optional[str]:
     print("Uploading profile stats (fb-only otherwise no-op)")
-    pass
+    return None

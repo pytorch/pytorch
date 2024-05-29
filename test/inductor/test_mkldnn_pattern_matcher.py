@@ -1589,6 +1589,144 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 (torch.randn((2, 4)),), gelu, int8_mixed_bf16=True
             )
 
+    def _qlinear_add_cpu_test_helper(self, use_relu=False, int8_mixed_bf16=False):
+        r"""
+        This testcase will quantize two consecutive Linear->Add(->relu) patterns as:
+                 X
+               /   \
+        linear(X)   linear(X)
+               \   /
+                Add
+                 |
+           Optional(relu)
+               /   \
+        linear(X)   linear(X)
+               \   /
+                Add
+                 |
+           Optional(relu)
+                 |
+                 Y
+        """
+
+        def fake_quant(x):
+            # to produce a float32 result as extra input
+            qlib = torch.ops.quantized_decomposed
+            x = qlib.quantize_per_tensor.default(x, 0.0166785, 42, 0, 255, torch.uint8)
+            x = qlib.dequantize_per_tensor.default(
+                x, 0.0166785, 42, 0, 255, torch.uint8
+            )
+            return x
+
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                add_fn,
+                use_relu,
+                fake_quant_before_extra_input,
+            ):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(4, 4)
+                self.linear2 = torch.nn.Linear(4, 4)
+                self.add_fn = add_fn
+                self.relu = torch.nn.ReLU()
+                self.linear3 = torch.nn.Linear(4, 4)
+                self.linear4 = torch.nn.Linear(4, 4)
+                self.add_fn2 = add_fn
+                self.relu2 = torch.nn.ReLU()
+                self.use_relu = use_relu
+                self.fake_quant_before_extra_input = fake_quant_before_extra_input
+
+            def forward(self, x):
+                x1 = self.linear1(x)
+                x2 = self.linear2(x)
+                if self.fake_quant_before_extra_input:
+                    x2 = fake_quant(x2)
+                tmp = self.add_fn(x1, x2)
+                if self.use_relu:
+                    tmp = self.relu(tmp)
+                tmp1 = self.linear3(tmp)
+                tmp2 = self.linear4(tmp)
+                if self.fake_quant_before_extra_input:
+                    tmp2 = fake_quant(tmp2)
+                res = self.add_fn2(tmp1, tmp2)
+                if self.use_relu:
+                    res = self.relu2(res)
+                return res
+
+        add_fn_list = [
+            lambda x, y: x + y,
+            lambda x, y: y + x,
+            lambda x, y: x.add_(y),
+            lambda x, y: y.add_(x),
+        ]
+        fake_quant_x2_list = [False, True] if int8_mixed_bf16 else [False]
+        cases = itertools.product(add_fn_list, fake_quant_x2_list)
+        for add_fn, fq_x2 in cases:
+            mod = M(add_fn, use_relu, fq_x2).eval()
+            v = torch.randn((4, 4), dtype=torch.float32, requires_grad=False).add(1)
+
+            def matcher_check_fn():
+                # 1. Dequant-linear pattern matched in quantization weight prepack * 4
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_count"], 4
+                )
+                # pattern = [dequant_per_tensor, (convert_dtype), dequant_per_channel, (convert_dtype), permute, addmm]
+                nodes_per_match = 6 if int8_mixed_bf16 else 4
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_nodes"],
+                    4 * nodes_per_match,
+                )
+                # 2. Qlinear Binary Unary fusion in post-grad fusion pass * 2
+                self.assertEqual(
+                    counters["inductor"]["qlinear_binary_matcher_count"], 2
+                )
+                # Two linear-binary patterns are matched
+                # matched patter1 = [qlinear, add, (convert dtype), (relu), quantize_per_tensor]
+                # matched patter2 = [qlinear, add, (convert dtype), (relu)]
+                # If add_fn is x.add_(y), x is bf16 and y is fp32, there is a to_bf16 node after binary
+                to_bf16_after_binary = 2 * (add_fn == add_fn_list[2] and fq_x2)
+                self.assertEqual(
+                    counters["inductor"]["qlinear_binary_matcher_nodes"],
+                    5 + 2 * use_relu + to_bf16_after_binary,
+                )
+
+            for is_qat in [False, True]:
+                self._test_common(
+                    mod,
+                    (v,),
+                    check_quantization=True,
+                    check_autocast=torch.bfloat16 if int8_mixed_bf16 else torch.float,
+                    matcher_check_fn=matcher_check_fn,
+                    is_qat=is_qat,
+                )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qlinear_add_cpu(self):
+        self._qlinear_add_cpu_test_helper()
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNNBF16
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qlinear_add_int8_mixed_bf16(self):
+        self._qlinear_add_cpu_test_helper(int8_mixed_bf16=True)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qlinear_add_relu_cpu(self):
+        self._qlinear_add_cpu_test_helper(use_relu=True)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNNBF16
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qlinear_add_relu_int8_mixed_bf16(self):
+        self._qlinear_add_cpu_test_helper(use_relu=True, int8_mixed_bf16=True)
+
     def _qlinear_dequant_promotion_cpu_test_helper(
         self,
         inputs,

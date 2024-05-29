@@ -40,7 +40,6 @@ if(USE_CUDA)
   set(CAFFE2_USE_CUDNN ${USE_CUDNN})
   set(CAFFE2_USE_CUSPARSELT ${USE_CUSPARSELT})
   set(CAFFE2_USE_NVRTC ${USE_NVRTC})
-  set(CAFFE2_USE_TENSORRT ${USE_TENSORRT})
   include(${CMAKE_CURRENT_LIST_DIR}/public/cuda.cmake)
   if(CAFFE2_USE_CUDA)
     # A helper variable recording the list of Caffe2 dependent libraries
@@ -63,11 +62,6 @@ if(USE_CUDA)
     else()
       caffe2_update_option(USE_CUSPARSELT OFF)
     endif()
-    if(CAFFE2_USE_TENSORRT)
-      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::tensorrt)
-    else()
-      caffe2_update_option(USE_TENSORRT OFF)
-    endif()
     find_program(SCCACHE_EXECUTABLE sccache)
     if(SCCACHE_EXECUTABLE)
       # Using RSP/--options-file renders output noncacheable by sccache
@@ -84,12 +78,10 @@ if(USE_CUDA)
     caffe2_update_option(USE_CUDNN OFF)
     caffe2_update_option(USE_CUSPARSELT OFF)
     caffe2_update_option(USE_NVRTC OFF)
-    caffe2_update_option(USE_TENSORRT OFF)
     set(CAFFE2_USE_CUDA OFF)
     set(CAFFE2_USE_CUDNN OFF)
     set(CAFFE2_USE_CUSPARSELT OFF)
     set(CAFFE2_USE_NVRTC OFF)
-    set(CAFFE2_USE_TENSORRT OFF)
   endif()
 endif()
 
@@ -140,35 +132,6 @@ if(TARGET Threads::Threads)
 else()
   message(FATAL_ERROR
       "Cannot find threading library. PyTorch requires Threads to compile.")
-endif()
-
-if(USE_TBB)
-  if(USE_SYSTEM_TBB)
-    find_package(TBB 2018.0 REQUIRED CONFIG COMPONENTS tbb)
-
-    get_target_property(TBB_INCLUDE_DIR TBB::tbb INTERFACE_INCLUDE_DIRECTORIES)
-  else()
-    message(STATUS "Compiling TBB from source")
-    # Unset our restrictive C++ flags here and reset them later.
-    # Remove this once we use proper target_compile_options.
-    set(OLD_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
-    set(CMAKE_CXX_FLAGS)
-
-    set(TBB_ROOT_DIR "${PROJECT_SOURCE_DIR}/third_party/tbb")
-    set(TBB_BUILD_STATIC OFF CACHE BOOL " " FORCE)
-    set(TBB_BUILD_SHARED ON CACHE BOOL " " FORCE)
-    set(TBB_BUILD_TBBMALLOC OFF CACHE BOOL " " FORCE)
-    set(TBB_BUILD_TBBMALLOC_PROXY OFF CACHE BOOL " " FORCE)
-    set(TBB_BUILD_TESTS OFF CACHE BOOL " " FORCE)
-    add_subdirectory(${PROJECT_SOURCE_DIR}/aten/src/ATen/cpu/tbb)
-    set_property(TARGET tbb tbb_def_files PROPERTY FOLDER "dependencies")
-
-    set(CMAKE_CXX_FLAGS ${OLD_CMAKE_CXX_FLAGS})
-
-    set(TBB_INCLUDE_DIR "${TBB_ROOT_DIR}/include")
-
-    add_library(TBB::tbb ALIAS tbb)
-  endif()
 endif()
 
 # ---[ protobuf
@@ -317,7 +280,7 @@ endif()
 # mismatch between these shared dependencies, explicitly declare our intent to these
 # libraries that we are interested in using the exact same source dependencies for all.
 
-if(USE_NNPACK OR USE_QNNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
+if(USE_NNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
   set(DISABLE_NNPACK_AND_FAMILY OFF)
 
   # Sanity checks - Can we actually build NNPACK and family given the configuration provided?
@@ -358,14 +321,12 @@ if(USE_NNPACK OR USE_QNNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
 
   if(DISABLE_NNPACK_AND_FAMILY)
     caffe2_update_option(USE_NNPACK OFF)
-    caffe2_update_option(USE_QNNPACK OFF)
     caffe2_update_option(USE_PYTORCH_QNNPACK OFF)
     caffe2_update_option(USE_XNNPACK OFF)
   else()
     # Disable unsupported NNPack combinations with MSVC
     if(MSVC)
       caffe2_update_option(USE_NNPACK OFF)
-      caffe2_update_option(USE_QNNPACK OFF)
       caffe2_update_option(USE_PYTORCH_QNNPACK OFF)
     endif()
 
@@ -389,13 +350,6 @@ if(USE_NNPACK OR USE_QNNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
   endif()
 else()
   set(DISABLE_NNPACK_AND_FAMILY ON)
-endif()
-
-if(USE_QNNPACK AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64" AND CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-  message(WARNING
-    "QNNPACK does not compile for Apple Silicon. "
-    "Turn this warning off by explicit USE_QNNPACK=OFF.")
-  caffe2_update_option(USE_QNNPACK OFF)
 endif()
 
 set(CONFU_DEPENDENCIES_SOURCE_DIR ${PROJECT_BINARY_DIR}/confu-srcs
@@ -487,70 +441,9 @@ if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(s390x|ppc64le)$")
   list(APPEND Caffe2_DEPENDENCY_LIBS cpuinfo)
 endif()
 
-# ---[ QNNPACK
-if(USE_QNNPACK)
-  set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
-
-  if(NOT DEFINED QNNPACK_SOURCE_DIR)
-    set(QNNPACK_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/QNNPACK" CACHE STRING "QNNPACK source directory")
-  endif()
-
-  if(NOT TARGET qnnpack)
-    if(NOT USE_SYSTEM_PTHREADPOOL AND USE_INTERNAL_PTHREADPOOL_IMPL)
-      set(QNNPACK_CUSTOM_THREADPOOL ON CACHE BOOL "")
-    endif()
-
-    set(QNNPACK_BUILD_TESTS OFF CACHE BOOL "")
-    set(QNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
-    set(QNNPACK_LIBRARY_TYPE "static" CACHE STRING "")
-    add_subdirectory(
-      "${QNNPACK_SOURCE_DIR}"
-      "${CONFU_DEPENDENCIES_BINARY_DIR}/QNNPACK")
-
-    # TODO: See https://github.com/pytorch/pytorch/issues/56285
-    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-      target_compile_options(qnnpack PRIVATE -Wno-deprecated-declarations)
-    endif()
-
-    # We build static versions of QNNPACK and pthreadpool but link
-    # them into a shared library for Caffe2, so they need PIC.
-    set_property(TARGET qnnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
-    set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
-
-    if(QNNPACK_CUSTOM_THREADPOOL)
-      target_compile_definitions(
-        qnnpack PRIVATE
-        pthreadpool_t=legacy_pthreadpool_t
-        pthreadpool_function_1d_t=legacy_pthreadpool_function_1d_t
-        pthreadpool_function_1d_tiled_t=legacy_pthreadpool_function_1d_tiled_t
-        pthreadpool_function_2d_t=legacy_pthreadpool_function_2d_t
-        pthreadpool_function_2d_tiled_t=legacy_pthreadpool_function_2d_tiled_t
-        pthreadpool_function_3d_tiled_t=legacy_pthreadpool_function_3d_tiled_t
-        pthreadpool_function_4d_tiled_t=legacy_pthreadpool_function_4d_tiled_t
-        pthreadpool_create=legacy_pthreadpool_create
-        pthreadpool_destroy=legacy_pthreadpool_destroy
-        pthreadpool_get_threads_count=legacy_pthreadpool_get_threads_count
-        pthreadpool_compute_1d=legacy_pthreadpool_compute_1d
-        pthreadpool_parallelize_1d=legacy_pthreadpool_parallelize_1d
-        pthreadpool_compute_1d_tiled=legacy_pthreadpool_compute_1d_tiled
-        pthreadpool_compute_2d=legacy_pthreadpool_compute_2d
-        pthreadpool_compute_2d_tiled=legacy_pthreadpool_compute_2d_tiled
-        pthreadpool_compute_3d_tiled=legacy_pthreadpool_compute_3d_tiled
-        pthreadpool_compute_4d_tiled=legacy_pthreadpool_compute_4d_tiled)
-    endif()
-  endif()
-
-  list(APPEND Caffe2_DEPENDENCY_LIBS qnnpack)
-endif()
-
-# ---[ Caffe2 Int8 operators (enabled by USE_QNNPACK) depend on gemmlowp and neon2sse headers
-if(USE_QNNPACK)
-  set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
-  include_directories(SYSTEM "${CAFFE2_THIRD_PARTY_ROOT}/gemmlowp")
-  include_directories(SYSTEM "${CAFFE2_THIRD_PARTY_ROOT}/neon2sse")
-endif()
 
 # ---[ PYTORCH_QNNPACK
+set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
 if(USE_PYTORCH_QNNPACK)
     if(NOT DEFINED PYTORCH_QNNPACK_SOURCE_DIR)
       set(PYTORCH_QNNPACK_SOURCE_DIR "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/quantized/cpu/qnnpack" CACHE STRING "QNNPACK source directory")
@@ -571,6 +464,8 @@ if(USE_PYTORCH_QNNPACK)
       # them into a shared library for Caffe2, so they need PIC.
       set_property(TARGET pytorch_qnnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
       set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
+      # QNNPACK depends on gemmlowp headers
+      target_include_directories(pytorch_qnnpack PRIVATE "${CAFFE2_THIRD_PARTY_ROOT}/gemmlowp")
 
       if(PYTORCH_QNNPACK_CUSTOM_THREADPOOL)
         target_compile_definitions(
@@ -1300,11 +1195,10 @@ endif()
 # ---[ CUB
 if(USE_CUDA)
   find_package(CUB)
-  if(CUB_FOUND)
-    include_directories(SYSTEM ${CUB_INCLUDE_DIRS})
-  else()
-    include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/cub)
+  if(NOT CUB_FOUND)
+    message(FATAL_ERROR "Cannot find CUB.")
   endif()
+  include_directories(SYSTEM ${CUB_INCLUDE_DIRS})
 endif()
 
 if(USE_DISTRIBUTED AND USE_TENSORPIPE)
@@ -1426,25 +1320,6 @@ if(USE_NNAPI AND NOT ANDROID)
   caffe2_update_option(USE_NNAPI OFF)
 endif()
 
-if(USE_ZSTD)
-  if(USE_SYSTEM_ZSTD)
-    find_package(zstd REQUIRED)
-    if(TARGET zstd::libzstd_shared)
-      set(ZSTD_TARGET zstd::libzstd_shared)
-    else()
-      set(ZSTD_TARGET zstd::libzstd_static)
-    endif()
-    list(APPEND Caffe2_DEPENDENCY_LIBS ${ZSTD_TARGET})
-    get_property(ZSTD_INCLUDE_DIR TARGET ${ZSTD_TARGET} PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
-    include_directories(SYSTEM ${ZSTD_INCLUDE_DIR})
-  else()
-    list(APPEND Caffe2_DEPENDENCY_LIBS libzstd_static)
-    include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/zstd/lib)
-    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/zstd/build/cmake)
-    set_property(TARGET libzstd_static PROPERTY POSITION_INDEPENDENT_CODE ON)
-  endif()
-endif()
-
 # ---[ Onnx
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   if(EXISTS "${CAFFE2_CUSTOM_PROTOC_EXECUTABLE}")
@@ -1509,27 +1384,6 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   list(APPEND Caffe2_DEPENDENCY_LIBS foxi_loader)
   # Recover the build shared libs option.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
-endif()
-
-# --[ TensorRT integration with onnx-trt
-function(add_onnx_tensorrt_subdir)
-  # We pass the paths we found to onnx tensorrt.
-  set(CUDNN_INCLUDE_DIR "${CUDNN_INCLUDE_PATH}")
-  set(CUDNN_LIBRARY "${CUDNN_LIBRARY_PATH}")
-  set(CMAKE_VERSION_ORIG "{CMAKE_VERSION}")
-  # TODO: this WAR is for https://github.com/pytorch/pytorch/issues/18524
-  set(CMAKE_VERSION "3.9.0")
-  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx-tensorrt EXCLUDE_FROM_ALL)
-  set(CMAKE_VERSION "{CMAKE_VERSION_ORIG}")
-endfunction()
-if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
-  if(USE_TENSORRT)
-    add_onnx_tensorrt_subdir()
-    include_directories("${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx-tensorrt")
-    caffe2_interface_library(nvonnxparser_static onnx_trt_library)
-    list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_trt_library)
-    set(CAFFE2_USE_TRT 1)
-  endif()
 endif()
 
 # --[ ATen checks

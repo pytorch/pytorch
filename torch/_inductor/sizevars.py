@@ -285,7 +285,7 @@ class SizeVarAllocator:
 
         return False
 
-    def statically_known_equals(self, left: Expr, right: Expr) -> bool:
+    def statically_known_equals(self, left: Expr, right: Union[Expr, int]) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left and right are equal.
         """
@@ -303,7 +303,7 @@ class SizeVarAllocator:
         return False
 
     # See Note - [On Statically Known]
-    def statically_known_leq(self, left: Expr, right: Expr) -> bool:
+    def statically_known_leq(self, left: Expr, right: Union[Expr, int]) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left is less than or equal to right.
         """
@@ -311,7 +311,15 @@ class SizeVarAllocator:
         return self.is_expr_static_and_true(expr)
 
     # See Note - [On Statically Known]
-    def statically_known_lt(self, left: Expr, right: Expr) -> bool:
+    def statically_known_geq(self, left: Expr, right: Union[Expr, int]) -> bool:
+        """
+        Returns a bool indicating if it is sound to optimize as if left is greater than or equal to right.
+        """
+        expr = left >= right
+        return self.is_expr_static_and_true(expr)
+
+    # See Note - [On Statically Known]
+    def statically_known_lt(self, left: Expr, right: Union[Expr, int]) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left is less than right.
         """
@@ -319,7 +327,17 @@ class SizeVarAllocator:
         return self.is_expr_static_and_true(expr)
 
     # See Note - [On Statically Known]
-    def statically_known_multiple_of(self, numerator: Expr, denominator: Expr) -> bool:
+    def statically_known_gt(self, left: Expr, right: Union[Expr, int]) -> bool:
+        """
+        Returns a bool indicating if it is sound to optimize as if left is greater than right.
+        """
+        expr = left > right
+        return self.is_expr_static_and_true(expr)
+
+    # See Note - [On Statically Known]
+    def statically_known_multiple_of(
+        self, numerator: Expr, denominator: Union[Expr, int]
+    ) -> bool:
         """
         Return a bool indicating if it is sound to optimize for the numerator being a multiple of the denominator.
         """
@@ -405,8 +423,9 @@ class SizeVarAllocator:
             return sympy_subs(expr, self.inv_precomputed_replacements)  # type: ignore[arg-type]
         return expr
 
-    def symbolic_hint(self, expr: Expr) -> Expr:
+    def symbolic_hint(self, expr: Expr) -> Union[Expr, int]:
         # Substitute all hints into expr, but leave unbacked symints alone
+        expr = self.simplify(expr)
         if not isinstance(expr, Expr):
             assert isinstance(expr, int)
             return expr
@@ -417,19 +436,20 @@ class SizeVarAllocator:
         return sympy_subs(expr, self.var_to_val)
 
     def size_hint(self, expr: Expr, *, fallback: Optional[int] = None) -> int:
-        expr = self.simplify(expr)
         out = self.symbolic_hint(expr)
         if not isinstance(out, (int, sympy.Integer)) and fallback is not None:
             # Use the provided heuristic fallback hint
-            sym_vrs = {
-                s: self.shape_env.var_to_range.get(s, None) for s in expr.free_symbols
+            unbacked_sym_vrs = {
+                s: self.shape_env.var_to_range.get(s, None) for s in out.free_symbols
             }
-            if all(vr is not None for vr in sym_vrs.values()):
-                expr_vr = bound_sympy(expr, sym_vrs)  # type: ignore[arg-type]
-                lower = self.size_hint(expr_vr.lower)  # type: ignore[arg-type]
-                upper = self.size_hint(expr_vr.upper)  # type: ignore[arg-type]
-                fallback = min(max(fallback, lower), upper)
+            if all(vr is not None for vr in unbacked_sym_vrs.values()):
+                hint_vr = bound_sympy(out, unbacked_sym_vrs)  # type: ignore[arg-type]
+                if isinstance(hint_vr.lower, (int, sympy.Integer)):
+                    fallback = max(fallback, int(hint_vr.lower))
+                if isinstance(hint_vr.upper, (int, sympy.Integer)):
+                    fallback = min(fallback, int(hint_vr.upper))
             return fallback
+
         try:
             return int(out)
         except Exception:

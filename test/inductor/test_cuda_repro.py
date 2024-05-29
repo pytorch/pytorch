@@ -32,7 +32,7 @@ try:
         import triton
         from triton import language as tl
     except ImportError:
-        raise unittest.SkipTest("requires triton")  # noqa: TRY200
+        raise unittest.SkipTest("requires triton")  # noqa: B904
 
     try:
         from . import test_torchinductor
@@ -1134,6 +1134,52 @@ class CudaReproTests(TestCase):
         ]
         fn(*args)
         torch.cuda.synchronize()  # shake out Triton Error [CUDA]: misaligned address
+
+    def test_non_commutative_scan_op(self):
+        from torch._higher_order_ops.associative_scan import associative_scan
+
+        a = torch.randn(1024, 8192, dtype=torch.float64, device="cuda")
+        b = torch.randn(1024, 8192, dtype=torch.float64, device="cuda")
+
+        def baseline(v, u):
+            A = []
+            A.append(b[:, 0])
+            for i in range(1, v.shape[1]):
+                A.append(a[:, i] * A[i - 1] + b[:, i])
+            return torch.stack(A, dim=1)
+
+        def combine_fn(i, j):
+            ia, ib = i
+            ja, jb = j
+            return ia * ja, ib * ja + jb
+
+        @torch.compile
+        def compiled_scan(a, b):
+            return associative_scan(combine_fn, (a, b), dim=-1)[1]
+
+        out1 = baseline(a, b)
+        out2 = compiled_scan(a, b)
+        self.assertEqual(out1, out2)
+
+    def test_dynamic_persistent_reductions(self):
+        @torch.compile(dynamic=True)
+        def inner_reduce(x):
+            assert x.shape[1] <= 1024
+            return x.sum(1)
+
+        a = torch.randn(50, 600, device="cuda")
+        out, code = run_and_get_code(inner_reduce, a)
+        self.assertEqual(inner_reduce(a), out)
+        self.assertTrue("for roffset" not in code)
+
+        @torch.compile(dynamic=True)
+        def outer_reduce(x):
+            assert x.shape[0] <= 64
+            return x.sum(0)
+
+        out, code = run_and_get_code(outer_reduce, a)
+        self.assertEqual(outer_reduce(a), out)
+        self.assertTrue("for roffset" not in code)
 
 
 if __name__ == "__main__":

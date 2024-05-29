@@ -3,6 +3,7 @@ import dataclasses
 import functools
 import itertools
 import logging
+import math
 import operator
 import re
 from itertools import chain
@@ -120,7 +121,7 @@ device_op_overrides_dict: Dict[str, DeviceOpOverrides] = {}
 # https://github.com/intel/intel-extension-for-pytorch/blob/5dcc9d57e5422cf295e1a1ee97896d6b6a554a85/intel_extension_for_pytorch/_inductor/__init__.py#L9
 def register_backend_for_device(
     device: str,
-    device_scheduling: type,
+    device_scheduling: Any,
     device_wrapper_codegen: type,
     device_cpp_wrapper_codegen: type = type(None),
 ):
@@ -537,6 +538,72 @@ class OpOverrides:
         return ops.mul(x, x)
 
     @staticmethod
+    def erfc(x):
+        return ops.sub(ops.constant(1, torch.float32), ops.erf(x))
+
+    @staticmethod
+    def erfcx(x):
+        return ops.mul(ops.exp(ops.square(x)), ops.erfc(x))
+
+    @staticmethod
+    def expm1(x):
+        return ops.sub(ops.exp(x), ops.constant(1, torch.float32))
+
+    @staticmethod
+    def log10(x):
+        return ops.mul(ops.log(x), ops.constant(1 / math.log(10), torch.float32))
+
+    @staticmethod
+    def log2(x):
+        return ops.mul(ops.log(x), ops.constant(1 / math.log(2), torch.float32))
+
+    @staticmethod
+    def exp2(x):
+        return ops.exp(ops.mul(x, ops.constant(math.log(2), torch.float32)))
+
+    @staticmethod
+    def log1p(x):
+        return ops.log(ops.add(x, ops.constant(1, torch.int32)))
+
+    @staticmethod
+    def sigmoid(x):
+        one = ops.constant(1, torch.int32)
+        return ops.truediv(one, ops.add(one, ops.exp(ops.neg(x))))
+
+    @staticmethod
+    def libdevice_sigmoid(x):
+        one = ops.constant(1, torch.int32)
+        return ops.truediv(one, ops.add(one, ops.libdevice_exp(ops.neg(x))))
+
+    @staticmethod
+    def relu(x):
+        return ops.maximum(x, ops.constant(0, torch.int32))
+
+    @staticmethod
+    def libdevice_abs(x):
+        return ops.abs(x)
+
+    @staticmethod
+    def libdevice_sqrt(x):
+        return ops.sqrt(x)
+
+    @staticmethod
+    def libdevice_cos(x):
+        return ops.cos(x)
+
+    @staticmethod
+    def libdevice_sin(x):
+        return ops.sin(x)
+
+    @staticmethod
+    def libdevice_log(x):
+        return ops.log(x)
+
+    @staticmethod
+    def libdevice_exp(x):
+        return ops.exp(x)
+
+    @staticmethod
     def bitwise_not(x):
         return f"~{ExprPrinter.paren(x)}"
 
@@ -601,6 +668,8 @@ class OverridesData:
     )
 
 
+# NB: if you add a new special function, don't forget to update
+# torch._inductor.ops_handler too
 pointwise_overrides_data: Dict[str, OverridesData] = dict(
     airy_ai=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
@@ -1031,12 +1100,14 @@ class KernelArgs:
     def python_argdefs(self):
         arg_defs = []
         call_args = []
+        arg_types = []
         precompile_args: List[Union[TensorArg, SizeArg, WorkspaceArg]] = []
         for inplaced in unique(self.inplace_buffers.values()):
             if self._buffer_is_marked_removed(inplaced):
                 continue
             arg_defs.append(inplaced.inner_name)
             call_args.append(inplaced.other_names[-1])
+            arg_types.append(V.graph.get_dtype(inplaced.other_names[-1]))
             precompile_args.append(
                 TensorArg(
                     name=inplaced.inner_name,
@@ -1051,6 +1122,7 @@ class KernelArgs:
                 continue
             arg_defs.append(inner)
             call_args.append(outer)
+            arg_types.append(V.graph.get_dtype(outer))
             precompile_args.append(
                 TensorArg(
                     name=inner,
@@ -1061,6 +1133,7 @@ class KernelArgs:
         for outer, inner in self.sizevars.items():
             arg_defs.append(inner)
             call_args.append(outer)
+            arg_types.append(type(outer))
             precompile_args.append(SizeArg(inner, outer))
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
@@ -1069,7 +1142,7 @@ class KernelArgs:
             call_args.append("workspace")
             precompile_args.append(self.workspace_arg)
 
-        return arg_defs, call_args, precompile_args
+        return arg_defs, call_args, precompile_args, arg_types
 
     def aliases(self):
         for inplaced in unique(self.inplace_buffers.values()):
@@ -1121,6 +1194,7 @@ class CSEVariable:
         assert isinstance(bounds, ValueRanges)
         self.name = name
         self.bounds = bounds
+        self.use_count = 1  # track how many tims this expression is used
 
     def __str__(self):
         return self.name
@@ -1133,6 +1207,9 @@ class CSEVariable:
 
     def update_on_args(self, name, args, kwargs):
         pass
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}({self.name!r})"
 
 
 class CppWrapperKernelArgs(KernelArgs):
@@ -1210,6 +1287,7 @@ class CSE:
             # assert expr.bounds == bounds, but sometimes the expression is created
             # with the loose ValueRanges.unknown(), so we need to tighten the bounds
             expr.bounds = expr.bounds.tighten(bounds)
+            expr.use_count += 1
             return expr
         cache_key = expr.getvalue() if isinstance(expr, IndentedBuffer) else expr
         var = self.cache.get(cache_key, None)
@@ -1234,6 +1312,7 @@ class CSE:
                     buffer.writeline(line)
         else:
             var.bounds = var.bounds.tighten(bounds)
+            var.use_count += 1
 
         return var
 
@@ -1333,6 +1412,10 @@ class Kernel(CodeGen):
         self.loads = IndentedBuffer()
         self.compute = IndentedBuffer()
         self.stores = IndentedBuffer()
+
+        self.num_load = 0
+        self.num_reduction = 0
+
         self.cse: CSE = CSE(self.newvar_prefix, self.suffix)
         self.must_keep_buffers = set()
         self.store_buffer_names = set()
@@ -1606,7 +1689,12 @@ class Kernel(CodeGen):
                 store_cache = self.cse.store_cache
                 if name in store_cache:
                     return store_cache[name]
-                return self.load(name, index)
+                out = self.load(name, index)
+                # count load that is not in the store_cache, and also not in the
+                # cse cache.
+                if out.use_count == 1:
+                    self.num_load += 1
+                return out
 
             @staticmethod
             def store(
@@ -1641,6 +1729,7 @@ class Kernel(CodeGen):
                 reduction_type: ReductionType,
                 value: Union[CSEVariable, Tuple[CSEVariable, ...]],
             ) -> Union[CSEVariable, Tuple[CSEVariable, ...]]:
+                self.num_reduction += 1
                 return self.reduction(dtype, src_dtype, reduction_type, value)
 
             @staticmethod

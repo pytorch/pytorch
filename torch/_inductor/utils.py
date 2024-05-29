@@ -39,10 +39,10 @@ from typing import (
     Union,
     ValuesView,
 )
+from typing_extensions import Concatenate, ParamSpec
 from unittest import mock
 
 import sympy
-from typing_extensions import Concatenate, ParamSpec
 
 import torch
 import torch._export
@@ -875,6 +875,21 @@ class IndentedBuffer:
         return res
 
 
+class FakeIndentedBuffer(IndentedBuffer):
+    def __init__(self):
+        super().__init__()
+
+    def __getattribute__(self, name):
+        if name == "__class__":  # Allow access to the class attribute
+            return object.__getattribute__(self, name)
+        raise RuntimeError(
+            f"Tried to call self.{name} on FakeIndentedBuffer. This buffer"
+            "is currently used on TritonTemplateKernel to prevent actual"
+            "writes to the body without explicitly specifying the body with"
+            "`TritonTemplateKernel.set_subgraph_body(name)`"
+        )
+
+
 @contextlib.contextmanager
 def restore_stdout_stderr(initial_stdout, initial_stderr):
     try:
@@ -1456,7 +1471,7 @@ def dump_node_schedule(node_schedule):
     An API that can be used in pdb to dump a node_schedule.
     Right mainly dump the read/write dependencies but can add more as needed.
     """
-    from torch._inductor.codegen.triton import DisableReduction, EnableReduction
+    from torch._inductor.codegen.simd import DisableReduction, EnableReduction
     from torch._inductor.scheduler import SchedulerNode
 
     print(f"Node schedule with {len(node_schedule)} nodes")
@@ -1470,6 +1485,7 @@ def dump_node_schedule(node_schedule):
             is_red = node.is_reduction()
             print(f"{'red' if is_red else 'pw'} scheduler node")
             if is_red:
+                assert node.node is not None
                 print(f"original reduction hint {node.node.data.reduction_hint}")  # type: ignore[attr-defined]
             print("ReadDep:")
             for dep in node.read_writes.reads:
@@ -1578,16 +1594,23 @@ def aoti_compile_with_persistent_cache(
     """
     Compile the given function with persistent cache for AOTI eager mode.
     """
-    flattened_inputs = pytree.arg_tree_leaves(*args, **kwargs)
-    assert all(
-        isinstance(input, torch.Tensor) for input in flattened_inputs
-    ), "Only support tensor for now"
     assert not dynamic, "Only support static shape for now"
+    type_to_torch_dtype = {int: torch.int32, float: torch.float, bool: torch.bool}
+    supported_scalar_types = tuple(type_to_torch_dtype.keys())
+    flattened_inputs = pytree.arg_tree_leaves(*args, **kwargs)
+    if not all(
+        isinstance(input, (supported_scalar_types, torch.Tensor))
+        for input in flattened_inputs
+    ):
+        raise NotImplementedError("Only support tensor, int, float, bool for now")
 
     persistent_cache = aoti_eager_cache_dir(ns, device_type)
-    persistent_cache.mkdir(parents=True, exist_ok=True)
+    if not persistent_cache.exists():
+        persistent_cache.mkdir(parents=True)
+
     persistent_cache_lib = persistent_cache / "lib"
-    persistent_cache_lib.mkdir(parents=True, exist_ok=True)
+    if not persistent_cache_lib.exists():
+        persistent_cache_lib.mkdir()
 
     with mock.patch.dict(
         os.environ,
@@ -1609,18 +1632,30 @@ def aoti_compile_with_persistent_cache(
             )
 
             kernel_metadata_items = []
-            for input_tensor in flattened_inputs:
+            for input in flattened_inputs:
                 # TODO(Eikan): To add dynamic support
                 metadata: Dict[str, Any] = {}
                 metadata["is_dynamic"] = dynamic
-                metadata["device_type"] = f"{input_tensor.device.type}"
-                if is_cpu_device([input_tensor]):
-                    metadata["device_index"] = -1
+
+                if isinstance(input, torch.Tensor):
+                    metadata["device_type"] = f"{input.device.type}"
+                    if is_cpu_device([input]):
+                        metadata["device_index"] = -1
+                    else:
+                        metadata["device_index"] = input.device.index
+                    metadata["dtype"] = f"{input.dtype}"
+                    metadata["sizes"] = list(input.size())
+                    metadata["strides"] = list(input.stride())
                 else:
-                    metadata["device_index"] = input_tensor.device.index
-                metadata["dtype"] = f"{input_tensor.dtype}"
-                metadata["sizes"] = list(input_tensor.size())
-                metadata["strides"] = list(input_tensor.stride())
+                    assert isinstance(input, supported_scalar_types)
+                    # Scalar tensor
+                    metadata["device_type"] = device_type
+                    metadata["device_index"] = -1 if device_type == "cpu" else 0
+                    metadata["dtype"] = f"{type_to_torch_dtype[type(input)]}"
+                    metadata["sizes"] = []
+                    metadata["strides"] = []
+                    metadata["scalar_value"] = input
+
                 kernel_metadata_items.append(metadata)
 
             kernel_meta_info: Dict[str, Any] = {}

@@ -29,6 +29,8 @@ from itertools import product, combinations, permutations, chain
 from functools import partial
 from torch import multiprocessing as mp
 from torch.testing import make_tensor
+from torch.testing._internal.common_optimizers import (
+    optim_db, optims, _get_optim_inputs_including_global_cliquey_kwargs)
 
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, run_tests, IS_JETSON,
@@ -5877,8 +5879,13 @@ else:
 
                 self.assertEqual(c, s, atol=atol, rtol=1e-05)
 
-    # Compares no scaling + no autocasting against scaling + autocasting.
-    def _grad_scaling_autocast_test(self, *, device="cuda", atol=1e-3, optimizer_ctor=torch.optim.SGD, optimizer_kwargs=None):
+    @onlyNativeDeviceTypes
+    @parametrize("foreach, fused", [(None, None), (True, None), (None, True)])
+    @optims(
+        [optim for optim in optim_db if optim.optim_cls in [torch.optim.AdamW, torch.optim.Adam, torch.optim.SGD]],
+        dtypes=[torch.float32]
+    )
+    def test_grad_scaling_autocast(self, device, dtype, optim_info, foreach, fused):
         try_pickle = False
 
         def run(device, data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
@@ -5902,6 +5909,9 @@ else:
                         optimizer.step()
             return scaler
 
+        optimizer_ctor = optim_info.optim_cls
+
+        # Compares no scaling + no autocasting against scaling + autocasting.
         # NOTE(mkozuki): With current way of testing, `torch.optim.Adam` is failing in spite of `foreach` and `fused`.
         #   Giving some flexibility to this test might help.
         context = contextlib.nullcontext
@@ -5911,71 +5921,51 @@ else:
         with context():
             # sets atol=1e-3 because we're comparing pure fp32 arithmetic vs a mixture of fp16 and fp32
             self._run_scaling_case(
-                device, run, unskipped=3, skipped=1, atol=atol, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
+                device, run, unskipped=3, skipped=1, atol=1e-3,
+                optimizer_ctor=optimizer_ctor, optimizer_kwargs={"foreach": foreach, "fused": fused},
             )
             # this will be picked up by try_pickle within run():
             try_pickle = True
             self._run_scaling_case(
-                device, run, unskipped=3, skipped=1, atol=atol, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
+                device, run, unskipped=3, skipped=1, atol=1e-3,
+                optimizer_ctor=optimizer_ctor, optimizer_kwargs={"foreach": foreach, "fused": fused},
             )
-
-    @onlyNativeDeviceTypes
-    def test_grad_scaling_autocast(self, device):
-        device = torch.device(device)
-        for optimizer_ctor in (torch.optim.SGD, torch.optim.Adam, torch.optim.AdamW):
-            self._grad_scaling_autocast_test(device=device.type, optimizer_ctor=optimizer_ctor)
-
-    @onlyNativeDeviceTypes
-    def test_grad_scaling_autocast_foreach(self, device):
-        device = torch.device(device)
-        for optimizer_ctor in (torch.optim.SGD, torch.optim.Adam, torch.optim.AdamW):
-            self._grad_scaling_autocast_test(device=device.type, optimizer_ctor=optimizer_ctor, optimizer_kwargs={"foreach": True})
-
-    @onlyNativeDeviceTypes
-    def test_grad_scaling_autocast_fused(self, device):
-        device = torch.device(device)
-        for optimizer_ctor in (torch.optim.Adam, torch.optim.AdamW):
-            self._grad_scaling_autocast_test(device=device.type, optimizer_ctor=optimizer_ctor, optimizer_kwargs={"fused": True})
 
     # Make sure that the parameters become nonsense when scaled gradients are finite
     # but they get invalidated before `optimizer.step`, after `GradScaler.unscale_`
 
     @onlyNativeDeviceTypes
-    def test_params_invalidated_with_grads_invalidated_between_unscale_and_step(self, device):
-        device = torch.device(device)
-        for optimizer_ctor, optimizer_kwargs in product(
-            (torch.optim.Adam, torch.optim.AdamW),
-            (
-                {"foreach": False, "fused": False},
-                {"foreach": True, "fused": False},
-                {"foreach": False, "fused": True},
-            ),
-        ):
-            with self.subTest(optimizer=optimizer_ctor, optimizer_kwargs=optimizer_kwargs):
-                self._test_grads_invalidated_between_unscale_and_step(device.type, optimizer_ctor, optimizer_kwargs)
+    @optims(
+        [optim for optim in optim_db if optim.optim_cls in [torch.optim.AdamW, torch.optim.Adam, torch.optim.SGD]],
+        dtypes=[torch.float32]
+    )
+    def test_params_invalidated_with_grads_invalidated_between_unscale_and_step(self, device, dtype, optim_info):
+        optimizer_ctor = optim_info.optim_cls
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
+            device, dtype, optim_info, skip=("differentiable",))
 
-    def _test_grads_invalidated_between_unscale_and_step(self, device, optimizer_ctor, optimizer_kwargs):
-        model, _, optimizer, _, data, loss_fn, _ = _create_scaling_case(
-            device, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
-        )
-        scaler = torch.GradScaler(device=device, init_scale=128.0)
+        for optim_input in all_optim_inputs:
+            model, _, optimizer, _, data, loss_fn, _ = _create_scaling_case(
+                device, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optim_input.kwargs,
+            )
+            scaler = torch.GradScaler(device=device, init_scale=128.0)
 
-        for input, target in data:
-            optimizer.zero_grad()
-            with torch.autocast(device_type=device, dtype=torch.half):
-                output = model(input)
-                loss = loss_fn(output, target)
-            scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
+            for input, target in data:
+                optimizer.zero_grad()
+                with torch.autocast(device_type=device, dtype=torch.half):
+                    output = model(input)
+                    loss = loss_fn(output, target)
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
 
-            # deliberately break grads
-            for j, param in enumerate(model.parameters()):
-                param.grad.copy_(torch.inf if j % 2 else torch.nan)
+                # deliberately break grads
+                for j, param in enumerate(model.parameters()):
+                    param.grad.copy_(torch.inf if j % 2 else torch.nan)
 
-            scaler.step(optimizer)
-            scaler.update()
+                scaler.step(optimizer)
+                scaler.update()
 
-        self.assertTrue(all((p.isnan().any() or p.isinf().any()) for p in model.parameters()))
+            self.assertTrue(all((p.isnan().any() or p.isinf().any()) for p in model.parameters()))
 
     @onlyNativeDeviceTypes
     def test_grad_scale_will_not_overflow(self, device):
@@ -6162,7 +6152,7 @@ else:
     @onlyNativeDeviceTypes
     def test_grad_scaler_pass_itself(self, device):
         device = torch.device(device)
-        GradScaler = torch.cuda.amp.GradScaler if "cuda" == device.type else torch.cpu.amp.GradScaler
+        GradScaler = partial(torch.amp.GradScaler, device=device.type)
 
         class _PlaceHolderOptimizer(torch.optim.Optimizer):
             tester = self
@@ -6175,7 +6165,7 @@ else:
 
         class Optimizer1(_PlaceHolderOptimizer):
             def step(self, closure=None, *, grad_scaler=None):
-                self.tester.assertTrue(isinstance(grad_scaler, GradScaler))
+                self.tester.assertTrue(isinstance(grad_scaler, torch.amp.GradScaler))
                 self.tester.assertFalse(hasattr(self, "grad_scale"))
                 self.tester.assertFalse(hasattr(self, "found_inf"))
 
@@ -6198,6 +6188,17 @@ else:
             scaler.step(o1)
         scaler.step(o2)
         scaler.update()
+
+    @onlyNativeDeviceTypes
+    def test_grad_scaler_deprecated_warning(self, device):
+        device = torch.device(device)
+        GradScaler = torch.cuda.amp.GradScaler if "cuda" == device.type else torch.cpu.amp.GradScaler
+
+        with self.assertWarnsRegex(
+            UserWarning,
+            rf"torch.{device.type}.amp.GradScaler\(args...\) is deprecated.",
+        ):
+            _ = GradScaler(init_scale=2.0)
 
     @dtypesIfCUDA(torch.float, torch.double, torch.half)
     @dtypesIfCPU(torch.float, torch.double, torch.bfloat16, torch.half)
@@ -7393,6 +7394,26 @@ class TestTorch(TestCase):
     def test_invalid_generator_raises(self):
         self.assertRaises(RuntimeError, lambda: torch.Generator('opengl'))
 
+    def test_pickle_generator(self) -> None:
+        devices = ['cpu']
+        if torch.cuda.is_available():
+            devices += ['cuda']
+
+        for device in devices:
+            with self.subTest(device=device):
+                generator = torch.Generator(device=device).manual_seed(12345)
+                if device != "cpu":
+                    generator.set_offset(100)
+                torch.randn((100, 100), generator=generator, device=device)  # progress the RNG state
+
+                reserialized: torch.Generator = pickle.loads(pickle.dumps(generator))
+
+                self.assertEqual(generator.device, reserialized.device)
+                self.assertEqual(generator.initial_seed(), reserialized.initial_seed())
+                if device != "cpu":
+                    self.assertEqual(generator.get_offset(), reserialized.get_offset())
+                torch.testing.assert_close(generator.get_state(), reserialized.get_state())
+
     def _sobol_reference_samples(self, scramble: bool) -> torch.Tensor:
         if not scramble:
             # theoretical values from Joe Kuo 2010
@@ -7498,6 +7519,20 @@ class TestTorch(TestCase):
 
     def test_sobolengine_fast_forward_scrambled(self):
         self.test_sobolengine_fast_forward(scramble=True)
+
+    def test_sobolengine_default_dtype(self):
+        engine = torch.quasirandom.SobolEngine(dimension=3, scramble=True, seed=123456)
+        # Check that default dtype is correctly handled
+        self.assertEqual(engine.draw(n=5).dtype, torch.float32)
+        with set_default_dtype(torch.float64):
+            engine = torch.quasirandom.SobolEngine(dimension=3, scramble=True, seed=123456)
+            # Check that default dtype is correctly handled (when set to float64)
+            self.assertEqual(engine.draw(n=5).dtype, torch.float64)
+            # Check that explicitly passed dtype is adhered to
+            self.assertEqual(engine.draw(n=5, dtype=torch.float32).dtype, torch.float32)
+            # Reinitialize the engine and check that first draw dtype is correctly handled
+            engine = torch.quasirandom.SobolEngine(dimension=3, scramble=True, seed=123456)
+            self.assertEqual(engine.draw(n=5, dtype=torch.float32).dtype, torch.float32)
 
     @skipIfTorchDynamo("np.float64 restored as float32 after graph break.")
     def test_sobolengine_distribution(self, scramble=False):
