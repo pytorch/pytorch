@@ -44,10 +44,7 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   fi
 fi
 
-if [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
-  export ATEN_THREADING=TBB
-  export USE_TBB=1
-elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
+if [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
   export ATEN_THREADING=NATIVE
 fi
 
@@ -295,7 +292,6 @@ else
         cp "$LIBTORCH_WHL" /tmp/
         python setup.py clean
         WERROR=1 BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py bdist_wheel
-        mv "/tmp/$(basename "$LIBTORCH_WHL")" dist/
       else
         WERROR=1 python setup.py clean
         WERROR=1 python setup.py bdist_wheel
@@ -311,7 +307,6 @@ else
         cp "$LIBTORCH_WHL" /tmp/
         python setup.py clean
         BUILD_PYTHON_ONLY=1 BUILD_LIBTORCH_WHL=0 python setup.py bdist_wheel
-        mv "/tmp/$(basename "$LIBTORCH_WHL")" dist/
       else
         python setup.py clean
         python setup.py bdist_wheel
@@ -319,6 +314,10 @@ else
     fi
 
     pip_install_whl "$(echo dist/*.whl)"
+
+    if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
+      mv "/tmp/$(basename "$LIBTORCH_WHL")" dist/
+    fi
 
     # TODO: I'm not sure why, but somehow we lose verbose commands
     set -x
