@@ -2090,3 +2090,22 @@ def import_device_backends():
 
 from . import _logging
 _logging._init_logs()
+
+def import_device_backends():
+    if sys.version_info < (3, 10):
+        from importlib_metadata import entry_points
+    else:
+        from importlib.metadata import entry_points
+
+    for backend in entry_points(group='torch.backends'):
+        try:
+            backend_hook = backend.load()
+        except IndexError:
+            pass
+
+def is_device_backend_autoload_enabled() -> bool:
+    var = os.getenv("TORCH_DISABLE_DEVICE_BACKEND_AUTOLOAD")
+    return var is None or not var.upper() in ('1', 'TRUE', 'YES')
+
+if is_device_backend_autoload_enabled():
+    import_device_backends()
