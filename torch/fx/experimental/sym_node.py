@@ -623,9 +623,12 @@ def _sympy_int_truediv(a, b):
 
 
 def _sympy_floordiv(a, b):
-    from torch.utils._sympy.functions import FloorDiv
+    from torch.utils._sympy.functions import NaturalDiv, PythonFloorDiv
 
-    return FloorDiv(a, b)
+    if a.is_nonnegative and b.is_nonnegative:
+        return NaturalDiv(a, b)
+    else:
+        return PythonFloorDiv(a, b)
 
 
 def _sympy_mod(a, b):
@@ -1033,11 +1036,11 @@ def _make_node_magic(method, func):
             )
         assert isinstance(other, SymNode)
         try:
+            # Special handling for mod and floordiv that requires access to the value
+            # ranges
             if method == "mod":
                 from torch.utils._sympy.functions import Mod, PythonMod
 
-                # Special handling for mod that requires access to the value
-                # ranges
                 shape_env = self.shape_env
                 if (
                     self.expr.is_nonnegative
@@ -1049,6 +1052,20 @@ def _make_node_magic(method, func):
                     out = Mod(self.expr, other.expr)
                 else:
                     out = PythonMod(self.expr, other.expr)
+            elif method == "floordiv":
+                from torch.utils._sympy.functions import NaturalDiv, PythonFloorDiv
+
+                shape_env = self.shape_env
+                if (
+                    self.expr.is_nonnegative
+                    or shape_env.bound_sympy(self.expr).lower >= 0
+                ) and (
+                    other.expr.is_nonnegative
+                    or shape_env.bound_sympy(other.expr).lower >= 0
+                ):
+                    out = NaturalDiv(self.expr, other.expr)
+                else:
+                    out = PythonFloorDiv(self.expr, other.expr)
             else:
                 # TODO: consider constant prop here
                 out = func(self.expr, other.expr)

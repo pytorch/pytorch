@@ -19,16 +19,18 @@ from .functions import (
     CMod,
     FloatPow,
     FloatTrueDiv,
-    FloorDiv,
     IntTrueDiv,
     IsNonOverlappingAndDenseIndicator,
     Mod,
     ModularIndexing,
+    NaturalDiv,
     PowByNatural,
+    PythonFloorDiv,
     PythonMod,
     RoundDecimal,
     RoundToInt,
     ToFloat,
+    TruncDiv,
     TruncToFloat,
     TruncToInt,
     Where,
@@ -57,7 +59,13 @@ def handlers():
         sympy.Not: "not_",
         IntTrueDiv: "int_truediv",
         FloatTrueDiv: "truediv",
-        FloorDiv: "floordiv",
+        # TODO: We're preferentially using truncdiv because that's what Triton
+        # and C are looking for, but in principle a dedicate natural,_div op
+        # would give the backend the choice of what they want to use, if for
+        # some reason truncdiv is not convenient.
+        NaturalDiv: "truncdiv",
+        TruncDiv: "truncdiv",
+        PythonFloorDiv: "floordiv",
         CleanDiv: "floordiv",  # TODO: hmm?
         TruncToFloat: "trunc",
         Where: "where",

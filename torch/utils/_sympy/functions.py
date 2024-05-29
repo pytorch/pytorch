@@ -52,27 +52,17 @@ def fuzzy_eq(x, y):
 # are NOT integers.
 
 
-# TODO: In Triton, // rounds to zero, but in Python, it is floor division.
-# When we can prove both arguments are non-negative, we should just have a
-# GenericFloorDiv (name pending) which can codegen efficiently in Python/C,
-# and then PythonFloorDiv and CIntDiv which have the appropriate rounding
-# semantics.
-#
-# Right now, FloorDiv de facto changes behavior if arguments are negative or
-# not, this can potentially cause correctness issues.
-class FloorDiv(sympy.Function):
-    """
-    We maintain this so that:
-    1. We can use divisibility guards to simplify FloorDiv(a, b) to a / b.
-    2. Printing out the expression is nicer (compared to say, representing a//b as (a - a % b) / b)
-
-    NB: This is Python-style floor division, round to -Inf
-    """
-
+# This class is ONLY valid when the arguments are non-negative, resulting in valid
+# codegen in Python and Triton as // and in C as /
+class NaturalDiv(sympy.Function):
     nargs = (2,)
     precedence = 50  # precedence of mul  # noqa: F811
 
     is_integer = True
+    is_nonnegative = True
+
+    def _eval_is_positive(self):
+        return self.args[0].is_positive  # type: ignore[attr-defined]
 
     @property
     def base(self):
@@ -82,13 +72,14 @@ class FloorDiv(sympy.Function):
     def divisor(self):
         return self.args[1]
 
+    # NB: Printing this as Python floordiv is concretizing the division on
+    # floor semantics for negatives, but our precondition is this is only
+    # valid for non-negative arguments anyway
     def _sympystr(self, printer):
         base = printer.parenthesize(self.base, self.precedence)
         divisor = printer.parenthesize(self.divisor, self.precedence)
         return f"({base}//{divisor})"
 
-    # Automatic evaluation.
-    # https://docs.sympy.org/latest/guides/custom-functions.html#best-practices-for-eval
     @classmethod
     def eval(cls, base, divisor):
         # python test/test_dynamic_shapes.py -k TestDimConstraints.test_dim_constraints_solve_full
@@ -105,12 +96,55 @@ class FloorDiv(sympy.Function):
             return sympy.S.Zero
         if base.is_integer and divisor == 1:
             return base
-        if base.is_integer and divisor == -1:
-            return sympy.Mul(base, -1)
         if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
+            assert base >= 0, base
+            assert divisor >= 0, divisor
             return sympy.Integer(int(base) // int(divisor))
-        if isinstance(base, FloorDiv):
-            return FloorDiv(base.args[0], base.args[1] * divisor)
+
+        # Note [Integer division of fractions]
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        #
+        # This formula (a / b) / c == a / (b * c) is valid only for integer
+        # division when the arguments are positive, or when the division is
+        # Euclidean division or C-style truncation division.
+        #
+        #   (declare-const a Int)
+        #   (declare-const b Int)
+        #   (declare-const c Int)
+        #   (assert (>= a 0))
+        #   (assert (> b 0))
+        #   (assert (> c 0))
+        #   (assert (not (= (div (div a b) c) (div a (* b c)))))
+        #   (check-sat)
+        #   (get-model)
+        #
+        # is unsat in Z3, as is this formula with truncdiv:
+        #
+        #   (define-fun truncdiv ((x Int) (y Int)) Int
+        #     (ite (or (= (mod x y) 0) (>= x 0))
+        #          (div x y)
+        #          (ite (>= y 0)
+        #               (+ (div x y) 1)
+        #               (- (div x y) 1))))
+        #
+        # (h/t https://gist.github.com/Rufflewind/a880e03fb0d13644a1e8)
+        #
+        # Counterexample for floor division when arguments are not positive: a=11, b=-3, c=-4
+        #
+        #   >>> (11 // -3) // -4
+        #   1
+        #   >>> 11 // (-3 * -4)
+        #   0
+        #
+        # Counterexample for Euclidean division: a=71, b=-9, c=-6
+        #
+        #   >>> euclidean_div(euclidean_div(71, -9), -6)
+        #   2
+        #   >>> euclidean_div(71, -9 * -6)
+        #   1
+        #
+        if isinstance(base, NaturalDiv):
+            return NaturalDiv(base.args[0], base.args[1] * divisor)
 
         # gcd in sympy is over polynomials, so you'll end up with rationals if
         # you do this.  Don't.
@@ -126,6 +160,94 @@ class FloorDiv(sympy.Function):
             gcd = sympy.gcd(base, divisor)
             if gcd != 1:
                 return FloorDiv(
+                    sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
+                )
+        except sympy.PolynomialError:
+            pass  # https://github.com/pytorch/pytorch/issues/108276
+
+
+FloorDiv = NaturalDiv  # TODO: delete
+
+
+# Intentionally renamed FloorDiv to PythonFloorDiv to force people to use the
+# new name.  Chances are, you actually want NaturalDiv.  This is FloorDiv in
+# all conventional sense though.
+class PythonFloorDiv(sympy.Function):
+    nargs = (2,)
+
+    is_integer = True
+
+    @property
+    def base(self):
+        return self.args[0]
+
+    @property
+    def divisor(self):
+        return self.args[1]
+
+    @classmethod
+    def eval(cls, base, divisor):
+        if divisor.is_zero:
+            raise ZeroDivisionError("division by zero")
+
+        if base.is_zero:
+            return sympy.S.Zero
+        if base.is_integer and divisor == 1:
+            return base
+        if base.is_integer and divisor == -1:
+            return sympy.Mul(base, -1)
+        if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
+            return sympy.Integer(int(base) // int(divisor))
+        # NB: No integer division of fractions rule, see Note [Integer division of fractions]
+
+
+def truncdiv(a: int, b: int):
+    return -(-a // b) if (a < 0) ^ (b < 0) else a // b
+
+
+# This is what Z3 div implements, just here for completeness
+def euclidean_div(a: int, b: int):
+    if b > 0:
+        return a // b
+    else:
+        return -(a // -b)
+
+
+# Integer division in C, rounding to zero
+class TruncDiv(sympy.Function):
+    nargs = (2,)
+
+    is_integer = True
+
+    @property
+    def base(self):
+        return self.args[0]
+
+    @property
+    def divisor(self):
+        return self.args[1]
+
+    @classmethod
+    def eval(cls, base, divisor):
+        if divisor.is_zero:
+            raise ZeroDivisionError("division by zero")
+
+        if base.is_zero:
+            return sympy.S.Zero
+        if base.is_integer and divisor == 1:
+            return base
+        if base.is_integer and divisor == -1:
+            return sympy.Mul(base, -1)
+        if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
+            return sympy.Integer(truncdiv(int(base), int(divisor)))
+        # NB: See Note [Integer division of fractions]
+        if isinstance(base, TruncDiv):
+            return TruncDiv(base.args[0], base.args[1] * divisor)
+
+        try:
+            gcd = sympy.gcd(base, divisor)
+            if gcd != 1:
+                return TruncDiv(
                     sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
                 )
         except sympy.PolynomialError:
