@@ -7,10 +7,11 @@ from copy import deepcopy
 from typing import Any, Dict, Tuple
 from unittest.mock import patch
 
-import torch
 from optim.test_lrscheduler import TestLRScheduler  # noqa: F401
 from optim.test_optim import TestDifferentiableOptimizer  # noqa: F401
 from optim.test_swa_utils import TestSWAUtils  # noqa: F401
+
+import torch
 from torch.nn import Parameter
 from torch.optim import Optimizer, SGD
 
@@ -286,7 +287,7 @@ class TestOptimRenewed(TestCase):
             inpt = torch.randn(5, device=device, dtype=dtype)
 
             # avoid endless recompiles by wrapping LR in a tensor if we're compiling
-            lr = torch.tensor(0.01) if torch._utils.is_compiling() else 0.01
+            lr = torch.tensor(0.01) if torch.compiler.is_compiling() else 0.01
             optimizer = optim_cls([{"params": [weight]}, {"params": [bias], "lr": lr}])
             schedulers = [scheduler_c(optimizer) for scheduler_c in schedulers_c]
 

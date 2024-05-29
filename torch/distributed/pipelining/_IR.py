@@ -729,18 +729,23 @@ class Pipe(torch.nn.Module):
                 # Replace old submod
                 split.register_module(name, new_submod)
 
-        # lift single-use parameter fetches into the modules that use them
         # TODO: backport this into split_module
-        def delete_user_reference(node, user, delete_node=True):
+        def delete_user_reference(node, user):
+            """
+            Delete reference of `node` from `user`'s arg list.
+            Args:
+                - node: a `get_attr` node at root.
+                - user: a submodule node that uses `node`.
+            """
             assert len(user.kwargs) == 0
             use_idxs = [i for i, arg in enumerate(user.args) if arg == node]
             assert len(use_idxs) == 1
             args_copy = list(user.args)
             args_copy.pop(use_idxs[0])
             user.args = tuple(args_copy)
-            if delete_node:
-                node.graph.erase_node(node)
-            return use_idxs[0]
+            logger.debug(
+                f"Deleted {node} from user {user}, arg index = {use_idxs[0]}"  # noqa: G004
+            )
 
         # A list of param referrals for deferred deletion.
         # To be accumulated in `move_param_to_callee`.
@@ -751,6 +756,13 @@ class Pipe(torch.nn.Module):
             callee_name,
             param_fqn,
         ):
+            """
+            Move a parameter from the root module to a submodule.
+            Args:
+                root: The root module.
+                callee_name: The name of the submodule to move the parameter to.
+                param_fqn: The fully qualified name of the parameter to move.
+            """
             # `atoms` is a list of strings representing the path to the
             # parameter in the original model
             atoms = param_fqn.split(".")
@@ -758,9 +770,12 @@ class Pipe(torch.nn.Module):
             mod_itr = split
             for atom in atoms[:-1]:
                 mod_itr = getattr(mod_itr, atom)
+            # Get the parameter (it is still under the root module)
             param_val = getattr(mod_itr, atoms[-1])
+            # Check whether the parameter is a buffer or a parameter
             is_buffer = atoms[-1] in mod_itr._buffers
 
+            # Check whether the parameter is a tensor
             assert isinstance(param_val, torch.Tensor), (
                 f"Expected '{param_fqn}' to be {torch.Tensor} but got {type(param_val)}."
                 + (
@@ -771,17 +786,21 @@ class Pipe(torch.nn.Module):
                     else ""
                 )
             )
+
+            # Get submodule
             callee = root.get_submodule(callee_name)
             assert not hasattr(
                 callee, param_fqn
             ), f"Module {callee_name} already has a parameter named {param_fqn}"
+
+            # Assign the parameter to the submodule
             if is_buffer:
                 _assign_attr(
                     param_val,
                     callee,
                     param_fqn,
                     attr_kind=_AttrKind.BUFFER,
-                    persistent=True,
+                    persistent=True,  # TODO: handle non-persistent buffer
                 )
             else:
                 _assign_attr(
@@ -790,7 +809,7 @@ class Pipe(torch.nn.Module):
                     param_fqn,
                     attr_kind=_AttrKind.PARAMETER,
                 )
-            # logger.debug(f"Moved parameter {param_fqn} to {callee_name}")
+            logger.debug(f"Moved parameter {param_fqn} to {callee_name}")  # noqa: G004
 
             # Next step is to replace placeholder of submodule with a get_attr.
             # Those placeholders are created by `split_module` inside each
@@ -805,8 +824,11 @@ class Pipe(torch.nn.Module):
         attr_nodes = list(filter(lambda n: n.op == "get_attr", split.graph.nodes))
         for node in attr_nodes:
             # Check whether the parameter is used in only one submodule
-            if len(node.users) == 1:
-                user = next(iter(node.users))
+            if len(node.users) > 1:
+                logger.info(
+                    f"Parameter {node.target} used in multiple stages: {node.users}."  # noqa: G004
+                )
+            for user in node.users:
                 assert user.op == "call_module"
                 # Move parameter into submodule
                 move_param_to_callee(
@@ -814,20 +836,15 @@ class Pipe(torch.nn.Module):
                     user.target,
                     node.target,
                 )
-            else:
-                # TODO: re-enable support for multi-use parameters
-                raise NotImplementedError(
-                    f"""
-                    Parameter {node.target} used in multiple stages:
-                    {node.users}.
-                    Currently, we do not support multi-use parameters.
-                    """
-                )
 
         # Deferral deletion: Remove the original attributes (to params) from the
         # root GraphModule
         for mod_itr, last_atom in to_delete:
-            delattr(mod_itr, last_atom)
+            try:
+                delattr(mod_itr, last_atom)
+            except AttributeError:
+                # This is expected if the parameter is used in multiple stages
+                pass
 
         # After moving the params to their corresponding hierarchies, we also
         # need to move the `get_attr` nodes from the root of the graph to those
@@ -835,177 +852,20 @@ class Pipe(torch.nn.Module):
         inputs_to_state: Dict[str, List[str]] = {
             attr.name: [attr.target] for attr in attr_nodes
         }
-        # This is done by (1) `_sind_params` at each submodule;
+        # This is done by (1) `_sink_params` at each submodule;
         for name, submod in split.named_children():
             if isinstance(submod, fx.GraphModule):
                 _sink_params(submod, inputs_to_state, [])
                 submod.graph.lint()
                 submod.recompile()
 
-        # And (2) remove `get_attr` nodes from the root
         for node in attr_nodes:
-            if len(node.users) == 1:
-                user = next(iter(node.users))
+            # And (2): remove `get_attr` node from submod's arg list
+            for user in copy.copy(node.users):
                 assert user.op == "call_module"
-                use_idx = delete_user_reference(node, user)
-
-        split.graph.lint()
-        split.recompile()
-
-        # Handle multi-use parameters based on user's configuration
-        # TODO: generalize this to sequential
-        multi_use_param_spec = multi_use_param_spec or {}
-
-        multi_use_params_qualnames: Dict[str, Optional[MultiUseParameterConfig]] = {}
-        for node in split.graph.nodes:
-            if node.op == "get_attr" and len(node.users) > 1:
-                multi_use_params_qualnames.setdefault(node.target)
-
-        def set_multi_use_param_spec(
-            multi_use_params_qualnames,
-            multi_use_param_spec,
-        ):
-            for param in multi_use_params_qualnames:
-                if isinstance(multi_use_param_spec, MultiUseParameterConfig):
-                    multi_use_params_qualnames[param] = multi_use_param_spec
-                elif isinstance(multi_use_param_spec, dict):
-                    multi_use_params_qualnames[param] = multi_use_param_spec.get(
-                        param, MultiUseParameterConfig.TRANSMIT
-                    )
-                else:
-                    raise ValueError(
-                        "multi_use_param_spec must be MultiUseParamSpec enum or dict"
-                    )
-
-        def handle_multi_use_params(
-            split,
-            multi_use_params_qualnames,
-        ):
-            # TODO: do we maintain the invariant that `Node.users` is topologically ordered? I don't think so
-            node_to_first_user: Dict[fx.Node, fx.Node] = {}
-            for node in split.graph.nodes:
-                for input in node.all_input_nodes:
-                    if input not in node_to_first_user:
-                        node_to_first_user[input] = node
-
-            for node in split.graph.nodes:
-                if node.op == "get_attr" and node.target in multi_use_params_qualnames:
-                    reuse_type = multi_use_params_qualnames[node.target]
-                    if reuse_type == MultiUseParameterConfig.TRANSMIT:
-                        first_user = node_to_first_user[node]
-                        assert first_user.op == "call_module"
-
-                        use_idx = delete_user_reference(
-                            node, first_user, delete_node=False
-                        )
-
-                        atoms = node.target.split(".")
-                        mod_itr = split
-                        for atom in atoms[:-1]:
-                            mod_itr = getattr(mod_itr, atom)
-                        param_val = getattr(mod_itr, atoms[-1])
-                        is_buffer = atoms[-1] in mod_itr._buffers
-
-                        callee_param_def = move_param_to_callee(  # type: ignore[call-arg]
-                            split,
-                            first_user.target,
-                            param_val,
-                            use_idx,
-                            is_buffer,
-                        )
-
-                        delattr(mod_itr, atoms[-1])
-
-                        # Add extra output to the callee and switch references to the parameter
-                        # access in the pipeline graph to use this.
-                        submod = split.get_submodule(first_user.target)
-                        callee_output_nodes = [
-                            n for n in submod.graph.nodes if n.op == "output"
-                        ]
-                        assert len(callee_output_nodes) == 1
-                        callee_output_node = callee_output_nodes[0]
-
-                        # TODO: zero outputs?
-                        if isinstance(callee_output_node.args[0], tuple):
-                            new_output_args = callee_output_node.args[0] + (
-                                callee_param_def,
-                            )
-                            callee_output_node.args = (new_output_args,)
-                            new_output_idx = len(new_output_args) - 1
-                            promoted_to_tuple = False
-                        else:
-                            new_output_args = (
-                                callee_output_node.args[0],
-                                callee_param_def,
-                            )
-                            callee_output_node.args = (new_output_args,)
-                            new_output_idx = len(new_output_args) - 1
-                            promoted_to_tuple = True
-
-                        submod.graph.lint()
-                        submod.recompile()
-
-                        with split.graph.inserting_after(first_user):
-                            if promoted_to_tuple:
-                                # TODO: test this code path
-                                orig_output_getitem = split.graph.call_function(
-                                    operator.getitem, (first_user, 0)
-                                )
-                                first_user.replace_all_uses_with(orig_output_getitem)
-                                # HACK because the above replace_all_uses with ALSO replaced the instance
-                                # of first_user within the getitem node we just added
-                                orig_output_getitem.args = (
-                                    first_user,
-                                ) + orig_output_getitem.args[1:]
-
-                            transmitted_value_getitem = split.graph.call_function(
-                                operator.getitem,
-                                (first_user, new_output_idx),
-                            )
-                            node.replace_all_uses_with(transmitted_value_getitem)
-                            split.graph.erase_node(node)
-                    elif reuse_type == MultiUseParameterConfig.REPLICATE:
-                        for user in copy.copy(node.users):
-                            use_idx = delete_user_reference(
-                                node, user, delete_node=False
-                            )
-                            atoms = node.target.split(".")
-                            mod_itr = split
-                            for atom in atoms[:-1]:
-                                mod_itr = getattr(mod_itr, atom)
-                            param_val = getattr(mod_itr, atoms[-1])
-                            is_buffer = atoms[-1] in mod_itr._buffers
-
-                            move_param_to_callee(  # type: ignore[call-arg]
-                                split,
-                                user.target,
-                                param_val,
-                                use_idx,
-                                is_buffer,
-                            )
-
-                        atoms = node.target.split(".")
-                        mod_itr = split
-                        for atom in atoms[:-1]:
-                            mod_itr = getattr(mod_itr, atom)
-
-                        delattr(mod_itr, atoms[-1])
-
-                        split.graph.erase_node(node)
-                    else:
-                        raise ValueError(
-                            f"Unknown multi-use config value {reuse_type} specified for {node.target}"
-                        )
-
-        if len(multi_use_params_qualnames) > 0:
-            # TODO: re-enable support for multi-use parameters
-            raise NotImplementedError(
-                "Sharing model parameters between stages are not yet supported. "
-                "Found the following shared parameters in your model: "
-                f"{multi_use_params_qualnames}"
-            )
-            set_multi_use_param_spec(multi_use_params_qualnames, multi_use_param_spec)
-            handle_multi_use_params(split, multi_use_params_qualnames)
+                delete_user_reference(node, user)
+            # And (3): remove the `get_attr` node from the root graph.
+            split.graph.erase_node(node)
 
         split.delete_all_unused_submodules()
         split.graph.lint()
