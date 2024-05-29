@@ -387,7 +387,7 @@ class _TorchDynamoContext:
         def do_nothing(*arg, **kwargs):
             pass
         callback = do_nothing
-        if hasattr(self, 'callback'):
+        if hasattr(self, "callback"):
             callback = self.callback
 
         is_jit_tracing = torch._C._is_tracing

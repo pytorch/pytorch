@@ -2755,6 +2755,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             loaded_model(inp)
             self.assertTrue(same_two_models(loaded_model, mod, [inp]))
             self.assertTrue(same_two_models(loaded_model, opt_mod, [inp]))
+            assert isinstance(loaded_model, torch._dynamo.OptimizedModule)
 
     def test_save_and_load2(self):
         mod = MockModule()
@@ -2768,6 +2769,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             loaded_model(inp)
             self.assertTrue(same_two_models(loaded_model, mod, [inp]))
             self.assertTrue(same_two_models(loaded_model, opt_mod, [inp]))
+            assert isinstance(loaded_model, torch._dynamo.OptimizedModule)
 
 
     def test_monkeypatching_forward(self):
