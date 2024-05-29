@@ -236,7 +236,7 @@ jobs:
     name: linux-focal-py3.12-clang10-experimental-split-build
     uses: ./.github/workflows/_linux-build-label.yml
     with:
-      use-split-build: true
+      use_split_build: true
       build-environment: linux-focal-py3.12-clang10
       docker-image-name: pytorch-linux-focal-py3.12-clang10
       test-matrix: |
@@ -331,7 +331,7 @@ jobs:
     name: linux-focal-cuda12.4-py3.10-gcc9-experimental-split-build
     uses: ./.github/workflows/_linux-build-label.yml
     with:
-      use-split-build: true
+      use_split_build: true
       build-environment: linux-focal-cuda12.4-py3.10-gcc9
       docker-image-name: pytorch-linux-focal-cuda12.4-cudnn8-py3-gcc9
       test-matrix: |
