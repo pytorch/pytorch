@@ -274,11 +274,11 @@ def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: 
 
     original_index = index
 
-    div = sympy.Wild("divisor")
+    div = sympy.Wild("divisor", integer=True)
     if index.has(FloorDiv):
         index = index.replace(FloorDiv(var, div), visit_indexing_div)
 
-    mod = sympy.Wild("modulus")
+    mod = sympy.Wild("modulus", integer=True)
     if index.has(ModularIndexing):
         index = index.replace(ModularIndexing(var, div, mod), visit_modular_indexing)
 
@@ -2486,7 +2486,7 @@ class CppVecKernel(CppKernel):
 
     def welford_weight_reciprocal_vec(self, dtype, num_threads=None):
         vec_num_range_thread = (
-            CeilDiv(self.weight_recp_vec_range, num_threads)
+            CeilDiv(self.weight_recp_vec_range, sympy.sympify(num_threads))
             if num_threads
             else self.weight_recp_vec_range
         )

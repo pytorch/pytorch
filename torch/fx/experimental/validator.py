@@ -358,6 +358,15 @@ try:
                 return z3.BoolVal(bool(value))
             raise ValueError(f"unsupported dtype (SympyToZ3): {dtype}")
 
+        def to_float(self, x: z3.ArithRef) -> z3.ArithRef:
+            return z3.ToReal(x)
+
+        def trunc_to_int(self, x: z3.ArithRef) -> z3.ArithRef:
+            return z3.ToInt(x)
+
+        def int_truediv(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
+            return self._ops.div(numerator, denominator)
+
         def truediv(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
             return self._ops.div(numerator, denominator)
 
@@ -370,10 +379,13 @@ try:
         def pow(self, base: z3.ArithRef, exp: z3.ArithRef) -> z3.ArithRef:
             return self._ops.pow(base, exp)
 
+        def pow_by_natural(self, base: z3.ArithRef, exp: z3.ArithRef) -> z3.ArithRef:
+            return self._ops.pow(base, exp)
+
         def mod(self, p: z3.ArithRef, q: z3.ArithRef) -> z3.ArithRef:
             return self._ops.mod(p, q)
 
-        def round(self, number: z3.ArithRef, ndigits: Optional[z3.ArithRef] = None) -> z3.ArithRef:
+        def round_to_int(self, number: z3.ArithRef, ndigits: Optional[z3.ArithRef] = None) -> z3.ArithRef:
             return self._ops.round(number, ndigits)
 
         def __getattr__(self, name: str) -> Any:
@@ -383,6 +395,8 @@ try:
                 "not_": z3.Not,
                 "floor": self._ops.floor,
                 "ceil": self._ops.ceil,
+                "floor_to_int": self._ops.floor,
+                "ceil_to_int": self._ops.ceil,
                 "minimum": self._ops.min,
                 "maximum": self._ops.max,
             }

@@ -138,6 +138,29 @@ class OpsHandler(Protocol[T]):
         """
         ...
 
+    def trunc_to_int(self, x: T) -> T:
+        """
+        Convert x to int64 with truncation semantics (similar to how the int
+        constructor works in Python).  In Inductor codegen, this just decays
+        to trunc and then to_dtype, but this composite operation helps
+        roundtrips for Sympy evaluation.
+        """
+        ...
+
+    def ceil_to_int(self, x: T) -> T:
+        """
+        Convert x to int64 with ceiling semantics.  This composite operation helps
+        roundtrips for Sympy evaluation.
+        """
+        ...
+
+    def floor_to_int(self, x: T) -> T:
+        """
+        Convert x to int64 with ceiling semantics.  This composite operation helps
+        roundtrips for Sympy evaluation.
+        """
+        ...
+
     def to_dtype_bitcast(self, x: T, dtype: torch.dtype, src_dtype: torch.dtype) -> T:
         """
         Reinterpret cast x to dtype (reinterpreting the bits in memory as another dtype.)
@@ -398,21 +421,23 @@ class OpsHandler(Protocol[T]):
     def isnan(self, x0: T) -> T:
         ...
 
+    # NB: this returns a float, like the torch operation
+    # This rounds half to even to break ties
     def round(self, x0: T) -> T:
         ...
 
+    # NB: this returns a float, like the torch operation
     def floor(self, x0: T) -> T:
         ...
 
     def sign(self, x0: T) -> T:
         ...
 
-    def to_int(self, x0: T) -> T:
-        ...
-
+    # NB: this returns a float, like the torch operation
     def trunc(self, x0: T) -> T:
         ...
 
+    # NB: this returns a float, like the torch operation
     def ceil(self, x0: T) -> T:
         ...
 
@@ -449,6 +474,7 @@ class OpsHandler(Protocol[T]):
     def mul(self, x0: T, x1: T) -> T:
         ...
 
+    # NB: this returns a float, like the torch operation
     def pow(self, x0: T, x1: T) -> T:
         ...
 
@@ -617,14 +643,21 @@ class OpsHandler(Protocol[T]):
 
     def floordiv(self, x0: T, x1: T) -> T:
         """Python-style floor division between integers only.  Computes the
-        true division of two numbers and floors the result.
+        true division of two numbers and floors the result.  If you want
+        floor division for floats, do regular truediv and floor the result.
         """
         ...
 
     def truediv(self, x0: T, x1: T) -> T:
-        """True division between floats.  Integer inputs are NOT valid: to do
-        Python style (int, int) -> float division, promote the inputs to float
-        first."""
+        """True division between floats.  Integer inputs are NOT valid.  To
+        do Python-style (int, int) -> float division, use int_truediv"""
+        ...
+
+    def int_truediv(self, x0: T, x1: T) -> T:
+        """True division between integers.  This is NOT the same as promoting
+        to float and doing integer division, there is a bespoke algorithm for
+        doing the division in higher precision than the above.
+        """
         ...
 
     def div(self, x0: T, x1: T) -> T:
@@ -638,6 +671,10 @@ class OpsHandler(Protocol[T]):
 
     def remainder(self, x0: T, x1: T) -> T:
         """Python-style modulus, take sign from RHS (x1)."""
+        ...
+
+    def round_decimal(self, x0: T, x1: T) -> T:
+        """Python-style round with decimal argument"""
         ...
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
