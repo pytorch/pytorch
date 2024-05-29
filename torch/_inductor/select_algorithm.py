@@ -22,6 +22,7 @@ import sympy
 from filelock import FileLock
 
 import torch
+import torch._inductor.async_compile
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, identity, preserve_rng_state
 
