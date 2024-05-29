@@ -1674,7 +1674,7 @@ err_epilogue = (
     "(and fall back to eager-mode PyTorch) on all ops "
     "that have do not have the 'pt2_compliant_tag'. "
     "Please see the following doc for how to mark this op as PT2 compliant "
-    "https://docs.google.com/document/d/1W--T6wz8IY8fOI0Vm8BF44PdBgs283QvpelJZWieQWQ"
+    "https://pytorch.org/docs/main/notes/custom_operators.html"
 )
 
 

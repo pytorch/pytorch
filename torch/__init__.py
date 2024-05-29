@@ -2044,14 +2044,6 @@ def get_device_module(device: Optional[Union[torch.device, str]] = None):
     return device_module
 
 
-def _constrain_as_value(symbol, min: Optional[builtins.int] = None, max: Optional[builtins.int] = None):
-    """
-    Add min/max constraint on the intermediate symbol at tracing time. If called in eager mode,
-    it will still check if the input value is within the specified range.
-    """
-    torch.sym_constrain_range(symbol, min=min, max=max)
-
-
 def _constrain_as_size(symbol, min: Optional[builtins.int] = None, max: Optional[builtins.int] = None):
     """
     This indicates that a given int is size-like, and can be used in any context where a size is expected.
@@ -2059,8 +2051,7 @@ def _constrain_as_size(symbol, min: Optional[builtins.int] = None, max: Optional
     which then need to be used as tensor constructors. Providing these assertions to PyTorch can help resolve
       GuardOnDataDependentSymNode errors upon export, since we cannot guard on unbacked SymInts.
 
-    This function has unusual semantics which distinguish it from
-    _constrain_as_value.  Specifically, in some circumstances in framework
+    This function has unusual semantics in some circumstances in framework
     code, we will treat this int as >= 2 (when we do a size-oblivious guard).
     This makes it easier to use the unbacked int in size contexts,
     as we will often attempt to guard on a size being zero/one

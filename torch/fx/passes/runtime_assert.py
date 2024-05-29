@@ -304,23 +304,13 @@ def insert_deferred_runtime_asserts(
                         except TypeError:
                             return None
 
-                    if export:
-                        graph.call_function(
-                            torch.ops.aten.sym_constrain_range.default,
-                            (symbol_to_proxy[i0].node,),
-                            {
-                                "min": convert(vr.lower),
-                                "max": convert(vr.upper),
-                            },
-                        )
-                    else:
-                        graph.call_function(
-                            torch._constrain_as_value,
-                            (
-                                symbol_to_proxy[i0].node,
-                                convert(vr.lower),
-                                convert(vr.upper),
-                            ),
-                        )
+                    graph.call_function(
+                        torch.ops.aten.sym_constrain_range.default,
+                        (symbol_to_proxy[i0].node,),
+                        {
+                            "min": convert(vr.lower),
+                            "max": convert(vr.upper),
+                        },
+                    )
 
                 add_runtime_asserts(ras)

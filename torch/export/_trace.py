@@ -22,7 +22,10 @@ from torch._export.non_strict_utils import (
     make_fake_params_buffers,
     produce_guards_and_solve_constraints,
 )
-from torch._export.passes._node_metadata_hook import _node_metadata_hook
+from torch._export.passes._node_metadata_hook import (
+    _node_metadata_hook,
+    _set_node_metadata_hook,
+)
 from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForInlineConstraintsPass,
 )
@@ -152,8 +155,8 @@ def _add_runtime_assertions_to_cond_in_subgraph(range_constraints, gm, fake_mode
             'File "torch/_export/passes/add_runtime_assertions_for_constraints_pass.py", line 46, '
             "in _AddRuntimeAssertionsForInlineConstraintsPass"
         )
-        with fake_mode, gm._set_create_node_hook(
-            functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+        with fake_mode, _set_node_metadata_hook(
+            gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
         ):
             res = _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints)(gm)
         assert res is not None
@@ -669,8 +672,8 @@ def _export_to_aten_ir(
             'File "torch/fx/passes/runtime_assert.py", line 24, '
             "in insert_deferred_runtime_asserts"
         )
-        with gm._set_create_node_hook(
-            functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+        with _set_node_metadata_hook(
+            gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
         ):
             insert_deferred_runtime_asserts(
                 gm,

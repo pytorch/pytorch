@@ -6,6 +6,7 @@ import functools
 import inspect
 import itertools
 import types
+import warnings
 from typing import Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
@@ -634,9 +635,21 @@ class SkipFunctionVariable(VariableTracker):
         else:
             try:
                 path = inspect.getfile(self.value)
+                msg = f"'skip function {self.value.__qualname__} in file {path}'"
             except TypeError:
-                path = f"Builtin {self.value.__name__}"
-            msg = f"'skip function {self.value.__qualname__} in file {path}'"
+                msg = (
+                    f"Graph break due to unsupported builtin {self.value.__qualname__}. "
+                    f"This function is either a Python builtin (e.g. functools.partial) "
+                    f"or a third-party C/C++ Python extension (perhaps created with pybind). "
+                    f"If it is a Python builtin, please file an issue on GitHub "
+                    f"so the PyTorch team can add support for it and see the next case for a workaround. "
+                    f"If it is a third-party C/C++ Python extension, please "
+                    f"wrap it into a PyTorch-understood custom operator "
+                    f"(see https://pytorch.org/docs/main/notes/custom_operators.html "
+                    f"for more details)"
+                )
+                # also warn on it because most users won't see the graph break message
+                warnings.warn(msg)
             msg += f"', {self.reason}'" if self.reason else ""
             unimplemented(msg)
 
