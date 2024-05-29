@@ -22,6 +22,7 @@ from typing import Any, Dict, Iterator, List, Tuple
 from unittest import mock
 
 import numpy as np
+
 import torch
 
 import torch._dynamo.test_case
@@ -166,9 +167,8 @@ bw_graph = [None]
 
 
 def aot_graph_capture_backend(gm, args):
-    from torch._functorch.aot_autograd import aot_module_simplified
-
     from functorch.compile import min_cut_rematerialization_partition
+    from torch._functorch.aot_autograd import aot_module_simplified
 
     def fw_compiler(gm, _):
         fw_graph[0] = gm
@@ -4713,7 +4713,8 @@ def forward(self, primals_1, primals_2):
     _foreach_copy = torch.ops.aten._foreach_copy.default([primals_1], [primals_2]);  primals_1 = primals_2 = None
     getitem = _foreach_copy[0];  _foreach_copy = None
     mm = torch.ops.aten.mm.default(getitem, getitem)
-    return [mm, getitem]""",
+    t_1 = torch.ops.aten.t.default(getitem);  getitem = None
+    return [mm, t_1]""",
         )
         self.assertEqual(out_ref, out_test)
 

@@ -1406,14 +1406,17 @@ class SIMDScheduling(BaseScheduling):
             for node in epilogue_nodes:
                 node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
 
+        if not isinstance(partial_code, str):
+            partial_code.finalize_hook("<DEF_KERNEL>")
         # finalize must be called after adding epilogue above
         with V.set_kernel_handler(kernel):
             # TODO: Maybe unify CUDATemplateKernel to also use PartialRender for flexible epilogue fusion.
-            src_code = (
-                partial_code
-                if isinstance(partial_code, str)
-                else partial_code.finalize()
-            )
+            with kernel.set_subgraph_body("<STORE_OUTPUT>"):
+                if isinstance(partial_code, str):
+                    src_code = partial_code
+                else:
+                    partial_code.finalize_hook("<STORE_OUTPUT>")
+                    src_code = partial_code.code
             node_schedule = [template_node, *epilogue_nodes]
 
             if config.benchmark_kernel:
