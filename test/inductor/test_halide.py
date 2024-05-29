@@ -3,6 +3,7 @@ import textwrap
 import unittest
 
 import torch
+from torch._inductor import config
 from torch._inductor.codecache import HalideCodeCache
 from torch._inductor.runtime.hints import HalideInputSpec, HalideMeta
 from torch._inductor.test_case import run_tests, TestCase
@@ -18,6 +19,19 @@ try:
     HAS_HALIDE = halide is not None
 except ImportError:
     HAS_HALIDE = False
+
+
+try:
+    from . import test_torchinductor
+except ImportError:
+    import test_torchinductor
+
+
+make_halide = config.patch(
+    cpu_backend="halide",
+    inplace_buffers=False,  # TODO(jansel): support inplace
+    fallback_random=True,  # TODO(jansel): support random
+)
 
 
 @unittest.skipUnless(HAS_HALIDE, "requires halide")
@@ -80,6 +94,9 @@ class HalideTests(TestCase):
         fn(a, b, c)
         self.assertEqual(c, a + b)
 
+
+SweepInputsCpuHalideTest = make_halide(test_torchinductor.SweepInputsCpuTest)
+CpuHalideTests = make_halide(test_torchinductor.CpuTests)
 
 if __name__ == "__main__":
     if HAS_CPU and not IS_MACOS and HAS_HALIDE:

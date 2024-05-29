@@ -62,7 +62,7 @@ nan_asserts = os.environ.get("TORCHINDUCTOR_NAN_ASSERTS") == "1"
 pick_loop_orders = True
 
 # reuse a kernel input as the output
-inplace_buffers = False  # TODO(jansel): support this with halide
+inplace_buffers = True
 
 # reuse a buffer for an unrelated purpose
 allow_buffer_reuse = True
@@ -311,7 +311,7 @@ realize_opcount_threshold = 30
 realize_acc_reads_threshold = 8
 
 # fallback to eager for random/dropout, this is slow but useful for debugging
-fallback_random = True  # TODO(jansel): halide+random
+fallback_random = False
 
 # automatically create fallbacks when encountering an unhandled op
 implicit_fallbacks = True
@@ -819,13 +819,12 @@ class cuda:
 
 
 # Backend to use for CPU codegen either "cpp" or "halide" (experimental)
-cpu_backend = "halide"
+cpu_backend = "cpp"
 
 
 class halide:
     # add `-no_asserts` to halide `target=`
-    # TODO(jansel): halide asserts seem buggy
-    # pytest test/inductor/test_torchinductor.py -vsx -k test_aliased_buffer_reuse_cpu
+    # TODO(jansel): halide asserts seem to false alarm e.g. test_AllenaiLongformerBase_repro_cpu
     no_asserts = True
 
 
