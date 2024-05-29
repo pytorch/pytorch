@@ -283,7 +283,6 @@ manual_torch_name_rule_map = {
     "torch._functorch.deprecated.vjp": UserFunctionVariable,
     #
     "torch._constrain_as_size": UserFunctionVariable,
-    "torch._constrain_as_value": UserFunctionVariable,
     "torch._tensor._convert": UserFunctionVariable,
     "torch.jit._unwrap_optional": UserFunctionVariable,
     "torch.backends.mha.get_fastpath_enabled": UserFunctionVariable,
@@ -1279,6 +1278,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._wrap_tensor_impl",
         "torch._C.fork",
         "torch._C.get_autocast_cpu_dtype",
+        "torch._C.get_autocast_dtype",
         "torch._C.get_autocast_gpu_dtype",
         "torch._C.get_autocast_ipu_dtype",
         "torch._C.get_autocast_xla_dtype",
@@ -2328,6 +2328,8 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.amp.autocast_mode._enter_autocast",
         "torch.amp.autocast_mode._exit_autocast",
         "torch.amp.autocast_mode.autocast_decorator",
+        "torch.amp.autocast_mode.custom_bwd",
+        "torch.amp.autocast_mode.custom_fwd",
         "torch.are_deterministic_algorithms_enabled",
         "torch.atleast_1d",
         "torch.atleast_2d",
@@ -3267,6 +3269,7 @@ SKIP_DIRS = [
     "<frozen importlib",
     "<__array_function__ internals>",
     _config_module.__file__,
+    "triton/backends",
 ]
 SKIP_DIRS.extend(filter(None, (_module_dir(m) for m in BUILTIN_SKIPLIST)))
 
@@ -3307,7 +3310,7 @@ FORCE_SKIP_FILES = {f"{_module_dir(torch)}optim/lr_scheduler.py"}
 
 def _recompile_re():
     global SKIP_DIRS_RE
-    SKIP_DIRS_RE = re.compile(f"^({'|'.join(map(re.escape, SKIP_DIRS))})")
+    SKIP_DIRS_RE = re.compile(rf"^[^\s<]*({'|'.join(map(re.escape, SKIP_DIRS))})")
 
 
 def add(import_name: str):
@@ -3322,7 +3325,6 @@ def add(import_name: str):
     origin = module_spec.origin
     if origin is None:
         return
-    global SKIP_DIRS_RE
     SKIP_DIRS.append(_strip_init_py(origin))
     _recompile_re()
 

@@ -3177,7 +3177,6 @@ def register_meta_foreach(ops):
         aten._foreach_log1p,
         aten._foreach_log2,
         aten._foreach_neg,
-        aten._foreach_norm,
         aten._foreach_reciprocal,
         aten._foreach_round,
         aten._foreach_sigmoid,
@@ -3305,6 +3304,30 @@ def meta__foreach_pow_scalar_and_tensor(self, exponent):
         lambda: f"exponent must be a tensor list but got {type(exponent)}",
     )
     return [torch.empty_like(e) for e in exponent]
+
+
+@register_meta([aten._foreach_norm])
+def meta__foreach_norm(self, ord=2, dtype=None):
+    torch._check(
+        isinstance(self, list),
+        lambda: f"self must be a tensor list but got {type(self)}",
+    )
+    torch._check(
+        isinstance(ord, Number),
+        lambda: f"ord must be an integer but got {type(ord)}",
+    )
+    torch._check(
+        dtype is None or isinstance(dtype, torch.dtype),
+        lambda: f"dtype must be either None or torch.dtype but got {type(dtype)}",
+    )
+    return [
+        torch.empty(
+            (),
+            device=t.device,
+            dtype=t.dtype.to_real() if dtype is None else dtype.to_real(),
+        )
+        for t in self
+    ]
 
 
 def _check_foreach_binop_tensor_lists(self, other):
