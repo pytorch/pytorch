@@ -13,17 +13,11 @@ if [[ -z "${USE_XPU}" ]]; then
         pip install --index-url ${DOWNLOAD_PYTORCH_ORG}/nightly/ $TRITON_VERSION+$(head -c 10 .ci/docker/ci_commit_pins/triton.txt)
     fi
 else
-    # Install Triton for XPU
+    # Always install Triton for XPU from source
 
-    if [[ "$BRANCH" =~ .*release.* ]]; then
-        # Stable version. Use the pre-built wheel from pypi.
-        TRITON_XPU_VERSION="triton-xpu==$(cat .ci/docker/triton_xpu_version.txt)"
-        pip install ${TRITON_XPU_VERSION}
-    else
-        # Nightly version. Always build triton-xpu from the source.
-        TRITON_XPU_REPO="https://github.com/intel/intel-xpu-backend-for-triton"
-        TRITON_XPU_COMMIT_ID="$(cat .ci/docker/ci_commit_pins/triton-xpu.txt)"
+    TRITON_XPU_REPO="https://github.com/intel/intel-xpu-backend-for-triton"
+    TRITON_XPU_COMMIT_ID="$(cat .ci/docker/ci_commit_pins/triton-xpu.txt)"
 
-        pip install --force-reinstall "git+${TRITON_XPU_REPO}@${TRITON_XPU_COMMIT_ID}#subdirectory=python"
-    fi
+    # force-reinstall to ensure the latest version is installed
+    pip install --force-reinstall "git+${TRITON_XPU_REPO}@${TRITON_XPU_COMMIT_ID}#subdirectory=python"
 fi
