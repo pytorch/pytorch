@@ -66,6 +66,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(arctan_);
   OP_DECOMPOSE(arctanh);
   OP_DECOMPOSE(arctanh_);
+  m.impl("as_strided_copy", native::as_strided_copy_symint);
   OP_DECOMPOSE(atleast_1d);
   OP_DECOMPOSE2(atleast_1d, Sequence);
   OP_DECOMPOSE(atleast_2d);

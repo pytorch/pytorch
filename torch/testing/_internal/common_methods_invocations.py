@@ -279,6 +279,23 @@ def sample_inputs_as_strided(op_info, device, dtype, requires_grad, **kwargs):
         kwargs = dict(storage_offset=storage_offset)
         yield SampleInput(input_t, args=(output_shape, stride), kwargs=kwargs)
 
+def sample_inputs_as_strided_copy(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # input shape, output shape, output stride, output storage offset
+    test_cases = (
+        # ((1,), (1,), (1,), 0),
+        # ((3, 3), (2, 2), (1, 2), 0),
+        ((3, 3), (2, 2), (1, 2), 1),
+        # ((16,), (2, 2, 2, 2), (1, 1, 1, 1), 0),
+        # ((16,), (2, 1, 1, 2), (1, 7, 7, 1), 0),
+    )
+
+    for input_shape, output_shape, stride, storage_offset in test_cases:
+        input_t = make_arg(input_shape)
+        kwargs = dict(storage_offset=storage_offset)
+        yield SampleInput(input_t, args=(output_shape, stride), kwargs=kwargs)
+
 def sample_inputs_as_strided_partial_views(op_info, device, dtype, requires_grad, **kwargs):
     def make_arg():
         base = make_tensor((20,), device=device, dtype=dtype)
@@ -14362,7 +14379,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            # vmap does not support inplace views
            check_inplace_batched_forward_grad=False,
-           sample_inputs_func=sample_inputs_as_strided,
+           sample_inputs_func=sample_inputs_as_strided_copy,
            skips=(
                # Note: This xfail is fine -- it's inherent to how as_strided works
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples'),
