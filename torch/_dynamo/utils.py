@@ -154,12 +154,9 @@ def increment_op_count(cnt):
     op_count += cnt
 
 
-# Print a report of time spent so far
-# Ex:
-# TIMING:
-# entire_frame_compile:8.574629999999999
-# backend_compile:5.26806
-def print_time_report():
+# Calculate total time spent so far for each phase
+# For example, {'entire_frame_compile':8.574629999999999, 'backend_compile':5.26806}
+def calculate_time_spent():
     total = 0.0
     total_by_key = {}
     for timings in frame_phase_timing.values():
@@ -169,6 +166,17 @@ def print_time_report():
                 total_by_key[key] = timing
             else:
                 total_by_key[key] += timing
+
+    return total_by_key
+
+
+# Print a report of time spent so far
+# Ex:
+# TIMING:
+# entire_frame_compile:8.574629999999999
+# backend_compile:5.26806
+def print_time_report():
+    total_by_key = calculate_time_spent()
 
     out = "TIMING:"
     for key, value in total_by_key.items():
@@ -2162,8 +2170,8 @@ class numpy_operator_wrapper:
 def defake(x):
     if not isinstance(x, FakeTensor):
         return x
-    size: "torch._prims_common.ShapeType"
-    stride: "torch._prims_common.StrideType"
+    size: torch._prims_common.ShapeType
+    stride: torch._prims_common.StrideType
     if x._has_symbolic_sizes_strides:
         size = []
         for s in x.size():
@@ -2204,7 +2212,7 @@ def build_checkpoint_variable(**options):
 
     # TODO - This is a temporary situation where we have two versions of
     # checkpointing implementation. We will converge on one and remove the other.
-    activation_checkpoint_op: "torch._ops.HigherOrderOperator" = (
+    activation_checkpoint_op: torch._ops.HigherOrderOperator = (
         higher_order_ops.tag_activation_checkpoint
     )
     if torch._functorch.config.functionalize_rng_ops:
