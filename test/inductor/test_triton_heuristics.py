@@ -73,7 +73,6 @@ class TestTritonHeuristics(TestCase):
         ]
         self.assertEqual(forward(*args), foo_c(*args))
 
-    @unittest.skip("https://github.com/pytorch/pytorch/issues/123210")
     @expectedFailureXPU
     def test_artificial_zgrid(self):
         self._test_artificial_zgrid()
