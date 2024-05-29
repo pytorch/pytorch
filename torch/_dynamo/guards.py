@@ -512,6 +512,8 @@ class GuardBuilder(GuardBuilderBase):
         # limit the number of cache entries with same ID_MATCH'd object.
         self.id_matched_objs: Dict[str, ReferenceType[object]] = {}
 
+        self._cached_guard_managers = {}
+
     def guard_on_dict_keys_and_ignore_order(self, example_value, guard):
         dict_mgr = self.get_guard_manager(guard)
         if isinstance(dict_mgr, DictGuardManager):
@@ -752,7 +754,7 @@ class GuardBuilder(GuardBuilderBase):
             guard_manager_enum=GuardManagerType.GUARD_MANAGER,
         )
 
-    @functools.lru_cache(None)
+    # @functools.lru_cache(None)
     def get_guard_manager_from_source(self, source):
         assert self.guard_manager  # to make mypy happy
         root_guard_manager = self.guard_manager.root
@@ -772,7 +774,11 @@ class GuardBuilder(GuardBuilderBase):
         if isinstance(source, ChainedSource):
             base_source_name = source.base.name()
             base_example_value = self.get(base_source_name)
-            base_guard_manager = self.get_guard_manager_from_source(source.base)
+            if base_source_name in self._cached_guard_managers:
+                base_guard_manager = self._cached_guard_managers[base_source_name]
+            else:
+                base_guard_manager = self.get_guard_manager_from_source(source.base)
+                self._cached_guard_managers[base_source_name] = base_guard_manager
             base_guard_manager_enum = self.get_guard_manager_type(
                 source.base, base_example_value
             )
