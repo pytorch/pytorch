@@ -1618,7 +1618,8 @@ def forward(self, lengths_1, values_1):
         self.assertExpectedInline(r, """\
 def forward(self, a_1):
     sym_size_int = torch.ops.aten.sym_size.int(a_1, 0)
-    pow_1 = sym_size_int ** 0.5;  sym_size_int = None
+    sym_float = torch.sym_float(sym_size_int);  sym_size_int = None
+    pow_1 = sym_float ** 0.5;  sym_float = None
     div = torch.ops.aten.div.Tensor(a_1, pow_1);  a_1 = pow_1 = None
     return div""")
 
