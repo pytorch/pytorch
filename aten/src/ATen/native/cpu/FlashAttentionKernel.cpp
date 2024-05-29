@@ -21,34 +21,6 @@ namespace at::native {
 
 namespace {
 
-// out = val * a + b
-template <typename T1, typename T2>
-inline void _scale_attn_mask_fusion_kernel(
-    T1* a,
-    T2* b,
-    const int& size,
-    T1* out,
-    T1& val) {
-  const auto vec_size1 = at::vec::Vectorized<T1>::size();
-  const auto vec_size2 = at::vec::Vectorized<T2>::size();
-  constexpr int64_t T1_n = (vec_size2 == vec_size1 * 2 && is_reduced_floating_point_v<T2>) ? 2 : 1;
-  constexpr int64_t T2_n = 1;
-  auto vec_scale = at::vec::VectorizedN<T1, T1_n>(val);
-  int64_t i = 0;
-  for (; i < size - (size % vec_size2); i += vec_size2) {
-    auto a_n = at::vec::VectorizedN<T1, T1_n>::loadu(a + i);
-    auto b_n = at::vec::VectorizedN<T2, T2_n>::loadu(b + i);
-    auto b_n_convert = at::vec::convert<T1, T1_n, T2, T2_n, true>(b_n);
-    auto res = a_n * vec_scale + b_n_convert;
-    res.store(out + i);
-  }
-  for (; i < size; i++) {
-    auto tmp0 = a[i];
-    auto tmp1 = (T1) b[i];
-    out[i] = tmp0 * val + tmp1;
-  }
-}
-
 // 1) out = exp(a - val)
 // 2) val = sum(out)
 template <typename T1, typename T2>
@@ -170,7 +142,7 @@ void reshape_attn_mask_to_4d(
                 .expand({attn_mask_size_0, attn_mask_size_1, qSize, kvSize});
 }
 
-template <typename scalar_t, typename mask_t, int64_t q_split_size, int64_t kv_split_size>
+template <typename scalar_t, int64_t q_split_size, int64_t kv_split_size>
 void cpu_flash_attention(
     const Tensor& output,
     const Tensor& logsumexp,
@@ -208,6 +180,9 @@ void cpu_flash_attention(
 
   bool has_attn_mask = attn_mask.has_value() && attn_mask.value().numel();
   if (has_attn_mask) {
+    if (is_reduced_type) {
+      attn_mask.value() = attn_mask.value().to(at::kFloat);
+    }
     reshape_attn_mask_to_4d(attn_mask.value(), batchSize, num_head, qSize, kvSize);
   }
 
@@ -260,8 +235,8 @@ void cpu_flash_attention(
   const scalar_t* q_data = query.const_data_ptr<scalar_t>();
   const scalar_t* k_data = key.const_data_ptr<scalar_t>();
   const scalar_t* v_data = value.const_data_ptr<scalar_t>();
-  mask_t* mask_data = has_attn_mask
-      ? attn_mask.value().data_ptr<mask_t>()
+  const accum_t* mask_data = has_attn_mask
+      ? attn_mask.value().const_data_ptr<accum_t>()
       : nullptr;
   scalar_t* out_data = output.data_ptr<scalar_t>();
   accum_t* lse_data = logsumexp.data_ptr<accum_t>();
@@ -323,13 +298,15 @@ void cpu_flash_attention(
         // qk <- qk * scaling + attn_mask
         if (has_attn_mask) {
           for (int64_t row = 0; row < qBlockSize; ++row) {
-            _scale_attn_mask_fusion_kernel(
+            at::vec::map2<accum_t>(
+                [scaling_factor](Vec x, Vec y) {
+                  return x * Vec(scaling_factor) + y;
+                },
+                qk_data + row * kvBlockSize,
                 qk_data + row * kvBlockSize,
                 mask_data + i * mStrideB + j * mStrideH +
-                        (m + row) * mStrideM + n,
-                kvBlockSize,
-                qk_data + row * kvBlockSize,
-                scaling_factor);
+                    (m + row) * mStrideM + n,
+                kvBlockSize);
           }
         }
         // Update coefficients with Softmax
@@ -410,7 +387,7 @@ void cpu_flash_attention(
 
 }
 
-template <typename scalar_t, typename mask_t, int64_t q_split_size, int64_t kv_split_size>
+template <typename scalar_t, int64_t q_split_size, int64_t kv_split_size>
 void cpu_flash_attention_backward(
     const at::Tensor& grad_q,
     const at::Tensor& grad_k,
@@ -445,6 +422,9 @@ void cpu_flash_attention_backward(
 
   bool has_attn_mask = attn_mask.has_value() && attn_mask.value().numel();
   if (has_attn_mask) {
+    if (is_reduced_type) {
+      attn_mask.value() = attn_mask.value().to(at::kFloat);
+    }
     reshape_attn_mask_to_4d(attn_mask.value(), batchSize, num_head, qSize, kvSize);
   }
 
@@ -517,8 +497,8 @@ void cpu_flash_attention_backward(
   const scalar_t* q_data = query.const_data_ptr<scalar_t>();
   const scalar_t* k_data = key.const_data_ptr<scalar_t>();
   const scalar_t* v_data = value.const_data_ptr<scalar_t>();
-  mask_t* mask_data = has_attn_mask
-      ? attn_mask.value().data_ptr<mask_t>()
+  const accum_t* mask_data = has_attn_mask
+      ? attn_mask.value().const_data_ptr<accum_t>()
       : nullptr;
   const scalar_t* out_data = out.const_data_ptr<scalar_t>();
   const accum_t* lse_data = logsumexp.const_data_ptr<accum_t>();
@@ -574,15 +554,16 @@ void cpu_flash_attention_backward(
             kvBlockSize);
           // attn <- attn + mask
           if (has_attn_mask) {
-            accum_t one = accum_t(1);
             for (const auto row : c10::irange(qBlockSize)) {
-              _scale_attn_mask_fusion_kernel(
+              at::vec::map2<accum_t>(
+                  [](Vec x, Vec y) {
+                    return x + y;
+                  },
+                  attn_data + row * kvBlockSize,
                   attn_data + row * kvBlockSize,
                   mask_data + i * mStrideB + j * mStrideH +
                       (m + row) * mStrideM + n,
-                  kvBlockSize,
-                  attn_data + row * kvBlockSize,
-                  one);
+                  kvBlockSize);
             }
           }
           // restore self attention after softmax from logsumexp
@@ -705,21 +686,6 @@ void cpu_flash_attention_backward(
   });
 }
 
-#define AT_DISPATCH_MASK_TYPES(TYPE, NAME, ...)            \
-  AT_DISPATCH_SWITCH(                                      \
-      TYPE,                                                \
-      NAME,                                                \
-      AT_PRIVATE_CASE_TYPE_USING_HINT(                     \
-          at::ScalarType::Bool, mask_t, __VA_ARGS__)       \
-      AT_PRIVATE_CASE_TYPE_USING_HINT(                     \
-          at::ScalarType::Float, mask_t, __VA_ARGS__)      \
-      AT_PRIVATE_CASE_TYPE_USING_HINT(                     \
-          at::ScalarType::Double, mask_t, __VA_ARGS__)     \
-      AT_PRIVATE_CASE_TYPE_USING_HINT(                     \
-          at::ScalarType::BFloat16, mask_t, __VA_ARGS__)   \
-      AT_PRIVATE_CASE_TYPE_USING_HINT(                     \
-          at::ScalarType::Half, mask_t, __VA_ARGS__))
-
 void flash_attention_kernel_impl(
     const Tensor& output,
     const Tensor& logsumexp,
@@ -733,36 +699,18 @@ void flash_attention_kernel_impl(
   auto q_seq_len = query.size(2);
 
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, query.scalar_type(), "flash_attention", [&] {
-    if (!attn_mask.has_value()) {
-      if (q_seq_len >= 768) {
-        cpu_flash_attention<scalar_t, scalar_t, 256, 512>(
-          output, logsumexp, query, key, value,
-          dropout_p, is_causal, attn_mask, scale);
-      } else if (q_seq_len >= 192) {
-        cpu_flash_attention<scalar_t, scalar_t, 64, 512>(
-          output, logsumexp, query, key, value,
-          dropout_p, is_causal, attn_mask, scale);
-      } else {
-        cpu_flash_attention<scalar_t, scalar_t, 32, 512>(
-          output, logsumexp, query, key, value,
-          dropout_p, is_causal, attn_mask, scale);
-      }
+    if (q_seq_len >= 768) {
+      cpu_flash_attention<scalar_t, 256, 512>(
+        output, logsumexp, query, key, value,
+        dropout_p, is_causal, attn_mask, scale);
+    } else if (q_seq_len >= 192) {
+      cpu_flash_attention<scalar_t, 64, 512>(
+        output, logsumexp, query, key, value,
+        dropout_p, is_causal, attn_mask, scale);
     } else {
-      AT_DISPATCH_MASK_TYPES(attn_mask.value().scalar_type(), "flash_attention_mask", [&]() {
-        if (q_seq_len >= 768) {
-          cpu_flash_attention<scalar_t, mask_t, 256, 512>(
-            output, logsumexp, query, key, value,
-            dropout_p, is_causal, attn_mask, scale);
-        } else if (q_seq_len >= 192) {
-          cpu_flash_attention<scalar_t, mask_t, 64, 512>(
-            output, logsumexp, query, key, value,
-            dropout_p, is_causal, attn_mask, scale);
-        } else {
-          cpu_flash_attention<scalar_t, mask_t, 32, 512>(
-            output, logsumexp, query, key, value,
-            dropout_p, is_causal, attn_mask, scale);
-        }
-      });
+      cpu_flash_attention<scalar_t, 32, 512>(
+        output, logsumexp, query, key, value,
+        dropout_p, is_causal, attn_mask, scale);
     }
   });
 }
@@ -788,43 +736,21 @@ void flash_attention_backward_kernel_impl(
   auto q_seq_len = query.size(1);
 
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, query.scalar_type(), "flash_attention_backward", [&] {
-    if (!attn_mask.has_value() || !attn_mask.value().defined()) {
-      using accum_t = at::opmath_type<scalar_t>;
-      if (q_seq_len >= 768) {
-        cpu_flash_attention_backward<scalar_t, accum_t, 256, 512>(
-          grad_q, grad_k, grad_v, grad_out_contig,
-          query, key, value, out, logsumexp,
-          dropout_p, is_causal, attn_mask, scale);
-      } else if (q_seq_len >= 192) {
-        cpu_flash_attention_backward<scalar_t, accum_t, 64, 512>(
-          grad_q, grad_k, grad_v, grad_out_contig,
-          query, key, value, out, logsumexp,
-          dropout_p, is_causal, attn_mask, scale);
-      } else {
-        cpu_flash_attention_backward<scalar_t, accum_t, 32, 512>(
-          grad_q, grad_k, grad_v, grad_out_contig,
-          query, key, value, out, logsumexp,
-          dropout_p, is_causal, attn_mask, scale);
-      }
+    if (q_seq_len >= 768) {
+      cpu_flash_attention_backward<scalar_t, 256, 512>(
+        grad_q, grad_k, grad_v, grad_out_contig,
+        query, key, value, out, logsumexp,
+        dropout_p, is_causal, attn_mask, scale);
+    } else if (q_seq_len >= 192) {
+      cpu_flash_attention_backward<scalar_t, 64, 512>(
+        grad_q, grad_k, grad_v, grad_out_contig,
+        query, key, value, out, logsumexp,
+        dropout_p, is_causal, attn_mask, scale);
     } else {
-      AT_DISPATCH_MASK_TYPES(attn_mask.value().scalar_type(), "flash_attention_mask_backward", [&]() {
-        if (q_seq_len >= 768) {
-          cpu_flash_attention_backward<scalar_t, mask_t, 256, 512>(
-            grad_q, grad_k, grad_v, grad_out_contig,
-            query, key, value, out, logsumexp,
-            dropout_p, is_causal, attn_mask, scale);
-        } else if (q_seq_len >= 192) {
-          cpu_flash_attention_backward<scalar_t, mask_t, 64, 512>(
-            grad_q, grad_k, grad_v, grad_out_contig,
-            query, key, value, out, logsumexp,
-            dropout_p, is_causal, attn_mask, scale);
-        } else {
-          cpu_flash_attention_backward<scalar_t, mask_t, 32, 512>(
-            grad_q, grad_k, grad_v, grad_out_contig,
-            query, key, value, out, logsumexp,
-            dropout_p, is_causal, attn_mask, scale);
-        }
-      });
+      cpu_flash_attention_backward<scalar_t, 32, 512>(
+        grad_q, grad_k, grad_v, grad_out_contig,
+        query, key, value, out, logsumexp,
+        dropout_p, is_causal, attn_mask, scale);
     }
   });
 }
