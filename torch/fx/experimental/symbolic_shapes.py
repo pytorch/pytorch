@@ -1288,7 +1288,7 @@ class SubclassSymbolicContext(StatefulSymbolicContext):
     may differ from that of the outer symbolic context. This structure allows for this
     flexibility, with inner symbolic contexts mapped via attr -> symbolic context.
     """
-    inner_contexts: Dict[str, SymbolicContext] = None
+    inner_contexts: Dict[str, "SubclassSymbolicContext"] = None
 
     def __post_init__(self):
         super().__post_init__()

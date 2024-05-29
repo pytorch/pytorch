@@ -33,6 +33,26 @@ def requires_subclass_dispatch(args, fw_metadata: ViewAndMutationMeta) -> bool:
     return any_subclass_args or any_subclass_outputs
 
 
+def create_rebuild_stack(a):
+    assert type(a) is not Tensor
+    rebuild_stack = []
+    plain_tensors = []
+    todo = [a]
+    while todo:
+        obj = todo.pop()
+        inner_keys, metadata = obj.__tensor_flatten__()
+        rebuild_stack.append((obj, metadata, inner_keys, obj.size, obj.stride()))
+        for attr_name in inner_keys:
+            val = getattr(obj, attr_name)
+            if not is_traceable_wrapper_subclass(val):
+                plain_tensors.append(val)
+            else:
+                assert isinstance(val, Tensor)
+                todo.append(val)
+
+    return plain_tensors, rebuild_stack
+
+
 # Given a flat list of arguments, some of which may be tensor subclasses,
 # computes metadata about "how to reconstruct the current list of subclasses,
 # if we were given their flattened dense tensors instead"
@@ -43,19 +63,15 @@ def create_subclass_meta(
     infos: List[Union[int, SubclassCreationMeta]] = []
     for a in curr_args:
         if isinstance(a, Tensor) and is_traceable_wrapper_subclass(a):
-            attrs, meta = a.__tensor_flatten__()  # type: ignore[attr-defined]
             start_idx = idx
-            cnt = len(attrs)
+            plain_tensors, rebuild_stack = create_rebuild_stack(a)
+            cnt = len(plain_tensors)
             curr_cnt = cnt
             infos.append(
                 SubclassCreationMeta(
                     flat_tensor_start_idx=start_idx,
                     arg_count=curr_cnt,
-                    original_subclass=a,
-                    meta=meta,
-                    inner_keys=attrs,
-                    outer_size=a.shape,
-                    outer_stride=a.stride(),
+                    rebuild_stack=rebuild_stack,
                 )
             )
         else:
@@ -80,11 +96,10 @@ def unwrap_tensor_subclasses(wrapped_args, *, is_joint_structure: bool):
     def concat_inner_tensors_from_subclasses(xs):
         xs_inner = []
         for x in xs:
-            if isinstance(x, Tensor) and is_traceable_wrapper_subclass(x):
-                attrs, _ = x.__tensor_flatten__()  # type: ignore[attr-defined]
-                xs_inner += [getattr(x, attr) for attr in attrs]
+            if type(x) is Tensor:
+                xs_inner.append(x)
             else:
-                xs_inner += [x]
+                xs_inner.extend(create_rebuild_stack(x)[0])
         return xs_inner
 
     if is_joint_structure:

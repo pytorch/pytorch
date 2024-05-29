@@ -704,6 +704,32 @@ def forward(self, primals_1):
         self.assertEqual(x_ref.grad, x_test.grad)
         self.assertEqual(x_ref_view.grad, x_test_view.grad)
 
+    def test_nested_subclasses(self):
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            return x.sin().cos()
+
+        a = torch.ones(4, requires_grad=True)
+        a2 = a.clone().detach().requires_grad_()
+        aa = TwoTensor(a, a2)
+        aa2 = aa.clone().detach().requires_grad_()
+        aaaa = TwoTensor(aa, aa2)
+        out = f(aaaa)
+        self.assertTrue(isinstance(out, TwoTensor))
+        self.assertTrue(isinstance(out.a, TwoTensor))
+        self.assertTrue(isinstance(out.b, TwoTensor))
+        self.assertTrue(isinstance(out.a.a, torch.Tensor))
+        self.assertTrue(isinstance(out.a.b, torch.Tensor))
+        self.assertTrue(isinstance(out.b.a, torch.Tensor))
+        self.assertTrue(isinstance(out.b.b, torch.Tensor))
+
+        out.sum().backward()
+        # aaaa.grad should be a TwoTensor(TwoTensor, TwoTensor)
+        # but instead it is a TwoTensor(tensor, tensor)
+        self.assertTrue(isinstance(aaaa.grad, TwoTensor))
+        self.assertTrue(isinstance(aaaa.grad.a, TwoTensor))
+        self.assertTrue(isinstance(aaaa.grad.b, TwoTensor))
+
     def test_outputs_are_aliased(self):
         # Tensor, None, int
         def f(a):

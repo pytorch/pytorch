@@ -690,15 +690,30 @@ class MetaConverter:
             outer_size = outer_size if outer_size is not None else t.size
             outer_stride = outer_stride if outer_stride is not None else t.stride
 
-            def transform(attr, inner_t):
+            def transform(attr, inner_t, prefix):
+                if is_traceable_wrapper_subclass(inner_t):
+                    return inner_t
+
+                attr_fqn = prefix + "." + attr if prefix != "" else attr
+                attr_list = attr_fqn.split(".")
+                attr_source = None
+                current_source = source
+                for a in attr_list:
+                    attr_source = AttrSource(current_source, a)
+                    current_source = attr_source
+
+                context = None
+                current_context = symbolic_context
+                for a in attr_list:
+                    context = current_context.inner_contexts[a]
+                    current_context = context
+
                 r = callback(
                     lambda: empty_create(
                         inner_t,
-                        AttrSource(source, attr),
+                        attr_source,
                         symbolic_context=(
-                            None
-                            if symbolic_context is None
-                            else symbolic_context.inner_contexts[attr]
+                            None if symbolic_context is None else context
                         ),
                     )
                 )
@@ -714,13 +729,59 @@ class MetaConverter:
                         _safe_copy(r.real_tensor, inner_t.data)
                 return r
 
-            transformed_tensors_dict = {
-                attr: transform(attr, inner_t) for attr, inner_t in t.attrs.items()
-            }
+            def _get_size(obj):
+                if obj is not t:
+                    return obj.size
+                return outer_size if outer_size is not None else obj.size
 
-            sub = t.type.__tensor_unflatten__(
-                transformed_tensors_dict, t.ctx, outer_size, outer_stride
-            )
+            def _get_strides(obj):
+                if obj is not t:
+                    return obj.stride
+                return outer_stride if outer_stride is not None else obj.stride
+
+            rebuild_stack = []
+            plain_meta_tensors = []
+            todo = [(t, "")]
+            while todo:
+                obj, prefix = todo.pop()
+                rebuild_stack.append(
+                    (
+                        obj,
+                        obj.ctx,
+                        prefix,
+                        list(obj.attrs.keys()),
+                        _get_size(obj),
+                        _get_strides(obj),
+                    )
+                )
+                for attr_name, inner_meta in obj.attrs.items():
+                    if inner_meta.attrs is None:
+                        plain_meta_tensors.append(inner_meta)
+                    else:
+                        todo.append(
+                            (
+                                inner_meta,
+                                prefix + "." + attr_name if prefix != "" else attr_name,
+                            )
+                        )
+
+            todo = plain_meta_tensors
+            for ts, meta, prefix, inner_keys, outer_size, outer_strides in reversed(
+                rebuild_stack
+            ):
+                nb_tensor = len(inner_keys)
+                inner_tensors = {
+                    a: transform(a, b, prefix)
+                    for a, b in zip(inner_keys, todo[:nb_tensor])
+                }
+                todo = todo[nb_tensor:]
+                rebuilt = ts.type.__tensor_unflatten__(
+                    inner_tensors, meta, outer_size, outer_strides
+                )
+                todo.append(rebuilt)
+            assert len(todo) == 1
+
+            sub = todo[0]
 
             # NB: Purposefully guard here to simplify the inner / outer symbols.
             # Using sym_eq() for symbolic comparison can result in an expression that's too
