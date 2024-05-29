@@ -1744,15 +1744,15 @@ def get_include_and_linking_paths(
         else:
             libs = ["omp"] if config.is_fbcode() else ["gomp"]
 
+        # For AOT mode, the produced library relies on torch cpu to set grad mode
+        # like aoti_torch_grad_mode_set_enabled
+        if aot_mode:
+            libs += ["torch", "torch_cpu"]
+
     # Unconditionally import c10 for non-abi-compatible mode to use TORCH_CHECK - See PyTorch #108690
     if not config.abi_compatible:
         libs += ["c10"]
         lpaths += [cpp_extension.TORCH_LIB_PATH]
-
-    # For AOT mode, the produced library relies on torch cpu to set grad mode
-    # like aoti_torch_grad_mode_set_enabled
-    if aot_mode:
-        libs += ["torch", "torch_cpu"]
 
     # third party libs
     if config.is_fbcode():

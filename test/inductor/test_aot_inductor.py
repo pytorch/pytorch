@@ -1310,7 +1310,10 @@ class AOTInductorTestsTemplate:
         for simdlen in [0, None]:
             with torch._inductor.config.patch("cpp.simdlen", simdlen):
                 so_path = torch._export.aot_compile(
-                    torch.ops.aten.add, args=(a, b), kwargs={"alpha": 2.0}, same_signature=False
+                    torch.ops.aten.add,
+                    args=(a, b),
+                    kwargs={"alpha": 2.0},
+                    same_signature=False,
                 )
                 kernel_runner = AOTIRunnerUtil.load_runner(self.device, so_path)
                 res = kernel_runner.run([a, b])
