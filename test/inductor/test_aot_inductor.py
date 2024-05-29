@@ -42,6 +42,7 @@ from torch.utils import _pytree as pytree
 
 if HAS_CUDA:
     import triton
+
     from torch.testing._internal.triton_utils import (
         add_kernel,
         add_kernel_2d_autotuned,
