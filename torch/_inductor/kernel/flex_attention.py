@@ -453,6 +453,7 @@ def flex_attention_backward_grid(batch_size, num_heads, num_queries, d_model, me
     """
     import triton
 
+    # TODO: support different seqlen for Query and Key/Value.
     num_key_value = num_queries
     return (
         triton.cdiv(num_queries, meta["BLOCK_M2"])
@@ -519,40 +520,39 @@ flex_attention_backward_template = TritonTemplate(
     offs_k = tl.arange(0, BLOCK_DMODEL)
 
     if pid >= NUM_KV_BLOCKS:
-        # THIS BLOCK DOES DQ:
+        # THIS BLOCK DOES DQ
         off_pid = pid - NUM_KV_BLOCKS
-        start_m = off_pid * BLOCK_M2
+        start_m2 = off_pid * BLOCK_M2
 
-        offs_m_ = start_m + tl.arange(0, BLOCK_M2)
+        offs_m2 = start_m2 + tl.arange(0, BLOCK_M2)
 
-        q = tl.load(Q + offs_m_[:, None] * stride_tok + offs_k[None, :] * stride_d)
+        q = tl.load(Q + offs_m2[:, None] * stride_tok + offs_k[None, :] * stride_d)
         dq = tl.zeros([BLOCK_M2, BLOCK_DMODEL], dtype=tl.float32)
-        do = tl.load(DO + offs_m_[:, None] * stride_tok + offs_k[None, :] * stride_d)
+        do = tl.load(DO + offs_m2[:, None] * stride_tok + offs_k[None, :] * stride_d)
 
-        lse = tl.load(LSE + offs_m_)
+        lse = tl.load(LSE + offs_m2)
         lse = lse[:, None]
 
-        # start bwd_dq
-        start_n = 0
-        offs_m_ = start_m + tl.arange(0, BLOCK_M2)
-        offs_n_ = start_n + tl.arange(0, BLOCK_N2)
-        kT_ptrs = K + offs_n_[None, :] * stride_tok + offs_k[:, None] * stride_d
-        vT_ptrs = V + offs_n_[None, :] * stride_tok + offs_k[:, None] * stride_d
-        Di = tl.load(DELTA + offs_m_)
+        start_n2 = 0
+        offs_m2 = start_m2 + tl.arange(0, BLOCK_M2)
+        offs_n2 = start_n2 + tl.arange(0, BLOCK_N2)
+        kT_ptrs = K + offs_n2[None, :] * stride_tok + offs_k[:, None] * stride_d
+        vT_ptrs = V + offs_n2[None, :] * stride_tok + offs_k[:, None] * stride_d
+        Di = tl.load(DELTA + offs_m2)
         # BLOCK_M2 must be a multiple of BLOCK_N2, otherwise the code wouldn't work.
         tl.static_assert(BLOCK_M2 % BLOCK_N2 == 0)
 
-        curr_n = start_n
+        curr_n = start_n2
         num_steps = KV_LEN // BLOCK_N2
         for blk_idx in range(num_steps):
-            offs_n_= curr_n + tl.arange(0, BLOCK_N2)
+            offs_n2= curr_n + tl.arange(0, BLOCK_N2)
             kT = tl.load(kT_ptrs)
             vT = tl.load(vT_ptrs)
             qk = tl.dot(q, kT)
             # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
             pre_mod_scores = qk
-            m = offs_m_[:, None]
-            n = offs_n_[None, :]
+            m = offs_m2[:, None]
+            n = offs_n2[None, :]
             {{ modification(
                 subgraph_number=0,
                 output_name="post_mod_scores",
@@ -568,7 +568,7 @@ flex_attention_backward_template = TritonTemplate(
                 post_mod_scores *= 1.44269504
             p = tl.math.exp2(post_mod_scores - lse).to(MATMUL_PRECISION)
             # Compute dP and dS.
-            dp = tl.dot(do, vT).to(tl.float32)
+            dp = tl.dot(do, vT)
             ds = p * (dp - Di[:, None])
             # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
             {{ modification(
@@ -591,42 +591,42 @@ flex_attention_backward_template = TritonTemplate(
             kT_ptrs += BLOCK_N2 * stride_tok
             vT_ptrs += BLOCK_N2 * stride_tok
         # Write back dQ.
-        dq_ptrs = DQ + offs_m_[:, None] * stride_tok + offs_k[None, :] * stride_d
+        dq_ptrs = DQ + offs_m2[:, None] * stride_tok + offs_k[None, :] * stride_d
         tl.store(dq_ptrs, dq)
     else:
-        start_n = pid * BLOCK_N1
-        start_m = 0
+        # THIS BLOCK DOES DK & DV
+        start_n1 = pid * BLOCK_N1
+        start_m1 = 0
 
-        offs_n = start_n + tl.arange(0, BLOCK_N1)
+        offs_n1 = start_n1 + tl.arange(0, BLOCK_N1)
 
         dv = tl.zeros([BLOCK_N1, BLOCK_DMODEL], dtype=tl.float32)
         dk = tl.zeros([BLOCK_N1, BLOCK_DMODEL], dtype=tl.float32)
 
         # load K and V: they stay in SRAM throughout the inner loop.
-        k = tl.load(K + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d)
-        v = tl.load(V + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d)
+        k = tl.load(K + offs_n1[:, None] * stride_tok + offs_k[None, :] * stride_d)
+        v = tl.load(V + offs_n1[:, None] * stride_tok + offs_k[None, :] * stride_d)
 
-        # start bwd dkdv
-        offs_m = start_m + tl.arange(0, BLOCK_M1)
-        offs_n = start_n + tl.arange(0, BLOCK_N1)
-        qT_ptrs = Q + offs_m[None, :] * stride_tok + offs_k[:, None] * stride_d
-        do_ptrs = DO + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d
+        offs_m1 = start_m1 + tl.arange(0, BLOCK_M1)
+        offs_n1 = start_n1 + tl.arange(0, BLOCK_N1)
+        qT_ptrs = Q + offs_m1[None, :] * stride_tok + offs_k[:, None] * stride_d
+        do_ptrs = DO + offs_m1[:, None] * stride_tok + offs_k[None, :] * stride_d
         # BLOCK_N1 must be a multiple of BLOCK_M1, otherwise the code wouldn't work.
         tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
 
-        curr_m = start_m
+        curr_m = start_m1
         num_steps = Q_LEN // BLOCK_M1
         for blk_idx in range(num_steps):
             qT = tl.load(qT_ptrs)
             # Load LSE before computing qk to reduce pipeline stall.
-            offs_m = curr_m + tl.arange(0, BLOCK_M1)
-            lse = tl.load(LSE + offs_m)
+            offs_m1 = curr_m + tl.arange(0, BLOCK_M1)
+            lse = tl.load(LSE + offs_m1)
             qkT = tl.dot(k, qT)
             # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
             pre_mod_scores = qkT
-            m = offs_m[:, None]
-            n = offs_n[None, :]
-            qk = tl.trans(qkT, 1, 0)
+            m = offs_m1[:, None]
+            n = offs_n1[None, :]
+            qk = tl.trans(qkT)
             {{ modification(
                 subgraph_number=0,
                 output_name="post_mod_scores",
@@ -637,7 +637,7 @@ flex_attention_backward_template = TritonTemplate(
                 n="n",
                 out="qk"
             ) | indent_except_first(3) }}
-            post_mod_scores = tl.trans(post_mod_scores, 1, 0)
+            post_mod_scores = tl.trans(post_mod_scores)
             # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             if not SCORE_MOD_IS_LINEAR:
                 post_mod_scores *= 1.44269504
@@ -646,12 +646,12 @@ flex_attention_backward_template = TritonTemplate(
             # Compute dV.
             ppT = pT
             dv += tl.dot(ppT.to(MATMUL_PRECISION), do)
-            Di = tl.load(DELTA + offs_m)
+            Di = tl.load(DELTA + offs_m1)
             # Compute dP and dS.
-            dpT = tl.dot(v, tl.trans(do)).to(tl.float32)
+            dpT = tl.dot(v, tl.trans(do))
             dsT = pT * (dpT - Di[None, :])
 
-            ds = tl.trans(dsT, 1, 0)
+            ds = tl.trans(dsT)
             # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
             {{ modification(
                 subgraph_number=1,
@@ -663,7 +663,7 @@ flex_attention_backward_template = TritonTemplate(
                 n="n",
                 grad_score_mod="ds"
             ) | indent_except_first(3) }}
-            dsT = tl.trans(grad_scores, 1, 0)
+            dsT = tl.trans(grad_scores)
             # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             dk += tl.dot(dsT.to(MATMUL_PRECISION), tl.trans(qT))
             # Increment pointers.
@@ -671,11 +671,11 @@ flex_attention_backward_template = TritonTemplate(
             qT_ptrs += BLOCK_M1 * stride_tok
             do_ptrs += BLOCK_M1 * stride_tok
 
-        dv_ptrs = DV + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
+        dv_ptrs = DV + offs_n1[:, None] * stride_tok + offs_k[None, :] * stride_d
         tl.store(dv_ptrs, dv)
 
         # Write back dK.
-        index_n = offs_n[:, None]
+        index_n = offs_n1[:, None]
         index_k = offs_k[None, :]
         # TODO generalize and add proper mask support
         mask = (index_n != -1) & (index_k != -1)
