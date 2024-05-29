@@ -166,7 +166,7 @@ case "$image" in
     ;;
   pytorch-linux-focal-cuda12.4-cudnn9-py3.12-gcc9-inductor-benchmarks)
     CUDA_VERSION=12.4.0
-    CUDNN_VERSION=8
+    CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=9
     PROTOBUF=yes
@@ -221,9 +221,9 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
-  pytorch-linux-focal-cuda12.4-cudnn8-py3-gcc9)
+  pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9)
     CUDA_VERSION=12.4.0
-    CUDNN_VERSION=8
+    CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     PROTOBUF=yes
