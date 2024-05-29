@@ -85,11 +85,11 @@ else()
     append_torchlib_if_found(nnpack)
   endif()
 
-  if(@USE_PYTORCH_QNNPACK@)
+  if("@USE_PYTORCH_QNNPACK@" AND "@PYTORCH_QNNPACK_LIBRARY_TYPE@" != "static")
     append_torchlib_if_found(pytorch_qnnpack)
   endif()
 
-  if(@USE_XNNPACK@)
+  if("@USE_XNNPACK@" AND "@XNNPACK_LIBRARY_TYPE@" != "static")
     append_torchlib_if_found(XNNPACK)
   endif()
 
@@ -105,7 +105,7 @@ else()
 
   append_torchlib_if_found(eigen_blas)
 
-  if(@USE_FBGEMM@)
+  if("@USE_FBGEMM@" AND "@FBGEMM_LIBRARY_TYPE@" != "static")
     append_torchlib_if_found(fbgemm)
   endif()
 
@@ -116,7 +116,7 @@ else()
   append_torchlib_if_found(sleef asmjit)
 endif()
 
-if(@USE_KINETO@)
+if("@USE_KINETO@" AND "@KINETO_LIBRARY_TYPE@" != "static")
   append_torchlib_if_found(kineto)
 endif()
 
