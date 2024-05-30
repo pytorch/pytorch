@@ -2034,7 +2034,8 @@ class TestOperators(TestCase):
             ),
             tol1(
                 "nn.functional.conv_transpose2d",
-                {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
+                {torch.float32: tol(atol=5e-04, rtol=5e-04)}
+            ),
             tol1("svd", {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
             tol1("matrix_exp", {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
         ),
