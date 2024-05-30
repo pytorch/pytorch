@@ -5858,6 +5858,26 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(actual, expected)
         self.assertEqual(some_list, [1, 1])
 
+    def test_vmap_side_effects_append_copy(self):
+        counters.clear()
+        lst = []
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def f(x):
+            y = x.clone()
+            lst.append(y * 2)
+
+            def g():
+                return y + 1
+
+            return g()
+
+        x = torch.randn(3)
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def g(x):
+            return torch.func.vmap(f)(x)
+
     @unittest.expectedFailure
     def test_vmap_side_effects_append_input(self):
         counters.clear()
