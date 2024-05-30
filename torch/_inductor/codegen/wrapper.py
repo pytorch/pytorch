@@ -28,12 +28,7 @@ import torch._ops
 from torch._dynamo.utils import counters, dynamo_timed
 
 from torch._inductor.codegen.multi_kernel import MultiKernelState
-from torch.fx.experimental.symbolic_shapes import (
-    ConvertIntKey,
-    DivideByKey,
-    free_unbacked_symbols,
-    SymTypes,
-)
+from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
 from torch.fx.node import _get_qualified_name
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.symbol import symbol_is_type, SymT
