@@ -41,6 +41,7 @@ def normalize_name(name: str) -> str:
 
 
 def get_op_overload(node: torch._C.Node):
+    # breakpoint()
     schema_str = node.schema()
     schema = FunctionSchema.parse(schema_str)
     ns, op_name = str(schema.name.name).split("::")
@@ -111,7 +112,7 @@ class TS2EPConverter:
 
     def convert(self) -> ExportedProgram:
         self.convert_graph_inputs()
-
+        # breakpoint()
         for node in self.ts_graph.nodes():
             self.convert_node(node)
 
@@ -316,6 +317,7 @@ class TS2EPConverter:
 
     def convert_node(self, node: torch._C.Node):
         node_kind = node.kind()
+        # breakpoint()
         if node_kind == "prim::CreateObject":
             self.convert_prim_CreateObject(node)
         elif node_kind == "prim::Constant":

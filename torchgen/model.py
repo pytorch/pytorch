@@ -2004,6 +2004,7 @@ class Argument:
 
     @staticmethod
     def parse(arg: str) -> "Argument":
+        print('reach here')
         name: str
         default: Optional[str]
         type_and_annot, name_and_default = arg.rsplit(" ", 1)
@@ -2012,6 +2013,7 @@ class Argument:
         else:
             name = name_and_default
             default = None
+        breakpoint()
         # TODO: deduplicate annotation matching with Return
         match = re.match(r"Tensor\((.+)\)(.*)", type_and_annot)
         annotation: Optional[Annotation]

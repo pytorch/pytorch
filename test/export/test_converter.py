@@ -51,6 +51,15 @@ class TestConverter(TestCase):
         inp = (torch.ones(2, 3),)
         self._check_equal_ts_ep_converter(Module(), inp)
 
+    def test_aten___getitem__(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                y = torch.split(x, 2)
+                return y[0]
+
+        inp = (torch.rand((3,2)), )
+        self._check_equal_ts_ep_converter(Module(), inp)
+
 
 if __name__ == "__main__":
     run_tests()
