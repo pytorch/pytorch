@@ -11,6 +11,7 @@ import math
 import numpy as np
 import torch
 import torch._dynamo
+import torch._dynamo.testing
 import torch.nn
 import torch.nn.functional as F
 from torch.testing._internal.common_cuda import (
