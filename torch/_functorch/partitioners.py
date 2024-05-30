@@ -1348,12 +1348,12 @@ def dp_knapsack(
 
     # Quantize the memory weights
     quantized_memory = torch.tensor(
-        [int(m * S) for m in memory], dtype=torch.long, device="cpu"
+        [int(round(m * S)) for m in memory], dtype=torch.long, device="cpu"
     )
     runtimes = torch.tensor(runtimes, dtype=torch.float32, device="cpu")
 
     # Quantized pseudopolynomial DP for 0-1 Knapsack
-    quantized_max_memory = round(max_memory * S)
+    quantized_max_memory = int(round(max_memory * S))
 
     n = len(memory)
 
@@ -1409,7 +1409,7 @@ def _optimize_runtime_with_given_memory(
     elif SOLVER == "dp":
         return dp_knapsack(memory, runtimes, max_memory)
     else:
-        raise RuntimeError(f"Could not find solver {SOLVER}")
+        raise RuntimeError(f"Not aware of memory budget knapsack solver: {SOLVER}")
 
 
 from torch.utils._mode_utils import no_dispatch
@@ -1432,7 +1432,7 @@ def estimate_runtime(node):
     if RUNTIME_MODE == "placeholder":
         return 1
 
-    if RUNTIME_MODE == "profile":
+    elif RUNTIME_MODE == "profile":
         from triton.testing import do_bench
 
         with no_dispatch():
@@ -1440,7 +1440,7 @@ def estimate_runtime(node):
             ms = do_bench(lambda: node.target(*args, **kwargs))
             return ms
 
-    if RUNTIME_MODE == "flops":
+    elif RUNTIME_MODE == "flops":
         # todo(chilli): Normalize this to also return ms
         from torch.utils.flop_counter import FlopCounterMode
 
@@ -1449,7 +1449,9 @@ def estimate_runtime(node):
             node.target(*args, **kwargs)
         counted_flops = mode.get_total_flops()
         return max(counted_flops, 1)
-
+    else:
+        raise RuntimeError(f"Not aware of runtime estimator: {RUNTIME_MODE}")
+        raise RuntimeError
     return 1
 
 
@@ -1476,7 +1478,6 @@ def choose_saved_values_set(
             ban_if_materialized_backward=False,
             ban_if_not_in_allowlist=False,
         )
-
     if memory_budget == 0:
         return node_info.inputs
 
@@ -1489,7 +1490,7 @@ def choose_saved_values_set(
     if memory_budget == 1:
         return runtime_optimized_saved_values
 
-    def estimate_activations_size(saved_values):
+    def estimate_activations_size(saved_values: List[fx.Node]) -> float:
         return sum([_size_of(i) for i in saved_values]) / 1e9
 
     min_act_size = estimate_activations_size(node_info.inputs)
@@ -1497,6 +1498,14 @@ def choose_saved_values_set(
     # The optimized choice is smaller than the inputs anyways
     if max_act_size <= min_act_size:
         return runtime_optimized_saved_values
+
+    def get_normalized_size(sz):
+        return (sz / 1e9) / (max_act_size - min_act_size)
+
+    def get_mem_ratio(activations: List[fx.Node]):
+        return (estimate_activations_size(activations) - min_act_size) / (
+            max_act_size - min_act_size
+        )
 
     more_aggressive_options = replace(
         min_cut_options,
@@ -1507,17 +1516,7 @@ def choose_saved_values_set(
     more_aggressive_saved_values, _ = get_saved_values(
         joint_graph, node_info, more_aggressive_options
     )
-
-    def get_normalized_size(sz):
-        return (sz / 1e9) / (max_act_size - min_act_size)
-
-    def get_mem_ratio(cur):
-        return (cur - min_act_size) / (max_act_size - min_act_size)
-
-    if (
-        get_mem_ratio(estimate_activations_size(more_aggressive_saved_values))
-        < memory_budget
-    ):
+    if get_mem_ratio(more_aggressive_saved_values) < memory_budget:
         return more_aggressive_saved_values
 
     aggressive_options = replace(
@@ -1528,10 +1527,7 @@ def choose_saved_values_set(
         joint_graph, node_info, aggressive_options
     )
 
-    if (
-        get_mem_ratio(estimate_activations_size(aggressive_recomputation_saved_values))
-        < memory_budget
-    ):
+    if get_mem_ratio(aggressive_recomputation_saved_values) < memory_budget:
         return aggressive_recomputation_saved_values
 
     from torch._inductor.fx_utils import get_node_storage
@@ -1542,15 +1538,12 @@ def choose_saved_values_set(
         return [
             i
             for i in banned_nodes
-            if not (i.dist_from_bw >= int(1e9) or get_node_storage(i) in input_storages)
+            if (i.dist_from_bw < int(1e9) and get_node_storage(i) not in input_storages)
         ]
 
     recomputable_banned_nodes = get_recomputable_banned_nodes(
         banned_nodes, aggressive_recomputation_saved_values
     )
-
-    def print_budget_real_mem(act_size, name=""):
-        print(f"{get_mem_ratio(act_size):.2f}: {act_size:.2f}GB ({name})")
 
     # default: runtime_optimized_saved_values
     # more aggressive: more_aggressive_saved_values
@@ -1566,45 +1559,75 @@ def choose_saved_values_set(
     cur_memory_budget = memory_budget
     from torch.utils._mode_utils import no_dispatch
 
-    with no_dispatch():
-        (
-            expected_runtime,
-            saved_node_idxs,
-            recomputable_node_idxs,
-        ) = _optimize_runtime_with_given_memory(
-            memories, runtimes, max(memory_budget, 0)
-        )
+    def get_saved_values_knapsack(memory_budget):
+        with no_dispatch():
+            (
+                expected_runtime,
+                saved_node_idxs,
+                recomputable_node_idxs,
+            ) = _optimize_runtime_with_given_memory(
+                memories, runtimes, max(memory_budget, 0)
+            )
         dont_ban = set()
         for idx in recomputable_node_idxs:
             dont_ban.add(all_recomputable_banned_nodes[idx])
         predicted_saved_nodes = set(all_recomputable_banned_nodes) - dont_ban
-        # print([(i, get_normalized_size(_size_of(i))) for i in dont_ban])
-        estimated_activations_saved = estimate_activations_size(
-            predicted_saved_nodes
-        ) / (max_act_size - min_act_size)
 
-        saved_values, banned_nodes = get_saved_values(
+        saved_values, _ = get_saved_values(
             joint_graph,
             node_info,
             aggressive_options,
             dont_ban,
         )
-        # todo(chilli): Estimated doesn't align exaclty with actual - actual is
-        # usually less memory than estimated. i'm guessing (actually quite
-        # unsure about this) that's because estimated is just only including
-        # tensors we actually banned from recompute, but there may be other
-        # tensors that we choose to save.
-        # print(f"desired: {cur_memory_budget} ")
-        # print(f"allow recomputing: {dont_ban}")
-        # print(f"estimated: {estimate_activations_size(predicted_saved_nodes)}")
-        # print(
-        #     f"estimated ratio: {estimate_activations_size(predicted_saved_nodes)/(max_act_size - min_act_size)}"
-        # )
-        # print(f"actual: {estimate_activations_size(saved_values) - min_act_size}")
-        # print(f"actual ratio: {get_mem_ratio(estimate_activations_size(saved_values))}")
-        # print_budget_real_mem(estimate_activations_size(saved_values), "milp")
+        return saved_values, expected_runtime
 
-        return saved_values
+    if config.visualize_memory_budget_pareto:
+        options = []
+        for sweep_memory_budget in range(100, -1, -5):
+            saved_values, expected_runtime = get_saved_values_knapsack(
+                sweep_memory_budget / 100
+            )
+            options.append(
+                (
+                    sweep_memory_budget,
+                    sum(runtimes) - expected_runtime,
+                    get_mem_ratio(saved_values),
+                )
+            )
+
+        import matplotlib.pyplot as plt
+
+        x_values = [item[2] for item in options]
+        y_values = [item[1] for item in options]
+
+        # Plotting the values with updated axis labels and chart title
+        plt.figure(figsize=(10, 6))
+        plt.plot(x_values, y_values, marker="o")
+
+        # Adding labels for each point
+        for i, txt in enumerate(x_values):
+            plt.annotate(
+                f"{txt:.2f}",
+                (x_values[i], y_values[i]),
+                textcoords="offset points",
+                xytext=(0, 10),
+                ha="center",
+            )
+
+        plt.xlabel("Memory Budget")
+        plt.ylabel("Runtime of Recomputed Components")
+        plt.title("Pareto Frontier of Memory Budget vs. Recomputation Runtime")
+        plt.grid(True)
+        fig = plt.gcf()
+        plt.show()
+        fig.savefig("memory_budget_pareto.png")
+    # todo(chilli): Estimated doesn't align exactly with actual - actual is
+    # usually less memory than estimated. i'm guessing (actually quite
+    # unsure about this) that's because estimated is just only including
+    # tensors we actually banned from recompute, but there may be other
+    # tensors that we choose to save.
+
+    return get_saved_values_knapsack(memory_budget=memory_budget)[0]
 
 
 def min_cut_rematerialization_partition(
@@ -1726,7 +1749,6 @@ def min_cut_rematerialization_partition(
             memory_budget = node.meta["memory_budget"]
             break
     # print("Memory Budget: ", memory_budget)
-
     saved_values = choose_saved_values_set(
         joint_graph, node_info, memory_budget=memory_budget
     )
