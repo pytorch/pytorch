@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import os
+import unittest
 
 import torch
 import torch._dynamo
@@ -16,16 +17,14 @@ from torch._functorch._aot_autograd.autograd_cache import (
 )
 from torch._functorch._aot_autograd.schemas import AOTConfig
 from torch._inductor import config as inductor_config
-from torch.testing._internal.inductor_utils import (
-    GPU_TYPE,
-    HAS_GPU,
-)
+from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_device_type import largeTensorTest
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+
 
 @instantiate_parametrized_tests
 class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
@@ -190,7 +189,6 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
-
     @largeTensorTest("64GB", device=GPU_TYPE)
     @parametrize("device", (GPU_TYPE,))
     @parametrize("dtype", (torch.float16, torch.bfloat16))
@@ -235,9 +233,15 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
             # instead cache miss because of guard failure.
             expected_misses += 1
             expected_saves += 1
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], expected_misses)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], expected_hits)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], expected_saves)
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_miss"], expected_misses
+            )
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_hit"], expected_hits
+            )
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_saved"], expected_saves
+            )
 
             # A second call should hit. (First reset so in-memory guards
             # don't prevent compilation).
@@ -248,9 +252,15 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
             self._clear_dynamo_and_codecache()
             res2 = compiled_fn(a, b)
             expected_hits += 1
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], expected_misses)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], expected_hits)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], expected_saves)
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_miss"], expected_misses
+            )
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_hit"], expected_hits
+            )
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_saved"], expected_saves
+            )
             self.assertEqual(res1, res2)
 
 
