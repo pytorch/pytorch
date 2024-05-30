@@ -983,8 +983,8 @@ class AOTInductorTestsTemplate:
                 addmm = torch.ops.aten.addmm.default(primals_2, view_1, permute_1)
                 primals_2 = None
                 return addmm
-
-        s0 = 727828
+        # let y_grid = 65537
+        s0 = 524296
         s1 = 512
         example_inputs = (
             torch.rand(2, 4, device=self.device),
