@@ -36,9 +36,10 @@ def main() -> None:
         print("The 'docathon-h1-2024' label is not present in the issue.")
         return
     pull_request_labels = pull_request.get_labels()
+    pull_request_label_names = [label.name for label in pull_request_labels]
     issue_label_names = [label.name for label in issue_labels]
     labels_to_add = [
-        label for label in issue_label_names if label not in pull_request_labels
+        label for label in issue_label_names if label not in pull_request_label_names
     ]
     if not labels_to_add:
         print("The pull request already has the same labels.")
