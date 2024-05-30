@@ -3,6 +3,7 @@ name: Docathon Labels Sync
 on:
   pull_request_target:
     types: [opened, synchronize, edited]
+    branches: [main]
 
 jobs:
   check-labels:
