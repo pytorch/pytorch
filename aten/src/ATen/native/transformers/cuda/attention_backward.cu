@@ -464,7 +464,7 @@ _efficient_attention_backward(
     ASSIGN_CHECK_OVERFLOW(p.gQ_strideH, grad_q.stride(2));
     ASSIGN_CHECK_OVERFLOW(p.gK_strideH, grad_k.stride(2));
     ASSIGN_CHECK_OVERFLOW(p.gV_strideH, grad_v.stride(2));
-    p.gQKV_strideM_multiplier = grad_q.is_contiguous() ? 1 : 3;
+    p.gQKV_strideM_multiplier = shared_storage_dqdkdv ? 3 : 1;
     TORCH_INTERNAL_ASSERT(p.gQ_strideM() == grad_q.stride(1));
     TORCH_INTERNAL_ASSERT(p.gK_strideM() == grad_k.stride(1));
     TORCH_INTERNAL_ASSERT(p.gV_strideM() == grad_v.stride(1));
