@@ -1244,6 +1244,9 @@ if(USE_KINETO)
     ${TORCH_ROOT}/third_party/kineto/libkineto/src)
 endif()
 
+target_include_directories(torch_cpu PRIVATE
+  ${TORCH_ROOT}/third_party/cpp-httplib)
+
 install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
   DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
   FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
