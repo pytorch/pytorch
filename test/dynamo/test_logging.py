@@ -225,7 +225,10 @@ LoweringException: AssertionError:
         ddp_model(torch.randn(1024, 1024, device="cuda:0"))
 
         dist.destroy_process_group()
-        self.assertEqual(len([r for r in records if "__ddp_graphs" in r.name]), 4)
+        self.assertEqual(
+            len([r for r in records if "__ddp_graphs" in r.name]),
+            0 if torch._dynamo.config.inline_inbuilt_nn_modules else 4,
+        )
 
     # check that logging to a child log of a registered logger
     # does not register it and result in duplicated records
