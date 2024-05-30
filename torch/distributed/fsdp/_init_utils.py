@@ -1099,7 +1099,6 @@ def _sync_module_params_and_buffers(
     )
 
 
-
 def _check_module_states_for_sync_module_states(
     module_states: List[torch.Tensor],
 ) -> None:
