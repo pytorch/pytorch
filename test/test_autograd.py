@@ -13108,6 +13108,10 @@ class TestNestedCheckpoint(TestCase):
         self.assertEqual(counter[0], 1)
 
 class TestSelectiveActivationCheckpoint(TestCase):
+    # Dynamo fails for various reasons:
+    # - some tests using custom op that does not implement Fake
+    # - dynamo is trying to trace into saved variable hooks unpack hook for some reason
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
     def test_basic(self):
         # When SAC is enabled, the op is not computed a second time
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -13145,7 +13149,7 @@ class TestSelectiveActivationCheckpoint(TestCase):
 
             for policy_fn in (policy_fn, op_list):
                 counter = [0]
-                context_fn = gen_selective_checkpoint_context_fn(policy_fn)
+                context_fn = functools.partial(gen_selective_checkpoint_context_fn, policy_fn)
                 out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
                 out.sum().backward()
                 self.assertEqual(counter[0], 1)
@@ -13174,6 +13178,7 @@ class TestSelectiveActivationCheckpoint(TestCase):
         with self.assertRaisesRegex(TypeError, "either a function or a list of ops."):
             gen_selective_checkpoint_context_fn(2)
 
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
     def test_policy_with_state(self):
         # If I have a stateful callable, state is shared between the original
         # forward and the recompute.
@@ -13196,13 +13201,14 @@ class TestSelectiveActivationCheckpoint(TestCase):
             return x.sin().sin().sin()
 
         x = torch.randn(3, requires_grad=True)
-        context_fn = gen_selective_checkpoint_context_fn(Policy(), allow_cache_entry_mutation=True)
+        context_fn = functools.partial(gen_selective_checkpoint_context_fn, Policy(), allow_cache_entry_mutation=True)
         out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
         out.sum().backward()
         # 1. counter properly reset to 0 for the recompute
         # 2. due to early-stop we do not recompute the final op
         self.assertEqual(counters, [1, 2, 3, 1, 2])
 
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
     def test_storage_lifetime(self):
         # The storage object saved by SAC survives as long as the graph is alive
         # graph -> the saved variable hooks -> recompute_context -> storage
@@ -13232,12 +13238,13 @@ class TestSelectiveActivationCheckpoint(TestCase):
             return out.cos()
 
         x = torch.randn(3, requires_grad=True)
-        context_fn = gen_selective_checkpoint_context_fn(policy_fn)
+        context_fn = functools.partial(gen_selective_checkpoint_context_fn, policy_fn)
         out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
         self.assertIsNotNone(ref())
         out.sum().backward()
         self.assertIsNone(ref())
 
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
     def test_version_counter(self):
         def policy_fn(ctx, op, *args, **kwargs):
             if op == torch.ops.aten.sin.default:
@@ -13249,7 +13256,7 @@ class TestSelectiveActivationCheckpoint(TestCase):
             return x.sin().mul_(2).cos().exp()
 
         x = torch.randn(3, requires_grad=True)
-        context_fn = gen_selective_checkpoint_context_fn(policy_fn)
+        context_fn = functools.partial(gen_selective_checkpoint_context_fn, policy_fn)
         out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
 
         # 1) Error because the output of sin is saved and mutated by mul_
@@ -13257,12 +13264,13 @@ class TestSelectiveActivationCheckpoint(TestCase):
             out.sum().backward()
 
         x = torch.randn(3, requires_grad=True)
-        context_fn = gen_selective_checkpoint_context_fn(policy_fn, allow_cache_entry_mutation=True)
+        context_fn = functools.partial(gen_selective_checkpoint_context_fn, policy_fn, allow_cache_entry_mutation=True)
         out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
 
         # 2) No longer should be an error because of allow_cache_entry_mutation
         out.sum().backward()
 
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
     def test_function_with_more_than_one_output(self):
         # maybe there is a more systematic way:
         counter = [0]
@@ -13279,13 +13287,14 @@ class TestSelectiveActivationCheckpoint(TestCase):
             return a * b
 
         x = torch.randn(3, requires_grad=True)
-        context_fn = gen_selective_checkpoint_context_fn(policy_fn)
+        context_fn = functools.partial(gen_selective_checkpoint_context_fn, policy_fn)
         out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
         x_grad = torch.autograd.grad(out.sum(), (x,))
         x_grad_ref = torch.autograd.grad(fn(x).sum(), (x,))
         self.assertEqual(x_grad, x_grad_ref)
         self.assertEqual(counter[0], 2)
 
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
     def test_function_with_non_tensor_output(self):
         # When SAC is enabled, the op is not computed a second time
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -13316,13 +13325,14 @@ class TestSelectiveActivationCheckpoint(TestCase):
             ops_list = [torch.ops.mylib.sin_with_extra.default]
 
             x = torch.randn(3, requires_grad=True)
-            context_fn = gen_selective_checkpoint_context_fn(ops_list)
+            context_fn = functools.partial(gen_selective_checkpoint_context_fn, ops_list)
             out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
             x_grad = torch.autograd.grad(out.sum(), (x,))
             self.assertEqual(counter[0], 1)
             x_grad_ref = torch.autograd.grad(fn(x).sum(), (x,))
             self.assertEqual(x_grad, x_grad_ref)
 
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
     def test_can_only_trigger_recompute_once(self):
         # We don't support this to avoid adding extra complexity for now.
         # If there's a need, we could probably do some kind of use_count tracking.
@@ -13337,7 +13347,7 @@ class TestSelectiveActivationCheckpoint(TestCase):
             return x.sin().cos().exp()
 
         x = torch.randn(3, requires_grad=True)
-        context_fn = gen_selective_checkpoint_context_fn(policy_fn)
+        context_fn = functools.partial(gen_selective_checkpoint_context_fn, policy_fn)
         out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
         out.sum().backward(retain_graph=True)
 

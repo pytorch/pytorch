@@ -1346,10 +1346,10 @@ def gen_selective_checkpoint_context_fn(policy_fn_or_list, allow_cache_entry_mut
         >>>    else:
         >>>        return CheckpointPolicy.PREFER_RECOMPUTE
         >>>
-        >>> context_fn = gen_selective_checkpoint_context_fn(policy_fn)
+        >>> context_fn = functools.partial(gen_selective_checkpoint_context_fn, policy_fn)
         >>>
         >>> # or equivalently
-        >>> context_fn = gen_selective_checkpoint_context_fn(ops_to_save)
+        >>> context_fn = functools.partial(gen_selective_checkpoint_context_fn, ops_to_save)
         >>>
         >>> def fn(x, y):
         >>>     return torch.sigmoid(torch.matmul(torch.matmul(x, y), y)) * y
@@ -1384,13 +1384,11 @@ def gen_selective_checkpoint_context_fn(policy_fn_or_list, allow_cache_entry_mut
     else:
         raise TypeError("policy_fn_or_list must be either a function or a list of ops.")
 
-    def context_fn():
-        storage: Dict[Any, List[Any]] = defaultdict(list)
-        return (
-            _CachingTorchDispatchMode(policy_fn, storage),
-            _CachedTorchDispatchMode(policy_fn, storage, allow_cache_entry_mutation),
-        )
-    return context_fn
+    storage: Dict[Any, List[Any]] = defaultdict(list)
+    return (
+        _CachingTorchDispatchMode(policy_fn, storage),
+        _CachedTorchDispatchMode(policy_fn, storage, allow_cache_entry_mutation),
+    )
 
 # NB: this helper wraps fn before calling checkpoint_impl. kwargs and
 #     saving/restoring of global state is handled here.
