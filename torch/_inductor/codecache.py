@@ -2638,8 +2638,9 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         #include <stdexcept>
         #include <cmath>
         void kernel({argdefs}) {{
+            int err = 0;
             {buffers}
-            int err = halide_kernel({buffer_names});
+            err = halide_kernel({buffer_names});
             if(err != 0) {{
                 throw std::runtime_error("halide_kernel failed");
             }}
@@ -2648,23 +2649,40 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
     )
 
     @classmethod
-    def _codegen_glue(cls, argtypes, headerfile):
+    def _codegen_glue(cls, argtypes, headerfile, cuda):
         buffers = []
         buffer_names = []
+        if cuda:
+            buffers.append(
+                "const halide_device_interface_t* cuda_interface = halide_cuda_device_interface();"
+            )
         for i, arg in enumerate(argtypes):
             if arg.numel:
                 buffer_names.append(f"hl_buf_{i}")
                 buffers.append(
-                    f"    Halide::Runtime::Buffer {buffer_names[-1]}({arg.halide_type()}, {arg.name}, {arg.numel});"
+                    f"Halide::Runtime::Buffer {buffer_names[-1]}({arg.halide_type()}, {arg.name}, {arg.numel});"
                 )
+                if cuda:
+                    buffers.extend(
+                        [
+                            f"err |= {buffer_names[-1]}.device_wrap_native(cuda_interface, (uint64_t){arg.name});",
+                            f"{buffer_names[-1]}.set_device_dirty();",
+                        ]
+                    )
             else:
                 assert "*" not in arg.ctype
                 buffer_names.append(arg.name)
+        if cuda:
+            buffers.append(
+                'if(err != 0) throw std::runtime_error("error in Halide::Runtime::Buffer::device_wrap_native");'
+            )
+        buffers = "\n".join([f"    {line}" for line in buffers]).lstrip()
+
         glue_code = cls.glue_template.format(
             halidebuffer_h=cls.find_header("HalideBuffer.h"),
             headerfile=headerfile,
             argdefs=", ".join(f"{a.bindings_type()} {a.name}" for a in argtypes),
-            buffers="\n".join(buffers).lstrip(),
+            buffers=buffers,
             buffer_names=", ".join(buffer_names),
         )
         return glue_code
@@ -2771,7 +2789,6 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         lockfile = str(dirpath / "lock")
         need_compile = not os.path.exists(donefile)
         jobs = []
-
         if need_compile:
             write_atomic(genfile, source_code)
             jobs.append(
@@ -2787,7 +2804,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
                         "-f",
                         "halide_kernel",
                         "-e",
-                        "static_library,h,schedule,pytorch_wrapper",
+                        "static_library,h,schedule",  # pytorch_wrapper
                         "-p",
                         cls.find_libautoschedule(meta.scheduler),
                         *meta.args(),
@@ -2797,7 +2814,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
 
         bindings_future = cls.load_pybinding_async(
             [arg.bindings_type() for arg in meta.argtypes],
-            cls._codegen_glue(meta.argtypes, headerfile),
+            cls._codegen_glue(meta.argtypes, headerfile, meta.cuda_device is not None),
             extra_flags=(libfile,),
             submit_fn=jobs.append if need_compile else None,
         )
@@ -2825,9 +2842,33 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
 def _worker_task_halide(lockfile, jobs):
     from filelock import FileLock
 
-    with FileLock(lockfile, LOCK_TIMEOUT):
-        for job in jobs:
-            job()
+    try:
+        with FileLock(lockfile, LOCK_TIMEOUT):
+            for job in jobs:
+                job()
+    except subprocess.SubprocessError as e:
+        if os.environ.get("HALIDE_REPRO") == "1":
+            python, script, *cmd = e.cmd
+            if os.path.basename(python).startswith("python"):
+                code = open(script).read()
+                main = "    hl.main()"
+                assert code.count(main) == 1
+                class Out:
+                    def __repr__(self):
+                        return "out"
+
+                cmd[cmd.index("-o") + 1] = Out()
+                repl = textwrap.indent(textwrap.dedent(f"""\
+                    import sys, tempfile
+                    with tempfile.TemporaryDirectory() as out:
+                        sys.argv = {["repro.py", *cmd]!r}
+                        hl.main()
+                """), "    ")
+                code = code.replace(main, repl)
+                with open("repro.py", "w") as fd:
+                    fd.write(code.lstrip())
+                raise RuntimeError(f"wrote repro.py: {e}")
+        raise
 
 
 def touch(filename):

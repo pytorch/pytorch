@@ -731,7 +731,9 @@ def is_cpp_backend(device):
 
 
 def is_halide_backend(device):
-    return getattr(device, "type", device) == "cpu" and config.cpu_backend == "halide"
+    if getattr(device, "type", device) == "cpu":
+        return config.cpu_backend == "halide"
+    return config.cuda_backend == "halide"
 
 
 def skip_if_halide(fn):

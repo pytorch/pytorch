@@ -288,10 +288,21 @@ class GraphLowering(torch.fx.Interpreter):
 
         if get_scheduling_for_device("cuda") is None:
             from .codegen.cuda_combined_scheduling import CUDACombinedScheduling
+            from .codegen.halide import HalideScheduling
+
+            cuda_backends = {
+                "triton": CUDACombinedScheduling,
+                "halide": HalideScheduling,
+            }
 
             # CUDACombinedScheduling combines Triton and CUDA C++ scheduling for CUDA devices via delegation
             register_backend_for_device(
-                "cuda", CUDACombinedScheduling, WrapperCodeGen, CppWrapperCuda
+                "cuda",
+                lambda *args, **kwargs: cuda_backends[config.cuda_backend](
+                    *args, **kwargs
+                ),
+                WrapperCodeGen,
+                CppWrapperCuda,
             )
 
         if get_scheduling_for_device("xpu") is None:

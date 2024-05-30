@@ -150,6 +150,7 @@ class HalideMeta(typing.NamedTuple):
     target: str
     scheduler: str
     scheduler_flags: Dict[str, Union[int, str]]
+    cuda_device: Optional[int] = None
 
     def args(self):
         """Command line args to pass to halide generator"""

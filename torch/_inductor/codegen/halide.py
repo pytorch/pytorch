@@ -910,10 +910,44 @@ class HalideKernel(SIMDKernel):
                     numel,
                 )
             )
-        target = ["host", "strict_float"]
+
+        current_device = V.graph.scheduler.get_current_device_or_throw()
+        if current_device.type == "cpu":
+            target = [config.halide.cpu_target]
+            scheduler_flags = {
+                "parallelism": parallel_num_threads(),
+            }
+            if config.halide.scheduler == "Mullapudi2016":
+                scheduler_flags[
+                    "last_level_cache_size"
+                ] = HalideCodeCache.cpu_cache_size()
+            cuda_device = None
+        else:
+            assert current_device.type == "cuda", "only cpu/cuda supported"
+            assert current_device.index <= 0, "only default device supported"
+            target = [config.halide.gpu_target]
+            capability = torch.cuda.get_device_properties(current_device)
+            if "cuda_capability" not in target[0]:
+                for major, minor in [(8, 6), (8, 0), (7, 5), (7, 0), (6, 1)]:
+                    if capability.major >= major and capability.minor >= minor:
+                        target.append(f"cuda_capability_{major}{minor}")
+                        break
+            # capability.append("user_context")  # may be needed for non-default device
+            scheduler_flags = {
+                "parallelism": capability.multi_processor_count,
+                # TODO(jansel): explore other flags, see:
+                # grep parser.parse ~/Halide/src/autoschedulers/anderson2021/AutoSchedule.cpp
+            }
+            cuda_device = max(0, current_device.index)
+
         # TODO(jansel): for cuda want target="host-cuda-cuda_capability_86-user_context"
+
+        # strict_float is requires for correctness
+        target.append("strict_float")
+
         if config.halide.no_asserts:
             target.append("no_asserts")
+
         if "64" in self.index_dtype:
             # TODO(jansel): it is unclear if this does anything, since input sizes are still int32
             target.append("large_buffers")
@@ -921,11 +955,9 @@ class HalideKernel(SIMDKernel):
         return HalideMeta(
             argtypes,
             target="-".join(target),
-            scheduler="Mullapudi2016",
-            scheduler_flags={
-                "parallelism": parallel_num_threads(),
-                "last_level_cache_size": HalideCodeCache.cpu_cache_size(),
-            },
+            scheduler=config.halide.scheduler,
+            scheduler_flags=scheduler_flags,
+            cuda_device=cuda_device,
         )
 
     def codegen_kernel(self, name=None):
@@ -1025,21 +1057,25 @@ class HalideKernel(SIMDKernel):
                 code.writeline(f"{arg.name}.set_estimates([{', '.join(range_hints)}])")
 
         code.do_unindent(2)
-        code.writeline("")
-        code.writeline("__name__ == '__main__' and hl.main()")
+        code.splice(
+            """
+            if __name__ == "__main__":
+                hl.main()
+            """
+        )
         return code.getvalue()
 
     def call_kernel(self, name: str, node=None):
         """Codegen a call to this kernel"""
         wrapper = V.graph.wrapper_code
         call_args = [f"{n}" for n, _ in self.halide_argdefs()]
-        assert V.graph.scheduler.current_device is not None
-        current_device = V.graph.scheduler.current_device
-        assert current_device.type == "cpu", "TODO"
+        current_device = V.graph.scheduler.get_current_device_or_throw()
+        assert current_device.index == 0, "need to handle multiple devices"
+        # stream_name = wrapper.write_get_raw_stream(current_device.index, V.graph)
         wrapper.generate_kernel_call(
             name,
             call_args,
-            cuda=False,
+            cuda=False,  # grid/stream is handled internally in halide
         )
 
     def generate_assert(self, check):
