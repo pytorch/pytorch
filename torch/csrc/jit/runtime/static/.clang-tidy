@@ -1,0 +1,20 @@
+# NOTE there must be no spaces before the '-', so put the comma after.
+# When making changes, be sure to verify the output of the following command to ensure
+# the desired checks are enabled (run from the directory containing a .clang-tidy file):
+# ~/fbsource/tools/lint/clangtidy/clang-tidy-platform010 -list-checks
+# NOTE: Please don't disable inheritance from the parent to make sure that common checks get propagated.
+
+# Remove noisy checks which are not necessary.
+---
+InheritParentConfig: true
+Checks: '
+-cppcoreguidelines-avoid-c-arrays,
+-modernize-avoid-c-arrays,
+-modernize-loop-convert,
+-readability-container-size-empty,
+'
+WarningsAsErrors: '
+-facebook-hte-BadMemberName,
+-facebook-hte-NullableReturn,
+'
+...
