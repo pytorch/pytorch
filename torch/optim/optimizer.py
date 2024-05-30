@@ -236,7 +236,7 @@ _foreach_doc = r"""foreach (bool, optional): whether foreach implementation of o
 
 _fused_doc = r"""fused (bool, optional): whether the fused implementation is used.
             Currently, `torch.float64`, `torch.float32`, `torch.float16`, and `torch.bfloat16`
-            are supported. A prototype implementation of Adam and AdamW for MPS supports `torch.float32` and `torch.float16`. 
+            are supported. A prototype implementation of Adam and AdamW for MPS supports `torch.float32` and `torch.float16`.
             (default: None)
 
     .. note:: The foreach and fused implementations are typically faster than the for-loop,

@@ -2,30 +2,53 @@
 import functools
 import math
 import tempfile
-from typing import Any, Dict, Tuple
 import unittest
 from copy import deepcopy
+from typing import Any, Dict, Tuple
 from unittest.mock import patch
 
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from optim.test_lrscheduler import TestLRScheduler  # noqa: F401
+from optim.test_optim import TestDifferentiableOptimizer  # noqa: F401
+from optim.test_swa_utils import TestSWAUtils  # noqa: F401
 
 import torch
-from torch.optim import Optimizer, SGD
-from torch.optim.optimizer import register_optimizer_step_pre_hook, register_optimizer_step_post_hook
-from optim.test_optim import TestDifferentiableOptimizer  # noqa: F401
-from optim.test_lrscheduler import TestLRScheduler  # noqa: F401
-from optim.test_swa_utils import TestSWAUtils  # noqa: F401
 from torch.nn import Parameter
+from torch.optim import Optimizer, SGD
+
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.optimizer import (
+    register_optimizer_step_post_hook,
+    register_optimizer_step_pre_hook,
+)
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
-from torch.testing._internal.common_optimizers import (
-    optim_db, optims, OptimizerErrorEnum, _get_device_type, _get_optim_inputs_including_global_cliquey_kwargs, TensorTracker)
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, largeTensorTest, onlyCPU, onlyCUDA, skipMPS, TEST_WITH_ROCM, onlyNativeDeviceTypes)
-from torch.testing._internal.common_utils import markDynamoStrictTest, parametrize, run_tests, TestCase, TEST_WITH_TORCHDYNAMO
-from torch.testing._internal.common_cuda import _create_scaling_case
+    instantiate_device_type_tests,
+    largeTensorTest,
+    onlyCPU,
+    onlyCUDA,
+    onlyNativeDeviceTypes,
+    skipMPS,
+    TEST_WITH_ROCM,
+)
 from torch.testing._internal.common_dtype import floating_types_and
+from torch.testing._internal.common_optimizers import (
+    _get_device_type,
+    _get_optim_inputs_including_global_cliquey_kwargs,
+    optim_db,
+    OptimizerErrorEnum,
+    optims,
+    TensorTracker,
+)
+from torch.testing._internal.common_utils import (
+    markDynamoStrictTest,
+    parametrize,
+    run_tests,
+    TEST_WITH_TORCHDYNAMO,
+    TestCase,
+)
 
 FP16_REDUCED_PRECISION = {'atol': 1e-5, 'rtol': 1e-4}
+
 
 def rosenbrock(tensor):
     assert tensor.size() == torch.Size([2]), f"Requires tensor with 2 scalars but got {tensor.size()}"

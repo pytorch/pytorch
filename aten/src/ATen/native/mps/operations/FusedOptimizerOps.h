@@ -65,7 +65,7 @@ inline void adam_math_amsgrad(
     const uint8_t maximize
 ) {
   T grad_ = grad;
-  
+
   if (maximize) {
     grad = -grad;
   }
@@ -111,7 +111,7 @@ inline void adam_math(
     const uint8_t maximize
 ) {
   T grad_ = grad;
-  
+
   if (maximize) {
     grad = -grad;
   }
@@ -154,25 +154,21 @@ kernel void fused_adam_amsgrad(
     uint tgid [[threadgroup_position_in_grid]],
     uint tptg [[threads_per_threadgroup]]) {
 
-    //if (found_inf_ptr) {
-    //  return;
-    //}
-    
-    const int64_t tensor_loc = metadata_args.threadgroup_to_tensor[tgid];
-    const int64_t chunk_idx = metadata_args.threadgroup_to_chunk[tgid];
-    const auto chunk_offset = chunk_idx * chunk_size;
-    const int64_t numel = metadata_args.numels[tensor_loc] - chunk_offset;
+    const uint32_t tensor_loc = metadata_args.threadgroup_to_tensor[tgid];
+    const uint32_t chunk_idx = metadata_args.threadgroup_to_chunk[tgid];
+    const uint32_t chunk_offset = chunk_idx * chunk_size;
+    const uint32_t numel = metadata_args.numels[tensor_loc] - chunk_offset;
 
-    auto step_count = args.state_steps[tensor_loc];
+    const auto step_count = args.state_steps[tensor_loc];
 
     // each chunk is a threadgroup
-    auto param = args.params[tensor_loc] += chunk_offset;
-    auto grad = args.grads[tensor_loc] += chunk_offset;
-    auto exp_avg = args.exp_avgs[tensor_loc] += chunk_offset;
-    auto exp_avg_sq = args.exp_avg_sqs[tensor_loc] += chunk_offset;
-    auto max_exp_avg_sq = args.max_exp_avg_sqs[tensor_loc] += chunk_offset;
+    auto param = args.params[tensor_loc] + chunk_offset;
+    auto grad = args.grads[tensor_loc] + chunk_offset;
+    auto exp_avg = args.exp_avgs[tensor_loc] + chunk_offset;
+    auto exp_avg_sq = args.exp_avg_sqs[tensor_loc] + chunk_offset;
+    auto max_exp_avg_sq = args.max_exp_avg_sqs[tensor_loc] + chunk_offset;
 
-    for (int64_t i_start = tid; i_start < numel && i_start < chunk_size; i_start += tptg) {
+    for (uint32_t i_start = tid; i_start < numel && i_start < chunk_size; i_start += tptg) {
       adam_math_amsgrad<T, state_steps_t, adam_mode>(
         *(param + i_start),
         *(grad + i_start),
@@ -186,8 +182,6 @@ kernel void fused_adam_amsgrad(
         weight_decay,
         eps,
         maximize
-        //grad_scale_ptr,
-        //found_inf_ptr,
       );
     }
 }
@@ -206,24 +200,20 @@ kernel void fused_adam(
     uint tgid [[threadgroup_position_in_grid]],
     uint tptg [[threads_per_threadgroup]]) {
 
-    //if (found_inf_ptr) {
-    //  return;
-    //}
-    
-    const int64_t tensor_loc = metadata_args.threadgroup_to_tensor[tgid];
-    const int64_t chunk_idx = metadata_args.threadgroup_to_chunk[tgid];
-    const auto chunk_offset = chunk_idx * chunk_size;
-    const int64_t numel = metadata_args.numels[tensor_loc] - chunk_offset;
+    const uint32_t tensor_loc = metadata_args.threadgroup_to_tensor[tgid];
+    const uint32_t chunk_idx = metadata_args.threadgroup_to_chunk[tgid];
+    const uint32_t chunk_offset = chunk_idx * chunk_size;
+    const uint32_t numel = metadata_args.numels[tensor_loc] - chunk_offset;
 
-    auto step_count = args.state_steps[tensor_loc];
+    const auto step_count = args.state_steps[tensor_loc];
 
     // each chunk is a threadgroup
-    auto param = args.params[tensor_loc] += chunk_offset;
-    auto grad = args.grads[tensor_loc] += chunk_offset;
-    auto exp_avg = args.exp_avgs[tensor_loc] += chunk_offset;
-    auto exp_avg_sq = args.exp_avg_sqs[tensor_loc] += chunk_offset;
+    auto param = args.params[tensor_loc] + chunk_offset;
+    auto grad = args.grads[tensor_loc] + chunk_offset;
+    auto exp_avg = args.exp_avgs[tensor_loc] + chunk_offset;
+    auto exp_avg_sq = args.exp_avg_sqs[tensor_loc] + chunk_offset;
 
-    for (int64_t i_start = tid; i_start < numel && i_start < chunk_size; i_start += tptg) {
+    for (uint32_t i_start = tid; i_start < numel && i_start < chunk_size; i_start += tptg) {
       adam_math<T, state_steps_t, adam_mode>(
         *(param + i_start),
         *(grad + i_start),
@@ -236,8 +226,6 @@ kernel void fused_adam(
         weight_decay,
         eps,
         maximize
-        //grad_scale_ptr,
-        //found_inf_ptr,
       );
     }
 }

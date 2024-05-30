@@ -6,8 +6,7 @@
 namespace at::native {
 namespace mps {
 
-//static constexpr int64_t kChunkSize = 65536;
-static constexpr int64_t kChunkSize = 32768;
+static constexpr int64_t kChunkSize = 65536;
 static constexpr int64_t kmaxThreadGroups = 32;
 static constexpr int64_t kmaxTensors = 32;
 
@@ -33,7 +32,7 @@ static void multi_tensor_apply_for_fused_adam(
   TORCH_CHECK(
       tensor_lists.size() == depth,
       "Number of tensor lists has to match the depth");
-  
+
   const auto num_tensors = tensor_lists[0].size();
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
@@ -45,7 +44,8 @@ static void multi_tensor_apply_for_fused_adam(
   float eps_lv = eps;
   uint8_t maximize_lv = maximize;
 
-  /* Remove comment for debugging
+  // Remove comment for debugging
+  /*
   mpsStream->addCompletedHandler(^(id<MTLCommandBuffer> cb) {
     [cb.logs enumerateObjectsUsingBlock:^(NSString* log, NSUInteger idx, BOOL* stop) {
       NSLog(@"MPSStream: %@", log);
@@ -58,12 +58,12 @@ static void multi_tensor_apply_for_fused_adam(
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       auto [fusedOptimizerPSO, fusedOptimizerFunc] = getPipelineState(device, kernel, kernel_name);
-      
+
       // this function call is a no-op if MPS Profiler is not enabled
       getMPSProfiler().beginProfileKernel(fusedOptimizerPSO, kernel, {tensor_lists[0]});
-      
+
       [computeEncoder setComputePipelineState:fusedOptimizerPSO];
-      
+
       // BufferIndex is the index in the kernel function
       auto tensorArgumentEncoder = [[fusedOptimizerFunc newArgumentEncoderWithBufferIndex:0] autorelease];
       id<MTLBuffer> tensorArgumentBuffer = [[device newBufferWithLength:tensorArgumentEncoder.encodedLength options:0] autorelease];
@@ -72,7 +72,7 @@ static void multi_tensor_apply_for_fused_adam(
       int64_t tensor_loc = 0;
       int64_t threadgroup_loc = 0;
       MetadataArguments metadata_arguments;
-      
+
       for (const auto tensor_index : c10::irange(num_tensors)) {
         // short-circuit to avoid adding empty tensors to tensorListMeta
         if (tensor_lists[0][tensor_index].numel() == 0) {
@@ -80,13 +80,11 @@ static void multi_tensor_apply_for_fused_adam(
         }
 
         for (const auto& d : c10::irange(depth)) {
-            TORCH_INTERNAL_ASSERT(getMTLBufferStorage(tensor_lists[d][tensor_index]) != nil);
             [tensorArgumentEncoder setBuffer:getMTLBufferStorage(tensor_lists[d][tensor_index])
                                       offset:tensor_lists[d][tensor_index].storage_offset() * tensor_lists[d][tensor_index].element_size()
                                      atIndex:d * kmaxTensors + tensor_loc];
             [computeEncoder useResource:getMTLBufferStorage(tensor_lists[d][tensor_index]) usage:MTLResourceUsageRead | MTLResourceUsageWrite];
         }
-        TORCH_INTERNAL_ASSERT(getMTLBufferStorage(state_steps[tensor_index]) != nil);
         [tensorArgumentEncoder setBuffer:getMTLBufferStorage(state_steps[tensor_index])
                            offset:state_steps[tensor_index].storage_offset() * state_steps[tensor_index].element_size()
                           atIndex:depth * kmaxTensors + tensor_loc];
@@ -108,7 +106,7 @@ static void multi_tensor_apply_for_fused_adam(
             const auto tensor_full = tensor_loc == kmaxTensors && chunk == chunks - 1;
             // Reach the maximum threadgroups per dispatch
             const auto blocks_full = threadgroup_loc == kmaxThreadGroups;
-        
+
             if (tensor_full || blocks_full){
                 [computeEncoder setBuffer:tensorArgumentBuffer
                                 offset:0
@@ -126,7 +124,7 @@ static void multi_tensor_apply_for_fused_adam(
                 uint32_t maxThreadsPerGroup = [fusedOptimizerPSO maxTotalThreadsPerThreadgroup];
                 MTLSize threadGroupSize = MTLSizeMake(std::min(maxThreadsPerGroup, kThreadGroupSize), 1, 1);
                 [computeEncoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
-                
+
                 // Reset
                 threadgroup_loc = 0;
                 if (chunk == chunks - 1) {
@@ -137,7 +135,7 @@ static void multi_tensor_apply_for_fused_adam(
                 } else {
                   // reuse the current tensor since the current one isn't done.
                   metadata_arguments.numels[0] = metadata_arguments.numels[tensor_loc - 1];
-                  
+
                   tensorArgumentBuffer = [[device newBufferWithLength:tensorArgumentEncoder.encodedLength options:0] autorelease];
                   [tensorArgumentEncoder setArgumentBuffer:tensorArgumentBuffer offset:0];
 
@@ -159,7 +157,7 @@ static void multi_tensor_apply_for_fused_adam(
       }
 
       if (threadgroup_loc != 0) {
-        
+
         [computeEncoder setBuffer:tensorArgumentBuffer offset:0 atIndex:0];
         [computeEncoder setBytes:&metadata_arguments length:sizeof(MetadataArguments) atIndex:1];
         [computeEncoder setBytes:&lr_lv length:sizeof(float) atIndex:2];
@@ -173,12 +171,11 @@ static void multi_tensor_apply_for_fused_adam(
         MTLSize threadGroupSize = MTLSizeMake(std::min(maxThreadsPerGroup, kThreadGroupSize), 1, 1);
         [computeEncoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
       }
-      
+
       getMPSProfiler().endProfileKernel(fusedOptimizerPSO);
 
     }
   });
-  mpsStream->synchronize(SyncType::COMMIT_AND_WAIT);
 }
 
 } // namespace mps
