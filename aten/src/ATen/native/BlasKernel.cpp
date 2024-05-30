@@ -559,12 +559,14 @@ template <typename scalar_t>
 inline void scal(int64_t n, scalar_t a, scalar_t *x, int64_t incx)
 {
   if (n == 1) incx = 1;
+#if AT_BUILD_WITH_BLAS()
   if (blas_impl::scal_use_fast_path<scalar_t>(n, incx)) {
     int i_n = (int)n;
     int i_incx = (int)incx;
     blas_impl::scal_fast_path<scalar_t>(&i_n, &a, x, &i_incx);
     return;
   }
+#endif
   for (const auto i : c10::irange(n)) {
     if (a == scalar_t(0)) {
       x[i * incx] = 0;
@@ -578,6 +580,7 @@ template<typename scalar_t>
 void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, const scalar_t *a, int64_t lda, const scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy) {
   if(n == 1) lda = m;
 
+#if AT_BUILD_WITH_BLAS()
   if (blas_impl::gemv_use_fast_path<scalar_t>(m, n, lda, incx, incy)) {
     TORCH_CHECK(lda >= std::max<int64_t>(1L, m), "lda should be at least max(1,", m, "), but have ", lda);
     int i_m = (int)m;
@@ -588,6 +591,7 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, const scalar_t *a, i
     blas_impl::gemv_fast_path<scalar_t>(&trans, &i_m, &i_n, &alpha, a, &i_lda, x, &i_incx, &beta, y, &i_incy);
     return;
   }
+#endif
 
   using opmath_t = at::opmath_type<scalar_t>;
   if ((trans == 'T') || (trans == 't')) {
