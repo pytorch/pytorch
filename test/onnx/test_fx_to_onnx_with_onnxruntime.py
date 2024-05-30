@@ -662,6 +662,11 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
         error_message="Trying to flatten user inputs with exported input tree spec"
     )
+    @pytorch_test_common.xfail_dynamic_fx_test(
+        error_message="!(it.GetName().empty())",
+        reason="With after onnx==1.16, constant folding in optimizer causes this error.",
+        model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
+    )
     def test_gpt2_tiny_from_config(self):
         # Model
         config = transformers.GPT2Config(
