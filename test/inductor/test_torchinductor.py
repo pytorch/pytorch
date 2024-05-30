@@ -10330,7 +10330,7 @@ class CommonTemplate:
             )
             return clone
 
-        s0 = 727828
+        s0 = 524296
         s1 = 512
         self.common(
             fn,
