@@ -43,15 +43,6 @@ BUILD_BIN_DIR="$BUILD_DIR"/bin
 SHARD_NUMBER="${SHARD_NUMBER:=1}"
 NUM_TEST_SHARDS="${NUM_TEST_SHARDS:=1}"
 
-pushd test
-CUDA_VERSION=$(python3 -c "import torch; print(torch.version.cuda)")
-if [ "$CUDA_VERSION" == "12.4" ]; then
-    ISCUDA124="cu124"
-else
-    ISCUDA124=""
-fi
-popd
-
 export VALGRIND=ON
 # export TORCH_INDUCTOR_INSTALL_GXX=ON
 if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
@@ -272,6 +263,15 @@ if [[ $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
 elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
   export ATEN_CPU_CAPABILITY=avx2
 fi
+
+pushd test
+CUDA_VERSION=$(python -c "import torch; print(torch.version.cuda)")
+if [ "$CUDA_VERSION" == "12.4" ]; then
+    ISCUDA124="cu124"
+else
+    ISCUDA124=""
+fi
+popd
 
 test_python_legacy_jit() {
   time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose
