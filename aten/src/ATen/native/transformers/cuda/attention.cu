@@ -774,22 +774,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_c
 
   Tensor attention, log_sumexp;
 
-  //auto cudnn_seed = at::zeros({1}, query.options().dtype(kLong));
-  //auto cudnn_offset = at::zeros({1}, query.options().dtype(kLong));
   at::Tensor cudnn_seed, cudnn_offset;
   cudnn_seed = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
   cudnn_offset = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
 
   const bool use_dropout = std::fpclassify(dropout_p) != FP_ZERO;
 
-  // Note [Seed and Offset Device]
-  // If we are currently in graph capture mode, we need to create the seed and offset tensors on the device.
-  // This is necessary for CUDA graph-safe random number generation, which requires the seed and offset tensors
-  // to be single element tensors on device. During graph capture, when the seed and offset tensors are passed
-  // the pointers act as scratch space for storing the RNG state for the backwards pass.
-  // When calling backwards, we either construct a PhiloxState with the pointers or the actual values.
-  // For more information on CUDA graph-safe RNG states, see Note [CUDA Graph-safe RNG states].
-
+  // See Note [Seed and Offset Device] in _efficient_attention_forward
   at::PhiloxCudaState philox_state;
   const bool in_capture_stream =
       at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None;

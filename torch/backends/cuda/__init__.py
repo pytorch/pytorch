@@ -361,7 +361,7 @@ def can_use_efficient_attention(params: SDPAParams, debug: bool = False) -> bool
 
 
 def can_use_cudnn_attention(params: SDPAParams, debug: bool = False) -> bool:
-    r"""Check if efficient_attention can be utilized in scaled_dot_product_attention.
+    r"""Check if cudnn_attention can be utilized in scaled_dot_product_attention.
 
     Args:
         params: An instance of SDPAParams containing the tensors for query,
