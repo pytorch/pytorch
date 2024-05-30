@@ -18,7 +18,8 @@ from torch.testing._internal.common_utils import \
      TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
      make_fullrank_matrices_with_distinct_singular_values,
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, parametrize, skipIfTorchDynamo,
-     setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest)
+     setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest,
+     xfailIfTorchDynamo)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, has_hipsolver,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
@@ -802,6 +803,8 @@ class TestLinalg(TestCase):
         # when beta is not zero
         self._test_addr_vs_numpy(device, dtype, beta=2, alpha=2)
 
+    # https://github.com/pytorch/pytorch/issues/127043
+    @xfailIfTorchDynamo
     @precisionOverride({torch.bfloat16: 1e-1})
     @dtypes(*floating_and_complex_types_and(torch.half, torch.bfloat16))
     def test_addr_float_and_complex(self, device, dtype):
