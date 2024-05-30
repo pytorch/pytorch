@@ -88,7 +88,7 @@ ban_recompute_not_in_allowlist = True
 # a fusion can be expensive.
 ban_recompute_reductions = True
 
-memory_budget = 1.0
+memory_budget = 0.5
 memory_budget_runtime_estimator = "flops"
 memory_budget_solver = "dp"
 
