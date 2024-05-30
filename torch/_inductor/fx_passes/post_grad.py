@@ -262,18 +262,19 @@ def cuda_and_enabled_mixed_mm_and_not_int8(match):
                     aten.reshape.default,
                     CallFunction(
                         aten.cat.default,
-                        [
+                        ListOf(
                             CallFunction(
                                 aten.bitwise_and.Scalar,
                                 KeywordArg("mat2"),
                                 0xF,
                             ),
-                            CallFunction(
-                                aten.__rshift__.Scalar,
-                                KeywordArg("mat2"),
-                                4,
-                            ),
-                        ],
+                            # CallFunction(
+                            #    aten.__rshift__.Scalar,
+                            #    KeywordArg("mat2"),
+                            #    4,
+                            # ),
+                            True,
+                        ),
                         1,
                     ),
                     KeywordArg("mat2_mm_shape"),
