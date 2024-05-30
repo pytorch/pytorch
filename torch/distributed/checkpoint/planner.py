@@ -28,6 +28,7 @@ __all__ = [
     "LoadPlan",
     "SavePlanner",
     "LoadPlanner",
+    "CheckpointableTensor",
 ]
 
 
@@ -424,5 +425,33 @@ class LoadPlanner:
         copying it back to the one in the state_dict.
 
         The contents of tensor will follow its device synchronization model.
+        """
+        pass
+
+
+class CheckpointableTensor(abc.ABC):
+    """
+    Interface for checkpointable tensors.
+    This is to allow arbitrary tensor subclasses to hook into DCP seamlessly through implementing the interface.
+    """
+
+    @abc.abstractmethod
+    def _create_write_items(self, fqn: str, *args, **kwargs) -> List[WriteItem]:
+        """
+        Return a list of WriteItems based on object's contents.
+        """
+        pass
+
+    @abc.abstractmethod
+    def _create_chunk_list(self, *args, **kwargs) -> List[ChunkStorageMetadata]:
+        """
+        Return a list of `ChunkStorageMetadata` based on object's contents.
+        """
+        pass
+
+    @abc.abstractmethod
+    def find_tensor_shard(self, index: MetadataIndex, *args, **kwargs) -> torch.Tensor:
+        """
+        Return a 'torch.Tensor' shard based on 'MetadataIndex'.
         """
         pass
