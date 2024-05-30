@@ -866,101 +866,63 @@ include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
 # ---[ Python + Numpy
 if(BUILD_PYTHON)
   # If not given a Python installation, then use the current active Python
-  if(NOT PYTHON_EXECUTABLE)
+  if(NOT Python_EXECUTABLE)
     execute_process(
-      COMMAND "which" "python" RESULT_VARIABLE _exitcode OUTPUT_VARIABLE _py_exe)
+      COMMAND "which" "python3" RESULT_VARIABLE _exitcode OUTPUT_VARIABLE _py_exe)
     if(${_exitcode} EQUAL 0)
       if(NOT MSVC)
-        string(STRIP ${_py_exe} PYTHON_EXECUTABLE)
+        string(STRIP ${_py_exe} Python_EXECUTABLE)
       endif()
-      message(STATUS "Setting Python to ${PYTHON_EXECUTABLE}")
+      message(STATUS "Setting Python to ${Python_EXECUTABLE}")
     endif()
   endif()
 
   # Check that Python works
   set(PYTHON_VERSION)
-  if(DEFINED PYTHON_EXECUTABLE)
+  if(DEFINED Python_EXECUTABLE)
     execute_process(
-        COMMAND "${PYTHON_EXECUTABLE}" "--version"
+        COMMAND "${Python_EXECUTABLE}" "--version"
         RESULT_VARIABLE _exitcode OUTPUT_VARIABLE PYTHON_VERSION)
     if(NOT _exitcode EQUAL 0)
-      message(FATAL_ERROR "The Python executable ${PYTHON_EXECUTABLE} cannot be run. Make sure that it is an absolute path.")
+      message(FATAL_ERROR "The Python executable ${Python_EXECUTABLE} cannot be run. Make sure that it is an absolute path.")
     endif()
     if(PYTHON_VERSION)
       string(REGEX MATCH "([0-9]+)\\.([0-9]+)" PYTHON_VERSION ${PYTHON_VERSION})
     endif()
   endif()
 
-  # Seed PYTHON_INCLUDE_DIR and PYTHON_LIBRARY to be consistent with the
-  # executable that we already found (if we didn't actually find an executable
-  # then these will just use "python", but at least they'll be consistent with
-  # each other).
-  if(NOT PYTHON_INCLUDE_DIR)
-    # TODO: Verify that sysconfig isn't inaccurate
-    pycmd_no_exit(_py_inc _exitcode "import sysconfig; print(sysconfig.get_path('include'))")
-    if("${_exitcode}" EQUAL 0 AND IS_DIRECTORY "${_py_inc}")
-      set(PYTHON_INCLUDE_DIR "${_py_inc}")
-      message(STATUS "Setting Python's include dir to ${_py_inc} from sysconfig")
-    else()
-      message(WARNING "Could not set Python's include dir to ${_py_inc} from sysconfig")
-    endif()
-  endif(NOT PYTHON_INCLUDE_DIR)
-
-  if(NOT PYTHON_LIBRARY)
-    pycmd_no_exit(_py_lib _exitcode "import sysconfig; print(sysconfig.get_path('stdlib'))")
-    if("${_exitcode}" EQUAL 0 AND EXISTS "${_py_lib}" AND EXISTS "${_py_lib}")
-      set(PYTHON_LIBRARY "${_py_lib}")
-      if(MSVC)
-        string(REPLACE "Lib" "libs" _py_static_lib ${_py_lib})
-        link_directories(${_py_static_lib})
-      endif()
-      message(STATUS "Setting Python's library to ${PYTHON_LIBRARY}")
-    endif()
-  endif(NOT PYTHON_LIBRARY)
-
   # These should fill in the rest of the variables, like versions, but resepct
   # the variables we set above
-  set(Python_ADDITIONAL_VERSIONS ${PYTHON_VERSION} 3.8)
-  find_package(PythonInterp 3.0)
-  find_package(PythonLibs 3.0)
+  if(USE_NUMPY)
+    find_package(Python COMPONENTS Interpreter Development NumPy)
+  else()
+    find_package(Python COMPONENTS Interpreter Development)
+  endif()
 
-  if(NOT PYTHONLIBS_VERSION_STRING)
+  if(NOT Python_Development_FOUND)
     message(FATAL_ERROR
       "Python development libraries could not be found.")
   endif()
 
-  if(${PYTHONLIBS_VERSION_STRING} VERSION_LESS 3)
+  if(${Python_VERSION} VERSION_LESS 3.8)
     message(FATAL_ERROR
-      "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python 2 has reached end-of-life and is no longer supported by PyTorch.")
-  endif()
-  if(${PYTHONLIBS_VERSION_STRING} VERSION_LESS 3.8)
-    message(FATAL_ERROR
-      "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python < 3.8 is no longer supported by PyTorch.")
+      "Found Python libraries version ${Python_VERSION}. Python < 3.8 is no longer supported by PyTorch.")
   endif()
 
-  # When building pytorch, we pass this in directly from setup.py, and
-  # don't want to overwrite it because we trust python more than cmake
-  if(NUMPY_INCLUDE_DIR)
-    set(NUMPY_FOUND ON)
-  elseif(USE_NUMPY)
-    find_package(NumPy)
-    if(NOT NUMPY_FOUND)
-      message(WARNING "NumPy could not be found. Not building with NumPy. Suppress this warning with -DUSE_NUMPY=OFF")
-    endif()
-  endif()
-
-  if(PYTHONINTERP_FOUND AND PYTHONLIBS_FOUND)
+  if(Python_Interpreter_FOUND)
     add_library(python::python INTERFACE IMPORTED)
-    target_include_directories(python::python SYSTEM INTERFACE ${PYTHON_INCLUDE_DIRS})
+    target_include_directories(python::python SYSTEM INTERFACE ${Python_INCLUDE_DIRS})
     if(WIN32)
-      target_link_libraries(python::python INTERFACE ${PYTHON_LIBRARIES})
+      target_link_libraries(python::python INTERFACE ${Python_LIBRARIES})
     endif()
 
-    caffe2_update_option(USE_NUMPY OFF)
-    if(NUMPY_FOUND)
-      caffe2_update_option(USE_NUMPY ON)
-      add_library(numpy::numpy INTERFACE IMPORTED)
-      target_include_directories(numpy::numpy SYSTEM INTERFACE ${NUMPY_INCLUDE_DIR})
+    if(USE_NUMPY)
+      if(NOT Python_NumPy_FOUND)
+        message(WARNING "NumPy could not be found. Not building with NumPy. Suppress this warning with -DUSE_NUMPY=OFF")
+        caffe2_update_option(USE_NUMPY OFF)
+      else()
+        caffe2_update_option(USE_NUMPY ON)
+      endif()
     endif()
     # Observers are required in the python build
     caffe2_update_option(USE_OBSERVERS ON)
@@ -989,10 +951,7 @@ endif()
 message(STATUS "pybind11 include dirs: " "${pybind11_INCLUDE_DIRS}")
 add_library(pybind::pybind11 INTERFACE IMPORTED)
 target_include_directories(pybind::pybind11 SYSTEM INTERFACE ${pybind11_INCLUDE_DIRS})
-target_link_libraries(pybind::pybind11 INTERFACE python::python)
-if(APPLE)
-  target_link_options(pybind::pybind11 INTERFACE -undefined dynamic_lookup)
-endif()
+target_link_libraries(pybind::pybind11 INTERFACE Python::Module)
 
 # ---[ OpenTelemetry API headers
 find_package(OpenTelemetryApi)
@@ -1769,3 +1728,7 @@ endif()
 
 # Include google/FlatBuffers
 include(${CMAKE_CURRENT_LIST_DIR}/FlatBuffers.cmake)
+
+# Include cpp-httplib
+add_library(httplib INTERFACE IMPORTED)
+target_include_directories(httplib SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/third_party/cpp-httplib)

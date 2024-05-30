@@ -2,7 +2,6 @@ import abc
 import cmath
 import collections.abc
 import contextlib
-import warnings
 from typing import (
     Any,
     Callable,
@@ -16,6 +15,7 @@ from typing import (
     Type,
     Union,
 )
+from typing_extensions import deprecated
 
 import torch
 
@@ -1523,6 +1523,12 @@ def assert_close(
         raise error_metas[0].to_error(msg)
 
 
+@deprecated(
+    "`torch.testing.assert_allclose()` is deprecated since 1.12 and will be removed in a future release. "
+    "Please use `torch.testing.assert_close()` instead. "
+    "You can find detailed upgrade instructions in https://github.com/pytorch/pytorch/issues/61844.",
+    category=FutureWarning,
+)
 def assert_allclose(
     actual: Any,
     expected: Any,
@@ -1538,14 +1544,6 @@ def assert_allclose(
        Please use :func:`torch.testing.assert_close` instead. You can find detailed upgrade instructions
        `here <https://github.com/pytorch/pytorch/issues/61844>`_.
     """
-    warnings.warn(
-        "`torch.testing.assert_allclose()` is deprecated since 1.12 and will be removed in a future release. "
-        "Please use `torch.testing.assert_close()` instead. "
-        "You can find detailed upgrade instructions in https://github.com/pytorch/pytorch/issues/61844.",
-        FutureWarning,
-        stacklevel=2,
-    )
-
     if not isinstance(actual, torch.Tensor):
         actual = torch.tensor(actual)
     if not isinstance(expected, torch.Tensor):

@@ -7,7 +7,7 @@ import functools
 import os
 from subprocess import CalledProcessError
 import sys
-
+import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._inductor.codecache import CppCodeCache
 from torch.utils._triton import has_triton
 from torch.testing._internal.common_utils import (
