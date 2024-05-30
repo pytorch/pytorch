@@ -375,22 +375,14 @@ PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
   THPVariable* a = reinterpret_cast<THPVariable*>(a_);
   THPVariable* b = reinterpret_cast<THPVariable*>(b_);
 
-  TORCH_CHECK(
-      a->cdata->use_count() == 1,
-      "Expected single reference to a's Tensor object but got ",
-      a->cdata->use_count());
-  TORCH_CHECK(
-      b->cdata->use_count() == 1,
-      "Expected single reference to b's Tensor object but got ",
-      b->cdata->use_count());
   // weak_use_count() adds 1 if use_count is non-zero
   TORCH_CHECK(
       a->cdata->weak_use_count() == 1,
-      "Expected no weakrefs to a's Tensor object but got  ",
+      "Expected no weakrefs to t1's Tensor object but got  ",
       a->cdata->weak_use_count() - 1);
   TORCH_CHECK(
       b->cdata->weak_use_count() == 1,
-      "Expected no weakrefs to b's Tensor object but got  ",
+      "Expected no weakrefs to t2's Tensor object but got  ",
       b->cdata->weak_use_count() - 1);
 
   // Swap the Tensor Impl

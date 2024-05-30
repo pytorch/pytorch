@@ -10,7 +10,7 @@ import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.utils import counters
 from torch._export import capture_pre_autograd_graph
-from torch._inductor import config
+from torch._inductor import config, metrics
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.ao.quantization.quantize_pt2e import (
@@ -264,6 +264,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             memory_format,
             dtype,
         ) in options:
+            metrics.reset()
             if dim == 4:
                 x_shape = (1, 3, 56, 56)
             else:
@@ -284,6 +285,18 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 # Has extra dtype conversion nodes for autocast.
                 match_nodes += 2
             self._test_common(mod, (v,), 2, match_nodes, check_autocast=dtype)
+            generated_kernel_count = 0
+            if dtype != torch.float32:
+                # "to_dtype" for input
+                generated_kernel_count = 1
+            if memory_format == torch.contiguous_format:
+                # "to_dtype + to_channel_last" for input, "to_contiguous" for output
+                generated_kernel_count = 2
+            if memory_format == torch.channels_last_3d:
+                # for float conv3d, the output for eager is channel last, we will generate "to_contiguous" for output
+                # for lp conv3d, the output for eager is channel last too, we will only generate "to_dtype"
+                generated_kernel_count = 1
+            self.assertEqual(metrics.generated_kernel_count, generated_kernel_count)
 
     def test_conv2d_unary_cpu(self):
         self._test_conv_unary_cpu_base(dim=4)
@@ -321,6 +334,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             dtypes.append(torch.float16)
         options = itertools.product(unary_list, [True, False], dtypes)
         for unary_fn, bias, dtype in options:
+            metrics.reset()
             mod = M(unary_fn, 10, 30, bias=bias).eval()
             # only fuse for linear when the dtype is bf16
             mod = mod
@@ -335,6 +349,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
             self._test_common(
                 mod, (v,), matcher_count, matcher_nodes, check_autocast=dtype
             )
+            # only generated 1 kernel for "to"
+            self.assertEqual(metrics.generated_kernel_count, 1)
 
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     def test_linear_fp32(self):
@@ -386,6 +402,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         )
 
         for unary_fn, memory_format, dtype in options:
+            metrics.reset()
             x_shape = (1, 3, 28, 28)
             mod = M(unary_fn).eval()
 
@@ -401,6 +418,14 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 # Has extra dtype conversion nodes for autocast.
                 match_nodes += 2
             self._test_common(mod, (v,), 2, match_nodes, check_autocast=dtype)
+            generated_kernel_count = 0
+            if dtype != torch.float32:
+                # "to" for input
+                generated_kernel_count = 1
+            if memory_format == torch.contiguous_format:
+                # "to_dtype + to_channel_last" for input, "to_contiguous" for output
+                generated_kernel_count = 2
+            self.assertEqual(metrics.generated_kernel_count, generated_kernel_count)
 
     def _test_conv_binary_base(self, dim=4):
         assert dim == 4 or dim == 5
@@ -430,19 +455,29 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 else:
                     return self.binary_fn(x1, x2)
 
+        dtypes = [
+            torch.float,
+        ]
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            dtypes.append(torch.float16)
         cl_format = torch.channels_last if dim == 4 else torch.channels_last_3d
         test_memory_format = [torch.contiguous_format, cl_format]
         options = itertools.product(
             binary_list,
             [True, False],
             test_memory_format,
+            dtypes,
         )
 
         for (
             binary_fn,
             has_relu,
             memory_format,
+            dtype,
         ) in options:
+            metrics.reset()
             if dim == 4:
                 x_shape = (1, 3, 56, 56)
             else:
@@ -457,7 +492,19 @@ class TestPatternMatcher(TestPatternMatcherBase):
             match_nodes = binary_list[binary_fn][1]
             if has_relu:
                 match_nodes += 1
-            self._test_common(mod, (v,), match_count, match_nodes + 2)
+            self._test_common(
+                mod, (v,), match_count, match_nodes + 2, check_autocast=dtype
+            )
+            generated_kernel_count = 0
+            if dtype != torch.float32:
+                # "to_dtype" for input
+                generated_kernel_count = 1
+            if memory_format == torch.contiguous_format:
+                # "to_dtype + to_channel_last" for input, "to_contiguous" for output
+                generated_kernel_count = 2
+            elif memory_format == torch.channels_last_3d:
+                generated_kernel_count = 1
+            self.assertEqual(metrics.generated_kernel_count, generated_kernel_count)
 
     def test_conv2d_binary(self):
         self._test_conv_binary_base(dim=4)
@@ -489,7 +536,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         )
         out_feature = 30
         for binary_fn, input_shape, bias, dtype in options:
-            torch._dynamo.reset()
+            metrics.reset()
             # addmm(mm) + (linear+add)
             match_count = 2
             match_nodes = 3
@@ -498,13 +545,20 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 # view + linear + view(joint_graph+freeze pass)
                 match_count = match_count + 5 if is_inplace else match_count + 3
                 match_nodes = match_nodes + 7 if is_inplace else match_nodes + 5
-            mod = M(binary_fn, input_shape[-1], out_feature, bias).to(dtype).eval()
-            v = torch.randn(input_shape).to(dtype)
+            mod = M(binary_fn, input_shape[-1], out_feature, bias).eval()
+            v = torch.randn(input_shape)
             other = torch.randn(input_shape[:-1] + [out_feature]).to(dtype)
-            mod_c = torch.compile(mod)
-            out, code = run_and_get_code(mod_c, v, other)
-            self.assertEqual(out, mod(v, other), rtol=1e-2, atol=1e-2)
-            # TODO - assert fusions work code
+            self._test_common(
+                mod,
+                (
+                    v,
+                    other,
+                ),
+                match_count,
+                match_nodes,
+                check_autocast=dtype,
+            )
+            self.assertEqual(metrics.generated_kernel_count, 1)
 
     def test_multi_linear_share_same_input(self):
         # llama pattern.
