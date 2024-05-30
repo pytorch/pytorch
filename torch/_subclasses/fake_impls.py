@@ -801,6 +801,7 @@ def meta__flash_attention_forward(fake_mode, func, *args, **kwargs):
     max_k = kwargs["max_k"]
     return_debug_mask = kwargs["return_debug_mask"]
     # unused: value, dropout_p, is_causal, scale
+    # unused: seqused_k, alibi_slopes, window_size_left, window_size_right
 
     def convert_tensor(t, device):
         return FakeTensor(fake_mode, t, device)

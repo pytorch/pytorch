@@ -30,7 +30,6 @@ from typing import (
     TypeVar,
     Union,
 )
-
 from typing_extensions import Self
 
 import torch
