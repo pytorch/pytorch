@@ -164,7 +164,7 @@ def aot_dispatch_base(
             )
 
         with TracingContext.report_output_strides() as fwd_output_strides:
-            compiled_fw = compiler(fw_module, updated_flat_args, num_params_buffers=aot_config.num_params_buffers)
+            compiled_fw = compiler(fw_module, updated_flat_args)
 
         if fakified_out_wrapper.needs_post_compile:
             fakified_out_wrapper.set_fwd_output_strides(fwd_output_strides)
@@ -432,11 +432,7 @@ def aot_dispatch_autograd(
                 tracing_context.fw_metadata = inner_meta
 
             with TracingContext.report_output_strides() as fwd_output_strides:
-                compiled_fw_func = aot_config.fw_compiler(
-                    fw_module,
-                    adjusted_flat_args,
-                    num_params_buffers=aot_config.num_params_buffers,
-                )
+                compiled_fw_func = aot_config.fw_compiler(fw_module, adjusted_flat_args)
 
             if not hasattr(compiled_fw_func, "_boxed_call"):
                 compiled_fw_func = make_boxed_func(compiled_fw_func)

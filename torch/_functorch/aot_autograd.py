@@ -781,6 +781,16 @@ def aot_function(
     return returned_function
 
 
+def extract_flat_params_buffers(mod: nn.Module):
+    mod_pb = {
+        **dict(mod.named_parameters(remove_duplicate=False)),
+        **dict(mod.named_buffers(remove_duplicate=False)),
+    }
+    mod_pb_flat, mod_pb_spec = pytree.tree_flatten(mod_pb)
+    mod_pb_flat = list(mod_pb_flat)
+    return mod_pb_flat, mod_pb_spec
+
+
 def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
     """
     Traces the forward and backward graph of :attr:`mod` using torch dispatch
@@ -810,12 +820,13 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
         params_and_buffers = {**named_params, **named_buffers}
         return torch.func.functional_call(mod, params_and_buffers, args, kwargs)
 
-    named_params = dict(mod.named_parameters(remove_duplicate=False))
-    named_buffers = dict(mod.named_buffers(remove_duplicate=False))
-    num_params_buffers = len(named_params) + len(named_buffers)
+    params_buffers_flat, _ = extract_flat_params_buffers(mod)
+    num_params_buffers = len(params_buffers_flat)
     compiled_f = aot_function(
         functional_call, *args, num_params_buffers=num_params_buffers, **kwargs
     )
+    if tracing_context := torch._guards.TracingContext.try_get():
+        tracing_context.params_buffers_flat = params_buffers_flat
 
     class AOTModule(nn.Module):
         def __init__(self):
@@ -824,8 +835,7 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
 
         def forward(self, *args, **kwargs):
             return compiled_f(
-                named_params,
-                named_buffers,
+                params_buffers_flat,
                 *args,
                 **kwargs,
             )
@@ -853,15 +863,17 @@ def aot_module_simplified(
 
     :func:`aot_module_simplified` removes these overheads.
     """
-    params = {
+    params_buffers = {
         **dict(mod.named_parameters(remove_duplicate=False)),
         **dict(mod.named_buffers(remove_duplicate=False)),
     }
-    params_flat, params_spec = pytree.tree_flatten(params)
-    params_flat = list(params_flat)
-    params_len = len(params_flat)
+    params_buffers_flat, params_buffers_spec = pytree.tree_flatten(params_buffers)
+    params_buffers_flat = list(params_buffers_flat)
 
-    functional_call = create_functional_call(mod, params_spec, params_len)
+    params_buffers_len = len(params_buffers_flat)
+    functional_call = create_functional_call(
+        mod, params_buffers_spec, params_buffers_len
+    )
 
     if bw_compiler is None:
         bw_compiler = fw_compiler
@@ -871,11 +883,11 @@ def aot_module_simplified(
     seen_sources = set()
 
     full_args = []
-    # First, the params
-    full_args.extend(params_flat)
+    # First, the params/buffers
+    full_args.extend(params_buffers_flat)
 
     if tracing_context := torch._guards.TracingContext.try_get():
-        tracing_context.params_flat = params_flat
+        tracing_context.params_buffers_flat = params_buffers_flat
 
     aot_autograd_arg_pos_to_source = None
     # Then, the params 1:1 mapped sources, if relevant.
@@ -884,7 +896,7 @@ def aot_module_simplified(
         # We now know this came from dynamo, and (1) we care about guards,
         # so setting up aot_autograd_arg_pos_to_source for downstream dedup guards
         # can now be done safely. (2) Dynamo logic protects the 1:1 sizing below.
-        for name in params.keys():
+        for name in params_buffers.keys():
             assert name in mod._param_name_to_source, f"{name} not found."
             source = mod._param_name_to_source[name]
             assert source not in seen_sources, source
@@ -921,7 +933,7 @@ def aot_module_simplified(
         inference_compiler=inference_compiler,
         partition_fn=partition_fn,
         decompositions=decompositions,
-        num_params_buffers=params_len,
+        num_params_buffers=params_buffers_len,
         aot_id=next(AOT_COUNTER),
         keep_inference_input_mutations=keep_inference_input_mutations,
         dynamic_shapes=dynamic_shapes,
@@ -944,7 +956,7 @@ def aot_module_simplified(
         # https://github.com/pytorch/pytorch/pull/122535/files#r1560096481
         def boxed_forward(runtime_args: List[Any]):
             flat_args = []
-            flat_args.extend(params_flat)
+            flat_args.extend(params_buffers_flat)
             flat_args.extend(runtime_args)
             runtime_args.clear()
             return compiled_fn(flat_args)
@@ -962,7 +974,7 @@ def aot_module_simplified(
     # NB: GraphModule/nn.Module rely on the non-boxed calling convention here
     def forward(*runtime_args: Tuple[Any]):
         full_args = []
-        full_args.extend(params_flat)
+        full_args.extend(params_buffers_flat)
         full_args.extend(runtime_args)
         return compiled_fn(full_args)
 
@@ -1023,19 +1035,22 @@ def aot_export_module(
     named_parameters = dict(mod.named_parameters(remove_duplicate=False))
     named_buffers = dict(mod.named_buffers(remove_duplicate=False))
 
-    params_and_buffers = {
+    params_buffers = {
         **dict(named_parameters),
         **dict(named_buffers),
     }
-    params_and_buffers_flat, params_spec = pytree.tree_flatten(params_and_buffers)
-    params_and_buffers_flat = tuple(params_and_buffers_flat)
-    params_len = len(params_and_buffers_flat)
+    params_buffers_flat, params_buffers_spec = pytree.tree_flatten(params_buffers)
+    params_buffers_flat = list(params_buffers_flat)
+    params_buffers_len = len(params_buffers_flat)
 
     kwargs = kwargs or {}
 
     functional_call = create_functional_call(
-        mod, params_spec, params_len, store_orig_mod=True
+        mod, params_buffers_spec, params_buffers_len, store_orig_mod=True
     )
+
+    if tracing_context := torch._guards.TracingContext.try_get():
+        tracing_context.params_buffers_flat = params_buffers_flat
 
     num_fw_outs = None
 
@@ -1103,16 +1118,17 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
     # parameters by looking at the difference in parameter count outside
     # and inside AOTAutograd, and assumes the prefix of arguments are fixed
     # arguments
-    full_args.extend(params_and_buffers_flat)
+    full_args.extend(params_buffers_flat)
     # Next, the input args
     full_args.extend(args)
 
+    kwargs = kwargs or {}
     with ctx():
         fx_g, metadata, in_spec, out_spec = _aot_export_function(
             fn_to_trace,
             full_args,
             decompositions=decompositions,
-            num_params_buffers=params_len,
+            num_params_buffers=params_buffers_len,
             no_tangents=True,
             pre_dispatch=pre_dispatch,
             kwargs=kwargs,
@@ -1168,7 +1184,7 @@ https://github.com/pytorch/pytorch/issues/101192
         in_spec,
         out_spec,
         user_args_flat=user_args_flat,
-        params_and_buffers_flat=params_and_buffers_flat,
+        params_and_buffers_flat=params_buffers_flat,
         param_names=list(named_parameters.keys()),
         buffer_names=list(named_buffers.keys()),
         trace_joint=trace_joint,

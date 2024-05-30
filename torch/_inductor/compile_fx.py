@@ -1180,7 +1180,7 @@ def fw_compiler_freezing(
     # constant params will be real tensors, not fake
     tracing_context = torch._guards.TracingContext.try_get()
     if tracing_context is not None:
-        params_flat = tracing_context.params_flat
+        params_flat = tracing_context.params_buffers_flat
         assert params_flat is not None
         for i in range(len(params_flat)):
             if i not in preserved_arg_indices:
@@ -1313,12 +1313,14 @@ def compile_fx(
         model: torch.fx.GraphModule,
         example_inputs: List[torch.Tensor],
         is_inference: bool,
-        num_params_buffers: int,
     ):
         if is_inference:
             # partition_fn won't be called
             _recursive_joint_graph_passes(model)
 
+        fixed = torch._inductor.utils.num_fw_fixed_arguments(
+            num_example_inputs, len(example_inputs)
+        )
         user_visible_outputs = {}
 
         if config.keep_output_stride:
@@ -1374,7 +1376,7 @@ def compile_fx(
         return inner_compile(
             model,
             example_inputs,
-            num_fixed=num_params_buffers,
+            num_fixed=fixed,
             cudagraphs=cudagraphs,
             graph_id=graph_id,
             is_inference=is_inference,
