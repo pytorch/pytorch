@@ -101,7 +101,7 @@ DynamicShapesExportTests.test_retracibility_dynamic_shapes = slowTest(  # noqa: 
     # As of 414a1fd29f04d06e41b7f895368dd1f83a4be29d
     DynamicShapesExportTests.test_retracibility_dynamic_shapes,  # noqa: F821
     # As of 15cc9f2e7e7b2b175f24755925dc38d4d430905d
-    DynamicShapesExportTests.test_retracibility_dict_container_inp_out,  # noqa: F821
+    DynamicShapesExportTests.test_retracibility_dict_container_inp_out_dynamic_shapes,  # noqa: F821
 )
 
 if __name__ == "__main__":
