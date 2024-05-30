@@ -36,7 +36,8 @@ def allow_in_graph(fn):
     and instead directly write it to the graph when encountered.
 
     If you are using :func:`torch.compile` (with backend="inductor" (the default)), or
-    :func:`torch.export.export`, and trying to black-box a Python function, do not use this API.
+    :func:`torch.export.export`, and trying to black-box a Python function throughout
+    all tracing, do not use this API.
     Instead, please create a custom operator (see :ref:`custom-ops-landing-page`)
 
     .. warning::
@@ -76,9 +77,9 @@ def allow_in_graph(fn):
     results in undefined behavior:
 
     - The inputs to ``fn`` must be Proxy-able types in the FX graph. Valid types include:
-    Tensor/int/bool/float/None/List[Tensor?]/List[int?]/List[float?]/
-    Tuple[Tensor?, ...]/Tuple[int?, ...]/Tuple[float?, ...]/torch.dtype/torch.device
-    - The outputs to ``fn` must be Proxy-able types in the FX graph (see previous bullet)
+      Tensor/int/bool/float/None/List[Tensor?]/List[int?]/List[float?]/
+      Tuple[Tensor?, ...]/Tuple[int?, ...]/Tuple[float?, ...]/torch.dtype/torch.device
+    - The outputs to ``fn`` must be Proxy-able types in the FX graph (see previous bullet)
     - all Tensors used inside of ``fn`` must be passed directly as inputs to ``fn``
     (as opposed to being captured variables).
 
@@ -101,7 +102,7 @@ def allow_in_graph(fn):
 
         fn(...)
 
-    Will capture a single graph containing `my_custom_function()`.
+    Will capture a single graph containing ``my_custom_function()``.
 
     """
     import torch._dynamo
