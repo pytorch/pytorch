@@ -5,4 +5,3 @@ runner_types:
     is_ephemeral: false
     max_available: 3120
     os: linux
-
