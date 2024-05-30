@@ -518,6 +518,11 @@ class PythonPrinter(ExprPrinter):
         assert isinstance(ndigits, sympy.Integer)
         return f"round({self._print(number)}, {ndigits})"
 
+    def doprint(self, expr, *, simplify: bool = True):
+        if simplify:
+            expr = V.graph.sizevars.simplify(expr)
+        return super().doprint(expr)
+
 
 class OpOverrides:
     def __init__(self, parent):

@@ -920,10 +920,7 @@ class WrapperCodeGen(CodeGen):
         pass
 
     def codegen_python_sizevar(self, x: Expr, *, simplify: bool = True) -> str:
-        if simplify:
-            return pexpr(V.graph.sizevars.simplify(x))
-        else:
-            return pexpr(x)
+        return pexpr(x, simplify=simplify)
 
     def codegen_sizevar(self, x: Expr) -> str:
         return self.codegen_python_sizevar(x)
