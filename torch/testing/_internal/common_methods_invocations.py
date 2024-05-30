@@ -2108,13 +2108,14 @@ def sample_inputs_singular_matrix_factors(op_info, device, dtype, requires_grad=
     """
 
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    batches = [(), (2,)]
-    size = [3, 4]
+    batches = [(), (0, ), (2, ), (1, 1)]
+    size = [1, 5, 10]
+
     for batch, m, n in product(batches, size, size):
-        k = 2
-        a = make_arg((*batch, m, k))
-        b = make_arg((*batch, n, k))
-        yield a, b
+        for k in range(min(3, m, n)):
+            a = make_arg((*batch, m, k))
+            b = make_arg((*batch, n, k))
+            yield a, b
 
 
 def sample_inputs_svd_lowrank(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -17718,6 +17719,10 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("See comment above"),
                                     'TestFwdGradients',
                                     'test_fn_fwgrad_bwgrad',
+                                    dtypes=[torch.complex128]),
+                       DecorateInfo(unittest.skip("See comment above"),
+                                    'TestBwdGradientsCUDA',
+                                    'test_fn_gradgrad',
                                     dtypes=[torch.complex128]),
                        ],
            skips=(
