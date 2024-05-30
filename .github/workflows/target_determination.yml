@@ -7,7 +7,7 @@ jobs:
   target-determination:
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
-    runs-on: linux.2xlarge
+    runs-on: lf.linux.2xlarge
     steps:
       # [pytorch repo ref]
       # Use a pytorch/pytorch reference instead of a reference to the local
