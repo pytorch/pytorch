@@ -803,8 +803,7 @@ class InstructionTranslatorBase(
         try:
             self.dispatch_table[inst.opcode](self, inst)
             return not self.output.should_exit
-        except exc.ObservedExceptionFromInlinedFrame:
-            # Inlined frame
+        except exc.ObservedException:
             self.exception_handler()
             return True
         except ReturnValueOp:
@@ -1263,8 +1262,7 @@ class InstructionTranslatorBase(
 
             # 2) when user raises exception instance
             if isinstance(val, variables.ExceptionVariable):
-                self.exception_handler()
-                return
+                raise exc.ObservedException(f"raised exception {val}")
             unimplemented(f"raise {exc}")
         else:
             unimplemented("raise ... from ...")
@@ -1298,6 +1296,8 @@ class InstructionTranslatorBase(
                 # No handler found. Bubble the exception to the parent
                 # instruction translater. We use special exception for this.
                 self.stack.clear()
+                if type(self) is InstructionTranslator:
+                    raise Unsupported("Observed exception")
                 raise exc.ObservedException
         else:
             if len(self.block_stack):
@@ -1332,6 +1332,8 @@ class InstructionTranslatorBase(
                 # No handler found. Bubble the exception to the parent
                 # instruction translater. We use special exception for this.
                 self.stack.clear()
+                if type(self) is InstructionTranslator:
+                    raise Unsupported("Observed exception")
                 raise exc.ObservedException
 
     def PUSH_EXC_INFO(self, inst):
@@ -2734,7 +2736,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             parent.exn_vt_stack.extend(tracer.exn_vt_stack)
             log.debug(msg)
             # bubble up the exception to the parent frame.
-            raise exc.ObservedExceptionFromInlinedFrame(msg) from e
+            raise
         except exc.SkipFrame as e:
             msg = f"SKIPPED INLINING {code}: {e}"
             log.debug(msg)

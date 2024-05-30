@@ -185,6 +185,11 @@ class ExceptionVariable(VariableTracker):
         self.exc_type = exc_type
         self.args = args
 
+    def reconstruct(self, codegen):
+        codegen.load_import_from("builtins", self.exc_type.__name__)
+        codegen.foreach(self.args)
+        codegen.call_function(len(self.args), True)
+
 
 class UnknownVariable(VariableTracker):
     """
