@@ -674,7 +674,7 @@ def _fused_adamw(
             lr = lr_dict.setdefault(
                 device, lr.to(device=device, non_blocking=True)  # type: ignore[union-attr]
             )
-        if device.type == "mps":
+        if device.type == "mps":  # type: ignore[union-attr]
             assert found_inf is None and grad_scale is None
             assert not isinstance(lr, Tensor)
             for device_state_step in device_state_steps:

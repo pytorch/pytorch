@@ -671,8 +671,7 @@ def _fused_adam(
         if lr_dict is not None and device not in lr_dict:
             lr_dict[device] = lr.to(device=device, non_blocking=True)  # type: ignore[union-attr]
             lr = lr_dict[device]
-        
-        if device.type == "mps":
+        if device.type == "mps":  # type: ignore[union-attr]
             assert found_inf is None and grad_scale is None
             assert not isinstance(lr, Tensor)
             for device_state_step in device_state_steps:
