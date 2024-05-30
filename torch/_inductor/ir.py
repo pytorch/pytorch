@@ -5485,6 +5485,9 @@ class FallbackKernel(ExternKernelAlloc):
         ordered_kwargs = [
             kwargs.get(key, None) for key in self.ordered_kwargs_for_cpp_kernel
         ]
+        if not V.graph.aot_mode:
+            # No need to serialize in the cpp wrapper JIT mode
+            return [*args, *ordered_kwargs]
 
         serializer = GraphModuleSerializer(None, None)  # type: ignore[arg-type]
         named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)  # type: ignore[arg-type]
