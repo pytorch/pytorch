@@ -38,7 +38,7 @@ from torch.fx.node import _get_qualified_name
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
-from .. import codecache, config, ir
+from .. import async_compile, config, ir
 from ..ir import ReinterpretView
 from ..runtime import triton_heuristics
 from ..runtime.hints import DeviceProperties
@@ -430,7 +430,7 @@ class WrapperCodeGen(CodeGen):
         # If the generated source code is exactly the same, reuse the
         # pre-existing kernel for it
         self.src_to_kernel: Dict[str, str] = {}
-        self.kernel_numel_expr: Set[Tuple[str, "GraphLowering"]] = set()
+        self.kernel_numel_expr: Set[Tuple[str, GraphLowering]] = set()
         self.lines: List[Union[MemoryPlanningLine, LineContext]] = []
         self.declare = ""
         self.declare_maybe_reference = ""
@@ -506,7 +506,7 @@ class WrapperCodeGen(CodeGen):
                 from torch._inductor.codegen.memory_planning import _align as align
 
                 from torch import device, empty_strided
-                from {codecache.__name__} import AsyncCompile
+                from {async_compile.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
                 from torch._inductor.codegen.multi_kernel import MultiKernelCall
 
@@ -685,9 +685,8 @@ class WrapperCodeGen(CodeGen):
         for line in code.split("\n"):
             self.writeline(line)
 
-        stream_name = self.write_get_raw_stream(
-            V.graph.scheduler.current_device.index, V.graph
-        )
+        current_device = V.graph.scheduler.get_current_device_or_throw()
+        stream_name = self.write_get_raw_stream(current_device.index, V.graph)
         self.writeline(
             f"{kernel_name}.run({', '.join(args)}, grid={grid}, stream={stream_name})"
         )
@@ -1149,7 +1148,9 @@ class WrapperCodeGen(CodeGen):
                 size_dtype=index_dtype,
                 indices=non_constant_indices,
             ),
-            "device": DeviceProperties.create(V.graph.scheduler.current_device),
+            "device": DeviceProperties.create(
+                V.graph.scheduler.get_current_device_or_throw()
+            ),
             # Triton compiler includes equal_to_1 args into constants even
             # when they are not constexpr. otherwise there may be a segfault
             # during launching the Inductor-compiled Triton kernel.
@@ -1270,9 +1271,8 @@ class WrapperCodeGen(CodeGen):
 
         traverse(kernel)
 
-        compile_wrapper.writeline(
-            f"''', device_str='{V.graph.scheduler.current_device.type}')"
-        )
+        current_device = V.graph.scheduler.get_current_device_or_throw()
+        compile_wrapper.writeline(f"''', device_str='{current_device.type}')")
         _, lineno = inspect.getsourcelines(kernel.fn)
         srcfile = inspect.getsourcefile(kernel.fn)
         metadata = f"# Original path: {srcfile}:{lineno}"
@@ -1387,9 +1387,8 @@ class WrapperCodeGen(CodeGen):
         """
         if cuda:
             call_args_str = ", ".join(pexpr(item) for item in call_args)
-            stream_name = self.write_get_raw_stream(
-                V.graph.scheduler.current_device.index, V.graph
-            )
+            current_device = V.graph.scheduler.get_current_device_or_throw()
+            stream_name = self.write_get_raw_stream(current_device.index, V.graph)
             if triton:
                 grid_str = ", ".join(pexpr(item) for item in grid)
                 grid_str = f"{grid_fn}({grid_str})"
