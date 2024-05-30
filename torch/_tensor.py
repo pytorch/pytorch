@@ -717,7 +717,7 @@ class Tensor(torch._C.TensorBase):
         It is expected that ``self`` is a parameter or buffer in an ``nn.Module`` and ``other`` is the
         value in the state dictionary with the corresponding key, this method defines
         how ``other`` is remapped before being swapped with ``self`` via
-        :func:`~torch.utils.swap_tensors`` in ``module.load_state_dict()``.
+        :func:`~torch.utils.swap_tensors` in ``module.load_state_dict()``.
 
         .. note::
             This method should always return a new object that is not ``self`` or ``other``.
