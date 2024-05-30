@@ -439,7 +439,7 @@ def dim_reduction(
     ndim: int, dim_or_dims: Optional[Union[int, Sequence[int]]], keepdim: bool
 ) -> DimMap:
     """
-    General fallback for reduction ops where _Partial() does not apply.
+    General fallback for reduction ops where Partial() does not apply.
 
     This will cause incoming tensor to be replicated on the reducing dimensions.
     """
