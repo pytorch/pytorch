@@ -691,7 +691,7 @@ def _load_optim_state_dict(
 ) -> None:
     if not info.handle_optim:
         return
-
+    #torch.distributed.breakpoint()
     for optim in optimizers:
         _init_optim_state(optim)
         if state_dict:
@@ -732,7 +732,6 @@ def _load_optim_state_dict(
             local_state_dict = _get_optim_state_dict(model, (optim,), info)
             info.full_state_dict = True
             device = None
-
             def _device(t):
                 if t.dim() > 0:
                     nonlocal device
@@ -746,6 +745,13 @@ def _load_optim_state_dict(
             assert device is not None
             flatten_osd, osd_mapping = _flatten_state_dict(optim_state_dict)
             flatten_local_osd, local_osd_mapping = _flatten_state_dict(local_state_dict)
+            optim_state_dict = _unflatten_state_dict(
+                flatten_local_osd, local_osd_mapping
+            )
+            for optim_key in flatten_osd.keys():
+                if optim_key not in flatten_local_osd:
+                    flatten_local_osd[optim_key] = flatten_osd[optim_key]
+                    local_osd_mapping[optim_key] = osd_mapping[optim_key]
             _broadcast_state_dict(flatten_osd, flatten_local_osd, device=device)
             optim_state_dict = _unflatten_state_dict(
                 flatten_local_osd, local_osd_mapping
@@ -1027,10 +1033,8 @@ def set_optimizer_state_dict(
             else tuple(optimizers)
         )
         info = _verify_options(model, optimizers, optim_only=True, options=options)
-
         _verify_state_dict({}, optim_state_dict, info)
         _load_optim_state_dict(model, optimizers, optim_state_dict, info)
-
 
 def set_state_dict(
     model: nn.Module,
