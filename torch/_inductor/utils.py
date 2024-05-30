@@ -1345,7 +1345,7 @@ def num_fw_fixed_arguments(dynamo_gm_num_inputs: int, aot_fw_gm_num_inputs: int)
     if tracing_context and tracing_context.params_buffers_flat is not None:
         return len(tracing_context.params_buffers_flat)
     else:
-        # We end up in this case when the frontend directy uses aot_function or when there's no TracingContext
+        # non-dynamo frontends
         num_rng_seed_offset_inputs = (
             2 if torch._functorch.config.functionalize_rng_ops else 0
         )

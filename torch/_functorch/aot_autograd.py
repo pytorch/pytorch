@@ -781,16 +781,6 @@ def aot_function(
     return returned_function
 
 
-def extract_flat_params_buffers(mod: nn.Module):
-    mod_pb = {
-        **dict(mod.named_parameters(remove_duplicate=False)),
-        **dict(mod.named_buffers(remove_duplicate=False)),
-    }
-    mod_pb_flat, mod_pb_spec = pytree.tree_flatten(mod_pb)
-    mod_pb_flat = list(mod_pb_flat)
-    return mod_pb_flat, mod_pb_spec
-
-
 def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
     """
     Traces the forward and backward graph of :attr:`mod` using torch dispatch
@@ -820,13 +810,12 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
         params_and_buffers = {**named_params, **named_buffers}
         return torch.func.functional_call(mod, params_and_buffers, args, kwargs)
 
-    params_buffers_flat, _ = extract_flat_params_buffers(mod)
-    num_params_buffers = len(params_buffers_flat)
+    named_params = dict(mod.named_parameters(remove_duplicate=False))
+    named_buffers = dict(mod.named_buffers(remove_duplicate=False))
+    num_params_buffers = len(named_params) + len(named_buffers)
     compiled_f = aot_function(
         functional_call, *args, num_params_buffers=num_params_buffers, **kwargs
     )
-    if tracing_context := torch._guards.TracingContext.try_get():
-        tracing_context.params_buffers_flat = params_buffers_flat
 
     class AOTModule(nn.Module):
         def __init__(self):
@@ -835,7 +824,8 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
 
         def forward(self, *args, **kwargs):
             return compiled_f(
-                params_buffers_flat,
+                named_params,
+                named_buffers,
                 *args,
                 **kwargs,
             )
