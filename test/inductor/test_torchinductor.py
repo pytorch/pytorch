@@ -4288,7 +4288,7 @@ class CommonTemplate:
 
         def fn(x):
             view_size = (3, 2)
-            full = x.repeat((3,2))
+            full = x.repeat((3, 2))
             view = torch.as_strided(full, view_size, full.stride())
             result = view + view
 
