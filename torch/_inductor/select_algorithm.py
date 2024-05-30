@@ -453,7 +453,7 @@ class TritonTemplateKernel(TritonKernel):
         index = " + ".join(
             f"{texpr(self.rename_indexing(s))} * {i}" for s, i in zip(stride, indices)
         )
-        return f"tl.load({name} + ({index}), {mask})"
+        return f"tl.load({name} + ({index}), {mask}, other=0.0)"
 
     def template_env(self):
         """
