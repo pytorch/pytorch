@@ -2534,7 +2534,7 @@ class TestSDPACudaOnly(NNTestCase):
                     else:
                         # cuDNN attention has no deterministic fallback
                         self.assertRaises(RuntimeError, lambda:
-                            torch.nn.functional.scaled_dot_product_attention(query, key, value).sum().backward())
+                                          torch.nn.functional.scaled_dot_product_attention(query, key, value).sum().backward())
 
     @unittest.skip("This test is not behaving deterministaclly non-deterministaclly on CI/CD")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Platform does not support fused SDPA")
