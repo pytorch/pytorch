@@ -93,7 +93,7 @@ programmatically since the settings become fixed. Use the C++ or Python APIs ins
 | PYTORCH_TUNABLEOP_VERBOSE | Default is 0. Set to 1 to enable basic logging. 2 for basic tuning status. 3 for full trace. |
 | PYTORCH_TUNABLEOP_VERBOSE_FILENAME | Default is "err" for stderr. Set to "out" for stdout or a filename for capturing verbose logging. |
 | PYTORCH_TUNABLEOP_FILENAME | Default is 'tunableop_results.csv'. |
-| PYTORCH_TUNABLEOP_NUMERICAL_CHECK | Default is 1. Set to 0 to disable. |
+| PYTORCH_TUNABLEOP_NUMERICAL_CHECK | Default is 0. Set to 1 to enable. |
 | PYTORCH_TUNABLEOP_ROCBLAS_ENABLED | Default is 1. Set to 0 to disable rocblas being considered during tuning. |
 | PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED | Default is 1. Set to 0 to disable hipblaslt being considered during tuning. |
 | PYTORCH_TUNABLEOP_MAX_TUNING_DURATION_MS | Default is 30. Unit is milliseconds. |
@@ -101,7 +101,7 @@ programmatically since the settings become fixed. Use the C++ or Python APIs ins
 | PYTORCH_TUNABLEOP_MAX_WARMUP_DURATION_MS | Default is 0, meaning it is not used. Unit is milliseconds. |
 | PYTORCH_TUNABLEOP_MAX_WARMUP_ITERATIONS | Default is 0, meaning it is not used. |
 | PYTORCH_TUNABLEOP_ICACHE_FLUSH_ENABLED | Default is 1. Set to 0 to disable. |
-| PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE | Default is 0, meaning it is not used. Set to the number of MiB to use for the pool of operator parameters. For example, setting this to the size of your device's memory cache will guarantee that every tuning iteration will use a cold cache. |
+| PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE | Default is to query L2 cache size. Set to 0 to disable. Otherwise, set to the number of MiB to use for the pool of operator parameters. For example, setting this to the size of your device's memory cache will guarantee that every tuning iteration will use a cold cache. |
 
 ### Python Interface
 All python APIs exist in the `torch.cuda.tunable` module.
