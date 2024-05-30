@@ -461,6 +461,11 @@ class TestOperators(TestCase):
                 device_type="cuda",
             ),
             tol1(
+                "svd_lowrank",
+                {torch.float32: tol(atol=5e-05, rtol=7e-06)},
+                device_type="mps",
+            ),
+            tol1(
                 "linalg.tensorsolve",
                 {torch.float32: tol(atol=3e-04, rtol=3e-04)},
                 device_type="cuda",
@@ -608,6 +613,7 @@ class TestOperators(TestCase):
                 "nn.functional.batch_norm", {torch.float32: tol(atol=4e-05, rtol=5e-05)}
             ),
             tol1("nn.functional.conv2d", {torch.float32: tol(atol=4e-05, rtol=5e-05)}),
+            tol1("svd_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
             tol1("pca_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
             tol1(
                 "nn.functional.multi_head_attention_forward",
@@ -2366,6 +2372,8 @@ class TestOperators(TestCase):
                 "linalg.pinv", "hermitian", {torch.float32: tol(atol=5e-06, rtol=5e-06)}
             ),
             tol1("nn.functional.conv3d", {torch.float32: tol(atol=5e-04, rtol=9e-03)}),
+            tol1("svd_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
+            tol1("pca_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
         ),
     )
     def test_vmap_autograd_grad(self, device, dtype, op):
