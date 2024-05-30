@@ -269,7 +269,7 @@ CUDA_VERSION=$(python -c "import torch; print(torch.version.cuda)")
 if [ "$CUDA_VERSION" == "12.4" ]; then
     ISCUDA124="cu124"
 else
-    ISCUDA124="."
+    ISCUDA124=""
 fi
 popd
 
@@ -373,7 +373,7 @@ test_inductor_cpp_wrapper_abi_compatible() {
     --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_training.csv"
   python benchmarks/dynamo/check_accuracy.py \
     --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_training.csv" \
-    --expected "benchmarks/dynamo/ci_expacted_accuracy/${ISCUDA124}/inductor_timm_training.csv"
+    --expected "benchmarks/dynamo/ci_expected_accuracy/${ISCUDA124}/inductor_timm_training.csv"
 }
 
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
@@ -535,10 +535,10 @@ test_single_dynamo_benchmark() {
       --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
     python benchmarks/dynamo/check_accuracy.py \
       --actual "$TEST_REPORTS_DIR/${name}_$suite.csv" \
-      --expected "benchmarks/dynamo/ci_expacted_accuracy/${ISCUDA124}/${TEST_CONFIG}_${name}.csv"
+      --expected "benchmarks/dynamo/ci_expected_accuracy/${ISCUDA124}/${TEST_CONFIG}_${name}.csv"
     python benchmarks/dynamo/check_graph_breaks.py \
       --actual "$TEST_REPORTS_DIR/${name}_$suite.csv" \
-      --expected "benchmarks/dynamo/ci_expacted_accuracy/${ISCUDA124}/${TEST_CONFIG}_${name}.csv"
+      --expected "benchmarks/dynamo/ci_expected_accuracy/${ISCUDA124}/${TEST_CONFIG}_${name}.csv"
   fi
 }
 
@@ -583,7 +583,7 @@ test_inductor_torchbench_smoketest_perf() {
     --bfloat16 --inference --inductor --only llama --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
   python benchmarks/dynamo/check_accuracy.py \
     --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv" \
-    --expected "benchmarks/dynamo/ci_expacted_accuracy/${ISCUDA124}/inductor_torchbench_inference.csv"
+    --expected "benchmarks/dynamo/ci_expected_accuracy/${ISCUDA124}/inductor_torchbench_inference.csv"
 
   python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --float16 --training \
     --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" --only hf_Bert \
@@ -623,7 +623,7 @@ test_inductor_torchbench_smoketest_perf() {
       --only $test --output "$TEST_REPORTS_DIR/inductor_warm_start_smoketest_$test.csv"
     python benchmarks/dynamo/check_accuracy.py \
       --actual "$TEST_REPORTS_DIR/inductor_warm_start_smoketest_$test.csv" \
-      --expected "benchmarks/dynamo/ci_expacted_accuracy/${ISCUDA124}/inductor_huggingface_training.csv"
+      --expected "benchmarks/dynamo/ci_expected_accuracy/${ISCUDA124}/inductor_huggingface_training.csv"
   done
 }
 
