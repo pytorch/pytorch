@@ -383,49 +383,53 @@ bool TuningContext::IsNumericsCheckEnabled() const {
 }
 
 void TuningContext::SetMaxTuningDurationMs(int max_duration_ms) {
-  max_tuning_duration_ms_ = max_duration_ms;
+  max_tuning_duration_ms_ = max_duration_ms < 0 ? 0 : max_duration_ms;
 }
 
 int TuningContext::GetMaxTuningDurationMs() const {
   static const char *env = std::getenv("PYTORCH_TUNABLEOP_MAX_TUNING_DURATION_MS");
   if (env != nullptr) {
-    return atoi(env);
+    int val = atoi(env);
+    return val < 0 ? 0 : val;
   }
   return max_tuning_duration_ms_;
 }
 
 void TuningContext::SetMaxTuningIterations(int max_iter) {
-  max_tuning_iterations_ = max_iter;
+  max_tuning_iterations_ = max_iter < 0 ? 0 : max_iter;
 }
 
 int TuningContext::GetMaxTuningIterations() const {
   static const char *env = std::getenv("PYTORCH_TUNABLEOP_MAX_TUNING_ITERATIONS");
   if (env != nullptr) {
-    return atoi(env);
+    int val = atoi(env);
+    return val < 0 ? 0 : val;
   }
   return max_tuning_iterations_;
 }
 
 void TuningContext::SetMaxWarmupDurationMs(int max_duration_ms) {
-  max_warmup_duration_ms_ = max_duration_ms;
+  max_warmup_duration_ms_ = max_duration_ms < 0 ? 0 : max_duration_ms;
 }
 
 int TuningContext::GetMaxWarmupDurationMs() const {
   static const char *env = std::getenv("PYTORCH_TUNABLEOP_MAX_WARMUP_DURATION_MS");
   if (env != nullptr) {
-    return atoi(env);
+    int val = atoi(env);
+    return val < 0 ? 0 : val;
   }
   return max_warmup_duration_ms_;
 }
 
 void TuningContext::SetMaxWarmupIterations(int max_iter) {
-  max_warmup_iterations_ = max_iter;
+  max_warmup_iterations_ = max_iter < 0 ? 0 : max_iter;
 }
 
 int TuningContext::GetMaxWarmupIterations() const {
   static const char *env = std::getenv("PYTORCH_TUNABLEOP_MAX_WARMUP_ITERATIONS");
   if (env != nullptr) {
-    return atoi(env);
+    int val = atoi(env);
+    return val < 0 ? 0 : val;
   }
   return max_warmup_iterations_;
 }
@@ -443,19 +447,15 @@ bool TuningContext::IsICacheFlushEnabled() const {
 }
 
 void TuningContext::SetRotatingBufferSize(int size) {
-  rotating_buffer_size_ = size;
+  rotating_buffer_size_ = size < 0 ? 0 : size;
 }
 
 int TuningContext::GetRotatingBufferSize() const {
   static const char *env = std::getenv("PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE");
-  // if env var is set, always use it
   if (env != nullptr) {
     constexpr int MB = 1024 * 1024;
-    int val = atoi(env) * MB;  // env var is specified as MB, returned as bytes
-    if (val < 0) {
-       return 0;  // disable
-    }
-    return val;
+    int val = atoi(env);
+    return val < 0 ? 0 : val * MB;  // env var is specified as MB, returned as bytes
   }
   else {
     if (rotating_buffer_size_ < 0) {
