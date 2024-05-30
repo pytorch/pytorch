@@ -300,7 +300,7 @@ TuningContext::TuningContext() :
     max_tuning_iterations_{100},
     max_warmup_duration_ms_{0},
     max_warmup_iterations_{0},
-    icache_flush_{false},
+    icache_flush_{true},
     rotating_buffer_size_{0},
     filename_{},
     results_count_from_input_file_{0}
@@ -436,8 +436,8 @@ void TuningContext::EnableICacheFlush(bool value) {
 
 bool TuningContext::IsICacheFlushEnabled() const {
   static const char *env = std::getenv("PYTORCH_TUNABLEOP_ICACHE_FLUSH_ENABLED");
-  if (env != nullptr && strcmp(env, "1") == 0) {
-    return true;
+  if (env != nullptr && strcmp(env, "0") == 0) {
+    return false;
   }
   return icache_flush_;
 }
