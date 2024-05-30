@@ -691,7 +691,7 @@ def _load_optim_state_dict(
 ) -> None:
     if not info.handle_optim:
         return
-    #torch.distributed.breakpoint()
+
     for optim in optimizers:
         _init_optim_state(optim)
         if state_dict:
@@ -728,7 +728,7 @@ def _load_optim_state_dict(
                 optim_state_dict = FSDP.optim_state_dict_to_load(
                     model, optim, optim_state_dict
                 )
-        else:
+        elif info.broadcast_from_rank0:
             info.full_state_dict = False
             local_state_dict = _get_optim_state_dict(model, (optim,), info)
             info.full_state_dict = True
