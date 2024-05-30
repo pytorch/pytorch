@@ -28,6 +28,7 @@ from typing import (
 import sympy
 
 import torch
+import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
@@ -161,8 +162,6 @@ class BaseSchedulerNode:
     group: Tuple[torch.device, Tuple[Tuple[sympy.Expr, ...], ...]]
     read_writes: dependencies.ReadWrites
     unmet_dependencies: Set[Dep]
-    # Processed deps used while scoring fusion
-    read_and_write_deps_with_hint: Set[Tuple[Dep, int]]
 
     def __init__(self, scheduler: "Scheduler", node: ir.Buffer) -> None:
         self.scheduler: Scheduler = scheduler
@@ -250,25 +249,6 @@ class BaseSchedulerNode:
         self.read_writes = rw
         self.unmet_dependencies = self.read_writes.reads
         self.prune_deps()
-
-        # read_and_write_deps_with_hint are a summary of read_writes used by
-        # score_fusion_memory()
-        def dep_size_hint(dep: Dep) -> int:
-            try:
-                if dep.has_unbacked_symbols():
-                    return 0
-                return dep.numbytes_hint()
-            except KeyError:
-                # In at least one test (test/inductor/test_torchbind.py) we
-                # create a StarDep that doesn't exist in the graph and calling
-                # `has_unbacked_symbols()` throws an error.
-                return 0
-
-        self.read_and_write_deps_with_hint = {
-            (dep, hint)
-            for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes)
-            if (hint := dep_size_hint(dep)) > 0
-        }
 
     def op_counts(self) -> Counter[str]:
         return self.read_writes.op_counts
@@ -1393,9 +1373,12 @@ _post_grad_graph_counter = itertools.count()
 
 
 class Scheduler:
+    __dep_size_hint_cache: Dict[Dep, int]
+
     @dynamo_timed
     def __init__(self, nodes: List[ir.Buffer]) -> None:
         super().__init__()
+        self.__dep_size_hint_cache = {}
         V.graph.scheduler = self
         self.backends: Dict[torch.device, BaseScheduling] = {}
         self.post_grad_graph_id = next(_post_grad_graph_counter)
@@ -2504,6 +2487,22 @@ class Scheduler:
             proximity_score,
         )
 
+    def dep_size_hint(self, dep: Dep) -> int:
+        res = 0
+        if dep not in self.__dep_size_hint_cache:
+            try:
+                if not dep.has_unbacked_symbols():
+                    res = dep.numbytes_hint()
+            except KeyError:
+                # In at least one test (test/inductor/test_torchbind.py) we
+                # create a StarDep that doesn't exist in the graph and calling
+                # `has_unbacked_symbols()` throws an error.
+                pass
+            self.__dep_size_hint_cache[dep] = res
+        else:
+            res = self.__dep_size_hint_cache[dep]
+        return res
+
     def score_fusion_memory(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> int:
@@ -2511,11 +2510,10 @@ class Scheduler:
         The first term in our fusion score that estimates number of saved
         memory operations.
         """
-        return sum(
-            hint
-            for dep, hint in node1.read_and_write_deps_with_hint
-            & node2.read_and_write_deps_with_hint
+        common_memory_deps = (node1.read_writes.reads | node1.read_writes.writes) & (
+            node2.read_writes.reads | node2.read_writes.writes
         )
+        return sum(self.dep_size_hint(dep) for dep in common_memory_deps)
 
     def get_possible_fusions_with_highest_priority(
         self, possible_fusions: List[Tuple[BaseSchedulerNode, BaseSchedulerNode]]
