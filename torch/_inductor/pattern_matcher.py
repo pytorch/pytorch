@@ -12,6 +12,7 @@ import os
 import re
 import textwrap
 import typing
+from abc import ABC, abstractmethod
 from collections import defaultdict
 from pathlib import Path
 from typing import (
@@ -54,9 +55,6 @@ from ..fx import Transformer
 from . import config
 from .decomposition import select_decomp_table
 from .lowering import fallback_node_due_to_unsupported_type
-
-# if typing.TYPE_CHECKING:
-#    from torch.fx import Node
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -135,7 +133,6 @@ class Match:
 
     @property
     def graph(self) -> torch.fx.Graph:
-        assert self.ctx
         return self.ctx.graph
 
     def extend(self, other: Match) -> None:
@@ -162,7 +159,6 @@ class Match:
                 graph.erase_node(n)
 
     def output_nodes(self) -> List[Optional[torch.fx.Node]]:
-        assert self.ctx
         return [
             (self.ctx.pattern_to_node[p] if p is not None else None)
             for p in self.ctx.outputs
@@ -174,7 +170,6 @@ class Match:
     def replace_with_graph(
         self, replacement_graph: torch.fx.Graph, args: Sequence[Any]
     ) -> None:
-        assert self.ctx
         ReplacementPatternEntry.replace_with_graph(
             self, self.ctx.graph, replacement_graph, args
         )
@@ -186,7 +181,6 @@ class Match:
         trace_fn: Optional[TraceFn] = None,
         run_dce: bool = True,
     ) -> None:
-        assert self.ctx
         if trace_fn is None:
             trace_fn = functools.partial(fwd_only, run_dce=run_dce)
         replacement = trace_fn(
@@ -274,13 +268,14 @@ class MatchContext:
         }
 
 
-class PatternExpr:
+class PatternExpr(ABC):
     """
     Base class for types of patterns
     """
 
+    @abstractmethod
     def _match(self, node: torch.fx.Node, ctx: MatchContext) -> MatchResult:
-        raise NotImplementedError
+        ...
 
     def match(self, node: torch.fx.Node) -> MatchResult:
         try:
@@ -385,24 +380,26 @@ class _TargetExpr(PatternExpr):
     Base class for filtering match by node.target
     """
 
-    op: Optional[str] = None
     fns: List[FnsType]
     fns_set: Set[FnsType]
 
     def __init__(
         self, fns: Union[FnsType, Sequence[FnsType]], users: Union[Multiple, int] = 1
     ) -> None:
-        if not self.op:
-            raise NotImplementedError("Shouldn't directly use _BaseNodeMatch")
         super().__init__()
         fns = [fns] if callable(fns) or isinstance(fns, str) else list(fns)
-        for fn in list(fns):
+        for fn in fns:
             if isinstance(fn, torch._ops.OpOverloadPacket):
-                fns.extend([getattr(fn, overload) for overload in fn.overloads()])
+                fns.extend(getattr(fn, overload) for overload in fn.overloads())
 
         self.fns = fns
         self.fns_set = set(fns)
         self.users = users
+
+    @property
+    @abstractmethod
+    def op(self) -> str:
+        ...
 
     def fns_repr(self) -> str:
         first_repr = self.fns[0]
@@ -740,8 +737,8 @@ class MultiOutputPattern(PatternExpr):
 
     @property
     def fns(self) -> Union[Callable[..., Any], str, Sequence[Any]]:
-        assert isinstance(self.outputs[0], _TargetExpr)
-        return self.outputs[0].fns
+        output = typing.cast(_TargetExpr, self.outputs[0])
+        return output.fns
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.outputs})"
@@ -754,8 +751,8 @@ class MultiOutputPattern(PatternExpr):
         return str_out
 
     def _match(self, node: torch.fx.Node, ctx: MatchContext) -> MatchResult:
-        assert isinstance(self.outputs[0], PatternExpr)
-        m = ctx.match(self.outputs[0], node)
+        output = typing.cast(_TargetExpr, self.outputs[0])
+        m = ctx.match(output, node)
         if not is_match(m):
             return m
 
@@ -805,9 +802,8 @@ class RepeatedExpr(PatternExpr):
     Checks for a repeated pattern. Useful for repeated operations after a node such as `split` or `unbind`
     """
 
-    def __init__(self, inner_pattern: PatternExpr) -> None:
+    def __init__(self, inner_pattern: _TargetExpr) -> None:
         super().__init__()
-        assert isinstance(inner_pattern, _TargetExpr)
         self.inner_pattern = inner_pattern
         self.op = inner_pattern.op
 

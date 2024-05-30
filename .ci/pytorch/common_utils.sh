@@ -158,6 +158,17 @@ function install_torchvision() {
   fi
 }
 
+function install_torchao() {
+  # Set ARCH list so that we can build fp16 with SM75+, the logic is copied from
+  # pytorch/builder
+  # https://github.com/pytorch/ao/blob/main/packaging/env_var_script_linux.sh#L16C1-L19
+  TORCH_CUDA_ARCH_LIST="8.0;8.6"
+  if [[ ${CU_VERSION:-} == "cu124" ]]; then
+    TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};9.0"
+  fi
+  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/ao.git"
+}
+
 function install_tlparse() {
   pip_install --user "tlparse==0.3.7"
   PATH="$(python -m site --user-base)/bin:$PATH"
