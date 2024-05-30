@@ -275,7 +275,7 @@ def aot_dispatch_autograd_graph(
     torch._dynamo.utils.assert_no_fake_params_or_buffers(fx_g)
     fx_g.graph.eliminate_dead_code()
 
-    fsdp_fx_passes.reinplace_primal_copyout_from_allgather_output(fx_g)
+    # fsdp_fx_passes.reinplace_primal_copyout_from_allgather_output(fx_g)
 
     fx_g.recompile()
     # TODO: in AOTAutograd, we create metadata like _indices_of_inps_to_detach to detect

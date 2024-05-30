@@ -6022,7 +6022,7 @@ try:
                 inp,
                 group_size,
                 group_name,
-                out=out,
+                out=out,  # TODO(yf225): is this being supported correctly?
             )
         )
         return out

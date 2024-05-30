@@ -523,21 +523,47 @@ def _collect_primal_inputs_used(node_list):
 
 def reinplace_primal_copyout_from_allgather_output(mod):
     """
-    split_contiguous_view_as_strided = torch.ops.fsdp.split_contiguous_view_as_strided.default(view_1, [13107200, 2560, 13107200, 2560, 13107200, 2560], [[5120, 5120], [5120], [5120, 5120], [5120], [5120, 5120], [5120]], [[5120, 1], [1], [5120, 1], [1], [5120, 1], [1]]);  view_1 = None
-    getitem_2: "f32[5120, 5120]" = split_contiguous_view_as_strided[0]
-    ... (other ops)
-    # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_composable/fsdp/_fsdp_collectives.py:231 in foreach_all_gather_copy_out, code: unsharded_param.copy_(out[i])
-    copy_1: "f32[5120, 5120]" = torch.ops.aten.copy.default(primals_8, getitem_2);  getitem_2 = None
-    ... (uses copy_1)
-    (at end of graph)
-    resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(primals_8, 104857600)
-    copy_: "f32[5120, 5120]" = torch.ops.aten.copy_.default(primals_8, copy_1);  primals_8 = copy_1 = None
+    NOTE: must only apply this on joint graph!
+
+    auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.fsdp.split_with_sizes_copy.default, all_gather_output = view_7, all_gather_input_split_sizes = [131072, 256, 131072, 256, 131072, 256], dim = 1, out = [view_1, view_2, view_3, view_4, view_5, view_6]);  view_7 = view_1 = view_2 = view_3 = view_4 = view_5 = view_6 = None
+    getitem_3 = auto_functionalized[1];  auto_functionalized = None
+    getitem_4: "f32[2, 131072]" = getitem_3[0]
+    view_8: "f32[262144]" = torch.ops.aten.view.default(getitem_4, [262144]);  getitem_4 = None
+
+    ... (uses view_8)
+
+    # No stacktrace found for following nodes
+    as_strided_12: "f32[512, 512]" = torch.ops.aten.as_strided.default(view_8, [512, 512], [512, 1], 0)
+
+    ... (uses as_strided_12)
+
+    # No stacktrace found for following nodes
+    set_: "f32[512, 512]" = torch.ops.aten.set_.source_Tensor(primals_8, as_strided_12);  primals_8 = as_strided_12 = None
+    resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(set_, 0);  set_ = None
+
+    (returns view_8 at end of graph)
 
     ->
 
-    resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(primals_8, 104857600)
-    copy_1: "f32[5120, 5120]" = torch.ops.aten.copy_.default(primals_8, getitem_2);  None
-    ... (uses primals_8)
+    auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.fsdp.split_with_sizes_copy.default, all_gather_output = view_7, all_gather_input_split_sizes = [131072, 256, 131072, 256, 131072, 256], dim = 1, out = [view_1, view_2, view_3, view_4, view_5, view_6]);  view_7 = view_1 = view_2 = view_3 = view_4 = view_5 = view_6 = None
+    getitem_3 = auto_functionalized[1];  auto_functionalized = None
+    getitem_4: "f32[2, 131072]" = getitem_3[0]
+    view_8: "f32[262144]" = torch.ops.aten.view.default(getitem_4, [262144]);  getitem_4 = None
+    as_strided_X: "f32[512, 512]" = torch.ops.aten.as_strided.default(view_8, [512, 512], [512, 1], 0)
+    set_: "f32[512, 512]" = torch.ops.aten.set_.source_Tensor(primals_8, as_strided_X);  primals_8 = as_strided_12 = None
+
+    ... (uses view_8)
+
+    # No stacktrace found for following nodes
+    as_strided_12: "f32[512, 512]" = torch.ops.aten.as_strided.default(view_8, [512, 512], [512, 1], 0)
+
+    ... (uses as_strided_12)
+
+    # No stacktrace found for following nodes
+
+    resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(set_, 0);  set_ = None
+
+    (returns view_8 at end of graph)
     """
     node_list = list(mod.graph.nodes)
     primal_inputs_used, primal_resize_copy_info_dict = _collect_primal_inputs_used(node_list)

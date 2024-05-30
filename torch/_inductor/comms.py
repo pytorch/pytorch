@@ -381,8 +381,8 @@ def enforce_comm_ordering_for_fsdp(
                     continue
                 _find_all_recursive_users_of_node_down_to_the_target_node_type(user.node, target_node_type_check_fn, collected_node_set)
 
-    # for snode in snodes:
-    #     torch_log.warning(f"snode: {snode}, snode.node: {snode.node}, snode.debug_str(): {snode.debug_str()}")
+    for snode in snodes:
+        torch_log.warning(f"snode: {snode}, snode.node: {snode.node}, snode.debug_str(): {snode.debug_str()}")
 
     new_order = []
     scheduled = set()
@@ -413,7 +413,7 @@ def enforce_comm_ordering_for_fsdp(
             _find_all_recursive_users_of_node_down_to_the_target_node_type(
                 snode,
                 lambda sn: (
-                    isinstance(sn.node, ir.ExternKernel) and sn.node.op_overload is torch.ops.fsdp.split_contiguous_view_as_strided.default
+                    isinstance(sn.node, ir.ExternKernel) and sn.node.op_overload is torch.ops.fsdp.split_with_sizes_copy.default
                 ),
                 collected_node_set,
             )
@@ -421,17 +421,17 @@ def enforce_comm_ordering_for_fsdp(
 
             # sort nodes by original buffer order
             collected_nodes = sorted(list(collected_node_set), key=lambda x: int(x.get_name()[3:]))
-            # torch_log.warning(f"collected_nodes: {collected_nodes}")
-            copy_out_node = None
-            for n in collected_nodes:
-                # torch_log.warning(f"type(n.node): {type(n.node)}")
-                if isinstance(n.node, ir.ExternKernel) and n.node.op_overload is torch.ops.fsdp.split_contiguous_view_as_strided.default:
-                    copy_out_node = n
-                    break
-            assert copy_out_node is not None
-            copy_out_multioutput_nodes = [x.node for x in copy_out_node.users if x.node.get_name() in name_to_fused_node]
-            assert all(isinstance(snode.node, ir.MultiOutput) for snode in copy_out_multioutput_nodes)
-            collected_nodes = collected_nodes + copy_out_multioutput_nodes
+            # # torch_log.warning(f"collected_nodes: {collected_nodes}")
+            # copy_out_node = None
+            # for n in collected_nodes:
+            #     # torch_log.warning(f"type(n.node): {type(n.node)}")
+            #     if isinstance(n.node, ir.ExternKernel) and n.node.op_overload is torch.ops.fsdp.split_with_sizes_copy.default:
+            #         copy_out_node = n
+            #         break
+            # assert copy_out_node is not None
+            # copy_out_multioutput_nodes = [x.node for x in copy_out_node.users if x.node.get_name() in name_to_fused_node]
+            # assert all(isinstance(snode.node, ir.MultiOutput) for snode in copy_out_multioutput_nodes)
+            # collected_nodes = collected_nodes + copy_out_multioutput_nodes
 
             # Group "cast + copy_in + getitem + all_gather" into one GroupedSchedulerNode
             nodes_to_group = []

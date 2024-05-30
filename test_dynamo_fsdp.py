@@ -8,6 +8,8 @@ rm artifacts/* && TORCH_NCCL_AVOID_RECORD_STREAMS=1 CUDA_VISIBLE_DEVICES=4,5 TOR
 # 2-gpu
 rm artifacts/* && TORCH_NCCL_AVOID_RECORD_STREAMS=1 TORCH_LOGS="aot_graphs,output_code,compiled_autograd,recompiles,+dynamo,aot,inductor" TORCH_COMPILE_DEBUG=1 CUDA_VISIBLE_DEVICES=4,5 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
 
+TORCH_NCCL_AVOID_RECORD_STREAMS=1 TORCH_LOGS="aot_graphs,output_code,compiled_autograd,recompiles,+dynamo,aot,inductor" TORCH_COMPILE_DEBUG=1 CUDA_VISIBLE_DEVICES=4,5 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 python -m torch.distributed.run --standalone --nproc_per_node=2 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
+
 # 8-gpu
 rm artifacts/* && TORCH_NCCL_AVOID_RECORD_STREAMS=1 TORCH_LOGS="aot_graphs,output_code,compiled_autograd,recompiles,+dynamo,aot,inductor" TORCH_COMPILE_DEBUG=1 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=8 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
 
@@ -275,7 +277,7 @@ def checkpoint_wrapper(module, config):
         )
 
 
-test_case = "toy_transformer"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard" / "toy_transformer"
+test_case = "simple_mlp"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard" / "toy_transformer"
 balanced = True
 mixed_precision = False  # TODO(yf225): when True, fails accuracy test, needs debugging
 apply_fsdp = True
@@ -330,8 +332,8 @@ def init(activation_checkpoint):
             nn.Linear(hidden_dim, hidden_dim, device=device_type),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim, device=device_type),  # FC->RELU->FC is a good test
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim, device=device_type),
+            # nn.ReLU(),
+            # nn.Linear(hidden_dim, hidden_dim, device=device_type),
         )
         if activation_checkpoint:
             model = checkpoint_wrapper(model, ac_config)
@@ -494,13 +496,13 @@ def run(model, optim, n_iter, hidden_dim, use_compiled_autograd=False):
         #     backend = "eager"
         #     fullgraph = False
         # else:
-        #     backend = "aot_eager"
+        #     backend = "inductor"
         #     fullgraph = True
         torch_log.warning(f"Starting iteration: {i}")
         optim.zero_grad(set_to_none=True)
         inp = create_input(hidden_dim)
         if use_compiled_autograd:
-            compiled_autograd_ctx = compiled_autograd.enable(compiler_fn("aot_eager", True))
+            compiled_autograd_ctx = compiled_autograd.enable(compiler_fn("inductor", True))
         else:
             compiled_autograd_ctx = contextlib.nullcontext()
         with compiled_autograd_ctx:
@@ -615,7 +617,7 @@ if __name__ == "__main__":
     if dist.get_rank() == 0:
         start_record_memory_history()
     ac_test_order = [False]
-    backends = ["aot_eager"]
+    backends = ["inductor"]
 
     def test_eager(activation_checkpoint):
         losses_eager = execute_and_profile(

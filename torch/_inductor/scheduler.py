@@ -1134,6 +1134,9 @@ class GroupedSchedulerNode(_BaseGroupedSchedulerNode):
     def can_fuse(cls, producer, consumer):
         return False
 
+    def add_fake_dep(self, dep: Dep) -> None:
+        self.set_read_writes(self.read_writes.with_read(dep))
+
     # None of these need to be implemented, as a GroupedSchedulerNode is always unpacked
     # and its constituent nodes are used for last usage calculation purpose.
     @property
@@ -1493,17 +1496,17 @@ class Scheduler:
         self.logged_slow_fusion: Set[Tuple[str, str]] = set()
         self.fuse_nodes()
         self.finalize_multi_template_buffers()
-        if config.raise_last_usage:
-            self.compute_last_usage()
-            self.nodes = memory_passes.raise_last_usage(self.name_to_fused_node, V.graph.graph_inputs, self.nodes)
-        self.nodes = comms.enforce_comm_ordering_for_fsdp(self.name_to_fused_node, V.graph.graph_inputs, self.nodes)
-        if config.reorder_for_compute_comm_overlap:
-            comms.decide_global_ordering_of_comms(self.nodes)
+        # if config.raise_last_usage:
+        #     self.compute_last_usage()
+        #     self.nodes = memory_passes.raise_last_usage(self.name_to_fused_node, V.graph.graph_inputs, self.nodes)
+        # self.nodes = comms.enforce_comm_ordering_for_fsdp(self.name_to_fused_node, V.graph.graph_inputs, self.nodes)
+        # if config.reorder_for_compute_comm_overlap:
+        #     comms.decide_global_ordering_of_comms(self.nodes)
         # Refresh node_users and inverse_users to reflect fused nodes and grouped nodes
         self.compute_node_users()
-        if config.reorder_for_compute_comm_overlap:
-            self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
-        self.nodes = memory_passes.raise_primal_resize_zero_if_primal_is_unused(self.name_to_fused_node, V.graph.graph_inputs, self.nodes)
+        # if config.reorder_for_compute_comm_overlap:
+        #     self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
+        # self.nodes = memory_passes.raise_primal_resize_zero_if_primal_is_unused(self.name_to_fused_node, V.graph.graph_inputs, self.nodes)
         self.compute_last_usage()
 
         # for snode in self.nodes:

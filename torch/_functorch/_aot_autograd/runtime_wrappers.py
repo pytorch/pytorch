@@ -1345,8 +1345,17 @@ def merge_view_inputs(
         post_processed_calling_convention_meta: List[
             Union[int, Tuple[int, torch.Tensor]]
         ] = [-1 for _ in range(len(inner_calling_convention_meta))]
+        # torch_log.warning(f"base_args: {base_args}")
+        # torch_log.warning(f"other_args: {other_args}")
+        # torch_log.warning(f"len(args_to_functionalization): {len(args_to_functionalization)}")
+        # torch_log.warning(f"args_to_functionalization:")
+        # for i, x in enumerate(args_to_functionalization):
+        #     torch_log.warning(f"{i}: {x}, id(x): {id(x)}, x._base: {x._base}, id(x._base): {id(x._base)}")
         for k, v in inner_calling_convention_meta.items():
             post_processed_calling_convention_meta[k] = v
+            # torch_log.warning(f"post_processed_calling_convention_meta: {k} -> {v}, type(v[1]): {type(v[1])}, id(v[1]): {id(v[1])}, v[1]._base: {v[1]._base}, id(v[1]._base): {id(v[1]._base)}")
+            # if isinstance(v[1], torch.nn.Parameter):
+            #     torch_log.warning(f"v[1].data: {v[1].data}, id(v[1].data): {id(v[1].data)}, v[1].data._base: {v[1].data._base}, id(v[1].data._base): {id(v[1].data._base)}")
         # Quick assert: every argument in the inner calling convention should be accounted for.
         for x in post_processed_calling_convention_meta:
             assert x != -1
