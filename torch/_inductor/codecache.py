@@ -1425,7 +1425,7 @@ def x86_isa_checker() -> List[str]:
     def _check_and_append_supported_isa(
         dest: List[str], isa_supported: bool, isa_name: str
     ):
-        if isa_supported is True:
+        if isa_supported:
             dest.append(isa_name)
 
     Arch = platform.machine()
@@ -2405,6 +2405,8 @@ class CppCodeCache:
             "vec_isa": pick_vec_isa(),
             "extra_flags": extra_flags,
         }
+
+        _set_gpu_runtime_env()  # cpp_extension consults the env
 
         from torch._inductor.cpp_builder import CppBuilder, CppTorchCudaOptions
 
