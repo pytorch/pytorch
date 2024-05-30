@@ -861,10 +861,21 @@ static std::tuple<at::Tensor,at::Tensor,at::Tensor> _native_batch_norm_legit_no_
     return at::native_batch_norm(self, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, eps);
 }
 
+static std::tuple<at::Tensor,at::Tensor,at::Tensor,at::Tensor> _batch_norm_with_update_batch(
+  const Tensor& self, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt,
+  Tensor& running_mean, Tensor& running_var, double momentum, double eps) {
+    at::Tensor output, save_mean, save_var;
+    std::tie(output, save_mean, save_var) =
+      at::native_batch_norm(self, weight_opt, bias_opt, running_mean, running_var, true/*train*/, momentum, eps);
+    at::Tensor reserve = at::empty({0}, self.options().dtype(kByte));
+    return std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>(output, save_mean, save_var, reserve);
+}
+
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(native_batch_norm, NATIVE_BATCH_NORM_BATCH_RULE(native_batch_norm));
   VMAP_SUPPORT(cudnn_batch_norm, CUDNN_BATCH_NORM_BATCH_RULE(cudnn_batch_norm));
   VMAP_SUPPORT(miopen_batch_norm, MIOPEN_BATCH_NORM_BATCH_RULE(miopen_batch_norm));
+  m.impl("_batch_norm_with_update", _batch_norm_with_update_batch);
   m.impl("_native_batch_norm_legit", _native_batch_norm_legit_batch);
   m.impl("_native_batch_norm_legit.no_stats", _native_batch_norm_legit_no_stats_batch);
   m.impl("native_batch_norm_backward", NATIVE_BATCH_NORM_BACKWARD_BATCH_RULE(native_batch_norm_backward));
