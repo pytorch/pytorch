@@ -36,7 +36,7 @@ on:
       runner:
         required: false
         type: string
-        default: "linux.2xlarge"
+        default: "lf.linux.2xlarge"
         description: |
           List of CUDA architectures CI build should target.
       test-matrix:
