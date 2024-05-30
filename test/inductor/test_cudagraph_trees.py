@@ -1018,6 +1018,31 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
                 self.assertNotEqual(run_once, run_twice)
 
+        def test_remove_hooks_on_cached_tensors(self):
+            @torch.compile()
+            def foo(x):
+                return x * x
+
+            inp = torch.rand([4], device="cuda", requires_grad=True)
+
+            for _ in range(5):
+                out = foo(inp)
+                self.assertIsNone(out._backward_hooks)
+                out.register_hook(lambda: None)
+
+            # today, torch.compile never outputs a leaf tensor which is the only
+            # tensor that can register _post_accumulate_grad_hooks
+            # add this as a preventative test
+
+            @torch.compile()
+            def foo(x):
+                return torch.rand([4], device="cuda", requires_grad=True)
+
+            for _ in range(5):
+                out = foo(inp)
+                self.assertIsNone(out._post_accumulate_grad_hooks)
+                out.register_post_accumulate_grad_hook(lambda: None)
+
         def test_multiple_insert_removal_caching(self):
             torch._C._set_cached_tensors_enabled(True)
             try:
@@ -1703,6 +1728,47 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             with self.assertRaisesRegex(Exception, "custom error msg"):
                 device = x.untyped_storage()
+
+        def test_static_inputs_address_mutation_log(self):
+            class Goo(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.linear = torch.nn.Linear(2, 2, device="cuda")
+
+                def forward(self, x) -> torch.Tensor:
+                    return self.linear(x)
+
+            class Foo(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.static_tensor = torch.zeros((2, 2), device="cuda")
+                    self.goo = Goo()
+
+                def forward(self, x) -> torch.Tensor:
+                    self.static_tensor.add_(torch.ones((2, 2), device="cuda"))
+                    return self.static_tensor + x + self.goo(x)
+
+            foo = Foo()
+            foo = torch.compile(foo, mode="reduce-overhead")
+            inp = torch.rand((2, 2), device="cuda")
+
+            for _ in range(3):
+                foo(inp)
+
+            # mutates static input tensors' addresses
+            foo.static_tensor = torch.ones((2, 2), device="cuda")
+            foo.goo.linear.bias = torch.nn.Parameter(torch.ones((2,), device="cuda"))
+
+            with self.assertRaisesRegex(
+                Exception,
+                r"static input data pointer changed.\n"
+                r"input name: primals_2. data pointer changed from .* to .*. input stack trace: None\n"
+                r"input name: primals_3. data pointer changed from .* to .*. input stack trace:.*,"
+                r" in forward\n.* self.static_tensor.add\_\(torch.ones\(\(2, 2\), device=\"cuda\"\)\).*\n\n",
+            ):
+                self.curr_node().run(
+                    [foo.goo.linear.weight, foo.goo.linear.bias, foo.static_tensor, inp]
+                )
 
     instantiate_parametrized_tests(CudaGraphTreeTests)
 

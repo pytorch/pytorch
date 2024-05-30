@@ -1,0 +1,8 @@
+# Defines runner types provisioned by by LF Self-hosted runners for pytorch/pytorch and their labels.
+runner_types:
+  lf.linux.2xlarge:
+    disk_size: 150
+    instance_type: c5.2xlarge
+    is_ephemeral: false
+    max_available: 3120
+    os: linux
