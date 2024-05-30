@@ -36,6 +36,9 @@ from .functional_utils import (
     from_fun,
     has_data_mutation,
     has_metadata_mutation,
+    was_inductor_storage_resized,
+    are_all_mutations_hidden_from_autograd,
+    are_all_mutations_under_no_grad_or_inference_mode,
     is_fun,
     sync_functional_tensor,
     to_fun,
@@ -425,11 +428,30 @@ def create_functionalized_fn(
                     and not inpt_info.mutates_data
                     and not inpt_info.mutates_storage_metadata
                 ):
+                    mutates_storage_metadata = has_metadata_mutation(
+                        f_inpt, before, check_only_storage_mutation=True
+                    )
+                    assert not mutates_storage_metadata, "storage metadata mutation in backward is not allowed"
+
+                    mutation_inductor_storage_resize = was_inductor_storage_resized(f_inpt)
+                    assert not mutation_inductor_storage_resize, "storage resize in backward is not allowed"
+
+                    mutations_hidden_from_autograd = are_all_mutations_hidden_from_autograd(
+                        f_inpt
+                    )
+                    mutations_under_no_grad_or_inference_mode = (
+                        are_all_mutations_under_no_grad_or_inference_mode(f_inpt)
+                    )
+                    # if the input did not require grad, or it was mutated under no_grad / by a triton kernel,
+                    # it is safe to put in the graph.
+                    mutation_can_be_in_graph = not inpt_info.requires_grad or mutations_under_no_grad_or_inference_mode or mutations_hidden_from_autograd
+
                     assert (
-                        not inpt_info.requires_grad
-                    ), "Found a graph input that requires_grad and was mutated in the backward. This is not supported"
-                    # Otherwise, put the mutation in the graph
-                    before.copy_(after)
+                        mutation_can_be_in_graph
+                    ), "Found a graph input that requires_grad and was mutated in the backward without a no_grad(). This is not supported"
+                    # Otherwise, put the mutation in the graph (under no_grad, since we've proven the mutation is safe to hide from autograd)
+                    with torch.no_grad():
+                        before.copy_(after)
             # Now that we covered mutations to *forward* inputs during the backward,
             # we also need to cover mutations to *backward-only* inputs during the backward (e.g. mutation to a grad_out).
             # Today, we will just error in all cases of this happening unless someone needs us to support it.
