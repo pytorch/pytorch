@@ -46,6 +46,7 @@ namespace sdp {
 namespace {
 
 // TODO(eqy): more benchmarking to determine whether this should include sm86/89
+// Needs to be kept in-sync with test_fused_chocie in test_transformers.py
 bool check_prefer_cudnn_attention() {
   auto dprops = at::cuda::getCurrentDeviceProperties();
   return dprops->major >= 9;
