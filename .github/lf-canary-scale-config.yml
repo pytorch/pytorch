@@ -6,3 +6,21 @@ runner_types:
     is_ephemeral: false
     max_available: 3120
     os: linux
+  lf.c.linux.4xlarge:
+    disk_size: 150
+    instance_type: c5.4xlarge
+    is_ephemeral: false
+    max_available: 1000
+    os: linux
+  lf.c.linux.4xlarge.nvidia.gpu:
+    disk_size: 150
+    instance_type: g3.4xlarge
+    is_ephemeral: false
+    max_available: 520
+    os: linux
+  lf.c.linux.8xlarge.nvidia.gpu:
+    disk_size: 150
+    instance_type: g3.8xlarge
+    is_ephemeral: false
+    max_available: 400
+    os: linux
