@@ -905,7 +905,7 @@ class TestModule(TestCase):
                 if isinstance(out, tuple):
                     out = out[0]
                 out.sum().backward()
-                m.to(dtype=torch.float64)
+                m.to(dtype=torch.half)
                 # reset
                 m.to(dtype=torch.float32)
 

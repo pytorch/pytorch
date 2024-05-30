@@ -1110,6 +1110,30 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         res = opt_mod(x)
         self.assertEqual(ref, res)
 
+    @requires_cuda
+    @requires_distributed()
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
+    def test_dynamo_does_not_trace_getattr_as_top_frame(self):
+        # inline_inbuilt_nn_modules is a proxy to emulate what FSDP tests do.
+        from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+            CheckpointWrapper,
+        )
+
+        cnt = CompileCounterWithBackend("eager")
+
+        lin = torch.nn.Linear(1, 1)
+        mod = torch.nn.Sequential(lin, lin)
+        mod = CheckpointWrapper(mod)
+        mod._checkpoint_wrapped_module.a = torch.ones(1, 1)
+
+        def fn(x):
+            return mod(x) * mod.a
+
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(1, 1)
+
+        self.assertEqual(opt_fn(x), fn(x))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
