@@ -257,10 +257,6 @@ def make_set_enable_dynamic(enable: bool):
         )
 
 
-def make_set_compile_flag_enabled():
-    return config._make_closure_patcher(_is_compiling=True)
-
-
 class _TorchDynamoContext:
     def __init__(
         self,
@@ -289,7 +285,6 @@ class _TorchDynamoContext:
         backend = innermost_fn(callback)
         cached_backends.setdefault(id(backend), backend)
 
-        self.enter_exit_hooks.append(make_set_compile_flag_enabled())
         if dynamic is not None:
             self.enter_exit_hooks.append(make_set_enable_dynamic(dynamic))
 
@@ -777,7 +772,8 @@ def explain(f, *extra_args, **extra_kwargs):
         warnings.warn(
             "explain(f, *args, **kwargs) is deprecated, use explain(f)(*args, **kwargs) instead.  "
             "If you don't migrate, we may break your explain call in the future if your user defined kwargs "
-            "conflict with future kwargs added to explain(f)."
+            "conflict with future kwargs added to explain(f).",
+            FutureWarning,
         )
         return inner(*extra_args, **extra_kwargs)
     else:
@@ -920,7 +916,7 @@ def check_signature_rewritable(graph):
             tb = "".join(traceback.format_list(stack))
             extra = ""
             if len(user_stacks) > 1:
-                extra = f"(elided {len(user_stacks)-1} more accesses)"
+                extra = f"(elided {len(user_stacks) - 1} more accesses)"
             msg = f"{source.name()}, accessed at:\n{tb}{extra}"
         # TODO: option to print ALL of the stack traces at once
         input_errors.append(msg)
@@ -1133,6 +1129,8 @@ def export(
     assume_static_by_default: bool = False,
     same_signature: bool = True,
     disable_constraint_solver: bool = False,
+    prefer_deferred_runtime_asserts_over_guards: bool = False,
+    _allow_complex_guards_as_runtime_asserts: bool = False,
     _log_export_usage: bool = True,
     **extra_kwargs,
 ) -> Callable[..., ExportResult]:
@@ -1308,6 +1306,8 @@ def export(
             automatic_dynamic_shapes=False,
             capture_dynamic_output_shape_ops=True,
             capture_scalar_outputs=True,
+            prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
+            _allow_complex_guards_as_runtime_asserts=_allow_complex_guards_as_runtime_asserts,
         ):
             opt_f = optimize_assert(
                 dynamo_normalization_capturing_compiler,
@@ -1451,7 +1451,8 @@ def export(
         warnings.warn(
             "export(f, *args, **kwargs) is deprecated, use export(f)(*args, **kwargs) instead.  "
             "If you don't migrate, we may break your export call in the future if your user defined kwargs "
-            "conflict with future kwargs added to export(f)."
+            "conflict with future kwargs added to export(f).",
+            FutureWarning,
         )
         return inner(*extra_args, **extra_kwargs)
     else:
