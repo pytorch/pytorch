@@ -1168,8 +1168,8 @@ static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, int64_t& info
     auto b_mat_stride = matrixStride(b);
     magma_int_t batch_size = magma_int_cast(batchCount(A), "batchCount");
 
-    scalar_t** A_array;
-    scalar_t** b_array;
+    scalar_t** A_array = nullptr;
+    scalar_t** b_array = nullptr;
 
     ALLOCATE_ARRAY(A_array, scalar_t*, batch_size);
     ALLOCATE_ARRAY(b_array, scalar_t*, batch_size);
@@ -1186,7 +1186,7 @@ static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, int64_t& info
     // Compute as many batches of 65535 possible
     // The number of "mini"-batches are floor(batch_size / batch_limit)
     // and these cover floor(batch_size / batch_limit) * batch_limit matrix solves
-    int64_t mini_batches = batch_size / batch_limit, mini_idx;
+    int64_t mini_batches = batch_size / batch_limit, mini_idx = 0;
     for (mini_idx = 0; mini_idx < mini_batches * batch_limit; mini_idx += batch_limit) {
       scalar_t** A_array_cur = &A_array[mini_idx];
       scalar_t** b_array_cur = &b_array[mini_idx];
@@ -1278,7 +1278,7 @@ static void apply_cholesky(const Tensor& self, bool upper, const Tensor& info) {
     auto self_mat_stride = matrixStride(self);
     magma_int_t batch_size = magma_int_cast(batchCount(self), "batchCount");
 
-    scalar_t** self_array;
+    scalar_t** self_array = nullptr;
 
     ALLOCATE_ARRAY(self_array, scalar_t*, batch_size);
 
@@ -1544,7 +1544,7 @@ static void apply_lu_factor_batched_magma(const Tensor& input, const Tensor& piv
   magma_int_t n = magma_int_cast(input.size(-1), "n");
   auto leading_dimension = std::max<magma_int_t>(1, m);
 
-  scalar_t** input_array;
+  scalar_t** input_array = nullptr;
   ALLOCATE_ARRAY(input_array, scalar_t*, batch_size);
 
   // Set up array of pointers to matrices
@@ -1564,7 +1564,7 @@ static void apply_lu_factor_batched_magma(const Tensor& input, const Tensor& piv
     // magmaLuBatched might not set the values for it
     // see https://github.com/pytorch/pytorch/pull/53064
     pivots.fill_(1);
-    magma_int_t** pivots_array;
+    magma_int_t** pivots_array = nullptr;
     ALLOCATE_ARRAY(pivots_array, magma_int_t*, batch_size);
     for (int64_t i = 0; i < batch_size; i++) {
       pivots_array[i] = &pivots_data[i * pivots_stride];
@@ -1700,8 +1700,8 @@ AT_ERROR("triangular_solve: MAGMA library not found in "
   auto A_mat_stride = matrixStride(A);
   auto b_mat_stride = matrixStride(b);
 
-  scalar_t** A_array;
-  scalar_t** b_array;
+  scalar_t** A_array = nullptr;
+  scalar_t** b_array = nullptr;
 
   ALLOCATE_ARRAY(A_array, scalar_t*, batch_size);
   ALLOCATE_ARRAY(b_array, scalar_t*, batch_size);
@@ -1719,7 +1719,7 @@ AT_ERROR("triangular_solve: MAGMA library not found in "
   // The number of "mini"-batches are floor(batch_size / batch_limit)
   // and these cover floor(batch_size / batch_limit) * batch_limit matrix solves
   int64_t mini_batches = batch_size / batch_limit;
-  int64_t mini_idx; // this is outside the loop because it is used for the case batch_size % batch_limit != 0
+  int64_t mini_idx = 0; // this is outside the loop because it is used for the case batch_size % batch_limit != 0
   for (mini_idx = 0; mini_idx < mini_batches * batch_limit; mini_idx += batch_limit) {
     scalar_t** A_array_cur = &A_array[mini_idx];
     scalar_t** b_array_cur = &b_array[mini_idx];
@@ -1897,7 +1897,7 @@ static void apply_magma_eigh(const Tensor& values, const Tensor& vectors, const 
   auto values_data = values.data_ptr<value_t>();
   auto infos_data = infos.data_ptr<magma_int_t>();
 
-  scalar_t* wA;
+  scalar_t* wA = nullptr;
   ALLOCATE_ARRAY(wA, scalar_t, lda * lda);
 
   // Run once, first to get the optimum work sizes.
@@ -1907,14 +1907,14 @@ static void apply_magma_eigh(const Tensor& values, const Tensor& vectors, const 
   magma_int_t lwork = -1;
   scalar_t wkopt;
   magma_int_t liwork = -1;
-  magma_int_t iwkopt;
+  magma_int_t iwkopt = -1;
   magma_int_t lrwork = -1;
   value_t rwkopt;
   magmaSyevd<scalar_t, value_t>(jobz, uplo, n, vectors_data, lda, values_data,
     wA, lda, &wkopt, lwork, &rwkopt, lrwork, &iwkopt, liwork, infos_data);
 
-  scalar_t* work;
-  magma_int_t* iwork;
+  scalar_t* work = nullptr;
+  magma_int_t* iwork = nullptr;
   lwork = magma_int_cast(std::max<int64_t>(1, real_impl<scalar_t, value_t>(wkopt)), "work_size");
   liwork = magma_int_cast(std::max<int64_t>(1, iwkopt), "iwork_size");
   ALLOCATE_ARRAY(work, scalar_t, lwork);
@@ -2120,7 +2120,7 @@ static void apply_svd_magma(const Tensor& A,
     rwork = static_cast<value_t*>(storage_rwork.mutable_data());
   }
 
-  magma_int_t* iwork;
+  magma_int_t* iwork = nullptr;
   ALLOCATE_ARRAY(iwork, magma_int_t, 8 * std::min(m, n));
 
   // Query svd for the optimal lwork size
@@ -2135,7 +2135,7 @@ static void apply_svd_magma(const Tensor& A,
                                 &wkopt, lwork, rwork, iwork, info_data);
     lwork = magma_int_cast(real_impl<scalar_t, value_t>(wkopt), "work_size");
   }
-  scalar_t* work;
+  scalar_t* work = nullptr;
   ALLOCATE_ARRAY(work, scalar_t, lwork);
 
   for (int64_t i = 0; i < batchsize; i++) {
@@ -2320,9 +2320,9 @@ static void apply_lu_solve_batched_magma(const Tensor& LU, const Tensor& pivots,
   auto pivots_stride = pivots.size(-1);
   magma_int_t batch_size = magma_int_cast(batchCount(B), "batchCount");
 
-  magma_int_t** pivots_array;
-  scalar_t** lu_array;
-  scalar_t** b_array;
+  magma_int_t** pivots_array = nullptr;
+  scalar_t** lu_array = nullptr;
+  scalar_t** b_array = nullptr;
 
   ALLOCATE_ARRAY(pivots_array, magma_int_t*, batch_size);
   ALLOCATE_ARRAY(lu_array, scalar_t*, batch_size);
@@ -2346,7 +2346,7 @@ static void apply_lu_solve_batched_magma(const Tensor& LU, const Tensor& pivots,
     scalar_t** b_array_cur = &b_array[mini_idx];
     magma_int_t** pivots_array_cur = &pivots_array[mini_idx];
 
-    int info;
+    int info = -1;
     magmaLuSolveBatched<scalar_t>(
         n, nrhs, lu_array_cur, leading_dimension,
         pivots_array_cur, b_array_cur, leading_dimension,
@@ -2425,7 +2425,7 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
       .set_check_mem_overlap(false)
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      .declare_static_shape(pivots_->sizes(), /*squash_dim=*/pivots_->dim() - 1)
+      .declare_static_shape(pivots_->sizes(), /*squash_dims=*/pivots_->dim() - 1)
       .add_output(perm)
       .add_const_input(*pivots_)
       .build();
@@ -2441,7 +2441,7 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
       // B1 = P^T @ B  (must be done out-of-place as B is both source and target)
       auto B1 = B.scatter(-2, inv_perm.unsqueeze(-1).expand_as(B), B);
       // B = L^{-1} @ B1
-      at::linalg_solve_triangular_out(const_cast<Tensor&>(B), *LU_, std::move(B1), /*upper=*/false, /*left=*/true, /*unitriangular=*/true);
+      at::linalg_solve_triangular_out(const_cast<Tensor&>(B), *LU_, B1, /*upper=*/false, /*left=*/true, /*unitriangular=*/true);
       // B = U^{-1} @ B
       at::linalg_solve_triangular_out(const_cast<Tensor&>(B), *LU_, B, /*upper=*/true);
     } else {
