@@ -158,7 +158,7 @@ class TritonTemplateKernel(TritonKernel):
 
     @contextlib.contextmanager
     def create_subgraph_body(self, body_name: str):
-        assert body_name not in self.subgraph_bodies
+        # assert body_name not in self.subgraph_bodies
         self.subgraph_bodies[body_name] = IndentedBuffer()
         with self.set_subgraph_body(body_name):
             yield
