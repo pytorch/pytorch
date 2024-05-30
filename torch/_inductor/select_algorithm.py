@@ -22,6 +22,7 @@ import sympy
 from filelock import FileLock
 
 import torch
+import torch._inductor.async_compile
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, identity, preserve_rng_state
 
@@ -150,7 +151,7 @@ class TritonTemplateKernel(TritonKernel):
     @contextlib.contextmanager
     def set_subgraph_body(self, body_name: str):
         old_body = self.body
-        assert body_name in self.subgraph_bodies
+        assert body_name in self.subgraph_bodies, body_name
         self.body = self.subgraph_bodies[body_name]
         yield
         self.body = old_body
