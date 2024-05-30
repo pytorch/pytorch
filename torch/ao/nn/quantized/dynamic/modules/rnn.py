@@ -268,7 +268,7 @@ class RNNBase(torch.nn.Module):
         self._all_weight_values = torch.nn.ModuleList(_all_weight_values)
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         assert type(mod) in {torch.nn.LSTM,
                              torch.nn.GRU}, 'nn.quantized.dynamic.RNNBase.from_float only works for nn.LSTM and nn.GRU'
         assert hasattr(
@@ -495,8 +495,8 @@ class LSTM(RNNBase):
             return self.forward_tensor(input, hx)
 
     @classmethod
-    def from_float(cls, mod):
-        return super().from_float(mod)
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
+        return super().from_float(mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
 
     @classmethod
     def from_reference(cls, ref_mod):
@@ -747,8 +747,8 @@ class GRU(RNNBase):
             return self.forward_tensor(input, hx)
 
     @classmethod
-    def from_float(cls, mod):
-        return super().from_float(mod)
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
+        return super().from_float(mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
 
     @classmethod
     def from_reference(cls, ref_mod):
@@ -839,7 +839,7 @@ class RNNCellBase(torch.nn.Module):
                 f"hidden{hidden_label} has inconsistent hidden_size: got {hx.size(1)}, expected {self.hidden_size}")
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         assert type(mod) in {torch.nn.LSTMCell,
                              torch.nn.GRUCell,
                              torch.nn.RNNCell}, 'nn.quantized.dynamic.RNNCellBase.from_float \
@@ -1012,8 +1012,8 @@ class RNNCell(RNNCellBase):
         return ret
 
     @classmethod
-    def from_float(cls, mod):
-        return super().from_float(mod)
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
+        return super().from_float(mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
 
 
 class LSTMCell(RNNCellBase):
@@ -1055,8 +1055,8 @@ class LSTMCell(RNNCellBase):
             self.bias_ih, self.bias_hh)
 
     @classmethod
-    def from_float(cls, mod):
-        return super().from_float(mod)
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
+        return super().from_float(mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
 
 
 class GRUCell(RNNCellBase):
@@ -1096,5 +1096,5 @@ class GRUCell(RNNCellBase):
         )
 
     @classmethod
-    def from_float(cls, mod):
-        return super().from_float(mod)
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
+        return super().from_float(mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
