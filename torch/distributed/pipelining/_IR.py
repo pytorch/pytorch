@@ -323,13 +323,13 @@ def pipe_split():
     no-op if your annotated module is run eagerly.
 
     Example:
-    >>> # xdoctest: +SKIP
-    >>> def forward(self, x):
-    >>>     x = torch.mm(x, self.mm_param)
-    >>>     x = torch.relu(x)
-    >>>     pipe_split()
-    >>>     x = self.lin(x)
-    >>>     return x
+        >>> # xdoctest: +SKIP
+        >>> def forward(self, x):
+        >>>     x = torch.mm(x, self.mm_param)
+        >>>     x = torch.relu(x)
+        >>>     pipe_split()
+        >>>     x = self.lin(x)
+        >>>     return x
 
     The above example will be split into two stages.
     """
@@ -1129,15 +1129,16 @@ def pipeline(
         )
 
 
-# Context manager for setting `args_chunk_spec` during creation of Pipe
 class ArgsChunkSpec:
     """
+    Context manager for setting `args_chunk_spec` during creation of Pipe
+
     Example:
-    >>> # xdoctest: +SKIP
-    >>> # There are three positional arguments to the model, and
-    >>> # we are chunking them along dimension 0, 0 and 1, respectively
-    >>> with ArgsChunkSpec((0, 0, 1)):
-    >>>     pipe = pipeline(model, num_chunks, example_args)
+        >>> # xdoctest: +SKIP
+        >>> # There are three positional arguments to the model, and
+        >>> # we are chunking them along dimension 0, 0 and 1, respectively
+        >>> with ArgsChunkSpec((0, 0, 1)):
+        >>>     pipe = pipeline(model, num_chunks, example_args)
     """
 
     def __init__(
@@ -1159,14 +1160,15 @@ class ArgsChunkSpec:
         Pipe.args_chunk_spec = None
 
 
-# Context manager for setting `kwargs_chunk_spec` during creation of Pipe
 class KwargsChunkSpec:
     """
+    Context manager for setting `kwargs_chunk_spec` during creation of Pipe
+
     Example:
-    >>> # xdoctest: +SKIP
-    >>> # Chunk dimension 0 for the "id" argument, 1 for the "mask" argument
-    >>> with KwargsChunkSpec({"id": 0, "mask": 1}):
-    >>>     pipe = pipeline(model, num_chunks, (), example_kwargs)
+        >>> # xdoctest: +SKIP
+        >>> # Chunk dimension 0 for the "id" argument, 1 for the "mask" argument
+        >>> with KwargsChunkSpec({"id": 0, "mask": 1}):
+        >>>     pipe = pipeline(model, num_chunks, (), example_kwargs)
     """
 
     def __init__(
