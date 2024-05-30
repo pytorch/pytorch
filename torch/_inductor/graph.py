@@ -1582,9 +1582,10 @@ class GraphLowering(torch.fx.Interpreter):
                 if tracing_context.output_strides:
                     tracing_context.output_strides.clear()
 
+                assert tracing_context.params_buffers_flat is not None
                 params_flat = [
                     param
-                    for param in tracing_context.params_buffers_flat  # type: ignore[union-attr]
+                    for param in tracing_context.params_buffers_flat
                     if param is not None
                 ]
                 real_inputs = [
