@@ -441,6 +441,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
 
             return tensor_variable
+        elif issubclass(self.value, enum.Enum) and len(args) == 1 and not kwargs:
+            options = {"mutable_local": MutableLocal()}
+            return variables.EnumVariable.create(self.value, args[0], options)
 
         return super().call_function(tx, args, kwargs)
 
