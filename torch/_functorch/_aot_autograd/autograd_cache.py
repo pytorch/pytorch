@@ -454,6 +454,7 @@ class AOTAutogradCache:
         Load a result from the cache, and reconstruct a runtime wrapper around the object
         """
         compiled_fn = None
+        cache_key = None
         try:
             cache_key = autograd_cache_key(gm, args, aot_config)
             entry: Optional[AOTAutogradCacheEntry] = AOTAutogradCache._lookup(cache_key)
