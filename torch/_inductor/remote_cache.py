@@ -29,7 +29,7 @@ class RedisRemoteCacheBackend(RemoteCacheBackend):
 
         self._cache_id = cache_id
         self._key_fmt = os.environ.get(
-            "TORCHINDUCTOR_REDIS_KEY_FORMAT", "inductor:{cache_id}:{key}"
+            "TORCHINDUCTOR_REDIS_KEY_FORMAT", "pt2:{cache_id}:{key}"
         )
         self._redis = redis.Redis(
             host=os.environ.get("TRITON_REDIS_HOST", "localhost"),
