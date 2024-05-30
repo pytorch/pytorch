@@ -353,9 +353,12 @@ class SideEffects:
             var.mutable_local = MutableSideEffects(var.mutable_local.source, True)
 
     def _get_modified_vars(self):
+        # Some packages like pytest can be updated during runtime. So, make a
+        # copy of id_to_variables.values() to avoid issues like
+        # "RuntimeError: dictionary changed size during iteration"
         return [
             var
-            for var in self.id_to_variable.values()
+            for var in list(self.id_to_variable.values())
             if self.is_modified(var) and not self.is_functorch_tensor(var)
         ]
 
