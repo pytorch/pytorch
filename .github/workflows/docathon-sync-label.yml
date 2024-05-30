@@ -22,8 +22,8 @@ jobs:
           python-version: 3.x
       - name: Install dependencies
         run: |
-          pip install requests
-          pip install PyGithub
+          pip install requests==2.32.3
+          pip install PyGithub==2.3.0
       - name: Run Python script
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
