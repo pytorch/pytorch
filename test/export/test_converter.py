@@ -18,7 +18,11 @@ requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 class TestConverter(TestCase):
     def _check_equal_ts_ep_converter(self, mod, inp) -> ExportedProgram:
         ts_model = torch.jit.script(mod)
+        print(ts_model.graph)
         ep = TS2EPConverter(ts_model, inp).convert()
+        print(ep.graph)
+        print(ep.module()(*inp))
+        print(mod(*inp))
         ep_out, _ = pytree.tree_flatten(ep.module()(*inp))
         orig_out, _ = pytree.tree_flatten(mod(*inp))
         self.assertEqual(len(ep_out), len(orig_out))
@@ -285,6 +289,61 @@ class TestConverter(TestCase):
         self._check_equal_ts_ep_converter(MTensorIn(), inp)
         inp = (torch.tensor(1), {torch.tensor(4): "foo"})
         self._check_equal_ts_ep_converter(MTensorIn(), inp)
+
+    def test_ts2ep_converter_custom_op(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch._dynamo.config.capture_scalar_outputs = True
+            torch._dynamo.config.capture_dynamic_output_shape_ops = True
+
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor x) -> Tensor",
+                lib=lib,
+            )
+
+            # PyTorch custorm op implementation
+            @torch.library.impl(
+                "mylib::foo",
+                "CompositeExplicitAutograd",
+                lib=lib,
+            )
+            def foo_impl(x):
+                return x + x
+
+            # Meta function of the custom op.
+            @torch.library.impl_abstract(
+                "mylib::foo",
+                lib=lib,
+            )
+            def foo_meta(x):
+                return x + x
+
+            class M(torch.nn.Module):
+                def __init__(self, in_features, out_features):
+                    super().__init__()
+                    self.weight = torch.nn.Parameter(
+                        torch.randn(out_features, in_features), requires_grad=True
+                    )
+                    self.bias = torch.nn.Parameter(
+                        torch.randn(out_features), requires_grad=True
+                    )
+
+                def forward(self, x):
+                    return torch.ops.mylib.foo(torch.nn.functional.linear(x, self.weight, bias=self.bias))
+                    # return torch.ops.mylib.foo(x)
+
+            inp = (torch.randn(3, 3),)
+            mod = M(3, 3)
+
+            ts_model = torch.jit.script(mod)
+            print(ts_model.graph)
+            ep = TS2EPConverter(ts_model, inp).convert()
+            print(ep.graph)
+            print(ep.module()(*inp))
+            print(mod(*inp))
+            ep_out, _ = pytree.tree_flatten(ep.module()(*inp))
+
+            # self._check_equal_ts_ep_converter(m, inp)
 
 
 if __name__ == "__main__":
