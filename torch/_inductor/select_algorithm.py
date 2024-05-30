@@ -151,7 +151,7 @@ class TritonTemplateKernel(TritonKernel):
     @contextlib.contextmanager
     def set_subgraph_body(self, body_name: str):
         old_body = self.body
-        assert body_name in self.subgraph_bodies
+        assert body_name in self.subgraph_bodies, body_name
         self.body = self.subgraph_bodies[body_name]
         yield
         self.body = old_body
@@ -453,7 +453,7 @@ class TritonTemplateKernel(TritonKernel):
         index = " + ".join(
             f"{texpr(self.rename_indexing(s))} * {i}" for s, i in zip(stride, indices)
         )
-        return f"tl.load({name} + ({index}), {mask})"
+        return f"tl.load({name} + ({index}), {mask}, other=0.0)"
 
     def template_env(self):
         """
