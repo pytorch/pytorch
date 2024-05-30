@@ -3176,6 +3176,7 @@ def register_meta_foreach(ops):
         aten._foreach_log10,
         aten._foreach_log1p,
         aten._foreach_log2,
+        aten._foreach_max,
         aten._foreach_neg,
         aten._foreach_reciprocal,
         aten._foreach_round,
@@ -6342,6 +6343,11 @@ def meta_channel_shuffle(input, groups):
         layout=input.layout,
         device=input.device,
     )
+
+
+@register_meta(aten._local_scalar_dense)
+def meta_local_scalar_dense(self: Tensor):
+    raise RuntimeError("Tensor.item() cannot be called on meta tensors")
 
 
 def _create_unary_float_meta_func(func):
