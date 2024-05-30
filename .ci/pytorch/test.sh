@@ -483,6 +483,89 @@ test_perf_for_dashboard() {
   done
 }
 
+test_torchao_perf_for_dashboard() {
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+
+  local suite="$1"
+  shift
+
+  local backend=torchao
+  local modes=()
+  if [[ "$DASHBOARD_TAG" == *training-true* ]]; then
+    modes+=(training)
+  fi
+  if [[ "$DASHBOARD_TAG" == *inference-true* ]]; then
+    modes+=(inference)
+  fi
+  # TODO: All the accuracy tests can be skipped once the CI accuracy checking is stable enough
+  local targets=(accuracy performance)
+  local torchao_backends=(noquant int8dynamic int8weightonly int4weightonly  autoquant)
+
+  for mode in "${modes[@]}"; do
+    if [[ "$mode" == "inference" ]]; then
+      dtype=bfloat16
+    elif [[ "$mode" == "training" ]]; then
+      dtype=amp
+    fi
+    for target in "${targets[@]}"; do
+      local target_flag=("--${target}")
+      if [[ "$target" == "performance" ]]; then
+        target_flag+=( --cold-start-latency)
+      elif [[ "$target" == "accuracy" ]]; then
+        target_flag+=( --no-translation-validation)
+      fi
+
+      for torchao_backend in "${torchao_backends[@]}"; do
+        if [[ "$DASHBOARD_TAG" == *${torchao_backend}-true* ]]; then
+          python "benchmarks/dynamo/$suite.py" \
+              "${target_flag[@]}" --"$mode" --"$dtype" --quantization "${torchao_backend}" "$@" \
+              --output "$TEST_REPORTS_DIR/${backend}_${torchao_backend}_${suite}_${dtype}_${mode}_cuda_${target}.csv"
+        fi
+      done
+    done
+  done
+}
+
+test_single_torchao_benchmark() {
+  # Usage: test_single_torchao_benchmark <inference|training> huggingface 0 --args-for-script
+
+  # Use test-reports directory under test folder will allow the CI to automatically pick up
+  # the test reports and upload them to S3. Need to use full path here otherwise the script
+  # will bark about file not found later on
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+
+  local name="$1"
+  shift
+  local suite="$1"
+  shift
+  # shard id is mandatory, even if it is not passed
+  local shard_id="$1"
+  shift
+
+  local partition_flags=()
+  if [[ -n "$NUM_TEST_SHARDS" && -n "$shard_id" ]]; then
+    partition_flags=( --total-partitions "$NUM_TEST_SHARDS" --partition-id "$shard_id" )
+  fi
+
+  test_torchao_perf_for_dashboard "$suite" \
+    "${TORCHAO_BENCHMARK_FLAGS[@]}" "$@" "${partition_flags[@]}"
+
+}
+
+test_torchao_benchmark() {
+  # Usage: test_torchao_benchmark huggingface 0
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+
+  local suite="$1"
+  shift
+  local shard_id="$1"
+  shift
+
+  test_single_torchao_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "$@"
+}
+
 test_single_dynamo_benchmark() {
   # Usage: test_single_dynamo_benchmark inductor_inference huggingface 0 --args-for-script
 
@@ -1238,15 +1321,15 @@ elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *inductor-micro-benchmark* ]]; then
   test_inductor_micro_benchmark
-elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
+elif [[ "${TEST_CONFIG}" == *inductor_huggingface* ]]; then
   install_torchvision
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark huggingface "$id"
-elif [[ "${TEST_CONFIG}" == *timm* ]]; then
+elif [[ "${TEST_CONFIG}" == *inductor_timm* ]]; then
   install_torchvision
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark timm_models "$id"
-elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
+elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
   if [[ "${TEST_CONFIG}" == *cpu_inductor* ]]; then
     install_torchaudio cpu
   else
@@ -1277,6 +1360,23 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     fi
     PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id"
   fi
+elif [[ "${TEST_CONFIG}" == *torchao_huggingface* ]]; then
+  install_torchao
+  install_torchvision
+  id=$((SHARD_NUMBER-1))
+  test_torchao_benchmark huggingface "$id"
+elif [[ "${TEST_CONFIG}" == *torchao_timm* ]]; then
+  install_torchao
+  install_torchvision
+  id=$((SHARD_NUMBER-1))
+  test_torchao_benchmark timm_models "$id"
+elif [[ "${TEST_CONFIG}" == *torchao_torchbench* ]]; then
+  install_torchao
+  install_torchaudio cuda
+  install_torchvision
+  id=$((SHARD_NUMBER-1))
+  checkout_install_torchbench
+  PYTHONPATH=$(pwd)/torchbench test_torchao_benchmark torchbench "$id"
 elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper_abi_compatible* ]]; then
   install_torchvision
   test_inductor_cpp_wrapper_abi_compatible
