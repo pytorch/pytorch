@@ -4,6 +4,8 @@ import copy
 import os
 import sys
 import tempfile
+import unittest
+from typing import Dict, List, Optional, Tuple
 
 from model_registry import ModelWithKwargs, MultiMLP
 
@@ -18,6 +20,7 @@ from torch.distributed.pipelining import (
     ScheduleInterleaved1F1B,
     ScheduleLoopedBFS,
 )
+from torch.distributed.pipelining.PipelineScheule import _ComputationType
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     MultiProcContinousTest,
@@ -35,6 +38,12 @@ batch_size = 256
 
 torch.manual_seed(0)
 
+class MockPipelineStageBase(_PipelineStageBase):
+    def __init__(self, *args, **kwargs):
+        # Mock the necessary attributes
+        self.group_size = kwargs.get('group_size', 1)
+        self.group_rank = kwargs.get('group_rank', 0)
+        self.group = kwargs.get('group', None)
 
 class ScheduleTest(MultiProcContinousTest):
     @classmethod
@@ -344,7 +353,120 @@ class ScheduleTest(MultiProcContinousTest):
 
 instantiate_parametrized_tests(ScheduleTest)
 
+
+class TestSchedulePlan(unittest.TestCase):
+    def _validate_pipeline_order(
+        self,
+        pipeline_order: List[List[Optional[Tuple[_ComputationType, int, int]]]],
+        num_microbatches: int,
+    ):
+        """
+        pipeline_order[rank] = [(computation_type, microbatch_index, stage_index), ...]
+
+        Validating that the pipeline order follows the rules:
+        1. Forward action for a microbatch must be before the Backward action for that microbatch
+        2. Recv for a microbatch must be before the send for that microbatch
+        3. Microbatch index is handled in sequential order for each stage
+        4. A later stage cannot operate on a microbatch before any of the previous stages have operated on it
+        5. Same microbatch cannot be handled in the same time step across ranks
+        """
+        # microbatch_index: (current computation type, current stage)
+        error_msg = []
+        microbatch_process_info: Dict[int, Tuple(_ComputationType, int)] = {}
+        max_timestep = max(len(rank_list) for rank_list in pipeline_order)
+        for timestep in range(max_timestep):
+            error_msg = None
+            current_timestep_actions = []
+            for rank in range(len(pipeline_order)):
+                action = pipeline_order[rank][timestep]
+                if action is not None:
+                    current_timestep_actions.append(action)
+
+            if len(current_timestep_actions) == 0:
+                error_msg.append(
+                    "All actions were None, there is an unnecessary gap in the schedule"
+                )
+
+            # Ensure that no microbatch is operated on twice in current_timestep_actions
+            unique_microbatch_indices = {
+                action[1] for action in current_timestep_actions
+            }
+            if len(unique_microbatch_indices) != len(current_timestep_actions):
+                error_msg.append(
+                    "Duplicate microbatch index found in current_timestep_actions"
+                )
+
+            # Add additional checks for other rules here...
+            for action in current_timestep_actions:
+                computation_type, mb_index, stage_index = action
+                # first microbatch
+                if mb_index not in microbatch_process_info:
+                    if computation_type != _ComputationType.FORWARD or stage_index != 0:
+                        error_msg.append(f"Incorrect start for microbatch {mb_index}")
+                    microbatch_process_info[mb_index] = (computation_type, stage_index)
+                else:
+                    # if the microbatch is included, check that the current stage is right after prev
+                    prev_computation, prev_stage = microbatch_process_info[mb_index]
+                    if prev_computation == _ComputationType.FORWARD:
+                        if prev_stage == num_microbatches - 1:
+                            expected_stage = num_microbatches - 1
+                            expected_computation = _ComputationType.BACKWARD
+                        else:
+                            expected_stage = prev_stage + 1
+                            expected_computation = _ComputationType.FORWARD
+                    elif prev_computation == _ComputationType.BACKWARD:
+                        if prev_stage == 0:
+                            error_msg.append(
+                                f"[{mb_index=}] already finished backward computation"
+                            )
+                            expected_stage = None
+                            expected_computation = None
+                        else:
+                            expected_stage = prev_stage - 1
+                            expected_computation = _ComputationType.BACKWARD
+                    else:
+                        raise ValueError(
+                            f"Computation type {prev_computation} not supported"
+                        )
+
+                    if expected_stage != stage_index:
+                        error_msg.append(
+                            f"[{mb_index=}] {expected_computation=}, actual computation {computation_type}",
+                            f"| {expected_stage=}, actual stage {stage_index}",
+                        )
+
+            if len(error_msg) != 0:
+                self.fail(f"Error at timestep {timestep}" + ",".join(error_msg))
+
+    def test_pipeline_order(self):
+        # always assume rank 0
+        rank = 0
+
+        # happy paths
+        num_stages = 2
+        num_microbatches = 8
+        group_size = 4
+        stages = [
+            MockPipelineStageBase(group_size=group_size, group_rank=rank)
+            for i in range(num_stages)
+        ]
+
+        schedule = ScheduleInterleaved1F1B(stages, num_microbatches)
+        self._validate_pipeline_order(schedule.pipeline_order)
+
+        # sad paths (should fail)
+
+        print("finished test_pipeline_order")
+        pass
+
+
 if __name__ == "__main__":
+    # Run only the TestSchedulePlan tests (single process)
+    loader = unittest.TestLoader()
+    suite = loader.loadTestsFromTestCase(TestSchedulePlan)
+    runner = unittest.TextTestRunner()
+    runner.run(suite)
+
     # Check if GPU and NCCL are available
     if not (
         dist.is_available()
@@ -372,3 +494,6 @@ if __name__ == "__main__":
             nprocs=world_size,
             args=(world_size, rdvz_file),
         )
+
+    # test the non multiprocessing tests
+    # unittest.main()
