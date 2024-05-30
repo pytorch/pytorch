@@ -371,7 +371,7 @@ class DistMathOpsTest(DTensorTestBase):
 
             if elementwise_affine:
                 # if input is sharded on any outer dimension, the gradient of weight
-                # and bias should be _Partial
+                # and bias should be Partial
                 dim_map = x_dist._spec.dim_map
                 outer_dims = range(norm_idx)
                 needs_reduction = any(dim_map[d] >= 0 for d in outer_dims)
