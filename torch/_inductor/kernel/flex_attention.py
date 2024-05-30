@@ -625,10 +625,10 @@ flex_attention_backward_template = TritonTemplate(
             lse = tl.load(LSE + offs_m1)
             qkT = tl.dot(k, qT)
             # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
-            pre_mod_scores = qkT
             m = offs_m1[:, None]
             n = offs_n1[None, :]
             qk = tl.trans(qkT)
+            pre_mod_scores = qk
             {{ modification(
                 subgraph_number=0,
                 output_name="post_mod_scores",
