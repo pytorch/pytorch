@@ -2205,7 +2205,7 @@ void svd_kernel(const Tensor& A,
   bool use_magma = at::globalContext().linalgPreferredBackend() == at::LinalgBackend::Magma;
   if (use_magma) {
     svd_magma(A, full_matrices, compute_uv, U, S, Vh, info);
-  } else 
+  } else
 #endif
   {
     // svd_cusolver computes V rather than Vh, so we pass a view of Vh.mT
@@ -2238,14 +2238,9 @@ REGISTER_CUDA_DISPATCH(svd_stub, &svd_kernel)
 
   For further details, please see the MAGMA documentation for magma_dgetrs_gpu.
 */
+#if AT_MAGMA_ENABLED()
 template <typename scalar_t>
 static void apply_lu_solve_looped_magma(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType transpose) {
-#if !AT_MAGMA_ENABLED()
-  static_assert(
-      false && sizeof(scalar_t),
-      "Calling linalg.lu_solve on a CUDA tensor requires compiling "
-      "PyTorch with MAGMA. Please rebuild with MAGMA.");
-#else
   auto trans = to_magma(transpose);
   auto b_data = B.data_ptr<scalar_t>();
   auto lu_data = LU.data_ptr<scalar_t>();
@@ -2283,7 +2278,6 @@ static void apply_lu_solve_looped_magma(const Tensor& LU, const Tensor& pivots, 
     // so we don't need to check it all the time
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
   }
-#endif
 }
 
 /*
@@ -2300,7 +2294,6 @@ static void apply_lu_solve_looped_magma(const Tensor& LU, const Tensor& pivots, 
 
   For further details, please see the MAGMA documentation for magma_dgetrs_batched.
 */
-#if AT_MAGMA_ENABLED()
 template <typename scalar_t>
 static void apply_lu_solve_batched_magma(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType transpose) {
   TORCH_INTERNAL_ASSERT(batchCount(B) == batchCount(LU), "batch_size of LU and B must be the same");
