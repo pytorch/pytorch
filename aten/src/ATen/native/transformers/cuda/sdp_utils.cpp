@@ -44,14 +44,27 @@
 
 namespace sdp {
 namespace {
+
+// TODO(eqy): more benchmarking to determine whether this should include sm86/89
+bool check_prefer_cudnn_attention() {
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  return dprops->major >= 9;
+}
+
 // flash_attention V2 is universally faster than efficient_attention and Math
 std::array<SDPBackend, num_backends> priority_order(sdp_params const& params) {
   constexpr std::array<SDPBackend, num_backends> default_order{
+      SDPBackend::flash_attention,
+      SDPBackend::cudnn_attention,
+      SDPBackend::efficient_attention,
+      SDPBackend::math};
+  constexpr std::array<SDPBackend, num_backends> cudnn_order{
       SDPBackend::cudnn_attention,
       SDPBackend::flash_attention,
       SDPBackend::efficient_attention,
       SDPBackend::math};
-  return default_order;
+  static const bool prefer_cudnn = check_prefer_cudnn_attention();
+  return prefer_cudnn ? cudnn_order : default_order;
 }
 
 bool use_tensor_cores(sdp_params const& params, cudaDeviceProp* dprops, bool is_half) {
@@ -474,22 +487,6 @@ bool check_dtypes_low_precision(sdp_params const& params, bool debug) {
   }
 }
 
-bool check_runtime_enabled_cudnn(sdp_params const& params, bool debug) {
-  static c10::once_flag supported_flag;
-  static bool supported = false;
-  c10::call_once(supported_flag, []() {
-    supported = (c10::utils::check_env("TORCH_CUDNN_SDPA_ENABLED") == true);
-  });
-  if (!supported) {
-    if (debug) {
-      TORCH_WARN(
-          "The CuDNN backend needs to be enabled by setting the enviornment variable`TORCH_CUDNN_SDPA_ENABLED=1`");
-    }
-    return false;
-  }
-  return true;
-}
-
 bool check_runtime_disabled_cudnn(sdp_params const& params, bool debug) {
   // We check the global context to see if user has explicitly turned of cudnn
   // sdp kernels
@@ -524,7 +521,6 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
   constexpr auto general_constraints =
       array_of<bool (*)(sdp_params const&, bool)>(
           check_for_nested_inputs,
-          check_runtime_enabled_cudnn,
           check_runtime_disabled_cudnn,
           check_cudnn_hardware_support,
           check_all_tensors_on_device,
