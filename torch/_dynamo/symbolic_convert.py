@@ -1280,8 +1280,10 @@ class InstructionTranslatorBase(
 
                 # 2) if 'lasti' is true, then push the offset that the exception was raised at
                 if exn_tab_entry.lasti:
-                    # TODO(anijain2305) - This is untested. Any test that tests
-                    # this end-to-end requires supporting more bytecodes.
+                    # This is untested. Any test that tests this end-to-end
+                    # requires supporting more bytecodes. Therefore graph
+                    # breaking for now.
+                    unimplemented("lasti=True while exception handling")
                     self.push(
                         variables.ConstantVariable(self.current_instruction.offset)
                     )
@@ -1325,16 +1327,17 @@ class InstructionTranslatorBase(
                         f"Current TOS is {block_stack_entry.inst}"
                     )
 
-                # Push a block of EX
+                # Push a dummy block stack entry of EXCEPT_HANDLER
+                # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L1456
                 except_handler_inst = Instruction(1e6, "EXCEPT_HANDLER", None, 0)
                 self.block_stack.append(BlockStackEntry(except_handler_inst, None))
 
                 # Push old exception
-                # TODO (anijain2305) - Add another block_stack entry for popping these
                 if len(self.exn_vt_stack) >= 2:
                     old_exception = self.exn_vt_stack[-2]
 
                     # Push the old exception on to stack - tb, value, type
+                    # Traceback is currently mapped to UnknownVariable
                     self.push(variables.UnknownVariable())
                     self.push(old_exception)
                     self.push(variables.BuiltinVariable(old_exception.exc_type))
@@ -1344,7 +1347,8 @@ class InstructionTranslatorBase(
                     self.push(variables.ConstantVariable(None))
                     self.push(variables.ConstantVariable(None))
 
-                # Push new tb, val, type
+                # Push new exception - tb, val, type
+                # Traceback is currently mapped to UnknownVariable
                 self.push(variables.UnknownVariable())
                 self.push(exception_var)
                 self.push(variables.BuiltinVariable(exception_var.exc_type))
