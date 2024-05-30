@@ -17,6 +17,9 @@ import textwrap
 import ctypes
 import inspect
 import threading
+import pdb
+import importlib
+import importlib.util
 
 # multipy/deploy is setting this import before importing torch, this is the most
 # reliable way we have to detect if we're running within deploy.
@@ -165,11 +168,53 @@ def _preload_cuda_deps(lib_folder, lib_name):
         raise ValueError(f"{lib_name} not found in the system path {sys.path}")
     ctypes.CDLL(lib_path)
 
-
 # See Note [Global dependencies]
 def _load_global_deps() -> None:
+
+    LIBTORCH_PKG_NAME = "libtorchsplit"
+
+    def find_package_path(package_name):
+        spec = importlib.util.find_spec(package_name)
+        if spec:
+            # The package might be a namespace package, so get_data may fail
+            try:
+                loader = spec.loader
+                if loader is not None:
+                    file_path = loader.get_filename()  # type: ignore[attr-defined]
+                    return os.path.dirname(file_path)
+            except AttributeError:
+                pass
+        return None
+
+    def load_shared_libraries(library_path):
+        lib_dir = os.path.join(library_path, 'lib')
+        if not os.path.exists(lib_dir):
+            return
+
+        # Determine the file extension based on the platform
+        if platform.system() == 'Darwin':
+            lib_ext = '.dylib'
+        else:
+            lib_ext = '.so'
+
+        # Find all shared library files with the appropriate extension
+        library_files = [f for f in os.listdir(lib_dir) if f.endswith(lib_ext)]
+        if not library_files:
+            return
+
+        for lib_file in library_files:
+            lib_path = os.path.join(lib_dir, lib_file)
+            try:
+                ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
+            except OSError as err:
+                print(f"Failed to load {lib_path}: {err}")
+
     if _running_with_deploy() or platform.system() == 'Windows':
         return
+    split_build_lib_name = LIBTORCH_PKG_NAME
+    library_path = find_package_path(split_build_lib_name)
+    if library_path:
+        load_shared_libraries(library_path)
 
     lib_name = 'libtorch_global_deps' + ('.dylib' if platform.system() == 'Darwin' else '.so')
     here = os.path.abspath(__file__)
@@ -1268,7 +1313,7 @@ def _check_tensor_all(cond, message=None):  # noqa: F811
 
 # For Python Array API (https://data-apis.org/array-api/latest/API_specification/constants.html) and
 # NumPy consistency (https://numpy.org/devdocs/reference/constants.html)
-from math import e , nan , inf , pi
+from math import e, nan , inf , pi
 newaxis: None = None
 __all__.extend(['e', 'pi', 'nan', 'inf', 'newaxis'])
 
@@ -1950,17 +1995,6 @@ import torch.fx.experimental.sym_node
 from torch import func as func
 from torch.func import vmap
 
-
-# The function _sparse_coo_tensor_unsafe is removed from PyTorch
-# Python API (v. 1.13), here we temporarily provide its replacement
-# with a deprecation warning.
-# TODO: remove the function for PyTorch v 1.15.
-def _sparse_coo_tensor_unsafe(*args, **kwargs):
-    import warnings
-    warnings.warn('torch._sparse_coo_tensor_unsafe is deprecated, '
-                  'use torch.sparse_coo_tensor(..., check_invariants=False) instead.')
-    kwargs['check_invariants'] = False
-    return torch.sparse_coo_tensor(*args, **kwargs)
 
 # Register MPS specific decomps
 torch.backends.mps._init()
