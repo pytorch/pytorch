@@ -3,7 +3,7 @@ from typing import Any, Callable, Dict, Optional
 
 import torch
 import torch.utils._pytree as pytree
-
+from collections import defaultdict
 aten = torch.ops.aten
 
 # We would like to split modules into two subgraphs for runtime weight updates to work correctly.
@@ -222,13 +222,10 @@ def constant_fold(gm, constraint_fn: Optional[Callable[[torch.fx.Node], bool]] =
     # call_function  add_                 aten.add_.Tensor  (_tensor_constant0_1, 1)     {}
     # output         output               output            ([add],)                     {}
 
-    get_attr_node_users = {}
+    get_attr_node_users = defaultdict(list)
     for node in gm.graph.nodes:
         if node.op == "get_attr":
-            if node.target in get_attr_node_users:
-                get_attr_node_users[node.target].extend(node.users.keys())
-            else:
-                get_attr_node_users[node.target] = list(node.users.keys())
+            get_attr_node_users[node.target].extend(node.users.keys())
     for node in gm.graph.find_nodes(op="get_attr"):
         if node.op == "get_attr" and len(get_attr_node_users[node.target]) == 0:
             if hasattr(gm, node.target):
