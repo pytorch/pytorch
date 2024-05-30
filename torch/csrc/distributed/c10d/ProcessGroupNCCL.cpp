@@ -28,6 +28,7 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 #include <torch/csrc/distributed/c10d/logger.hpp>
 #include <torch/torch.h>
 
@@ -354,6 +355,13 @@ std::string dump_nccl_trace() {
   return NCCLTraceBuffer::get()->dump(c10::nullopt);
 }
 #endif
+
+// TODO(c-p-i-o): add a JSON endpoint.
+control_plane::RegisterHandler dumpHandler{
+    "dump_nccl_trace_pickle",
+    [](const control_plane::Request&, control_plane::Response& res) {
+      res.setContent(dump_nccl_trace(), "application/octet-stream");
+    }};
 
 std::optional<std::function<void(std::function<void(const std::string&)>)>>&
 get_cpp_trace_dumper() {
