@@ -17,7 +17,7 @@ from torch._streambase import _StreamBase
 from ..._guards import TracingContext
 from .. import config, polyfill, variables
 from ..codegen import PyCodegen
-from ..create_parameter_op import new_parameter_placeholder, tracable_create_parameter, new_parameter_placeholder_dtensor
+from ..create_parameter_op import new_parameter_placeholder, tracable_create_parameter  # , new_parameter_placeholder_dtensor
 from ..device_interface import get_registered_device_interfaces
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
@@ -926,18 +926,18 @@ Either create the tensor outside the compiled region, or do not set the tensor t
 
         # # TODO(yf225): how to merge these 2 branches and make them subclass-agnostic?
         # # Do we really need to write out codegen rules for DeviceMesh / Placements?
-        if isinstance(example_value, DTensor):
-            placeholder = tx.output.synthetic_graph_input(
-                new_parameter_placeholder_dtensor, [
-                    shape, dtype, device, requires_grad,
-                    # example_value.device_mesh.device_type, example_value.device_mesh.mesh.tolist(), example_value.device_mesh.mesh_dim_names,
-                    # placements_info,
-                ]
-            )
-        else:
-            placeholder = tx.output.synthetic_graph_input(
-                new_parameter_placeholder, [shape, dtype, device, requires_grad]
-            )
+        # if isinstance(example_value, DTensor):
+        #     placeholder = tx.output.synthetic_graph_input(
+        #         new_parameter_placeholder_dtensor, [
+        #             shape, dtype, device, requires_grad,
+        #             # example_value.device_mesh.device_type, example_value.device_mesh.mesh.tolist(), example_value.device_mesh.mesh_dim_names,
+        #             # placements_info,
+        #         ]
+        #     )
+        # else:
+        placeholder = tx.output.synthetic_graph_input(
+            new_parameter_placeholder, [shape, dtype, device, requires_grad]
+        )
         if data.requires_grad:
             data = data.call_method(tx, "detach", [], {})
 

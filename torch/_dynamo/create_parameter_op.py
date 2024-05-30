@@ -37,7 +37,7 @@ class TracableCreateParameter(torch.autograd.Function):
 def tracable_create_parameter(tensor, placeholder):
     with torch.set_grad_enabled(placeholder.requires_grad):
         out = TracableCreateParameter.apply(tensor, placeholder)
-        out = out.clone()
+        # out = out.clone()
     return out
 
 
@@ -52,18 +52,18 @@ def new_parameter_placeholder(size, dtype, device, requires_grad):
     return result
 
 
-def new_parameter_placeholder_dtensor(size, dtype, device, requires_grad):  # , device_type, mesh, mesh_dim_names, placements_info):
-    """Create a placeholder to be passed to the above functions"""
-    data_tensor = torch.empty(size, dtype=dtype, device=device)
-    data_tensor.untyped_storage().resize_(0)
-    # NOTE(yf225): allocate a placeholder nn.Parameter(DTensor), whose content will get swapped out in TracableCreateParameter.forward
-    data_tensor = torch.distributed._tensor.api.DTensor.from_local(
-        data_tensor,
-        device_mesh=torch.distributed.device_mesh.DeviceMesh(device_type=str(device), mesh=[0]),
-        placements=[torch.distributed._tensor.Replicate()],
-    )
-    result = torch.nn.Parameter(
-        data_tensor, requires_grad=requires_grad
-    )
-    torch_log.warning(f"new_parameter_placeholder_dtensor: result: {result}")
-    return result
+# def new_parameter_placeholder_dtensor(size, dtype, device, requires_grad):  # , device_type, mesh, mesh_dim_names, placements_info):
+#     """Create a placeholder to be passed to the above functions"""
+#     data_tensor = torch.empty(size, dtype=dtype, device=device)
+#     data_tensor.untyped_storage().resize_(0)
+#     # NOTE(yf225): allocate a placeholder nn.Parameter(DTensor), whose content will get swapped out in TracableCreateParameter.forward
+#     data_tensor = torch.distributed._tensor.api.DTensor.from_local(
+#         data_tensor,
+#         device_mesh=torch.distributed.device_mesh.DeviceMesh(device_type=str(device), mesh=[0]),
+#         placements=[torch.distributed._tensor.Replicate()],
+#     )
+#     result = torch.nn.Parameter(
+#         data_tensor, requires_grad=requires_grad
+#     )
+#     torch_log.warning(f"new_parameter_placeholder_dtensor: result: {result}")
+#     return result

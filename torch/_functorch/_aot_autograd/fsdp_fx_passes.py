@@ -499,118 +499,110 @@ def remove_storage_resize_and_copy(mod):
 def _collect_primal_inputs_used(node_list):
     primal_inputs_tensor_only = [x for x in list(filter(torch._functorch.partitioners._is_primal, node_list)) if isinstance(x.meta.get('val', None), torch.Tensor)]
     primal_inputs_used = set()
-    primal_resize_copy_info_dict = {}
+    primal_set_info_dict = {}
     for i, n in enumerate(node_list):
-        if n.target == torch.ops.inductor.resize_storage_bytes_.default and n.args[0] in primal_inputs_tensor_only:
+        if n.target == torch.ops.aten.set_.source_Tensor and n.args[0] in primal_inputs_tensor_only:
             primal_input = n.args[0]
-            resize_storage_bytes_node = n
-            inplace_copy_node = None
-            inplace_copy_node_idx = None
-            for j in range(i+1, len(node_list)):
-                nj = node_list[j]
-                if nj.target == torch.ops.aten.copy_.default and nj.args[0] == primal_input:
-                    inplace_copy_node = nj
-                    inplace_copy_node_idx = j
-                    break
-            if inplace_copy_node is not None:
-                primal_resize_copy_info_dict[primal_input] = {
-                    "resize_storage_bytes_node": resize_storage_bytes_node,
-                    "inplace_copy_node": inplace_copy_node,
-                }
-                primal_inputs_used.add(primal_input)
-    return primal_inputs_used, primal_resize_copy_info_dict
+            set_node = n
+            primal_set_info_dict[primal_input] = set_node
+            primal_inputs_used.add(primal_input)
+    return primal_inputs_used, primal_set_info_dict
 
 
-def reinplace_primal_copyout_from_allgather_output(mod):
+def _collect_view_to_as_strided_users(node_list):
+    view_to_as_strided_users = defaultdict(list)
+    for i, n in enumerate(node_list):
+        if n.target == torch.ops.aten.as_strided.default and n.args[0].target == torch.ops.aten.view.default:
+            view_to_as_strided_users[n.args[0]].append(n)
+    return view_to_as_strided_users
+
+
+
+def reinplace_primal_set_from_allgather_output(mod):
     """
-    NOTE: must only apply this on joint graph!
-
-    auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.fsdp.split_with_sizes_copy.default, all_gather_output = view_7, all_gather_input_split_sizes = [131072, 256, 131072, 256, 131072, 256], dim = 1, out = [view_1, view_2, view_3, view_4, view_5, view_6]);  view_7 = view_1 = view_2 = view_3 = view_4 = view_5 = view_6 = None
+    auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.fsdp.split_with_sizes_copy.default, all_gather_output = view_5, all_gather_input_split_sizes = [131072, 256, 131072, 256], dim = 1, out = [view_1, view_2, view_3, view_4]);  view_5 = view_1 = view_2 = view_3 = view_4 = None
     getitem_3 = auto_functionalized[1];  auto_functionalized = None
     getitem_4: "f32[2, 131072]" = getitem_3[0]
-    view_8: "f32[262144]" = torch.ops.aten.view.default(getitem_4, [262144]);  getitem_4 = None
-
-    ... (uses view_8)
-
-    # No stacktrace found for following nodes
-    as_strided_12: "f32[512, 512]" = torch.ops.aten.as_strided.default(view_8, [512, 512], [512, 1], 0)
-
-    ... (uses as_strided_12)
-
-    # No stacktrace found for following nodes
-    set_: "f32[512, 512]" = torch.ops.aten.set_.source_Tensor(primals_8, as_strided_12);  primals_8 = as_strided_12 = None
-    resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(set_, 0);  set_ = None
-
-    (returns view_8 at end of graph)
+    view_6: "f32[262144]" = torch.ops.aten.view.default(getitem_4, [262144]);  getitem_4 = None
+    as_strided_5: "f32[512, 512]" = torch.ops.aten.as_strided.default(view_6, [512, 512], [512, 1], 0)
+    (... uses as_strided_5)
+    as_strided_8: "f32[512, 512]" = torch.ops.aten.as_strided.default(view_6, [512, 512], [512, 1], 0);  view_6 = None
+    (... not using as_strided_8)
+    set_: "f32[512, 512]" = torch.ops.aten.set_.source_Tensor(primals_6, as_strided_8);  primals_6 = as_strided_8 = None
+    (end of graph)
 
     ->
 
-    auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.fsdp.split_with_sizes_copy.default, all_gather_output = view_7, all_gather_input_split_sizes = [131072, 256, 131072, 256, 131072, 256], dim = 1, out = [view_1, view_2, view_3, view_4, view_5, view_6]);  view_7 = view_1 = view_2 = view_3 = view_4 = view_5 = view_6 = None
+    auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.fsdp.split_with_sizes_copy.default, all_gather_output = view_5, all_gather_input_split_sizes = [131072, 256, 131072, 256], dim = 1, out = [view_1, view_2, view_3, view_4]);  view_5 = view_1 = view_2 = view_3 = view_4 = None
     getitem_3 = auto_functionalized[1];  auto_functionalized = None
     getitem_4: "f32[2, 131072]" = getitem_3[0]
-    view_8: "f32[262144]" = torch.ops.aten.view.default(getitem_4, [262144]);  getitem_4 = None
-    as_strided_X: "f32[512, 512]" = torch.ops.aten.as_strided.default(view_8, [512, 512], [512, 1], 0)
-    set_: "f32[512, 512]" = torch.ops.aten.set_.source_Tensor(primals_8, as_strided_X);  primals_8 = as_strided_12 = None
-
-    ... (uses view_8)
-
-    # No stacktrace found for following nodes
-    as_strided_12: "f32[512, 512]" = torch.ops.aten.as_strided.default(view_8, [512, 512], [512, 1], 0)
-
-    ... (uses as_strided_12)
-
-    # No stacktrace found for following nodes
-
-    resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(set_, 0);  set_ = None
-
-    (returns view_8 at end of graph)
+    view_6: "f32[262144]" = torch.ops.aten.view.default(getitem_4, [262144]);  getitem_4 = None
+    as_strided_X: "f32[512, 512]" = torch.ops.aten.as_strided.default(view_6, [512, 512], [512, 1], 0);  view_6 = None
+    set_: "f32[512, 512]" = torch.ops.aten.set_.source_Tensor(primals_6, as_strided_X);  primals_6 = as_strided_8 = None
+    (... uses primals_6 instead of as_strided_5)
+    ...
+    (end of graph)
     """
+
     node_list = list(mod.graph.nodes)
-    primal_inputs_used, primal_resize_copy_info_dict = _collect_primal_inputs_used(node_list)
-    for i, n in enumerate(node_list):
-        if (
-            n.target is torch.ops.aten.copy.default
-            and n.args[0] in primal_inputs_used
-            and n.args[1].target is operator.getitem
-            and n.args[1].args[0].target is torch.ops.fsdp.split_contiguous_view_as_strided.default
-        ):
-            primal_input = n.args[0]
-            resize_node = primal_resize_copy_info_dict[primal_input]["resize_storage_bytes_node"]
-            inplace_copy_node = primal_resize_copy_info_dict[primal_input]["inplace_copy_node"]
-            copyout_from_allgather_node = n
-            with mod.graph.inserting_before(copyout_from_allgather_node):
-                new_resize_node = mod.graph.call_function(resize_node.target, resize_node.args, resize_node.kwargs)
-                new_inplace_copy_node = mod.graph.call_function(inplace_copy_node.target, copyout_from_allgather_node.args, copyout_from_allgather_node.kwargs)
-            inplace_copy_node.replace_all_uses_with(new_inplace_copy_node, propagate_meta=True)
-            mod.graph.erase_node(inplace_copy_node)
-            resize_node.replace_all_uses_with(new_resize_node, propagate_meta=True)
-            mod.graph.erase_node(resize_node)
-            copyout_from_allgather_node.replace_all_uses_with(primal_input, propagate_meta=False)
-            mod.graph.erase_node(copyout_from_allgather_node)
+    primal_inputs_used, primal_set_info_dict = _collect_primal_inputs_used(node_list)
+    view_to_as_strided_users = _collect_view_to_as_strided_users(node_list)
+
+    as_strided_to_primal = {}
+    for set_node in primal_set_info_dict.values():
+        if set_node.args[1].target == torch.ops.aten.as_strided.default:
+            as_strided_to_primal[set_node.args[1]] = set_node.args[0]
+
+    for as_strided_node in as_strided_to_primal:
+        assert as_strided_node.args[0].target == torch.ops.aten.view.default
+        primal_node = as_strided_to_primal[as_strided_node]
+        view_node = as_strided_node.args[0]
+        set_node = primal_set_info_dict[primal_node]
+        for other_as_strided_node in view_to_as_strided_users[view_node]:
+            if other_as_strided_node != as_strided_node:
+                assert other_as_strided_node.args == as_strided_node.args
+        with mod.graph.inserting_after(view_node):
+            new_as_strided_node = mod.graph.call_function(as_strided_node.target, as_strided_node.args, as_strided_node.kwargs)
+        with mod.graph.inserting_after(new_as_strided_node):
+            new_set_node = mod.graph.call_function(set_node.target, (primal_node, new_as_strided_node), set_node.kwargs)
+        mod.graph.erase_node(set_node)
+        mod.graph.erase_node(as_strided_node)
+        for other_as_strided_node in view_to_as_strided_users[view_node]:
+            if other_as_strided_node != as_strided_node:
+                other_as_strided_node.replace_all_uses_with(primal_node)
+                mod.graph.erase_node(other_as_strided_node)
     mod.graph.lint()
     mod.recompile()
 
 
-def move_primal_inplace_copy_to_end_of_fwd_graph(mod):
+def move_primal_set_to_end_of_fwd_graph(mod):
     """
-    ... (no alias of primals_15)
-    split_contiguous_view_as_strided_1 = torch.ops.fsdp.split_contiguous_view_as_strided.default(view_3, [52428800, 10240, 52428800, 2560], [[20480, 5120], [20480], [5120, 20480], [5120]], [[5120, 1], [1], [20480, 1], [1]]);  view_3 = None
-    getitem_8: "f32[20480, 5120]" = split_contiguous_view_as_strided_1[0]
-    ... (no alias of primals_15)
-    resize_storage_bytes__default_4 = torch.ops.inductor.resize_storage_bytes_.default(primals_15, 419430400)
-    copy__default_4: "f32[20480, 5120]" = torch.ops.aten.copy_.default(primals_15, getitem_8);  getitem_8 = None
-    ... (uses primals_15)
-    return [..., primals_15, ...]
+    auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.fsdp.split_with_sizes_copy.default, all_gather_output = view_5, all_gather_input_split_sizes = [131072, 256, 131072, 256], dim = 1, out = [view_1, view_2, view_3, view_4]);  view_5 = view_1 = view_2 = view_3 = view_4 = None
+    getitem_3 = auto_functionalized[1];  auto_functionalized = None
+    getitem_6: "f32[2, 131072]" = getitem_3[2]
+
+    # File: /data/users/willfeng/pytorch/torch/distributed/_composable/fsdp/_fsdp_collectives.py:193 in foreach_all_gather_copy_out, code: torch.ops.fsdp.split_with_sizes_copy(
+    view_10: "f32[262144]" = torch.ops.aten.view.default(getitem_6, [262144]);  getitem_6 = None
+
+    as_strided_default_2 = torch.ops.aten.as_strided.default(view_10, [512, 512], [512, 1], 0);  view_10 = None
+    set__source_tensor_2 = torch.ops.aten.set_.source_Tensor(primals_8, as_strided_default_2);  as_strided_default_2 = None
+    ... (uses primals_8)
+    return [..., primals_8, ...]
 
     ->
 
-    ... (no alias of primals_15)
-    split_contiguous_view_as_strided_1 = torch.ops.fsdp.split_contiguous_view_as_strided.default(view_3, [52428800, 10240, 52428800, 2560], [[20480, 5120], [20480], [5120, 20480], [5120]], [[5120, 1], [1], [20480, 1], [1]]);  view_3 = None
-    getitem_8: "f32[20480, 5120]" = split_contiguous_view_as_strided_1[0]
-    ... (uses getitem_8 instead of primals_15)
-    resize_storage_bytes__default_4 = torch.ops.inductor.resize_storage_bytes_.default(primals_15, 419430400)
-    copy__default_4: "f32[20480, 5120]" = torch.ops.aten.copy_.default(primals_15, getitem_8);  getitem_8 = None
-    return [..., primals_15, ...]
+    auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.fsdp.split_with_sizes_copy.default, all_gather_output = view_5, all_gather_input_split_sizes = [131072, 256, 131072, 256], dim = 1, out = [view_1, view_2, view_3, view_4]);  view_5 = view_1 = view_2 = view_3 = view_4 = None
+    getitem_3 = auto_functionalized[1];  auto_functionalized = None
+    getitem_6: "f32[2, 131072]" = getitem_3[2]
+
+    # File: /data/users/willfeng/pytorch/torch/distributed/_composable/fsdp/_fsdp_collectives.py:193 in foreach_all_gather_copy_out, code: torch.ops.fsdp.split_with_sizes_copy(
+    view_10: "f32[262144]" = torch.ops.aten.view.default(getitem_6, [262144]);  getitem_6 = None
+
+    as_strided_default_2 = torch.ops.aten.as_strided.default(view_10, [512, 512], [512, 1], 0);  view_10 = None
+    ... (uses as_strided_default_2 instead of primals_8)
+    set__source_tensor_2 = torch.ops.aten.set_.source_Tensor(primals_8, as_strided_default_2);  as_strided_default_2 = None
+    return [..., primals_8, ...]
+
     """
     node_list = list(mod.graph.nodes)
     node_to_idx = {n: i for i, n in enumerate(node_list)}
@@ -619,30 +611,19 @@ def move_primal_inplace_copy_to_end_of_fwd_graph(mod):
         if node.target == "output":
             return_op = node
             break
-    primal_inputs_used, primal_resize_copy_info_dict = _collect_primal_inputs_used(node_list)
-    torch_log.warning(f"primal_inputs_used: {primal_inputs_used}")
-    for primal_input in primal_inputs_used:
-        resize_node = primal_resize_copy_info_dict[primal_input]["resize_storage_bytes_node"]
-        resize_node_idx = node_to_idx[resize_node]
-        if _input_is_used_in_view_ops(node_list[:resize_node_idx], primal_input):
-            # If input is used in view ops, we can't move the resize_ and copy_ ops to the end of the graph (b/c it's not always sound to do).
-            return
-    for primal_input in primal_resize_copy_info_dict:
-        resize_node = primal_resize_copy_info_dict[primal_input]["resize_storage_bytes_node"]
-        inplace_copy_node = primal_resize_copy_info_dict[primal_input]["inplace_copy_node"]
-        getitem_node = inplace_copy_node.args[1]
-        getitem_node_idx = node_to_idx[getitem_node]
-        resize_to_size = resize_node.args[1]
-        mod.graph.erase_node(inplace_copy_node)
-        mod.graph.erase_node(resize_node)
-        # Replace primalX node usage with getitemY node for all nodes between getitemY producer node and return op.
-        primal_input.replace_all_uses_with(
-            getitem_node,
+    _, primal_set_info_dict = _collect_primal_inputs_used(node_list)
+    for primal_node in primal_set_info_dict:
+        set_node = primal_set_info_dict[primal_node]
+        as_strided_node = set_node.args[1]
+        as_strided_node_idx = node_to_idx[as_strided_node]
+        mod.graph.erase_node(set_node)
+        # Replace primals_X node usage with as_strided_Y node for all nodes between as_strided_Y node and return op.
+        primal_node.replace_all_uses_with(
+            as_strided_node,
             propagate_meta=False,
-            delete_user_cb=lambda node: node_to_idx[node] > getitem_node_idx and node_to_idx[node] < node_to_idx[return_op]
+            delete_user_cb=lambda node: node_to_idx[node] > as_strided_node_idx and node_to_idx[node] < node_to_idx[return_op]
         )
         with mod.graph.inserting_before(return_op):
-            new_resize_node = mod.graph.call_function(torch.ops.inductor.resize_storage_bytes_.default, (primal_input, resize_to_size), {})
-            new_inplace_copy_node = mod.graph.call_function(torch.ops.aten.copy_.default, (primal_input, getitem_node), {})
+            new_set_node = mod.graph.call_function(set_node.target, (primal_node, as_strided_node), set_node.kwargs)
     mod.graph.lint()
     mod.recompile()

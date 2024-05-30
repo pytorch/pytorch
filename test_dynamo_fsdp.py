@@ -496,13 +496,13 @@ def run(model, optim, n_iter, hidden_dim, use_compiled_autograd=False):
         #     backend = "eager"
         #     fullgraph = False
         # else:
-        #     backend = "inductor"
+        #     backend = "aot_eager"
         #     fullgraph = True
         torch_log.warning(f"Starting iteration: {i}")
         optim.zero_grad(set_to_none=True)
         inp = create_input(hidden_dim)
         if use_compiled_autograd:
-            compiled_autograd_ctx = compiled_autograd.enable(compiler_fn("inductor", True))
+            compiled_autograd_ctx = compiled_autograd.enable(compiler_fn("aot_eager", True))
         else:
             compiled_autograd_ctx = contextlib.nullcontext()
         with compiled_autograd_ctx:
@@ -617,7 +617,7 @@ if __name__ == "__main__":
     if dist.get_rank() == 0:
         start_record_memory_history()
     ac_test_order = [False]
-    backends = ["inductor"]
+    backends = ["aot_eager"]
 
     def test_eager(activation_checkpoint):
         losses_eager = execute_and_profile(

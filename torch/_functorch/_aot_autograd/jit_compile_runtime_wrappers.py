@@ -121,6 +121,7 @@ def aot_dispatch_base(
     Handles functions that don't need autograd. Runs wrappers and compiles with fw_compiler.
     """
     wrappers = _create_wrappers_for_dispatch(needs_autograd=False)
+    print("here5")
     flat_fn, flat_args, fw_metadata = pre_compile(
         wrappers, flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
     )

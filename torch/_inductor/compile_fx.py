@@ -1477,6 +1477,7 @@ def compile_fx(
     with V.set_fake_mode(fake_mode), torch._guards.tracing(
         tracing_context
     ), compiled_autograd.disable(), functorch_config.patch(unlift_effect_tokens=True):
+        print("here1 before aot_autograd() call")
         return aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,

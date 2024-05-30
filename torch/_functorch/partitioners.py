@@ -28,6 +28,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.passes import graph_drawer
 from . import config
 from .compile_utils import fx_graph_cse, get_aten_target
+from ._aot_autograd import fsdp_fx_passes
 
 
 AOT_PARTITIONER_DEBUG = config.debug_partitioner
@@ -1453,6 +1454,7 @@ def min_cut_rematerialization_partition(
         saved_sym_nodes=saved_sym_nodes,
         num_fwd_outputs=num_fwd_outputs,
     )
+    fsdp_fx_passes.move_primal_set_to_end_of_fwd_graph(fw_module)
 
     if graph_has_recomputable_ops:
         if graph_has_recomputable_rng_ops:

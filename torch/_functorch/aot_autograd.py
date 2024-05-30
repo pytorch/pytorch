@@ -668,6 +668,7 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
 
         compiler_fn = choose_dispatcher(needs_autograd, aot_config)
 
+        print("here4")
         compiled_fn, fw_metadata = compiler_fn(
             flat_fn, fake_flat_args, aot_config, fw_metadata=fw_metadata
         )
@@ -935,6 +936,7 @@ def aot_module_simplified(
     )
 
     with compiled_autograd.disable():
+        print("here3")
         compiled_fn, _ = create_aot_dispatcher_function(
             functional_call,
             full_args,
