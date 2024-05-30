@@ -1400,8 +1400,9 @@ class SIMDScheduling(BaseScheduling):
                 for node in [template_node, *epilogue_nodes]:
                     node.mark_run()
             partial_code = render()
-            for node in epilogue_nodes:
-                node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
+            with kernel.set_subgraph_body("<STORE_OUTPUT>"):
+                for node in epilogue_nodes:
+                    node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
 
         if not isinstance(partial_code, str):
             partial_code.finalize_hook("<DEF_KERNEL>")
