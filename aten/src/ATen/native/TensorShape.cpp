@@ -46,7 +46,7 @@
 #include <ATen/ops/_foreach_copy.h>
 #include <ATen/ops/_fw_primal_copy_native.h>
 #include <ATen/ops/_indices_copy_native.h>
-#include <ATen/ops/_lazy_clone.h>
+#include <ATen/ops/_lazy_clone_native.h>
 #include <ATen/ops/_make_dual.h>
 #include <ATen/ops/_make_dual_copy_native.h>
 #include <ATen/ops/_mkldnn_reshape.h>
@@ -57,7 +57,7 @@
 #include <ATen/ops/_reshape_copy_native.h>
 #include <ATen/ops/_reshape_from_tensor_native.h>
 #include <ATen/ops/_shape_as_tensor_native.h>
-#include <ATen/ops/_simulate_lazy_clone.h>
+#include <ATen/ops/_simulate_lazy_clone_native.h>
 #include <ATen/ops/_sparse_broadcast_to.h>
 #include <ATen/ops/_sparse_broadcast_to_copy_native.h>
 #include <ATen/ops/_sparse_broadcast_to_native.h>
