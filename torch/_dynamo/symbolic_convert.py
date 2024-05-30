@@ -1907,7 +1907,9 @@ class InstructionTranslatorBase(
 
         if target:
             if isinstance(self, InstructionTranslator):
-                self.block_stack.append(BlockStackEntry(inst, target, len(self.stack), ctx))
+                self.block_stack.append(
+                    BlockStackEntry(inst, target, len(self.stack), ctx)
+                )
             else:
                 self.block_stack.append(BlockStackEntry(inst, target))
 
