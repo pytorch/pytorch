@@ -22,6 +22,7 @@ import sympy
 from filelock import FileLock
 
 import torch
+import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, identity, preserve_rng_state
 
@@ -150,7 +151,7 @@ class TritonTemplateKernel(TritonKernel):
     @contextlib.contextmanager
     def set_subgraph_body(self, body_name: str):
         old_body = self.body
-        assert body_name in self.subgraph_bodies
+        assert body_name in self.subgraph_bodies, body_name
         self.body = self.subgraph_bodies[body_name]
         yield
         self.body = old_body
@@ -381,7 +382,7 @@ class TritonTemplateKernel(TritonKernel):
             assert isinstance(mask, (str, type(None)))
             assert self.template_mask is None
             indices = list(map(TritonPrinter.paren, indices))
-            index_symbols = [sympy.Symbol(x, integer=True) for x in indices]
+            index_symbols = [sympy.Symbol(x) for x in indices]
             lengths = [
                 V.graph.sizevars.simplify(s) for s in self.output_node.get_size()
             ]
@@ -405,7 +406,7 @@ class TritonTemplateKernel(TritonKernel):
             output_index = self.output_node.get_layout().make_indexer()(index_symbols)
             output_index = self.rename_indexing(output_index)
             if output_index == contiguous_index:
-                output_index = sympy.Symbol("xindex", integer=True)
+                output_index = sympy.Symbol("xindex")
 
             epilogue_args = [val]
             for input_node in itertools.chain(
@@ -452,7 +453,7 @@ class TritonTemplateKernel(TritonKernel):
         index = " + ".join(
             f"{texpr(self.rename_indexing(s))} * {i}" for s, i in zip(stride, indices)
         )
-        return f"tl.load({name} + ({index}), {mask})"
+        return f"tl.load({name} + ({index}), {mask}, other=0.0)"
 
     def template_env(self):
         """
