@@ -363,6 +363,15 @@ class TS2FXGraphConverter:
         output_name = node.output().debugName()
         self.attribute_map[output_name] = ""
 
+    def convert_aten___contains__(self, node: torch._C.Node):
+        inp_list = [inp for inp in node.inputs()]
+        assert len(inp_list) == 2, "aten::__contains__ assumes 2 inputs"
+
+        container, ele = inp_list
+        container = self.get_fx_value(container)
+        ele = self.get_fx_value(ele)
+        self.name_to_node[node.output().debugName()] = ele in container
+
     def convert_aten__convolution(self, node: torch._C.Node):
         # converts aten::_convolution as aten.convolution, since aten::_convolution
         # doesn't have a meta function
@@ -506,7 +515,6 @@ class TS2FXGraphConverter:
 
     def convert_node(self, node: torch._C.Node):
         node_kind = node.kind()
-        node_kind_split = node_kind.split("::")
 
         # Get handler based on namespace and operator name.
         # Provide a default node handler as well in case we don't find

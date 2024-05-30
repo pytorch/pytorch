@@ -264,6 +264,19 @@ class TestConverter(TestCase):
         inp = ((torch.zeros(1, 4), torch.ones(1, 4)),)
         self._check_equal_ts_ep_converter(MUnpackTuple(), inp)
 
+    def test_ts2ep_converter_contains(self):
+        class MIn(torch.nn.Module):
+            def forward(self, x: torch.Tensor):
+                return x.dtype in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+        class MNotIn(torch.nn.Module):
+            def forward(self, x: torch.Tensor):
+                return x.dtype in [-1]
+
+        inp = (torch.tensor(4),)
+        self._check_equal_ts_ep_converter(MIn(), inp)
+        self._check_equal_ts_ep_converter(MNotIn(), inp)
+
 
 if __name__ == "__main__":
     run_tests()
