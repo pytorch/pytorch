@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-import copyid_to_fqn
+import copy
 import logging
 import operator
 from collections import defaultdict
