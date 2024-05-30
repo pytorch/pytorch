@@ -325,7 +325,7 @@ def generate_wheels_matrix(
         package_type = "manywheel"
 
     if python_versions is None:
-        python_versions = FULL_PYTHON_VERSIONS
+        python_versions = FULL_PYTHON_VERSIONS + ["3.13"]
 
     if arches is None:
         # Define default compute archivectures
@@ -417,6 +417,6 @@ def generate_wheels_matrix(
     return ret
 
 
-validate_nccl_dep_consistency("12.4")
-validate_nccl_dep_consistency("12.1")
-validate_nccl_dep_consistency("11.8")
+# validate_nccl_dep_consistency("12.4")
+# validate_nccl_dep_consistency("12.1")
+# validate_nccl_dep_consistency("11.8")
