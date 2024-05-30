@@ -218,10 +218,9 @@ static inline float16_t reduce(float16x8_t x) {
 
 /*
  * NOTE [ GGML Copyright Notice ]
- * The below reduce overload and
- * fp16_gemv_trans_fp16_arith_by_dot_products function is adapted from
- * llama.cpp's ggml_vec_dot_f16 and surrounding utility functions, so
- * here is the required copyright notice:
+ * The below reduce overload and fp16_dot_with_fp16_arith function is
+ * adapted from llama.cpp's ggml_vec_dot_f16 and surrounding utility
+ * functions, so here is the required copyright notice:
  *
  * MIT License
  *
@@ -279,29 +278,33 @@ static inline float16x8_t f16_fma(float16x8_t a, float16x8_t b, float16x8_t c) {
 #endif
 }
 
+static float fp16_dot_with_fp16_arith(const float16_t* x, const float16_t* a, int len) {
+  float16x8_t sum[kF16RegistersPerIteration] = {vdupq_n_f16(0)};
+
+  const auto len_aligned = len & ~(kF16ElementsPerIteration - 1);
+  for (int j = 0; j < len_aligned ; j += kF16ElementsPerIteration) {
+    for (int k = 0; k < kF16RegistersPerIteration; ++k) {
+      const auto temp_x = vld1q_f16(x + j + k * kF16ElementsPerRegister);
+      const auto temp_a = vld1q_f16(a + j + k * kF16ElementsPerRegister);
+      sum[k] = f16_fma(sum[k], temp_x, temp_a);
+    }
+  }
+  auto reducedSum = reduce(sum);
+
+  for (int j = len_aligned; j < len; ++j) {
+    reducedSum += x[j] * a[j];
+  }
+  return reducedSum;
+}
+
 // Rather than unrolling to process multiple rows (transposed columns)
 // of matrix A at once as done in fp16_gemv_trans_fp16_arith, unroll
 // along an individual dot product.
 static void fp16_gemv_trans_fp16_arith_by_dot_products(const int m, const int n, const float16_t* a, const int lda, const float16_t *x, float16_t* y, int incy) {
   parallel_for(0, n, 1, [&](int begin, int end) {
-  for (int i = begin; i < end; ++i) {
-      float16x8_t sum[kF16RegistersPerIteration] = {vdupq_n_f16(0)};
-
-      const auto m_aligned = m & ~(kF16ElementsPerIteration - 1);
-      for (int j = 0; j < m_aligned ; j += kF16ElementsPerIteration) {
-        for (int k = 0; k < kF16RegistersPerIteration; ++k) {
-          const auto temp_x = vld1q_f16(x + j + k * kF16ElementsPerRegister);
-          const auto temp_a = vld1q_f16(a + lda * i + j + k * kF16ElementsPerRegister);
-          sum[k] = f16_fma(sum[k], temp_x, temp_a);
-        }
-      }
-      auto reducedSum = reduce(sum);
-
-      for (int j = m_aligned; j < m; ++j) {
-        reducedSum += x[j] * a[lda * i + j];
-      }
-      y[i * incy] = reducedSum;
-  }
+    for (int i = begin; i < end; ++i) {
+      y[i * incy] = fp16_dot_with_fp16_arith(x, a + lda * i, m);
+    }
   });
 }
 
@@ -341,10 +344,10 @@ static inline float32x4_t f32_fma_high_f16(float32x4_t a, float16x8_t b, float16
 #endif
 }
 
-// The below reduce overload and
-// fp16_gemv_trans_fp32_arith_by_dot_products are adapted from
-// llama.cpp's ggml_vec_dot_f32 and surrounding utility functions. See
-// NOTE [ GGML Copyright Notice ] above for the required notice.
+// The below reduce overload and fp16_dot_with_fp32_arith are adapted
+// from llama.cpp's ggml_vec_dot_f32 and surrounding utility
+// functions. See NOTE [ GGML Copyright Notice ] above for the
+// required notice.
 
 // We need the shift for reduce(), hence the extra constants.
 static constexpr auto kF32ElementsPerIterationShift = 5;
@@ -372,32 +375,37 @@ static inline double reduce(float32x4_t x[kF32RegistersPerIteration]) {
   return vaddvq_f32(x[0]);
 }
 
+static float fp16_dot_with_fp32_arith(const float16_t* x, const float16_t* a, int len) {
+  float32x4_t sum[kF32RegistersPerIteration] = {vdupq_n_f32(0)};
+  const auto len_aligned = len & ~(kF32ElementsPerIteration - 1);
+  for (int j = 0; j < len_aligned ; j += kF32ElementsPerIteration) {
+    const auto* x_ = x + j;
+    const auto* a_ = a + j;
+    c10::ForcedUnroll<kF32RegisterPairsPerIteration>{}([x_, a_, &sum](auto k) {
+      // Load a pair of f32 registers at a time.
+      const auto temp_x = vld1q_f16(x_ + k * 2 * kF32ElementsPerRegister);
+      const auto temp_a = vld1q_f16(a_ + k * 2 * kF32ElementsPerRegister);
+
+      sum[2 * k] = f32_fma_low_f16(sum[2 * k], temp_x, temp_a);
+      sum[2 * k + 1] = f32_fma_high_f16(sum[2 * k + 1], temp_x, temp_a);
+    });
+  }
+  auto reducedSum = reduce(sum);
+
+  for (int j = len_aligned; j < len; ++j) {
+    reducedSum += x[j] * a[j];
+  }
+  return reducedSum;
+}
+
 // On my Apple M1 Macbook (which is ARM v8.5 and thus has the
 // instructions f32_fma_{low,high}_f16 is targeting), this kernel has
 // equivalent performance to the fp16-native kernel.
 static void fp16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n, const float16_t* a, const int lda, const float16_t *x, float16_t* y, int incy) {
   parallel_for(0, n, 1, [&](int begin, int end) {
-  for (int i = begin; i < end; ++i) {
-      float32x4_t sum[kF32RegistersPerIteration] = {vdupq_n_f32(0)};
-
-      const auto m_aligned = m & ~(kF32ElementsPerIteration - 1);
-      for (int j = 0; j < m_aligned ; j += kF32ElementsPerIteration) {
-        c10::ForcedUnroll<kF32RegisterPairsPerIteration>{}([x, a, lda, i, j, &sum](auto k) {
-          // Load a pair of f32 registers at a time.
-          const auto temp_x = vld1q_f16(x + j + k * 2 * kF32ElementsPerRegister);
-          const auto temp_a = vld1q_f16(a + lda * i + j + k * 2 * kF32ElementsPerRegister);
-
-          sum[2 * k] = f32_fma_low_f16(sum[2 * k], temp_x, temp_a);
-          sum[2 * k + 1] = f32_fma_high_f16(sum[2 * k + 1], temp_x, temp_a);
-        });
-      }
-      auto reducedSum = reduce(sum);
-
-      for (int j = m_aligned; j < m; ++j) {
-        reducedSum += x[j] * a[lda * i + j];
-      }
-      y[i * incy] = reducedSum;
-  }
+    for (int i = begin; i < end; ++i) {
+      y[i * incy] = fp16_dot_with_fp32_arith(x, a + lda * i, m);
+    }
   });
 }
 
