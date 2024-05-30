@@ -134,6 +134,35 @@ else()
       "Cannot find threading library. PyTorch requires Threads to compile.")
 endif()
 
+if(USE_TBB)
+  if(USE_SYSTEM_TBB)
+    find_package(TBB 2018.0 REQUIRED CONFIG COMPONENTS tbb)
+
+    get_target_property(TBB_INCLUDE_DIR TBB::tbb INTERFACE_INCLUDE_DIRECTORIES)
+  else()
+    message(STATUS "Compiling TBB from source")
+    # Unset our restrictive C++ flags here and reset them later.
+    # Remove this once we use proper target_compile_options.
+    set(OLD_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
+    set(CMAKE_CXX_FLAGS)
+
+    set(TBB_ROOT_DIR "${PROJECT_SOURCE_DIR}/third_party/tbb")
+    set(TBB_BUILD_STATIC OFF CACHE BOOL " " FORCE)
+    set(TBB_BUILD_SHARED ON CACHE BOOL " " FORCE)
+    set(TBB_BUILD_TBBMALLOC OFF CACHE BOOL " " FORCE)
+    set(TBB_BUILD_TBBMALLOC_PROXY OFF CACHE BOOL " " FORCE)
+    set(TBB_BUILD_TESTS OFF CACHE BOOL " " FORCE)
+    add_subdirectory(${PROJECT_SOURCE_DIR}/aten/src/ATen/cpu/tbb)
+    set_property(TARGET tbb tbb_def_files PROPERTY FOLDER "dependencies")
+
+    set(CMAKE_CXX_FLAGS ${OLD_CMAKE_CXX_FLAGS})
+
+    set(TBB_INCLUDE_DIR "${TBB_ROOT_DIR}/include")
+
+    add_library(TBB::tbb ALIAS tbb)
+  endif()
+endif()
+
 # ---[ protobuf
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   if(USE_LITE_PROTO)
@@ -864,7 +893,11 @@ if(BUILD_PYTHON)
 
   # These should fill in the rest of the variables, like versions, but resepct
   # the variables we set above
-  find_package(Python COMPONENTS Interpreter Development)
+  if(USE_NUMPY)
+    find_package(Python COMPONENTS Interpreter Development NumPy)
+  else()
+    find_package(Python COMPONENTS Interpreter Development)
+  endif()
 
   if(NOT Python_Development_FOUND)
     message(FATAL_ERROR
@@ -876,29 +909,20 @@ if(BUILD_PYTHON)
       "Found Python libraries version ${Python_VERSION}. Python < 3.8 is no longer supported by PyTorch.")
   endif()
 
-  # When building pytorch, we pass this in directly from setup.py, and
-  # don't want to overwrite it because we trust python more than cmake
-  if(NUMPY_INCLUDE_DIR)
-    set(NUMPY_FOUND ON)
-  elseif(USE_NUMPY)
-    find_package(NumPy)
-    if(NOT NUMPY_FOUND)
-      message(WARNING "NumPy could not be found. Not building with NumPy. Suppress this warning with -DUSE_NUMPY=OFF")
-    endif()
-  endif()
-
-  if(Python_Interpreter_FOUND AND Python_Development_FOUND)
+  if(Python_Interpreter_FOUND)
     add_library(python::python INTERFACE IMPORTED)
     target_include_directories(python::python SYSTEM INTERFACE ${Python_INCLUDE_DIRS})
     if(WIN32)
       target_link_libraries(python::python INTERFACE ${Python_LIBRARIES})
     endif()
 
-    caffe2_update_option(USE_NUMPY OFF)
-    if(NUMPY_FOUND)
-      caffe2_update_option(USE_NUMPY ON)
-      add_library(numpy::numpy INTERFACE IMPORTED)
-      target_include_directories(numpy::numpy SYSTEM INTERFACE ${NUMPY_INCLUDE_DIR})
+    if(USE_NUMPY)
+      if(NOT Python_NumPy_FOUND)
+        message(WARNING "NumPy could not be found. Not building with NumPy. Suppress this warning with -DUSE_NUMPY=OFF")
+        caffe2_update_option(USE_NUMPY OFF)
+      else()
+        caffe2_update_option(USE_NUMPY ON)
+      endif()
     endif()
     # Observers are required in the python build
     caffe2_update_option(USE_OBSERVERS ON)
